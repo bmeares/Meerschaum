@@ -1107,18 +1107,18 @@ def get_pipe_attributes(
 
 
 def sync_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        df: Union[pd.DataFrame, str, Dict[Any, Any], None] = None,
-        begin: Optional[datetime] = None,
-        end: Optional[datetime] = None,
-        chunksize: Optional[int] = -1,
-        check_existing: bool = True,
-        blocking: bool = True,
-        debug: bool = False,
-        _check_temporary_tables: bool = True,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    df: Union[pd.DataFrame, str, Dict[Any, Any], None] = None,
+    begin: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    chunksize: Optional[int] = -1,
+    check_existing: bool = True,
+    blocking: bool = True,
+    debug: bool = False,
+    _check_temporary_tables: bool = True,
+    **kw: Any
+) -> SuccessTuple:
     """
     Sync a pipe using a database connection.
 
@@ -1262,31 +1262,6 @@ def sync_pipe(
         kw.pop('if_exists')
     if 'name' in kw:
         kw.pop('name')
-
-    ### Account for first-time syncs of JSON columns.
-    unseen_json_cols = get_json_cols(unseen_df)
-    update_json_cols = get_json_cols(update_df) if update_df is not None else []
-    json_cols = list(set(unseen_json_cols + update_json_cols))
-    existing_json_cols = [col for col, typ in pipe.dtypes.items() if typ == 'json']
-    new_json_cols = [col for col in json_cols if col not in existing_json_cols]
-    if new_json_cols:
-        pipe.dtypes.update({col: 'json' for col in json_cols})
-        if not pipe.temporary:
-            edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
-            if not edit_success:
-                warn(f"Unable to update JSON dtypes for {pipe}:\n{edit_msg}")
-
-    unseen_numeric_cols = get_numeric_cols(unseen_df)
-    update_numeric_cols = get_numeric_cols(update_df) if update_df is not None else []
-    numeric_cols = list(set(unseen_numeric_cols + update_numeric_cols))
-    existing_numeric_cols = [col for col, typ in pipe.dtypes.items() if typ == 'numeric']
-    new_numeric_cols = [col for col in numeric_cols if col not in existing_numeric_cols]
-    if new_numeric_cols:
-        pipe.dtypes.update({col: 'numeric' for col in numeric_cols})
-        if not pipe.temporary:
-            edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
-            if not edit_success:
-                warn(f"Unable to update NUMERIC dtypes for {pipe}:\n{edit_msg}")
 
     ### Insert new data into Pipe's table.
     unseen_kw = copy.deepcopy(kw)

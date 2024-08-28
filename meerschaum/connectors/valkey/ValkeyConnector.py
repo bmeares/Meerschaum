@@ -51,6 +51,9 @@ class ValkeyConnector(Connector):
         get_pipe_rowcount,
         fetch_pipes_keys,
     )
+    from ._fetch import (
+        fetch,
+    )
 
     from ._users import (
         get_users_pipe,
@@ -255,7 +258,7 @@ class ValkeyConnector(Connector):
             ) if datetime_column else None
             doc_str = json.dumps(
                 doc,
-                default=json_serialize_datetime,
+                default=(lambda x: json_serialize_datetime(x) if hasattr(x, 'tzinfo') else str(x)),
                 separators=(',', ':'),
                 sort_keys=True,
             )

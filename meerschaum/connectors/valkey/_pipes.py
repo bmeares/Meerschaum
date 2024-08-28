@@ -46,7 +46,7 @@ def serialize_document(doc: Dict[str, Any]) -> str:
     """
     return json.dumps(
         doc,
-        default=json_serialize_datetime,
+        default=(lambda x: json_serialize_datetime(x) if hasattr(x, 'tzinfo') else str(x)),
         separators=(',', ':'),
         sort_keys=True,
     )
@@ -109,7 +109,7 @@ def get_table_quoted_doc_key(
         },
         sort_keys=True,
         separators=(',', ':'),
-        default=json_serialize_datetime,
+        default=(lambda x: json_serialize_datetime(x) if hasattr(x, 'tzinfo') else str(x)),
     )
 
 
@@ -321,7 +321,6 @@ def delete_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
-    from meerschaum.utils.misc import json_serialize_datetime
     drop_success, drop_message = pipe.drop(debug=debug)
     if not drop_success:
         return drop_success, drop_message
@@ -340,7 +339,7 @@ def delete_pipe(
         doc = docs[0]
         doc_str = json.dumps(
             doc,
-            default=json_serialize_datetime,
+            default=(lambda x: json_serialize_datetime(x) if hasattr(x, 'tzinfo') else str(x)),
             separators=(',', ':'),
             sort_keys=True,
         )
@@ -445,6 +444,8 @@ def sync_pipe(
     from meerschaum.utils.dataframe import (
         get_datetime_bound_from_df,
         get_unique_index_values,
+        get_numeric_cols,
+        get_json_cols,
     )
     from meerschaum.utils.dtypes import are_dtypes_equal
 
@@ -465,6 +466,7 @@ def sync_pipe(
             for doc in _df.to_dict(orient='records')
         ]
 
+    numeric_cols = get_numeric_cols(df)
     non_dt_cols = [
         col
         for col, typ in df.dtypes.items()

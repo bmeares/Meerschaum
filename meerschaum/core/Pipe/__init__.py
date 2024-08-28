@@ -121,6 +121,8 @@ class Pipe:
         filter_existing,
         _get_chunk_label,
         get_num_workers,
+        _persist_new_json_columns,
+        _persist_new_numeric_columns,
     )
     from ._verify import (
         verify,

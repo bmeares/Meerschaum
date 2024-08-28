@@ -266,7 +266,6 @@ def sync(
                             **kw
                         )
                     )
-
             except Exception as e:
                 get_console().print_exception(
                     suppress=[
@@ -369,6 +368,11 @@ def sync(
 
         ### Cast to a dataframe and ensure datatypes are what we expect.
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+
+        ### Capture `numeric` and `json` columns.
+        self._persist_new_json_columns(df, debug=debug)
+        self._persist_new_numeric_columns(df, debug=debug)
+
         if debug:
             dprint(
                 "DataFrame to sync:\n"
@@ -900,3 +904,47 @@ def get_num_workers(self, workers: Optional[int] = None) -> int:
         (desired_workers - current_num_connections),
         1,
     )
+
+
+def _persist_new_numeric_columns(self, df, debug: bool = False) -> SuccessTuple:
+    """
+    Check for new numeric columns and update the parameters.
+    """
+    from meerschaum.utils.dataframe import get_numeric_cols
+    numeric_cols = get_numeric_cols(df)
+    existing_numeric_cols = [col for col, typ in self.dtypes.items() if typ == 'numeric']
+    new_numeric_cols = [col for col in numeric_cols if col not in existing_numeric_cols]
+    if not new_numeric_cols:
+        return True, "Success"
+
+    self.dtypes.update({col: 'numeric' for col in numeric_cols})
+    if not self.temporary:
+        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
+        if not edit_success:
+            warn(f"Unable to update NUMERIC dtypes for {self}:\n{edit_msg}")
+
+        return edit_success, edit_msg
+
+    return True, "Success"
+
+
+def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
+    """
+    Check for new JSON columns and update the parameters.
+    """
+    from meerschaum.utils.dataframe import get_json_cols
+    json_cols = get_json_cols(df)
+    existing_json_cols = [col for col, typ in self.dtypes.items() if typ == 'json']
+    new_json_cols = [col for col in json_cols if col not in existing_json_cols]
+    if not new_json_cols:
+        return True, "Success"
+
+    self.dtypes.update({col: 'json' for col in json_cols})
+    if not self.temporary:
+        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
+        if not edit_success:
+            warn(f"Unable to update JSON dtypes for {self}:\n{edit_msg}")
+        
+        return edit_success, edit_msg
+
+    return True, "Success"
