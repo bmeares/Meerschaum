@@ -917,7 +917,9 @@ def _persist_new_numeric_columns(self, df, debug: bool = False) -> SuccessTuple:
     if not new_numeric_cols:
         return True, "Success"
 
-    self.dtypes.update({col: 'numeric' for col in numeric_cols})
+    dtypes = self.parameters.get('dtypes', {})
+    dtypes.update({col: 'numeric' for col in numeric_cols})
+    self.parameters['dtypes'] = dtypes
     if not self.temporary:
         edit_success, edit_msg = self.edit(interactive=False, debug=debug)
         if not edit_success:
@@ -939,7 +941,10 @@ def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
     if not new_json_cols:
         return True, "Success"
 
-    self.dtypes.update({col: 'json' for col in json_cols})
+    dtypes = self.parameters.get('dtypes', {})
+    dtypes.update({col: 'json' for col in json_cols})
+    self.parameters['dtypes'] = dtypes
+
     if not self.temporary:
         edit_success, edit_msg = self.edit(interactive=False, debug=debug)
         if not edit_success:

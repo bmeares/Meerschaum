@@ -140,7 +140,12 @@ def filter_unseen_df(
     from decimal import Decimal
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import import_pandas, attempt_import
-    from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal, attempt_cast_to_numeric
+    from meerschaum.utils.dtypes import (
+        to_pandas_dtype,
+        are_dtypes_equal,
+        attempt_cast_to_numeric,
+        coerce_timezone,
+    )
     from meerschaum.utils.debug import dprint
     pd = import_pandas(debug=debug)
     is_dask = 'dask' in new_df.__module__
@@ -227,7 +232,7 @@ def filter_unseen_df(
     try:
         for col, typ in dt_dtypes.items():
             tz = typ.split(',')[-1].strip() if ',' in typ else None
-            new_df[col] = pd.to_datetime(new_df[col], tz)
+            new_df[col] = coerce_timezone(pd.to_datetime(new_df[col], utc=True))
         cast_dt_cols = False
     except Exception as e:
         warn(f"Could not cast datetime columns:\n{e}")
@@ -1086,15 +1091,11 @@ def query_df(
             )
 
             if begin_is_int:
-                begin = datetime.fromtimestamp(int(begin), timezone.utc)
-                if df_tz is None:
-                    begin = begin.replace(tzinfo=None)
+                begin = datetime.fromtimestamp(int(begin), timezone.utc).replace(tzinfo=None)
                 if debug:
                     dprint(f"`begin` will be cast to '{begin}'.")
             if end_is_int:
-                end = datetime.fromtimestamp(int(end), timezone.utc)
-                if df_tz is None:
-                    end = end.replace(tzinfo=None)
+                end = datetime.fromtimestamp(int(end), timezone.utc).replace(tzinfo=None)
                 if debug:
                     dprint(f"`end` will be cast to '{end}'.")
 
@@ -1104,7 +1105,7 @@ def query_df(
             if begin_tz is not None or end_tz is not None or df_tz is not None:
                 begin = coerce_timezone(begin)
                 end = coerce_timezone(end)
-                if df_tz != timezone.utc:
+                if df_tz is not None:
                     if debug:
                         dprint(f"Casting column '{datetime_column}' to UTC...")
                     df[datetime_column] = coerce_timezone(df[datetime_column])

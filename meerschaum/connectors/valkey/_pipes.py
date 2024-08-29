@@ -6,12 +6,12 @@ Define pipes methods for `ValkeyConnector`.
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, List, Tuple
-from meerschaum.utils.misc import json_serialize_datetime
-from meerschaum.utils.warnings import dprint
+from meerschaum.utils.misc import json_serialize_datetime, string_to_dict
+from meerschaum.utils.warnings import dprint, warn
 
 PIPES_TABLE: str = 'mrsm_pipes'
 PIPES_COUNTER: str = 'mrsm_pipes:counter'
@@ -52,7 +52,11 @@ def serialize_document(doc: Dict[str, Any]) -> str:
     )
 
 
-def get_table_document_key(table_name: str, doc: Dict[str, Any], indices: List[str]) -> str:
+def get_document_key(
+    doc: Dict[str, Any],
+    indices: List[str],
+    table_name: Optional[str] = None,
+) -> str:
     """
     Return a serialized string for a document's indices only.
 
@@ -64,6 +68,9 @@ def get_table_document_key(table_name: str, doc: Dict[str, Any], indices: List[s
     indices: List[str]
         The name of the indices to be serialized.
 
+    table_name: Optional[str], default None
+        If provided, prepend the table to the key.
+
     Returns
     -------
     A serialized string of the document's indices.
@@ -73,20 +80,20 @@ def get_table_document_key(table_name: str, doc: Dict[str, Any], indices: List[s
         key: (
             str(val)
             if not isinstance(val, datetime)
-            else str(int(coerce_timezone(val).timestamp()))
+            else str(int(coerce_timezone(val).replace(tzinfo=timezone.utc).timestamp()))
         )
         for key, val in doc.items()
         if key in indices
-    }
-    indices_str = ','.join(
+    } if indices else {}
+    indices_str = ((table_name + ':indices:') if table_name else '') + ','.join(
         sorted(
             [
                 f'{key}:{val}'
                 for key, val in index_vals.items()
             ]
         )
-    )
-    return table_name + ':indices:' + indices_str
+    ) if indices else serialize_document(doc)
+    return indices_str
 
 
 def get_table_quoted_doc_key(
@@ -100,7 +107,7 @@ def get_table_quoted_doc_key(
     """
     return json.dumps(
         {
-            get_table_document_key(table_name, doc, indices): serialize_document(doc),
+            get_document_key(doc, indices, table_name): serialize_document(doc),
             **(
                 {datetime_column: doc.get(datetime_column, 0)}
                 if datetime_column
@@ -300,6 +307,16 @@ def drop_pipe(
         return True, "Success"
 
     self.drop_table(pipe.target, debug=debug)
+
+    if 'valkey' not in pipe.parameters:
+        return True, "Success"
+
+    pipe.parameters['valkey']['dtypes'] = {}
+    if not pipe.temporary:
+        edit_success, edit_msg = pipe.edit(debug=debug)
+        if not edit_success:
+            return edit_success, edit_msg
+
     return True, "Success"
 
 
@@ -393,8 +410,10 @@ def get_pipe_data(
 
     valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
     dt_col = pipe.columns.get('datetime', None)
-    docs = [
-        json.loads(list({k: v for k, v in doc.items() if k != dt_col}.values())[0])
+    table_name = self.quote_table(pipe.target)
+    indices = [col for col in pipe.columns.values() if col]
+    ix_docs = [
+        string_to_dict(doc['ix'])
         for doc in self.read_docs(
             pipe.target,
             begin=begin,
@@ -402,12 +421,30 @@ def get_pipe_data(
             debug=debug,
         )
     ]
+    try:
+        docs_strings = [
+            self.get(get_document_key(
+                doc, indices, table_name
+            ))
+            for doc in ix_docs
+        ]
+    except Exception as e:
+        warn(f"Failed to fetch documents for {pipe}:\n{e}")
+        docs_strings = []
+
+    docs = [
+        json.loads(doc_str)
+        for doc_str in docs_strings
+        if doc_str
+    ]
     df = parse_df_datetimes(docs)
     for col, typ in valkey_dtypes.items():
         try:
             df[col] = df[col].astype(typ)
         except Exception:
             pass
+
+    df = pipe.enforce_dtypes(df, debug=debug)
 
     if len(df) == 0:
         return df
@@ -449,50 +486,34 @@ def sync_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
-    from meerschaum.utils.dataframe import (
-        get_datetime_bound_from_df,
-        get_unique_index_values,
-    )
-    from meerschaum.utils.dtypes import are_dtypes_equal
-
     dt_col = pipe.columns.get('datetime', None)
     indices = [col for col in pipe.columns.values() if col]
     table_name = self.quote_table(pipe.target)
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = df.compute()
 
-    def _serialize_docs(_df):
+    def _serialize_indices_docs(_docs):
         return [
             {
-                get_table_document_key(table_name, doc, indices): serialize_document(doc),
+                'ix': get_document_key(doc, indices),
                 **(
-                    {dt_col: doc.get(dt_col, 0)}
+                    {
+                        dt_col: doc.get(dt_col, 0)
+                    }
                     if dt_col
                     else {}
                 )
             }
-            for doc in _df.to_dict(orient='records')
+            for doc in _docs
         ]
 
-    non_dt_cols = [
-        col
-        for col, typ in df.dtypes.items()
-        if not are_dtypes_equal(str(typ), 'datetime')
-    ]
-    existing_dtypes = pipe.parameters.get('dtypes', {})
+    valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
     new_dtypes = {
         str(key): str(val)
         for key, val in df.dtypes.items()
-        if str(key) not in existing_dtypes and key in non_dt_cols
+        if str(key) not in valkey_dtypes
     }
-    valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
-    #  for col, typ in existing_dtypes.items():
-        #  if col not in df.columns:
-            #  continue
-        #  df_typ = df.dtypes[col]
-        #  if not are_dtypes_equal(typ, str(df_typ)):
-            #  new_dtypes[col] = 'string'
-            #  df[col] = df[col].astype(str)
-
-    #  df = enforce_dtypes(df, {col: 'string' for col in df.columns}, debug=debug)
     for col, typ in {c: v for c, v in valkey_dtypes.items()}.items():
         if col in df.columns:
             try:
@@ -501,23 +522,18 @@ def sync_pipe(
                 valkey_dtypes[col] = 'string'
                 new_dtypes[col] = 'string'
                 df[col] = df[col].astype('string')
-    #  df = pipe.enforce_dtypes(df, debug=debug)
+
     if new_dtypes:
-        col_dtypes_to_pop = [
-            col
-            for col in pipe.parameters.get('dtypes', {}).items()
-            if col not in valkey_dtypes
-        ]
         valkey_dtypes.update(new_dtypes)
         if 'valkey' not in pipe.parameters:
             pipe.parameters['valkey'] = {}
         pipe.parameters['valkey']['dtypes'] = valkey_dtypes
-        edit_success, edit_msg = pipe.edit(debug=debug)
-        if not edit_success:
-            return edit_success, edit_msg
+        if not pipe.temporary:
+            edit_success, edit_msg = pipe.edit(debug=debug)
+            if not edit_success:
+                return edit_success, edit_msg
 
-        for col in col_dtypes_to_pop:
-            print(f"{col=}")
+    #  df = pipe.enforce_dtypes(df, debug=debug)
 
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(df, include_unchanged_columns=True, debug=debug)
@@ -530,56 +546,27 @@ def sync_pipe(
     if len(delta_df) == 0:
         return True, msg
 
-    unseen_docs = _serialize_docs(unseen_df)
+    delta_docs = delta_df.to_dict(orient='records')
+    delta_indices_docs = _serialize_indices_docs(delta_docs)
+    delta_ix_vals = {
+        get_document_key(doc, indices, table_name): serialize_document(doc)
+        for doc in delta_docs
+    }
+    for key, val in delta_ix_vals.items():
+        try:
+            self.set(key, val)
+        except Exception as e:
+            return False, f"Failed to set keys for {pipe}:\n{e}"
 
     try:
         self.push_docs(
-            unseen_docs,
+            delta_indices_docs,
             pipe.target,
             datetime_column=dt_col,
             debug=debug,
         )
     except Exception as e:
         return False, f"Failed to push docs to '{pipe.target}':\n{e}"
-
-    update_min_dt = get_datetime_bound_from_df(update_df, dt_col, minimum=True)
-    update_max_dt = get_datetime_bound_from_df(update_df, dt_col, minimum=False)
-    if update_max_dt is not None:
-        update_max_dt += (
-            timedelta(minutes=1)
-            if hasattr(update_max_dt, 'tzinfo')
-            else 1
-        )
-    update_params = get_unique_index_values(update_df, [col for col in indices if col != dt_col])
-
-    if update_df is not None and len(update_df) != 0:
-        if debug:
-            dprint(
-                "Clearing update documents:\n"
-                + f"begin={update_min_dt}\n"
-                + f"end={update_max_dt}\n"
-                + f"params={update_params}"
-            )
-        clear_success, clear_msg = pipe.clear(
-            begin=update_min_dt,
-            end=update_max_dt,
-            params=update_params,
-            debug=debug,
-        )
-        if not clear_success:
-            return clear_success, clear_msg
-
-        serialized_update_docs = _serialize_docs(update_df)
-
-        try:
-            self.push_docs(
-                serialized_update_docs,
-                pipe.target,
-                datetime_column=dt_col,
-                debug=debug,
-            )
-        except Exception as e:
-            return False, f"Failed to push docs to '{pipe.target}':\n{e}"
 
     return True, msg
 
@@ -659,13 +646,16 @@ def clear_pipe(
     table_name = self.quote_table(pipe.target)
     indices = [col for col in pipe.columns.values() if col]
     for doc in docs:
-        quoted_doc_key = get_table_quoted_doc_key(table_name, doc, indices, dt_col)
-        if debug:
-            dprint(f"{quoted_doc_key=}")
-        if dt_col:
-            self.client.zrem(table_name, quoted_doc_key)
-        else:
-            self.client.srem(table_name, quoted_doc_key)
+        set_doc_key = get_document_key(doc, indices)
+        table_doc_key = get_document_key(doc, indices, table_name)
+        try:
+            if dt_col:
+                self.client.zrem(table_name, set_doc_key)
+            else:
+                self.client.srem(table_name, set_doc_key)
+            self.client.delete(table_doc_key)
+        except Exception as e:
+            return False, f"Failed to delete documents:\n{e}"
     msg = (
         f"Deleted {len(docs)} row"
         + ('s' if len(docs) != 1 else '')

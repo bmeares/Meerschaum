@@ -55,11 +55,11 @@ def test_dtype_enforcement(flavor: str):
     pipe.delete(debug=debug)
     pipe = Pipe(
         'dtype', 'enforcement',
-        columns = {
+        columns={
             'datetime': 'dt',
             'id': 'id',
         },
-        dtypes = {
+        dtypes={
             'int': 'int',
             'float': 'float',
             'bool': 'bool',
@@ -68,7 +68,7 @@ def test_dtype_enforcement(flavor: str):
             'numeric': 'numeric',
             'str': 'str',
         },
-        instance = conn,
+        instance=conn,
     )
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'int': '1'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'float': '1.0'}], debug=debug)

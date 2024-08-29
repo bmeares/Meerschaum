@@ -634,20 +634,20 @@ def delete_pipe(
 
 
 def get_pipe_data(
-        self,
-        pipe: mrsm.Pipe,
-        select_columns: Optional[List[str]] = None,
-        omit_columns: Optional[List[str]] = None,
-        begin: Union[datetime, str, None] = None,
-        end: Union[datetime, str, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        order: str = 'asc',
-        limit: Optional[int] = None,
-        begin_add_minutes: int = 0,
-        end_add_minutes: int = 0,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union[pd.DataFrame, None]:
+    self,
+    pipe: mrsm.Pipe,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Union[datetime, str, None] = None,
+    end: Union[datetime, str, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    order: str = 'asc',
+    limit: Optional[int] = None,
+    begin_add_minutes: int = 0,
+    end_add_minutes: int = 0,
+    debug: bool = False,
+    **kw: Any
+) -> Union[pd.DataFrame, None]:
     """
     Access a pipe's data from the SQL instance.
 
@@ -746,19 +746,19 @@ def get_pipe_data(
     }
     query = self.get_pipe_data_query(
         pipe,
-        select_columns = select_columns,
-        omit_columns = omit_columns,
-        begin = begin,
-        end = end,
-        params = params,
-        order = order,
-        limit = limit,
-        begin_add_minutes = begin_add_minutes,
-        end_add_minutes = end_add_minutes,
-        debug = debug,
+        select_columns=select_columns,
+        omit_columns=omit_columns,
+        begin=begin,
+        end=end,
+        params=params,
+        order=order,
+        limit=limit,
+        begin_add_minutes=begin_add_minutes,
+        end_add_minutes=end_add_minutes,
+        debug=debug,
         **kw
     )
-    
+
     if is_dask:
         index_col = pipe.columns.get('datetime', None)
         kw['index_col'] = index_col
@@ -769,11 +769,11 @@ def get_pipe_data(
         if typ == 'numeric' and col in dtypes
     ]
     kw['coerce_float'] = kw.get('coerce_float', (len(numeric_columns) == 0))
-    
+
     df = self.read(
         query,
-        dtype = dtypes,
-        debug = debug,
+        dtype=dtypes,
+        debug=debug,
         **kw
     )
     for col in numeric_columns:
@@ -817,21 +817,21 @@ def get_pipe_data(
 
 
 def get_pipe_data_query(
-        self,
-        pipe: mrsm.Pipe,
-        select_columns: Optional[List[str]] = None,
-        omit_columns: Optional[List[str]] = None,
-        begin: Union[datetime, int, str, None] = None,
-        end: Union[datetime, int, str, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        order: str = 'asc',
-        limit: Optional[int] = None,
-        begin_add_minutes: int = 0,
-        end_add_minutes: int = 0,
-        replace_nulls: Optional[str] = None,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union[str, None]:
+    self,
+    pipe: mrsm.Pipe,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Union[datetime, int, str, None] = None,
+    end: Union[datetime, int, str, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    order: str = 'asc',
+    limit: Optional[int] = None,
+    begin_add_minutes: int = 0,
+    end_add_minutes: int = 0,
+    replace_nulls: Optional[str] = None,
+    debug: bool = False,
+    **kw: Any
+) -> Union[str, None]:
     """
     Return the `SELECT` query for retrieving a pipe's data from its instance.
 
@@ -2386,11 +2386,11 @@ def get_pipe_columns_types(
 
 
 def get_add_columns_queries(
-        self,
-        pipe: mrsm.Pipe,
-        df: Union[pd.DataFrame, Dict[str, str]],
-        debug: bool = False,
-    ) -> List[str]:
+    self,
+    pipe: mrsm.Pipe,
+    df: Union[pd.DataFrame, Dict[str, str]],
+    debug: bool = False,
+) -> List[str]:
     """
     Add new null columns of the correct type to a table from a dataframe.
 

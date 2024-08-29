@@ -226,7 +226,7 @@ def quantize_decimal(x: Decimal, scale: int, precision: int) -> Decimal:
 def coerce_timezone(dt: Any) -> Any:
     """
     Given a `datetime`, pandas `Timestamp` or `Series` of `Timestamp`,
-    return the input but as UTC.
+    return a naive datetime in terms of UTC.
     """
     if dt is None:
         return None
@@ -238,9 +238,9 @@ def coerce_timezone(dt: Any) -> Any:
 
     if dt_is_series:
         pandas = mrsm.attempt_import('pandas')
-        return pandas.to_datetime(dt, utc=True)
+        return pandas.to_datetime(dt, utc=True).apply(lambda x: x.replace(tzinfo=None))
 
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt
 
-    return dt.astimezone(timezone.utc)
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
