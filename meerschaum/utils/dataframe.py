@@ -591,12 +591,12 @@ def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
 
 
 def enforce_dtypes(
-        df: 'pd.DataFrame',
-        dtypes: Dict[str, str],
-        safe_copy: bool = True,
-        coerce_numeric: bool = True,
-        debug: bool = False,
-    ) -> 'pd.DataFrame':
+    df: 'pd.DataFrame',
+    dtypes: Dict[str, str],
+    safe_copy: bool = True,
+    coerce_numeric: bool = True,
+    debug: bool = False,
+) -> 'pd.DataFrame':
     """
     Enforce the `dtypes` dictionary on a DataFrame.
 

@@ -18,12 +18,12 @@ def update(self, *args, **kw) -> SuccessTuple:
 
 
 def edit(
-        self,
-        patch: bool = False,
-        interactive: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    patch: bool = False,
+    interactive: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Edit a Pipe's configuration.
 
@@ -50,11 +50,12 @@ def edit(
     if not interactive:
         with Venv(get_connector_plugin(self.instance_connector)):
             return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
+
     from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
     from meerschaum.utils.misc import edit_file
     parameters_filename = str(self) + '.yaml'
     parameters_path = PIPES_CACHE_RESOURCES_PATH / parameters_filename
-    
+
     from meerschaum.utils.yaml import yaml
 
     edit_text = f"Edit the parameters for {self}"
@@ -96,13 +97,13 @@ def edit(
 
 
 def edit_definition(
-        self,
-        yes: bool = False,
-        noask: bool = False,
-        force: bool = False,
-        debug : bool = False,
-        **kw : Any
-    ) -> SuccessTuple:
+    self,
+    yes: bool = False,
+    noask: bool = False,
+    force: bool = False,
+    debug : bool = False,
+    **kw : Any
+) -> SuccessTuple:
     """
     Edit a pipe's definition file and update its configuration.
     **NOTE:** This function is interactive and should not be used in automated scripts!

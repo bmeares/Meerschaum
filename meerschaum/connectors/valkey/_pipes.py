@@ -391,6 +391,7 @@ def get_pipe_data(
 
     from meerschaum.utils.dataframe import query_df, parse_df_datetimes
 
+    valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
     dt_col = pipe.columns.get('datetime', None)
     docs = [
         json.loads(list({k: v for k, v in doc.items() if k != dt_col}.values())[0])
@@ -402,8 +403,15 @@ def get_pipe_data(
         )
     ]
     df = parse_df_datetimes(docs)
+    for col, typ in valkey_dtypes.items():
+        try:
+            df[col] = df[col].astype(typ)
+        except Exception:
+            pass
+
     if len(df) == 0:
         return df
+
     return query_df(
         df,
         params=params,
@@ -444,8 +452,6 @@ def sync_pipe(
     from meerschaum.utils.dataframe import (
         get_datetime_bound_from_df,
         get_unique_index_values,
-        get_numeric_cols,
-        get_json_cols,
     )
     from meerschaum.utils.dtypes import are_dtypes_equal
 
@@ -466,26 +472,52 @@ def sync_pipe(
             for doc in _df.to_dict(orient='records')
         ]
 
-    numeric_cols = get_numeric_cols(df)
     non_dt_cols = [
         col
         for col, typ in df.dtypes.items()
         if not are_dtypes_equal(str(typ), 'datetime')
     ]
-    existing_dtypes = pipe.dtypes
+    existing_dtypes = pipe.parameters.get('dtypes', {})
     new_dtypes = {
-        str(key): 'string'
+        str(key): str(val)
         for key, val in df.dtypes.items()
         if str(key) not in existing_dtypes and key in non_dt_cols
     }
+    valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
+    #  for col, typ in existing_dtypes.items():
+        #  if col not in df.columns:
+            #  continue
+        #  df_typ = df.dtypes[col]
+        #  if not are_dtypes_equal(typ, str(df_typ)):
+            #  new_dtypes[col] = 'string'
+            #  df[col] = df[col].astype(str)
 
+    #  df = enforce_dtypes(df, {col: 'string' for col in df.columns}, debug=debug)
+    for col, typ in {c: v for c, v in valkey_dtypes.items()}.items():
+        if col in df.columns:
+            try:
+                df[col] = df[col].astype(typ)
+            except Exception:
+                valkey_dtypes[col] = 'string'
+                new_dtypes[col] = 'string'
+                df[col] = df[col].astype('string')
+    #  df = pipe.enforce_dtypes(df, debug=debug)
     if new_dtypes:
-        pipe.dtypes.update(new_dtypes)
+        col_dtypes_to_pop = [
+            col
+            for col in pipe.parameters.get('dtypes', {}).items()
+            if col not in valkey_dtypes
+        ]
+        valkey_dtypes.update(new_dtypes)
+        if 'valkey' not in pipe.parameters:
+            pipe.parameters['valkey'] = {}
+        pipe.parameters['valkey']['dtypes'] = valkey_dtypes
         edit_success, edit_msg = pipe.edit(debug=debug)
         if not edit_success:
             return edit_success, edit_msg
 
-    df = pipe.enforce_dtypes(df, debug=debug)
+        for col in col_dtypes_to_pop:
+            print(f"{col=}")
 
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(df, include_unchanged_columns=True, debug=debug)
@@ -573,9 +605,11 @@ def get_pipe_columns_types(
     if not pipe.exists(debug=debug):
         return {}
 
-    columns_types = {}
-
-    return columns_types
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
+    return {
+        col: get_db_type_from_pd_type(typ)
+        for col, typ in pipe.parameters.get('valkey', {}).get('dtypes', {}).items()
+    }
 
 
 def clear_pipe(
@@ -626,7 +660,8 @@ def clear_pipe(
     indices = [col for col in pipe.columns.values() if col]
     for doc in docs:
         quoted_doc_key = get_table_quoted_doc_key(table_name, doc, indices, dt_col)
-        print(f"{quoted_doc_key=}")
+        if debug:
+            dprint(f"{quoted_doc_key=}")
         if dt_col:
             self.client.zrem(table_name, quoted_doc_key)
         else:

@@ -827,7 +827,7 @@ def filter_existing(
         .reset_index(drop=True)
     ) if on_cols else get_empty_df()
 
-    if include_unchanged_columns:
+    if include_unchanged_columns and on_cols:
         unchanged_backtrack_cols = [
             col
             for col in backtrack_df.columns
@@ -944,7 +944,7 @@ def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
         edit_success, edit_msg = self.edit(interactive=False, debug=debug)
         if not edit_success:
             warn(f"Unable to update JSON dtypes for {self}:\n{edit_msg}")
-        
+
         return edit_success, edit_msg
 
     return True, "Success"

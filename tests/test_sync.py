@@ -502,9 +502,9 @@ def test_sync_inplace(flavor: str):
     Verify that in-place syncing works as expected.
     """
     from meerschaum.utils.sql import sql_item_name
-    if flavor == 'api':
-        return
     conn = conns[flavor]
+    if conn.type != 'sql':
+        return
     source_pipe = Pipe('test', 'inplace', 'src', instance=conn)
     source_pipe.delete()
     source_pipe = Pipe(
