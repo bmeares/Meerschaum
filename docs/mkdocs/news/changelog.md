@@ -1,13 +1,41 @@
 # 🪵 Changelog
 
-## 2.3.x Releases
+## 2.4.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.3.7
+### v2.4.0
+
+- **Allow querying for `None` in `query_df()`.**  
+  You may now query for null rows:
+
+  ```python
+  import pandas as pd
+  from meerschaum.utils.dataframe import query_df
+
+  df = pd.DataFrame({'a': [1, 2, pd.NA]}).astype('Int64')
+
+  result = query_df(df, {'a': None})
+  print(result)
+  #       a
+  # 2  <NA>
+  
+  result = query_df(df, {'a': [None, 1]})
+  print(result)
+  #       a
+  # 0     1
+  # 2  <NA> 
+  ```
+
+- **Improve `query_df()` performance.**  
+  Dataframe vlues are no longer serialized by default in `query_df()`, meaning that parameters must match the data type. Pass `coerce_types=True` to restore legacy behavior.
 
 - **Add `OPTIONAL_ATTRIBUTES` to connectors.**  
   Connectors may now set `OPTIONAL_ATTRIBUTES`, which will add skippable prompts in `bootstrap connector`.
+
+## 2.3.x Releases
+
+The 2.3 series was short but brought significant improvements, notably the `Job` API, remote jobs, and action chaining.
 
 ### v2.3.5 — v2.3.6
 

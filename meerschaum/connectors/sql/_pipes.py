@@ -782,28 +782,25 @@ def get_pipe_data(
         df[col] = df[col].apply(attempt_cast_to_numeric)
 
     if self.flavor == 'sqlite':
+        ignore_dt_cols = [
+            col
+            for col, dtype in pipe.dtypes.items()
+            if 'datetime' not in str(dtype)
+        ]
         ### NOTE: We have to consume the iterator here to ensure that datetimes are parsed correctly
         df = (
             parse_df_datetimes(
                 df,
-                ignore_cols = [
-                    col
-                    for col, dtype in pipe.dtypes.items()
-                    if 'datetime' not in str(dtype)
-                ],
-                chunksize = kw.get('chunksize', None),
-                debug = debug,
+                ignore_cols=ignore_dt_cols,
+                chunksize=kw.get('chunksize', None),
+                debug=debug,
             ) if isinstance(df, pd.DataFrame) else (
                 [
                     parse_df_datetimes(
                         c,
-                        ignore_cols = [
-                            col
-                            for col, dtype in pipe.dtypes.items()
-                            if 'datetime' not in str(dtype)
-                        ],
+                        ignore_cols=ignore_dt_cols,
                         chunksize = kw.get('chunksize', None),
-                        debug = debug,
+                        debug=debug,
                     )
                     for c in df
                 ]

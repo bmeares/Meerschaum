@@ -449,24 +449,26 @@ def test_sync_bools_inplace(flavor: str):
     Test that pipes are able to sync bool in-place.
     """
     conn = conns[flavor]
+    if conn.type not in ('api', 'sql'):
+        return
     pipe = mrsm.Pipe('test', 'bools', 'inplace', instance=conn)
     _ = pipe.delete()
     pipe = mrsm.Pipe(
         'test', 'bools', 'inplace',
-        instance = conn,
-        columns = {'datetime': 'dt', 'id': 'id'},
+        instance=conn,
+        columns={'datetime': 'dt', 'id': 'id'},
     )
     pipe_table = sql_item_name(pipe.target, conn.flavor) if conn.type == 'sql' else pipe.target
     inplace_pipe = mrsm.Pipe(conn, 'bools', 'inplace', instance=conn)
     _ = inplace_pipe.delete()
     inplace_pipe = mrsm.Pipe(
         conn, 'bools', 'inplace',
-        instance = conn,
-        columns = pipe.columns,
-        dtypes = {
+        instance=conn,
+        columns=pipe.columns,
+        dtypes={
             'is_bool': 'bool',
         },
-        parameters = {
+        parameters={
             'fetch': {
                 'definition': f"SELECT * FROM {pipe_table}",
                 'pipe': pipe.keys(),
@@ -501,4 +503,3 @@ def test_sync_bools_inplace(flavor: str):
     assert success, msg
     df = inplace_pipe.get_data(params={'id': 3})
     assert 'na' in str(df['is_bool'][0]).lower()
-

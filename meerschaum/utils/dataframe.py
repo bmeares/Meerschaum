@@ -146,7 +146,6 @@ def filter_unseen_df(
         attempt_cast_to_numeric,
         coerce_timezone,
     )
-    from meerschaum.utils.debug import dprint
     pd = import_pandas(debug=debug)
     is_dask = 'dask' in new_df.__module__
     if is_dask:
@@ -316,7 +315,7 @@ def filter_unseen_df(
             continue
         try:
             delta_df[json_col] = delta_df[json_col].apply(json.loads)
-        except Exception as e:
+        except Exception:
             warn(f"Unable to deserialize JSON column '{json_col}':\n{traceback.format_exc()}")
 
     for numeric_col in numeric_cols:
@@ -324,7 +323,7 @@ def filter_unseen_df(
             continue
         try:
             delta_df[numeric_col] = delta_df[numeric_col].apply(attempt_cast_to_numeric)
-        except Exception as e:
+        except Exception:
             warn(f"Unable to parse numeric column '{numeric_col}':\n{traceback.format_exc()}")
 
     return delta_df
@@ -1004,6 +1003,7 @@ def query_df(
     omit_columns: Optional[List[str]] = None,
     inplace: bool = False,
     reset_index: bool = False,
+    coerce_types: bool = False,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -1037,8 +1037,11 @@ def query_df(
     inplace: bool, default False
         If `True`, modify the DataFrame inplace rather than creating a new DataFrame.
 
-    reset_index: bool, default True
+    reset_index: bool, default False
         If `True`, reset the index in the resulting DataFrame.
+
+    coerce_types: bool, default False
+        If `True`, cast the dataframe and parameters as strings before querying.
 
     Returns
     -------
@@ -1047,16 +1050,36 @@ def query_df(
     if not params and not begin and not end:
         return df
 
-    import json
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import get_in_ex_params
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, value_is_null
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
+    pandas = mrsm.attempt_import('pandas')
+    NA = pandas.NA
+
+    if params:
+        params = params.copy()
+        for key, val in {k: v for k, v in params.items()}.items():
+            if isinstance(val, (list, tuple)):
+                if None in val:
+                    val = [item for item in val if item is not None] + [NA]
+                    params[key] = val
+                if coerce_types:
+                    params[key] = [str(x) for x in val]
+            else:
+                if value_is_null(val):
+                    val = NA
+                    params[key] = NA
+                if coerce_types:
+                    params[key] = str(val)
 
     dtypes = {col: str(typ) for col, typ in df.dtypes.items()}
-    if not inplace:
-        df = df.copy()
+
+    if inplace:
+        df.fillna(NA, inplace=True)
+    else:
+        df = df.fillna(NA)
 
     if isinstance(begin, str):
         begin = dateutil_parser.parse(begin)
@@ -1113,13 +1136,6 @@ def query_df(
 
     in_ex_params = get_in_ex_params(params)
 
-    def serialize(x: Any) -> str:
-        if isinstance(x, (dict, list, tuple)):
-            return json.dumps(x, sort_keys=True, separators=(',', ':'), default=str)
-        if hasattr(x, 'isoformat'):
-            return x.isoformat()
-        return str(x)
-
     masks = [
         (
             (df[datetime_column] >= begin)
@@ -1135,32 +1151,32 @@ def query_df(
     masks.extend([
         (
             (
-                df[col].apply(serialize).isin(
-                    [
-                        serialize(_in_val)
-                        for _in_val in in_vals
-                    ]
-                ) if in_vals else True
+                (df[col] if not coerce_types else df[col].astype(str)).isin(in_vals)
+                if in_vals
+                else True
             ) & (
-                ~df[col].apply(serialize).isin(
-                    [
-                        serialize(_ex_val)
-                        for _ex_val in ex_vals
-                    ]
-                ) if ex_vals else True
+                ~(df[col] if not coerce_types else df[col].astype(str)).isin(ex_vals)
+                if ex_vals
+                else True
             )
         )
         for col, (in_vals, ex_vals) in in_ex_params.items()
         if col in df.columns
     ])
     query_mask = masks[0]
-    for mask in masks:
+    for mask in masks[1:]:
         query_mask = query_mask & mask
 
-    ### NOTE: `inplace` is ok here because we're working with a copy.
-    df.where(query_mask, inplace=True)
-    df.dropna(how='all', inplace=True)
-    result_df = df
+    original_cols = df.columns
+    df['__mrsm_mask'] = query_mask
+
+    if inplace:
+        df.where(query_mask, inplace=True)
+        df.dropna(how='all', inplace=True)
+        result_df = df
+    else:
+        result_df = df.where(query_mask)
+        result_df.dropna(how='all', inplace=True)
 
     if reset_index:
         result_df.reset_index(drop=True, inplace=True)
@@ -1176,8 +1192,11 @@ def query_df(
     if select_columns == ['*']:
         select_columns = None
 
+    for col, typ in df.dtypes.items():
+        df[col] = df[col].fillna(NA)
+
     if not select_columns and not omit_columns:
-        return result_df
+        return result_df[original_cols]
 
     if select_columns:
         for col in list(result_df.columns):

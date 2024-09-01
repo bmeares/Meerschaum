@@ -437,7 +437,18 @@ def get_pipe_data(
         for doc_str in docs_strings
         if doc_str
     ]
-    df = parse_df_datetimes(docs)
+    ignore_dt_cols = [
+        col
+        for col, dtype in pipe.dtypes.items()
+        if 'datetime' not in str(dtype)
+    ]
+
+    df = parse_df_datetimes(
+        docs,
+        ignore_cols=ignore_dt_cols,
+        chunksize=kwargs.get('chunksize', None),
+        debug=debug,
+    )
     for col, typ in valkey_dtypes.items():
         try:
             df[col] = df[col].astype(typ)
@@ -451,6 +462,8 @@ def get_pipe_data(
 
     return query_df(
         df,
+        select_columns=select_columns,
+        omit_columns=omit_columns,
         params=params,
         begin=begin,
         end=end,
@@ -546,13 +559,13 @@ def sync_pipe(
     if len(delta_df) == 0:
         return True, msg
 
-    delta_docs = delta_df.to_dict(orient='records')
-    delta_indices_docs = _serialize_indices_docs(delta_docs)
-    delta_ix_vals = {
+    unseen_docs = unseen_df.to_dict(orient='records')
+    unseen_indices_docs = _serialize_indices_docs(unseen_docs)
+    unseen_ix_vals = {
         get_document_key(doc, indices, table_name): serialize_document(doc)
-        for doc in delta_docs
+        for doc in unseen_docs
     }
-    for key, val in delta_ix_vals.items():
+    for key, val in unseen_ix_vals.items():
         try:
             self.set(key, val)
         except Exception as e:
@@ -560,13 +573,26 @@ def sync_pipe(
 
     try:
         self.push_docs(
-            delta_indices_docs,
+            unseen_indices_docs,
             pipe.target,
             datetime_column=dt_col,
             debug=debug,
         )
     except Exception as e:
         return False, f"Failed to push docs to '{pipe.target}':\n{e}"
+
+    update_docs = update_df.to_dict(orient='records')
+    update_ix_docs = {
+        get_document_key(doc, indices, table_name): doc
+        for doc in update_docs
+    }
+    for key, doc in update_ix_docs.items():
+        try:
+            old_doc = json.loads(self.get(key))
+            old_doc.update(doc)
+            self.set(key, serialize_document(old_doc))
+        except Exception as e:
+            return False, f"Failed to set keys for {pipe}:\n{e}"
 
     return True, msg
 
@@ -751,7 +777,7 @@ def fetch_pipes_keys(
     """
     Return the keys for the registered pipes.
     """
-    from meerschaum.utils.dataframe import query_df, parse_df_datetimes
+    from meerschaum.utils.dataframe import query_df
     try:
         df = self.read(PIPES_TABLE, debug=debug)
     except Exception:
