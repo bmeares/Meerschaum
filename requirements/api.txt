@@ -6,6 +6,7 @@ fastapi>=0.111.0
 fastapi-login>=1.7.2
 python-multipart>=0.0.9
 httpx>=0.24.1
+valkey>=6.0.0
 numpy>=1.18.5
 pandas[parquet]>=2.0.1
 pyarrow>=16.1.0
