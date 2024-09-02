@@ -303,10 +303,10 @@ def drop_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
-    if not pipe.exists(debug=debug):
-        return True, "Success"
-
-    self.drop_table(pipe.target, debug=debug)
+    try:
+        self.drop_table(pipe.target, debug=debug)
+    except Exception as e:
+        return False, f"Failed to drop {pipe}:\n{e}"
 
     if 'valkey' not in pipe.parameters:
         return True, "Success"
@@ -458,7 +458,7 @@ def get_pipe_data(
     df = pipe.enforce_dtypes(df, debug=debug)
 
     if len(df) == 0:
-        return df
+        return query_df(df, select_columns=select_columns, omit_columns=omit_columns)
 
     return query_df(
         df,
@@ -581,7 +581,7 @@ def sync_pipe(
     except Exception as e:
         return False, f"Failed to push docs to '{pipe.target}':\n{e}"
 
-    update_docs = update_df.to_dict(orient='records')
+    update_docs = update_df.to_dict(orient='records') if update_df is not None else []
     update_ix_docs = {
         get_document_key(doc, indices, table_name): doc
         for doc in update_docs
@@ -699,6 +699,7 @@ def get_sync_time(
     """
     Return the newest (or oldest) timestamp in a pipe.
     """
+    from meerschaum.utils.dtypes import are_dtypes_equal
     dt_col = pipe.columns.get('datetime', None)
     dt_typ = pipe.dtypes.get(dt_col, 'datetime64[ns]')
     if not dt_col:
@@ -723,11 +724,16 @@ def get_sync_time(
     if dt_val is None:
         return None
 
-    return (
-        dateutil_parser.parse(str(dt_val))
-        if 'datetime' in dt_typ
-        else int(dt_val)
-    )
+    try:
+        return (
+            int(dt_val)
+            if are_dtypes_equal(dt_typ, 'int')
+            else dateutil_parser.parse(str(dt_val)).replace(tzinfo=None)
+        )
+    except Exception as e:
+        warn(f"Failed to parse sync time for {pipe}:\n{e}")
+
+    return None
 
 
 def get_pipe_rowcount(
@@ -778,6 +784,7 @@ def fetch_pipes_keys(
     Return the keys for the registered pipes.
     """
     from meerschaum.utils.dataframe import query_df
+    from meerschaum.utils.misc import separate_negation_values
     try:
         df = self.read(PIPES_TABLE, debug=debug)
     except Exception:
@@ -788,16 +795,17 @@ def fetch_pipes_keys(
 
     query = {}
     if connector_keys:
-        query['connector_keys'] = connector_keys
+        query['connector_keys'] = [str(k) for k in connector_keys]
     if metric_keys:
-        query['metric_key'] = metric_keys
+        query['metric_key'] = [str(k) for k in metric_keys]
     if location_keys:
-        query['location_key'] = location_keys
+        query['location_key'] = [str(k) for k in location_keys]
     if params:
         query.update(params)
 
     df = query_df(df, query, inplace=True)
-    return [
+
+    keys = [
         (
             doc['connector_keys'],
             doc['metric_key'],
@@ -805,3 +813,27 @@ def fetch_pipes_keys(
         )
         for doc in df.to_dict(orient='records')
     ]
+    if not tags:
+        return keys
+
+    tag_groups = [tag.split(',') for tag in tags]
+    in_ex_tag_groups = [separate_negation_values(tag_group) for tag_group in tag_groups]
+
+    filtered_keys = []
+    for ck, mk, lk in keys:
+        pipe = mrsm.Pipe(ck, mk, lk, instance=self)
+        pipe_tags = set(pipe.tags)
+        
+        include_pipe = True
+        for in_tags, ex_tags in in_ex_tag_groups:
+            all_in = all(tag in pipe_tags for tag in in_tags)
+            any_ex = any(tag in pipe_tags for tag in ex_tags)
+
+            if (not all_in) or any_ex:
+                include_pipe = False
+                continue
+
+        if include_pipe:
+            filtered_keys.append((ck, mk, lk))
+
+    return filtered_keys

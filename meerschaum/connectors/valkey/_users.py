@@ -29,8 +29,8 @@ def get_users_pipe(self):
     )
 
 
-@staticmethod
-def get_user_key(user_id_or_username: str, sub_key: str, by_username: bool = False) -> str:
+@classmethod
+def get_user_key(cls, user_id_or_username: str, sub_key: str, by_username: bool = False) -> str:
     """
     Return the key to store metadata about a user.
 
@@ -58,7 +58,7 @@ def get_user_key(user_id_or_username: str, sub_key: str, by_username: bool = Fal
     'mrsm_user:username:foo:user_id'
     """
     key_type = 'user_id' if not by_username else 'username'
-    return f"{USER_PREFIX}:{key_type}:{user_id_or_username}:{sub_key}"
+    return cls.get_entity_key(USER_PREFIX, key_type, user_id_or_username, sub_key)
 
 
 @classmethod
@@ -93,8 +93,8 @@ def get_user_keys_vals(
         return mutable_keys_vals
 
     immutable_keys_vals = {
-        get_user_key(user.user_id, 'username'): user.username,
-        get_user_key(user.username, 'user_id', by_username=True): user.user_id,
+        cls.get_user_key(user.user_id, 'username'): user.username,
+        cls.get_user_key(user.username, 'user_id', by_username=True): user.user_id,
     }
 
     return {**immutable_keys_vals, **mutable_keys_vals}
@@ -124,16 +124,20 @@ def register_user(
                 },
             ],
             check_existing=False,
+            debug=debug,
         )
         if not sync_success:
             return sync_success, sync_msg
 
         for key, val in keys_vals.items():
-            self.set(key, val)
+            if val is not None:
+                self.set(key, val)
 
         success, msg = True, "Success"
     except Exception as e:
         success = False
+        import traceback
+        traceback.print_exc()
         msg = f"Failed to register '{user.username}':\n{e}"
 
     if not success:
@@ -146,11 +150,11 @@ def register_user(
     return success, msg
 
 
-def get_user_id(self, user: 'mrsm.core.User') -> Union[str, None]:
+def get_user_id(self, user: 'mrsm.core.User', debug: bool = False) -> Union[str, None]:
     """
     Return the ID for a user, or `None`.
     """
-    username_user_id_key = get_user_key(user.username, 'user_id', by_username=True)
+    username_user_id_key = self.get_user_key(user.username, 'user_id', by_username=True)
     try:
         user_id = self.get(username_user_id_key)
     except Exception:
@@ -203,7 +207,7 @@ def get_user_attributes(
     Return the user's attributes.
     """
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
-    user_id_attributes_key = get_user_key(user_id, 'attributes')
+    user_id_attributes_key = self.get_user_key(user_id, 'attributes')
     try:
         return json.loads(self.get(user_id_attributes_key))
     except Exception:
@@ -227,7 +231,7 @@ def delete_user(
             for key in keys_vals
         }
     except Exception as e:
-        return False, f"Failed to edit user:\n{e}"
+        return False, f"Failed to delete user:\n{e}"
 
     clear_success, clear_msg = users_pipe.clear(params={'user_id': user_id})
     if not clear_success:
@@ -277,7 +281,7 @@ def get_user_password_hash(
     Return the password has for a user.
     """
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
-    user_id_password_hash_key = get_user_key(user_id, 'password_hash')
+    user_id_password_hash_key = self.get_user_key(user_id, 'password_hash')
     try:
         return self.get(user_id_password_hash_key)
     except Exception:
@@ -294,7 +298,7 @@ def get_user_type(
     Return the user's type.
     """
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
-    user_id_type_key = get_user_key(user_id, 'type')
+    user_id_type_key = self.get_user_key(user_id, 'type')
     try:
         return self.get(user_id_type_key)
     except Exception:

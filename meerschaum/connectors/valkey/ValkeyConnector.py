@@ -34,6 +34,7 @@ class ValkeyConnector(Connector):
         'db': 0,
         'socket_timeout': 300,
     }
+    KEY_SEPARATOR: str = ':'
 
     from ._pipes import (
         register_pipe,
@@ -67,6 +68,19 @@ class ValkeyConnector(Connector):
         get_users,
         get_user_password_hash,
         get_user_type,
+    )
+    from ._plugins import (
+        get_plugins_pipe,
+        get_plugin_key,
+        get_plugin_keys_vals,
+        register_plugin,
+        get_plugin_id,
+        get_plugin_version,
+        get_plugin_user_id,
+        get_plugin_username,
+        get_plugin_attributes,
+        get_plugins,
+        delete_plugin,
     )
 
     @property
@@ -505,3 +519,17 @@ class ValkeyConnector(Connector):
         datetime_column_key = self.get_datetime_column_key(table)
         self.client.delete(table_name)
         self.client.delete(datetime_column_key)
+
+    @classmethod
+    def get_entity_key(cls, *keys: Any) -> str:
+        """
+        Return a joined key to set an entity.
+        """
+        if not keys:
+            raise ValueError("No keys to be joined.")
+
+        for key in keys:
+            if cls.KEY_SEPARATOR in str(key):
+                raise ValueError(f"Key cannot contain separator '{cls.KEY_SEPARATOR}'.")
+
+        return cls.KEY_SEPARATOR.join([str(key) for key in keys])

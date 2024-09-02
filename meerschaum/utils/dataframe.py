@@ -1047,7 +1047,26 @@ def query_df(
     -------
     A Pandas DataFrame query result.
     """
+
+    def _process_select_columns(_df):
+        if not select_columns:
+            return
+        for col in list(_df.columns):
+            if col not in select_columns:
+                del _df[col]
+
+    def _process_omit_columns(_df):
+        if not omit_columns:
+            return
+        for col in list(_df.columns):
+            if col in omit_columns:
+                del _df[col]
+
     if not params and not begin and not end:
+        if not inplace:
+            df = df.copy()
+        _process_select_columns(df)
+        _process_omit_columns(df)
         return df
 
     from meerschaum.utils.debug import dprint
@@ -1168,15 +1187,27 @@ def query_df(
         query_mask = query_mask & mask
 
     original_cols = df.columns
+    bool_cols = [
+        col
+        for col, typ in df.dtypes.items()
+        if are_dtypes_equal(str(typ), 'bool')
+    ]
+    for col in bool_cols:
+        df[col] = df[col].astype('boolean[pyarrow]')
     df['__mrsm_mask'] = query_mask
 
     if inplace:
-        df.where(query_mask, inplace=True)
+        df.where(query_mask, other=NA, inplace=True)
         df.dropna(how='all', inplace=True)
         result_df = df
     else:
-        result_df = df.where(query_mask)
+        result_df = df.where(query_mask, other=NA)
         result_df.dropna(how='all', inplace=True)
+
+    if '__mrsm_mask' in df.columns:
+        del df['__mrsm_mask']
+    if '__mrsm_mask' in result_df.columns:
+        del result_df['__mrsm_mask']
 
     if reset_index:
         result_df.reset_index(drop=True, inplace=True)
@@ -1192,22 +1223,10 @@ def query_df(
     if select_columns == ['*']:
         select_columns = None
 
-    for col, typ in df.dtypes.items():
-        df[col] = df[col].fillna(NA)
-
     if not select_columns and not omit_columns:
         return result_df[original_cols]
 
-    if select_columns:
-        for col in list(result_df.columns):
-            if col not in select_columns:
-                del result_df[col]
-        return result_df
-
-    if omit_columns:
-        for col in list(result_df.columns):
-            if col in omit_columns:
-                del result_df[col]
-    if debug:
-        dprint(f"{dtypes=}")
+    _process_select_columns(result_df)
+    _process_omit_columns(result_df)
+    
     return result_df

@@ -152,8 +152,7 @@ def test_sync_engine(flavor: str):
     if flavor == 'duckdb':
         return
     pipe = stress_pipes[flavor]
-    pipe.delete()
-    pipe.register()
+    _ = pipe.register()
     mrsm_instance = str(pipe.instance_connector)
     _ = actions['drop'](
         ['pipes'],

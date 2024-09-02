@@ -6,6 +6,27 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v2.4.0
 
+- **Add `valkey` instance connectors.**  
+  Introducing a new first-class instance connector: the `ValkeyConnector`! [Valkey](https://valkey.io/), a fork of Redis, is a high-performance in-memory database often used for caching.
+
+  The `valkey` service has been added to the Meerschaum stack:
+
+  ```bash
+  mrsm stack up -d valkey
+  ```
+
+  To access it, use the new built-in connector `valkey:main`:
+
+  ```bash
+  mrsm sync pipes -i valkey:main
+  ```
+
+  Like `SQLConnector`, the `ValkeyConnector` supports users and plugins and may be used as a backing instance for an API instance:
+  
+  ```bash
+  mrsm start api -i valkey:main
+  ```
+
 - **Allow querying for `None` in `query_df()`.**  
   You may now query for null rows:
 

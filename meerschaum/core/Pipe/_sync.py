@@ -795,8 +795,8 @@ def filter_existing(
     casted_cols = set(unhashable_delta_cols + unhashable_backtrack_cols)
 
     joined_df = merge(
-        delta_df.fillna(NA),
-        backtrack_df.fillna(NA),
+        delta_df.infer_objects(copy=False).fillna(NA),
+        backtrack_df.infer_objects(copy=False).fillna(NA),
         how='left',
         on=on_cols,
         indicator=True,

@@ -6,9 +6,12 @@
 Stress test for pipes.
 """
 
-__version__ = '0.3.6'
+__version__ = '0.3.7'
 
-import datetime, random, math
+from datetime import datetime, timezone, timedelta
+import random
+import math
+
 import meerschaum as mrsm
 from meerschaum.utils.misc import iterate_chunks
 from meerschaum.utils.typing import Optional
@@ -31,12 +34,12 @@ def register(pipe):
     }
 
 def fetch(
-        pipe: mrsm.Pipe,
-        chunksize: Optional[int] = None,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
-        **kw
-    ):
+    pipe: mrsm.Pipe,
+    chunksize: Optional[int] = None,
+    begin: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    **kw
+):
     """
     Yield random chunks of data.
     """
@@ -49,7 +52,7 @@ def fetch(
         else (
             sync_time
             if sync_time is not None
-            else datetime.datetime.utcnow()
+            else datetime.now(timezone.utc).replace(tzinfo=None)
         )
     )
     if chunksize is None or chunksize < 1:
@@ -79,7 +82,7 @@ def fetch(
                 id_col: random.randint(1, num_ids),
                 val_col: random.randint(1, 100),
             })
-            now += datetime.timedelta(minutes=1)
+            now += timedelta(minutes=1)
             yielded_rows += 1
 
         if chunk:
