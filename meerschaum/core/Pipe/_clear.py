@@ -7,25 +7,28 @@ Clear pipe data within a bounded or unbounded interval.
 """
 
 from __future__ import annotations
+
+from datetime import datetime
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Dict
 
+
 def clear(
-        self,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
-        params: Optional[Dict[str, Any]] = None,
-        debug: bool = False,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    self,
+    begin: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Call the Pipe's instance connector's `clear_pipe` method.
 
     Parameters
     ----------
-    begin: Optional[datetime.datetime], default None:
+    begin: Optional[datetime], default None:
         If provided, only remove rows newer than this datetime value.
 
-    end: Optional[datetime.datetime], default None:
+    end: Optional[datetime], default None:
         If provided, only remove rows older than this datetime column (not including end).
 
     params: Optional[Dict[str, Any]], default None
@@ -41,11 +44,11 @@ def clear(
     Examples
     --------
     >>> pipe = mrsm.Pipe('test', 'test', columns={'datetime': 'dt'}, instance='sql:local')
-    >>> pipe.sync({'dt': [datetime.datetime(2020, 1, 1, 0, 0)]})
-    >>> pipe.sync({'dt': [datetime.datetime(2021, 1, 1, 0, 0)]})
-    >>> pipe.sync({'dt': [datetime.datetime(2022, 1, 1, 0, 0)]})
+    >>> pipe.sync({'dt': [datetime(2020, 1, 1, 0, 0)]})
+    >>> pipe.sync({'dt': [datetime(2021, 1, 1, 0, 0)]})
+    >>> pipe.sync({'dt': [datetime(2022, 1, 1, 0, 0)]})
     >>> 
-    >>> pipe.clear(begin=datetime.datetime(2021, 1, 1, 0, 0))
+    >>> pipe.clear(begin=datetime(2021, 1, 1, 0, 0))
     >>> pipe.get_data()
               dt
     0 2020-01-01

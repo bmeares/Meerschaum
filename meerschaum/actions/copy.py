@@ -115,11 +115,11 @@ def _copy_pipes(
         ):
             _new_pipe.sync(
                 p.get_data(
-                    debug = debug,
-                    as_iterator = True,
+                    debug=debug,
+                    as_iterator=True,
                     **kw
                 ),
-                debug = debug,
+                debug=debug,
                 **kw
             )
 

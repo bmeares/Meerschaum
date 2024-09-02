@@ -12,17 +12,17 @@ from meerschaum.utils.warnings import warn, info
 from meerschaum.utils.debug import dprint
 
 def verify(
-        self,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        chunk_interval: Union[timedelta, int, None] = None,
-        bounded: Optional[bool] = None,
-        deduplicate: bool = False,
-        workers: Optional[int] = None,
-        debug: bool = False,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    self,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    chunk_interval: Union[timedelta, int, None] = None,
+    bounded: Optional[bool] = None,
+    deduplicate: bool = False,
+    workers: Optional[int] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Verify the contents of the pipe by resyncing its interval.
 

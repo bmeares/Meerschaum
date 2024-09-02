@@ -51,6 +51,16 @@ This is the current release cycle, so stay tuned for future releases!
 - **Improve `query_df()` performance.**  
   Dataframe vlues are no longer serialized by default in `query_df()`, meaning that parameters must match the data type. Pass `coerce_types=True` to restore legacy behavior.
 
+- **Add `Pipe.copy_to()`.**  
+  Copy pipes between instances with `Pipe.copy_to()`:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe('plugin:noaa', 'weather')
+  pipe.copy_to('valkey:main')
+  ```
+
 - **Add `OPTIONAL_ATTRIBUTES` to connectors.**  
   Connectors may now set `OPTIONAL_ATTRIBUTES`, which will add skippable prompts in `bootstrap connector`.
 

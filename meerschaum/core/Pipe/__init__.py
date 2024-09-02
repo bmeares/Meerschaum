@@ -135,6 +135,7 @@ class Pipe:
     from ._deduplicate import deduplicate
     from ._bootstrap import bootstrap
     from ._dtypes import enforce_dtypes, infer_dtypes
+    from ._copy import copy_to
 
     def __init__(
         self,
