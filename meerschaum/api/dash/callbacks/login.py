@@ -14,7 +14,8 @@ import uuid
 from meerschaum.utils.typing import Optional
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State
-from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes, active_sessions
+from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes
+from meerschaum.api.dash.sessions import set_session
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.routes._login import login
 from meerschaum.api.dash.components import alert_from_success_tuple
@@ -69,11 +70,12 @@ def login_button_click(
 
     try:
         _ = login({'username': username, 'password': password})
+        session_id = str(uuid.uuid4())
         session_data = {
-            'session-id': str(uuid.uuid4()),
+            'session-id': session_id,
             'location.href': location_href,
         }
-        active_sessions[session_data['session-id']] = {'username': username}
+        set_session(session_id, {'username': username})
         alerts = []
     except HTTPException:
         form_class += ' is-invalid'

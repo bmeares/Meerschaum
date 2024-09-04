@@ -13,7 +13,8 @@ from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
 from meerschaum.core import Plugin
-from meerschaum.api.dash import dash_app, debug, active_sessions
+from meerschaum.api.dash import dash_app, debug
+from meerschaum.api.dash.sessions import get_username_from_session
 
 
 def get_plugins_cards(
@@ -88,9 +89,10 @@ def is_plugin_owner(plugin_name: str, session_data: Dict['str', Any]) -> bool:
     Check whether the currently logged in user is the owner of a plugin.
     """
     plugin = Plugin(plugin_name)
-    _username = active_sessions.get(
-        session_data.get('session-id', None), {}
-    ).get('username', None)
+    session_id = session_data.get('session-id', None)
+    if session_id is None:
+        return False
+    _username = get_username_from_session(session_id)
     _plugin_username = get_api_connector().get_plugin_username(plugin, debug=debug)
     return (
         _username is not None

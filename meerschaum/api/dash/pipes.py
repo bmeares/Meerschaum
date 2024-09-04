@@ -12,18 +12,16 @@ import shlex
 from textwrap import dedent
 from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
-from meerschaum.utils.misc import string_to_dict, json_serialize_datetime
+from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
 from meerschaum.utils.sql import get_pd_type
 from meerschaum.utils.yaml import yaml
 from meerschaum.connectors.sql._fetch import get_pipe_query
-from meerschaum.api import endpoints, CHECK_UPDATE
-from meerschaum.api.dash import (
-    dash_app, debug, _get_pipes
-)
+from meerschaum.api import CHECK_UPDATE
+from meerschaum.api.dash import debug, _get_pipes
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
-from meerschaum.api.dash.users import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.config import get_config
 import meerschaum as mrsm
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)

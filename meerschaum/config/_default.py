@@ -96,6 +96,9 @@ default_system_config = {
             'proxy_headers': True,
             'forwarded_allow_ips': '*',
         },
+        'cache': {
+            'connector_keys': 'valkey:main',
+        },
         'permissions':       {
             'registration': {
                 'users': True,
@@ -105,7 +108,7 @@ default_system_config = {
             'actions': {
                 'non_admin': True,
             },
-            'chaining' : {
+            'chaining': {
                 'insecure_parent_instance': False,
                 'child_apis': False,
             },

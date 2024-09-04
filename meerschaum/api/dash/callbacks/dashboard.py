@@ -7,18 +7,21 @@ Callbacks for the main dashboard.
 """
 
 from __future__ import annotations
-import sys, textwrap, json, datetime, uuid
+
+import textwrap
+import json
+import uuid
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
-from meerschaum.config import get_config
-from meerschaum.config.static import _static_config
 from meerschaum.utils.typing import List, Optional, Any, Tuple
 from meerschaum.api import get_api_connector, endpoints, no_auth, CHECK_UPDATE
-from meerschaum.api.dash import (
-    dash_app, debug, pipes, _get_pipes,
-    active_sessions, authenticated_sessions, unauthenticated_sessions,
+from meerschaum.api.dash import dash_app, debug
+from meerschaum.api.dash.sessions import (
+    is_session_active,
+    delete_session,
+    set_session,
 )
-from meerschaum.api.dash.users import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import get_pipes_cards, pipe_from_ctx, accordion_items_from_pipe
@@ -30,21 +33,15 @@ from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.components import (
     alert_from_success_tuple, console_div, build_cards_grid,
 )
-from meerschaum.api.dash.actions import execute_action, stop_action
-import meerschaum.api.dash.pages as pages
+from meerschaum.api.dash.actions import stop_action
+from meerschaum.api.dash import pages
 from meerschaum.utils.typing import Dict
-from meerschaum.utils.debug import dprint
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
-from meerschaum.utils.misc import (
-    string_to_dict, get_connector_labels, json_serialize_datetime, filter_keywords,
-    flatten_list,
-)
+from meerschaum.utils.misc import filter_keywords, flatten_list
 from meerschaum.utils.yaml import yaml
 from meerschaum.actions import get_subactions, actions
-from meerschaum._internal.arguments._parser import get_arguments_triggers, parser
+from meerschaum._internal.arguments._parser import parser
 from meerschaum.connectors.sql._fetch import set_pipe_query
-import meerschaum as mrsm
-import json
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
@@ -141,9 +138,9 @@ def update_page_layout_div(
         session_id = None
 
     ### Bypass login if `--no-auth` is specified.
-    if session_id not in active_sessions and no_auth:
+    if not is_session_active(session_id) and no_auth:
         session_store_data['session-id'] = str(uuid.uuid4())
-        active_sessions[session_store_data['session-id']] = {'username': 'no-auth'}
+        set_session(session_id, {'username': 'no-auth'})
 
         ### Sometimes the href is an empty string, so store it here for later.
         session_store_data['location.href'] = location_href
@@ -176,7 +173,7 @@ def update_page_layout_div(
         path_str
         if no_auth or path_str not in _required_login else (
             path_str
-            if session_id in active_sessions
+            if is_session_active(session_id)
             else 'login'
         )
     )
@@ -956,9 +953,9 @@ def toggle_navbar_collapse(n_clicks: Optional[int], is_open: bool) -> bool:
     State('session-store', 'data'),
 )
 def sign_out_button_click(
-        n_clicks: Optional[int],
-        session_store_data: Dict[str, Any],
-    ):
+    n_clicks: Optional[int],
+    session_store_data: Dict[str, Any],
+):
     """
     When the sign out button is clicked, remove the session data and redirect to the login page.
     """
@@ -966,9 +963,7 @@ def sign_out_button_click(
         raise PreventUpdate
     session_id = session_store_data.get('session-id', None)
     if session_id:
-        _ = active_sessions.pop(session_id, None)
-        _ = authenticated_sessions.pop(session_id, None)
-        _ = unauthenticated_sessions.pop(session_id, None)
+        delete_session(session_id)
     return endpoints['dash'], {}
 
 

@@ -8,7 +8,8 @@ Callbacks for the registration page.
 
 import uuid
 from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
-from meerschaum.api.dash import dash_app, debug, active_sessions
+from meerschaum.api.dash import dash_app, debug
+from meerschaum.api.dash.sessions import set_session
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum.core import User
@@ -93,9 +94,9 @@ def register_button_click(
         form_class += ' is-invalid'
         return {}, form_class, dash.no_update
     try:
-        token_dict = login({'username': username, 'password': password})
+        _ = login({'username': username, 'password': password})
         session_data = {'session-id': str(uuid.uuid4())}
-        active_sessions[session_data['session-id']] = {'username': username}
+        set_session(session_data['session-id'], {'username': username})
     except HTTPException as e:
         form_class += ' is-invalid'
         session_data = None

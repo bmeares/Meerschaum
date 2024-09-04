@@ -235,6 +235,7 @@ def _api_start(
         'no_dash': no_dash,
         'no_auth': no_auth,
         'private': private,
+        'production': production,
     })
     if debug:
         uvicorn_config['reload'] = debug
@@ -251,7 +252,7 @@ def _api_start(
     if secure:
         cf['system']['api']['permissions']['actions']['non_admin'] = False
 
-    custom_keys = ['mrsm_instance', 'no_dash', 'no_auth', 'private', 'debug']
+    custom_keys = ['mrsm_instance', 'no_dash', 'no_auth', 'private', 'debug', 'production']
 
     ### write config to a temporary file to communicate with uvicorn threads
     import json, sys
@@ -342,7 +343,7 @@ def _api_start(
             run_python_package(
                 'gunicorn',
                 gunicorn_args,
-                env = {
+                env={
                     k: (
                         json.dumps(v)
                         if isinstance(v, (dict, list))
@@ -350,14 +351,16 @@ def _api_start(
                     )
                     for k, v in env_dict.items()
                 },
-                venv = None,
-                debug = debug,
+                venv=None,
+                debug=debug,
             )
         except KeyboardInterrupt:
             pass
 
-
-    _run_uvicorn() if not production else _run_gunicorn()
+    if production:
+        _run_gunicorn()
+    else:
+        _run_uvicorn()
 
     ### Cleanup
     if uvicorn_config_path.parent.exists():

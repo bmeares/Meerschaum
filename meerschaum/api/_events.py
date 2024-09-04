@@ -10,6 +10,7 @@ import sys, os, time
 from meerschaum.api import (
     app,
     get_api_connector,
+    get_cache_connector,
     get_uvicorn_config,
     debug,
     no_dash,
@@ -41,10 +42,17 @@ async def startup():
 
         connected = retry_connect(
             get_api_connector(),
-            workers = get_uvicorn_config().get('workers', None),
-            debug = debug
+            workers=get_uvicorn_config().get('workers', None),
+            debug=debug
         )
-    except Exception as e:
+        cache_connector = get_cache_connector()
+        if cache_connector is not None:
+            connected = retry_connect(
+                cache_connector,
+                workers=get_uvicorn_config().get('workers', None),
+                debug=debug,
+            )
+    except Exception:
         import traceback
         traceback.print_exc()
         connected = False

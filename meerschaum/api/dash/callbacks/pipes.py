@@ -5,14 +5,13 @@
 Define callbacks for the `/dash/pipes/` page.
 """
 
-from dash.exceptions import PreventUpdate
-from dash.dependencies import Input, Output, State
+from dash.dependencies import Input, Output
 from dash import no_update
 
 import meerschaum as mrsm
-from meerschaum.api.dash import dash_app, debug, active_sessions
+from meerschaum.api.dash import dash_app
 from meerschaum.api.dash.pipes import build_pipe_card
-from meerschaum.api import get_api_connector, CHECK_UPDATE
+from meerschaum.api import CHECK_UPDATE
 from meerschaum.utils.packages import import_html, import_dcc
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 

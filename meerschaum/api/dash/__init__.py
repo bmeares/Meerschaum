@@ -38,9 +38,6 @@ with warnings.catch_warnings():
 html, dcc = import_html(), import_dcc()
 from meerschaum.api.dash.components import location
 
-active_sessions = {}
-authenticated_sessions = {}
-unauthenticated_sessions = {}
 running_jobs = {}
 running_monitors = {}
 stopped_jobs = {}

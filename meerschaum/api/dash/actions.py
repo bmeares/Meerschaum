@@ -7,17 +7,22 @@ Execute actions via the web interface.
 """
 
 from __future__ import annotations
-import platform, sys, io, os, shlex, time, copy
-from dash.exceptions import PreventUpdate
+import sys
+import io
+import os
+import shlex
+import time
+import copy
+
 from meerschaum.utils.threading import Thread
 from meerschaum.utils.typing import SuccessTuple, Tuple, Dict, Any, WebState
-from meerschaum.utils.packages import attempt_import, import_html, import_dcc
-from meerschaum.utils.misc import remove_ansi
-from meerschaum.actions import actions, get_shell
+from meerschaum.utils.packages import import_html, import_dcc
+from meerschaum.actions import actions
 from meerschaum.api import debug, CHECK_UPDATE
 from meerschaum.api.dash import (
-    running_jobs, stopped_jobs, running_monitors, stopped_monitors, active_sessions
+    running_jobs, stopped_jobs, running_monitors, stopped_monitors
 )
+from meerschaum.api.dash.sessions import get_username_from_session
 from meerschaum.api import get_api_connector
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div
@@ -75,7 +80,7 @@ def execute_action(state: WebState):
     permissions = get_config('system', 'api', 'permissions')
     allow_non_admin = permissions.get('actions', {}).get('non_admin', False)
     if not allow_non_admin:
-        username = active_sessions.get(session_id, {}).get('username', None)
+        username = get_username_from_session(session_id)
         user = User(username, instance=get_api_connector())
         user_type = get_api_connector().get_user_type(user, debug=debug)
         if user_type != 'admin':
