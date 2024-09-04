@@ -12,6 +12,7 @@ from meerschaum.api import debug, no_auth
 from meerschaum.api import get_cache_connector, get_api_connector
 from meerschaum.core import User
 from meerschaum.config import get_config
+from meerschaum.utils.warnings import dprint
 
 SESSION_KEY_TEMPLATE: str = 'mrsm_session_id:{session_id}'
 _active_sessions: Dict[str, Dict[str, Any]] = {}
@@ -31,10 +32,15 @@ def set_session(session_id: str, session_data: Dict[str, Any]):
     conn = get_cache_connector()
     if conn is None:
         _active_sessions[session_id] = session_data
+        if debug:
+            dprint(f"Setting in-memory data for {session_id}:\n{session_data}")
         return
 
     session_key = get_session_key(session_id)
     session_data_str = json.dumps(session_data, separators=(',', ':'))
+    if debug:
+        dprint(f"Setting production data for {session_id=}:\n{session_data_str}")
+
     conn.set(session_key, session_data_str)
 
 
@@ -51,6 +57,8 @@ def get_session_data(session_id: Optional[str]) -> Union[Dict[str, Any], None]:
     """
     Return the session data dictionary.
     """
+    if debug:
+        dprint(f"Getting session data for {session_id=}")
     conn = get_cache_connector()
     if conn is None:
         return _active_sessions.get(str(session_id), None)
@@ -68,6 +76,8 @@ def get_username_from_session(session_id: Optional[str]) -> Union[str, None]:
     If a `session_id` has been set, return the username.
     Otherwise return `None`.
     """
+    if debug:
+        dprint(f"Getting username for {session_id=}")
     session_data = get_session_data(session_id)
     if session_data is None:
         return None
@@ -86,6 +96,8 @@ def delete_session(session_id: str):
     """
     Delete a session if it's been set.
     """
+    if debug:
+        dprint(f"Deleting {session_id=}")
     conn = get_cache_connector()
     if conn is None:
         _ = _active_sessions.pop(session_id, None)
@@ -109,6 +121,9 @@ def is_session_authenticated(session_id: Optional[str]) -> bool:
     -------
     A bool whether the session is authenticated to perform actions.
     """
+    if debug:
+        dprint(f"Checking authentication for {session_id=}")
+
     if no_auth:
         return True
 
@@ -138,6 +153,8 @@ def session_is_admin(session_id: str) -> bool:
     """
     Check whether a session ID corresponds to an admin user.
     """
+    if debug:
+        dprint(f"Check admin for {session_id=}")
     session_data = get_session_data(session_id)
     if session_data is None:
         return False

@@ -16,7 +16,6 @@ flask_compress = attempt_import('flask_compress', lazy=False)
 _monkey_patch_get_distribution('flask-compress', flask_compress.__version__)
 dash = attempt_import('dash', lazy=False)
 
-
 from meerschaum.utils.typing import List, Optional
 from meerschaum.config.static import _static_config
 from meerschaum.api import (
@@ -37,11 +36,6 @@ with warnings.catch_warnings():
     enrich = attempt_import('dash_extensions.enrich', lazy=False)
 html, dcc = import_html(), import_dcc()
 from meerschaum.api.dash.components import location
-
-running_jobs = {}
-running_monitors = {}
-stopped_jobs = {}
-stopped_monitors = {}
 
 stylesheets = [
     '/static/css/bootstrap.min.css',

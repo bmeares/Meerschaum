@@ -763,7 +763,6 @@ class Shell(cmd.Cmd):
 
         return True, "Success"
 
-
     def complete_instance(
         self,
         text: str,
@@ -776,9 +775,10 @@ class Shell(cmd.Cmd):
         from meerschaum.utils.misc import get_connector_labels
         from meerschaum._internal.arguments._parse_arguments import parse_line
         from meerschaum.connectors import instance_types, _load_builtin_custom_connectors
-        if _executor:
+        if not self.__dict__.get('_loaded_custom_connectors', None):
             _load_builtin_custom_connectors()
             from meerschaum.jobs import executor_types
+            self.__dict__['_loaded_custom_connectors'] = True
 
         conn_types = instance_types if not _executor else executor_types
 
@@ -791,7 +791,6 @@ class Shell(cmd.Cmd):
             ignore_exact_match=True,
             _additional_options=_additional_options,
         )
-
 
     def do_repo(
         self,

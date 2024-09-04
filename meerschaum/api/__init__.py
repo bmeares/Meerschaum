@@ -113,16 +113,28 @@ def get_api_connector(instance_keys: Optional[str] = None):
 
 cache_connector = None
 def get_cache_connector(connector_keys: Optional[str] = None):
-    """Return the `valkey` connector."""
+    """Return the `valkey` connector if running in production."""
+    global cache_connector
+    if cache_connector is not None:
+        return cache_connector
+
     if not production:
         return None
-    connector_keys = connector_keys or get_config('system', 'cache', 'connector_keys')
-    global cache_connector
+
+    connector_keys = connector_keys or get_config(
+        'system', 'api', 'cache', 'connector',
+        warn=False,
+    )
+    if connector_keys is None:
+        return None
+
     if cache_connector is None:
         from meerschaum.connectors.parse import parse_instance_keys
-        cache_connector = parse_instance_keys(cache_connector)
+        cache_connector = parse_instance_keys(connector_keys)
+
     if debug:
         dprint(f"Cache connector: {cache_connector}")
+
     return cache_connector
 
 

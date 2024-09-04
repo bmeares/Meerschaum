@@ -1187,6 +1187,9 @@ def query_df(
         query_mask = query_mask & mask
 
     original_cols = df.columns
+
+    ### NOTE: We must cast bool columns to `boolean[pyarrow]`
+    ###       to allow for `<NA>` values.
     bool_cols = [
         col
         for col, typ in df.dtypes.items()
@@ -1194,7 +1197,7 @@ def query_df(
     ]
     for col in bool_cols:
         df[col] = df[col].astype('boolean[pyarrow]')
-    df['__mrsm_mask'] = query_mask
+    df['__mrsm_mask'] = query_mask.astype('boolean[pyarrow]')
 
     if inplace:
         df.where(query_mask, other=NA, inplace=True)

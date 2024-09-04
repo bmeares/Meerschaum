@@ -7,11 +7,13 @@ Callbacks for the login page.
 """
 
 from __future__ import annotations
-from meerschaum.api import endpoints, no_auth, CHECK_UPDATE
-from meerschaum.utils.packages import attempt_import, import_html, import_dcc
-dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 import uuid
+
+from meerschaum.api import CHECK_UPDATE
+from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.utils.typing import Optional
+
+dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State
 from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes
@@ -23,6 +25,7 @@ from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi.exceptions import HTTPException
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
+
 
 @dash_app.callback(
     Output('user-registration-disabled-collapse', 'is_open'),
@@ -37,18 +40,19 @@ def show_registration_disabled_collapse(n_clicks, is_open):
         return not is_open
     return is_open
 
+
 @dash_app.callback(
     Output('session-store', 'data'),
     Output('username-input', 'className'),
-    Output('location', 'pathname'),
+    Output('mrsm-location', 'pathname'),
     Output('login-alert-div', 'children'),
     Input('username-input', 'n_submit'),
     Input('password-input', 'n_submit'),
     Input('login-button', 'n_clicks'),
     State('username-input', 'value'),
     State('password-input', 'value'),
-    State('location', 'href'),
-    State('location', 'pathname'),
+    State('mrsm-location', 'href'),
+    State('mrsm-location', 'pathname'),
 )
 def login_button_click(
     username_submit,
@@ -73,7 +77,7 @@ def login_button_click(
         session_id = str(uuid.uuid4())
         session_data = {
             'session-id': session_id,
-            'location.href': location_href,
+            'mrsm-location.href': location_href,
         }
         set_session(session_id, {'username': username})
         alerts = []

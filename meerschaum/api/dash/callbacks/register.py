@@ -58,7 +58,7 @@ def validate_email(email):
 @dash_app.callback(
     Output('session-store', 'data'),
     Output('register-username-input', 'className'),
-    Output('location', 'pathname'),
+    Output('mrsm-location', 'pathname'),
     Input('register-username-input', 'n_submit'),
     Input('register-password-input', 'n_submit'),
     Input('register-button', 'n_clicks'),
@@ -67,13 +67,13 @@ def validate_email(email):
     State("register-email-input", "value"),
 )
 def register_button_click(
-        username_submit,
-        password_submit,
-        n_clicks,
-        username,
-        password,
-        email,
-    ):
+    username_submit,
+    password_submit,
+    n_clicks,
+    username,
+    password,
+    email,
+):
     if not n_clicks:
         raise PreventUpdate
     form_class = 'form-control'

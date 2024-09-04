@@ -61,6 +61,35 @@ This is the current release cycle, so stay tuned for future releases!
   pipe.copy_to('valkey:main')
   ```
 
+- **Add `include_unchanged_columns` to `Pipe.filter_existing()`.**  
+  Pass `include_unchanged_columns=True` to return entire documents in the update dataframe. This is useful for situations where you are unable to update individual fields:
+
+  ```python
+  import meerschaum as mrsm
+  import pandas as pd
+
+  pipe = mrsm.Pipe('a', 'b', columns=['id'])
+  pipe.sync([
+      {'animal': 'cat', 'name': 'Meowth', 'id': 1},
+      {'animal': 'dog', 'name': 'Fluffy', 'id': 2},
+  ])
+
+  df = pd.DataFrame([{'id': 1, 'breed': 'tabby'}])
+
+  unseen, update, delta = pipe.filter_existing(df)
+  print(update)
+  #    id  breed
+  # 0   1  tabby
+  
+  unseen, update, delta = pipe.filter_existing(
+      df,
+      include_unchanged_columns=True,
+  )
+  print(update)
+  #   animal    name  id  breed
+  # 0    cat  Meowth   1  tabby
+  ```
+
 - **Add `OPTIONAL_ATTRIBUTES` to connectors.**  
   Connectors may now set `OPTIONAL_ATTRIBUTES`, which will add skippable prompts in `bootstrap connector`.
 

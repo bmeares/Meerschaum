@@ -11,10 +11,11 @@ from datetime import datetime, timedelta, timezone
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, List, Tuple
 from meerschaum.utils.misc import json_serialize_datetime, string_to_dict
-from meerschaum.utils.warnings import dprint, warn
+from meerschaum.utils.warnings import warn
 
 PIPES_TABLE: str = 'mrsm_pipes'
 PIPES_COUNTER: str = 'mrsm_pipes:counter'
+COLON: str = '-_'
 
 
 def get_pipe_key(pipe: mrsm.Pipe) -> str:
@@ -88,7 +89,7 @@ def get_document_key(
     indices_str = ((table_name + ':indices:') if table_name else '') + ','.join(
         sorted(
             [
-                f'{key}:{val}'
+                f'{key}{COLON}{val}'
                 for key, val in index_vals.items()
             ]
         )
@@ -413,7 +414,7 @@ def get_pipe_data(
     table_name = self.quote_table(pipe.target)
     indices = [col for col in pipe.columns.values() if col]
     ix_docs = [
-        string_to_dict(doc['ix'])
+        string_to_dict(doc['ix'].replace(COLON, ':'))
         for doc in self.read_docs(
             pipe.target,
             begin=begin,
@@ -505,6 +506,7 @@ def sync_pipe(
     is_dask = 'dask' in df.__module__
     if is_dask:
         df = df.compute()
+    upsert = pipe.parameters.get('upsert', False)
 
     def _serialize_indices_docs(_docs):
         return [
@@ -546,16 +548,18 @@ def sync_pipe(
             if not edit_success:
                 return edit_success, edit_msg
 
-    #  df = pipe.enforce_dtypes(df, debug=debug)
-
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(df, include_unchanged_columns=True, debug=debug)
-        if check_existing
+        if check_existing and not upsert
         else (df, None, df)
     )
     num_insert = len(unseen_df) if unseen_df is not None else 0
     num_update = len(update_df) if update_df is not None else 0
-    msg = f"Inserted {num_insert}, updated {num_update} rows."
+    msg = (
+        f"Inserted {num_insert}, updated {num_update} rows."
+        if not upsert
+        else f"Upserted {num_insert} rows."
+    )
     if len(delta_df) == 0:
         return True, msg
 

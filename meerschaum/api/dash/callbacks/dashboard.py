@@ -33,7 +33,6 @@ from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.components import (
     alert_from_success_tuple, console_div, build_cards_grid,
 )
-from meerschaum.api.dash.actions import stop_action
 from meerschaum.api.dash import pages
 from meerschaum.utils.typing import Dict
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
@@ -106,12 +105,12 @@ _required_login = {''}
 @dash_app.callback(
     Output('page-layout-div', 'children'),
     Output('session-store', 'data'),
-    Input('location', 'pathname'),
+    Input('mrsm-location', 'pathname'),
     Input('session-store', 'data'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
 )
 def update_page_layout_div(
-    pathname: str, 
+    pathname: str,
     session_store_data: Dict[str, Any],
     location_href: str,
 ) -> Tuple[List[Any], Dict[str, Any]]:
@@ -120,7 +119,7 @@ def update_page_layout_div(
 
     Parameters
     ----------
-    pathname: str :
+    pathname: str
         The path in the browser.
         
     session_store_data: Dict[str, Any]:
@@ -130,7 +129,6 @@ def update_page_layout_div(
     -------
     A tuple of the page layout and new session store data.
     """
-    ctx = dash.callback_context
     dash_endpoint = endpoints['dash']
     try:
         session_id = session_store_data.get('session-id', None)
@@ -143,7 +141,7 @@ def update_page_layout_div(
         set_session(session_id, {'username': 'no-auth'})
 
         ### Sometimes the href is an empty string, so store it here for later.
-        session_store_data['location.href'] = location_href
+        session_store_data['mrsm-location.href'] = location_href
         session_store_to_return = session_store_data
     else:
         session_store_to_return = dash.no_update
@@ -192,7 +190,7 @@ def update_page_layout_div(
     Input('get-plugins-button', 'n_clicks'),
     Input('get-users-button', 'n_clicks'),
     Input('get-graphs-button', 'n_clicks'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
     State('session-store', 'data'),
     State('webterm-div', 'children'),
     *keys_state,
@@ -203,7 +201,6 @@ def update_content(*args):
     and execute the appropriate function.
     """
     ctx = dash.callback_context
-    location_href = ctx.states['session-store.data'].get('location.href', None)
     session_id = ctx.states['session-store.data'].get('session-id', None)
     authenticated = is_session_authenticated(str(session_id))
 
@@ -235,9 +232,6 @@ def update_content(*args):
         'get-pipes-button': 1,
         'get-jobs-button': 2,
     }
-    
-    ### NOTE: stop the running action if it exists
-    stop_action(ctx.states)
 
     content, alerts = triggers[trigger](
         ctx.states,
@@ -309,9 +303,9 @@ dash_app.clientside_callback(
         return url;
     }
     """,
-    Output('location', 'href'),
+    Output('mrsm-location', 'href'),
     Input('go-button', 'n_clicks'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
     State('connector-keys-dropdown', 'value'),
     State('metric-keys-dropdown', 'value'),
     State('location-keys-dropdown', 'value'),
@@ -488,12 +482,12 @@ def update_flags(input_flags_dropdown_values, n_clicks, input_flags_texts):
     *keys_state
 )
 def update_keys_options(
-        connector_keys: Optional[List[str]],
-        metric_keys: Optional[List[str]],
-        location_keys: Optional[List[str]],
-        instance_keys: Optional[str],
-        *keys
-    ):
+    connector_keys: Optional[List[str]],
+    metric_keys: Optional[List[str]],
+    location_keys: Optional[List[str]],
+    instance_keys: Optional[str],
+    *keys
+):
     """
     Update the keys dropdown menus' options.
     """
@@ -541,9 +535,9 @@ def update_keys_options(
         _keys = fetch_pipes_keys(
             'registered',
             get_web_connector(ctx.states),
-            connector_keys = _ck_filter,
-            metric_keys = _mk_filter,
-            location_keys = _lk_filter,
+            connector_keys=_ck_filter,
+            metric_keys=_mk_filter,
+            location_keys=_lk_filter,
         )
     except Exception as e:
         instance_alerts += [alert_from_success_tuple((False, str(e)))]
@@ -635,7 +629,7 @@ dash_app.clientside_callback(
         return url;
     }
     """,
-    Output('location', 'href'),
+    Output('mrsm-location', 'href'),
     Input('instance-select', 'value'),
 )
 
@@ -708,9 +702,9 @@ dash_app.clientside_callback(
         return url;
     }
     """,
-    Output('location', 'href'),
+    Output('mrsm-location', 'href'),
     Input('console-pre', 'children'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
 )
 
 @dash_app.callback(
@@ -917,7 +911,7 @@ dash_app.clientside_callback(
     """,
     Output('content-div-right', 'children'),
     Input({'type': 'manage-pipe-button', 'index': ALL, 'action': ALL}, 'n_clicks'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
 )
 
 @dash_app.callback(
@@ -947,7 +941,7 @@ def toggle_navbar_collapse(n_clicks: Optional[int], is_open: bool) -> bool:
 
 
 @dash_app.callback(
-    Output('location', 'pathname'),
+    Output('mrsm-location', 'pathname'),
     Output('session-store', 'data'),
     Input("sign-out-button", "n_clicks"),
     State('session-store', 'data'),

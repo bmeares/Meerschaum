@@ -86,8 +86,5 @@ async def shutdown():
 
     ### Terminate any running jobs left over.
     if 'meerschaum.api.dash' in sys.modules:
-        from meerschaum.api.dash.actions import running_jobs, stop_action
         from meerschaum.api.dash.webterm import stop_webterm
         stop_webterm()
-        for session_id in running_jobs:
-            stop_action({'session-store.data': {'session-id': session_id}})

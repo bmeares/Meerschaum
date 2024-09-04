@@ -97,7 +97,7 @@ default_system_config = {
             'forwarded_allow_ips': '*',
         },
         'cache': {
-            'connector_keys': 'valkey:main',
+            'connector': 'valkey:main',
         },
         'permissions':       {
             'registration': {
