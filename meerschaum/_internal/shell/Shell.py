@@ -81,10 +81,10 @@ PIPELINE_KEY: str = STATIC_CONFIG['system']['arguments']['pipeline_key']
 ESCAPED_PIPELINE_KEY: str = STATIC_CONFIG['system']['arguments']['escaped_pipeline_key']
 
 def _insert_shell_actions(
-        _shell: Optional['Shell'] = None,
-        actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
-        keep_self: bool = False,
-    ) -> None:
+    _shell: Optional['Shell'] = None,
+    actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+    keep_self: bool = False,
+) -> None:
     """
     Update the Shell with Meerschaum actions.
     """
@@ -111,9 +111,10 @@ def _insert_shell_actions(
         completer = _completer_wrapper(_completer)
         setattr(_shell_class, 'complete_' + a, completer)
 
+
 def _completer_wrapper(
     target: Callable[[Any], List[str]]
-) -> Callable[['meerschaum._internal.shell.Shell', str, str, int, int], Any]:
+) -> Callable[['mrsm._internal.shell.Shell', str, str, int, int], Any]:
     """
     Wrapper for `complete_` functions so they can instead use Meerschaum arguments.
     """
@@ -162,20 +163,20 @@ def default_action_completer(
             possibilities.append(sa)
     return sorted(possibilities)
 
+
 def _check_complete_keys(line: str) -> Optional[List[str]]:
-    from meerschaum._internal.arguments._parser import parser, get_arguments_triggers
+    from meerschaum._internal.arguments._parser import get_arguments_triggers
 
     ### TODO Add all triggers
     trigger_args = {
-        '-c' : 'connector_keys',
-        '--connector-keys' : 'connector_keys',
-        '-r' : 'repository',
-        '--repository' : 'repository',
-        '-i' : 'mrsm_instance',
-        '--instance' : 'mrsm_instance',
-        '--mrsm-instance' : 'mrsm_instance',
+        '-c': 'connector_keys',
+        '--connector-keys': 'connector_keys',
+        '-r': 'repository',
+        '--repository': 'repository',
+        '-i': 'mrsm_instance',
+        '--instance': 'mrsm_instance',
+        '--mrsm-instance': 'mrsm_instance',
     }
-
 
     ### TODO Find out arg possibilities
     possibilities = []
@@ -236,10 +237,14 @@ def get_shell_intro(with_color: bool = True) -> str:
 
 
 class Shell(cmd.Cmd):
+    """
+    The interactive Meerschaum shell.
+    """
     def __init__(
         self,
         actions: Optional[Dict[str, Any]] = None,
-        sysargs: Optional[List[str]] = None
+        sysargs: Optional[List[str]] = None,
+        instance_keys: Optional[str] = None,
     ):
         """
         Customize the CLI from configuration
@@ -268,26 +273,13 @@ class Shell(cmd.Cmd):
             reserve_space_for_menu=False,
         )
 
-        try: ### try cmd2 arguments first
-            super().__init__(
-                allow_cli_args = False,
-                auto_load_commands = False,
-                persistent_history_length = 1000,
-                persistent_history_file = None,
-            )
-            _init = True
-        except Exception as e:
-             ### fall back to default init (cmd)
-            _init = False
-        
-        if not _init:
-            super().__init__()
+        super().__init__()
 
         ### remove default commands from the Cmd class
         for command in commands_to_remove:
             try:
                 delattr(cmd.Cmd, f'do_{command}')
-            except Exception as e:
+            except Exception:
                 pass
 
         ### NOTE: custom actions must be added to the self._actions dictionary
@@ -301,7 +293,7 @@ class Shell(cmd.Cmd):
         shell_attrs['_old_bottom_toolbar'] = ''
         shell_attrs['debug'] = False
         shell_attrs['_reload'] = True
-        self.load_config()
+        self.load_config(instance=instance_keys)
         self.hidden_commands = []
         ### update hidden commands list (cmd2 only)
         try:
@@ -313,7 +305,6 @@ class Shell(cmd.Cmd):
         ### Finally, spawn the version update thread.
         from meerschaum._internal.shell.updates import run_version_check_thread
         self._update_thread = run_version_check_thread(debug=shell_attrs.get('debug', False))
-
 
     def load_config(self, instance: Optional[str] = None):
         """
@@ -478,13 +469,13 @@ class Shell(cmd.Cmd):
         """
         Pass line string to parent actions.
         Pass parsed arguments to custom actions
-        
+
         Overrides `default`. If an action does not exist, assume the action is `shell`
         """
         ### Preserve the working directory.
         old_cwd = os.getcwd()
 
-        from meerschaum._internal.entry import _shell, get_shell
+        from meerschaum._internal.entry import get_shell
         self = get_shell(sysargs=shell_attrs['_sysargs'], debug=shell_attrs.get('debug', False))
 
         ### make a backup of line for later
@@ -522,7 +513,6 @@ class Shell(cmd.Cmd):
         if line.startswith(help_token):
             return "help " + line[len(help_token):]
 
-        from meerschaum._internal.arguments import parse_line
         try:
             sysargs = shlex.split(line)
         except ValueError as e:
@@ -628,18 +618,24 @@ class Shell(cmd.Cmd):
         for i, kwargs in enumerate([_ for _ in chained_kwargs]):
             kwargs.update(patches[i])
 
-        from meerschaum._internal.entry import entry_with_args, entry
+        from meerschaum._internal.entry import entry
         sysargs_to_execute = []
         for i, kwargs in enumerate(chained_kwargs):
             step_kwargs = {k: v for k, v in kwargs.items() if k != 'line'}
-            step_sysargs = parse_dict_to_sysargs(step_kwargs)
+            step_action = kwargs.get('action', None)
+            step_action_name = step_action[0] if step_action else None
+            ### NOTE: For `stack`, revert argument parsing.
+            step_sysargs = (
+                parse_dict_to_sysargs(step_kwargs)
+                if step_action_name != 'stack'
+                else chained_sysargs[i]
+            )
             sysargs_to_execute.extend(step_sysargs)
             sysargs_to_execute.append(AND_KEY)
-        
+
         sysargs_to_execute = sysargs_to_execute[:-1] + (
             ([':'] + pipeline_args) if pipeline_args else []
         )
-
         try:
             success_tuple = entry(sysargs_to_execute, _patch_args=patch_args)
         except Exception as e:
@@ -777,8 +773,8 @@ class Shell(cmd.Cmd):
         from meerschaum.connectors import instance_types, _load_builtin_custom_connectors
         if not self.__dict__.get('_loaded_custom_connectors', None):
             _load_builtin_custom_connectors()
-            from meerschaum.jobs import executor_types
             self.__dict__['_loaded_custom_connectors'] = True
+        from meerschaum.jobs import executor_types
 
         conn_types = instance_types if not _executor else executor_types
 
@@ -991,7 +987,6 @@ class Shell(cmd.Cmd):
         """
         Patch builtin cmdloop with my own input (defined below).
         """
-        import signal, os
         cmd.__builtins__['input'] = input_with_sigint(
             _old_input,
             shell_attrs['session'],

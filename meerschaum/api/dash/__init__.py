@@ -41,7 +41,6 @@ stylesheets = [
     '/static/css/bootstrap.min.css',
     '/static/css/dbc_dark.css',
     '/static/css/dash.css',
-    '/static/css/bootstrap-icons/font/bootstrap-icons.min.css',
 ]
 scripts = ['/static/js/node_modules/xterm/lib/xterm.js']
 dash_app = enrich.DashProxy(
@@ -59,7 +58,7 @@ dash_app = enrich.DashProxy(
 
 dash_app.layout = html.Div([
     location,
-    dcc.Store(id='session-store', storage_type='session', data={}),
+    dcc.Store(id='session-store', storage_type='local', data={}),
     html.Div([], id='page-layout-div'),
 ])
 

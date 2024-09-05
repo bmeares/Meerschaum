@@ -15,6 +15,7 @@ from meerschaum.config import get_config
 from meerschaum.utils.warnings import dprint
 
 SESSION_KEY_TEMPLATE: str = 'mrsm_session_id:{session_id}'
+EXPIRES_SECONDS: int = get_config('system', 'api', 'cache', 'session_expires_minutes') * 60
 _active_sessions: Dict[str, Dict[str, Any]] = {}
 
 
@@ -41,7 +42,7 @@ def set_session(session_id: str, session_data: Dict[str, Any]):
     if debug:
         dprint(f"Setting production data for {session_id=}:\n{session_data_str}")
 
-    conn.set(session_key, session_data_str)
+    conn.set(session_key, session_data_str, ex=EXPIRES_SECONDS)
 
 
 def update_session(session_id: Optional[str], session_data: Dict[str, Any]):
@@ -104,7 +105,7 @@ def delete_session(session_id: str):
         return
 
     session_key = get_session_key(session_id)
-    conn.delete(session_key)
+    conn.client.delete(session_key)
 
 
 def is_session_authenticated(session_id: Optional[str]) -> bool:

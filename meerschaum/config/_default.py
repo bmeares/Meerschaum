@@ -98,6 +98,7 @@ default_system_config = {
         },
         'cache': {
             'connector': 'valkey:main',
+            'session_expires_minutes': 43200,
         },
         'permissions':       {
             'registration': {
@@ -123,6 +124,7 @@ default_system_config = {
         'inplace_sync': True,
         'uv_pip': True,
         'systemd_healthcheck': False,
+        'valkey_session_cache': True,
     },
 }
 default_pipes_config = {

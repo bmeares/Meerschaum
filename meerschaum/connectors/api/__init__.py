@@ -6,5 +6,6 @@
 Interact with the Meerschaum API (send commands, pull data, etc.)
 """
 
-from meerschaum.connectors.api.APIConnector import APIConnector
+from meerschaum.connectors.api._APIConnector import APIConnector
 
+__all__ = ('APIConnector',)

@@ -30,6 +30,8 @@ def get_data(
     as_chunks: bool = False,
     as_dask: bool = False,
     chunk_interval: Union[timedelta, int, None] = None,
+    order: Optional[str] = 'asc',
+    limit: Optional[int] = None,
     fresh: bool = False,
     debug: bool = False,
     **kw: Any
@@ -80,6 +82,12 @@ def get_data(
         If `chunk_interval` is a `timedelta` and the `datetime` axis an integer,
         use the number of minutes in the `timedelta`.
 
+    order: Optional[str], default 'asc'
+        If `order` is not `None`, sort the resulting dataframe by indices.
+
+    limit: Optional[int], default None
+        If provided, cap the dataframe to this many rows.
+
     fresh: bool, default True
         If `True`, skip local cache and directly query the instance connector.
         Defaults to `True`.
@@ -113,17 +121,39 @@ def get_data(
 
     as_iterator = as_iterator or as_chunks
 
-    if as_iterator or as_chunks:
-        return self._get_data_as_iterator(
-            select_columns = select_columns,
-            omit_columns = omit_columns,
-            begin = begin,
-            end = end,
-            params = params,
-            chunk_interval = chunk_interval,
-            fresh = fresh,
-            debug = debug,
+    def _sort_df(_df):
+        dt_col = self.columns.get('datetime', None)
+        indices = [] if dt_col not in _df.columns else [dt_col]
+        non_dt_cols = [
+            col
+            for col_ix, col in self.columns.values()
+            if col_ix != 'datetime' and col in _df.columns
+        ]
+        indices.extend(non_dt_cols)
+        _df.sort_values(
+            by=indices,
+            inplace=True,
+            ascending=(str(order).lower() == 'asc')
         )
+        _df.reset_index(drop=True, inplace=True)
+        if limit is not None and len(_df) > limit:
+            return _df.head(limit)
+        return _df
+
+    if as_iterator or as_chunks:
+        df = self._get_data_as_iterator(
+            select_columns=select_columns,
+            omit_columns=omit_columns,
+            begin=begin,
+            end=end,
+            params=params,
+            chunk_interval=chunk_interval,
+            limit=limit,
+            order=order,
+            fresh=fresh,
+            debug=debug,
+        )
+        return _sort_df(df)
 
     if as_dask:
         from multiprocessing.pool import ThreadPool
@@ -131,22 +161,24 @@ def get_data(
         dask.config.set(pool=dask_pool)
         chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
         bounds = self.get_chunk_bounds(
-            begin = begin,
-            end = end,
-            bounded = False,
-            chunk_interval = chunk_interval,
-            debug = debug,
+            begin=begin,
+            end=end,
+            bounded=False,
+            chunk_interval=chunk_interval,
+            debug=debug,
         )
         dask_chunks = [
             dask.delayed(self.get_data)(
-                select_columns = select_columns,
-                omit_columns = omit_columns,
-                begin = chunk_begin,
-                end = chunk_end,
-                params = params,
-                chunk_interval = chunk_interval,
-                fresh = fresh,
-                debug = debug,
+                select_columns=select_columns,
+                omit_columns=omit_columns,
+                begin=chunk_begin,
+                end=chunk_end,
+                params=params,
+                chunk_interval=chunk_interval,
+                order=order,
+                limit=limit,
+                fresh=fresh,
+                debug=debug,
             )
             for (chunk_begin, chunk_end) in bounds
         ]
@@ -154,18 +186,18 @@ def get_data(
             col: to_pandas_dtype(typ)
             for col, typ in self.dtypes.items()
         }
-        return dd.from_delayed(dask_chunks, meta=dask_meta)
+        return _sort_df(dd.from_delayed(dask_chunks, meta=dask_meta))
 
     if not self.exists(debug=debug):
         return None
-       
+
     if self.cache_pipe is not None:
         if not fresh:
             _sync_cache_tuple = self.cache_pipe.sync(
-                begin = begin,
-                end = end,
-                params = params,
-                debug = debug,
+                begin=begin,
+                end=end,
+                params=params,
+                debug=debug,
                 **kw
             )
             if not _sync_cache_tuple[0]:
@@ -174,27 +206,31 @@ def get_data(
             else: ### Successfully synced cache.
                 return self.enforce_dtypes(
                     self.cache_pipe.get_data(
-                        select_columns = select_columns,
-                        omit_columns = omit_columns,
-                        begin = begin,
-                        end = end,
-                        params = params,
-                        debug = debug,
-                        fresh = True,
+                        select_columns=select_columns,
+                        omit_columns=omit_columns,
+                        begin=begin,
+                        end=end,
+                        params=params,
+                        order=order,
+                        limit=limit,
+                        debug=debug,
+                        fresh=True,
                         **kw
                     ),
-                    debug = debug,
+                    debug=debug,
                 )
 
     with Venv(get_connector_plugin(self.instance_connector)):
         df = self.instance_connector.get_pipe_data(
-            pipe = self,
-            select_columns = select_columns,
-            omit_columns = omit_columns,
-            begin = begin,
-            end = end,
-            params = params,
-            debug = debug,
+            pipe=self,
+            select_columns=select_columns,
+            omit_columns=omit_columns,
+            begin=begin,
+            end=end,
+            params=params,
+            limit=limit,
+            order=order,
+            debug=debug,
             **kw
         )
         if df is None:
@@ -226,7 +262,7 @@ def get_data(
                     + "Consider adding `select_columns` and `omit_columns` support to "
                     + f"'{self.instance_connector.type}' connectors to improve performance."
                 ),
-                stack = False,
+                stack=False,
             )
             _cols_to_select = [col for col in df.columns if col not in cols_to_omit]
             df = df[_cols_to_select]
@@ -237,25 +273,31 @@ def get_data(
                     f"Specified columns {items_str(cols_to_add)} were not found on {self}. "
                     + "Adding these to the DataFrame as null columns."
                 ),
-                stack = False,
+                stack=False,
             )
             df = add_missing_cols_to_df(df, {col: 'string' for col in cols_to_add})
 
-        return self.enforce_dtypes(df, debug=debug)
+        enforced_df = self.enforce_dtypes(df, debug=debug)
+
+        if order:
+            return _sort_df(enforced_df)
+        return enforced_df
 
 
 def _get_data_as_iterator(
-        self,
-        select_columns: Optional[List[str]] = None,
-        omit_columns: Optional[List[str]] = None,
-        begin: Optional[datetime] = None,
-        end: Optional[datetime] = None,
-        params: Optional[Dict[str, Any]] = None,
-        chunk_interval: Union[timedelta, int, None] = None,
-        fresh: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> Iterator['pd.DataFrame']:
+    self,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    params: Optional[Dict[str, Any]] = None,
+    chunk_interval: Union[timedelta, int, None] = None,
+    limit: Optional[int] = None,
+    order: Optional[str] = 'asc',
+    fresh: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> Iterator['pd.DataFrame']:
     """
     Return a pipe's data as a generator.
     """
@@ -305,46 +347,51 @@ def _get_data_as_iterator(
         (min_dt + chunk_interval) > max_dt
     ):
         yield self.get_data(
-            select_columns = select_columns,
-            omit_columns = omit_columns,
-            begin = begin,
-            end = end,
-            params = params,
-            fresh = fresh,
-            debug = debug,
+            select_columns=select_columns,
+            omit_columns=omit_columns,
+            begin=begin,
+            end=end,
+            params=params,
+            limit=limit,
+            order=order,
+            fresh=fresh,
+            debug=debug,
         )
         return
 
     chunk_bounds = self.get_chunk_bounds(
-        begin = min_dt,
-        end = max_dt,
-        chunk_interval = chunk_interval,
-        debug = debug,
+        begin=min_dt,
+        end=max_dt,
+        chunk_interval=chunk_interval,
+        debug=debug,
     )
 
     for chunk_begin, chunk_end in chunk_bounds:
         chunk = self.get_data(
-            select_columns = select_columns,
-            omit_columns = omit_columns,
-            begin = chunk_begin,
-            end = chunk_end,
-            params = params,
-            fresh = fresh,
-            debug = debug,
+            select_columns=select_columns,
+            omit_columns=omit_columns,
+            begin=chunk_begin,
+            end=chunk_end,
+            params=params,
+            limit=limit,
+            order=order,
+            fresh=fresh,
+            debug=debug,
         )
         if len(chunk) > 0:
             yield chunk
 
 
 def get_backtrack_data(
-        self,
-        backtrack_minutes: Optional[int] = None,
-        begin: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        fresh: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> Optional['pd.DataFrame']:
+    self,
+    backtrack_minutes: Optional[int] = None,
+    begin: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    limit: Optional[int] = None,
+    fresh: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> Optional['pd.DataFrame']:
     """
     Get the most recent data from the instance connector as a Pandas DataFrame.
 
@@ -371,8 +418,10 @@ def get_backtrack_data(
 
     params: Optional[Dict[str, Any]], default None
         The standard Meerschaum `params` query dictionary.
-        
-        
+
+    limit: Optional[int], default None
+        If provided, cap the number of rows to be returned.
+
     fresh: bool, default False
         If `True`, Ignore local cache and pull directly from the instance connector.
         Only comes into effect if a pipe was created with `cache=True`.
@@ -409,28 +458,31 @@ def get_backtrack_data(
             else: ### Successfully synced cache.
                 return self.enforce_dtypes(
                     self.cache_pipe.get_backtrack_data(
-                        fresh = True,
-                        begin = begin,
-                        backtrack_minutes = backtrack_minutes,
-                        params = params,
-                        debug = deubg,
+                        fresh=True,
+                        begin=begin,
+                        backtrack_minutes=backtrack_minutes,
+                        params=params,
+                        limit=limit,
+                        order=kw.get('order', 'desc'),
+                        debug=debug,
                         **kw
                     ),
-                    debug = debug,
+                    debug=debug,
                 )
 
     if hasattr(self.instance_connector, 'get_backtrack_data'):
         with Venv(get_connector_plugin(self.instance_connector)):
             return self.enforce_dtypes(
                 self.instance_connector.get_backtrack_data(
-                    pipe = self,
-                    begin = begin,
-                    backtrack_minutes = backtrack_minutes,
-                    params = params,
-                    debug = debug,
+                    pipe=self,
+                    begin=begin,
+                    backtrack_minutes=backtrack_minutes,
+                    params=params,
+                    limit=limit,
+                    debug=debug,
                     **kw
                 ),
-                debug = debug,
+                debug=debug,
             )
 
     if begin is None:
@@ -445,11 +497,14 @@ def get_backtrack_data(
         begin = begin - backtrack_interval
 
     return self.get_data(
-        begin = begin,
-        params = params,
-        debug = debug,
+        begin=begin,
+        params=params,
+        debug=debug,
+        limit=limit,
+        order=kw.get('order', 'desc'),
         **kw
     )
+
 
 
 def get_rowcount(

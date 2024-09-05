@@ -52,8 +52,8 @@ env_dict = {
 ### apply patch to host config to change hostname to the Docker service name
 env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
     {
-        'meerschaum' : 'MRSM{!meerschaum}',
-        'system' : 'MRSM{!system}',
+        'meerschaum': 'MRSM{!meerschaum}',
+        'system': 'MRSM{!system}',
     },
     indent = 4,
 ).replace(
@@ -82,12 +82,14 @@ env_dict['MEERSCHAUM_API_PATCH'] = json.dumps(
                         'port': 5432,
                     },
                     'local': {
-                        'database': volumes['api_root'] + '/sqlite/mrsm_local.db'
+                        'database': volumes['api_root'] + '/sqlite/mrsm_local.db',
                     },
                 },
                 'valkey': {
-                    'host': valkey_host,
-                    'port': 6379,
+                    'main': {
+                        'host': valkey_host,
+                        'port': 6379,
+                    },
                 },
             },
         },
@@ -133,7 +135,7 @@ default_docker_compose_config = {
             'ports': [
                 f'{db_port}:5432',
             ],
-            'hostname': f'{db_hostname}',
+            'hostname': db_hostname,
             'volumes': [
                 'meerschaum_db_data:' + volumes['meerschaum_db_data'],
             ],
@@ -178,7 +180,7 @@ default_docker_compose_config = {
             ],
         },
         'valkey': {
-            'image': 'bitnami/valkey',
+            'image': 'bitnami/valkey:latest',
             'restart': 'always',
             'environment': {
                 'VALKEY_PASSWORD': '<DOLLAR>VALKEY_PASSWORD',

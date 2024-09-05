@@ -9,9 +9,11 @@ NOTE: `sync` required a SQL connection and is not intended for client use
 """
 
 from __future__ import annotations
-from datetime import timedelta, datetime, timezone
+from datetime import timedelta
+
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Tuple, Union
+
 
 def sync(
     action: Optional[List[str]] = None,
@@ -38,47 +40,45 @@ def sync(
 
 
 def _pipes_lap(
-        workers: Optional[int] = None,
-        debug: Optional[bool] = None,
-        unblock: bool = False,
-        force: bool = False,
-        min_seconds: int = 1,
-        verify: bool = False,
-        deduplicate: bool = False,
-        bounded: Optional[bool] = None,
-        chunk_interval: Union[timedelta, int, None] = None,
-        mrsm_instance: Optional[str] = None,
-        timeout_seconds: Optional[int] = None,
-        nopretty: bool = False,
-        _progress: Optional['rich.progress.Progress'] = None,
-        **kw: Any
-    ) -> Tuple[List[mrsm.Pipe], List[mrsm.Pipe]]:
+    workers: Optional[int] = None,
+    debug: Optional[bool] = None,
+    unblock: bool = False,
+    force: bool = False,
+    min_seconds: int = 1,
+    verify: bool = False,
+    deduplicate: bool = False,
+    bounded: Optional[bool] = None,
+    chunk_interval: Union[timedelta, int, None] = None,
+    mrsm_instance: Optional[str] = None,
+    timeout_seconds: Optional[int] = None,
+    nopretty: bool = False,
+    _progress: Optional['rich.progress.Progress'] = None,
+    **kw: Any
+) -> Tuple[List[mrsm.Pipe], List[mrsm.Pipe]]:
     """
     Do a lap of syncing pipes.
     """
-    from meerschaum import get_pipes
-    from meerschaum.utils.debug import dprint, _checkpoint
-    from meerschaum.utils.packages import attempt_import, import_rich
-    from meerschaum.utils.formatting import print_tuple, ANSI, UNICODE, get_console
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.threading import Lock, RLock, Thread, Event
-    from meerschaum.utils.misc import print_options, get_cols_lines
-    from meerschaum.utils.pool import get_pool_executor, get_pool
-    from meerschaum.connectors.parse import parse_instance_keys
-    from meerschaum import Plugin
     import queue
     import multiprocessing
-    import contextlib
-    import time, os, copy
-    from meerschaum.utils.packages import venv_exec
-    from meerschaum.utils.process import poll_process
+    import time
+    import copy
     import json
     import sys
+
+    from meerschaum import get_pipes
+    from meerschaum.utils.debug import dprint, _checkpoint
+    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.formatting import print_tuple
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.threading import Lock, Thread, Event
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils.packages import venv_exec
+    from meerschaum.utils.process import poll_process
     dill = attempt_import('dill')
 
     rich_table, rich_text, rich_box = attempt_import(
         'rich.table', 'rich.text', 'rich.box',
-        lazy = False,
+        lazy=False,
     )
     all_kw = copy.deepcopy(kw)
     all_kw.update({
@@ -126,7 +126,7 @@ def _pipes_lap(
             + "may lead to concurrency issues.\n    You can change the pool size with "
             + "`edit config system` under the keys connectors:sql:create_engine:pool_size,\n    "
             + "and a size of 0 will not limit the number of connections.",
-            stack = False,
+            stack=False,
         )
 
 
@@ -155,8 +155,8 @@ def _pipes_lap(
                 ) + msg + '\n'
                 print_tuple(
                     (success, msg),
-                    calm = True,
-                    _progress = _progress,
+                    calm=True,
+                    _progress=_progress,
                 )
             _checkpoint(_progress=_progress, _task=_task)
             if _progress is not None:
@@ -274,25 +274,26 @@ def _sync_pipes(
         - `--debug`
             - Print verbose messages.
     """
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn, info
-    from meerschaum.utils.formatting import UNICODE
-    from meerschaum.utils.formatting._shell import progress, live
-    from meerschaum.utils.formatting._shell import clear_screen, flush_with_newlines
-    from meerschaum.utils.formatting import print_pipes_results
-    import contextlib
     import time
-    import sys
-    import json
-    import asyncio
+    import os
+    import contextlib
+
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.formatting._shell import progress
+    from meerschaum.utils.formatting._shell import clear_screen
+    from meerschaum.utils.formatting import print_pipes_results
+    from meerschaum.config.static import STATIC_CONFIG
+
+    noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)
+    is_noninterative = noninteractive_val in ('1', 'true', 'True', 'yes')
+
     run = True
     msg = ""
     interrupt_warning_msg = "Syncing was interrupted due to a keyboard interrupt."
     cooldown = 2 * (min_seconds + 1)
-    underline = '\u2015' if UNICODE else '-'
     success_pipes, failure_pipes = [], []
     while run:
-        _progress = progress() if shell else None
+        _progress = progress() if shell and not is_noninterative else None
         cm = _progress if _progress is not None else contextlib.nullcontext()
 
         lap_begin = time.perf_counter()
@@ -301,15 +302,15 @@ def _sync_pipes(
             results_dict = {}
             with cm:
                 results_dict = _pipes_lap(
-                    min_seconds = min_seconds,
-                    _progress = _progress,
-                    verify = verify,
-                    deduplicate = deduplicate,
-                    bounded = bounded,
-                    chunk_interval = chunk_interval,
-                    unblock = unblock,
-                    debug = debug,
-                    nopretty = nopretty,
+                    min_seconds=min_seconds,
+                    _progress=_progress,
+                    verify=verify,
+                    deduplicate=deduplicate,
+                    bounded=bounded,
+                    chunk_interval=chunk_interval,
+                    unblock=unblock,
+                    debug=debug,
+                    nopretty=nopretty,
                     **kw
                 )
                 success_pipes = [

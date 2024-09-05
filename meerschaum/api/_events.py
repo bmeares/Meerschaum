@@ -6,7 +6,9 @@
 Declare FastAPI events in this module (startup, shutdown, etc.).
 """
 
-import sys, os, time
+import sys
+import os
+import time
 from meerschaum.api import (
     app,
     get_api_connector,
@@ -14,21 +16,19 @@ from meerschaum.api import (
     get_uvicorn_config,
     debug,
     no_dash,
-    uvicorn_config_path,
 )
 from meerschaum.utils.debug import dprint
 from meerschaum.connectors.poll import retry_connect
 from meerschaum.utils.warnings import warn
-from meerschaum._internal.term.tools import is_webterm_running
 from meerschaum.jobs import (
     get_jobs,
     start_check_jobs_thread,
     stop_check_jobs_thread,
-    get_executor_keys_from_context,
 )
 from meerschaum.config.static import STATIC_CONFIG
 
 TEMP_PREFIX: str = STATIC_CONFIG['api']['jobs']['temp_prefix']
+
 
 @app.on_event("startup")
 async def startup():

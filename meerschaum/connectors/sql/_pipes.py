@@ -821,7 +821,8 @@ def get_pipe_data_query(
     begin: Union[datetime, int, str, None] = None,
     end: Union[datetime, int, str, None] = None,
     params: Optional[Dict[str, Any]] = None,
-    order: str = 'asc',
+    order: Optional[str] = 'asc',
+    sort_datetimes: bool = False,
     limit: Optional[int] = None,
     begin_add_minutes: int = 0,
     end_add_minutes: int = 0,
@@ -854,9 +855,12 @@ def get_pipe_data_query(
         Additional parameters to filter by.
         See `meerschaum.connectors.sql.build_where`.
 
-    order: Optional[str], default 'asc'
+    order: Optional[str], default None
         The selection order for all of the indices in the query.
         If `None`, omit the `ORDER BY` clause.
+
+    sort_datetimes: bool, default False
+        Alias for `order='desc'`.
 
     limit: Optional[int], default None
         If specified, limit the number of rows retrieved to this value.
@@ -880,7 +884,6 @@ def get_pipe_data_query(
     -------
     A `SELECT` query to retrieve a pipe's data.
     """
-    import json
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import items_str
     from meerschaum.utils.sql import sql_item_name, dateadd_str
@@ -894,6 +897,9 @@ def get_pipe_data_query(
     )
     if omit_columns:
         select_columns = [col for col in select_columns if col not in omit_columns]
+
+    if order is None and sort_datetimes:
+        order = 'desc'
 
     if begin == '':
         begin = pipe.get_sync_time(debug=debug)
@@ -960,10 +966,10 @@ def get_pipe_data_query(
     is_dt_bound = False
     if begin is not None and _dt in existing_cols:
         begin_da = dateadd_str(
-            flavor = self.flavor,
-            datepart = 'minute',
-            number = begin_add_minutes,
-            begin = begin
+            flavor=self.flavor,
+            datepart='minute',
+            number=begin_add_minutes,
+            begin=begin,
         )
         where += f"{dt} >= {begin_da}" + (" AND " if end is not None else "")
         is_dt_bound = True
@@ -972,10 +978,10 @@ def get_pipe_data_query(
         if 'int' in str(type(end)).lower() and end == begin:
             end += 1
         end_da = dateadd_str(
-            flavor = self.flavor,
-            datepart = 'minute',
-            number = end_add_minutes,
-            begin = end
+            flavor=self.flavor,
+            datepart='minute',
+            number=end_add_minutes,
+            begin=end
         )
         where += f"{dt} < {end_da}"
         is_dt_bound = True
@@ -1599,45 +1605,39 @@ def sync_pipe_inplace(
 
     backtrack_def = self.get_pipe_data_query(
         pipe,
-        begin = begin,
-        end = end,
-        begin_add_minutes = 0,
-        end_add_minutes = 1,
-        params = params,
-        debug = debug,
-        order = None,
+        begin=begin,
+        end=end,
+        begin_add_minutes=0,
+        end_add_minutes=1,
+        params=params,
+        debug=debug,
+        order=None,
     )
 
-    select_backtrack_query = format_cte_subquery(
-        backtrack_def,
-        self.flavor,
-        sub_name = 'backtrack_def',
-    )
     create_backtrack_query = get_create_table_query(
         backtrack_def,
         temp_tables['backtrack'],
         self.flavor,
-        schema = internal_schema,
+        schema=internal_schema,
     )
     (create_backtrack_success, create_backtrack_msg), create_backtrack_results = session_execute(
         session,
         create_backtrack_query,
-        with_results = True,
-        debug = debug,
+        with_results=True,
+        debug=debug,
     ) if not upsert else (True, "Success"), None
 
     if not create_backtrack_success:
         _ = clean_up_temp_tables()
         return create_backtrack_success, create_backtrack_msg
-    bactrack_count = create_backtrack_results[0].rowcount if create_backtrack_results else 0
 
     backtrack_cols_types = get_table_cols_types(
         temp_tables['backtrack'],
-        connectable = connectable,
-        flavor = self.flavor,
-        schema = internal_schema,
-        database = database,
-        debug = debug,
+        connectable=connectable,
+        flavor=self.flavor,
+        schema=internal_schema,
+        database=database,
+        debug=debug,
     ) if not upsert else new_cols_types
 
     common_cols = [col for col in new_cols if col in backtrack_cols_types]
@@ -1663,7 +1663,7 @@ def sync_pipe_inplace(
     )
 
     select_delta_query = (
-        f"SELECT\n"
+        "SELECT\n"
         + null_replace_new_cols_str + "\n"
         + f"\nFROM {temp_table_names['new']}\n"
         + f"LEFT OUTER JOIN {temp_table_names['backtrack']}\nON\n"
@@ -1693,12 +1693,12 @@ def sync_pipe_inplace(
         select_delta_query,
         temp_tables['delta'],
         self.flavor,
-        schema = internal_schema,
+        schema=internal_schema,
     )
     create_delta_success, create_delta_msg = session_execute(
         session,
         create_delta_query,
-        debug = debug,
+        debug=debug,
     ) if not upsert else (True, "Success")
     if not create_delta_success:
         _ = clean_up_temp_tables()
@@ -1707,10 +1707,10 @@ def sync_pipe_inplace(
     delta_cols_types = get_table_cols_types(
         temp_tables['delta'],
         connectable = connectable,
-        flavor = self.flavor,
-        schema = internal_schema,
-        database = database,
-        debug = debug,
+        flavor=self.flavor,
+        schema=internal_schema,
+        database=database,
+        debug=debug,
     ) if not upsert else new_cols_types
 
     ### This is a weird bug on SQLite.

@@ -167,7 +167,7 @@ def _api_start(
 
     ### Uvicorn must be installed on the host because of multiprocessing reasons.
     ### `check_update` must be False, because otherwise Uvicorn's hidden imports will break things.
-    dotenv = attempt_import('dotenv', lazy=False)
+    _ = attempt_import('dotenv', lazy=False)
     uvicorn, gunicorn = attempt_import(
         'uvicorn', 'gunicorn', venv=None, lazy=False, check_update=False,
     )

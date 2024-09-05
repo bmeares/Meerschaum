@@ -301,7 +301,7 @@ def _bootstrap_connectors(
             )
             if not overwrite and not force:
                 return False, "No changes made to connector configuration."
-                break
+            break
         elif _label == "":
             warn("Please enter a label.", stack=False)
         else:
@@ -336,6 +336,7 @@ def _bootstrap_connectors(
             return abort_tuple
         new_attributes['flavor'] = flavor
         required = sorted(list(connector_attributes[_type]['flavors'][flavor]['requirements']))
+        required = sorted(list(connector_attributes[_type]['flavors'][flavor]['optional']))
         default = type_attributes['flavors'][flavor].get('defaults', {})
     else:
         required = sorted(list(type_attributes.get('required', {})))

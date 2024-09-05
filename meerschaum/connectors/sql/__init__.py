@@ -6,4 +6,6 @@
 Subpackage for SQLConnector subclass
 """
 
-from meerschaum.connectors.sql.SQLConnector import SQLConnector
+from meerschaum.connectors.sql._SQLConnector import SQLConnector
+
+__all__ = ('SQLConnector',)

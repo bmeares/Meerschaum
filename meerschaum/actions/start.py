@@ -304,24 +304,20 @@ def _start_jobs(
 
 
 def _start_gui(
-        action: Optional[List[str]] = None,
-        mrsm_instance: Optional[str] = None,
-        port: Optional[int] = None,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    mrsm_instance: Optional[str] = None,
+    port: Optional[int] = None,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Start the Meerschaum GUI application.
     """
-    from meerschaum.utils.daemon import Daemon
-    from meerschaum.utils.process import run_process
     from meerschaum.utils.venv import venv_exec
-    from meerschaum.utils.packages import (
-        run_python_package, attempt_import, venv_contains_package, pip_install
-    )
+    from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.networking import find_open_ports, is_port_in_use
+    from meerschaum.utils.networking import find_open_ports
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum._internal.term.tools import is_webterm_running
     import platform
@@ -395,13 +391,14 @@ def _start_gui(
 
 
 def _start_webterm(
-        port: Optional[int] = None,
-        host: Optional[str] = None,
-        force: bool = False,
-        nopretty: bool = False,
-        sysargs: Optional[List[str]] = None,
-        **kw
-    ) -> SuccessTuple:
+    port: Optional[int] = None,
+    host: Optional[str] = None,
+    mrsm_instance: Optional[str] = None,
+    force: bool = False,
+    nopretty: bool = False,
+    sysargs: Optional[List[str]] = None,
+    **kw
+) -> SuccessTuple:
     """
     Start the Meerschaum Web Terminal.
     
@@ -409,15 +406,17 @@ def _start_webterm(
         - `-p`, `--port`
             The port to which the webterm binds.
             Defaults to 8765, and `--force` will choose the next available port.
-    
+
         - `--host`
             The host interface to which the webterm binds.
             Defaults to '127.0.0.1'.
+
+        - `-i`, '--instance'
+            The default instance to use for the Webterm shell.
     """
-    from meerschaum._internal.term import get_webterm_app_and_manager, tornado, tornado_ioloop
+    from meerschaum._internal.term import get_webterm_app_and_manager, tornado_ioloop
     from meerschaum._internal.term.tools import is_webterm_running
-    from meerschaum.utils.networking import find_open_ports, is_port_in_use
-    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.networking import find_open_ports
     from meerschaum.utils.warnings import info
 
     if host is None:
@@ -426,7 +425,7 @@ def _start_webterm(
         port = 8765
     if sysargs is None:
         sysargs = ['start', 'webterm']
-    tornado_app, term_manager = get_webterm_app_and_manager()
+    tornado_app, term_manager = get_webterm_app_and_manager(instance_keys=mrsm_instance)
 
     if is_webterm_running(host, port):
         if force:

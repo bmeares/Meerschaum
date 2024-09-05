@@ -199,13 +199,13 @@ def entry_with_args(
     """Execute a Meerschaum action with keyword arguments.
     Use `_entry()` for parsing sysargs before executing.
     """
-    import sys
     import functools
     import inspect
-    from meerschaum.actions import get_action, get_main_action_name
+    from meerschaum.actions import get_action
     from meerschaum._internal.arguments import remove_leading_action
     from meerschaum.utils.venv import active_venvs, deactivate_venv
     from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.typing import is_success_tuple
 
     if _patch_args:
         kw.update(_patch_args)
@@ -225,7 +225,8 @@ def entry_with_args(
         or
         (kw['action'][0] == 'mrsm' and len(kw['action'][1:]) == 0)
     ):
-        return get_shell().cmdloop()
+        _ = get_shell(**kw).cmdloop()
+        return True, "Success"
 
     skip_schedule = False
 
@@ -296,12 +297,15 @@ def entry_with_args(
     for venv in [venv for venv in active_venvs]:
         deactivate_venv(venv, debug=kw.get('debug', False), force=True)
 
+    if not is_success_tuple(result):
+        return True, str(result)
+
     return result
 
 
 def _do_action_wrapper(action_function, plugin_name, **kw):
     from meerschaum.plugins import Plugin
-    from meerschaum.utils.venv import Venv, active_venvs, deactivate_venv
+    from meerschaum.utils.venv import Venv
     from meerschaum.utils.misc import filter_keywords
     plugin = Plugin(plugin_name) if plugin_name else None
     with Venv(plugin, debug=kw.get('debug', False)):
@@ -330,7 +334,9 @@ _shell = None
 def get_shell(
     sysargs: Optional[List[str]] = None,
     reload: bool = False,
-    debug: bool = False
+    debug: bool = False,
+    mrsm_instance: Optional[str] = None,
+    **kwargs: Any
 ):
     """Initialize and return the Meerschaum shell object."""
     global _shell
@@ -346,9 +352,9 @@ def get_shell(
 
         if _shell is None:
             shell_pkg._insert_shell_actions()
-            _shell = shell_pkg.Shell(actions, sysargs=sysargs)
+            _shell = shell_pkg.Shell(actions, sysargs=sysargs, instance_keys=mrsm_instance)
         elif reload:
-            _shell.__init__()
+            _shell.__init__(instance_keys=mrsm_instance)
 
         _shells.append(_shell)
     return _shell

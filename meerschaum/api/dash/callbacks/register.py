@@ -74,6 +74,9 @@ def register_button_click(
     password,
     email,
 ):
+    """
+    Register the user and redirect to the console.
+    """
     if not n_clicks:
         raise PreventUpdate
     form_class = 'form-control'

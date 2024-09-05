@@ -9,9 +9,9 @@ Higher-level utilities for managing `meerschaum.utils.daemon.Daemon`.
 import pathlib
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Dict, Optional, List, Callable, Any, SuccessTuple
+from meerschaum.utils.typing import Dict, Optional, List, SuccessTuple
 
-from meerschaum.jobs._Job import Job, StopMonitoringLogs
+from meerschaum.jobs._Job import Job
 from meerschaum.jobs._Executor import Executor
 
 __all__ = (
@@ -403,8 +403,13 @@ def get_executor_keys_from_context() -> str:
     if _context_keys is not None:
         return _context_keys
 
+    from meerschaum.config import get_config
     from meerschaum.config.paths import ROOT_DIR_PATH, DEFAULT_ROOT_DIR_PATH
     from meerschaum.utils.misc import is_systemd_available
+
+    configured_executor = get_config('meerschaum', 'executor', warn=False)
+    if configured_executor is not None:
+        return configured_executor
 
     _context_keys = (
         'systemd'

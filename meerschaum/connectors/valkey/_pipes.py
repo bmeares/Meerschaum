@@ -6,16 +6,17 @@ Define pipes methods for `ValkeyConnector`.
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, List, Tuple
 from meerschaum.utils.misc import json_serialize_datetime, string_to_dict
 from meerschaum.utils.warnings import warn
+from meerschaum.config.static import STATIC_CONFIG
 
 PIPES_TABLE: str = 'mrsm_pipes'
 PIPES_COUNTER: str = 'mrsm_pipes:counter'
-COLON: str = '-_'
+COLON: str = STATIC_CONFIG['valkey']['colon']
 
 
 def get_pipe_key(pipe: mrsm.Pipe) -> str:

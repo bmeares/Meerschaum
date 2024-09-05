@@ -233,12 +233,10 @@ def build_pipe_card(
             ),
             dbc.Col(
                 dbc.Button(
-                    [
-                        html.I(
-                            className="bi bi-share",
-                        ),
-                    ],
-                    #  href=pipe_url,
+                    "🔗",
+                    href=pipe_url,
+                    external_link=True,
+                    target="_blank",
                     style={'float': 'right'},
                     outline=True,
                     color='link',
@@ -551,11 +549,11 @@ def accordion_items_from_pipe(
         backtrack_df = pipe.get_backtrack_data(debug=debug, limit=1)
         try:
             json_text = backtrack_df.fillna(pd.NA).to_json(
-                orient = 'records',
-                date_format = 'iso',
-                force_ascii = False,
-                indent = 4,
-                date_unit = 'ns',
+                orient='records',
+                date_format='iso',
+                force_ascii=False,
+                indent=4,
+                date_unit='ns',
             ) if backtrack_df is not None else '[]'
         except Exception as e:
             warn(e)

@@ -181,7 +181,7 @@ dash_app.clientside_callback(
     """,
     Output('content-div-right', 'children'),
     Input({'type': 'follow-logs-button', 'index': ALL}, 'n_clicks'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
 )
 
 

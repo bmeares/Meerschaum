@@ -7,25 +7,14 @@ This is the current release cycle, so stay tuned for future releases!
 ### v2.4.0
 
 - **Add `valkey` instance connectors.**  
-  Introducing a new first-class instance connector: the `ValkeyConnector`! [Valkey](https://valkey.io/), a fork of Redis, is a high-performance in-memory database often used for caching.
+  Introducing a new first-class instance connector: the `ValkeyConnector`. [Valkey](https://valkey.io/), a fork of Redis, is a high-performance in-memory database often used for caching. The `valkey` service has been added to the Meerschaum stack and is accessible via the built-in connector `valkey:main`.
 
-  The `valkey` service has been added to the Meerschaum stack:
+- **Cache Web Console sessions in Valkey when running with `--production`.**  
+  Starting the web API with `--production` will now store sessions in `valkey:main`. This results in a smoother experience in the event of a web server restart. By default, sessions expire after 30 days.
+  > You may disable this behavior by setting `system:experimental:valkey_session_cache` to `false`.
 
-  ```bash
-  mrsm stack up -d valkey
-  ```
-
-  To access it, use the new built-in connector `valkey:main`:
-
-  ```bash
-  mrsm sync pipes -i valkey:main
-  ```
-
-  Like `SQLConnector`, the `ValkeyConnector` supports users and plugins and may be used as a backing instance for an API instance:
-  
-  ```bash
-  mrsm start api -i valkey:main
-  ```
+- **Allow for a default executor.**  
+  Setting the key `meerschaum:executor` will set the default executor (overriding the check for `systemd`). This is useful for defaulting to remote actions in a multi-node deployment.
 
 - **Allow querying for `None` in `query_df()`.**  
   You may now query for null rows:
@@ -90,8 +79,16 @@ This is the current release cycle, so stay tuned for future releases!
   # 0    cat  Meowth   1  tabby
   ```
 
+- **Add a share button to the Pipe card.**  
+  On the web dashboard, you may now more easily share pipes by clicking the "share" icon and copying the URL. This opens the pipe card in a new, dedicated tab.
+
 - **Add `OPTIONAL_ATTRIBUTES` to connectors.**  
   Connectors may now set `OPTIONAL_ATTRIBUTES`, which will add skippable prompts in `bootstrap connector`.
+
+- **Remove progress bar for syncing via remote actions.**  
+  Executing `sync pipes` remotely will no longer print the timer progress bar.
+- **Fix bug with `stack` in the shell.**  
+  Note that `stack` actions may not be chained.
 
 ## 2.3.x Releases
 

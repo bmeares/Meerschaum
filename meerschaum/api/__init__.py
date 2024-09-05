@@ -121,11 +121,19 @@ def get_cache_connector(connector_keys: Optional[str] = None):
     if not production:
         return None
 
+    enable_valkey_cache = get_config('system', 'experimental', 'valkey_session_cache')
+    if not enable_valkey_cache:
+        return None
+
     connector_keys = connector_keys or get_config(
         'system', 'api', 'cache', 'connector',
         warn=False,
     )
     if connector_keys is None:
+        return None
+
+    if not connector_keys.startswith('valkey'):
+        warn(f"Invalid cache connector '{connector_keys}'.")
         return None
 
     if cache_connector is None:

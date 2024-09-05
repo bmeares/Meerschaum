@@ -14,13 +14,13 @@ For ease of use, you can also import from the root `meerschaum` module:
 from __future__ import annotations
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List, Dict
-from meerschaum.utils.threading import Lock, RLock
-from meerschaum.utils.warnings import error, warn
+from meerschaum.utils.typing import Any, Union, List, Dict
+from meerschaum.utils.threading import RLock
+from meerschaum.utils.warnings import warn
 
-from meerschaum.connectors.Connector import Connector, InvalidAttributesError
-from meerschaum.connectors.sql.SQLConnector import SQLConnector
-from meerschaum.connectors.api.APIConnector import APIConnector
+from meerschaum.connectors._Connector import Connector, InvalidAttributesError
+from meerschaum.connectors.sql._SQLConnector import SQLConnector
+from meerschaum.connectors.api._APIConnector import APIConnector
 from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
 
 __all__ = (
@@ -31,6 +31,9 @@ __all__ = (
     "get_connector",
     "is_connected",
     "poll",
+    "api",
+    "sql",
+    "valkey",
 )
 
 ### store connectors partitioned by
@@ -54,7 +57,10 @@ attributes: Dict[str, Dict[str, Any]] = {
         'required': [
             'host',
             'username',
-            'password'
+            'password',
+        ],
+        'optional': [
+            'port',
         ],
         'default': {
             'protocol': 'http',
@@ -263,11 +269,11 @@ def is_connected(keys: str, **kw) -> bool:
 
     try:
         typ, label = keys.split(':')
-    except Exception as e:
+    except Exception:
         return False
     if typ not in instance_types:
         return False
-    if not (label in connectors.get(typ, {})):
+    if label not in connectors.get(typ, {}):
         return False
 
     from meerschaum.connectors.parse import parse_instance_keys

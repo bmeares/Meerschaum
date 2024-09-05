@@ -9,7 +9,6 @@ Manage jobs via the Meerschaum API.
 from __future__ import annotations
 
 import os
-import select
 import asyncio
 import traceback
 from datetime import datetime
@@ -18,12 +17,10 @@ from functools import partial
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from meerschaum.utils.typing import Dict, Any, SuccessTuple, List, Optional, Union
+from meerschaum.utils.typing import Dict, Any, SuccessTuple, List, Union
 from meerschaum.jobs import (
     get_jobs as _get_jobs,
     Job,
-    StopMonitoringLogs,
-    get_executor_keys_from_context,
 )
 from meerschaum.utils.warnings import warn
 
@@ -32,14 +29,13 @@ from meerschaum.api import (
     app,
     endpoints,
     manager,
-    debug,
     no_auth,
-    private,
 )
 from meerschaum.config.static import STATIC_CONFIG
 
 JOBS_STDIN_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stdin_message']
 JOBS_STOP_MESSAGE: str = STATIC_CONFIG['api']['jobs']['stop_message']
+NONINTERACTIVE_ENV: str = STATIC_CONFIG['environment']['noninteractive']
 EXECUTOR_KEYS: str = 'local'
 
 
@@ -48,7 +44,8 @@ def _get_job(name: str):
     if systemd_job.exists():
         return systemd_job
 
-    return Job(name, executor_keys=EXECUTOR_KEYS)
+    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    return job
 
 
 @app.get(endpoints['jobs'], tags=['Jobs'])
@@ -150,6 +147,10 @@ def create_job(
         name,
         clean_sysargs(sysargs),
         executor_keys=EXECUTOR_KEYS,
+        env={
+            NONINTERACTIVE_ENV: '1',
+            **dict(os.environ)
+        },
         _properties=properties,
     )
     if job.exists():

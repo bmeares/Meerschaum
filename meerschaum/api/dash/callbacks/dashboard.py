@@ -707,6 +707,7 @@ dash_app.clientside_callback(
     State('mrsm-location', 'href'),
 )
 
+
 @dash_app.callback(
     Output("download-dataframe-csv", "data"),
     Input({'type': 'pipe-download-csv-button', 'index': ALL}, 'n_clicks'),
@@ -728,7 +729,7 @@ def download_pipe_csv(n_clicks):
     filename = str(pipe.target) + f" {begin} - {end}.csv"
     try:
         df = pipe.get_data(begin=begin, end=end, debug=debug)
-    except Exception as e:
+    except Exception:
         df = None
     if df is not None:
         return dcc.send_data_frame(df.to_csv, filename, index=False)
@@ -741,6 +742,9 @@ def download_pipe_csv(n_clicks):
     State('session-store', 'data'),
 )
 def update_pipe_accordion(item, session_store_data):
+    """
+    Expand the pipe accordion item and lazy load.
+    """
     if item is None:
         raise PreventUpdate
 
@@ -752,7 +756,6 @@ def update_pipe_accordion(item, session_store_data):
         raise PreventUpdate
 
     session_id = session_store_data.get('session-id', None)
-    print(f"{session_id=}")
     authenticated = is_session_authenticated(str(session_id))
     return accordion_items_from_pipe(pipe, active_items=[item], authenticated=authenticated)
 

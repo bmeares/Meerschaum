@@ -902,23 +902,28 @@ def pip_install(
                 pip = attempt_import('pip', venv=venv, install=False, debug=debug, lazy=False)
                 if need_update(pip, check_pypi=check_pypi, debug=debug):
                     _args.append(all_packages['pip'])
-        
+
         _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
         if check_wheel and not _uninstall and not use_uv_pip:
             if not have_wheel:
+                setup_packages_to_install = (
+                    ['setuptools', 'wheel']
+                    + ([] if is_android() else ['uv'])
+                )
                 if not pip_install(
-                    'setuptools', 'wheel', 'uv',
-                    venv = venv,
-                    check_update = False,
-                    check_pypi = False,
-                    check_wheel = False,
-                    debug = debug,
-                    _install_uv_pip = False,
+                    *setup_packages_to_install,
+                    venv=venv,
+                    check_update=False,
+                    check_pypi=False,
+                    check_wheel=False,
+                    debug=debug,
+                    _install_uv_pip=False,
                 ) and not silent:
+                    from meerschaum.utils.misc import items_str
                     warn(
                         (
-                            "Failed to install `setuptools`, `wheel`, and `uv` for virtual "
+                            f"Failed to install {items_str(setup_packages_to_install)} for virtual "
                             + f"environment '{venv}'."
                         ),
                         color=False,
