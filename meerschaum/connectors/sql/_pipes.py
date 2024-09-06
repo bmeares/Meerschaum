@@ -909,7 +909,7 @@ def get_pipe_data_query(
 
     cols_names = [sql_item_name(col, self.flavor, None) for col in select_columns]
     select_cols_str = (
-        'SELECT\n'
+        'SELECT\n    '
         + ',\n    '.join(
             [
                 (
@@ -953,14 +953,14 @@ def get_pipe_data_query(
                 warn(
                     f"No datetime could be determined for {pipe}."
                     + "\n    Ignoring begin and end...",
-                    stack = False,
+                    stack=False,
                 )
                 begin, end = None, None
             else:
                 warn(
                     f"A datetime wasn't specified for {pipe}.\n"
                     + f"    Using column \"{_dt}\" for datetime bounds...",
-                    stack = False,
+                    stack=False,
                 )
 
     is_dt_bound = False
@@ -1014,9 +1014,12 @@ def get_pipe_data_query(
 
     if isinstance(limit, int):
         if self.flavor == 'mssql':
-            query = f'SELECT TOP {limit} ' + query[len("SELECT *"):]
+            query = f'SELECT TOP {limit}\n' + query[len("SELECT "):]
         elif self.flavor == 'oracle':
-            query = f"SELECT * FROM (\n  {query}\n)\nWHERE ROWNUM = 1"
+            query = (
+                f"SELECT * FROM (\n  {query}\n)\n"
+                + f"WHERE ROWNUM IN ({', '.join([str(i) for i in range(1, limit+1)])})"
+            )
         else:
             query += f"\nLIMIT {limit}"
     
