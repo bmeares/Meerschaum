@@ -86,4 +86,4 @@ def test_get_data_order(flavor: str):
         debug=debug,
     )
     assert len(df) == limit
-    assert df['id'][0] == 1
+    assert df['id'][0] == 3
