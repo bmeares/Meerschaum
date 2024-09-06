@@ -106,7 +106,7 @@ def get_data(
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import iterate_chunks, items_str
     from meerschaum.utils.dtypes import to_pandas_dtype
-    from meerschaum.utils.dataframe import add_missing_cols_to_df
+    from meerschaum.utils.dataframe import add_missing_cols_to_df, df_is_chunk_generator
     from meerschaum.utils.packages import attempt_import
     dd = attempt_import('dask.dataframe') if as_dask else None
     dask = attempt_import('dask') if as_dask else None
@@ -122,6 +122,8 @@ def get_data(
     as_iterator = as_iterator or as_chunks
 
     def _sort_df(_df):
+        if df_is_chunk_generator(_df):
+            return _df
         dt_col = self.columns.get('datetime', None)
         indices = [] if dt_col not in _df.columns else [dt_col]
         non_dt_cols = [
@@ -130,12 +132,19 @@ def get_data(
             if col_ix != 'datetime' and col in _df.columns
         ]
         indices.extend(non_dt_cols)
-        _df.sort_values(
-            by=indices,
-            inplace=True,
-            ascending=(str(order).lower() == 'asc')
-        )
-        _df.reset_index(drop=True, inplace=True)
+        if 'dask' not in _df.__module__:
+            _df.sort_values(
+                by=indices,
+                inplace=True,
+                ascending=(str(order).lower() == 'asc'),
+            )
+            _df.reset_index(drop=True, inplace=True)
+        else:
+            _df = _df.sort_values(
+                by=indices,
+                ascending=(str(order).lower() == 'asc'),
+            )
+            _df = _df.reset_index(drop=True)
         if limit is not None and len(_df) > limit:
             return _df.head(limit)
         return _df

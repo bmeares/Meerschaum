@@ -49,6 +49,7 @@ packages: Dict[str, Dict[str, str]] = {
         'more_itertools'             : 'more-itertools>=8.7.0',
         'fasteners'                  : 'fasteners>=0.19.0',
         'virtualenv'                 : 'virtualenv>=20.1.0',
+        'attrs'                      : 'attrs<24.2.0',
         'apscheduler'                : 'APScheduler>=4.0.0a5',
         'uv'                         : 'uv>=0.2.11',
     },

@@ -87,8 +87,12 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Remove progress bar for syncing via remote actions.**  
   Executing `sync pipes` remotely will no longer print the timer progress bar.
+
 - **Fix bug with `stack` in the shell.**  
   Note that `stack` actions may not be chained.
+
+- **Fix scheduler dependency.**  
+  To fix the installation of `APScheduler`, `attrs` is now held back to 24.1.0.
 
 ## 2.3.x Releases
 
