@@ -126,7 +126,7 @@ def get_data(
         indices = [] if dt_col not in _df.columns else [dt_col]
         non_dt_cols = [
             col
-            for col_ix, col in self.columns.values()
+            for col_ix, col in self.columns.items()
             if col_ix != 'datetime' and col in _df.columns
         ]
         indices.extend(non_dt_cols)
