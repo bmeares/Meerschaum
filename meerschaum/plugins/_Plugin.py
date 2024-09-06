@@ -7,8 +7,12 @@ Plugin metadata class
 """
 
 from __future__ import annotations
-import os, pathlib, shutil
-from site import venv
+
+import os
+import pathlib
+import shutil
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Dict,
     List,
@@ -40,8 +44,8 @@ class Plugin:
         attributes: Optional[Dict[str, Any]] = None,
         archive_path: Optional[pathlib.Path] = None,
         venv_path: Optional[pathlib.Path] = None,
-        repo_connector: Optional['meerschaum.connectors.api.APIConnector'] = None,
-        repo: Union['meerschaum.connectors.api.APIConnector', str, None] = None,
+        repo_connector: Optional['mrsm.connectors.api.APIConnector'] = None,
+        repo: Union['mrsm.connectors.api.APIConnector', str, None] = None,
     ):
         from meerschaum.config.static import STATIC_CONFIG
         sep = STATIC_CONFIG['plugins']['repo_separator']
@@ -470,9 +474,9 @@ class Plugin:
 
 
     def remove_archive(
-            self,        
-            debug: bool = False
-        ) -> SuccessTuple:
+        self,        
+        debug: bool = False
+    ) -> SuccessTuple:
         """Remove a plugin's archive file."""
         if not self.archive_path.exists():
             return True, f"Archive file for plugin '{self}' does not exist."
@@ -484,9 +488,9 @@ class Plugin:
 
 
     def remove_venv(
-            self,        
-            debug: bool = False
-        ) -> SuccessTuple:
+        self,        
+        debug: bool = False
+    ) -> SuccessTuple:
         """Remove a plugin's virtual environment."""
         if not self.venv_path.exists():
             return True, f"Virtual environment for plugin '{self}' does not exist."
@@ -608,9 +612,9 @@ class Plugin:
 
 
     def get_dependencies(
-            self,
-            debug: bool = False,
-        ) -> List[str]:
+        self,
+        debug: bool = False,
+    ) -> List[str]:
         """
         If the Plugin has specified dependencies in a list called `required`, return the list.
         

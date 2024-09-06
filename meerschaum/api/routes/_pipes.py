@@ -474,9 +474,9 @@ def get_pipe_data(
         df[col] = df[col].apply(lambda x: f'{x:f}' if isinstance(x, Decimal) else x)
 
     json_content = df.to_json(
-        date_format = 'iso',
-        orient = 'records',
-        date_unit = 'us',
+        date_format='iso',
+        orient='records',
+        date_unit='us',
     )
 
     return fastapi.Response(

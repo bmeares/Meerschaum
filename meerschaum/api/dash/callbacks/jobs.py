@@ -7,36 +7,35 @@ Callbacks for jobs' cards.
 """
 
 from __future__ import annotations
+
 import json
-import functools
 import time
 import traceback
 from datetime import datetime, timezone
-import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any
-from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
-from meerschaum.api.dash import dash_app, debug, active_sessions
+from meerschaum.api import CHECK_UPDATE
+from meerschaum.api.dash import dash_app
+from meerschaum.api.dash.sessions import get_username_from_session
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
-dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
-from dash.exceptions import PreventUpdate
-from dash.dependencies import Input, Output, State, ALL, MATCH
-from dash import Patch
-html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
-import dash_bootstrap_components as dbc
-from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
-from dash.exceptions import PreventUpdate
+from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.jobs import (
     build_manage_job_buttons_div_children,
     build_status_children,
     build_process_timestamps_children,
 )
 from meerschaum.jobs import Job
-from meerschaum.api.dash.users import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated
+dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
+html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
+from dash.exceptions import PreventUpdate
+from dash.dependencies import Input, Output, State, ALL, MATCH
+import dash_bootstrap_components as dbc
+
 
 @dash_app.callback(
     Output("download-logs", "data"),
     Input({'type': 'job-download-logs-button', 'index': ALL}, 'n_clicks'),
-    prevent_initial_call = True,
+    prevent_initial_call=True,
 )
 def download_job_logs(n_clicks):
     """
@@ -84,7 +83,7 @@ def manage_job_button_click(
         raise PreventUpdate
 
     session_id = session_data.get('session-id', None)
-    username = active_sessions.get(session_id, {}).get('username', None)
+    username = get_username_from_session(session_id)
 
     if not is_session_authenticated(session_id):
         success, msg = False, f"User '{username}' is not authenticated to manage jobs."
@@ -182,7 +181,7 @@ dash_app.clientside_callback(
     """,
     Output('content-div-right', 'children'),
     Input({'type': 'follow-logs-button', 'index': ALL}, 'n_clicks'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
 )
 
 

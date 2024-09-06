@@ -16,12 +16,12 @@ if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
 
 def enforce_dtypes(
-        self,
-        df: 'pd.DataFrame',
-        chunksize: Optional[int] = -1,
-        safe_copy: bool = True,
-        debug: bool = False,
-    ) -> 'pd.DataFrame':
+    self,
+    df: 'pd.DataFrame',
+    chunksize: Optional[int] = -1,
+    safe_copy: bool = True,
+    debug: bool = False,
+) -> 'pd.DataFrame':
     """
     Cast the input dataframe to the pipe's registered data types.
     If the pipe does not exist and dtypes are not set, return the dataframe.
@@ -35,7 +35,7 @@ def enforce_dtypes(
     if df is None:
         if debug:
             dprint(
-                f"Received None instead of a DataFrame.\n"
+                "Received None instead of a DataFrame.\n"
                 + "    Skipping dtype enforcement..."
             )
         return df
@@ -46,24 +46,24 @@ def enforce_dtypes(
         if isinstance(df, str):
             df = parse_df_datetimes(
                 pd.read_json(StringIO(df)),
-                ignore_cols = [
+                ignore_cols=[
                     col
                     for col, dtype in pipe_dtypes.items()
                     if 'datetime' not in str(dtype)
                 ],
-                chunksize = chunksize,
-                debug = debug,
+                chunksize=chunksize,
+                debug=debug,
             )
         else:
             df = parse_df_datetimes(
                 df,
-                ignore_cols = [
+                ignore_cols=[
                     col
                     for col, dtype in pipe_dtypes.items()
                     if 'datetime' not in str(dtype)
                 ],
-                chunksize = chunksize,
-                debug = debug,
+                chunksize=chunksize,
+                debug=debug,
             )
     except Exception as e:
         warn(f"Unable to cast incoming data as a DataFrame...:\n{e}\n\n{traceback.format_exc()}")
@@ -80,7 +80,7 @@ def enforce_dtypes(
     return _enforce_dtypes(df, pipe_dtypes, safe_copy=safe_copy, debug=debug)
 
 
-def infer_dtypes(self, persist: bool=False, debug: bool=False) -> Dict[str, Any]:
+def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, Any]:
     """
     If `dtypes` is not set in `meerschaum.Pipe.parameters`,
     infer the data types from the underlying table if it exists.

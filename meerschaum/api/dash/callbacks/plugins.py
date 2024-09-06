@@ -9,7 +9,7 @@ Callbacks for the plugins page.
 from __future__ import annotations
 import json
 from meerschaum.utils.typing import Optional, Dict, Any
-from meerschaum.api.dash import dash_app, debug, active_sessions
+from meerschaum.api.dash import dash_app, debug
 from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
 from meerschaum.core import Plugin
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html

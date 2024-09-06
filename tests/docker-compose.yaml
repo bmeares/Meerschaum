@@ -6,6 +6,7 @@ volumes:
   # cockroachdb_volume:
   oracle_volume:
   citus_healthcheck_volume:
+  valkey_volume:
 
 services:
 
@@ -94,3 +95,12 @@ services:
       - "citus_healthcheck_volume:/healthcheck"
     depends_on: ["citus"]
     environment: *CITUS_AUTH
+
+  valkey:
+    image: "bitnami/valkey"
+    environment:
+      ALLOW_EMPTY_PASSWORD: "yes"
+    volumes:
+      - "valkey_volume:/bitnami/valkey/data"
+    ports:
+      - "6399:6379"

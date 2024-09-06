@@ -53,6 +53,9 @@ STATIC_CONFIG: Dict[str, Any] = {
         'internal_schema': '_mrsm_internal',
         'instance_schema': 'mrsm',
     },
+    'valkey': {
+        'colon': '-_',
+    },
     'environment': {
         'config': 'MRSM_CONFIG',
         'config_dir': 'MRSM_CONFIG_DIR',
@@ -69,6 +72,7 @@ STATIC_CONFIG: Dict[str, Any] = {
         'uid': 'MRSM_UID',
         'gid': 'MRSM_GID',
         'noask': 'MRSM_NOASK',
+        'noninteractive': 'MRSM_NONINTERACTIVE',
         'id': 'MRSM_SERVER_ID',
         'daemon_id': 'MRSM_DAEMON_ID',
         'systemd_log_path': 'MRSM_SYSTEMD_LOG_PATH',

@@ -118,7 +118,6 @@ def _register_pipes(
             )
 
     success, message = True, "Success"
-    failed_message = ""
     failed_pipes = []
     success_pipes = []
     for p in pipes:
@@ -127,7 +126,6 @@ def _register_pipes(
         ss, msg = p.register(debug=debug)
         if not ss:
             warn(f"{msg}", stack=False)
-            success = False
             failed_pipes.append(p)
         else:
             success_pipes.append(p)
@@ -356,7 +354,7 @@ def _register_users(
 
     msg = (
         f"Finished registering {succeeded + failed} users." + '\n' +
-        f"  ({succeeded} succeeded, {failed} failed)"
+        f"    ({succeeded} succeeded, {failed} failed)"
     )
     return succeeded > 0, msg
 

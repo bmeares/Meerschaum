@@ -16,19 +16,18 @@ from meerschaum.utils.typing import (
 __pdoc__ = {'get_pipes': True, 'fetch_pipes_keys': True}
 
 def get_pipes(
-        connector_keys: Union[str, List[str], None] = None,
-        metric_keys: Union[str, List[str], None] = None,
-        location_keys: Union[str, List[str], None] = None,
-        tags: Optional[List[str]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        mrsm_instance: Union[str, InstanceConnector, None] = None,
-        instance: Union[str, InstanceConnector, None] = None,
-        as_list: bool = False,
-        method: str = 'registered',
-        wait: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union[PipesDict, List[mrsm.Pipe]]:
+    connector_keys: Union[str, List[str], None] = None,
+    metric_keys: Union[str, List[str], None] = None,
+    location_keys: Union[str, List[str], None] = None,
+    tags: Optional[List[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    mrsm_instance: Union[str, InstanceConnector, None] = None,
+    instance: Union[str, InstanceConnector, None] = None,
+    as_list: bool = False,
+    method: str = 'registered',
+    debug: bool = False,
+    **kw: Any
+) -> Union[PipesDict, List[mrsm.Pipe]]:
     """
     Return a dictionary or list of `meerschaum.Pipe` objects.
 
@@ -71,10 +70,6 @@ def get_pipes(
         instead of consulting the pipes table. Useful for creating non-existent pipes.
         If `'all'`, create pipes from predefined metrics and locations. Required `connector_keys`.
         **NOTE:** Method `'all'` is not implemented!
-
-    wait: bool, default False
-        Wait for a connection before getting Pipes. Should only be true for cases where the
-        database might not be running (like the API).
 
     **kw: Any:
         Keyword arguments to pass to the `meerschaum.Pipe` constructor.
@@ -133,15 +128,14 @@ def get_pipes(
         location_keys = [location_keys]
 
     ### Get SQL or API connector (keys come from `connector.fetch_pipes_keys()`).
-    ### If `wait`, wait until a connection is made
     if mrsm_instance is None:
         mrsm_instance = instance
     if mrsm_instance is None:
         mrsm_instance = get_config('meerschaum', 'instance', patch=True)
     if isinstance(mrsm_instance, str):
         from meerschaum.connectors.parse import parse_instance_keys
-        connector = parse_instance_keys(keys=mrsm_instance, wait=wait, debug=debug)
-    else: ### NOTE: mrsm_instance MUST be a SQL or API connector for this to work
+        connector = parse_instance_keys(keys=mrsm_instance, debug=debug)
+    else:
         from meerschaum.connectors import instance_types
         valid_connector = False
         if hasattr(mrsm_instance, 'type'):

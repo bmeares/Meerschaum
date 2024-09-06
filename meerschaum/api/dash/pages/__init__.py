@@ -10,3 +10,4 @@ import meerschaum.api.dash.pages.login
 import meerschaum.api.dash.pages.dashboard
 import meerschaum.api.dash.pages.plugins
 import meerschaum.api.dash.pages.register
+import meerschaum.api.dash.pages.pipes

@@ -7,15 +7,19 @@ Functions for managing plugins registration via the SQL connector
 """
 
 from __future__ import annotations
+
+import json
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Any, List, SuccessTuple, Dict
 
 def register_plugin(
-        self,
-        plugin: 'meerschaum.core.Plugin',
-        force: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    plugin: 'mrsm.core.Plugin',
+    force: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """Register a new plugin to the plugins table."""
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.packages import attempt_import
@@ -46,14 +50,13 @@ def register_plugin(
                 f"must be greater than existing version '{old_version}'."
             )
 
-    import json
     bind_variables = {
-        'plugin_name' : plugin.name,
-        'version' : plugin.version,
-        'attributes' : (
+        'plugin_name': plugin.name,
+        'version': plugin.version,
+        'attributes': (
             json.dumps(plugin.attributes) if self.flavor not in json_flavors else plugin.attributes
         ),
-        'user_id' : plugin.user_id,
+        'user_id': plugin.user_id,
     }
 
     if old_id is None:
@@ -71,10 +74,10 @@ def register_plugin(
     return True, f"Successfully registered plugin '{plugin}'."
 
 def get_plugin_id(
-        self,
-        plugin: 'meerschaum.core.Plugin',
-        debug: bool = False
-    ) -> Optional[int]:
+    self,
+    plugin: 'mrsm.core.Plugin',
+    debug: bool = False
+) -> Optional[int]:
     """
     Return a plugin's ID.
     """
@@ -96,10 +99,10 @@ def get_plugin_id(
         return None
 
 def get_plugin_version(
-        self,
-        plugin: 'meerschaum.core.Plugin',
-        debug: bool = False
-    ) -> Optional[str]:
+    self,
+    plugin: 'mrsm.core.Plugin',
+    debug: bool = False
+) -> Optional[str]:
     """
     Return a plugin's version.
     """
@@ -112,10 +115,10 @@ def get_plugin_version(
     return self.value(query, debug=debug)
 
 def get_plugin_user_id(
-        self,
-        plugin: 'meerschaum.core.Plugin',
-        debug: bool = False
-    ) -> Optional[int]:
+    self,
+    plugin: 'mrsm.core.Plugin',
+    debug: bool = False
+) -> Optional[int]:
     """
     Return a plugin's user ID.
     """
@@ -137,10 +140,10 @@ def get_plugin_user_id(
         return None
 
 def get_plugin_username(
-        self,
-        plugin: 'meerschaum.core.Plugin',
-        debug: bool = False
-    ) -> Optional[str]:
+    self,
+    plugin: 'mrsm.core.Plugin',
+    debug: bool = False
+) -> Optional[str]:
     """
     Return the username of a plugin's owner.
     """
@@ -163,16 +166,15 @@ def get_plugin_username(
 
 
 def get_plugin_attributes(
-        self,
-        plugin: 'meerschaum.core.Plugin',
-        debug: bool = False
-    ) -> Dict[str, Any]:
+    self,
+    plugin: 'mrsm.core.Plugin',
+    debug: bool = False
+) -> Dict[str, Any]:
     """
     Return the attributes of a plugin.
     """
     ### ensure plugins table exists
     from meerschaum.connectors.sql.tables import get_tables
-    import json
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
@@ -191,12 +193,12 @@ def get_plugin_attributes(
     return _attr
 
 def get_plugins(
-        self,
-        user_id: Optional[int] = None,
-        search_term: Optional[str] = None,
-        debug: bool = False,
-        **kw: Any
-    ) -> List[str]:
+    self,
+    user_id: Optional[int] = None,
+    search_term: Optional[str] = None,
+    debug: bool = False,
+    **kw: Any
+) -> List[str]:
     """
     Return a list of all registered plugins.
 
@@ -238,11 +240,11 @@ def get_plugins(
 
 
 def delete_plugin(
-        self,
-        plugin: 'meerschaum.core.Plugin',
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    plugin: 'mrsm.core.Plugin',
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """Delete a plugin from the plugins table."""
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.packages import attempt_import

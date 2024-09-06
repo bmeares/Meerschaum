@@ -23,8 +23,8 @@ from meerschaum.api._oauth2 import CustomOAuth2PasswordRequestForm
 
 @manager.user_loader()
 def load_user(
-        username: str
-    ) -> User:
+    username: str
+) -> User:
     """
     Create the `meerschaum.core.User` object from the username.
     """
@@ -33,8 +33,8 @@ def load_user(
 
 @app.post(endpoints['login'], tags=['Users'])
 def login(
-        data: CustomOAuth2PasswordRequestForm = fastapi.Depends()
-    ) -> Dict[str, Any]:
+    data: CustomOAuth2PasswordRequestForm = fastapi.Depends()
+) -> Dict[str, Any]:
     """
     Login and set the session token.
     """

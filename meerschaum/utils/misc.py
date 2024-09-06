@@ -1354,9 +1354,9 @@ def truncate_string_sections(item: str, delimeter: str = '_', max_len: int = 128
 
 
 def separate_negation_values(
-        vals: Union[List[str], Tuple[str]],
-        negation_prefix: Optional[str] = None,
-    ) -> Tuple[List[str], List[str]]:
+    vals: Union[List[str], Tuple[str]],
+    negation_prefix: Optional[str] = None,
+) -> Tuple[List[str], List[str]]:
     """
     Separate the negated values from the positive ones.
     Return two lists: positive and negative values.

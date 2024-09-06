@@ -7,7 +7,10 @@ Utility functions for working with data types.
 """
 
 import traceback
+from datetime import timezone
 from decimal import Decimal, Context, InvalidOperation
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Union, Any
 from meerschaum.utils.warnings import warn
 
@@ -44,20 +47,19 @@ def to_pandas_dtype(dtype: str) -> str:
 
     try:
         return str(pandas.api.types.pandas_dtype(dtype))
-    except Exception as e:
+    except Exception:
         warn(
             f"Invalid dtype '{dtype}', will use 'object' instead:\n"
             + f"{traceback.format_exc()}",
             stack = False,
-        )
-    
+        ) 
     return 'object'
 
 
 def are_dtypes_equal(
-        ldtype: Union[str, Dict[str, str]],
-        rdtype: Union[str, Dict[str, str]],
-    ) -> bool:
+    ldtype: Union[str, Dict[str, str]],
+    rdtype: Union[str, Dict[str, str]],
+) -> bool:
     """
     Determine whether two dtype strings may be considered
     equivalent to avoid unnecessary conversions.
@@ -219,3 +221,26 @@ def quantize_decimal(x: Decimal, scale: int, precision: int) -> Decimal:
         return x.quantize(precision_decimal, context=Context(prec=scale))
     except InvalidOperation:
         return x
+
+
+def coerce_timezone(dt: Any) -> Any:
+    """
+    Given a `datetime`, pandas `Timestamp` or `Series` of `Timestamp`,
+    return a naive datetime in terms of UTC.
+    """
+    if dt is None:
+        return None
+
+    if isinstance(dt, int):
+        return dt
+
+    dt_is_series = hasattr(dt, 'dtype')
+
+    if dt_is_series:
+        pandas = mrsm.attempt_import('pandas')
+        return pandas.to_datetime(dt, utc=True).apply(lambda x: x.replace(tzinfo=None))
+
+    if dt.tzinfo is None:
+        return dt
+
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)

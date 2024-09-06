@@ -10,7 +10,6 @@ from tests.connectors import conns, get_flavors
 from tests.test_users import test_register_user
 import meerschaum as mrsm
 from meerschaum import Pipe
-from meerschaum.actions import actions
 from meerschaum.utils.dtypes import are_dtypes_equal
 from meerschaum.utils.sql import sql_item_name
 
@@ -18,6 +17,7 @@ from meerschaum.utils.sql import sql_item_name
 def run_before_and_after(flavor: str):
     test_register_user(flavor)
     yield
+
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_change_columns_dtypes(flavor: str):
@@ -54,11 +54,11 @@ def test_dtype_enforcement(flavor: str):
     pipe.delete(debug=debug)
     pipe = Pipe(
         'dtype', 'enforcement',
-        columns = {
+        columns={
             'datetime': 'dt',
             'id': 'id',
         },
-        dtypes = {
+        dtypes={
             'int': 'int',
             'float': 'float',
             'bool': 'bool',
@@ -67,7 +67,7 @@ def test_dtype_enforcement(flavor: str):
             'numeric': 'numeric',
             'str': 'str',
         },
-        instance = conn,
+        instance=conn,
     )
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'int': '1'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'float': '1.0'}], debug=debug)
@@ -448,24 +448,26 @@ def test_sync_bools_inplace(flavor: str):
     Test that pipes are able to sync bool in-place.
     """
     conn = conns[flavor]
+    if conn.type not in ('api', 'sql'):
+        return
     pipe = mrsm.Pipe('test', 'bools', 'inplace', instance=conn)
     _ = pipe.delete()
     pipe = mrsm.Pipe(
         'test', 'bools', 'inplace',
-        instance = conn,
-        columns = {'datetime': 'dt', 'id': 'id'},
+        instance=conn,
+        columns={'datetime': 'dt', 'id': 'id'},
     )
     pipe_table = sql_item_name(pipe.target, conn.flavor) if conn.type == 'sql' else pipe.target
     inplace_pipe = mrsm.Pipe(conn, 'bools', 'inplace', instance=conn)
     _ = inplace_pipe.delete()
     inplace_pipe = mrsm.Pipe(
         conn, 'bools', 'inplace',
-        instance = conn,
-        columns = pipe.columns,
-        dtypes = {
+        instance=conn,
+        columns=pipe.columns,
+        dtypes={
             'is_bool': 'bool',
         },
-        parameters = {
+        parameters={
             'fetch': {
                 'definition': f"SELECT * FROM {pipe_table}",
                 'pipe': pipe.keys(),
@@ -500,4 +502,3 @@ def test_sync_bools_inplace(flavor: str):
     assert success, msg
     df = inplace_pipe.get_data(params={'id': 3})
     assert 'na' in str(df['is_bool'][0]).lower()
-

@@ -7,24 +7,20 @@ Functions for interacting with jobs via the web interface.
 """
 
 from __future__ import annotations
-from dash.dependencies import Input, Output, State
-from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union, WebState
+from meerschaum.utils.typing import List, Dict, WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
-from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
-from meerschaum.api.dash.users import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.api import CHECK_UPDATE
-dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
-html, dcc = import_html(), import_dcc()
 from meerschaum.jobs import (
     get_jobs,
-    get_running_jobs,
-    get_paused_jobs,
-    get_stopped_jobs,
     get_executor_keys_from_context,
     Job,
 )
 from meerschaum.config import get_config
 from meerschaum.utils.misc import sorted_dict
+from dash.dependencies import Input, Output, State
+dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
+html, dcc = import_html(), import_dcc()
 
 STATUS_EMOJI: Dict[str, str] = {
     'running': get_config('formatting', 'emoji', 'running'),

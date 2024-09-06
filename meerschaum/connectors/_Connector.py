@@ -53,17 +53,23 @@ class Connector(metaclass=abc.ABCMeta):
         """
         self._original_dict = copy.deepcopy(self.__dict__)
         self._set_attributes(type=type, label=label, **kw)
-        self.verify_attributes(getattr(self, 'REQUIRED_ATTRIBUTES', None))
+
+        ### NOTE: Override `REQUIRED_ATTRIBUTES` if `uri` is set.
+        self.verify_attributes(
+            ['uri']
+            if 'uri' in self.__dict__
+            else getattr(self, 'REQUIRED_ATTRIBUTES', None)
+        )
 
     def _reset_attributes(self):
         self.__dict__ = self._original_dict
 
     def _set_attributes(
-            self,
-            *args,
-            inherit_default: bool = True,
-            **kw: Any
-        ):
+        self,
+        *args,
+        inherit_default: bool = True,
+        **kw: Any
+    ):
         from meerschaum.config.static import STATIC_CONFIG
         from meerschaum.utils.warnings import error
 
@@ -114,12 +120,11 @@ class Connector(metaclass=abc.ABCMeta):
         ### finally, update __dict__ with _attributes.
         self.__dict__.update(self._attributes)
 
-
     def verify_attributes(
-            self,
-            required_attributes: Optional[List[str]] = None,
-            debug: bool = False
-        ) -> None:
+        self,
+        required_attributes: Optional[List[str]] = None,
+        debug: bool = False,
+    ) -> None:
         """
         Ensure that the required attributes have been met.
         
@@ -147,6 +152,7 @@ class Connector(metaclass=abc.ABCMeta):
         from meerschaum.utils.misc import items_str
         if required_attributes is None:
             required_attributes = ['label']
+
         missing_attributes = set()
         for a in required_attributes:
             if a not in self.__dict__:
@@ -158,8 +164,8 @@ class Connector(metaclass=abc.ABCMeta):
                     + f"for connector '{self.type}:{self.label}'."
                 ),
                 InvalidAttributesError,
-                silent = True,
-                stack = False
+                silent=True,
+                stack=False
             )
 
 

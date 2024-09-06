@@ -400,10 +400,10 @@ def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = False) ->
 
 
 def get_db_type_from_pd_type(
-        pd_type: str,
-        flavor: str = 'default',
-        as_sqlalchemy: bool = False,
-    ) -> Union[str, 'sqlalchemy.sql.visitors.TraversibleType']:
+    pd_type: str,
+    flavor: str = 'default',
+    as_sqlalchemy: bool = False,
+) -> Union[str, 'sqlalchemy.sql.visitors.TraversibleType']:
     """
     Parse a Pandas data type into a flavor's database type.
 

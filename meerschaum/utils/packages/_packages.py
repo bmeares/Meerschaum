@@ -49,6 +49,7 @@ packages: Dict[str, Dict[str, str]] = {
         'more_itertools'             : 'more-itertools>=8.7.0',
         'fasteners'                  : 'fasteners>=0.19.0',
         'virtualenv'                 : 'virtualenv>=20.1.0',
+        'attrs'                      : 'attrs<24.2.0',
         'apscheduler'                : 'APScheduler>=4.0.0a5',
         'uv'                         : 'uv>=0.2.11',
     },
@@ -154,6 +155,7 @@ packages['api'] = {
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
     'multipart'                      : 'python-multipart>=0.0.9',
     'httpx'                          : 'httpx>=0.24.1',
+    'valkey'                         : 'valkey>=6.0.0',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])

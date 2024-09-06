@@ -6,7 +6,7 @@
 Meerschaum API backend. Start an API instance with `start api`.
 """
 from __future__ import annotations
-import pathlib, os
+import os
 from meerschaum.utils.typing import Dict, Any, Optional
 
 from meerschaum import __version__ as version
@@ -21,7 +21,7 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.utils import get_pipes as _get_pipes
 from meerschaum.config._paths import API_UVICORN_CONFIG_PATH, API_UVICORN_RESOURCES_PATH
 from meerschaum.plugins import _api_plugins
-from meerschaum.utils.warnings import warn
+from meerschaum.utils.warnings import warn, dprint
 from meerschaum.utils.threading import RLock
 
 _locks = {'pipes': RLock(), 'connector': RLock(), 'uvicorn_config': RLock()}
@@ -44,8 +44,8 @@ uv = attempt_import('uv', lazy=False, check_update=CHECK_UPDATE)
     'starlette.responses',
     'multipart',
     'packaging.version',
-    lazy = False,
-    check_update = CHECK_UPDATE,
+    lazy=False,
+    check_update=CHECK_UPDATE,
 )
 (
     typing_extensions,
@@ -53,9 +53,9 @@ uv = attempt_import('uv', lazy=False, check_update=CHECK_UPDATE)
 ) = attempt_import(
     'typing_extensions',
     'uvicorn.workers',
-    lazy = False,
-    check_update = CHECK_UPDATE,
-    venv = None,
+    lazy=False,
+    check_update=CHECK_UPDATE,
+    venv=None,
 )
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
@@ -75,7 +75,7 @@ def get_uvicorn_config() -> Dict[str, Any]:
     with _locks['uvicorn_config']:
         if uvicorn_config is None:
             try:
-                with open(uvicorn_config_path, 'r') as f:
+                with open(uvicorn_config_path, 'r', encoding='utf-8') as f:
                     uvicorn_config = json.load(f)
                 _uvicorn_config = uvicorn_config
             except Exception as e:
@@ -93,12 +93,12 @@ debug = get_uvicorn_config().get('debug', False)
 no_dash = get_uvicorn_config().get('no_dash', False)
 no_auth = get_uvicorn_config().get('no_auth', False)
 private = get_uvicorn_config().get('private', False)
+production = get_uvicorn_config().get('production', False)
 _include_dash = (not no_dash)
 
 connector = None
 def get_api_connector(instance_keys: Optional[str] = None):
     """Create the instance connector."""
-    from meerschaum.utils.debug import dprint
     global connector
     with _locks['connector']:
         if connector is None:
@@ -110,6 +110,40 @@ def get_api_connector(instance_keys: Optional[str] = None):
     if debug:
         dprint(f"API instance connector: {connector}")
     return connector
+
+cache_connector = None
+def get_cache_connector(connector_keys: Optional[str] = None):
+    """Return the `valkey` connector if running in production."""
+    global cache_connector
+    if cache_connector is not None:
+        return cache_connector
+
+    if not production:
+        return None
+
+    enable_valkey_cache = get_config('system', 'experimental', 'valkey_session_cache')
+    if not enable_valkey_cache:
+        return None
+
+    connector_keys = connector_keys or get_config(
+        'system', 'api', 'cache', 'connector',
+        warn=False,
+    )
+    if connector_keys is None:
+        return None
+
+    if not connector_keys.startswith('valkey'):
+        warn(f"Invalid cache connector '{connector_keys}'.")
+        return None
+
+    if cache_connector is None:
+        from meerschaum.connectors.parse import parse_instance_keys
+        cache_connector = parse_instance_keys(connector_keys)
+
+    if debug:
+        dprint(f"Cache connector: {cache_connector}")
+
+    return cache_connector
 
 
 _pipes = None
@@ -138,17 +172,17 @@ def get_pipe(connector_keys, metric_key, location_key, refresh=False):
 
 app = fastapi.FastAPI(
     title = 'Meerschaum API',
-    description = __doc__,
-    version = __version__,
-    contact = {
+    description=__doc__,
+    version=__version__,
+    contact={
         'name': 'Bennett Meares',
         'url': 'https://meerschaum.io',
     },
-    license_info = {
+    license_info={
         'name': 'Apache 2.0',
         'url': 'https://www.apache.org/licenses/LICENSE-2.0.html',
     },
-    open_api_tags = [
+    open_api_tags=[
         {
             'name': 'Pipes',
             'description': 'Access pipes by indexing their keys.',

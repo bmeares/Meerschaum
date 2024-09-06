@@ -7,16 +7,12 @@ Functions for interacting with the Webterm via the dashboard.
 """
 
 import time
-from urllib.parse import urlparse
-from meerschaum.config import get_config
-from meerschaum.api import debug, CHECK_UPDATE, get_api_connector, no_auth
-from meerschaum.api.dash import active_sessions
-from meerschaum.api.dash.users import is_session_authenticated
+from meerschaum.api import CHECK_UPDATE, get_api_connector
+from meerschaum.api.dash.sessions import is_session_authenticated, get_username_from_session
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div
-from meerschaum.utils.typing import WebState, SuccessTuple, List, Tuple, Optional, Any
-from meerschaum.utils.packages import attempt_import, import_html, import_dcc, run_python_package
+from meerschaum.utils.typing import WebState, Tuple, Any
+from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum._internal.term.tools import is_webterm_running
-from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.threading import Thread, RLock
 dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
@@ -30,7 +26,7 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
     Start the webterm and return its iframe.
     """
     session_id = state['session-store.data'].get('session-id', None)
-    username = active_sessions.get(session_id, {}).get('username', None)
+    username = get_username_from_session(session_id)
     if not is_session_authenticated(session_id):
         msg = f"User '{username}' is not authorized to access the webterm."
         return (
@@ -57,24 +53,23 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
     return console_div, [alert_from_success_tuple((False, "Could not start the webterm server."))]
 
 
-
 webterm_procs = {}
 def start_webterm() -> None:
     """
     Start the webterm thread.
     """
-    from meerschaum._internal.entry import entry
     from meerschaum.utils.packages import run_python_package
 
     def run():
+        conn = get_api_connector()
         _ = run_python_package(
             'meerschaum',
-            ['start', 'webterm'],
-            capture_output = True,
-            as_proc = True,
-            store_proc_dict = webterm_procs,
-            store_proc_key = 'process',
-            venv = None,
+            ['start', 'webterm', '-i', str(conn)],
+            capture_output=True,
+            as_proc=True,
+            store_proc_dict=webterm_procs,
+            store_proc_key='process',
+            venv=None,
         )
 
     with _locks['webterm_thread']:

@@ -15,10 +15,10 @@ from meerschaum.utils.warnings import warn, error, info
 from meerschaum.utils.debug import dprint
 
 def register_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> SuccessTuple:
     """
     Register a new pipe.
     A pipe's attributes must be set before registering.
@@ -140,14 +140,14 @@ def edit_pipe(
 
 
 def fetch_pipes_keys(
-        self,
-        connector_keys: Optional[List[str]] = None,
-        metric_keys: Optional[List[str]] = None,
-        location_keys: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        debug: bool = False
-    ) -> Optional[List[Tuple[str, str, Optional[str]]]]:
+    self,
+    connector_keys: Optional[List[str]] = None,
+    metric_keys: Optional[List[str]] = None,
+    location_keys: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False
+) -> Optional[List[Tuple[str, str, Optional[str]]]]:
     """
     Return a list of tuples corresponding to the parameters provided.
 
@@ -634,20 +634,20 @@ def delete_pipe(
 
 
 def get_pipe_data(
-        self,
-        pipe: mrsm.Pipe,
-        select_columns: Optional[List[str]] = None,
-        omit_columns: Optional[List[str]] = None,
-        begin: Union[datetime, str, None] = None,
-        end: Union[datetime, str, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        order: str = 'asc',
-        limit: Optional[int] = None,
-        begin_add_minutes: int = 0,
-        end_add_minutes: int = 0,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union[pd.DataFrame, None]:
+    self,
+    pipe: mrsm.Pipe,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Union[datetime, str, None] = None,
+    end: Union[datetime, str, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    order: str = 'asc',
+    limit: Optional[int] = None,
+    begin_add_minutes: int = 0,
+    end_add_minutes: int = 0,
+    debug: bool = False,
+    **kw: Any
+) -> Union[pd.DataFrame, None]:
     """
     Access a pipe's data from the SQL instance.
 
@@ -746,19 +746,19 @@ def get_pipe_data(
     }
     query = self.get_pipe_data_query(
         pipe,
-        select_columns = select_columns,
-        omit_columns = omit_columns,
-        begin = begin,
-        end = end,
-        params = params,
-        order = order,
-        limit = limit,
-        begin_add_minutes = begin_add_minutes,
-        end_add_minutes = end_add_minutes,
-        debug = debug,
+        select_columns=select_columns,
+        omit_columns=omit_columns,
+        begin=begin,
+        end=end,
+        params=params,
+        order=order,
+        limit=limit,
+        begin_add_minutes=begin_add_minutes,
+        end_add_minutes=end_add_minutes,
+        debug=debug,
         **kw
     )
-    
+
     if is_dask:
         index_col = pipe.columns.get('datetime', None)
         kw['index_col'] = index_col
@@ -769,11 +769,11 @@ def get_pipe_data(
         if typ == 'numeric' and col in dtypes
     ]
     kw['coerce_float'] = kw.get('coerce_float', (len(numeric_columns) == 0))
-    
+
     df = self.read(
         query,
-        dtype = dtypes,
-        debug = debug,
+        dtype=dtypes,
+        debug=debug,
         **kw
     )
     for col in numeric_columns:
@@ -782,28 +782,25 @@ def get_pipe_data(
         df[col] = df[col].apply(attempt_cast_to_numeric)
 
     if self.flavor == 'sqlite':
+        ignore_dt_cols = [
+            col
+            for col, dtype in pipe.dtypes.items()
+            if 'datetime' not in str(dtype)
+        ]
         ### NOTE: We have to consume the iterator here to ensure that datetimes are parsed correctly
         df = (
             parse_df_datetimes(
                 df,
-                ignore_cols = [
-                    col
-                    for col, dtype in pipe.dtypes.items()
-                    if 'datetime' not in str(dtype)
-                ],
-                chunksize = kw.get('chunksize', None),
-                debug = debug,
+                ignore_cols=ignore_dt_cols,
+                chunksize=kw.get('chunksize', None),
+                debug=debug,
             ) if isinstance(df, pd.DataFrame) else (
                 [
                     parse_df_datetimes(
                         c,
-                        ignore_cols = [
-                            col
-                            for col, dtype in pipe.dtypes.items()
-                            if 'datetime' not in str(dtype)
-                        ],
+                        ignore_cols=ignore_dt_cols,
                         chunksize = kw.get('chunksize', None),
-                        debug = debug,
+                        debug=debug,
                     )
                     for c in df
                 ]
@@ -817,21 +814,22 @@ def get_pipe_data(
 
 
 def get_pipe_data_query(
-        self,
-        pipe: mrsm.Pipe,
-        select_columns: Optional[List[str]] = None,
-        omit_columns: Optional[List[str]] = None,
-        begin: Union[datetime, int, str, None] = None,
-        end: Union[datetime, int, str, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        order: str = 'asc',
-        limit: Optional[int] = None,
-        begin_add_minutes: int = 0,
-        end_add_minutes: int = 0,
-        replace_nulls: Optional[str] = None,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union[str, None]:
+    self,
+    pipe: mrsm.Pipe,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Union[datetime, int, str, None] = None,
+    end: Union[datetime, int, str, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    order: Optional[str] = 'asc',
+    sort_datetimes: bool = False,
+    limit: Optional[int] = None,
+    begin_add_minutes: int = 0,
+    end_add_minutes: int = 0,
+    replace_nulls: Optional[str] = None,
+    debug: bool = False,
+    **kw: Any
+) -> Union[str, None]:
     """
     Return the `SELECT` query for retrieving a pipe's data from its instance.
 
@@ -857,9 +855,12 @@ def get_pipe_data_query(
         Additional parameters to filter by.
         See `meerschaum.connectors.sql.build_where`.
 
-    order: Optional[str], default 'asc'
+    order: Optional[str], default None
         The selection order for all of the indices in the query.
         If `None`, omit the `ORDER BY` clause.
+
+    sort_datetimes: bool, default False
+        Alias for `order='desc'`.
 
     limit: Optional[int], default None
         If specified, limit the number of rows retrieved to this value.
@@ -883,7 +884,6 @@ def get_pipe_data_query(
     -------
     A `SELECT` query to retrieve a pipe's data.
     """
-    import json
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import items_str
     from meerschaum.utils.sql import sql_item_name, dateadd_str
@@ -898,6 +898,9 @@ def get_pipe_data_query(
     if omit_columns:
         select_columns = [col for col in select_columns if col not in omit_columns]
 
+    if order is None and sort_datetimes:
+        order = 'desc'
+
     if begin == '':
         begin = pipe.get_sync_time(debug=debug)
         backtrack_interval = pipe.get_backtrack_interval(debug=debug)
@@ -906,7 +909,7 @@ def get_pipe_data_query(
 
     cols_names = [sql_item_name(col, self.flavor, None) for col in select_columns]
     select_cols_str = (
-        'SELECT\n'
+        'SELECT\n    '
         + ',\n    '.join(
             [
                 (
@@ -950,23 +953,23 @@ def get_pipe_data_query(
                 warn(
                     f"No datetime could be determined for {pipe}."
                     + "\n    Ignoring begin and end...",
-                    stack = False,
+                    stack=False,
                 )
                 begin, end = None, None
             else:
                 warn(
                     f"A datetime wasn't specified for {pipe}.\n"
                     + f"    Using column \"{_dt}\" for datetime bounds...",
-                    stack = False,
+                    stack=False,
                 )
 
     is_dt_bound = False
     if begin is not None and _dt in existing_cols:
         begin_da = dateadd_str(
-            flavor = self.flavor,
-            datepart = 'minute',
-            number = begin_add_minutes,
-            begin = begin
+            flavor=self.flavor,
+            datepart='minute',
+            number=begin_add_minutes,
+            begin=begin,
         )
         where += f"{dt} >= {begin_da}" + (" AND " if end is not None else "")
         is_dt_bound = True
@@ -975,10 +978,10 @@ def get_pipe_data_query(
         if 'int' in str(type(end)).lower() and end == begin:
             end += 1
         end_da = dateadd_str(
-            flavor = self.flavor,
-            datepart = 'minute',
-            number = end_add_minutes,
-            begin = end
+            flavor=self.flavor,
+            datepart='minute',
+            number=end_add_minutes,
+            begin=end
         )
         where += f"{dt} < {end_da}"
         is_dt_bound = True
@@ -1011,9 +1014,12 @@ def get_pipe_data_query(
 
     if isinstance(limit, int):
         if self.flavor == 'mssql':
-            query = f'SELECT TOP {limit} ' + query[len("SELECT *"):]
+            query = f'SELECT TOP {limit}\n' + query[len("SELECT "):]
         elif self.flavor == 'oracle':
-            query = f"SELECT * FROM (\n  {query}\n)\nWHERE ROWNUM = 1"
+            query = (
+                f"SELECT * FROM (\n  {query}\n)\n"
+                + f"WHERE ROWNUM IN ({', '.join([str(i) for i in range(1, limit+1)])})"
+            )
         else:
             query += f"\nLIMIT {limit}"
     
@@ -1107,18 +1113,18 @@ def get_pipe_attributes(
 
 
 def sync_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        df: Union[pd.DataFrame, str, Dict[Any, Any], None] = None,
-        begin: Optional[datetime] = None,
-        end: Optional[datetime] = None,
-        chunksize: Optional[int] = -1,
-        check_existing: bool = True,
-        blocking: bool = True,
-        debug: bool = False,
-        _check_temporary_tables: bool = True,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    df: Union[pd.DataFrame, str, Dict[Any, Any], None] = None,
+    begin: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    chunksize: Optional[int] = -1,
+    check_existing: bool = True,
+    blocking: bool = True,
+    debug: bool = False,
+    _check_temporary_tables: bool = True,
+    **kw: Any
+) -> SuccessTuple:
     """
     Sync a pipe using a database connection.
 
@@ -1191,9 +1197,9 @@ def sync_pipe(
     if not isinstance(df, pd.DataFrame):
         df = pipe.enforce_dtypes(
             df,
-            chunksize = chunksize,
-            safe_copy = kw.get('safe_copy', False),
-            debug = debug,
+            chunksize=chunksize,
+            safe_copy=kw.get('safe_copy', False),
+            debug=debug,
         )
 
     ### if table does not exist, create it with indices
@@ -1243,8 +1249,8 @@ def sync_pipe(
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
             df,
-            chunksize = chunksize,
-            debug = debug,
+            chunksize=chunksize,
+            debug=debug,
             **kw
         ) if check_existing else (df, None, df)
     )
@@ -1262,31 +1268,6 @@ def sync_pipe(
         kw.pop('if_exists')
     if 'name' in kw:
         kw.pop('name')
-
-    ### Account for first-time syncs of JSON columns.
-    unseen_json_cols = get_json_cols(unseen_df)
-    update_json_cols = get_json_cols(update_df) if update_df is not None else []
-    json_cols = list(set(unseen_json_cols + update_json_cols))
-    existing_json_cols = [col for col, typ in pipe.dtypes.items() if typ == 'json']
-    new_json_cols = [col for col in json_cols if col not in existing_json_cols]
-    if new_json_cols:
-        pipe.dtypes.update({col: 'json' for col in json_cols})
-        if not pipe.temporary:
-            edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
-            if not edit_success:
-                warn(f"Unable to update JSON dtypes for {pipe}:\n{edit_msg}")
-
-    unseen_numeric_cols = get_numeric_cols(unseen_df)
-    update_numeric_cols = get_numeric_cols(update_df) if update_df is not None else []
-    numeric_cols = list(set(unseen_numeric_cols + update_numeric_cols))
-    existing_numeric_cols = [col for col, typ in pipe.dtypes.items() if typ == 'numeric']
-    new_numeric_cols = [col for col in numeric_cols if col not in existing_numeric_cols]
-    if new_numeric_cols:
-        pipe.dtypes.update({col: 'numeric' for col in numeric_cols})
-        if not pipe.temporary:
-            edit_success, edit_msg = pipe.edit(interactive=False, debug=debug)
-            if not edit_success:
-                warn(f"Unable to update NUMERIC dtypes for {pipe}:\n{edit_msg}")
 
     ### Insert new data into Pipe's table.
     unseen_kw = copy.deepcopy(kw)
@@ -1326,16 +1307,16 @@ def sync_pipe(
         self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
-            instance = pipe.instance_keys,
-            columns = {
+            instance=pipe.instance_keys,
+            columns={
                 ix_key: ix
                 for ix_key, ix in pipe.columns.items()
                 if ix and ix in update_df.columns
             },
-            dtypes = pipe.dtypes,
-            target = temp_target,
-            temporary = True,
-            parameters = {
+            dtypes=pipe.dtypes,
+            target=temp_target,
+            temporary=True,
+            parameters={
                 'schema': self.internal_schema,
                 'hypertable': False,
             },
@@ -1352,20 +1333,20 @@ def sync_pipe(
             temp_target, 
             self,
             join_cols,
-            upsert = upsert,
-            schema = self.get_pipe_schema(pipe),
-            patch_schema = self.internal_schema,
-            datetime_col = pipe.columns.get('datetime', None),
-            debug = debug,
+            upsert=upsert,
+            schema=self.get_pipe_schema(pipe),
+            patch_schema=self.internal_schema,
+            datetime_col=pipe.columns.get('datetime', None),
+            debug=debug,
         )
         update_success = all(
             self.exec_queries(update_queries, break_on_error=True, rollback=True, debug=debug)
         )
         self._log_temporary_tables_creation(
             temp_target,
-            ready_to_drop = True,
-            create = (not pipe.temporary),
-            debug = debug,
+            ready_to_drop=True,
+            create=(not pipe.temporary),
+            debug=debug,
         )
         if not update_success:
             warn(f"Failed to apply update to {pipe}.")
@@ -1406,16 +1387,16 @@ def sync_pipe(
 
 
 def sync_pipe_inplace(
-        self,
-        pipe: 'mrsm.Pipe',
-        params: Optional[Dict[str, Any]] = None,
-        begin: Optional[datetime] = None,
-        end: Optional[datetime] = None,
-        chunksize: Optional[int] = -1,
-        check_existing: bool = True,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    pipe: 'mrsm.Pipe',
+    params: Optional[Dict[str, Any]] = None,
+    begin: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    chunksize: Optional[int] = -1,
+    check_existing: bool = True,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     If a pipe's connector is the same as its instance connector,
     it's more efficient to sync the pipe in-place rather than reading data into Pandas.
@@ -1455,13 +1436,13 @@ def sync_pipe_inplace(
     """
     if self.flavor == 'duckdb':
         return pipe.sync(
-            params = params,
-            begin = begin,
-            end = end,
-            chunksize = chunksize,
-            check_existing = check_existing,
-            debug = debug,
-            _inplace = False,
+            params=params,
+            begin=begin,
+            end=end,
+            chunksize=chunksize,
+            check_existing=check_existing,
+            debug=debug,
+            _inplace=False,
             **kw
         )
     from meerschaum.utils.sql import (
@@ -1627,45 +1608,39 @@ def sync_pipe_inplace(
 
     backtrack_def = self.get_pipe_data_query(
         pipe,
-        begin = begin,
-        end = end,
-        begin_add_minutes = 0,
-        end_add_minutes = 1,
-        params = params,
-        debug = debug,
-        order = None,
+        begin=begin,
+        end=end,
+        begin_add_minutes=0,
+        end_add_minutes=1,
+        params=params,
+        debug=debug,
+        order=None,
     )
 
-    select_backtrack_query = format_cte_subquery(
-        backtrack_def,
-        self.flavor,
-        sub_name = 'backtrack_def',
-    )
     create_backtrack_query = get_create_table_query(
         backtrack_def,
         temp_tables['backtrack'],
         self.flavor,
-        schema = internal_schema,
+        schema=internal_schema,
     )
     (create_backtrack_success, create_backtrack_msg), create_backtrack_results = session_execute(
         session,
         create_backtrack_query,
-        with_results = True,
-        debug = debug,
+        with_results=True,
+        debug=debug,
     ) if not upsert else (True, "Success"), None
 
     if not create_backtrack_success:
         _ = clean_up_temp_tables()
         return create_backtrack_success, create_backtrack_msg
-    bactrack_count = create_backtrack_results[0].rowcount if create_backtrack_results else 0
 
     backtrack_cols_types = get_table_cols_types(
         temp_tables['backtrack'],
-        connectable = connectable,
-        flavor = self.flavor,
-        schema = internal_schema,
-        database = database,
-        debug = debug,
+        connectable=connectable,
+        flavor=self.flavor,
+        schema=internal_schema,
+        database=database,
+        debug=debug,
     ) if not upsert else new_cols_types
 
     common_cols = [col for col in new_cols if col in backtrack_cols_types]
@@ -1691,7 +1666,7 @@ def sync_pipe_inplace(
     )
 
     select_delta_query = (
-        f"SELECT\n"
+        "SELECT\n"
         + null_replace_new_cols_str + "\n"
         + f"\nFROM {temp_table_names['new']}\n"
         + f"LEFT OUTER JOIN {temp_table_names['backtrack']}\nON\n"
@@ -1721,12 +1696,12 @@ def sync_pipe_inplace(
         select_delta_query,
         temp_tables['delta'],
         self.flavor,
-        schema = internal_schema,
+        schema=internal_schema,
     )
     create_delta_success, create_delta_msg = session_execute(
         session,
         create_delta_query,
-        debug = debug,
+        debug=debug,
     ) if not upsert else (True, "Success")
     if not create_delta_success:
         _ = clean_up_temp_tables()
@@ -1735,10 +1710,10 @@ def sync_pipe_inplace(
     delta_cols_types = get_table_cols_types(
         temp_tables['delta'],
         connectable = connectable,
-        flavor = self.flavor,
-        schema = internal_schema,
-        database = database,
-        debug = debug,
+        flavor=self.flavor,
+        schema=internal_schema,
+        database=database,
+        debug=debug,
     ) if not upsert else new_cols_types
 
     ### This is a weird bug on SQLite.
@@ -2062,14 +2037,14 @@ def pipe_exists(
 
 
 def get_pipe_rowcount(
-        self,
-        pipe: mrsm.Pipe,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        remote: bool = False,
-        debug: bool = False
-    ) -> Union[int, None]:
+    self,
+    pipe: mrsm.Pipe,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    remote: bool = False,
+    debug: bool = False
+) -> Union[int, None]:
     """
     Get the rowcount for a pipe in accordance with given parameters.
 
@@ -2411,11 +2386,11 @@ def get_pipe_columns_types(
 
 
 def get_add_columns_queries(
-        self,
-        pipe: mrsm.Pipe,
-        df: Union[pd.DataFrame, Dict[str, str]],
-        debug: bool = False,
-    ) -> List[str]:
+    self,
+    pipe: mrsm.Pipe,
+    df: Union[pd.DataFrame, Dict[str, str]],
+    debug: bool = False,
+) -> List[str]:
     """
     Add new null columns of the correct type to a table from a dataframe.
 

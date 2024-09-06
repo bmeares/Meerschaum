@@ -9,34 +9,32 @@ Functions for running the Docker Compose stack
 from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Union
 
+
 def stack(
-        action: Optional[List[str]] = None,
-        sysargs: Optional[List[str]] = None,
-        sub_args: Optional[List[str]] = None,
-        yes: bool = False,
-        noask: bool = False,
-        force: bool = False,
-        debug: bool = False,
-        _capture_output: bool = False,
-        **kw: Any
-    ) -> Union[SuccessTuple, 'subprocess.Popen']:
+    action: Optional[List[str]] = None,
+    sysargs: Optional[List[str]] = None,
+    sub_args: Optional[List[str]] = None,
+    yes: bool = False,
+    noask: bool = False,
+    force: bool = False,
+    debug: bool = False,
+    _capture_output: bool = False,
+    **kw: Any
+) -> Union[SuccessTuple, 'subprocess.Popen']:
     """
     Control the Meerschaum stack with Docker Compose.
     Usage: `stack {command}`
-    
+
     Command: action[0]: default 'up'
         Docker Compose command to run. E.g. 'config' will print Docker Compose configuration
     """
     import subprocess
-    import contextlib
-    import io
     import os
     import sys
     import pathlib
     import meerschaum.config.stack
     from meerschaum.config.stack import NECESSARY_FILES, write_stack
     from meerschaum.config._paths import STACK_COMPOSE_PATH
-    from meerschaum.utils.prompt import yes_no
     import meerschaum.config
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.packages import (
@@ -47,9 +45,9 @@ def stack(
     from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.formatting import ANSI
     from meerschaum.utils.misc import is_docker_available
     from meerschaum.config._read_config import search_and_substitute_config
+    from meerschaum.utils.prompt import yes_no
 
     stack_env_dict = apply_patch_to_config(
         os.environ.copy(),
@@ -81,7 +79,7 @@ def stack(
             break
     if bootstrap:
         write_stack(debug=debug)
-    else: 
+    else:
         sync_files(['stack'])
 
     ### define project name when starting containers
@@ -91,7 +89,7 @@ def stack(
             'stack', 'project_name', patch=True, substitute=True,
         )
     ]
-    
+
     ### Debug list used to include --log-level DEBUG, but the flag is not supported on Windows (?)
     debug_list = []
 
@@ -102,7 +100,7 @@ def stack(
         print(
             "To start the Docker service, run `sudo systemctl start docker` or `sudo dockerd`.\n"
             + "On Windows or MacOS, make sure Docker Desktop is running.",
-            file = sys.stderr,
+            file=sys.stderr,
         )
         return False, "Failed to connect to the Docker engine."
 
@@ -115,7 +113,7 @@ def stack(
 
     if not has_builtin_compose:
         _compose_venv = 'mrsm'
-        compose = attempt_import('compose', lazy=False, venv=_compose_venv, debug=debug)
+        _ = attempt_import('compose', lazy=False, venv=_compose_venv, debug=debug)
 
         ### If docker-compose is installed globally, don't use the `mrsm` venv.
         if not venv_contains_package('compose', _compose_venv):
@@ -128,6 +126,13 @@ def stack(
         if not venv_contains_package('yaml', _compose_venv):
             if not pip_install('pyyaml', venv=_compose_venv, debug=debug):
                 warn(f"Unable to install `pyyaml` into venv '{_compose_venv}'.")
+
+    if 'down' in sysargs and '-v' in sysargs:
+        if not yes_no(
+            "Are you sure you want to drop volumes?\n    This cannot be undone!",
+            default='n',
+        ):
+            return False, "Nothing was dropped."
 
     cmd_list = [
         _arg

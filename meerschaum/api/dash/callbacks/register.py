@@ -8,7 +8,8 @@ Callbacks for the registration page.
 
 import uuid
 from meerschaum.api import get_api_connector, endpoints, CHECK_UPDATE
-from meerschaum.api.dash import dash_app, debug, active_sessions
+from meerschaum.api.dash import dash_app, debug
+from meerschaum.api.dash.sessions import set_session
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum.core import User
@@ -57,7 +58,7 @@ def validate_email(email):
 @dash_app.callback(
     Output('session-store', 'data'),
     Output('register-username-input', 'className'),
-    Output('location', 'pathname'),
+    Output('mrsm-location', 'pathname'),
     Input('register-username-input', 'n_submit'),
     Input('register-password-input', 'n_submit'),
     Input('register-button', 'n_clicks'),
@@ -66,13 +67,16 @@ def validate_email(email):
     State("register-email-input", "value"),
 )
 def register_button_click(
-        username_submit,
-        password_submit,
-        n_clicks,
-        username,
-        password,
-        email,
-    ):
+    username_submit,
+    password_submit,
+    n_clicks,
+    username,
+    password,
+    email,
+):
+    """
+    Register the user and redirect to the console.
+    """
     if not n_clicks:
         raise PreventUpdate
     form_class = 'form-control'
@@ -93,9 +97,9 @@ def register_button_click(
         form_class += ' is-invalid'
         return {}, form_class, dash.no_update
     try:
-        token_dict = login({'username': username, 'password': password})
+        _ = login({'username': username, 'password': password})
         session_data = {'session-id': str(uuid.uuid4())}
-        active_sessions[session_data['session-id']] = {'username': username}
+        set_session(session_data['session-id'], {'username': username})
     except HTTPException as e:
         form_class += ' is-invalid'
         session_data = None

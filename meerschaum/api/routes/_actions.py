@@ -7,28 +7,13 @@ Execute Meerschaum Actions via the API
 """
 
 from __future__ import annotations
-import asyncio
-import traceback
-import shlex
-from functools import partial
-from datetime import datetime, timezone
 
-from fastapi import WebSocket, WebSocketDisconnect
-from websockets.exceptions import ConnectionClosedError
-
-from meerschaum.utils.misc import generate_password
-from meerschaum.jobs import Job
-from meerschaum.utils.warnings import warn
-from meerschaum.utils.typing import SuccessTuple, Union, List, Dict, Any
+from meerschaum.utils.typing import SuccessTuple, List, Dict, Any
 from meerschaum.api import (
     fastapi, app, endpoints, get_api_connector, debug, manager, private, no_auth
 )
 from meerschaum.actions import actions
-import meerschaum.core
 from meerschaum.config import get_config
-from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs, parse_arguments
-from meerschaum.api.routes._jobs import clean_sysargs
-from meerschaum.jobs._Job import StopMonitoringLogs
 
 actions_endpoint = endpoints['actions']
 
@@ -82,7 +67,7 @@ def do_action_legacy(
     ----------
     action: str
         The action to perform.
-        
+
     keywords: Dict[str, Any]
         The keywords dictionary to pass to the action.
 
@@ -91,7 +76,6 @@ def do_action_legacy(
     A `SuccessTuple`.
     """
     if curr_user is not None and curr_user.type != 'admin':
-        from meerschaum.config import get_config
         allow_non_admin = get_config(
             'system', 'api', 'permissions', 'actions', 'non_admin', patch=True
         )
@@ -103,7 +87,7 @@ def do_action_legacy(
                 + "and search for 'permissions'. "
                 + "\nUnder the keys 'api:permissions:actions', "
                 + "you can allow non-admin users to perform actions."
-        )
+            )
 
     if action not in actions:
         return False, f"Invalid action '{action}'."

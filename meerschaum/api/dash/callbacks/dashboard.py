@@ -7,18 +7,21 @@ Callbacks for the main dashboard.
 """
 
 from __future__ import annotations
-import sys, textwrap, json, datetime, uuid
+
+import textwrap
+import json
+import uuid
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
-from meerschaum.config import get_config
-from meerschaum.config.static import _static_config
 from meerschaum.utils.typing import List, Optional, Any, Tuple
 from meerschaum.api import get_api_connector, endpoints, no_auth, CHECK_UPDATE
-from meerschaum.api.dash import (
-    dash_app, debug, pipes, _get_pipes,
-    active_sessions, authenticated_sessions, unauthenticated_sessions,
+from meerschaum.api.dash import dash_app, debug
+from meerschaum.api.dash.sessions import (
+    is_session_active,
+    delete_session,
+    set_session,
 )
-from meerschaum.api.dash.users import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import get_pipes_cards, pipe_from_ctx, accordion_items_from_pipe
@@ -30,21 +33,14 @@ from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.components import (
     alert_from_success_tuple, console_div, build_cards_grid,
 )
-from meerschaum.api.dash.actions import execute_action, stop_action
-import meerschaum.api.dash.pages as pages
+from meerschaum.api.dash import pages
 from meerschaum.utils.typing import Dict
-from meerschaum.utils.debug import dprint
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
-from meerschaum.utils.misc import (
-    string_to_dict, get_connector_labels, json_serialize_datetime, filter_keywords,
-    flatten_list,
-)
+from meerschaum.utils.misc import filter_keywords, flatten_list
 from meerschaum.utils.yaml import yaml
 from meerschaum.actions import get_subactions, actions
-from meerschaum._internal.arguments._parser import get_arguments_triggers, parser
+from meerschaum._internal.arguments._parser import parser
 from meerschaum.connectors.sql._fetch import set_pipe_query
-import meerschaum as mrsm
-import json
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
@@ -101,6 +97,7 @@ _paths = {
     ''        : pages.dashboard.layout,
     'plugins' : pages.plugins.layout,
     'register': pages.register.layout,
+    'pipes'   : pages.pipes.layout,
 }
 _required_login = {''}
 
@@ -108,21 +105,21 @@ _required_login = {''}
 @dash_app.callback(
     Output('page-layout-div', 'children'),
     Output('session-store', 'data'),
-    Input('location', 'pathname'),
+    Input('mrsm-location', 'pathname'),
     Input('session-store', 'data'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
 )
 def update_page_layout_div(
-        pathname: str, 
-        session_store_data: Dict[str, Any],
-        location_href: str,
-    ) -> Tuple[List[Any], Dict[str, Any]]:
+    pathname: str,
+    session_store_data: Dict[str, Any],
+    location_href: str,
+) -> Tuple[List[Any], Dict[str, Any]]:
     """
     Route the user to the correct page.
 
     Parameters
     ----------
-    pathname: str :
+    pathname: str
         The path in the browser.
         
     session_store_data: Dict[str, Any]:
@@ -132,20 +129,19 @@ def update_page_layout_div(
     -------
     A tuple of the page layout and new session store data.
     """
-    ctx = dash.callback_context
     dash_endpoint = endpoints['dash']
     try:
-        session_id = session_store_data.get('session-id', None) 
+        session_id = session_store_data.get('session-id', None)
     except AttributeError:
         session_id = None
 
     ### Bypass login if `--no-auth` is specified.
-    if session_id not in active_sessions and no_auth:
+    if not is_session_active(session_id) and no_auth:
         session_store_data['session-id'] = str(uuid.uuid4())
-        active_sessions[session_store_data['session-id']] = {'username': 'no-auth'}
+        set_session(session_id, {'username': 'no-auth'})
 
         ### Sometimes the href is an empty string, so store it here for later.
-        session_store_data['location.href'] = location_href
+        session_store_data['mrsm-location.href'] = location_href
         session_store_to_return = session_store_data
     else:
         session_store_to_return = dash.no_update
@@ -175,7 +171,7 @@ def update_page_layout_div(
         path_str
         if no_auth or path_str not in _required_login else (
             path_str
-            if session_id in active_sessions
+            if is_session_active(session_id)
             else 'login'
         )
     )
@@ -194,7 +190,7 @@ def update_page_layout_div(
     Input('get-plugins-button', 'n_clicks'),
     Input('get-users-button', 'n_clicks'),
     Input('get-graphs-button', 'n_clicks'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
     State('session-store', 'data'),
     State('webterm-div', 'children'),
     *keys_state,
@@ -205,7 +201,6 @@ def update_content(*args):
     and execute the appropriate function.
     """
     ctx = dash.callback_context
-    location_href = ctx.states['session-store.data'].get('location.href', None)
     session_id = ctx.states['session-store.data'].get('session-id', None)
     authenticated = is_session_authenticated(str(session_id))
 
@@ -237,9 +232,6 @@ def update_content(*args):
         'get-pipes-button': 1,
         'get-jobs-button': 2,
     }
-    
-    ### NOTE: stop the running action if it exists
-    stop_action(ctx.states)
 
     content, alerts = triggers[trigger](
         ctx.states,
@@ -311,9 +303,9 @@ dash_app.clientside_callback(
         return url;
     }
     """,
-    Output('location', 'href'),
+    Output('mrsm-location', 'href'),
     Input('go-button', 'n_clicks'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
     State('connector-keys-dropdown', 'value'),
     State('metric-keys-dropdown', 'value'),
     State('location-keys-dropdown', 'value'),
@@ -490,12 +482,12 @@ def update_flags(input_flags_dropdown_values, n_clicks, input_flags_texts):
     *keys_state
 )
 def update_keys_options(
-        connector_keys: Optional[List[str]],
-        metric_keys: Optional[List[str]],
-        location_keys: Optional[List[str]],
-        instance_keys: Optional[str],
-        *keys
-    ):
+    connector_keys: Optional[List[str]],
+    metric_keys: Optional[List[str]],
+    location_keys: Optional[List[str]],
+    instance_keys: Optional[str],
+    *keys
+):
     """
     Update the keys dropdown menus' options.
     """
@@ -543,9 +535,9 @@ def update_keys_options(
         _keys = fetch_pipes_keys(
             'registered',
             get_web_connector(ctx.states),
-            connector_keys = _ck_filter,
-            metric_keys = _mk_filter,
-            location_keys = _lk_filter,
+            connector_keys=_ck_filter,
+            metric_keys=_mk_filter,
+            location_keys=_lk_filter,
         )
     except Exception as e:
         instance_alerts += [alert_from_success_tuple((False, str(e)))]
@@ -637,7 +629,7 @@ dash_app.clientside_callback(
         return url;
     }
     """,
-    Output('location', 'href'),
+    Output('mrsm-location', 'href'),
     Input('instance-select', 'value'),
 )
 
@@ -710,10 +702,11 @@ dash_app.clientside_callback(
         return url;
     }
     """,
-    Output('location', 'href'),
+    Output('mrsm-location', 'href'),
     Input('console-pre', 'children'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
 )
+
 
 @dash_app.callback(
     Output("download-dataframe-csv", "data"),
@@ -736,7 +729,7 @@ def download_pipe_csv(n_clicks):
     filename = str(pipe.target) + f" {begin} - {end}.csv"
     try:
         df = pipe.get_data(begin=begin, end=end, debug=debug)
-    except Exception as e:
+    except Exception:
         df = None
     if df is not None:
         return dcc.send_data_frame(df.to_csv, filename, index=False)
@@ -749,6 +742,9 @@ def download_pipe_csv(n_clicks):
     State('session-store', 'data'),
 )
 def update_pipe_accordion(item, session_store_data):
+    """
+    Expand the pipe accordion item and lazy load.
+    """
     if item is None:
         raise PreventUpdate
 
@@ -918,7 +914,7 @@ dash_app.clientside_callback(
     """,
     Output('content-div-right', 'children'),
     Input({'type': 'manage-pipe-button', 'index': ALL, 'action': ALL}, 'n_clicks'),
-    State('location', 'href'),
+    State('mrsm-location', 'href'),
 )
 
 @dash_app.callback(
@@ -948,15 +944,15 @@ def toggle_navbar_collapse(n_clicks: Optional[int], is_open: bool) -> bool:
 
 
 @dash_app.callback(
-    Output('location', 'pathname'),
+    Output('mrsm-location', 'pathname'),
     Output('session-store', 'data'),
     Input("sign-out-button", "n_clicks"),
     State('session-store', 'data'),
 )
 def sign_out_button_click(
-        n_clicks: Optional[int],
-        session_store_data: Dict[str, Any],
-    ):
+    n_clicks: Optional[int],
+    session_store_data: Dict[str, Any],
+):
     """
     When the sign out button is clicked, remove the session data and redirect to the login page.
     """
@@ -964,9 +960,7 @@ def sign_out_button_click(
         raise PreventUpdate
     session_id = session_store_data.get('session-id', None)
     if session_id:
-        _ = active_sessions.pop(session_id, None)
-        _ = authenticated_sessions.pop(session_id, None)
-        _ = unauthenticated_sessions.pop(session_id, None)
+        delete_session(session_id)
     return endpoints['dash'], {}
 
 

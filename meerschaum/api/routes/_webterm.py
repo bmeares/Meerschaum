@@ -8,10 +8,9 @@ Routes to the Webterm proxy.
 
 import asyncio
 from meerschaum.utils.typing import Optional
-from meerschaum.api import app, no_auth, manager, endpoints
+from meerschaum.api import app, endpoints
 from meerschaum.utils.packages import attempt_import
-from meerschaum.api.dash import active_sessions
-from meerschaum.api.dash.users import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated
 fastapi, fastapi_responses = attempt_import('fastapi', 'fastapi.responses')
 import starlette
 httpx = attempt_import('httpx')
@@ -25,9 +24,9 @@ PlainTextResponse = fastapi_responses.PlainTextResponse
 
 @app.get(endpoints['webterm'], tags=["Webterm"])
 async def get_webterm(
-        request: Request,
-        s: Optional[str] = None,
-    ) -> HTMLResponse:
+    request: Request,
+    s: Optional[str] = None,
+) -> HTMLResponse:
     """
     Get the main HTML template for the Webterm.
     """

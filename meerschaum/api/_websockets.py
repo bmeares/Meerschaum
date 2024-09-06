@@ -6,13 +6,13 @@
 Implement WebSockets for the Meerschaum API via FastAPI.
 """
 
-import time, uuid
 from datetime import datetime, timezone
+
 from meerschaum.api import (
-    app, get_api_connector, get_uvicorn_config, debug, fastapi, endpoints
+    app,
+    fastapi,
+    endpoints,
 )
-from meerschaum.api.dash.users import is_session_authenticated
-from meerschaum.utils.typing import Optional
 
 _websocket_endpoint = endpoints['websocket']
 
@@ -28,6 +28,7 @@ async def websocket_endpoint(
     """
     Communicate with the Web Interface over a websocket.
     """
+    from meerschaum.api.dash.sessions import is_session_authenticated
     await websocket.accept()
     try:
         initial_data = await websocket.receive_json()

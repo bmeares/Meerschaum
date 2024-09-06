@@ -14,7 +14,25 @@ To use your custom connector type as an instance connector, implement the follow
 ??? tip "Using the `params` Filter"
     Methods which take the `params` argument ([`get_pipe_data()`](#get_pipe_data), [`get_sync_time()`](#get_sync_time), [`get_backtrack_data()`](#get_backtrack_data)) behave similarly to the filters applied to [`fetch_pipes_keys`](#fetch_pipes_keys).
 
-    See the definition for [`MongoDBConnector.build_query()`](https://github.com/bmeares/mongodb-connector/blob/main/plugins/mongodb-connector/_mongo.py#L16) for an example of how to adapt the `params` filter to your connector's query specification.
+    The easiest way to support `params` is with [meerschaum.utils.dataframe.query_df()](https://docs.meerschaum.io/meerschaum/utils/dataframe.html#query_df):
+
+    ```python
+    from meerschaum.utils.dataframe import query_df, parse_df_datetimes
+    df = parse_df_datetimes([
+        {'ts': '2024-01-01 00:00:00', 'color': 'red'},
+        {'ts': '2024-02-02 02:00:00', 'color': 'blue'},
+        {'ts': '2024-03-03 03:00:00', 'color': 'green'},
+    ])
+    print(query_df(df, {'color': 'red'}))
+    #           ts color
+    # 0 2024-01-01   red 
+    print(query_df(df, begin='2024-02-01', datetime_column='ts'))
+    #                    ts  color
+    # 1 2024-02-02 02:00:00   blue
+    # 2 2024-03-03 03:00:00  green
+    ```
+
+    For advanced implementations, see the definition for [`MongoDBConnector.build_query()`](https://github.com/bmeares/mongodb-connector/blob/main/plugins/mongodb-connector/_mongo.py#L16) for an example of how to adapt the `params` filter to your connector's query specification.
 
     ```python
     >>> build_query({'a': 1})
@@ -38,14 +56,14 @@ To use your custom connector type as an instance connector, implement the follow
 
     ```python
     def get_backtrack_data(
-            self,
-            pipe: mrsm.Pipe,
-            backtrack_minutes: int = 0,
-            begin: Union[datetime, int, None] = None,
-            params: Optional[Dict[str, Any]] = None,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> 'pd.DataFrame':
+        self,
+        pipe: mrsm.Pipe,
+        backtrack_minutes: int = 0,
+        begin: Union[datetime, int, None] = None,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> 'pd.DataFrame':
         """
         Return the most recent interval of data leading up to `begin` (defaults to the sync time).
 
@@ -109,11 +127,11 @@ The attributes row of a pipe includes the pipe's keys (immutable) and parameters
 ??? example "`#!python def register_pipe():`"
     ```python
     def register_pipe(
-            self,
-            pipe: mrsm.Pipe,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> SuccessTuple:
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
         """
         Insert the pipe's attributes into the internal `pipes` table.
 
@@ -128,7 +146,7 @@ The attributes row of a pipe includes the pipe's keys (immutable) and parameters
         """
         attributes = {
             'connector_keys': str(pipe.connector_keys),
-            'metric_key': str(pipe.connector_key),
+            'metric_key': str(pipe.metric_key),
             'location_key': str(pipe.location_key),
             'parameters': pipe._attributes.get('parameters', {}),
         }
@@ -147,11 +165,11 @@ Note that a pipe's attributes must be JSON-serializable, so objects like MongoDB
 ??? example "`#!python def get_pipe_attributes():`"
     ```python
     def get_pipe_attributes(
-            self,
-            pipe: mrsm.Pipe,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> Dict[str, Any]:
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> Dict[str, Any]:
         """
         Return the pipe's document from the internal `pipes` collection.
 
@@ -165,7 +183,7 @@ Note that a pipe's attributes must be JSON-serializable, so objects like MongoDB
         The document that matches the keys of the pipe.
         """
         query = {
-            'connector_keys': str(pipe.connector_keys,
+            'connector_keys': str(pipe.connector_keys),
             'metric_key': str(pipe.metric_key),
             'location_key': str(pipe.location_key),
         }
@@ -182,11 +200,11 @@ Return the ID tied to the pipe's connector, metric, and location keys.
 ??? example "`#!python def get_pipe_id():`"
     ```python
     def get_pipe_id(
-            self,
-            pipe: mrsm.Pipe,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> Union[str, int, None]:
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> Union[str, int, None]:
         """
         Return the `_id` for the pipe if it exists.
 
@@ -216,11 +234,11 @@ Update the `parameters` dictionary of a pipe's registration.
 ??? example "`#!python def edit_pipe():`"
     ```python
     def edit_pipe(
-            self,
-            pipe: mrsm.Pipe,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> SuccessTuple:
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
         """
         Edit the attributes of the pipe.
 
@@ -252,11 +270,11 @@ Delete a pipe's registration from the `pipes` table.
 ??? example "`#!python def delete_pipe():`"
     ```python
     def delete_pipe(
-            self,
-            pipe: mrsm.Pipe,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> SuccessTuple:
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
         """
         Delete a pipe's registration from the `pipes` collection.
 
@@ -294,14 +312,14 @@ The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/mis
 ??? example "`#!python def fetch_pipes_keys():`"
     ```python
     def fetch_pipes_keys(
-            self,
-            connector_keys: Optional[List[str]] = None,
-            metric_keys: Optional[List[str]] = None,
-            location_keys: Optional[List[str]] = None,
-            tags: Optional[List[str]] = None,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> List[Tuple[str, str, str]]:
+        self,
+        connector_keys: Optional[List[str]] = None,
+        metric_keys: Optional[List[str]] = None,
+        location_keys: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> List[Tuple[str, str, str]]:
         """
         Return a list of tuples for the registered pipes' keys according to the provided filters.
 
@@ -374,11 +392,11 @@ Return `True` if the target table exists and has data.
 ??? example "`#!python def pipe_exists():`"
     ```python
     def pipe_exists(
-            self,
-            pipe: mrsm.Pipe,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> bool:
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> bool:
         """
         Check whether a pipe's target table exists.
 
@@ -404,11 +422,11 @@ Drop the pipe's target table.
 ??? example "`#!python def drop_pipe():`"
     ```python
     def drop_pipe(
-            self,
-            pipe: mrsm.Pipe,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> SuccessTuple:
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
         """
         Drop a pipe's collection if it exists.
 
@@ -441,12 +459,12 @@ You may use the built-in method [`pipe.filter_existing()`](https://docs.meerscha
 ??? example "`#!python def sync_pipe():`"
     ```python
     def sync_pipe(
-            self,
-            pipe: mrsm.Pipe,
-            df: 'pd.DataFrame' = None,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> SuccessTuple:
+        self,
+        pipe: mrsm.Pipe,
+        df: 'pd.DataFrame' = None,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
         """
         Upsert new documents into the pipe's collection.
 
@@ -483,13 +501,13 @@ Delete a pipe's data within a bounded or unbounded interval without dropping the
 ??? example "`#!python def clear_pipe():`"
     ```python
     def clear_pipe(
-            self,
-            pipe: mrsm.Pipe,
-            begin: Union[datetime, int, None] = None,
-            end: Union[datetime, int, None] = None,
-            params: Optional[Dict[str, Any]] = None,
-            debug: bool = False,
-        ) -> SuccessTuple:
+        self,
+        pipe: mrsm.Pipe,
+        begin: Union[datetime, int, None] = None,
+        end: Union[datetime, int, None] = None,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+    ) -> mrsm.SuccessTuple:
         """
         Delete rows within `begin`, `end`, and `params`.
 
@@ -533,16 +551,16 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
 ??? example "`#!python def get_pipe_data():`"
     ```python
     def get_pipe_data(
-            self,
-            pipe: mrsm.Pipe,
-            select_columns: Optional[List[str]] = None,
-            omit_columns: Optional[List[str]] = None,
-            begin: Union[datetime, int, None] = None,
-            end: Union[datetime, int, None] = None,
-            params: Optional[Dict[str, Any]] = None,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> Union['pd.DataFrame', None]:
+        self,
+        pipe: mrsm.Pipe,
+        select_columns: Optional[List[str]] = None,
+        omit_columns: Optional[List[str]] = None,
+        begin: Union[datetime, int, None] = None,
+        end: Union[datetime, int, None] = None,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> Union['pd.DataFrame', None]:
         """
         Query a pipe's target table and return the DataFrame.
 
@@ -602,13 +620,13 @@ Return the largest (or smallest) value in target table, according to the `params
 ??? example "`#!python def get_sync_time():`"
     ```python
     def get_sync_time(
-            self,
-            pipe: mrsm.Pipe,
-            params: Optional[Dict[str, Any]] = None,
-            newest: bool = True,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> Union[datetime, int, None]:
+        self,
+        pipe: mrsm.Pipe,
+        params: Optional[Dict[str, Any]] = None,
+        newest: bool = True,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> Union[datetime, int, None]:
         """
         Return the most recent value for the `datetime` axis.
 
@@ -644,11 +662,11 @@ You may take advantage of automatic dtype enforcement by implementing this metho
 ??? example
     ```python
     def get_pipe_columns_types(
-            self,
-            pipe: mrsm.Pipe,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> Dict[str, str]:
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> Dict[str, str]:
         """
         Return the data types for the columns in the target table for data type enforcement.
 
@@ -681,14 +699,14 @@ Return the number of rows in the pipe's target table within the `begin`, `end`, 
 ??? example "`#!python def get_pipe_rowcount():`"
     ```python
     def get_pipe_rowcount(
-            self,
-            pipe: mrsm.Pipe,
-            begin: Union[datetime, int, None] = None,
-            end: Union[datetime, int, None] = None,
-            params: Optional[Dict[str, Any]] = None,
-            debug: bool = False,
-            **kwargs: Any
-        ) -> int:
+        self,
+        pipe: mrsm.Pipe,
+        begin: Union[datetime, int, None] = None,
+        end: Union[datetime, int, None] = None,
+        params: Optional[Dict[str, Any]] = None,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> int:
         """
         Return the rowcount for the pipe's table.
 
@@ -715,4 +733,3 @@ Return the number of rows in the pipe's target table within the `begin`, `end`, 
         count = 0
         return count
     ```
-

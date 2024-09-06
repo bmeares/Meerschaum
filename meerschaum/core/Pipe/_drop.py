@@ -10,10 +10,10 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any
 
 def drop(
-        self,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Call the Pipe's instance connector's `drop_pipe()` method.
 
