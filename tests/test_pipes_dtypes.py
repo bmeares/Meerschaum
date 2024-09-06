@@ -10,7 +10,6 @@ from tests.connectors import conns, get_flavors
 from tests.test_users import test_register_user
 import meerschaum as mrsm
 from meerschaum import Pipe
-from meerschaum.actions import actions
 from meerschaum.utils.dtypes import are_dtypes_equal
 from meerschaum.utils.sql import sql_item_name
 
