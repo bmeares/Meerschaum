@@ -7,7 +7,7 @@ Interact with Meerschaum APIs. May be chained together (see 'meerschaum:api_inst
 """
 
 from datetime import datetime, timedelta, timezone
-from meerschaum.utils.typing import Optional
+from meerschaum.utils.typing import Optional, List
 from meerschaum.connectors import Connector
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
@@ -23,6 +23,8 @@ class APIConnector(Connector):
 
     IS_INSTANCE: bool = True
     IS_THREAD_SAFE: bool = False
+
+    OPTIONAL_ATTRIBUTES: List[str] = ['port']
 
     from ._request import (
         make_request,

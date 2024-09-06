@@ -121,6 +121,8 @@ class Pipe:
         filter_existing,
         _get_chunk_label,
         get_num_workers,
+        _persist_new_json_columns,
+        _persist_new_numeric_columns,
     )
     from ._verify import (
         verify,
@@ -133,6 +135,7 @@ class Pipe:
     from ._deduplicate import deduplicate
     from ._bootstrap import bootstrap
     from ._dtypes import enforce_dtypes, infer_dtypes
+    from ._copy import copy_to
 
     def __init__(
         self,

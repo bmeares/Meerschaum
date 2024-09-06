@@ -234,7 +234,13 @@ def _bootstrap_connectors(
     Prompt the user for the details necessary to create a Connector.
     """
     from meerschaum.connectors.parse import is_valid_connector_keys
-    from meerschaum.connectors import connectors, get_connector, types, custom_types
+    from meerschaum.connectors import (
+        connectors,
+        get_connector,
+        types,
+        custom_types,
+        _load_builtin_custom_connectors,
+    )
     from meerschaum.utils.prompt import prompt, yes_no, choose
     from meerschaum.config import get_config
     from meerschaum.config._edit import write_config
@@ -246,6 +252,7 @@ def _bootstrap_connectors(
 
     abort_tuple = False, "No connectors bootstrapped."
     _clear = get_config('shell', 'clear_screen', patch=True)
+    _load_builtin_custom_connectors()
 
     if action is None:
         action = []
@@ -262,8 +269,8 @@ def _bootstrap_connectors(
                 + '    See https://meerschaum.io/reference/connectors '
                 + 'for documentation on connectors.\n'
             ),
-            sorted(list(connectors)),
-            default = 'sql'
+            sorted([k for k in connectors if k != 'plugin']),
+            default='sql',
         )
     except KeyboardInterrupt:
         return abort_tuple
@@ -288,21 +295,30 @@ def _bootstrap_connectors(
             warn(f"Connector '{_type}:{_label}' already exists.", stack=False)
             overwrite = yes_no(
                 f"Do you want to overwrite connector '{_type}:{_label}'?",
-                default = 'n',
-                yes = yes,
-                noask = noask,
+                default='n',
+                yes=yes,
+                noask=noask,
             )
             if not overwrite and not force:
-                return False, f"No changes made to connector configuration."
-                break
+                return False, "No changes made to connector configuration."
+            break
         elif _label == "":
-            warn(f"Please enter a label.", stack=False)
+            warn("Please enter a label.", stack=False)
         else:
             break
 
     cls = types.get(_type)
     cls_required_attrs = getattr(cls, 'REQUIRED_ATTRIBUTES', [])
-    type_attributes = connector_attributes.get(_type, {'required': cls_required_attrs})
+    cls_optional_attrs = getattr(cls, 'OPTIONAL_ATTRIBUTES', [])
+    cls_default_attrs = getattr(cls, 'DEFAULT_ATTRIBUTES', {})
+    type_attributes = connector_attributes.get(
+        _type,
+        {
+            'required': cls_required_attrs,
+            'optional': cls_optional_attrs,
+            'default': cls_default_attrs,
+        }
+    )
 
     new_attributes = {}
     if 'flavors' in type_attributes:
@@ -320,9 +336,11 @@ def _bootstrap_connectors(
             return abort_tuple
         new_attributes['flavor'] = flavor
         required = sorted(list(connector_attributes[_type]['flavors'][flavor]['requirements']))
+        required = sorted(list(connector_attributes[_type]['flavors'][flavor]['optional']))
         default = type_attributes['flavors'][flavor].get('defaults', {})
     else:
         required = sorted(list(type_attributes.get('required', {})))
+        optional = sorted(list(type_attributes.get('optional', {})))
         default = type_attributes.get('default', {})
     info(
         f"Please answer the following questions to configure the new connector '{_type}:{_label}'."
@@ -330,12 +348,21 @@ def _bootstrap_connectors(
     )
     for r in required:
         try:
-            val = prompt(f"Value for {r}:")
+            default_val = str(default.get(r)) if r in default else None
+            val = prompt(f"Value for {r}:", default=default_val)
         except KeyboardInterrupt:
             continue
         if is_int(val):
             val = int(val)
         new_attributes[r] = val
+
+    for o in optional:
+        try:
+            val = prompt(f"Value for {o} (optional; empty to omit):")
+        except KeyboardInterrupt:
+            continue
+        if val:
+            new_attributes[o] = val
 
     for k, v in default.items():
         ### skip already configured attributes, (e.g. flavor or from required)

@@ -46,6 +46,9 @@ conns = {
     'api': get_connector('api', 'test_api',
         port=8989, username='test', password='test1234', host='localhost',
     ),
+    'valkey': get_connector('valkey', 'test_valkey',
+        port=6399, host='localhost',
+    ),
 }
 
 def get_dtypes(debug: bool = False) -> Dict[str, Dict[str, 'sqlalchemy.types.Type']]:

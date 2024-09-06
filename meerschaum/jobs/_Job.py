@@ -10,10 +10,7 @@ from __future__ import annotations
 
 import shlex
 import asyncio
-import threading
-import json
 import pathlib
-import os
 import sys
 import traceback
 from functools import partial
@@ -206,13 +203,11 @@ class Job:
             jobs_dir = root_dir / DAEMON_RESOURCES_PATH.name
             daemon_dir = jobs_dir / daemon_id
             pid_file = daemon_dir / 'process.pid'
-            properties_path = daemon_dir / 'properties.json'
-            pickle_path = daemon_dir / 'pickle.pkl'
 
             if pid_file.exists():
                 with open(pid_file, 'r', encoding='utf-8') as f:
                     daemon_pid = int(f.read())
-                
+
                 if pid != daemon_pid:
                     raise EnvironmentError(f"Differing PIDs: {pid=}, {daemon_pid=}")
             else:

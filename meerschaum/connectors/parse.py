@@ -7,7 +7,10 @@ Utility functions for parsing connector keys.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Mapping, Any, SuccessTuple, Union, Optional, Dict, Tuple
+
+import meerschaum as mrsm
+from meerschaum.utils.typing import Any, Union, Optional, Dict, Tuple
+
 
 def parse_connector_keys(
     keys: str,
@@ -15,20 +18,20 @@ def parse_connector_keys(
     as_tuple: bool = False,
     **kw:  Any
 ) -> (
-        Union[
-            meerschaum.connectors.Connector,
-            Dict[str, Any],
-            Tuple[
-                Union[
-                    meerschaum.connectors.Connector,
-                    Dict[str, Any],
-                    None
-                ],
-                str
+    Union[
+        mrsm.connectors.Connector,
+        Dict[str, Any],
+        Tuple[
+            Union[
+                mrsm.connectors.Connector,
+                Dict[str, Any],
+                None,
             ],
-            None
-        ]
-    ):
+            str
+        ],
+        None
+    ]
+):
     """
     Convenience function for parsing connector keys and returning Connector objects.
 
@@ -95,13 +98,12 @@ def parse_instance_keys(
     """
     Parse the Meerschaum instance value into a Connector object.
     """
-    from meerschaum.utils.warnings import warn
     from meerschaum.config import get_config
 
     if keys is None:
         keys = get_config('meerschaum', 'instance')
     keys = str(keys)
-    
+
     return parse_connector_keys(keys, construct=construct, as_tuple=as_tuple, **kw)
 
 

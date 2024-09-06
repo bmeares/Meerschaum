@@ -12,10 +12,9 @@ tornado_web = attempt_import('tornado.web', lazy=False)
 
 class TermPageHandler(tornado_web.RequestHandler):
     def get(self):
-        from meerschaum.api import endpoints
         return self.render(
             "termpage.html",
-            static = self.static_url,
-            ws_url_path = "/websocket"
+            static=self.static_url,
+            ws_url_path="/websocket",
         )
 

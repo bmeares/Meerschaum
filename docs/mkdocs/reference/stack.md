@@ -7,6 +7,34 @@ The Meerschaum stack is an integrated collection of services designed to help yo
 
 The `stack` command wraps [Docker Compose](https://docs.docker.com/compose/) to create a full-stack Meerschaum installation ― services such as a database instance, API server, and pre-configured Grafana instance.
 
+## 🐳 Services
+
+The default stack starts 4 services:
+
+| Service | Description                                                                            | Image                                   |
+|---------|----------------------------------------------------------------------------------------|-----------------------------------------|
+| db      | TimescaleDB instance corresponding to `sql:main`.                                      | `timescale/timescaledb:latest-pg16-oss` |
+| api     | Production Meerschaum Web API server corresponding to `api:main`.                      | `bmeares/meerschaum:api`                |
+| valkey  | Valkey instance corresponding to `valkey:main`. Used for caching sessions in by `api`. | `bitnami/valkey:latest`                 |
+| grafana | Grafana instance connected to `sql:main`.                                              | `grafana/grafana:latest`                |
+
+You can edit the stack's Docker Compose file with `mrsm edit config stack`.
+
+!!! tip "Entering the Meerschaum Docker image"
+    Hop into a shell in the `api` service:
+
+    ```bash
+    mrsm stack exec -it api mrsm
+    ```
+
+    You may want to run `bash` instead:
+
+    ```bash
+    mrsm stack exec -it api bash
+    ```
+
+
+
 ## 🗒️ Requirements
 
 You need [Docker](https://www.docker.com/get-started) installed to run the stack. To install Docker, follow [this guide](https://docs.docker.com/engine/install/) or do the following:

@@ -521,7 +521,10 @@ def _complete_delete_jobs(
         )
     )
 
-    if parse_executor_keys(executor_keys, construct=False) is None:
+    if (
+        executor_keys != 'systemd'
+        and parse_executor_keys(executor_keys, construct=False) is None
+    ):
         return []
 
     jobs = get_jobs(executor_keys, include_hidden=False)

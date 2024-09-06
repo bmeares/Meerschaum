@@ -39,10 +39,10 @@ def generate_secret_key() -> str:
     from meerschaum.config._paths import API_SECRET_KEY_PATH
     if not API_SECRET_KEY_PATH.exists():
         secret_key = os.urandom(24).hex()
-        with open(API_SECRET_KEY_PATH, 'w+') as f:
+        with open(API_SECRET_KEY_PATH, 'w+', encoding='utf-8') as f:
             f.write(secret_key)
     else:
-        with open(API_SECRET_KEY_PATH, 'r') as f:
+        with open(API_SECRET_KEY_PATH, 'r', encoding='utf-8') as f:
             secret_key = f.read()
 
     return secret_key.encode('utf-8')

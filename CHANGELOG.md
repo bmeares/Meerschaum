@@ -1,8 +1,102 @@
 # 🪵 Changelog
 
-## 2.3.x Releases
+## 2.4.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v2.4.0
+
+- **Add `valkey` instance connectors.**  
+  Introducing a new first-class instance connector: the `ValkeyConnector`. [Valkey](https://valkey.io/), a fork of Redis, is a high-performance in-memory database often used for caching. The `valkey` service has been added to the Meerschaum stack and is accessible via the built-in connector `valkey:main`.
+
+- **Cache Web Console sessions in Valkey when running with `--production`.**  
+  Starting the web API with `--production` will now store sessions in `valkey:main`. This results in a smoother experience in the event of a web server restart. By default, sessions expire after 30 days.
+  > You may disable this behavior by setting `system:experimental:valkey_session_cache` to `false`.
+
+- **Allow for a default executor.**  
+  Setting the key `meerschaum:executor` will set the default executor (overriding the check for `systemd`). This is useful for defaulting to remote actions in a multi-node deployment.
+
+- **Allow querying for `None` in `query_df()`.**  
+  You may now query for null rows:
+
+  ```python
+  import pandas as pd
+  from meerschaum.utils.dataframe import query_df
+
+  df = pd.DataFrame({'a': [1, 2, pd.NA]}).astype('Int64')
+
+  result = query_df(df, {'a': None})
+  print(result)
+  #       a
+  # 2  <NA>
+  
+  result = query_df(df, {'a': [None, 1]})
+  print(result)
+  #       a
+  # 0     1
+  # 2  <NA> 
+  ```
+
+- **Improve `query_df()` performance.**  
+  Dataframe vlues are no longer serialized by default in `query_df()`, meaning that parameters must match the data type. Pass `coerce_types=True` to restore legacy behavior.
+
+- **Add `Pipe.copy_to()`.**  
+  Copy pipes between instances with `Pipe.copy_to()`:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe('plugin:noaa', 'weather')
+  pipe.copy_to('valkey:main')
+  ```
+
+- **Add `include_unchanged_columns` to `Pipe.filter_existing()`.**  
+  Pass `include_unchanged_columns=True` to return entire documents in the update dataframe. This is useful for situations where you are unable to update individual fields:
+
+  ```python
+  import meerschaum as mrsm
+  import pandas as pd
+
+  pipe = mrsm.Pipe('a', 'b', columns=['id'])
+  pipe.sync([
+      {'animal': 'cat', 'name': 'Meowth', 'id': 1},
+      {'animal': 'dog', 'name': 'Fluffy', 'id': 2},
+  ])
+
+  df = pd.DataFrame([{'id': 1, 'breed': 'tabby'}])
+
+  unseen, update, delta = pipe.filter_existing(df)
+  print(update)
+  #    id  breed
+  # 0   1  tabby
+  
+  unseen, update, delta = pipe.filter_existing(
+      df,
+      include_unchanged_columns=True,
+  )
+  print(update)
+  #   animal    name  id  breed
+  # 0    cat  Meowth   1  tabby
+  ```
+
+- **Add a share button to the Pipe card.**  
+  On the web dashboard, you may now more easily share pipes by clicking the "share" icon and copying the URL. This opens the pipe card in a new, dedicated tab.
+
+- **Add `OPTIONAL_ATTRIBUTES` to connectors.**  
+  Connectors may now set `OPTIONAL_ATTRIBUTES`, which will add skippable prompts in `bootstrap connector`.
+
+- **Remove progress bar for syncing via remote actions.**  
+  Executing `sync pipes` remotely will no longer print the timer progress bar.
+
+- **Fix bug with `stack` in the shell.**  
+  Note that `stack` actions may not be chained.
+
+- **Fix scheduler dependency.**  
+  To fix the installation of `APScheduler`, `attrs` is now held back to 24.1.0.
+
+## 2.3.x Releases
+
+The 2.3 series was short but brought significant improvements, notably the `Job` API, remote jobs, and action chaining.
 
 ### v2.3.5 — v2.3.6
 

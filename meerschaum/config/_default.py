@@ -52,6 +52,14 @@ default_meerschaum_config = {
                 'protocol': 'https',
             },
         },
+        'valkey': {
+            'main': {
+                'host': 'localhost',
+                'username': 'default',
+                'password': 'mrsm',
+                'port': 6379,
+            },
+        },
     },
 }
 default_system_config = {
@@ -74,7 +82,7 @@ default_system_config = {
             },
         },
 
-        'api' : {
+        'api': {
         },
     },
     ### not to be confused with system_config['connectors']['api'], this is the configuration
@@ -88,6 +96,10 @@ default_system_config = {
             'proxy_headers': True,
             'forwarded_allow_ips': '*',
         },
+        'cache': {
+            'connector': 'valkey:main',
+            'session_expires_minutes': 43200,
+        },
         'permissions':       {
             'registration': {
                 'users': True,
@@ -97,7 +109,7 @@ default_system_config = {
             'actions': {
                 'non_admin': True,
             },
-            'chaining' : {
+            'chaining': {
                 'insecure_parent_instance': False,
                 'child_apis': False,
             },
@@ -112,6 +124,7 @@ default_system_config = {
         'inplace_sync': True,
         'uv_pip': True,
         'systemd_healthcheck': False,
+        'valkey_session_cache': True,
     },
 }
 default_pipes_config = {

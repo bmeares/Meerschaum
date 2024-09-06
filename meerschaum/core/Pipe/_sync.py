@@ -26,8 +26,6 @@ from meerschaum.utils.typing import (
     SuccessTuple,
     Dict,
     List,
-    Iterable,
-    Generator,
 )
 from meerschaum.utils.warnings import warn, error
 
@@ -266,7 +264,6 @@ def sync(
                             **kw
                         )
                     )
-
             except Exception as e:
                 get_console().print_exception(
                     suppress=[
@@ -369,6 +366,11 @@ def sync(
 
         ### Cast to a dataframe and ensure datatypes are what we expect.
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+
+        ### Capture `numeric` and `json` columns.
+        self._persist_new_json_columns(df, debug=debug)
+        self._persist_new_numeric_columns(df, debug=debug)
+
         if debug:
             dprint(
                 "DataFrame to sync:\n"
@@ -554,14 +556,15 @@ def exists(
 
 
 def filter_existing(
-        self,
-        df: 'pd.DataFrame',
-        safe_copy: bool = True,
-        date_bound_only: bool = False,
-        chunksize: Optional[int] = -1,
-        debug: bool = False,
-        **kw
-    ) -> Tuple['pd.DataFrame', 'pd.DataFrame', 'pd.DataFrame']:
+    self,
+    df: 'pd.DataFrame',
+    safe_copy: bool = True,
+    date_bound_only: bool = False,
+    include_unchanged_columns: bool = False,
+    chunksize: Optional[int] = -1,
+    debug: bool = False,
+    **kw
+) -> Tuple['pd.DataFrame', 'pd.DataFrame', 'pd.DataFrame']:
     """
     Inspect a dataframe and filter out rows which already exist in the pipe.
 
@@ -569,7 +572,7 @@ def filter_existing(
     ----------
     df: 'pd.DataFrame'
         The dataframe to inspect and filter.
-        
+
     safe_copy: bool, default True
         If `True`, create a copy before comparing and modifying the dataframes.
         Setting to `False` may mutate the DataFrames.
@@ -577,6 +580,10 @@ def filter_existing(
 
     date_bound_only: bool, default False
         If `True`, only use the datetime index to fetch the sample dataframe.
+
+    include_unchanged_columns: bool, default False
+        If `True`, include the backtrack columns which haven't changed in the update dataframe.
+        This is useful if you can't update individual keys.
 
     chunksize: Optional[int], default -1
         The `chunksize` used when fetching existing data.
@@ -605,7 +612,7 @@ def filter_existing(
     from meerschaum.config import get_config
     pd = import_pandas()
     pandas = attempt_import('pandas')
-    if not 'dataframe' in str(type(df)).lower():
+    if 'dataframe' not in str(type(df)).lower():
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
     is_dask = 'dask' in df.__module__
     if is_dask:
@@ -615,8 +622,21 @@ def filter_existing(
     else:
         merge = pd.merge
         NA = pd.NA
+
+    def get_empty_df():
+        empty_df = pd.DataFrame([])
+        dtypes = dict(df.dtypes) if df is not None else {}
+        dtypes.update(self.dtypes)
+        pd_dtypes = {
+            col: to_pandas_dtype(str(typ))
+            for col, typ in dtypes.items()
+        }
+        return add_missing_cols_to_df(empty_df, pd_dtypes)
+
     if df is None:
-        return df, df, df
+        empty_df = get_empty_df()
+        return empty_df, empty_df, empty_df
+
     if (df.empty if not is_dask else len(df) == 0):
         return df, df, df
 
@@ -633,7 +653,7 @@ def filter_existing(
             if min_dt_val is not None and 'datetime' in str(dt_type)
             else min_dt_val
         )
-    except Exception as e:
+    except Exception:
         min_dt = None
     if not ('datetime' in str(type(min_dt))) or str(min_dt) == 'NaT':
         if 'int' not in str(type(min_dt)).lower():
@@ -643,7 +663,7 @@ def filter_existing(
         begin = (
             round_time(
                 min_dt,
-                to = 'down'
+                to='down'
             ) - timedelta(minutes=1)
         )
     elif dt_type and 'int' in dt_type.lower():
@@ -661,7 +681,7 @@ def filter_existing(
             if max_dt_val is not None and 'datetime' in str(dt_type)
             else max_dt_val
         )
-    except Exception as e:
+    except Exception:
         import traceback
         traceback.print_exc()
         max_dt = None
@@ -674,14 +694,14 @@ def filter_existing(
         end = (
             round_time(
                 max_dt,
-                to = 'down'
+                to='down'
             ) + timedelta(minutes=1)
         )
     elif dt_type and 'int' in dt_type.lower():
         end = max_dt + 1
 
     if max_dt is not None and min_dt is not None and min_dt > max_dt:
-        warn(f"Detected minimum datetime greater than maximum datetime.")
+        warn("Detected minimum datetime greater than maximum datetime.")
 
     if begin is not None and end is not None and begin > end:
         if isinstance(begin, datetime):
@@ -710,13 +730,18 @@ def filter_existing(
         dprint(f"Looking at data between '{begin}' and '{end}':", **kw)
 
     backtrack_df = self.get_data(
-        begin = begin,
-        end = end,
-        chunksize = chunksize,
-        params = params,
-        debug = debug,
+        begin=begin,
+        end=end,
+        chunksize=chunksize,
+        params=params,
+        debug=debug,
         **kw
     )
+    if backtrack_df is None:
+        if debug:
+            dprint(f"No backtrack data was found for {self}.")
+        return df, get_empty_df(), df
+
     if debug:
         dprint(f"Existing data for {self}:\n" + str(backtrack_df), **kw)
         dprint(f"Existing dtypes for {self}:\n" + str(backtrack_df.dtypes))
@@ -743,18 +768,19 @@ def filter_existing(
         filter_unseen_df(
             backtrack_df,
             df,
-            dtypes = {
+            dtypes={
                 col: to_pandas_dtype(typ)
                 for col, typ in self_dtypes.items()
             },
-            safe_copy = safe_copy,
-            debug = debug
+            safe_copy=safe_copy,
+            debug=debug
         ),
         on_cols_dtypes,
     )
 
     ### Cast dicts or lists to strings so we can merge.
     serializer = functools.partial(json.dumps, sort_keys=True, separators=(',', ':'), default=str)
+
     def deserializer(x):
         return json.loads(x) if isinstance(x, str) else x
 
@@ -767,12 +793,12 @@ def filter_existing(
     casted_cols = set(unhashable_delta_cols + unhashable_backtrack_cols)
 
     joined_df = merge(
-        delta_df.fillna(NA),
-        backtrack_df.fillna(NA),
-        how = 'left',
-        on = on_cols,
-        indicator = True,
-        suffixes = ('', '_old'),
+        delta_df.infer_objects(copy=False).fillna(NA),
+        backtrack_df.infer_objects(copy=False).fillna(NA),
+        how='left',
+        on=on_cols,
+        indicator=True,
+        suffixes=('', '_old'),
     ) if on_cols else delta_df
     for col in casted_cols:
         if col in joined_df.columns:
@@ -782,20 +808,13 @@ def filter_existing(
 
     ### Determine which rows are completely new.
     new_rows_mask = (joined_df['_merge'] == 'left_only') if on_cols else None
-    cols = list(backtrack_df.columns)
+    cols = list(delta_df.columns)
 
     unseen_df = (
-        (
-            joined_df
-            .where(new_rows_mask)
-            .dropna(how='all')[cols]
-            .reset_index(drop=True)
-        ) if not is_dask else (
-            joined_df
-            .where(new_rows_mask)
-            .dropna(how='all')[cols]
-            .reset_index(drop=True)
-        )
+        joined_df
+        .where(new_rows_mask)
+        .dropna(how='all')[cols]
+        .reset_index(drop=True)
     ) if on_cols else delta_df
 
     ### Rows that have already been inserted but values have changed.
@@ -804,20 +823,33 @@ def filter_existing(
         .where(~new_rows_mask)
         .dropna(how='all')[cols]
         .reset_index(drop=True)
-    ) if on_cols else None
+    ) if on_cols else get_empty_df()
+
+    if include_unchanged_columns and on_cols:
+        unchanged_backtrack_cols = [
+            col
+            for col in backtrack_df.columns
+            if col in on_cols or col not in update_df.columns
+        ]
+        update_df = merge(
+            backtrack_df[unchanged_backtrack_cols],
+            update_df,
+            how='inner',
+            on=on_cols,
+        )
 
     return unseen_df, update_df, delta_df
 
 
 @staticmethod
 def _get_chunk_label(
-        chunk: Union[
-            'pd.DataFrame',
-            List[Dict[str, Any]],
-            Dict[str, List[Any]]
-        ],
-        dt_col: str,
-    ) -> str:
+    chunk: Union[
+        'pd.DataFrame',
+        List[Dict[str, Any]],
+        Dict[str, List[Any]]
+    ],
+    dt_col: str,
+) -> str:
     """
     Return the min - max label for the chunk.
     """
@@ -870,3 +902,52 @@ def get_num_workers(self, workers: Optional[int] = None) -> int:
         (desired_workers - current_num_connections),
         1,
     )
+
+
+def _persist_new_numeric_columns(self, df, debug: bool = False) -> SuccessTuple:
+    """
+    Check for new numeric columns and update the parameters.
+    """
+    from meerschaum.utils.dataframe import get_numeric_cols
+    numeric_cols = get_numeric_cols(df)
+    existing_numeric_cols = [col for col, typ in self.dtypes.items() if typ == 'numeric']
+    new_numeric_cols = [col for col in numeric_cols if col not in existing_numeric_cols]
+    if not new_numeric_cols:
+        return True, "Success"
+
+    dtypes = self.parameters.get('dtypes', {})
+    dtypes.update({col: 'numeric' for col in numeric_cols})
+    self.parameters['dtypes'] = dtypes
+    if not self.temporary:
+        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
+        if not edit_success:
+            warn(f"Unable to update NUMERIC dtypes for {self}:\n{edit_msg}")
+
+        return edit_success, edit_msg
+
+    return True, "Success"
+
+
+def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
+    """
+    Check for new JSON columns and update the parameters.
+    """
+    from meerschaum.utils.dataframe import get_json_cols
+    json_cols = get_json_cols(df)
+    existing_json_cols = [col for col, typ in self.dtypes.items() if typ == 'json']
+    new_json_cols = [col for col in json_cols if col not in existing_json_cols]
+    if not new_json_cols:
+        return True, "Success"
+
+    dtypes = self.parameters.get('dtypes', {})
+    dtypes.update({col: 'json' for col in json_cols})
+    self.parameters['dtypes'] = dtypes
+
+    if not self.temporary:
+        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
+        if not edit_success:
+            warn(f"Unable to update JSON dtypes for {self}:\n{edit_msg}")
+
+        return edit_success, edit_msg
+
+    return True, "Success"

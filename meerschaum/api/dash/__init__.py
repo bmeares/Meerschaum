@@ -16,7 +16,6 @@ flask_compress = attempt_import('flask_compress', lazy=False)
 _monkey_patch_get_distribution('flask-compress', flask_compress.__version__)
 dash = attempt_import('dash', lazy=False)
 
-
 from meerschaum.utils.typing import List, Optional
 from meerschaum.config.static import _static_config
 from meerschaum.api import (
@@ -38,14 +37,6 @@ with warnings.catch_warnings():
 html, dcc = import_html(), import_dcc()
 from meerschaum.api.dash.components import location
 
-active_sessions = {}
-authenticated_sessions = {}
-unauthenticated_sessions = {}
-running_jobs = {}
-running_monitors = {}
-stopped_jobs = {}
-stopped_monitors = {}
-
 stylesheets = [
     '/static/css/bootstrap.min.css',
     '/static/css/dbc_dark.css',
@@ -54,12 +45,12 @@ stylesheets = [
 scripts = ['/static/js/node_modules/xterm/lib/xterm.js']
 dash_app = enrich.DashProxy(
     __name__,
-    title = 'Meerschaum Web',
-    requests_pathname_prefix = endpoints['dash'] + '/',
-    external_stylesheets = stylesheets,
-    update_title = None,
-    suppress_callback_exceptions = True,
-    transforms = [
+    title='Meerschaum Web',
+    requests_pathname_prefix=endpoints['dash'] + '/',
+    external_stylesheets=stylesheets,
+    update_title=None,
+    suppress_callback_exceptions=True,
+    transforms=[
         enrich.TriggerTransform(),
         enrich.MultiplexerTransform(),
     ],
@@ -67,7 +58,7 @@ dash_app = enrich.DashProxy(
 
 dash_app.layout = html.Div([
     location,
-    dcc.Store(id='session-store', storage_type='session', data={}),
+    dcc.Store(id='session-store', storage_type='local', data={}),
     html.Div([], id='page-layout-div'),
 ])
 

@@ -101,6 +101,7 @@ def schedule_function(
     kw['debug'] = debug
     kw = filter_keywords(function, **kw)
 
+    _ = mrsm.attempt_import('attrs', lazy=False)
     apscheduler = mrsm.attempt_import('apscheduler', lazy=False)
     now = round_time(datetime.now(timezone.utc), timedelta(minutes=1))
     trigger = parse_schedule(schedule, now=now)

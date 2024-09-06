@@ -436,8 +436,9 @@ def init_dash(dash_app):
   - `meerschaum.connectors.is_connected()`
   - `meerschaum.connectors.poll.retry_connect()`
   - `meerschaum.connectors.Connector`
-  - `meerschaum.connectors.SQLConnector`
-  - `meerschaum.connectors.APIConnector`
+  - `meerschaum.connectors.sql.SQLConnector`
+  - `meerschaum.connectors.api.APIConnector`
+  - `meerschaum.connectors.valkey.ValkeyConnector`
 
 </details>
 

@@ -6,6 +6,7 @@ fastapi>=0.111.0
 fastapi-login>=1.7.2
 python-multipart>=0.0.9
 httpx>=0.24.1
+valkey>=6.0.0
 numpy>=1.18.5
 pandas[parquet]>=2.0.1
 pyarrow>=16.1.0
@@ -41,6 +42,7 @@ prompt-toolkit>=3.0.39
 more-itertools>=8.7.0
 fasteners>=0.19.0
 virtualenv>=20.1.0
+attrs<24.2.0
 APScheduler>=4.0.0a5
 uv>=0.2.11
 pprintpp>=0.4.0

@@ -31,21 +31,29 @@ db_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:db:hostname}'
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
 api_host = "api"
 
+valkey_hostname = "valkey"
+valkey_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:valkey:hostname}'
+valkey_port = "MRSM{meerschaum:connectors:valkey:main:port}"
+valkey_username = 'MRSM{meerschaum:connectors:valkey:main:username}'
+valkey_password = 'MRSM{meerschaum:connectors:valkey:main:password}'
+
 env_dict = {
-    'COMPOSE_PROJECT_NAME' : 'mrsm',
-    'TIMESCALEDB_VERSION' : 'latest-pg16-oss',
-    'POSTGRES_USER' : f'{db_user}',
-    'POSTGRES_PASSWORD' : f'{db_pass}',
-    'POSTGRES_DB' : f'{db_base}',
-    'MEERSCHAUM_API_HOSTNAME' : f'{api_host}',
-    'ALLOW_IP_RANGE' : '0.0.0.0/0',
-    'MEERSCHAUM_API_CONFIG_RESOURCES' : '/meerschaum',
+    'COMPOSE_PROJECT_NAME': 'mrsm',
+    'TIMESCALEDB_VERSION': 'latest-pg16-oss',
+    'POSTGRES_USER': db_user,
+    'POSTGRES_PASSWORD': db_pass,
+    'POSTGRES_DB': db_base,
+    'VALKEY_USERNAME': valkey_username,
+    'VALKEY_PASSWORD': valkey_password,
+    'MEERSCHAUM_API_HOSTNAME': api_host,
+    'ALLOW_IP_RANGE': '0.0.0.0/0',
+    'MEERSCHAUM_API_CONFIG_RESOURCES': '/meerschaum',
 }
 ### apply patch to host config to change hostname to the Docker service name
 env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
     {
-        'meerschaum' : 'MRSM{!meerschaum}',
-        'system' : 'MRSM{!system}',
+        'meerschaum': 'MRSM{!meerschaum}',
+        'system': 'MRSM{!system}',
     },
     indent = 4,
 ).replace(
@@ -58,6 +66,7 @@ volumes = {
     'api_root': '/meerschaum',
     'meerschaum_db_data': '/var/lib/postgresql/data',
     'grafana_storage': '/var/lib/grafana',
+    'valkey_data': '/bitnami/valkey/data',
 }
 networks = {
     'frontend': None,
@@ -73,13 +82,19 @@ env_dict['MEERSCHAUM_API_PATCH'] = json.dumps(
                         'port': 5432,
                     },
                     'local': {
-                        'database': volumes['api_root'] + '/sqlite/mrsm_local.db'
+                        'database': volumes['api_root'] + '/sqlite/mrsm_local.db',
+                    },
+                },
+                'valkey': {
+                    'main': {
+                        'host': valkey_host,
+                        'port': 6379,
                     },
                 },
             },
         },
     },
-    indent = 4,
+    indent=4,
 )
 
 compose_header = """
@@ -113,19 +128,19 @@ default_docker_compose_config = {
                 ],
                 'interval': '5s',
                 'timeout': '3s',
-                'retries': 3
+                'retries': 5
             },
             'restart': 'always',
-            'image' : 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
-            'ports' : [
+            'image': 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
+            'ports': [
                 f'{db_port}:5432',
             ],
-            'hostname' : f'{db_hostname}',
-            'volumes' : [
+            'hostname': db_hostname,
+            'volumes': [
                 'meerschaum_db_data:' + volumes['meerschaum_db_data'],
             ],
             'shm_size': '1024m',
-            'networks' : [
+            'networks': [
                 'backend',
             ],
         },
@@ -156,9 +171,39 @@ default_docker_compose_config = {
                 'db': {
                     'condition': 'service_healthy',
                 },
+                'valkey': {
+                    'condition': 'service_healthy',
+                },
             },
-            'volumes' : [
+            'volumes': [
                 'api_root:' + volumes['api_root'],
+            ],
+        },
+        'valkey': {
+            'image': 'bitnami/valkey:latest',
+            'restart': 'always',
+            'environment': {
+                'VALKEY_PASSWORD': '<DOLLAR>VALKEY_PASSWORD',
+                'VALKEY_RDB_POLICY_DISABLED': 'no',
+                'VALKEY_RDB_POLICY': '900#1 600#5 300#10 120#50 60#1000 30#10000',
+            },
+            'hostname': valkey_hostname,
+            'ports': [
+                f'{valkey_port}:6379',
+            ],
+            'volumes': [
+                'valkey_data:' + volumes['valkey_data'],
+            ],
+            'healthcheck': {
+                'test': [
+                    'CMD', 'valkey-cli', 'ping',
+                ],
+                'interval': '5s',
+                'timeout': '3s',
+                'retries': 5,
+            },
+            'networks': [
+                'backend',
             ],
         },
         'grafana': {
