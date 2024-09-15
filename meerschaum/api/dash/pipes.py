@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import shlex
 from textwrap import dedent
+from urllib.parse import urlencode
+
 from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.misc import string_to_dict
@@ -29,6 +31,7 @@ dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 humanfriendly = attempt_import('humanfriendly', check_update=CHECK_UPDATE)
 pd = import_pandas()
+
 
 def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, None]:
     """
@@ -105,6 +108,7 @@ def pipes_from_state(
 def build_pipe_card(
     pipe: mrsm.Pipe,
     authenticated: bool = False,
+    include_manage: bool = True,
     _build_children_num: int = 10,
 ) -> 'dbc.Card':
     """
@@ -117,6 +121,9 @@ def build_pipe_card(
 
     authenticated: bool, default False
         If `True`, allow editing functionality to the card.
+
+    include_manage: bool, default True
+        If `True` and `authenticated` is `True`, include the "Manage" dropdown.
 
     Returns
     -------
@@ -184,7 +191,7 @@ def build_pipe_card(
                         size='sm',
                         color='secondary',
                     )
-                ) if authenticated else [],
+                ) if authenticated and include_manage else [],
                 width=2,
             ),
             dbc.Col(width=6),
@@ -217,8 +224,16 @@ def build_pipe_card(
 
     ]
 
+    query_params = {}
+    default_instance = get_config('meerschaum', 'instance')
+    if pipe.instance_keys != default_instance:
+        query_params['instance'] = pipe.instance_keys
     pipe_url = (
-        f"/dash/pipes/{pipe.connector_keys}/{pipe.metric_key}/{pipe.location_key}"
+        f"/dash/pipes/"
+        + f"{pipe.connector_keys}/"
+        + f"{pipe.metric_key}/"
+        + (f"{pipe.location_key}" if pipe.location_key is not None else '')
+        + (f"?{urlencode(query_params)}" if query_params else "")
     )
 
     card_header_children = dbc.Row(
