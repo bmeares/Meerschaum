@@ -4,6 +4,14 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.4.1
+
+- **Add `instance` to the external pipe links.**  
+  When sharing pipe links on the Web Console, the instance will now be included in the URL.
+
+- **Fix an issue with remote actions.**  
+  An import error has been patched.
+
 ### v2.4.0
 
 - **Add `valkey` instance connectors.**  

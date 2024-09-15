@@ -214,6 +214,13 @@ def update_content(*args):
     trigger = ctx.triggered[0]['prop_id'].split('.')[0] if not trigger else trigger
 
     session_data = args[-1]
+    mrsm_location_href = session_data.get('mrsm-location.href', None)
+    if (
+        initial_load
+        and mrsm_location_href
+        and not mrsm_location_href.rstrip('/').endswith('/dash')
+    ):
+        raise PreventUpdate
 
     ### NOTE: functions MUST return a list of content and a list of alerts
     triggers = {

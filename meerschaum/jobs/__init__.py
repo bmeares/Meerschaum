@@ -11,11 +11,12 @@ import pathlib
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Optional, List, SuccessTuple
 
-from meerschaum.jobs._Job import Job
+from meerschaum.jobs._Job import Job, StopMonitoringLogs
 from meerschaum.jobs._Executor import Executor
 
 __all__ = (
     'Job',
+    'StopMonitoringLogs',
     'systemd',
     'get_jobs',
     'get_filtered_jobs',
