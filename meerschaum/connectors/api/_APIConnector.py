@@ -168,7 +168,8 @@ class APIConnector(Connector):
     @property
     def session(self):
         if self._session is None:
-            requests = attempt_import('requests')
+            certifi = attempt_import('certifi', lazy=False)
+            requests = attempt_import('requests', lazy=False)
             if requests:
                 self._session = requests.Session()
             if self._session is None:
