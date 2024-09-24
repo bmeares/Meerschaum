@@ -4,6 +4,17 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.4.2
+
+- **Fix `bootstrap connectors`.**  
+  Revert a breaking change to the `bootstrap connectors` wizard.
+
+- **Respect disabling `uv` for package installation.**  
+  Setting `system:experimental:uv_pip` to `false` will now disable `uv` for certain.
+
+- **Default to a query string for `options` when bootstrapping MSSQL connectors.**  
+  Although dictionaries are supported for `options`, using a dictionary as a default was breaking serialization. The default for `options` is now the string `driver=ODBC Driver 17 for SQL Server&UseFMTONLY=Yes`.
+
 ### v2.4.1
 
 - **Add `instance` to the external pipe links.**  

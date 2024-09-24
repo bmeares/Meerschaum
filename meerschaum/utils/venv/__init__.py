@@ -330,11 +330,11 @@ def verify_venv(
 
 tried_virtualenv = False
 def init_venv(
-        venv: str = 'mrsm',
-        verify: bool = True,
-        force: bool = False,
-        debug: bool = False,
-    ) -> bool:
+    venv: str = 'mrsm',
+    verify: bool = True,
+    force: bool = False,
+    debug: bool = False,
+) -> bool:
     """
     Initialize the virtual environment.
 
@@ -366,6 +366,7 @@ def init_venv(
     import sys, platform, os, pathlib, shutil
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.utils.packages import is_uv_enabled
     venv_path = VIRTENV_RESOURCES_PATH / venv
     docker_home_venv_path = pathlib.Path('/home/meerschaum/venvs/mrsm')
 
@@ -387,7 +388,7 @@ def init_venv(
     global tried_virtualenv
     try:
         import venv as _venv
-        uv = attempt_import('uv', venv=None, debug=debug)
+        uv = attempt_import('uv', venv=None, debug=debug) if is_uv_enabled() else None
         virtualenv = None
     except ImportError:
         _venv = None
@@ -400,9 +401,9 @@ def init_venv(
         _venv_success = run_python_package(
             'uv',
             ['venv', venv_path.as_posix(), '-q'],
-            venv = None,
-            env = _get_pip_os_env(),
-            debug = debug,
+            venv=None,
+            env=_get_pip_os_env(),
+            debug=debug,
         ) == 0
 
     if _venv is not None and not _venv_success:

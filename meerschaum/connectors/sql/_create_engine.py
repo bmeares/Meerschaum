@@ -27,39 +27,39 @@ default_create_engine_args = {
     'connect_args': {},
 }
 flavor_configs = {
-    'timescaledb'      : {
-        'engine'       : 'postgresql+psycopg',
-        'create_engine' : default_create_engine_args,
+    'timescaledb': {
+        'engine': 'postgresql+psycopg',
+        'create_engine': default_create_engine_args,
         'omit_create_engine': {'method',},
-        'to_sql' : {},
-        'requirements' : default_requirements,
-        'defaults'     : {
-            'port'     : 5432,
+        'to_sql': {},
+        'requirements': default_requirements,
+        'defaults': {
+            'port': 5432,
         },
     },
-    'postgresql'         : {
-        'engine'       : 'postgresql+psycopg',
-        'create_engine' : default_create_engine_args,
+    'postgresql': {
+        'engine': 'postgresql+psycopg',
+        'create_engine': default_create_engine_args,
         'omit_create_engine': {'method',},
-        'to_sql' : {},
-        'requirements' : default_requirements,
-        'defaults'     : {
-            'port'     : 5432,
+        'to_sql': {},
+        'requirements': default_requirements,
+        'defaults': {
+            'port': 5432,
         },
     },
-    'citus'            : {
-        'engine'       : 'postgresql+psycopg',
-        'create_engine' : default_create_engine_args,
+    'citus': {
+        'engine': 'postgresql+psycopg',
+        'create_engine': default_create_engine_args,
         'omit_create_engine': {'method',},
-        'to_sql' : {},
-        'requirements' : default_requirements,
-        'defaults'     : {
-            'port'     : 5432,
+        'to_sql': {},
+        'requirements': default_requirements,
+        'defaults': {
+            'port': 5432,
         },
     },
-    'mssql'            : {
-        'engine'       : 'mssql+pyodbc',
-        'create_engine' : {
+    'mssql': {
+        'engine': 'mssql+pyodbc',
+        'create_engine': {
             'fast_executemany': True,
             'isolation_level': 'AUTOCOMMIT',
             'use_setinputsizes': False,
@@ -68,84 +68,81 @@ flavor_configs = {
         'to_sql': {
             'method': None,
         },
-        'requirements' : default_requirements,
-        'defaults'     : {
-            'port'     : 1433,
-            'options'  : {
-                'driver'   : 'ODBC Driver 17 for SQL Server',
-                'UseFMTONLY': 'Yes',
-            },
+        'requirements': default_requirements,
+        'defaults': {
+            'port': 1433,
+            'options': "driver=ODBC Driver 17 for SQL Server&UseFMTONLY=Yes",
         },
     },
-    'mysql'            : {
-        'engine'       : 'mysql+pymysql',
-        'create_engine' : default_create_engine_args,
+    'mysql': {
+        'engine': 'mysql+pymysql',
+        'create_engine': default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql': {
             'method': 'multi',
         },
-        'requirements' : default_requirements,
-        'defaults'     : {
-            'port'     : 3306,
+        'requirements': default_requirements,
+        'defaults': {
+            'port': 3306,
         },
     },
-    'mariadb'          : {
-        'engine'       : 'mysql+pymysql',
-        'create_engine' : default_create_engine_args,
+    'mariadb': {
+        'engine': 'mysql+pymysql',
+        'create_engine': default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql': {
             'method': 'multi',
         },
-        'requirements' : default_requirements,
-        'defaults'     : {
-            'port'     : 3306,
+        'requirements': default_requirements,
+        'defaults': {
+            'port': 3306,
         },
     },
-    'oracle'           : {
-        'engine'       : 'oracle+cx_oracle',
-        'create_engine' : default_create_engine_args,
+    'oracle': {
+        'engine': 'oracle+cx_oracle',
+        'create_engine': default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql': {
             'method': None,
         },
-        'requirements' : default_requirements,
-        'defaults'     : {
-            'port'     : 1521,
+        'requirements': default_requirements,
+        'defaults': {
+            'port': 1521,
         },
     },
-    'sqlite'           : {
-        'engine'       : 'sqlite',
-        'create_engine' : default_create_engine_args,
+    'sqlite': {
+        'engine': 'sqlite',
+        'create_engine': default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql': {
             'method': 'multi',
         },
-        'requirements' : {'database'},
-        'defaults'     : {},
+        'requirements': {'database'},
+        'defaults': {},
     },
-    'duckdb' : {
-        'engine' : 'duckdb',
-        'create_engine' : {},
+    'duckdb': {
+        'engine': 'duckdb',
+        'create_engine': {},
         'omit_create_engine': {'ALL',},
         'to_sql': {
             'method': 'multi',
         },
-        'requirements' : '',
-        'defaults' : {},
+        'requirements': '',
+        'defaults': {},
     },
-    'cockroachdb'      : {
-        'engine'       : 'cockroachdb',
+    'cockroachdb': {
+        'engine': 'cockroachdb',
         'omit_create_engine': {'method',},
         'create_engine': default_create_engine_args,
         'to_sql': {
             'method': 'multi',
         },
-        'requirements' : {'host'},
-        'defaults'     : {
-            'port'     : 26257,
-            'database' : 'defaultdb',
-            'username' : 'root',
-            'password' : 'admin',
+        'requirements': {'host'},
+        'defaults': {
+            'port': 26257,
+            'database': 'defaultdb',
+            'username': 'root',
+            'password': 'admin',
         },
     },
 }
