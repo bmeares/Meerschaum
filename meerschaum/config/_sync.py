@@ -7,17 +7,20 @@ Synchronize across config files
 """
 
 from __future__ import annotations
+import pathlib
 from meerschaum.utils.typing import Optional, List, Tuple
 
+
 def sync_yaml_configs(
-        keys: List[str],
-        sub_path: pathlib.Path,
-        substitute: bool = True,
-        permissions: Optional[int] = None,
-        replace_tuples: Optional[List[Tuple[str, str]]] = None,
-    ) -> None:
-    """Synchronize sub-configuration with main configuration file.
-    
+    keys: List[str],
+    sub_path: pathlib.Path,
+    substitute: bool = True,
+    permissions: Optional[int] = None,
+    replace_tuples: Optional[List[Tuple[str, str]]] = None,
+) -> None:
+    """
+    Synchronize sub-configuration with main configuration file.
+
     Parameters
     ----------
     keys: List[str]
@@ -84,11 +87,13 @@ def sync_yaml_configs(
     new_path = sub_path
 
     ### write changes
+    new_path.parent.mkdir(exist_ok=True, parents=True)
     with open(new_path, 'w+', encoding='utf-8') as f:
         f.write(new_header)
         f.write(new_config_text)
     if permissions is not None:
         os.chmod(new_path, permissions)
+
 
 def sync_files(keys: Optional[List[str]] = None):
     if keys is None:
@@ -110,20 +115,22 @@ def sync_files(keys: Optional[List[str]] = None):
         sync_yaml_configs(
             ['stack', STACK_COMPOSE_FILENAME],
             STACK_COMPOSE_PATH,
-            substitute = True,
-            replace_tuples = [('$', '$$'), ('<DOLLAR>', '$')],
+            substitute=True,
+            replace_tuples=[
+                ('$', '$$'),
+                ('<DOLLAR>', '$'),
+            ],
         )
         sync_yaml_configs(
             ['stack', 'grafana', 'datasource'],
             GRAFANA_DATASOURCE_PATH,
-            substitute = True,
+            substitute=True,
         )
         sync_yaml_configs(
             ['stack', 'grafana', 'dashboard'],
             GRAFANA_DASHBOARD_PATH,
-            substitute = True,
+            substitute=True,
         )
-
 
     key_functions = {
         'stack': _stack,

@@ -49,6 +49,7 @@ def stack(
     from meerschaum.config._read_config import search_and_substitute_config
     from meerschaum.utils.prompt import yes_no
 
+    meerschaum.pprint(meerschaum.config.stack.env_dict)
     stack_env_dict = apply_patch_to_config(
         os.environ.copy(),
         {

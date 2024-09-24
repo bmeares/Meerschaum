@@ -240,11 +240,11 @@ def manually_import_module(
                 if install:
                     if not pip_install(
                         root_name,
-                        venv = venv,
-                        split = False,
-                        check_update = check_update,
-                        color = color,
-                        debug = debug
+                        venv=venv,
+                        split=False,
+                        check_update=check_update,
+                        color=color,
+                        debug=debug
                     ) and warn:
                         warn_function(
                             f"There's an update available for '{install_name}', "
@@ -252,21 +252,20 @@ def manually_import_module(
                             + "Try installig via Meerschaum with "
                             + "`install packages '{install_name}'`.",
                             ImportWarning,
-                            stacklevel = 3,
-                            color = False,
+                            stacklevel=3,
+                            color=False,
                         )
                 elif warn:
                     warn_function(
                         f"There's an update available for '{root_name}'.",
-                        stack = False,
-                        color = False,
+                        stack=False,
+                        color=False,
                     )
                 spec = (
                     importlib.util.find_spec(import_name)
                     if mod_path is None or not mod_path.exists()
                     else importlib.util.spec_from_file_location(import_name, str(mod_path))
                 )
-
 
     if spec is None:
         try:
@@ -291,7 +290,7 @@ def manually_import_module(
             sys.modules[import_name] = old_sys_mod
         else:
             del sys.modules[import_name]
-    
+
     return mod
 
 
@@ -497,8 +496,19 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
         cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
         _args += ['--cache-dir', cache_dir_path.as_posix()]
 
+    if use_uv():
+        package_name = 'uv'
+        _args = ['pip', 'show', install_name]
+    else:
+        package_name = 'pip'
+        _args = ['show', install_name]
+
+    print(f"{package_name=}")
+    import traceback
+    traceback.print_stack()
+
     proc = run_python_package(
-        'uv', _args,
+        package_name, _args,
         capture_output=True, as_proc=True, venv=venv, universal_newlines=True,
     )
     outs, errs = proc.communicate()
@@ -515,16 +525,16 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
 
 
 def need_update(
-        package: Optional['ModuleType'] = None,
-        install_name: Optional[str] = None,
-        import_name: Optional[str] = None,
-        version: Optional[str] = None,
-        check_pypi: bool = False,
-        split: bool = True,
-        color: bool = True,
-        debug: bool = False,
-        _run_determine_version: bool = True,
-    ) -> bool:
+    package: Optional['ModuleType'] = None,
+    install_name: Optional[str] = None,
+    import_name: Optional[str] = None,
+    version: Optional[str] = None,
+    check_pypi: bool = False,
+    split: bool = True,
+    color: bool = True,
+    debug: bool = False,
+    _run_determine_version: bool = True,
+) -> bool:
     """
     Check if a Meerschaum dependency needs an update.
     Returns a bool for whether or not a package needs to be updated.
@@ -749,21 +759,21 @@ def get_pip(
 
 
 def pip_install(
-        *install_names: str,
-        args: Optional[List[str]] = None,
-        requirements_file_path: Union[pathlib.Path, str, None] = None,
-        venv: Optional[str] = 'mrsm',
-        split: bool = False,
-        check_update: bool = True,
-        check_pypi: bool = True,
-        check_wheel: bool = True,
-        _uninstall: bool = False,
-        _from_completely_uninstall: bool = False,
-        _install_uv_pip: bool = True,
-        color: bool = True,
-        silent: bool = False,
-        debug: bool = False,
-    ) -> bool:
+    *install_names: str,
+    args: Optional[List[str]] = None,
+    requirements_file_path: Union[pathlib.Path, str, None] = None,
+    venv: Optional[str] = 'mrsm',
+    split: bool = False,
+    check_update: bool = True,
+    check_pypi: bool = True,
+    check_wheel: bool = True,
+    _uninstall: bool = False,
+    _from_completely_uninstall: bool = False,
+    _install_uv_pip: bool = True,
+    color: bool = True,
+    silent: bool = False,
+    debug: bool = False,
+) -> bool:
     """
     Install packages from PyPI with `pip`.
 
@@ -818,7 +828,6 @@ def pip_install(
     from meerschaum.config import get_config
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.misc import is_android
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
     if color:
@@ -847,7 +856,7 @@ def pip_install(
     except (ImportError, FileNotFoundError):
         uv_bin = None
         have_uv_pip = False
-    if have_pip and not have_uv_pip and _install_uv_pip and not is_android():
+    if have_pip and not have_uv_pip and _install_uv_pip and is_uv_enabled():
         if not pip_install(
             'uv',
             venv=None,
@@ -866,6 +875,7 @@ def pip_install(
         venv_contains_package('uv', venv=None, debug=debug)
         and uv_bin is not None
         and venv is not None
+        and is_uv_enabled()
     )
 
     import sys
@@ -883,7 +893,7 @@ def pip_install(
                 + "https://pip.pypa.io/en/stable/installing/"
             )
             sys.exit(1)
-    
+
     with Venv(venv, debug=debug):
         if venv is not None:
             if (
@@ -909,7 +919,7 @@ def pip_install(
             if not have_wheel:
                 setup_packages_to_install = (
                     ['setuptools', 'wheel']
-                    + ([] if is_android() else ['uv'])
+                    + (['uv'] if is_uv_enabled() else [])
                 )
                 if not pip_install(
                     *setup_packages_to_install,
@@ -1047,10 +1057,10 @@ def get_prerelease_dependencies(_packages: Optional[List[str]] = None):
 
 
 def completely_uninstall_package(
-        install_name: str,
-        venv: str = 'mrsm',
-        debug: bool = False,
-    ) -> bool:
+    install_name: str,
+    venv: str = 'mrsm',
+    debug: bool = False,
+) -> bool:
     """
     Continue calling `pip uninstall` until a package is completely
     removed from a virtual environment. 
@@ -1092,8 +1102,8 @@ def completely_uninstall_package(
 
 
 def pip_uninstall(
-        *args, **kw
-    ) -> bool:
+    *args, **kw
+) -> bool:
     """
     Uninstall Python packages.
     This function is a wrapper around `pip_install()` but with `_uninstall` enforced as `True`.
@@ -1102,16 +1112,16 @@ def pip_uninstall(
 
 
 def run_python_package(
-        package_name: str,
-        args: Optional[List[str]] = None,
-        venv: Optional[str] = 'mrsm',
-        cwd: Optional[str] = None,
-        foreground: bool = False,
-        as_proc: bool = False,
-        capture_output: bool = False,
-        debug: bool = False,
-        **kw: Any,
-    ) -> Union[int, subprocess.Popen, None]:
+    package_name: str,
+    args: Optional[List[str]] = None,
+    venv: Optional[str] = 'mrsm',
+    cwd: Optional[str] = None,
+    foreground: bool = False,
+    as_proc: bool = False,
+    capture_output: bool = False,
+    debug: bool = False,
+    **kw: Any,
+) -> Union[int, subprocess.Popen, None]:
     """
     Runs an installed python package.
     E.g. Translates to `/usr/bin/python -m [package]`
@@ -1172,9 +1182,9 @@ def run_python_package(
     try:
         to_return = run_process(
             command,
-            foreground = foreground,
-            as_proc = as_proc,
-            capture_output = capture_output,
+            foreground=foreground,
+            as_proc=as_proc,
+            capture_output=capture_output,
             **kw
         )
     except Exception as e:
@@ -1187,9 +1197,9 @@ def run_python_package(
         )
         proc = subprocess.Popen(
             command,
-            stdout = stdout,
-            stderr = stderr,
-            env = env_dict,
+            stdout=stdout,
+            stderr=stderr,
+            env=env_dict,
         )
         to_return = proc if as_proc else proc.wait()
     except KeyboardInterrupt:
@@ -1199,20 +1209,20 @@ def run_python_package(
 
 
 def attempt_import(
-        *names: str,
-        lazy: bool = True,
-        warn: bool = True,
-        install: bool = True,
-        venv: Optional[str] = 'mrsm',
-        precheck: bool = True,
-        split: bool = True,
-        check_update: bool = False,
-        check_pypi: bool = False,
-        check_is_installed: bool = True,
-        allow_outside_venv: bool = True,
-        color: bool = True,
-        debug: bool = False
-    ) -> Any:
+    *names: str,
+    lazy: bool = True,
+    warn: bool = True,
+    install: bool = True,
+    venv: Optional[str] = 'mrsm',
+    precheck: bool = True,
+    split: bool = True,
+    check_update: bool = False,
+    check_pypi: bool = False,
+    check_is_installed: bool = True,
+    allow_outside_venv: bool = True,
+    color: bool = True,
+    debug: bool = False
+) -> Any:
     """
     Raise a warning if packages are not installed; otherwise import and return modules.
     If `lazy` is `True`, return lazy-imported modules.
@@ -1399,10 +1409,10 @@ def attempt_import(
 
 
 def lazy_import(
-        name: str,
-        local_name: str = None,
-        **kw
-    ) -> meerschaum.utils.packages.lazy_loader.LazyLoader:
+    name: str,
+    local_name: str = None,
+    **kw
+) -> meerschaum.utils.packages.lazy_loader.LazyLoader:
     """
     Lazily import a package.
     """
@@ -1440,10 +1450,10 @@ def pandas_name() -> str:
 
 emitted_pandas_warning: bool = False
 def import_pandas(
-        debug: bool = False,
-        lazy: bool = False,
-        **kw
-    ) -> 'ModuleType':
+    debug: bool = False,
+    lazy: bool = False,
+    **kw
+) -> 'ModuleType':
     """
     Quality-of-life function to attempt to import the configured version of `pandas`.
     """
@@ -1472,10 +1482,10 @@ def import_pandas(
 
 
 def import_rich(
-        lazy: bool = True,
-        debug: bool = False,
-        **kw : Any
-    ) -> 'ModuleType':
+    lazy: bool = True,
+    debug: bool = False,
+    **kw : Any
+) -> 'ModuleType':
     """
     Quality of life function for importing `rich`.
     """
@@ -1530,13 +1540,13 @@ def import_html(warn=False, **kw) -> 'ModuleType':
 
 
 def get_modules_from_package(
-        package: 'package',
-        names: bool = False,
-        recursive: bool = False,
-        lazy: bool = False,
-        modules_venvs: bool = False,
-        debug: bool = False
-    ):
+    package: 'package',
+    names: bool = False,
+    recursive: bool = False,
+    lazy: bool = False,
+    modules_venvs: bool = False,
+    debug: bool = False
+):
     """
     Find and import all modules in a package.
     
@@ -1585,13 +1595,13 @@ def get_modules_from_package(
 
 
 def import_children(
-        package: Optional['ModuleType'] = None,
-        package_name: Optional[str] = None,
-        types : Optional[List[str]] = None,
-        lazy: bool = True,
-        recursive: bool = False,
-        debug: bool = False
-    ) -> List['ModuleType']:
+    package: Optional['ModuleType'] = None,
+    package_name: Optional[str] = None,
+    types : Optional[List[str]] = None,
+    lazy: bool = True,
+    recursive: bool = False,
+    debug: bool = False
+) -> List['ModuleType']:
     """
     Import all functions in a package to its `__init__`.
 
@@ -1660,12 +1670,12 @@ def import_children(
 
 _reload_module_cache = {}
 def reload_package(
-        package: str,
-        skip_submodules: Optional[List[str]] = None,
-        lazy: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ):
+    package: str,
+    skip_submodules: Optional[List[str]] = None,
+    lazy: bool = False,
+    debug: bool = False,
+    **kw: Any
+):
     """
     Recursively load a package's subpackages, even if they were not previously loaded.
     """
@@ -1724,12 +1734,12 @@ def reload_meerschaum(debug: bool = False) -> SuccessTuple:
 
 
 def is_installed(
-        import_name: str,
-        venv: Optional[str] = 'mrsm',
-        split: bool = True,
-        allow_outside_venv: bool = True,
-        debug: bool = False,
-    ) -> bool:
+    import_name: str,
+    venv: Optional[str] = 'mrsm',
+    split: bool = True,
+    allow_outside_venv: bool = True,
+    debug: bool = False,
+) -> bool:
     """
     Check whether a package is installed.
 
@@ -1782,11 +1792,11 @@ def is_installed(
 
 
 def venv_contains_package(
-        import_name: str,
-        venv: Optional[str] = 'mrsm',
-        split: bool = True,
-        debug: bool = False,
-    ) -> bool:
+    import_name: str,
+    venv: Optional[str] = 'mrsm',
+    split: bool = True,
+    debug: bool = False,
+) -> bool:
     """
     Search the contents of a virtual environment for a package.
     """
@@ -1821,10 +1831,10 @@ def ensure_readline() -> 'ModuleType':
         try:
             rl = attempt_import(
                 rl_name,
-                lazy = False,
-                install = True,
-                venv = None,
-                warn = False,
+                lazy=False,
+                install=True,
+                venv=None,
+                warn=False,
             )
         except (ImportError, ModuleNotFoundError):
             if not pip_install(rl_name, args=['--upgrade', '--ignore-installed'], venv=None):
@@ -1867,9 +1877,51 @@ def _get_pip_os_env(color: bool = True):
     path_sep = ':' if platform.system() != 'Windows' else ';'
     pip_os_env.update({
         'PIP_BREAK_SYSTEM_PACKAGES': 'true',
+        'UV_BREAK_SYSTEM_PACKAGES': 'true',
         ('FORCE_COLOR' if color else 'NO_COLOR'): '1',
     })
     if str(python_bin_path) not in path_str:
         pip_os_env['PATH'] = str(python_bin_path.parent) + path_sep + path_str
 
     return pip_os_env
+
+
+def use_uv() -> bool:
+    """
+    Return whether `uv` is available and enabled.
+    """
+    from meerschaum.utils.misc import is_android
+    if is_android():
+        return False
+
+    if not is_uv_enabled():
+        return False
+
+    try:
+        import uv
+        uv_bin = uv.find_uv_bin()
+    except (ImportError, FileNotFoundError):
+        uv_bin = None
+
+    if uv_bin is None:
+        return False
+
+    return True
+
+
+def is_uv_enabled() -> bool:
+    """
+    Return whether the user has disabled `uv`.
+    """
+    from meerschaum.utils.misc import is_android
+    if is_android():
+        return False
+
+    try:
+        import yaml
+    except ImportError:
+        return False
+
+    from meerschaum.config import get_config
+    enabled = get_config('system', 'experimental', 'uv_pip')
+    return enabled

@@ -55,7 +55,7 @@ env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
         'meerschaum': 'MRSM{!meerschaum}',
         'system': 'MRSM{!system}',
     },
-    indent = 4,
+    indent=4,
 ).replace(
     '"MRSM{!system}"', 'MRSM{!system}'
 ).replace(

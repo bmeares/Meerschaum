@@ -10,12 +10,12 @@ from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
 from meerschaum.config import get_config
 
 def read_config(
-        directory: Optional[str] = None,
-        keys: Optional[List[str]] = None,
-        write_missing : bool = True,
-        substitute : bool = True,
-        with_filenames : bool = False,
-    ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], List[str]]]:
+    directory: Optional[str] = None,
+    keys: Optional[List[str]] = None,
+    write_missing : bool = True,
+    substitute : bool = True,
+    with_filenames : bool = False,
+) -> Union[Dict[str, Any], Tuple[Dict[str, Any], List[str]]]:
     """
     Read the configuration directory.
 
@@ -313,10 +313,10 @@ def search_and_substitute_config(
         try:
             valid, value = get_config(
                 *keys,
-                substitute = False,
-                as_tuple = True,
-                write_missing = False,
-                sync_files = False,
+                substitute=False,
+                as_tuple=True,
+                write_missing=False,
+                sync_files=False,
             )
         except Exception as e:
             import traceback

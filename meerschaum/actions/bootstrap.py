@@ -336,7 +336,7 @@ def _bootstrap_connectors(
             return abort_tuple
         new_attributes['flavor'] = flavor
         required = sorted(list(connector_attributes[_type]['flavors'][flavor]['requirements']))
-        required = sorted(list(connector_attributes[_type]['flavors'][flavor]['optional']))
+        optional = sorted(list(connector_attributes[_type]['flavors'][flavor].get('optional', {})))
         default = type_attributes['flavors'][flavor].get('defaults', {})
     else:
         required = sorted(list(type_attributes.get('required', {})))

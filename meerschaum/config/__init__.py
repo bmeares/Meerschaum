@@ -79,15 +79,15 @@ def set_config(cf: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_config(
-        *keys: str,
-        patch: bool = True,
-        substitute: bool = True,
-        sync_files: bool = True,
-        write_missing: bool = True,
-        as_tuple: bool = False,
-        warn: bool = True,
-        debug: bool = False
-    ) -> Any:
+    *keys: str,
+    patch: bool = True,
+    substitute: bool = True,
+    sync_files: bool = True,
+    write_missing: bool = True,
+    as_tuple: bool = False,
+    warn: bool = True,
+    debug: bool = False
+) -> Any:
     """
     Return the Meerschaum configuration dictionary.
     If positional arguments are provided, index by the keys.
