@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.4.2
+### v2.4.2 — v2.4.3
 
 - **Fix `bootstrap connectors`.**  
   Revert a breaking change to the `bootstrap connectors` wizard.
@@ -14,6 +14,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Default to a query string for `options` when bootstrapping MSSQL connectors.**  
   Although dictionaries are supported for `options`, using a dictionary as a default was breaking serialization. The default for `options` is now the string `driver=ODBC Driver 17 for SQL Server&UseFMTONLY=Yes`.
+
+- **Default to MSSQL ODBC Driver 18.**  
+  The default driver to be used by MSSQL connectors is version 18.
 
 ### v2.4.1
 
