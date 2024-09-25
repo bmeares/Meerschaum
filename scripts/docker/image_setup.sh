@@ -25,8 +25,27 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
     git \
     || exit 1
 
+  sudo -u $MRSM_USER python -m pip install \
+    --no-cache-dir --upgrade --user psycopg pandas || exit 1
+
   ### Install graphics dependencies for the full version only.
   if [ "$MRSM_DEP_GROUP" == "full" ]; then
+
+    ### Install MSSQL ODBC driver.
+    apt-get install -y gpg alien || exit 1
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+    curl https://packages.microsoft.com/config/debian/12/prod.list | tee /etc/apt/sources.list.d/mssql-release.list
+    apt-get update
+    ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev || exit 1
+
+    ### Install the Oracle driver.
+    curl https://download.oracle.com/otn_software/linux/instantclient/217000/oracle-instantclient-basic-21.7.0.0.0-1.el8.x86_64.rpm \
+      -o /tmp/_oracle.rpm
+    alien -i /tmp/_oracle.rpm || exit 1
+    rm -f /tmp/_oracle.rpm
+    apt-get purge alien -y && apt-get autoremove -y
+
+    ### Install GUI libraries.
     apt-get install -y --no-install-recommends \
       libglib2.0-dev \
       libgirepository1.0-dev \
@@ -37,8 +56,6 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
       || exit 1
   fi
 
-  sudo -u $MRSM_USER python -m pip install \
-    --no-cache-dir --upgrade --user psycopg pandas || exit 1
 fi
 
 
@@ -49,7 +66,7 @@ apt-get clean && \
 
 
 ### Also remove python3-dev and dependencies to get the image size down.
-if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
+if [ "$MRSM_DEP_GROUP" == "api" ]; then
   apt-get purge -y $(apt-get -s purge python3-dev | grep '^ ' | tr -d '*')
 fi
 
