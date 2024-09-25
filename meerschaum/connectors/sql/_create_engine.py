@@ -71,7 +71,7 @@ flavor_configs = {
         'requirements': default_requirements,
         'defaults': {
             'port': 1433,
-            'options': "driver=ODBC Driver 17 for SQL Server&UseFMTONLY=Yes",
+            'options': "driver=ODBC Driver 18 for SQL Server&UseFMTONLY=Yes",
         },
     },
     'mysql': {
