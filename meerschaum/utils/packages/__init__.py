@@ -503,10 +503,6 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
         package_name = 'pip'
         _args = ['show', install_name]
 
-    print(f"{package_name=}")
-    import traceback
-    traceback.print_stack()
-
     proc = run_python_package(
         package_name, _args,
         capture_output=True, as_proc=True, venv=venv, universal_newlines=True,
