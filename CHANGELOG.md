@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.4.2 — v2.4.4
+### v2.4.2 — v2.4.5
 
 - **Fix `bootstrap connectors`.**  
   Revert a breaking change to the `bootstrap connectors` wizard.
