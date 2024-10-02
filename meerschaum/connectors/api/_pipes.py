@@ -171,8 +171,8 @@ def sync_pipe(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.misc import json_serialize_datetime, items_str
     from meerschaum.config import get_config
-    from meerschaum.utils.packages import attempt_import, import_pandas
-    from meerschaum.utils.dataframe import get_numeric_cols
+    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.dataframe import get_numeric_cols, to_json
     begin = time.time()
     more_itertools = attempt_import('more_itertools')
     if df is None:
@@ -183,8 +183,7 @@ def sync_pipe(
         ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
         if isinstance(c, (dict, list)):
             return json.dumps(c, default=json_serialize_datetime)
-        pd = import_pandas()
-        return c.fillna(pd.NA).to_json(date_format='iso', date_unit='ns')
+        return to_json(c, orient='columns')
 
     df = json.loads(df) if isinstance(df, str) else df
 
@@ -202,6 +201,7 @@ def sync_pipe(
             if not is_dask
             else [partition.compute() for partition in df.partitions]
         )
+
         numeric_cols = get_numeric_cols(df)
         if numeric_cols:
             for col in numeric_cols:

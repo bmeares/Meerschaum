@@ -1306,5 +1306,49 @@ def query_df(
 
     _process_select_columns(result_df)
     _process_omit_columns(result_df)
-    
+
     return result_df
+
+
+def to_json(
+    df: 'pd.DataFrame',
+    safe_copy: bool = True,
+    orient: str = 'records',
+    date_format: str = 'iso',
+    date_unit: str = 'us',
+    **kwargs: Any
+) -> str:
+    """
+    Serialize the given dataframe as a JSON string.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame to be serialized.
+
+    safe_copy: bool, default True
+        If `False`, modify the DataFrame inplace.
+
+    date_format: str, default 'iso'
+        The default format for timestamps.
+
+    date_unit: str, default 'us'
+        The precision of the timestamps.
+
+    Returns
+    -------
+    A JSON string.
+    """
+    from meerschaum.utils.packages import import_pandas
+    pd = import_pandas()
+    uuid_cols = get_uuid_cols(df)
+    if uuid_cols and safe_copy:
+        df = df.copy()
+    for col in uuid_cols:
+        df[col] = df[col].astype(str)
+    return df.fillna(pd.NA).to_json(
+        date_format=date_format,
+        date_unit=date_unit,
+        orient=orient,
+        **kwargs
+    )

@@ -959,7 +959,7 @@ def get_connector_labels(
 def json_serialize_datetime(dt: datetime) -> Union[str, None]:
     """
     Serialize a datetime object into JSON (ISO format string).
-    
+
     Examples
     --------
     >>> import json

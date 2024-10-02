@@ -27,7 +27,7 @@ from decimal import Decimal
 from meerschaum import Pipe
 from meerschaum.api.models import MetaPipe
 from meerschaum.utils.packages import attempt_import, import_pandas
-from meerschaum.utils.dataframe import get_numeric_cols
+from meerschaum.utils.dataframe import get_numeric_cols, to_json
 from meerschaum.utils.misc import (
     is_pipe_registered, round_time, is_int, parse_df_datetimes,
     replace_pipes_in_dict,
@@ -473,15 +473,10 @@ def get_pipe_data(
     for col in numeric_cols:
         df[col] = df[col].apply(lambda x: f'{x:f}' if isinstance(x, Decimal) else x)
 
-    json_content = df.to_json(
-        date_format='iso',
-        orient='records',
-        date_unit='us',
-    )
-
+    json_content = to_json(df)
     return fastapi.Response(
         json_content,
-        media_type = 'application/json',
+        media_type='application/json',
     )
 
 
