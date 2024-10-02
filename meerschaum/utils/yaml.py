@@ -83,7 +83,7 @@ class yaml:
             and packaging_version.parse(_yaml.__version__) >= packaging_version.parse('6.0')
             and 'Loader' not in kw
         ):
-            kw['Loader'] = _yaml.FullLoader
+            kw['Loader'] = _yaml.Loader
 
         return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
 
