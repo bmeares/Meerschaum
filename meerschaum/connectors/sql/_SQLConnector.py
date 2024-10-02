@@ -13,6 +13,7 @@ from meerschaum.utils.typing import Optional, Any, Union
 from meerschaum.connectors import Connector
 from meerschaum.utils.warnings import error
 
+
 class SQLConnector(Connector):
     """
     Connect to SQL databases via `sqlalchemy`.
@@ -26,7 +27,15 @@ class SQLConnector(Connector):
     IS_INSTANCE: bool = True
 
     from ._create_engine import flavor_configs, create_engine
-    from ._sql import read, value, exec, execute, to_sql, exec_queries
+    from ._sql import (
+        read,
+        value,
+        exec,
+        execute,
+        to_sql,
+        exec_queries,
+        get_connection,
+    )
     from meerschaum.utils.sql import test_connection
     from ._fetch import fetch, get_pipe_metadef
     from ._cli import cli, _cli_exit
@@ -85,7 +94,7 @@ class SQLConnector(Connector):
         _drop_temporary_tables,
         _drop_old_temporary_tables,
     )
-    
+
     def __init__(
         self,
         label: Optional[str] = None,

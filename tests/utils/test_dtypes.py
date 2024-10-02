@@ -6,7 +6,6 @@
 Test functions from `meerschaum.utils.misc`.
 """
 
-import datetime
 import pytest
 from meerschaum.utils.packages import import_pandas
 DEBUG: bool = True
@@ -27,6 +26,7 @@ pd = import_pandas(debug=DEBUG)
         ('json', 'object', True),
         ('float', 'object', False),
         ('datetime', 'object', False),
+        ('uuid', 'object', True),
     ]
 )
 def test_are_dtypes_equal(ldtype: str, rdtype: str, are_equal: bool):

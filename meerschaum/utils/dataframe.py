@@ -138,12 +138,14 @@ def filter_unseen_df(
     import functools
     import traceback
     from decimal import Decimal
+    from uuid import UUID
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import import_pandas, attempt_import
     from meerschaum.utils.dtypes import (
         to_pandas_dtype,
         are_dtypes_equal,
         attempt_cast_to_numeric,
+        attempt_cast_to_uuid,
         coerce_timezone,
     )
     pd = import_pandas(debug=debug)
@@ -299,6 +301,18 @@ def filter_unseen_df(
             lambda x: f'{x:f}' if isinstance(x, Decimal) else x
         )
 
+    old_uuid_cols = get_uuid_cols(old_df)
+    new_uuid_cols = get_uuid_cols(new_df)
+    uuid_cols = set(new_uuid_cols + old_uuid_cols)
+    for uuid_col in old_uuid_cols:
+        old_df[uuid_col] = old_df[uuid_col].apply(
+            lambda x: f'{x}' if isinstance(x, UUID) else x
+        )
+    for uuid_col in new_uuid_cols:
+        new_df[uuid_col] = new_df[uuid_col].apply(
+            lambda x: f'{x}' if isinstance(x, UUID) else x
+        )
+
     joined_df = merge(
         new_df.fillna(NA),
         old_df.fillna(NA),
@@ -325,6 +339,14 @@ def filter_unseen_df(
             delta_df[numeric_col] = delta_df[numeric_col].apply(attempt_cast_to_numeric)
         except Exception:
             warn(f"Unable to parse numeric column '{numeric_col}':\n{traceback.format_exc()}")
+
+    for uuid_col in uuid_cols:
+        if uuid_col not in delta_df.columns:
+            continue
+        try:
+            delta_df[uuid_col] = delta_df[uuid_col].apply(attempt_cast_to_uuid)
+        except Exception:
+            warn(f"Unable to parse numeric column '{uuid_col}':\n{traceback.format_exc()}")
 
     return delta_df
 
@@ -575,7 +597,7 @@ def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
     is_dask = 'dask' in df.__module__
     if is_dask:
         df = get_first_valid_dask_partition(df)
-    
+
     if len(df) == 0:
         return []
 
@@ -590,6 +612,42 @@ def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
             ix is not None
             and
             isinstance(df.loc[ix][col], Decimal)
+        )
+    ]
+
+
+def get_uuid_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the columns which contain `decimal.Decimal` objects from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain decimal objects.
+
+    Returns
+    -------
+    A list of columns to treat as numerics.
+    """
+    from uuid import UUID
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+
+    if len(df) == 0:
+        return []
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+    }
+    return [
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and
+            isinstance(df.loc[ix][col], UUID)
         )
     ]
 
@@ -640,11 +698,11 @@ def enforce_dtypes(
         to_pandas_dtype,
         is_dtype_numeric,
         attempt_cast_to_numeric,
+        attempt_cast_to_uuid,
     )
     if safe_copy:
         df = df.copy()
-    df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
-    if len(df_dtypes) == 0:
+    if len(df.columns) == 0:
         if debug:
             dprint("Incoming DataFrame has no columns. Skipping enforcement...")
         return df
@@ -663,12 +721,17 @@ def enforce_dtypes(
         for col, typ in dtypes.items()
         if typ == 'numeric'
     ]
+    uuid_cols = [
+        col
+        for col, typ in dtypes.items()
+        if typ == 'uuid'
+    ]
     df_numeric_cols = get_numeric_cols(df)
     if debug:
         dprint("Desired data types:")
         pprint(dtypes)
         dprint("Data types for incoming DataFrame:")
-        pprint(df_dtypes)
+        pprint({_col: str(_typ) for _col, _typ in df.dtypes.items()})
 
     if json_cols and len(df) > 0:
         if debug:
@@ -700,9 +763,21 @@ def enforce_dtypes(
                     if debug:
                         dprint(f"Unable to parse column '{col}' as NUMERIC:\n{e}")
 
+    if uuid_cols:
+        if debug:
+            dprint(f"Checking for UUIDs: {uuid_cols}")
+        for col in uuid_cols:
+            if col in df.columns:
+                try:
+                    df[col] = df[col].apply(attempt_cast_to_uuid)
+                except Exception as e:
+                    if debug:
+                        dprint(f"Unable to parse column '{col}' as UUID:\n{e}")
+
+    df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):
         if debug:
-            dprint(f"Data types match. Exiting enforcement...")
+            dprint("Data types match. Exiting enforcement...")
         return df
 
     common_dtypes = {}
@@ -714,7 +789,7 @@ def enforce_dtypes(
                 common_diff_dtypes[col] = df_dtypes[col]
 
     if debug:
-        dprint(f"Common columns with different dtypes:")
+        dprint("Common columns with different dtypes:")
         pprint(common_diff_dtypes)
 
     detected_dt_cols = {}
@@ -726,7 +801,7 @@ def enforce_dtypes(
         del common_diff_dtypes[col]
 
     if debug:
-        dprint(f"Common columns with different dtypes (after dates):")
+        dprint("Common columns with different dtypes (after dates):")
         pprint(common_diff_dtypes)
 
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):

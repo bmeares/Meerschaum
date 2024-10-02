@@ -211,9 +211,9 @@ def test_sync_new_columns(flavor: str):
     Test that new columns are added.
     """
     conn = conns[flavor]
-    pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
+    pipe = Pipe('new', 'cols', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
     pipe.delete(debug=debug)
-    pipe = Pipe('foo', 'bar', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
+    pipe = Pipe('new', 'cols', columns={'datetime': 'dt', 'id': 'id'}, instance=conn)
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 10},
     ]
@@ -478,17 +478,17 @@ def test_sync_inplace(flavor: str):
     source_pipe.delete()
     source_pipe = Pipe(
         'test', 'inplace', 'src',
-        instance = conn,
-        columns = {'datetime': 'dt'}
+        instance=conn,
+        columns={'datetime': 'dt'}
     )
     dest_pipe = Pipe(str(conn), 'inplace', 'dest', instance=conn)
     dest_pipe.delete()
     query = f"SELECT * FROM {sql_item_name(source_pipe.target, flavor)}"
     dest_pipe = Pipe(
         str(conn), 'inplace', 'dest',
-        instance = conn,
-        columns = {'datetime': 'dt'},
-        parameters = {
+        instance=conn,
+        columns={'datetime': 'dt'},
+        parameters={
             "fetch": {
                 "definition": query,
                 "backtrack_minutes": 1440,

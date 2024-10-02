@@ -107,6 +107,16 @@ update_queries = {
             UPDATE
             {sets_subquery_none};
     """,
+    'mssql-upsert': """
+        MERGE {target_table_name} f
+            USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
+            ON {and_subquery_f}
+            AND {date_bounds_subquery}
+        {when_matched_update_sets_subquery_none}
+        WHEN NOT MATCHED THEN
+            INSERT ({patch_cols_str})
+            VALUES ({patch_cols_prefixed_str});
+    """,
     'oracle': """
         MERGE INTO {target_table_name} f
             USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
@@ -172,8 +182,9 @@ columns_types_queries = {
             TABLE_NAME AS [table],
             COLUMN_NAME AS [column],
             DATA_TYPE AS [type]
-        FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
+        FROM {db_prefix}INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME LIKE '{table}%'
+            OR TABLE_NAME LIKE '{table_trunc}%'
     """,
     'mysql': """
         SELECT
@@ -182,7 +193,7 @@ columns_types_queries = {
             TABLE_NAME `table`,
             COLUMN_NAME `column`,
             DATA_TYPE `type`
-        FROM INFORMATION_SCHEMA.COLUMNS 
+        FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
     """,
     'mariadb': """
@@ -192,7 +203,7 @@ columns_types_queries = {
             TABLE_NAME `table`,
             COLUMN_NAME `column`,
             DATA_TYPE `type`
-        FROM INFORMATION_SCHEMA.COLUMNS 
+        FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
     """,
     'oracle': """
@@ -273,11 +284,11 @@ def clean(substring: str) -> str:
 
 
 def dateadd_str(
-        flavor: str = 'postgresql',
-        datepart: str = 'day',
-        number: Union[int, float] = 0,
-        begin: Union[str, datetime, int] = 'now'
-    ) -> str:
+    flavor: str = 'postgresql',
+    datepart: str = 'day',
+    number: Union[int, float] = 0,
+    begin: Union[str, datetime, int] = 'now'
+) -> str:
     """
     Generate a `DATEADD` clause depending on database flavor.
 
@@ -843,17 +854,17 @@ def get_sqlalchemy_table(
 
 
 def get_table_cols_types(
-        table: str,
-        connectable: Union[
-            'mrsm.connectors.sql.SQLConnector',
-            'sqlalchemy.orm.session.Session',
-            'sqlalchemy.engine.base.Engine'
-        ],
-        flavor: Optional[str] = None,
-        schema: Optional[str] = None,
-        database: Optional[str] = None,
-        debug: bool = False,
-    ) -> Dict[str, str]:
+    table: str,
+    connectable: Union[
+        'mrsm.connectors.sql.SQLConnector',
+        'sqlalchemy.orm.session.Session',
+        'sqlalchemy.engine.base.Engine'
+    ],
+    flavor: Optional[str] = None,
+    schema: Optional[str] = None,
+    database: Optional[str] = None,
+    debug: bool = False,
+) -> Dict[str, str]:
     """
     Return a dictionary mapping a table's columns to data types.
     This is useful for inspecting tables creating during a not-yet-committed session.
@@ -889,13 +900,12 @@ def get_table_cols_types(
     A dictionary mapping column names to data types.
     """
     from meerschaum.connectors import SQLConnector
-    from meerschaum.utils.misc import filter_keywords
     sqlalchemy = mrsm.attempt_import('sqlalchemy')
     flavor = flavor or getattr(connectable, 'flavor', None)
     if not flavor:
-        raise ValueError(f"Please provide a database flavor.")
+        raise ValueError("Please provide a database flavor.")
     if flavor == 'duckdb' and not isinstance(connectable, SQLConnector):
-        raise ValueError(f"You must provide a SQLConnector when using DuckDB.")
+        raise ValueError("You must provide a SQLConnector when using DuckDB.")
     if flavor in NO_SCHEMA_FLAVORS:
         schema = None
     if schema is None:
@@ -907,18 +917,24 @@ def get_table_cols_types(
     table_upper = table.upper()
     table_lower_trunc = truncate_item_name(table_lower, flavor=flavor)
     table_upper_trunc = truncate_item_name(table_upper, flavor=flavor)
+    db_prefix = (
+        "tempdb."
+        if flavor == 'mssql' and table.startswith('#')
+        else ""
+    )
 
     cols_types_query = sqlalchemy.text(
         columns_types_queries.get(
             flavor,
             columns_types_queries['default']
         ).format(
-            table = table,
-            table_trunc = table_trunc,
-            table_lower = table_lower,
-            table_lower_trunc = table_lower_trunc,
-            table_upper = table_upper,
-            table_upper_trunc = table_upper_trunc,
+            table=table,
+            table_trunc=table_trunc,
+            table_lower=table_lower,
+            table_lower_trunc=table_lower_trunc,
+            table_upper=table_upper,
+            table_upper_trunc=table_upper_trunc,
+            db_prefix=db_prefix,
         )
     )
 
@@ -987,20 +1003,20 @@ def get_table_cols_types(
 
 
 def get_update_queries(
-        target: str,
-        patch: str,
-        connectable: Union[
-            mrsm.connectors.sql.SQLConnector,
-            'sqlalchemy.orm.session.Session'
-        ],
-        join_cols: Iterable[str],
-        flavor: Optional[str] = None,
-        upsert: bool = False,
-        datetime_col: Optional[str] = None,
-        schema: Optional[str] = None,
-        patch_schema: Optional[str] = None,
-        debug: bool = False,
-    ) -> List[str]:
+    target: str,
+    patch: str,
+    connectable: Union[
+        mrsm.connectors.sql.SQLConnector,
+        'sqlalchemy.orm.session.Session'
+    ],
+    join_cols: Iterable[str],
+    flavor: Optional[str] = None,
+    upsert: bool = False,
+    datetime_col: Optional[str] = None,
+    schema: Optional[str] = None,
+    patch_schema: Optional[str] = None,
+    debug: bool = False,
+) -> List[str]:
     """
     Build a list of `MERGE`, `UPDATE`, `DELETE`/`INSERT` queries to apply a patch to target table.
 
@@ -1067,16 +1083,16 @@ def get_update_queries(
     target_table_columns = get_table_cols_types(
         target,
         connectable,
-        flavor = flavor,
-        schema = schema,
-        debug = debug,
+        flavor=flavor,
+        schema=schema,
+        debug=debug,
     )
     patch_table_columns = get_table_cols_types(
         patch,
         connectable,
-        flavor = flavor,
-        schema = patch_schema,
-        debug = debug,
+        flavor=flavor,
+        schema=patch_schema,
+        debug=debug,
     )
 
     patch_cols_str = ', '.join(
@@ -1085,6 +1101,13 @@ def get_update_queries(
             for col in patch_table_columns
         ]
     )
+    patch_cols_prefixed_str = ', '.join(
+        [
+            'p.' + sql_item_name(col, flavor)
+            for col in patch_table_columns
+        ]
+    )
+
     join_cols_str = ', '.join(
         [
             sql_item_name(col, flavor)
@@ -1095,7 +1118,7 @@ def get_update_queries(
     value_cols = []
     join_cols_types = []
     if debug:
-        dprint(f"target_table_columns:")
+        dprint("target_table_columns:")
         mrsm.pprint(target_table_columns)
     for c_name, c_type in target_table_columns.items():
         if c_name not in patch_table_columns:
@@ -1156,7 +1179,7 @@ def get_update_queries(
                 + ' = '
                 + "COALESCE("
                 + r_prefix
-                + sql_item_name(c_name, flavor, None) 
+                + sql_item_name(c_name, flavor, None)
                 + ", "
                 + get_null_replacement(c_type, flavor)
                 + ")"
@@ -1175,20 +1198,28 @@ def get_update_queries(
         else "1 = 1"
     )
 
+    ### NOTE: MSSQL upserts must exclude the update portion if only upserting indices.
+    when_matched_update_sets_subquery_none = "" if not value_cols else (
+        "WHEN MATCHED THEN"
+        f"     UPDATE {sets_subquery('', 'p.')}"
+    )
+
     return [
         base_query.format(
-            sets_subquery_none = sets_subquery('', 'p.'),
-            sets_subquery_none_excluded = sets_subquery('', 'EXCLUDED.'),
-            sets_subquery_f = sets_subquery('f.', 'p.'),
-            and_subquery_f = and_subquery('p.', 'f.'),
-            and_subquery_t = and_subquery('p.', 't.'),
-            target_table_name = target_table_name,
-            patch_table_name = patch_table_name,
-            patch_cols_str = patch_cols_str,
-            date_bounds_subquery = date_bounds_subquery,
-            join_cols_str = join_cols_str,
-            coalesce_join_cols_str = coalesce_join_cols_str,
-            update_or_nothing = update_or_nothing,
+            sets_subquery_none=sets_subquery('', 'p.'),
+            sets_subquery_none_excluded=sets_subquery('', 'EXCLUDED.'),
+            sets_subquery_f=sets_subquery('f.', 'p.'),
+            and_subquery_f=and_subquery('p.', 'f.'),
+            and_subquery_t=and_subquery('p.', 't.'),
+            target_table_name=target_table_name,
+            patch_table_name=patch_table_name,
+            patch_cols_str=patch_cols_str,
+            patch_cols_prefixed_str=patch_cols_prefixed_str,
+            date_bounds_subquery=date_bounds_subquery,
+            join_cols_str=join_cols_str,
+            coalesce_join_cols_str=coalesce_join_cols_str,
+            update_or_nothing=update_or_nothing,
+            when_matched_update_sets_subquery_none=when_matched_update_sets_subquery_none,
         )
         for base_query in base_queries
     ]
@@ -1232,6 +1263,11 @@ def get_null_replacement(typ: str, flavor: str) -> str:
         return dateadd_str(flavor=flavor, begin='1900-01-01')
     if 'float' in typ.lower() or 'double' in typ.lower() or typ.lower() in ('decimal',):
         return '-987654321.0'
+    if typ.lower() in ('uniqueidentifier', 'guid', 'uuid'):
+        magic_val = 'DEADBEEF-ABBA-BABE-CAFE-DECAFC0FFEE5'
+        if flavor == 'mssql':
+            return f"CAST('{magic_val}' AS UNIQUEIDENTIFIER)"
+        return f"'{magic_val}'"
     return ('n' if flavor == 'oracle' else '') + "'-987654321'"
 
 
@@ -1443,7 +1479,7 @@ def session_execute(
     successes, msgs, results = [], [], []
     for query in queries:
         query_text = sqlalchemy.text(query)
-        fail_msg = f"Failed to execute queries."
+        fail_msg = "Failed to execute queries."
         try:
             result = session.execute(query_text)
             query_success = result is not None

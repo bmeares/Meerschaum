@@ -55,6 +55,7 @@ DB_FLAVORS_CAST_DTYPES = {
         'NVARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
         'VARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
         'VARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
+        'NVARCHAR': 'NVARCHAR(MAX)',
     },
 }
 for _flavor, (_precision, _scale) in NUMERIC_PRECISION_FLAVORS.items():
@@ -92,6 +93,8 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'BIT(1)': 'bool[pyarrow]',
     'JSON': 'json',
     'JSONB': 'json',
+    'UUID': 'uuid',
+    'UNIQUEIDENTIFIER': 'uuid',
     'substrings': {
         'CHAR': 'string[pyarrow]',
         'TIMESTAMP': 'datetime64[ns]',
@@ -239,6 +242,19 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'cockroachdb': 'NUMERIC',
         'default': 'NUMERIC',
     },
+    'uuid': {
+        'timescaledb': 'UUID',
+        'postgresql': 'UUID',
+        'mariadb': 'CHAR(36)',
+        'mysql': 'CHAR(36)',
+        'mssql': 'UNIQUEIDENTIFIER',
+        'oracle': 'VARCHAR2(36)',
+        'sqlite': 'TEXT',
+        'duckdb': 'UUID',
+        'citus': 'UUID',
+        'cockroachdb': 'UUID',
+        'default': 'TEXT',
+    },
 }
 PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'int': {
@@ -357,6 +373,19 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'citus': 'Numeric',
         'cockroachdb': 'Numeric',
         'default': 'Numeric',
+    },
+    'uuid': {
+        'timescaledb': 'Uuid',
+        'postgresql': 'Uuid',
+        'mariadb': 'Uuid',
+        'mysql': 'Uuid',
+        'mssql': 'Uuid',
+        'oracle': 'Uuid',
+        'sqlite': 'Uuid',
+        'duckdb': 'Uuid',
+        'citus': 'Uuid',
+        'cockroachdb': 'Uuid',
+        'default': 'Uuid',
     },
 }
 

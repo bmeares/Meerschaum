@@ -4,6 +4,23 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.4.6
+
+- **Prefix temporary tables with `##`.**  
+  Temporary tables are now prefixed with `##` to take advantage of `tempdb` in MSSQL.
+
+- **Add the `uuid` dtype.**  
+  The `uuid` dtype adds support for Python `UUID` objects and maps to the appropriate `UUID` data type per SQL flavor (e.g. `UNIQUEIDENTIFIER` for `mssql`).
+
+- **Add `upsert` support to MSSQL.**  
+  Setting `upsert` in a pipe's parameters will now upsert rows in a single transaction (via a `MERGE` query).
+
+- **Add `SQLConnector.get_connection()`.**  
+  To simplify connection management, you may now obtain an active connection with `SQLConnector.get_connection()`. To force a new connection, pass `rebuild=True`.
+
+- **Improve session management for MSSQL.**  
+  Transactions and connections are now more gracefully handled when working with MSSQL.
+
 ### v2.4.2 — v2.4.5
 
 - **Fix `bootstrap connectors`.**  

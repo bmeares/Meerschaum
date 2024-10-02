@@ -16,6 +16,7 @@ import meerschaum as mrsm
 from meerschaum import Pipe
 from meerschaum.actions import actions
 
+
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_verify_backfill_simple(flavor: str):
     """
@@ -87,7 +88,7 @@ def test_verify_backfill_inplace(flavor: str):
     source_rowcount = source_pipe.get_rowcount()
     target_rowcount = target_pipe.get_rowcount()
     assert source_rowcount == target_rowcount
-    
+
     backfill_begin = datetime(2022, 12, 24)
     backfill_end = datetime(2022, 12, 26)
     _ = source_pipe.sync(begin=backfill_begin, end=backfill_end)

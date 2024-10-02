@@ -11,8 +11,9 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Union, Any, SuccessTuple, Tuple, Dict, Optional, List
 )
-from meerschaum.utils.warnings import warn, error, info
+from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.debug import dprint
+
 
 def register_pipe(
     self,
@@ -73,12 +74,12 @@ def register_pipe(
 
 
 def edit_pipe(
-        self,
-        pipe : mrsm.Pipe = None,
-        patch: bool = False,
-        debug: bool = False,
-        **kw : Any
-    ) -> SuccessTuple:
+    self,
+    pipe : mrsm.Pipe = None,
+    patch: bool = False,
+    debug: bool = False,
+    **kw : Any
+) -> SuccessTuple:
     """
     Persist a Pipe's parameters to its database.
 
@@ -307,11 +308,11 @@ def fetch_pipes_keys(
 
 
 def create_indices(
-        self,
-        pipe: mrsm.Pipe,
-        indices: Optional[List[str]] = None,
-        debug: bool = False
-    ) -> bool:
+    self,
+    pipe: mrsm.Pipe,
+    indices: Optional[List[str]] = None,
+    debug: bool = False
+) -> bool:
     """
     Create a pipe's indices.
     """
@@ -339,11 +340,11 @@ def create_indices(
 
 
 def drop_indices(
-        self,
-        pipe: mrsm.Pipe,
-        indices: Optional[List[str]] = None,
-        debug: bool = False
-    ) -> bool:
+    self,
+    pipe: mrsm.Pipe,
+    indices: Optional[List[str]] = None,
+    debug: bool = False
+) -> bool:
     """
     Drop a pipe's indices.
     """
@@ -369,10 +370,10 @@ def drop_indices(
 
 
 def get_create_index_queries(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-    ) -> Dict[str, List[str]]:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> Dict[str, List[str]]:
     """
     Return a dictionary mapping columns to a `CREATE INDEX` or equivalent query.
 
@@ -541,10 +542,10 @@ def get_create_index_queries(
 
 
 def get_drop_index_queries(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-    ) -> Dict[str, List[str]]:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> Dict[str, List[str]]:
     """
     Return a dictionary mapping columns to a `DROP INDEX` or equivalent query.
 
@@ -607,10 +608,10 @@ def get_drop_index_queries(
 
 
 def delete_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> SuccessTuple:
     """
     Delete a Pipe's registration.
     """
@@ -701,7 +702,7 @@ def get_pipe_data(
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.misc import parse_df_datetimes, to_pandas_dtype
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dtypes import attempt_cast_to_numeric
+    from meerschaum.utils.dtypes import attempt_cast_to_numeric, attempt_cast_to_uuid
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
 
@@ -768,6 +769,12 @@ def get_pipe_data(
         for col, typ in pipe.dtypes.items()
         if typ == 'numeric' and col in dtypes
     ]
+    uuid_columns = [
+        col
+        for col, typ in pipe.dtypes.items()
+        if typ == 'uuid' and col in dtypes
+    ]
+
     kw['coerce_float'] = kw.get('coerce_float', (len(numeric_columns) == 0))
 
     df = self.read(
@@ -780,6 +787,11 @@ def get_pipe_data(
         if col not in df.columns:
             continue
         df[col] = df[col].apply(attempt_cast_to_numeric)
+
+    for col in uuid_columns:
+        if col not in df.columns:
+            continue
+        df[col] = df[col].apply(attempt_cast_to_uuid)
 
     if self.flavor == 'sqlite':
         ignore_dt_cols = [
@@ -1036,10 +1048,10 @@ def get_pipe_data_query(
 
 
 def get_pipe_id(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-    ) -> Any:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> Any:
     """
     Get a Pipe's ID from the pipes table.
     """
@@ -1066,10 +1078,10 @@ def get_pipe_id(
 
 
 def get_pipe_attributes(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-    ) -> Dict[str, Any]:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> Dict[str, Any]:
     """
     Get a Pipe's attributes dictionary.
     """
@@ -1236,7 +1248,7 @@ def sync_pipe(
         }
         pipe_dtypes.update(new_bool_cols)
         pipe.dtypes = pipe_dtypes
-        if not pipe.temporary:
+        if new_bool_cols and not pipe.temporary:
             infer_bool_success, infer_bool_msg = pipe.edit(debug=debug)
             if not infer_bool_success:
                 return infer_bool_success, infer_bool_msg
@@ -1468,7 +1480,7 @@ def sync_pipe_inplace(
 
     transact_id = generate_password(3)
     def get_temp_table_name(label: str) -> str:
-        return '-' + transact_id + '_' + label + '_' + pipe.target
+        return '##' + transact_id + '_' + label + '_' + pipe.target
 
     internal_schema = self.internal_schema
     temp_table_roots = ['backtrack', 'new', 'delta', 'joined', 'unseen', 'update']
@@ -1486,11 +1498,11 @@ def sync_pipe_inplace(
     }
     metadef = self.get_pipe_metadef(
         pipe,
-        params = params,
-        begin = begin,
-        end = end,
-        check_existing = check_existing,
-        debug = debug,
+        params=params,
+        begin=begin,
+        end=end,
+        check_existing=check_existing,
+        debug=debug,
     )
     pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
     upsert = pipe.parameters.get('upsert', False) and f'{self.flavor}-upsert' in update_queries
@@ -1502,15 +1514,15 @@ def sync_pipe_inplace(
                 table
                 for table in temp_tables.values()
             ] if not upsert else [temp_tables['update']],
-            ready_to_drop = ready_to_drop,
-            create = (not pipe.temporary),
-            debug = debug,
+            ready_to_drop=ready_to_drop,
+            create=(not pipe.temporary),
+            debug=debug,
         )
         if not log_success:
             warn(log_msg)
         drop_stale_success, drop_stale_msg = self._drop_old_temporary_tables(
-            refresh = False,
-            debug = debug,
+            refresh=False,
+            debug=debug,
         )
         if not drop_stale_success:
             warn(drop_stale_msg)
@@ -1522,7 +1534,7 @@ def sync_pipe_inplace(
             metadef,
             pipe.target,
             self.flavor,
-            schema = self.get_pipe_schema(pipe),
+            schema=self.get_pipe_schema(pipe),
         )
         result = self.exec(create_pipe_query, debug=debug)
         if result is None:
@@ -1543,13 +1555,13 @@ def sync_pipe_inplace(
         metadef,
         temp_tables[('new') if not upsert else 'update'],
         self.flavor,
-        schema = internal_schema,
+        schema=internal_schema,
     )
     (create_new_success, create_new_msg), create_new_results = session_execute(
         session,
         create_new_query,
-        with_results = True,
-        debug = debug,
+        with_results=True,
+        debug=debug,
     )
     if not create_new_success:
         _ = clean_up_temp_tables()
@@ -1558,14 +1570,16 @@ def sync_pipe_inplace(
 
     new_cols_types = get_table_cols_types(
         temp_tables[('new' if not upsert else 'update')],
-        connectable = connectable,
-        flavor = self.flavor,
-        schema = internal_schema,
-        database = database,
-        debug = debug,
+        connectable=connectable,
+        flavor=self.flavor,
+        schema=internal_schema,
+        database=database,
+        debug=debug,
     )
     if not new_cols_types:
         return False, f"Failed to get new columns for {pipe}."
+
+    mrsm.pprint(new_cols_types)
 
     new_cols = {
         str(col_name): get_pd_type_from_db_type(str(col_type))
@@ -2389,6 +2403,7 @@ def get_add_columns_queries(
     self,
     pipe: mrsm.Pipe,
     df: Union[pd.DataFrame, Dict[str, str]],
+    _is_db_types: bool = False,
     debug: bool = False,
 ) -> List[str]:
     """
@@ -2402,6 +2417,9 @@ def get_add_columns_queries(
     df: Union[pd.DataFrame, Dict[str, str]]
         The pandas DataFrame which contains new columns.
         If a dictionary is provided, assume it maps columns to Pandas data types.
+
+    _is_db_types: bool, default False
+        If `True`, assume `df` is a dictionary mapping columns to SQL native dtypes.
 
     Returns
     -------
@@ -2495,11 +2513,11 @@ def get_add_columns_queries(
 
 
 def get_alter_columns_queries(
-        self,
-        pipe: mrsm.Pipe,
-        df: Union[pd.DataFrame, Dict[str, str]],
-        debug: bool = False,
-    ) -> List[str]:
+    self,
+    pipe: mrsm.Pipe,
+    df: Union[pd.DataFrame, Dict[str, str]],
+    debug: bool = False,
+) -> List[str]:
     """
     If we encounter a column of a different type, set the entire column to text.
     If the altered columns are numeric, alter to numeric instead.
@@ -2556,6 +2574,7 @@ def get_alter_columns_queries(
         'int': 'bool',
         'float': 'bool',
         'numeric': 'bool',
+        'guid': 'object',
     }
     if self.flavor == 'oracle':
         pd_db_df_aliases['int'] = 'numeric'
@@ -2609,7 +2628,6 @@ def get_alter_columns_queries(
     else:
         numeric_cols.extend([col for col, typ in pipe.dtypes.items() if typ == 'numeric'])
 
-    pipe_dtypes = pipe.dtypes
     numeric_type = get_db_type_from_pd_type('numeric', self.flavor, as_sqlalchemy=False)
     text_type = get_db_type_from_pd_type('str', self.flavor, as_sqlalchemy=False)
     altered_cols_types = {

@@ -298,7 +298,7 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
                 break
     if not candidates:
         if debug:
-            dprint(f"No value column could be determined.")
+            dprint("No value column could be determined.")
         return None
 
     return candidates[0]
