@@ -430,6 +430,10 @@ def value(
 
     _close = kw.get('close', True)
     _commit = kw.get('commit', (self.flavor != 'mssql'))
+
+    #  _close = True
+    #  _commit = True
+
     try:
         result, connection = self.exec(
             query,
@@ -561,11 +565,8 @@ def exec(
             dprint(f"[{self}] Failed to execute query:\n\n{query}\n\n{e}")
         if not silent:
             warn(str(e), stacklevel=3)
-        import traceback
-        traceback.print_exc()
         result = None
         if _commit:
-            print('ROLLBACK!')
             transaction.rollback()
             connection = self.get_connection(rebuild=True)
     finally:
@@ -673,20 +674,20 @@ def exec_queries(
 
 
 def to_sql(
-        self,
-        df: pandas.DataFrame,
-        name: str = None,
-        index: bool = False,
-        if_exists: str = 'replace',
-        method: str = "",
-        chunksize: Optional[int] = -1,
-        schema: Optional[str] = None,
-        silent: bool = False,
-        debug: bool = False,
-        as_tuple: bool = False,
-        as_dict: bool = False,
-        **kw
-    ) -> Union[bool, SuccessTuple]:
+    self,
+    df: pandas.DataFrame,
+    name: str = None,
+    index: bool = False,
+    if_exists: str = 'replace',
+    method: str = "",
+    chunksize: Optional[int] = -1,
+    schema: Optional[str] = None,
+    silent: bool = False,
+    debug: bool = False,
+    as_tuple: bool = False,
+    as_dict: bool = False,
+    **kw
+) -> Union[bool, SuccessTuple]:
     """
     Upload a DataFrame's contents to the SQL server.
 
@@ -724,7 +725,7 @@ def to_sql(
         If `True`, return a dictionary of transaction information.
         The keys are `success`, `msg`, `start`, `end`, `duration`, `num_rows`, `chunksize`,
         `method`, and `target`.
-        
+
     kw: Any
         Additional arguments will be passed to the DataFrame's `to_sql` function
 
@@ -753,9 +754,12 @@ def to_sql(
         json_flavors,
         truncate_item_name,
     )
-    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols
+    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
     from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal
-    from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS
+    from meerschaum.utils.dtypes.sql import (
+        NUMERIC_PRECISION_FLAVORS,
+        PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
+    )
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
     sqlalchemy = attempt_import('sqlalchemy', debug=debug)
@@ -874,6 +878,11 @@ def to_sql(
                     else x
                 )
             )
+
+    if PD_TO_SQLALCHEMY_DTYPES_FLAVORS['uuid'].get(self.flavor, None) != 'Uuid':
+        uuid_cols = get_uuid_cols(df)
+        for col in uuid_cols:
+            df[col] = df[col].astype(str)
 
     try:
         with warnings.catch_warnings():
@@ -1014,19 +1023,54 @@ def get_connection(self, rebuild: bool = False) -> 'sqlalchemy.engine.base.Conne
     -------
     A `sqlalchemy.engine.base.Connection` object.
     """
-    connection = self.__dict__.get('_connection', None)
+    import threading
+    if '_thread_connections' not in self.__dict__:
+        self.__dict__['_thread_connections'] = {}
+
+    self._cleanup_connections()
+
+    thread_id = threading.get_ident()
+
+    thread_connections = self.__dict__.get('_thread_connections', {})
+    connection = thread_connections.get(thread_id, None)
 
     if rebuild and connection is not None:
         try:
             connection.close()
-        except Exception as e:
-            warn(e)
+        except Exception:
+            pass
 
-        _ = self.__dict__.pop('_connection', None)
+        _ = thread_connections.pop(thread_id, None)
         connection = None
 
     if connection is None or connection.closed:
         connection = self.engine.connect()
-        self._connection = connection
+        thread_connections[thread_id] = connection
 
     return connection
+
+
+def _cleanup_connections(self) -> None:
+    """
+    Remove connections for inactive threads.
+    """
+    import threading
+    thread_connections = self.__dict__.get('_thread_connections', None)
+    if not thread_connections:
+        return
+    thread_ids = set(thread_connections)
+    active_threads = [
+        thread
+        for thread in threading.enumerate()
+        if thread.ident in thread_ids
+    ]
+    active_thread_ids = {thread.ident for thread in active_threads}
+    inactive_thread_ids = thread_ids - active_thread_ids
+    for thread_id in inactive_thread_ids:
+        connection = thread_connections.pop(thread_id, None)
+        if connection is None:
+            continue
+        try:
+            connection.close()
+        except Exception:
+            pass

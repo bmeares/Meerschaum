@@ -248,7 +248,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'CHAR(36)',
         'mysql': 'CHAR(36)',
         'mssql': 'UNIQUEIDENTIFIER',
-        'oracle': 'VARCHAR2(36)',
+        ### I know this is too much space, but erring on the side of caution.
+        'oracle': 'NVARCHAR(2000)',
         'sqlite': 'TEXT',
         'duckdb': 'UUID',
         'citus': 'UUID',
@@ -380,7 +381,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'Uuid',
         'mysql': 'Uuid',
         'mssql': 'Uuid',
-        'oracle': 'Uuid',
+        'oracle': 'UnicodeText',
         'sqlite': 'Uuid',
         'duckdb': 'Uuid',
         'citus': 'Uuid',

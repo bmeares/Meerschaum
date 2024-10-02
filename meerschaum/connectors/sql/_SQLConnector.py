@@ -35,6 +35,7 @@ class SQLConnector(Connector):
         to_sql,
         exec_queries,
         get_connection,
+        _cleanup_connections,
     )
     from meerschaum.utils.sql import test_connection
     from ._fetch import fetch, get_pipe_metadef

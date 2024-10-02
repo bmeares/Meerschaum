@@ -583,7 +583,6 @@ def test_sync_uuids_inplace(flavor: str):
     assert 'uuid' in inplace_pipe.dtypes['uuid_col']
     assert inplace_pipe.get_rowcount() == len(docs)
     db_col = inplace_pipe.get_columns_types()['uuid_col']
-    print(f"{db_col=}")
     if flavor in PD_TO_DB_DTYPES_FLAVORS['uuid']:
         uuid_typ = PD_TO_DB_DTYPES_FLAVORS['uuid'][flavor]
         assert db_col == uuid_typ
