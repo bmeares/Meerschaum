@@ -61,7 +61,6 @@ class yaml:
             _yaml.add_representer(str, _string_presenter)
             _yaml.representer.SafeRepresenter.add_representer(str, _string_presenter)
 
-
     @staticmethod
     def safe_load(*args, **kw):
         """
@@ -71,7 +70,6 @@ class yaml:
             return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
         return _yaml.safe_load(*args, **filter_keywords(_yaml.safe_load, **kw))
 
-
     @staticmethod
     def load(*args, **kw):
         """
@@ -80,15 +78,14 @@ class yaml:
         (added `yaml.Loader` as a positional argument).
         """
         packaging_version = attempt_import('packaging.version')
-        _args = list(args)
         if (
             _import_name == 'yaml'
             and packaging_version.parse(_yaml.__version__) >= packaging_version.parse('6.0')
+            and 'Loader' not in kw
         ):
-            _args += [_yaml.Loader]
-        
-        return _yaml.load(*_args, **filter_keywords(_yaml.load, **kw))
+            kw['Loader'] = _yaml.FullLoader
 
+        return _yaml.load(*args, **filter_keywords(_yaml.load, **kw))
 
     @staticmethod
     def dump(data, stream=None, **kw):

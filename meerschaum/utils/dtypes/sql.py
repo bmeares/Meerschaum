@@ -245,8 +245,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'uuid': {
         'timescaledb': 'UUID',
         'postgresql': 'UUID',
-        'mariadb': 'CHAR(36)',
-        'mysql': 'CHAR(36)',
+        'mariadb': 'CHAR(32)',
+        'mysql': 'CHAR(32)',
         'mssql': 'UNIQUEIDENTIFIER',
         ### I know this is too much space, but erring on the side of caution.
         'oracle': 'NVARCHAR(2000)',
