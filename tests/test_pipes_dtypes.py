@@ -5,6 +5,7 @@
 import pytest
 import datetime
 from decimal import Decimal
+from uuid import UUID
 from tests import debug
 from tests.connectors import conns, get_flavors
 from tests.test_users import test_register_user
@@ -12,6 +13,7 @@ import meerschaum as mrsm
 from meerschaum import Pipe
 from meerschaum.utils.dtypes import are_dtypes_equal
 from meerschaum.utils.sql import sql_item_name
+from meerschaum.utils.dtypes.sql import PD_TO_DB_DTYPES_FLAVORS
 
 @pytest.fixture(autouse=True)
 def run_before_and_after(flavor: str):
@@ -66,6 +68,7 @@ def test_dtype_enforcement(flavor: str):
             'json': 'json',
             'numeric': 'numeric',
             'str': 'str',
+            'uuid': 'uuid',
         },
         instance=conn,
     )
@@ -76,9 +79,10 @@ def test_dtype_enforcement(flavor: str):
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'str': 'bar'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': '{"a": {"b": 1}}'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug)
+    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'uuid': '00000000-1234-5678-0000-000000000000'}], debug=debug)
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
-    assert len(df.columns) == 9
+    assert len(df.columns) == 10
     for col, typ in df.dtypes.items():
         pipe_dtype = pipe.dtypes[col]
         if pipe_dtype == 'json':
@@ -86,6 +90,9 @@ def test_dtype_enforcement(flavor: str):
             pipe_dtype = 'object'
         elif pipe_dtype == 'numeric':
             assert isinstance(df[col][0], Decimal)
+            pipe_dtype = 'object'
+        elif pipe_dtype == 'uuid':
+            assert isinstance(df[col][0], UUID)
             pipe_dtype = 'object'
         elif pipe_dtype == 'str':
             assert isinstance(df[col][0], str)
@@ -144,7 +151,7 @@ def test_force_json_dtype(flavor: str):
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_infer_numeric_dtype(flavor: str):
     """
-    Ensure that `Decimal` objects are persisted as `numeric`. 
+    Ensure that `Decimal` objects are persisted as `numeric`.
     """
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.misc import generate_password
@@ -176,6 +183,31 @@ def test_infer_numeric_dtype(flavor: str):
     assert df['a'][0] == Decimal('1')
     assert isinstance(df['a'][1], Decimal)
     assert df['a'][1] == Decimal(numeric_str)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_infer_uuid_dtype(flavor: str):
+    """
+    Ensure that `UUID` objects are persisted as `uuid`.
+    """
+    from meerschaum.utils.formatting import pprint
+    conn = conns[flavor]
+    pipe = Pipe('infer', 'uuid', instance=conn)
+    _ = pipe.delete(debug=debug)
+    pipe = Pipe('infer', 'uuid', instance=conn)
+    uuid_str = "e6f3a4ea-f1af-4e93-8da9-716b57672206"
+    success, msg = pipe.sync(
+        [
+            {'a': UUID(uuid_str)},
+        ],
+        debug=debug,
+    )
+    assert success, msg
+    pprint(pipe.get_columns_types())
+    df = pipe.get_data(debug=debug)
+    print(df)
+    assert isinstance(df['a'][0], UUID)
+    assert df['a'][0] == UUID(uuid_str)
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -502,3 +534,70 @@ def test_sync_bools_inplace(flavor: str):
     assert success, msg
     df = inplace_pipe.get_data(params={'id': 3})
     assert 'na' in str(df['is_bool'][0]).lower()
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_uuids_inplace(flavor: str):
+    """
+    Test that pipes are able to sync UUIDs in-place.
+    """
+    conn = conns[flavor]
+    if conn.type not in ('api', 'sql'):
+        return
+    pipe = mrsm.Pipe('test', 'uuid', 'inplace', instance=conn)
+    _ = pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'uuid', 'inplace',
+        instance=conn,
+        columns={'datetime': 'dt', 'id': 'id'},
+    )
+    pipe_table = sql_item_name(pipe.target, conn.flavor) if conn.type == 'sql' else pipe.target
+    inplace_pipe = mrsm.Pipe(conn, 'uuid', 'inplace', instance=conn)
+    _ = inplace_pipe.delete()
+    inplace_pipe = mrsm.Pipe(
+        conn, 'uuid', 'inplace',
+        instance=conn,
+        columns=pipe.columns,
+        dtypes={
+            'uuid_col': 'uuid',
+        },
+        parameters={
+            'fetch': {
+                'definition': f"SELECT * FROM {pipe_table}",
+                'pipe': pipe.keys(),
+            },
+        },
+    )
+    _ = pipe.drop()
+    docs = [
+        {'dt': '2023-01-01', 'id': 1, 'uuid_col': UUID('77e704d2-7513-45c7-b806-7b5cb0badc37')},
+        {'dt': '2023-01-02', 'id': 2, 'uuid_col': UUID('2854eeed-2911-4641-8d67-6ecd217392cc')},
+        {'dt': '2023-01-03', 'id': 3},
+    ]
+    success, msg = pipe.sync(docs)
+    assert success, msg
+
+    success, msg = inplace_pipe.sync(debug=debug)
+    assert success, msg
+
+    assert 'uuid' in inplace_pipe.dtypes['uuid_col']
+    assert inplace_pipe.get_rowcount() == len(docs)
+    db_col = inplace_pipe.get_columns_types()['uuid_col']
+    if flavor in PD_TO_DB_DTYPES_FLAVORS['uuid']:
+        uuid_typ = PD_TO_DB_DTYPES_FLAVORS['uuid'][flavor]
+        assert db_col == uuid_typ
+
+    df = inplace_pipe.get_data()
+
+    update_uuid = UUID('a12bbc7c-4595-4bfe-a9b6-8b81c6e329c8')
+    pipe.sync([{'dt': '2023-01-03', 'id': 3, 'uuid_col': update_uuid}])
+    success, msg = inplace_pipe.sync(debug=debug)
+    assert success, msg
+    df = inplace_pipe.get_data(params={'id': 3})
+    assert df['uuid_col'][0] == update_uuid
+
+    pipe.sync([{'dt': '2023-01-03', 'id': 3, 'uuid_col': None}])
+    success, msg = inplace_pipe.sync(debug=debug)
+    assert success, msg
+    df = inplace_pipe.get_data(params={'id': 3})
+    assert df['uuid_col'][0] is None

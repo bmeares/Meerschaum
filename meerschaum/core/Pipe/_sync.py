@@ -367,9 +367,10 @@ def sync(
         ### Cast to a dataframe and ensure datatypes are what we expect.
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
 
-        ### Capture `numeric` and `json` columns.
+        ### Capture `numeric`, `uuid`, and `json` columns.
         self._persist_new_json_columns(df, debug=debug)
         self._persist_new_numeric_columns(df, debug=debug)
+        self._persist_new_uuid_columns(df, debug=debug)
 
         if debug:
             dprint(
@@ -922,6 +923,30 @@ def _persist_new_numeric_columns(self, df, debug: bool = False) -> SuccessTuple:
         edit_success, edit_msg = self.edit(interactive=False, debug=debug)
         if not edit_success:
             warn(f"Unable to update NUMERIC dtypes for {self}:\n{edit_msg}")
+
+        return edit_success, edit_msg
+
+    return True, "Success"
+
+
+def _persist_new_uuid_columns(self, df, debug: bool = False) -> SuccessTuple:
+    """
+    Check for new numeric columns and update the parameters.
+    """
+    from meerschaum.utils.dataframe import get_uuid_cols
+    uuid_cols = get_uuid_cols(df)
+    existing_uuid_cols = [col for col, typ in self.dtypes.items() if typ == 'uuid']
+    new_uuid_cols = [col for col in uuid_cols if col not in existing_uuid_cols]
+    if not new_uuid_cols:
+        return True, "Success"
+
+    dtypes = self.parameters.get('dtypes', {})
+    dtypes.update({col: 'uuid' for col in uuid_cols})
+    self.parameters['dtypes'] = dtypes
+    if not self.temporary:
+        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
+        if not edit_success:
+            warn(f"Unable to update UUID dtypes for {self}:\n{edit_msg}")
 
         return edit_success, edit_msg
 

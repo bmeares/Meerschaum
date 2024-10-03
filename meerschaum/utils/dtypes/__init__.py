@@ -7,6 +7,7 @@ Utility functions for working with data types.
 """
 
 import traceback
+import uuid
 from datetime import timezone
 from decimal import Decimal, Context, InvalidOperation
 
@@ -17,6 +18,7 @@ from meerschaum.utils.warnings import warn
 MRSM_PD_DTYPES: Dict[str, str] = {
     'json': 'object',
     'numeric': 'object',
+    'uuid': 'object',
     'datetime': 'datetime64[ns]',
     'bool': 'bool[pyarrow]',
     'int': 'Int64',
@@ -51,8 +53,8 @@ def to_pandas_dtype(dtype: str) -> str:
         warn(
             f"Invalid dtype '{dtype}', will use 'object' instead:\n"
             + f"{traceback.format_exc()}",
-            stack = False,
-        ) 
+            stack=False,
+        )
     return 'object'
 
 
@@ -109,8 +111,12 @@ def are_dtypes_equal(
     if ldtype in numeric_dtypes and rdtype in numeric_dtypes:
         return True
 
-    ldtype_clean = ldtype.split('[')[0]
-    rdtype_clean = rdtype.split('[')[0]
+    uuid_dtypes = ('uuid', 'object')
+    if ldtype in uuid_dtypes and rdtype in uuid_dtypes:
+        return True
+
+    ldtype_clean = ldtype.split('[', maxsplit=1)[0]
+    rdtype_clean = rdtype.split('[', maxsplit=1)[0]
 
     if ldtype_clean.lower() == rdtype_clean.lower():
         return True
@@ -178,6 +184,22 @@ def attempt_cast_to_numeric(value: Any) -> Any:
             Decimal(str(value))
             if not value_is_null(value)
             else Decimal('NaN')
+        )
+    except Exception as e:
+        return value
+
+
+def attempt_cast_to_uuid(value: Any) -> Any:
+    """
+    Given a value, attempt to coerce it into a UUID (`uuid4`).
+    """
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return (
+            uuid.UUID(str(value))
+            if not value_is_null(value)
+            else None
         )
     except Exception as e:
         return value

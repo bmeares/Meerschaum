@@ -574,10 +574,10 @@ def get_rowcount(
 
 
 def get_chunk_interval(
-        self,
-        chunk_interval: Union[timedelta, int, None] = None,
-        debug: bool = False,
-    ) -> Union[timedelta, int]:
+    self,
+    chunk_interval: Union[timedelta, int, None] = None,
+    debug: bool = False,
+) -> Union[timedelta, int]:
     """
     Get the chunk interval to use for this pipe.
 
@@ -615,18 +615,18 @@ def get_chunk_interval(
 
 
 def get_chunk_bounds(
-        self,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        bounded: bool = False,
-        chunk_interval: Union[timedelta, int, None] = None,
-        debug: bool = False,
-    ) -> List[
-        Tuple[
-            Union[datetime, int, None],
-            Union[datetime, int, None],
-        ]
-    ]:
+    self,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    bounded: bool = False,
+    chunk_interval: Union[timedelta, int, None] = None,
+    debug: bool = False,
+) -> List[
+    Tuple[
+        Union[datetime, int, None],
+        Union[datetime, int, None],
+    ]
+]:
     """
     Return a list of datetime bounds for iterating over the pipe's `datetime` axis.
 

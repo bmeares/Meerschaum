@@ -18,6 +18,7 @@ from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
 from meerschaum.utils.sql import get_pd_type
 from meerschaum.utils.yaml import yaml
+from meerschaum.utils.dataframe import to_json
 from meerschaum.connectors.sql._fetch import get_pipe_query
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash import debug, _get_pipes
@@ -563,12 +564,13 @@ def accordion_items_from_pipe(
     if 'sync-data' in active_items:
         backtrack_df = pipe.get_backtrack_data(debug=debug, limit=1)
         try:
-            json_text = backtrack_df.fillna(pd.NA).to_json(
+            json_text = to_json(
+                backtrack_df,
                 orient='records',
                 date_format='iso',
                 force_ascii=False,
                 indent=4,
-                date_unit='ns',
+                date_unit='us',
             ) if backtrack_df is not None else '[]'
         except Exception as e:
             warn(e)

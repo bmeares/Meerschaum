@@ -12,17 +12,17 @@ from meerschaum.utils.typing import SuccessTuple, Any, Optional, Dict, Tuple, Un
 
 
 def deduplicate(
-        self,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        chunk_interval: Union[datetime, int, None] = None,
-        bounded: Optional[bool] = None,
-        workers: Optional[int] = None,
-        debug: bool = False,
-        _use_instance_method: bool = True,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    self,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    chunk_interval: Union[datetime, int, None] = None,
+    bounded: Optional[bool] = None,
+    workers: Optional[int] = None,
+    debug: bool = False,
+    _use_instance_method: bool = True,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Call the Pipe's instance connector's `delete_duplicates` method to delete duplicate rows.
 
@@ -158,10 +158,10 @@ def deduplicate(
         chunk_msg_body = ""
 
         full_chunk = self.get_data(
-            begin = chunk_begin,
-            end = chunk_end,
-            params = params,
-            debug = debug,
+            begin=chunk_begin,
+            end=chunk_end,
+            params=params,
+            debug=debug,
         )
         if full_chunk is None or len(full_chunk) == 0:
             return bounds, (True, f"{chunk_msg_header}\nChunk is empty, skipping...")
@@ -171,10 +171,10 @@ def deduplicate(
             return bounds, (False, f"None of {items_str(indices)} were present in chunk.")
         try:
             full_chunk = full_chunk.drop_duplicates(
-                subset = chunk_indices,
-                keep = 'last'
+                subset=chunk_indices,
+                keep='last'
             ).reset_index(
-                drop = True,
+                drop=True,
             )
         except Exception as e:
             return (
@@ -183,10 +183,10 @@ def deduplicate(
             )
 
         clear_success, clear_msg = self.clear(
-            begin = chunk_begin,
-            end = chunk_end,
-            params = params,
-            debug = debug,
+            begin=chunk_begin,
+            end=chunk_end,
+            params=params,
+            debug=debug,
         )
         if not clear_success:
             chunk_msg_body += f"Failed to clear chunk while deduplicating:\n{clear_msg}\n"
@@ -195,13 +195,13 @@ def deduplicate(
         sync_success, sync_msg = self.sync(full_chunk, debug=debug)
         if not sync_success:
             chunk_msg_body += f"Failed to sync chunk while deduplicating:\n{sync_msg}\n"
-         
+
         ### Finally check if the deduplication worked.
         chunk_rowcount = self.get_rowcount(
-            begin = chunk_begin,
-            end = chunk_end,
-            params = params,
-            debug = debug,
+            begin=chunk_begin,
+            end=chunk_end,
+            params=params,
+            debug=debug,
         )
         if chunk_rowcount != deduped_chunk_len:
             return bounds, (
