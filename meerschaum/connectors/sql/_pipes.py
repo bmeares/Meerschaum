@@ -1579,8 +1579,6 @@ def sync_pipe_inplace(
     if not new_cols_types:
         return False, f"Failed to get new columns for {pipe}."
 
-    mrsm.pprint(new_cols_types)
-
     new_cols = {
         str(col_name): get_pd_type_from_db_type(str(col_type))
         for col_name, col_type in new_cols_types.items()

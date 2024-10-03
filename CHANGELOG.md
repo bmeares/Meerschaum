@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.4.6
+### v2.4.6 ― v2.4.7
 
 - **Prefix temporary tables with `##`.**  
   Temporary tables are now prefixed with `##` to take advantage of `tempdb` in MSSQL.
