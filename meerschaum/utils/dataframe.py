@@ -574,10 +574,10 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to be encoded as JSON.
     """
-    is_dask = 'dask' in df.__module__
+    is_dask = 'dask' in df.__module__ if hasattr(df, '__module__') else False
     if is_dask:
         df = get_first_valid_dask_partition(df)
-    
+
     if len(df) == 0:
         return []
 

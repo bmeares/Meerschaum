@@ -37,7 +37,10 @@ version_queries = {
     'mssql': "SELECT @@version",
     'oracle': "SELECT version from PRODUCT_COMPONENT_VERSION WHERE rownum = 1",
 }
-SKIP_IF_EXISTS_FLAVORS = {'oracle'}
+SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
+DROP_IF_EXISTS_FLAVORS = {
+    'timescaledb', 'postgresql', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite'
+}
 COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'citus'}
 update_queries = {
     'default': """

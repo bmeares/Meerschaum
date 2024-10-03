@@ -247,8 +247,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'uuid': {
         'timescaledb': 'UUID',
         'postgresql': 'UUID',
-        'mariadb': 'CHAR(32)',
-        'mysql': 'CHAR(32)',
+        'mariadb': 'TEXT',
+        'mysql': 'TEXT',
         'mssql': 'UNIQUEIDENTIFIER',
         ### I know this is too much space, but erring on the side of caution.
         'oracle': 'NVARCHAR(2000)',
@@ -384,7 +384,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mysql': 'Uuid',
         'mssql': 'Uuid',
         'oracle': 'UnicodeText',
-        'sqlite': 'Uuid',
+        'sqlite': 'UnicodeText',
         'duckdb': 'Uuid',
         'citus': 'Uuid',
         'cockroachdb': 'Uuid',

@@ -811,7 +811,7 @@ def get_pipe_data(
                     parse_df_datetimes(
                         c,
                         ignore_cols=ignore_dt_cols,
-                        chunksize = kw.get('chunksize', None),
+                        chunksize=kw.get('chunksize', None),
                         debug=debug,
                     )
                     for c in df
@@ -2538,7 +2538,7 @@ def get_alter_columns_queries(
     """
     if not pipe.exists(debug=debug):
         return []
-    from meerschaum.utils.sql import sql_item_name, SKIP_IF_EXISTS_FLAVORS
+    from meerschaum.utils.sql import sql_item_name, DROP_IF_EXISTS_FLAVORS
     from meerschaum.utils.dataframe import get_numeric_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import (
@@ -2694,7 +2694,7 @@ def get_alter_columns_queries(
             f"\nFROM {sql_item_name(temp_table_name, self.flavor, self.get_pipe_schema(pipe))}"
         )
 
-        if_exists_str = "" if self.flavor in SKIP_IF_EXISTS_FLAVORS else "IF EXISTS"
+        if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
 
         drop_query = f"DROP TABLE {if_exists_str}" + sql_item_name(
             temp_table_name, self.flavor, self.get_pipe_schema(pipe)

@@ -15,6 +15,10 @@ This is the current release cycle, so stay tuned for future releases!
 - **Remove temporary tables warnings.**  
   Failure to drop temporary tables no longer raises a warning (added `IF EXISTS` check).
 
+- **Fix an issue with the `sql` action.**
+
+- **Fix UUID support for SQLite, MySQL / MariaDB.**
+
 ### v2.4.6 ― v2.4.7
 
 - **Prefix temporary tables with `##`.**  
