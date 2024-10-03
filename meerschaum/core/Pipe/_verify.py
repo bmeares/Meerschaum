@@ -281,9 +281,9 @@ def verify(
 
 
 def get_chunks_success_message(
-        chunk_success_tuples: Dict[Tuple[Any, Any], SuccessTuple],
-        header: str = '',
-    ) -> str:
+    chunk_success_tuples: Dict[Tuple[Any, Any], SuccessTuple],
+    header: str = '',
+) -> str:
     """
     Sum together all of the inserts and updates from the chunks.
 
@@ -323,8 +323,8 @@ def get_chunks_success_message(
             + ([f'updated {num_updated}'] if num_updated else [])
             + ([f'upserted {num_upserted}'] if num_upserted else [])
         ) or ['synced 0'],
-        quotes = False,
-        and_ = False,
+        quotes=False,
+        and_=False,
     )
 
     success_msg = (

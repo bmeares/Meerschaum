@@ -3,4 +3,5 @@ nav:
   - "🥾 Bootstrapping": bootstrapping.md
   - "📥 Syncing": syncing.md
   - "🔖 Tags": tags.md
+  - "🧩 Parameters": parameters.md
   - ...
