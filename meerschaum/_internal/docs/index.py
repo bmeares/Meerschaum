@@ -545,6 +545,7 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dataframe.get_unhashable_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.parse_df_datetimes()</code></li>
       <li><code>meerschaum.utils.dataframe.query_df()</code></li>
+      <li><code>meerschaum.utils.dataframe.to_json()</code></li>
     </ul>
   </details>
   </ul>

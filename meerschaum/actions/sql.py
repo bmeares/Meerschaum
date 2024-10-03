@@ -15,12 +15,12 @@ exec_methods = {
 }
 
 def sql(
-        action: Optional[List[str]] = None,
-        gui: bool = False,
-        nopretty: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ):
+    action: Optional[List[str]] = None,
+    gui: bool = False,
+    nopretty: bool = False,
+    debug: bool = False,
+    **kw: Any
+):
     """Execute a SQL query or launch an interactive CLI. All positional arguments are optional.
     
     Usage:
@@ -59,6 +59,7 @@ def sql(
         - `sql local exec "INSERT INTO table (id) VALUES (1)"
             Execute the above query on `sql:local`.
     """
+    from meerschaum.utils.dataframe impor to_json
 
     if action is None:
         action = []
@@ -135,11 +136,10 @@ def sql(
             pprint(result)
         else:
             print(
-                result.fillna(pd.NA).to_json(
-                    date_format = 'iso',
-                    orient = 'split',
-                    index = False,
-                    date_unit = 'us'
+                to_json(
+                    result,
+                    orient='split',
+                    index=False,
                 )
             )
 

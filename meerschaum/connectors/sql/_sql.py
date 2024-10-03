@@ -20,32 +20,33 @@ _bulk_flavors = {'postgresql', 'timescaledb', 'citus'}
 _disallow_chunks_flavors = {'duckdb', 'mssql'}
 _max_chunks_flavors = {'sqlite': 1000,}
 
+
 def read(
-        self,
-        query_or_table: Union[str, sqlalchemy.Query],
-        params: Union[Dict[str, Any], List[str], None] = None,
-        dtype: Optional[Dict[str, Any]] = None,
-        coerce_float: bool = True,
-        chunksize: Optional[int] = -1,
-        workers: Optional[int] = None,
-        chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
-        as_hook_results: bool = False,
-        chunks: Optional[int] = None,
-        schema: Optional[str] = None,
-        as_chunks: bool = False,
-        as_iterator: bool = False,
-        as_dask: bool = False,
-        index_col: Optional[str] = None,
-        silent: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union[
-        pandas.DataFrame,
-        dask.DataFrame,
-        List[pandas.DataFrame],
-        List[Any],
-        None,
-    ]:
+    self,
+    query_or_table: Union[str, sqlalchemy.Query],
+    params: Union[Dict[str, Any], List[str], None] = None,
+    dtype: Optional[Dict[str, Any]] = None,
+    coerce_float: bool = True,
+    chunksize: Optional[int] = -1,
+    workers: Optional[int] = None,
+    chunk_hook: Optional[Callable[[pandas.DataFrame], Any]] = None,
+    as_hook_results: bool = False,
+    chunks: Optional[int] = None,
+    schema: Optional[str] = None,
+    as_chunks: bool = False,
+    as_iterator: bool = False,
+    as_dask: bool = False,
+    index_col: Optional[str] = None,
+    silent: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> Union[
+    pandas.DataFrame,
+    dask.DataFrame,
+    List[pandas.DataFrame],
+    List[Any],
+    None,
+]:
     """
     Read a SQL query or table into a pandas dataframe.
 
@@ -145,7 +146,7 @@ def read(
     if chunksize is None and as_iterator:
         if not silent and self.flavor not in _disallow_chunks_flavors:
             warn(
-                f"An iterator may only be generated if chunksize is not None.\n"
+                "An iterator may only be generated if chunksize is not None.\n"
                 + "Falling back to a chunksize of 1000.", stacklevel=3,
             )
         chunksize = 1000
@@ -386,12 +387,12 @@ def read(
 
 
 def value(
-        self,
-        query: str,
-        *args: Any,
-        use_pandas: bool = False,
-        **kw: Any
-    ) -> Any:
+    self,
+    query: str,
+    *args: Any,
+    use_pandas: bool = False,
+    **kw: Any
+) -> Any:
     """
     Execute the provided query and return the first value.
 
@@ -424,18 +425,22 @@ def value(
     if use_pandas:
         try:
             return self.read(query, *args, **kw).iloc[0, 0]
-        except Exception as e:
+        except Exception:
             return None
 
     _close = kw.get('close', True)
     _commit = kw.get('commit', (self.flavor != 'mssql'))
+
+    #  _close = True
+    #  _commit = True
+
     try:
         result, connection = self.exec(
             query,
             *args,
-            with_connection = True,
-            close = False,
-            commit = _commit,
+            with_connection=True,
+            close=False,
+            commit=_commit,
             **kw
         )
         first = result.first() if result is not None else None
@@ -452,10 +457,10 @@ def value(
 
 
 def execute(
-        self,
-        *args : Any,
-        **kw : Any
-    ) -> Optional[sqlalchemy.engine.result.resultProxy]:
+    self,
+    *args : Any,
+    **kw : Any
+) -> Optional[sqlalchemy.engine.result.resultProxy]:
     """
     An alias for `meerschaum.connectors.sql.SQLConnector.exec`.
     """
@@ -463,22 +468,22 @@ def execute(
 
 
 def exec(
-        self,
-        query: str,
-        *args: Any,
-        silent: bool = False,
-        debug: bool = False,
-        commit: Optional[bool] = None,
-        close: Optional[bool] = None,
-        with_connection: bool = False,
-        **kw: Any
-    ) -> Union[
-            sqlalchemy.engine.result.resultProxy,
-            sqlalchemy.engine.cursor.LegacyCursorResult,
-            Tuple[sqlalchemy.engine.result.resultProxy, sqlalchemy.engine.base.Connection],
-            Tuple[sqlalchemy.engine.cursor.LegacyCursorResult, sqlalchemy.engine.base.Connection],
-            None
-    ]:
+    self,
+    query: str,
+    *args: Any,
+    silent: bool = False,
+    debug: bool = False,
+    commit: Optional[bool] = None,
+    close: Optional[bool] = None,
+    with_connection: bool = False,
+    **kw: Any
+) -> Union[
+        sqlalchemy.engine.result.resultProxy,
+        sqlalchemy.engine.cursor.LegacyCursorResult,
+        Tuple[sqlalchemy.engine.result.resultProxy, sqlalchemy.engine.base.Connection],
+        Tuple[sqlalchemy.engine.cursor.LegacyCursorResult, sqlalchemy.engine.base.Connection],
+        None
+]:
     """
     Execute SQL code and return the `sqlalchemy` result, e.g. when calling stored procedures.
     
@@ -492,7 +497,7 @@ def exec(
 
     args: Any
         Arguments passed to `sqlalchemy.engine.execute`.
-        
+
     silent: bool, default False
         If `True`, suppress warnings.
 
@@ -509,7 +514,7 @@ def exec(
     with_connection: bool, default False
         If `True`, return a tuple including the connection object.
         This does not apply if `query` is a list of strings.
-    
+
     Returns
     -------
     The `sqlalchemy` result object, or a tuple with the connection if `with_connection` is provided.
@@ -519,8 +524,8 @@ def exec(
         return self.exec_queries(
             list(query),
             *args,
-            silent = silent,
-            debug = debug,
+            silent=silent,
+            debug=debug,
             **kw
         )
 
@@ -538,8 +543,19 @@ def exec(
     if not hasattr(query, 'compile'):
         query = sqlalchemy.text(query)
 
-    connection = self.engine.connect()
-    transaction = connection.begin() if _commit else None
+    connection = self.get_connection()
+
+    try:
+        transaction = connection.begin() if _commit else None
+    except sqlalchemy.exc.InvalidRequestError:
+        connection = self.get_connection(rebuild=True)
+        transaction = connection.begin()
+
+    if transaction is not None and not transaction.is_active:
+        connection = self.get_connection(rebuild=True)
+        transaction = connection.begin() if _commit else None
+
+    result = None
     try:
         result = connection.execute(query, *args, **kw)
         if _commit:
@@ -552,29 +568,30 @@ def exec(
         result = None
         if _commit:
             transaction.rollback()
+            connection = self.get_connection(rebuild=True)
     finally:
         if _close:
             connection.close()
 
-        if with_connection:
-            return result, connection
+    if with_connection:
+        return result, connection
 
     return result
 
 
 def exec_queries(
-        self,
-        queries: List[
-            Union[
-                str,
-                Tuple[str, Callable[['sqlalchemy.orm.session.Session'], List[str]]]
-            ]
-        ],
-        break_on_error: bool = False,
-        rollback: bool = True,
-        silent: bool = False,
-        debug: bool = False,
-    ) -> List[sqlalchemy.engine.cursor.LegacyCursorResult]:
+    self,
+    queries: List[
+        Union[
+            str,
+            Tuple[str, Callable[['sqlalchemy.orm.session.Session'], List[str]]]
+        ]
+    ],
+    break_on_error: bool = False,
+    rollback: bool = True,
+    silent: bool = False,
+    debug: bool = False,
+) -> List[sqlalchemy.engine.cursor.LegacyCursorResult]:
     """
     Execute a list of queries in a single transaction.
 
@@ -624,7 +641,7 @@ def exec_queries(
 
             if debug:
                 dprint(f"[{self}]\n" + str(query))
- 
+
             try:
                 result = session.execute(query)
                 session.flush()
@@ -645,9 +662,9 @@ def exec_queries(
                     hook_results = self.exec_queries(
                         hook_queries,
                         break_on_error = break_on_error,
-                        rollback = rollback,
-                        silent = silent,
-                        debug = debug,
+                        rollback=rollback,
+                        silent=silent,
+                        debug=debug,
                     )
                     result = (result, hook_results)
 
@@ -657,20 +674,20 @@ def exec_queries(
 
 
 def to_sql(
-        self,
-        df: pandas.DataFrame,
-        name: str = None,
-        index: bool = False,
-        if_exists: str = 'replace',
-        method: str = "",
-        chunksize: Optional[int] = -1,
-        schema: Optional[str] = None,
-        silent: bool = False,
-        debug: bool = False,
-        as_tuple: bool = False,
-        as_dict: bool = False,
-        **kw
-    ) -> Union[bool, SuccessTuple]:
+    self,
+    df: pandas.DataFrame,
+    name: str = None,
+    index: bool = False,
+    if_exists: str = 'replace',
+    method: str = "",
+    chunksize: Optional[int] = -1,
+    schema: Optional[str] = None,
+    silent: bool = False,
+    debug: bool = False,
+    as_tuple: bool = False,
+    as_dict: bool = False,
+    **kw
+) -> Union[bool, SuccessTuple]:
     """
     Upload a DataFrame's contents to the SQL server.
 
@@ -708,7 +725,7 @@ def to_sql(
         If `True`, return a dictionary of transaction information.
         The keys are `success`, `msg`, `start`, `end`, `duration`, `num_rows`, `chunksize`,
         `method`, and `target`.
-        
+
     kw: Any
         Additional arguments will be passed to the DataFrame's `to_sql` function
 
@@ -737,9 +754,12 @@ def to_sql(
         json_flavors,
         truncate_item_name,
     )
-    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols
+    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
     from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal
-    from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS
+    from meerschaum.utils.dtypes.sql import (
+        NUMERIC_PRECISION_FLAVORS,
+        PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
+    )
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
     sqlalchemy = attempt_import('sqlalchemy', debug=debug)
@@ -859,6 +879,11 @@ def to_sql(
                 )
             )
 
+    if PD_TO_SQLALCHEMY_DTYPES_FLAVORS['uuid'].get(self.flavor, None) != 'Uuid':
+        uuid_cols = get_uuid_cols(df)
+        for col in uuid_cols:
+            df[col] = df[col].astype(str)
+
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'case sensitivity issues')
@@ -890,12 +915,12 @@ def to_sql(
 
 
 def psql_insert_copy(
-        table: pandas.io.sql.SQLTable,
-        conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
-        keys: List[str],
-        data_iter: Iterable[Any],
-        schema: Optional[str] = None,
-    ) -> None:
+    table: pandas.io.sql.SQLTable,
+    conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
+    keys: List[str],
+    data_iter: Iterable[Any],
+    schema: Optional[str] = None,
+) -> None:
     """
     Execute SQL statement inserting data for PostgreSQL.
 
@@ -981,8 +1006,71 @@ def format_sql_query_for_dask(query: str) -> 'sqlalchemy.sql.selectable.Select':
     sqlalchemy_sql = attempt_import("sqlalchemy.sql")
     select, text = sqlalchemy_sql.select, sqlalchemy_sql.text
 
-    parts = query.rsplit('ORDER BY', maxsplit=1)
     meta_query = f"SELECT * FROM (\n{query}\n) AS s"
-    #  if parts[1]:
-        #  meta_query += "\nORDER BY " + parts[1]
     return select(text(_remove_leading_select(meta_query)))
+
+
+def get_connection(self, rebuild: bool = False) -> 'sqlalchemy.engine.base.Connection':
+    """
+    Return the current alive connection.
+
+    Parameters
+    ----------
+    rebuild: bool, default False
+        If `True`, close the previous connection and open a new one.
+
+    Returns
+    -------
+    A `sqlalchemy.engine.base.Connection` object.
+    """
+    import threading
+    if '_thread_connections' not in self.__dict__:
+        self.__dict__['_thread_connections'] = {}
+
+    self._cleanup_connections()
+
+    thread_id = threading.get_ident()
+
+    thread_connections = self.__dict__.get('_thread_connections', {})
+    connection = thread_connections.get(thread_id, None)
+
+    if rebuild and connection is not None:
+        try:
+            connection.close()
+        except Exception:
+            pass
+
+        _ = thread_connections.pop(thread_id, None)
+        connection = None
+
+    if connection is None or connection.closed:
+        connection = self.engine.connect()
+        thread_connections[thread_id] = connection
+
+    return connection
+
+
+def _cleanup_connections(self) -> None:
+    """
+    Remove connections for inactive threads.
+    """
+    import threading
+    thread_connections = self.__dict__.get('_thread_connections', None)
+    if not thread_connections:
+        return
+    thread_ids = set(thread_connections)
+    active_threads = [
+        thread
+        for thread in threading.enumerate()
+        if thread.ident in thread_ids
+    ]
+    active_thread_ids = {thread.ident for thread in active_threads}
+    inactive_thread_ids = thread_ids - active_thread_ids
+    for thread_id in inactive_thread_ids:
+        connection = thread_connections.pop(thread_id, None)
+        if connection is None:
+            continue
+        try:
+            connection.close()
+        except Exception:
+            pass

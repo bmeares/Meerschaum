@@ -71,7 +71,13 @@ flavor_configs = {
         'requirements': default_requirements,
         'defaults': {
             'port': 1433,
-            'options': "driver=ODBC Driver 18 for SQL Server&UseFMTONLY=Yes&TrustServerCertificate=yes&Encrypt=no",
+            'options': (
+                "driver=ODBC Driver 18 for SQL Server"
+                "&UseFMTONLY=Yes"
+                "&TrustServerCertificate=yes"
+                "&Encrypt=no"
+                "&MARS_Connection=yes"
+            ),
         },
     },
     'mysql': {
@@ -167,12 +173,13 @@ flavor_dialects = {
     'duckdb': ('duckdb', 'duckdb_engine', 'Dialect'),
 }
 
+
 def create_engine(
-        self,
-        include_uri: bool = False,
-        debug: bool = False,
-        **kw
-    ) -> 'sqlalchemy.engine.Engine':
+    self,
+    include_uri: bool = False,
+    debug: bool = False,
+    **kw
+) -> 'sqlalchemy.engine.Engine':
     """Create a sqlalchemy engine by building the engine string."""
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import error, warn

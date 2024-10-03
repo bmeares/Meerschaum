@@ -309,6 +309,7 @@ def _show_data(
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.dataframe import to_json
     pd = import_pandas()
 
     if action is None:
@@ -372,7 +373,7 @@ def _show_data(
             info(info_msg)
         else:
             print(json.dumps(p.__getstate__()))
-            df = df.fillna(pd.NA).to_json(orient='columns')
+            df = to_json(df, orient='columns')
 
         pprint(df, nopretty=nopretty)
 

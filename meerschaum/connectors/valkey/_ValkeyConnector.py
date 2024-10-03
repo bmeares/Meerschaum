@@ -202,11 +202,8 @@ class ValkeyConnector(Connector):
         -------
         The current index counter value (how many docs have been pushed).
         """
-        docs_str = df.to_json(
-            date_format='iso',
-            orient='records',
-            date_unit='us',
-        )
+        from meerschaum.utils.dataframe import to_json
+        docs_str = to_json(df)
         docs = json.loads(docs_str)
         return self.push_docs(
             docs,
