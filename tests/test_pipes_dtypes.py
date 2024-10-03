@@ -601,3 +601,55 @@ def test_sync_uuids_inplace(flavor: str):
     assert success, msg
     df = inplace_pipe.get_data(params={'id': 3})
     assert df['uuid_col'][0] is None
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_uuids_simple_upsert(flavor: str):
+    """
+    Testing syncing UUIDs normally.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'uuids', 'upsert')
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'uuids', 'upsert',
+        instance=conn,
+        columns=['datetime', 'id'],
+        parameters={
+            'upsert': True,
+        },
+    )
+    docs = [
+        {
+            'datetime': '2024-01-01',
+            'id': UUID('7d78f4a7-8c0d-4cc3-9636-9516aa0c32ce'),
+            'val': UUID('603e2509-8c53-4942-8395-4c8775455df1'),
+        },
+        {
+            'datetime': '2024-01-02',
+            'id': UUID('07557810-5662-449d-b0da-8360fe6134fe'),
+            'val': UUID('de8b4f65-1bbb-41ac-9572-be637a647349'),
+        },
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    upsert_docs = [
+        {
+            'datetime': '2024-01-01',
+            'id': UUID('7d78f4a7-8c0d-4cc3-9636-9516aa0c32ce'),
+            'val': UUID('603e2509-8c53-4942-8395-4c8775455df1'),
+        },
+        {
+            'datetime': '2024-01-02',
+            'id': UUID('07557810-5662-449d-b0da-8360fe6134fe'),
+            'val': UUID('d1cc1516-16e5-4471-8ab9-e969a1def655'),
+        },
+    ]
+    success, msg = pipe.sync(upsert_docs, debug=debug)
+    assert pipe.get_rowcount(debug=debug) == len(docs)
+    df = pipe.get_data(params={'id': UUID('07557810-5662-449d-b0da-8360fe6134fe')})
+    assert len(df) == 1
+    assert isinstance(df['val'][0], UUID)
+    assert isinstance(df['id'][0], UUID)
+    assert df['val'][0] == UUID('d1cc1516-16e5-4471-8ab9-e969a1def655')

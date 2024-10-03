@@ -6,6 +6,7 @@ import pytest
 import sys
 from datetime import datetime, timedelta
 from decimal import Decimal
+from uuid import UUID
 from tests import debug
 from tests.pipes import all_pipes, stress_pipes, remote_pipes
 from tests.connectors import conns, get_flavors
@@ -272,9 +273,9 @@ def test_id_index_col(flavor: str):
     conn = conns[flavor]
     pipe = Pipe(
         'test_id', 'index_col', 'table',
-        instance = conn,
-        dtypes = {'id': 'Int64'},
-        columns = {'datetime': 'id'},
+        instance=conn,
+        dtypes={'id': 'Int64'},
+        columns={'datetime': 'id'},
     )
     pipe.delete()
     docs = [{'id': i, 'a': i*2, 'b': {'c': i/2}} for i in range(100)]
@@ -296,7 +297,6 @@ def test_id_index_col(flavor: str):
     new_docs = [{'id': i, 'a': i*3, 'b': {'c': round(i/3, 2)}} for i in range(10)]
     success, msg = pipe.sync(new_docs, debug=debug)
     small_df = pipe.get_data(end=10, debug=debug)
-    print(small_df)
     assert len(small_df) == len(new_docs)
     small_synced_docs = small_df.to_dict(orient='records')
     assert small_synced_docs == new_docs
@@ -310,8 +310,8 @@ def test_utc_offset_datetimes(flavor: str):
     conn = conns[flavor]
     pipe = Pipe(
         'test_utc_offset', 'datetimes',
-        instance = conn,
-        columns = {'datetime': 'dt'},
+        instance=conn,
+        columns={'datetime': 'dt'},
     )
     pipe.delete()
 
@@ -340,7 +340,7 @@ def test_no_indices_inferred_datetime_to_text(flavor: str):
     conn = conns[flavor]
     pipe = Pipe(
         'test_no_indices', 'datetimes', 'text',
-        instance = conn,
+        instance=conn,
     )
     pipe.delete()
     docs = [
@@ -377,8 +377,8 @@ def test_sync_generators(flavor: str):
     conn = conns[flavor]
     pipe = Pipe(
         'test_generators', 'foo',
-        instance = conn,
-        columns = {'datetime': 'dt'},
+        instance=conn,
+        columns={'datetime': 'dt'},
     )
     pipe.delete()
     start_time = datetime(2023, 1, 1)
@@ -400,8 +400,8 @@ def test_add_new_columns(flavor: str):
     pipe.delete()
     pipe = Pipe(
         'test_add', 'columns',
-        instance = conn,
-        columns = {'datetime': 'dt'},
+        instance=conn,
+        columns={'datetime': 'dt'},
     )
 
     docs = [{'dt': '2023-01-01', 'a': 1}]
@@ -441,21 +441,21 @@ def test_get_data_iterator(flavor: str):
     success, message = pipe.sync(docs, debug=debug)
     assert success, message
     gen = pipe.get_data(
-        begin = 1,
-        end = 6,
-        as_iterator = True,
-        chunk_interval = 2,
-        debug = debug,
+        begin=1,
+        end=6,
+        as_iterator=True,
+        chunk_interval=2,
+        debug=debug,
     )
     chunks = [chunk for chunk in gen]
     assert len(chunks) == 3
     assert len(chunks[2]) == 1
 
     gen = pipe.get_data(
-        params = {'color': 'a'},
-        as_iterator = True,
-        chunk_interval = 3,
-        debug = debug,
+        params={'color': 'a'},
+        as_iterator=True,
+        chunk_interval=3,
+        debug=debug,
     )
     chunks = [chunk for chunk in gen]
     print(chunks)
@@ -487,7 +487,7 @@ def test_sync_inplace(flavor: str):
     dest_pipe = Pipe(
         str(conn), 'inplace', 'dest',
         instance=conn,
-        columns={'datetime': 'dt'},
+        columns={'datetime': 'dt', 'id': 'id'},
         parameters={
             "fetch": {
                 "definition": query,
@@ -497,11 +497,11 @@ def test_sync_inplace(flavor: str):
     )
 
     docs = [
-        {'dt': '2023-01-01 00:00:00'},
-        {'dt': '2023-01-01 00:01:00'},
-        {'dt': '2023-01-01 00:02:00'},
-        {'dt': '2023-01-01 00:03:00'},
-        {'dt': '2023-01-01 00:04:00'},
+        {'dt': '2023-01-01 00:00:00', 'id': UUID('9f680a72-b5f7-4336-8f7c-30927ec21cb1')},
+        {'dt': '2023-01-01 00:01:00', 'id': UUID('335b0322-4b54-40aa-8019-07666cbefa52')},
+        {'dt': '2023-01-01 00:02:00', 'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e')},
+        {'dt': '2023-01-01 00:03:00', 'id': UUID('7e194a2c-26b4-4632-af02-e0a8b2c6ce1e')},
+        {'dt': '2023-01-01 00:04:00', 'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e')},
     ]
     success, msg = source_pipe.sync(docs)
     assert success, msg
@@ -515,11 +515,11 @@ def test_sync_inplace(flavor: str):
     assert dest_pipe.get_rowcount(debug=debug) == len(docs)
 
     new_docs = [
-        {'dt': '2023-01-02 00:00:00'},
-        {'dt': '2023-01-02 00:01:00'},
-        {'dt': '2023-01-02 00:02:00'},
-        {'dt': '2023-01-02 00:03:00'},
-        {'dt': '2023-01-02 00:04:00'},
+        {'dt': '2023-01-02 00:00:00', 'id': UUID('afb0b31b-15dc-485e-ac6f-d8622b6d03d4')},
+        {'dt': '2023-01-02 00:01:00', 'id': UUID('8b7bf428-d0ed-40fa-951b-bb115a03eac5')},
+        {'dt': '2023-01-02 00:02:00', 'id': UUID('36aed9b4-4c7a-4566-a321-d1774ef1015a')},
+        {'dt': '2023-01-02 00:03:00', 'id': UUID('7a4ef6cc-37d8-4899-9ddb-07b4998d0b53')},
+        {'dt': '2023-01-02 00:04:00', 'id': UUID('59244211-fdb8-46f1-b14b-8631146758c0')},
     ]
     success, msg = source_pipe.sync(new_docs)
     assert success, msg
@@ -527,6 +527,27 @@ def test_sync_inplace(flavor: str):
     success, msg = dest_pipe.sync(debug=debug)
     assert success, msg
     assert dest_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
+
+    update_docs = [
+        {'dt': '2023-01-01 00:00:00', 'id': UUID('9f680a72-b5f7-4336-8f7c-30927ec21cb1'), 'a': 1},
+        {'dt': '2023-01-01 00:01:00', 'id': UUID('335b0322-4b54-40aa-8019-07666cbefa52'), 'a': 2},
+        {'dt': '2023-01-01 00:02:00', 'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'a': 3},
+        {'dt': '2023-01-01 00:03:00', 'id': UUID('7e194a2c-26b4-4632-af02-e0a8b2c6ce1e'), 'a': 4},
+        {'dt': '2023-01-01 00:04:00', 'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e'), 'a': 5},
+    ]
+    success, msg = source_pipe.sync(update_docs)
+    print(source_pipe.get_data())
+    assert success, msg
+    assert source_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
+
+    success, msg = dest_pipe.verify(debug=debug)
+    assert success, msg
+    assert dest_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
+
+    print(dest_pipe.get_data())
+    df = dest_pipe.get_data(params={'id': 'd7d42913-2dfe-47d6-b0e0-7f71e13e814e'})
+    assert len(df) == 1
+    assert df['a'][0] == 3
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -565,8 +586,8 @@ def test_sync_dask_dataframe(flavor: str):
     conn = conns[flavor]
     pipe = mrsm.Pipe(
         'dask', 'demo',
-        columns = {'datetime': 'dt'},
-        instance = conn,
+        columns={'datetime': 'dt'},
+        instance=conn,
     )
     pipe.drop()
     pipe.sync([
@@ -578,8 +599,8 @@ def test_sync_dask_dataframe(flavor: str):
 
     pipe2 = mrsm.Pipe(
         'dask', 'insert',
-        columns = pipe.columns,
-        instance = conn,
+        columns=pipe.columns,
+        instance=conn,
     )
     pipe2.drop()
     pipe2.sync(ddf, debug=debug)
@@ -646,9 +667,9 @@ def test_upsert_sync(flavor: str):
     pipe.delete()
     pipe = Pipe(
         'test', 'upsert', instance=conn,
-        columns = {'datetime': 'dt', 'id': 'id'},
-        dtypes = {'num': 'numeric'},
-        parameters = {'upsert': True},
+        columns={'datetime': 'dt', 'id': 'id'},
+        dtypes={'num': 'numeric'},
+        parameters={'upsert': True},
     )
 
     docs = [
@@ -679,8 +700,8 @@ def test_upsert_no_value_cols(flavor: str):
     pipe.delete()
     pipe = Pipe(
         'test', 'upsert', 'no_vals', instance=conn,
-        columns = {'datetime': 'dt', 'id': 'id'},
-        parameters = {'upsert': True},
+        columns={'datetime': 'dt', 'id': 'id'},
+        parameters={'upsert': True},
     )
 
     docs = [

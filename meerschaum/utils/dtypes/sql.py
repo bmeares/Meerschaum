@@ -82,6 +82,8 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'TIMESTAMPTZ': 'datetime64[ns, UTC]',
     'DATE': 'datetime64[ns]',
     'DATETIME': 'datetime64[ns]',
+    'DATETIME2': 'datetime64[ns]',
+    'DATETIMEOFFSET': 'datetime64[ns, UTC]',
     'TEXT': 'string[pyarrow]',
     'CLOB': 'string[pyarrow]',
     'BOOL': 'bool[pyarrow]',
@@ -156,7 +158,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgresql': 'TIMESTAMP',
         'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
-        'mssql': 'DATETIME',
+        'mssql': 'DATETIME2',
         'oracle': 'DATE',
         'sqlite': 'DATETIME',
         'duckdb': 'TIMESTAMP',
@@ -169,7 +171,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgresql': 'TIMESTAMP',
         'mariadb': 'TIMESTAMP',
         'mysql': 'TIMESTAMP',
-        'mssql': 'TIMESTAMP',
+        'mssql': 'DATETIMEOFFSET',
         'oracle': 'TIMESTAMP',
         'sqlite': 'TIMESTAMP',
         'duckdb': 'TIMESTAMP',
@@ -289,7 +291,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgresql': 'DateTime',
         'mariadb': 'DateTime',
         'mysql': 'DateTime',
-        'mssql': 'DateTime',
+        'mssql': 'sqlalchemy.dialects.mssql.DATETIME2',
         'oracle': 'DateTime',
         'sqlite': 'DateTime',
         'duckdb': 'DateTime',
@@ -302,7 +304,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgresql': 'DateTime',
         'mariadb': 'DateTime',
         'mysql': 'DateTime',
-        'mssql': 'DateTime',
+        'mssql': 'sqlalchemy.dialects.mssql.DATETIMEOFFSET',
         'oracle': 'DateTime',
         'sqlite': 'DateTime',
         'duckdb': 'DateTime',
@@ -350,16 +352,16 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'default': 'UnicodeText',
     },
     'json': {
-        'timescaledb': 'JSONB',
-        'postgresql': 'JSONB',
+        'timescaledb': 'sqlalchemy.dialects.postgresql.JSONB',
+        'postgresql': 'sqlalchemy.dialects.postgresql.JSONB',
         'mariadb': 'UnicodeText',
         'mysql': 'UnicodeText',
         'mssql': 'UnicodeText',
         'oracle': 'UnicodeText',
         'sqlite': 'UnicodeText',
         'duckdb': 'TEXT',
-        'citus': 'JSONB',
-        'cockroachdb': 'JSONB',
+        'citus': 'sqlalchemy.dialects.postgresql.JSONB',
+        'cockroachdb': 'sqlalchemy.dialects.postgresql.JSONB',
         'default': 'UnicodeText',
     },
     'numeric': {
@@ -505,9 +507,12 @@ def get_db_type_from_pd_type(
     db_type = flavor_types.get(flavor, default_flavor_type)
     if not as_sqlalchemy:
         return db_type
-    if db_type == 'JSONB':
-        sqlalchemy_dialects_postgresql = attempt_import('sqlalchemy.dialects.postgresql')
-        return sqlalchemy_dialects_postgresql.JSONB
+
+    if db_type.startswith('sqlalchemy.dialects'):
+        dialect, typ_class_name  = db_type.replace('sqlalchemy.dialects.', '').split('.', maxsplit=2)
+        sqlalchemy_dialects_flavor_module = attempt_import(f'sqlalchemy.dialects.{dialect}')
+        return getattr(sqlalchemy_dialects_flavor_module, typ_class_name)
+
     if 'numeric' in db_type.lower():
         numeric_type_str = PD_TO_DB_DTYPES_FLAVORS['numeric'].get(flavor, 'NUMERIC')
         if flavor not in NUMERIC_PRECISION_FLAVORS:

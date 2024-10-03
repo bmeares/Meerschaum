@@ -301,6 +301,22 @@ def filter_unseen_df(
             lambda x: f'{x:f}' if isinstance(x, Decimal) else x
         )
 
+    old_dt_cols = [
+        col
+        for col, typ in old_df.dtypes.items()
+        if are_dtypes_equal(str(typ), 'datetime')
+    ]
+    for col in old_dt_cols:
+        old_df[col] = coerce_timezone(old_df[col])
+
+    new_dt_cols = [
+        col
+        for col, typ in old_df.dtypes.items()
+        if are_dtypes_equal(str(typ), 'datetime')
+    ]
+    for col in new_dt_cols:
+        new_df[col] = coerce_timezone(new_df[col])
+
     old_uuid_cols = get_uuid_cols(old_df)
     new_uuid_cols = get_uuid_cols(new_df)
     uuid_cols = set(new_uuid_cols + old_uuid_cols)
@@ -699,6 +715,7 @@ def enforce_dtypes(
         is_dtype_numeric,
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
+        coerce_timezone,
     )
     if safe_copy:
         df = df.copy()

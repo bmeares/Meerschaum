@@ -1017,7 +1017,7 @@ def get_pipe_data_query(
             if _dt and _dt in existing_cols:
                 order_by += dt + ' ' + order + ','
             for key, quoted_col_name in quoted_indices.items():
-                if key == 'datetime':
+                if dt == quoted_col_name:
                     continue
                 order_by += ' ' + quoted_col_name + ' ' + order + ','
             order_by = order_by[:-1]
@@ -1034,7 +1034,7 @@ def get_pipe_data_query(
             )
         else:
             query += f"\nLIMIT {limit}"
-    
+
     if debug:
         to_print = (
             []
@@ -2198,7 +2198,7 @@ def get_pipe_rowcount(
                     else 'WHERE'
                 )
             )
-        
+
     result = self.value(query, debug=debug, silent=True)
     try:
         return int(result)
@@ -2207,11 +2207,11 @@ def get_pipe_rowcount(
 
 
 def drop_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Drop a pipe's tables but maintain its registration.
 
@@ -2219,7 +2219,10 @@ def drop_pipe(
     ----------
     pipe: mrsm.Pipe
         The pipe to drop.
-        
+
+    Returns
+    -------
+    A `SuccessTuple` indicated success.
     """
     from meerschaum.utils.sql import table_exists, sql_item_name
     success = True
@@ -2235,14 +2238,14 @@ def drop_pipe(
 
 
 def clear_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Delete a pipe's data within a bounded or unbounded interval without dropping the table.
 
@@ -2535,7 +2538,7 @@ def get_alter_columns_queries(
     """
     if not pipe.exists(debug=debug):
         return []
-    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.sql import sql_item_name, SKIP_IF_EXISTS_FLAVORS
     from meerschaum.utils.dataframe import get_numeric_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import (
@@ -2691,7 +2694,9 @@ def get_alter_columns_queries(
             f"\nFROM {sql_item_name(temp_table_name, self.flavor, self.get_pipe_schema(pipe))}"
         )
 
-        drop_query = "DROP TABLE " + sql_item_name(
+        if_exists_str = "" if self.flavor in SKIP_IF_EXISTS_FLAVORS else "IF EXISTS"
+
+        drop_query = f"DROP TABLE {if_exists_str}" + sql_item_name(
             temp_table_name, self.flavor, self.get_pipe_schema(pipe)
         )
         return [
