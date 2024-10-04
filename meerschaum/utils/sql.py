@@ -1320,12 +1320,13 @@ def get_rename_table_queries(
     if flavor == 'mssql':
         return [f"EXEC sp_rename '{old_table}', '{new_table}'"]
 
+    if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     if flavor == 'duckdb':
         return [
             get_create_table_query(f"SELECT * FROM {old_table_name}", tmp_table, 'duckdb', schema),
             get_create_table_query(f"SELECT * FROM {tmp_table_name}", new_table, 'duckdb', schema),
-            f"DROP TABLE {tmp_table_name}",
-            f"DROP TABLE {old_table_name}",
+            f"DROP TABLE {if_exists_str} {tmp_table_name}",
+            f"DROP TABLE {if_exists_str} {old_table_name}",
         ]
 
     return [f"ALTER TABLE {old_table_name} RENAME TO {new_table_name}"]

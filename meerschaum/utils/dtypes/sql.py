@@ -381,8 +381,8 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'uuid': {
         'timescaledb': 'Uuid',
         'postgresql': 'Uuid',
-        'mariadb': 'Uuid',
-        'mysql': 'Uuid',
+        'mariadb': 'UnicodeText',
+        'mysql': 'UnicodeText',
         'mssql': 'Uuid',
         'oracle': 'UnicodeText',
         'sqlite': 'UnicodeText',

@@ -459,6 +459,11 @@ def get_create_index_queries(
                 + 'if_not_exists => true, '
                 + "migrate_data => true);"
             )
+        elif self.flavor == 'mssql':
+            dt_query = (
+                f"CREATE CLUSTERED INDEX {_datetime_index_name} "
+                f"ON {_pipe_name} ({_datetime_name})"
+            )
         else: ### mssql, sqlite, etc.
             dt_query = (
                 f"CREATE INDEX {_datetime_index_name} "
@@ -563,7 +568,12 @@ def get_drop_index_queries(
         return {}
     if not pipe.exists(debug=debug):
         return {}
-    from meerschaum.utils.sql import sql_item_name, table_exists, hypertable_queries
+    from meerschaum.utils.sql import (
+        sql_item_name,
+        table_exists,
+        hypertable_queries,
+        DROP_IF_EXISTS_FLAVORS,
+    )
     drop_queries = {}
     schema = self.get_pipe_schema(pipe)
     schema_prefix = (schema + '_') if schema else ''
@@ -580,16 +590,17 @@ def get_drop_index_queries(
         is_hypertable_query = hypertable_queries[self.flavor].format(table_name=pipe_name)
         is_hypertable = self.value(is_hypertable_query, silent=True, debug=debug) is not None
 
+    if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     if is_hypertable:
         nuke_queries = []
         temp_table = '_' + pipe.target + '_temp_migration'
         temp_table_name = sql_item_name(temp_table, self.flavor, self.get_pipe_schema(pipe))
 
         if table_exists(temp_table, self, schema=self.get_pipe_schema(pipe), debug=debug):
-            nuke_queries.append(f"DROP TABLE {temp_table_name}")
+            nuke_queries.append(f"DROP TABLE {if_exists_str} {temp_table_name}")
         nuke_queries += [
             f"SELECT * INTO {temp_table_name} FROM {pipe_name}",
-            f"DROP TABLE {pipe_name}",
+            f"DROP TABLE {if_exists_str} {pipe_name}",
             f"ALTER TABLE {temp_table_name} RENAME TO {pipe_name_no_schema}",
         ]
         nuke_ix_keys = ('datetime', 'id')
@@ -2224,14 +2235,17 @@ def drop_pipe(
     -------
     A `SuccessTuple` indicated success.
     """
-    from meerschaum.utils.sql import table_exists, sql_item_name
+    from meerschaum.utils.sql import table_exists, sql_item_name, DROP_IF_EXISTS_FLAVORS
     success = True
     target = pipe.target
     target_name = (
         sql_item_name(target, self.flavor, self.get_pipe_schema(pipe))
     )
     if table_exists(target, self, debug=debug):
-        success = self.exec(f"DROP TABLE {target_name}", silent=True, debug=debug) is not None
+        if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
+        success = self.exec(
+            f"DROP TABLE {if_exists_str} {target_name}", silent=True, debug=debug
+        ) is not None
 
     msg = "Success" if success else f"Failed to drop {pipe}."
     return success, msg

@@ -153,6 +153,7 @@ def filter_unseen_df(
     is_dask = 'dask' in new_df.__module__
     if is_dask:
         pandas = attempt_import('pandas')
+        _ = attempt_import('partd', lazy=False)
         dd = attempt_import('dask.dataframe')
         merge = dd.merge
         NA = pandas.NA
@@ -1074,6 +1075,7 @@ def get_first_valid_dask_partition(ddf: 'dask.dataframe.DataFrame') -> Union['pd
             continue
         if len(pdf) > 0:
             return pdf
+    _ = mrsm.attempt_import('partd', lazy=False)
     return ddf.compute()
 
 
