@@ -4,6 +4,23 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.4.8
+
+- **Allow for syncing against `DATETIMEOFFSET` columns in MSSQL.**  
+  When syncing an existing table with a `DATETIMEOFFSET` column, timestamps correctly coerced into timezone-naive UTC timestamps. Note this behavior will likely change to timezone-aware-by-default in a future release.
+
+- **Default to `DATETIME2` for MSSQL.**  
+  To preserve precision, MSSQL now creates datetime columns as `DATETIME2`.
+
+- **Remove temporary tables warnings.**  
+  Failure to drop temporary tables no longer raises a warning (added `IF EXISTS` check).
+
+- **Fix an issue with the `sql` action.**
+
+- **Fix UUID support for SQLite, MySQL / MariaDB.**
+
+- **Set `IS_THREAD_SAFE` to `False` for Oracle.**
+
 ### v2.4.6 ― v2.4.7
 
 - **Prefix temporary tables with `##`.**  

@@ -61,12 +61,10 @@ def add_missing_cols_to_df(
     if set(df.columns) == set(dtypes):
         return df
 
-    import traceback
-    from meerschaum.utils.packages import import_pandas, attempt_import
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.dtypes import to_pandas_dtype
     pandas = attempt_import('pandas')
-    
+
     def build_series(dtype: str):
         return pandas.Series([], dtype=to_pandas_dtype(dtype))
 
@@ -75,7 +73,10 @@ def add_missing_cols_to_df(
         for col, typ in dtypes.items()
         if col not in df.columns
     }
-    return df.assign(**assign_kwargs)
+    df_with_cols = df.assign(**assign_kwargs)
+    for col in assign_kwargs:
+        df_with_cols[col] = df_with_cols[col].fillna(pandas.NA)
+    return df_with_cols
 
 
 def filter_unseen_df(
@@ -152,6 +153,7 @@ def filter_unseen_df(
     is_dask = 'dask' in new_df.__module__
     if is_dask:
         pandas = attempt_import('pandas')
+        _ = attempt_import('partd', lazy=False)
         dd = attempt_import('dask.dataframe')
         merge = dd.merge
         NA = pandas.NA
@@ -301,21 +303,28 @@ def filter_unseen_df(
             lambda x: f'{x:f}' if isinstance(x, Decimal) else x
         )
 
+    old_dt_cols = [
+        col
+        for col, typ in old_df.dtypes.items()
+        if are_dtypes_equal(str(typ), 'datetime')
+    ]
+    for col in old_dt_cols:
+        old_df[col] = coerce_timezone(old_df[col])
+
+    new_dt_cols = [
+        col
+        for col, typ in old_df.dtypes.items()
+        if are_dtypes_equal(str(typ), 'datetime')
+    ]
+    for col in new_dt_cols:
+        new_df[col] = coerce_timezone(new_df[col])
+
     old_uuid_cols = get_uuid_cols(old_df)
     new_uuid_cols = get_uuid_cols(new_df)
     uuid_cols = set(new_uuid_cols + old_uuid_cols)
-    for uuid_col in old_uuid_cols:
-        old_df[uuid_col] = old_df[uuid_col].apply(
-            lambda x: f'{x}' if isinstance(x, UUID) else x
-        )
-    for uuid_col in new_uuid_cols:
-        new_df[uuid_col] = new_df[uuid_col].apply(
-            lambda x: f'{x}' if isinstance(x, UUID) else x
-        )
-
     joined_df = merge(
-        new_df.fillna(NA),
-        old_df.fillna(NA),
+        new_df.infer_objects(copy=False).fillna(NA),
+        old_df.infer_objects(copy=False).fillna(NA),
         how='left',
         on=None,
         indicator=True,
@@ -558,10 +567,10 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to be encoded as JSON.
     """
-    is_dask = 'dask' in df.__module__
+    is_dask = 'dask' in df.__module__ if hasattr(df, '__module__') else False
     if is_dask:
         df = get_first_valid_dask_partition(df)
-    
+
     if len(df) == 0:
         return []
 
@@ -699,6 +708,7 @@ def enforce_dtypes(
         is_dtype_numeric,
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
+        coerce_timezone,
     )
     if safe_copy:
         df = df.copy()
@@ -1065,6 +1075,7 @@ def get_first_valid_dask_partition(ddf: 'dask.dataframe.DataFrame') -> Union['pd
             continue
         if len(pdf) > 0:
             return pdf
+    _ = mrsm.attempt_import('partd', lazy=False)
     return ddf.compute()
 
 
@@ -1171,9 +1182,9 @@ def query_df(
     dtypes = {col: str(typ) for col, typ in df.dtypes.items()}
 
     if inplace:
-        df.fillna(NA, inplace=True)
+        df.infer_objects(copy=False).fillna(NA, inplace=True)
     else:
-        df = df.fillna(NA)
+        df = df.infer_objects(copy=False).fillna(NA)
 
     if isinstance(begin, str):
         begin = dateutil_parser.parse(begin)
@@ -1346,7 +1357,7 @@ def to_json(
         df = df.copy()
     for col in uuid_cols:
         df[col] = df[col].astype(str)
-    return df.fillna(pd.NA).to_json(
+    return df.infer_objects(copy=False).fillna(pd.NA).to_json(
         date_format=date_format,
         date_unit=date_unit,
         orient=orient,

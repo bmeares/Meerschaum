@@ -459,6 +459,11 @@ def get_create_index_queries(
                 + 'if_not_exists => true, '
                 + "migrate_data => true);"
             )
+        elif self.flavor == 'mssql':
+            dt_query = (
+                f"CREATE CLUSTERED INDEX {_datetime_index_name} "
+                f"ON {_pipe_name} ({_datetime_name})"
+            )
         else: ### mssql, sqlite, etc.
             dt_query = (
                 f"CREATE INDEX {_datetime_index_name} "
@@ -563,7 +568,12 @@ def get_drop_index_queries(
         return {}
     if not pipe.exists(debug=debug):
         return {}
-    from meerschaum.utils.sql import sql_item_name, table_exists, hypertable_queries
+    from meerschaum.utils.sql import (
+        sql_item_name,
+        table_exists,
+        hypertable_queries,
+        DROP_IF_EXISTS_FLAVORS,
+    )
     drop_queries = {}
     schema = self.get_pipe_schema(pipe)
     schema_prefix = (schema + '_') if schema else ''
@@ -580,16 +590,17 @@ def get_drop_index_queries(
         is_hypertable_query = hypertable_queries[self.flavor].format(table_name=pipe_name)
         is_hypertable = self.value(is_hypertable_query, silent=True, debug=debug) is not None
 
+    if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     if is_hypertable:
         nuke_queries = []
         temp_table = '_' + pipe.target + '_temp_migration'
         temp_table_name = sql_item_name(temp_table, self.flavor, self.get_pipe_schema(pipe))
 
         if table_exists(temp_table, self, schema=self.get_pipe_schema(pipe), debug=debug):
-            nuke_queries.append(f"DROP TABLE {temp_table_name}")
+            nuke_queries.append(f"DROP TABLE {if_exists_str} {temp_table_name}")
         nuke_queries += [
             f"SELECT * INTO {temp_table_name} FROM {pipe_name}",
-            f"DROP TABLE {pipe_name}",
+            f"DROP TABLE {if_exists_str} {pipe_name}",
             f"ALTER TABLE {temp_table_name} RENAME TO {pipe_name_no_schema}",
         ]
         nuke_ix_keys = ('datetime', 'id')
@@ -811,7 +822,7 @@ def get_pipe_data(
                     parse_df_datetimes(
                         c,
                         ignore_cols=ignore_dt_cols,
-                        chunksize = kw.get('chunksize', None),
+                        chunksize=kw.get('chunksize', None),
                         debug=debug,
                     )
                     for c in df
@@ -1017,7 +1028,7 @@ def get_pipe_data_query(
             if _dt and _dt in existing_cols:
                 order_by += dt + ' ' + order + ','
             for key, quoted_col_name in quoted_indices.items():
-                if key == 'datetime':
+                if dt == quoted_col_name:
                     continue
                 order_by += ' ' + quoted_col_name + ' ' + order + ','
             order_by = order_by[:-1]
@@ -1034,7 +1045,7 @@ def get_pipe_data_query(
             )
         else:
             query += f"\nLIMIT {limit}"
-    
+
     if debug:
         to_print = (
             []
@@ -1315,7 +1326,7 @@ def sync_pipe(
         ) if dt_col else None
 
         transact_id = generate_password(3)
-        temp_target = '-' + transact_id + '_' + pipe.target
+        temp_target = '##' + transact_id + '_' + pipe.target
         self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
@@ -1721,7 +1732,7 @@ def sync_pipe_inplace(
 
     delta_cols_types = get_table_cols_types(
         temp_tables['delta'],
-        connectable = connectable,
+        connectable=connectable,
         flavor=self.flavor,
         schema=internal_schema,
         database=database,
@@ -1779,7 +1790,7 @@ def sync_pipe_inplace(
     create_joined_success, create_joined_msg = session_execute(
         session,
         create_joined_query,
-        debug = debug,
+        debug=debug,
     ) if on_cols and not upsert else (True, "Success")
     if not create_joined_success:
         _ = clean_up_temp_tables()
@@ -1790,14 +1801,14 @@ def sync_pipe_inplace(
         + (', '.join([
             (
                 "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor, None)
-                + " != " + get_null_replacement(typ, self.flavor) 
+                + " != " + get_null_replacement(typ, self.flavor)
                 + " THEN " + sql_item_name(c + '_delta', self.flavor, None)
                 + "\n    ELSE NULL\nEND "
                 + " AS " + sql_item_name(c, self.flavor, None)
             ) for c, typ in delta_cols.items()
         ]))
         + f"\nFROM {temp_table_names['joined']}\n"
-        + f"WHERE "
+        + "WHERE "
         + '\nAND\n'.join([
             (
                 sql_item_name(c + '_backtrack', self.flavor, None) + ' IS NULL'
@@ -1813,8 +1824,8 @@ def sync_pipe_inplace(
     (create_unseen_success, create_unseen_msg), create_unseen_results = session_execute(
         session,
         create_unseen_query,
-        with_results = True,
-        debug = debug
+        with_results=True,
+        debug=debug
     ) if not upsert else (True, "Success"), None
     if not create_unseen_success:
         _ = clean_up_temp_tables()
@@ -1832,7 +1843,7 @@ def sync_pipe_inplace(
             ) for c, typ in delta_cols.items()
         ]))
         + f"\nFROM {temp_table_names['joined']}\n"
-        + f"WHERE "
+        + "WHERE "
         + '\nOR\n'.join([
             (
                 sql_item_name(c + '_backtrack', self.flavor, None) + ' IS NOT NULL'
@@ -1849,8 +1860,8 @@ def sync_pipe_inplace(
     (create_update_success, create_update_msg), create_update_results = session_execute(
         session,
         create_update_query,
-        with_results = True,
-        debug = debug,
+        with_results=True,
+        debug=debug,
     ) if on_cols and not upsert else ((True, "Success"), [])
     apply_update_queries = (
         get_update_queries(
@@ -1858,12 +1869,12 @@ def sync_pipe_inplace(
             temp_tables['update'],
             session,
             on_cols,
-            upsert = upsert,
-            schema = self.get_pipe_schema(pipe),
-            patch_schema = internal_schema,
-            datetime_col = pipe.columns.get('datetime', None),
-            flavor = self.flavor,
-            debug = debug
+            upsert=upsert,
+            schema=self.get_pipe_schema(pipe),
+            patch_schema=internal_schema,
+            datetime_col=pipe.columns.get('datetime', None),
+            flavor=self.flavor,
+            debug=debug,
         )
         if on_cols else []
     )
@@ -1883,8 +1894,8 @@ def sync_pipe_inplace(
     (apply_unseen_success, apply_unseen_msg), apply_unseen_results = session_execute(
         session,
         apply_unseen_queries,
-        with_results = True,
-        debug = debug,
+        with_results=True,
+        debug=debug,
     ) if not upsert else (True, "Success"), None
     if not apply_unseen_success:
         _ = clean_up_temp_tables()
@@ -1894,8 +1905,8 @@ def sync_pipe_inplace(
     (apply_update_success, apply_update_msg), apply_update_results = session_execute(
         session,
         apply_update_queries,
-        with_results = True,
-        debug = debug,
+        with_results=True,
+        debug=debug,
     )
     if not apply_update_success:
         _ = clean_up_temp_tables()
@@ -2198,7 +2209,7 @@ def get_pipe_rowcount(
                     else 'WHERE'
                 )
             )
-        
+
     result = self.value(query, debug=debug, silent=True)
     try:
         return int(result)
@@ -2207,11 +2218,11 @@ def get_pipe_rowcount(
 
 
 def drop_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Drop a pipe's tables but maintain its registration.
 
@@ -2219,30 +2230,36 @@ def drop_pipe(
     ----------
     pipe: mrsm.Pipe
         The pipe to drop.
-        
+
+    Returns
+    -------
+    A `SuccessTuple` indicated success.
     """
-    from meerschaum.utils.sql import table_exists, sql_item_name
+    from meerschaum.utils.sql import table_exists, sql_item_name, DROP_IF_EXISTS_FLAVORS
     success = True
     target = pipe.target
     target_name = (
         sql_item_name(target, self.flavor, self.get_pipe_schema(pipe))
     )
     if table_exists(target, self, debug=debug):
-        success = self.exec(f"DROP TABLE {target_name}", silent=True, debug=debug) is not None
+        if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
+        success = self.exec(
+            f"DROP TABLE {if_exists_str} {target_name}", silent=True, debug=debug
+        ) is not None
 
     msg = "Success" if success else f"Failed to drop {pipe}."
     return success, msg
 
 
 def clear_pipe(
-        self,
-        pipe: mrsm.Pipe,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    self,
+    pipe: mrsm.Pipe,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Delete a pipe's data within a bounded or unbounded interval without dropping the table.
 
@@ -2535,7 +2552,7 @@ def get_alter_columns_queries(
     """
     if not pipe.exists(debug=debug):
         return []
-    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.sql import sql_item_name, DROP_IF_EXISTS_FLAVORS
     from meerschaum.utils.dataframe import get_numeric_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import (
@@ -2691,7 +2708,9 @@ def get_alter_columns_queries(
             f"\nFROM {sql_item_name(temp_table_name, self.flavor, self.get_pipe_schema(pipe))}"
         )
 
-        drop_query = "DROP TABLE " + sql_item_name(
+        if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
+
+        drop_query = f"DROP TABLE {if_exists_str}" + sql_item_name(
             temp_table_name, self.flavor, self.get_pipe_schema(pipe)
         )
         return [
@@ -2882,6 +2901,7 @@ def deduplicate_pipe(
         NO_CTE_FLAVORS,
         get_rename_table_queries,
         NO_SELECT_INTO_FLAVORS,
+        DROP_IF_EXISTS_FLAVORS,
         get_create_table_query,
         format_cte_subquery,
         get_null_replacement,
@@ -3012,6 +3032,7 @@ def deduplicate_pipe(
     ) + f"""
     ORDER BY {index_list_str_ordered}
     """
+    if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     alter_queries = flatten_list([
         get_rename_table_queries(
             pipe.target, temp_old_table, self.flavor, schema=self.get_pipe_schema(pipe)
@@ -3020,7 +3041,7 @@ def deduplicate_pipe(
             dedup_table, pipe.target, self.flavor, schema=self.get_pipe_schema(pipe)
         ),
         f"""
-        DROP TABLE {temp_old_table_name}
+        DROP TABLE {if_exists_str} {temp_old_table_name}
         """,
     ])
 
@@ -3030,9 +3051,9 @@ def deduplicate_pipe(
 
     results = self.exec_queries(
         alter_queries,
-        break_on_error = True,
-        rollback = True,
-        debug = debug,
+        break_on_error=True,
+        rollback=True,
+        debug=debug,
     )
 
     fail_query = None

@@ -59,7 +59,7 @@ def sql(
         - `sql local exec "INSERT INTO table (id) VALUES (1)"
             Execute the above query on `sql:local`.
     """
-    from meerschaum.utils.dataframe impor to_json
+    from meerschaum.utils.dataframe import to_json
 
     if action is None:
         action = []

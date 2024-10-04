@@ -295,7 +295,7 @@ def sync(
 
         ### CHECKPOINT: Retrieved the DataFrame.
         _checkpoint(**kw)
-        
+
         ### Allow for dataframe generators or iterables.
         if df_is_chunk_generator(df):
             kw['workers'] = p.get_num_workers(kw.get('workers', None))

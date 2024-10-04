@@ -15,12 +15,12 @@ from meerschaum.utils.warnings import warn
 
 _in_memory_temp_tables: Dict[str, bool] = {}
 def _log_temporary_tables_creation(
-        self,
-        tables: Union[str, List[str]],
-        ready_to_drop: bool = False,
-        create: bool = True,
-        debug: bool = False,
-    ) -> SuccessTuple:
+    self,
+    tables: Union[str, List[str]],
+    ready_to_drop: bool = False,
+    create: bool = True,
+    debug: bool = False,
+) -> SuccessTuple:
     """
     Log a temporary table's creation for later deletion.
     """
@@ -58,15 +58,15 @@ def _log_temporary_tables_creation(
 
 
 def _drop_temporary_table(
-        self,
-        table: str,
-        debug: bool = False,
-    ) -> SuccessTuple:
+    self,
+    table: str,
+    debug: bool = False,
+) -> SuccessTuple:
     """
     Drop a temporary table and clear it from the internal table.
     """
-    from meerschaum.utils.sql import sql_item_name, table_exists, SKIP_IF_EXISTS_FLAVORS
-    if_exists = "IF EXISTS" if self.flavor not in SKIP_IF_EXISTS_FLAVORS else ""
+    from meerschaum.utils.sql import sql_item_name, table_exists, DROP_IF_EXISTS_FLAVORS
+    if_exists = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     if not if_exists:
         if not table_exists(table, self, self.internal_schema, debug=debug):
             return True, "Success"
