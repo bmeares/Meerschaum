@@ -272,7 +272,7 @@ class SQLConnector(Connector):
         """
         Return whether this connector may be multithreaded.
         """
-        if self.flavor == 'duckdb':
+        if self.flavor in ('duckdb', 'oracle'):
             return False
         if self.flavor == 'sqlite':
             return ':memory:' not in self.URI

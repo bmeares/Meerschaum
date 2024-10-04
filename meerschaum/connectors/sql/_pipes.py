@@ -1732,7 +1732,7 @@ def sync_pipe_inplace(
 
     delta_cols_types = get_table_cols_types(
         temp_tables['delta'],
-        connectable = connectable,
+        connectable=connectable,
         flavor=self.flavor,
         schema=internal_schema,
         database=database,
@@ -1790,7 +1790,7 @@ def sync_pipe_inplace(
     create_joined_success, create_joined_msg = session_execute(
         session,
         create_joined_query,
-        debug = debug,
+        debug=debug,
     ) if on_cols and not upsert else (True, "Success")
     if not create_joined_success:
         _ = clean_up_temp_tables()
@@ -1801,14 +1801,14 @@ def sync_pipe_inplace(
         + (', '.join([
             (
                 "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor, None)
-                + " != " + get_null_replacement(typ, self.flavor) 
+                + " != " + get_null_replacement(typ, self.flavor)
                 + " THEN " + sql_item_name(c + '_delta', self.flavor, None)
                 + "\n    ELSE NULL\nEND "
                 + " AS " + sql_item_name(c, self.flavor, None)
             ) for c, typ in delta_cols.items()
         ]))
         + f"\nFROM {temp_table_names['joined']}\n"
-        + f"WHERE "
+        + "WHERE "
         + '\nAND\n'.join([
             (
                 sql_item_name(c + '_backtrack', self.flavor, None) + ' IS NULL'
@@ -1824,8 +1824,8 @@ def sync_pipe_inplace(
     (create_unseen_success, create_unseen_msg), create_unseen_results = session_execute(
         session,
         create_unseen_query,
-        with_results = True,
-        debug = debug
+        with_results=True,
+        debug=debug
     ) if not upsert else (True, "Success"), None
     if not create_unseen_success:
         _ = clean_up_temp_tables()
@@ -1843,7 +1843,7 @@ def sync_pipe_inplace(
             ) for c, typ in delta_cols.items()
         ]))
         + f"\nFROM {temp_table_names['joined']}\n"
-        + f"WHERE "
+        + "WHERE "
         + '\nOR\n'.join([
             (
                 sql_item_name(c + '_backtrack', self.flavor, None) + ' IS NOT NULL'
@@ -1860,8 +1860,8 @@ def sync_pipe_inplace(
     (create_update_success, create_update_msg), create_update_results = session_execute(
         session,
         create_update_query,
-        with_results = True,
-        debug = debug,
+        with_results=True,
+        debug=debug,
     ) if on_cols and not upsert else ((True, "Success"), [])
     apply_update_queries = (
         get_update_queries(
@@ -1869,12 +1869,12 @@ def sync_pipe_inplace(
             temp_tables['update'],
             session,
             on_cols,
-            upsert = upsert,
-            schema = self.get_pipe_schema(pipe),
-            patch_schema = internal_schema,
-            datetime_col = pipe.columns.get('datetime', None),
-            flavor = self.flavor,
-            debug = debug
+            upsert=upsert,
+            schema=self.get_pipe_schema(pipe),
+            patch_schema=internal_schema,
+            datetime_col=pipe.columns.get('datetime', None),
+            flavor=self.flavor,
+            debug=debug,
         )
         if on_cols else []
     )
@@ -1894,8 +1894,8 @@ def sync_pipe_inplace(
     (apply_unseen_success, apply_unseen_msg), apply_unseen_results = session_execute(
         session,
         apply_unseen_queries,
-        with_results = True,
-        debug = debug,
+        with_results=True,
+        debug=debug,
     ) if not upsert else (True, "Success"), None
     if not apply_unseen_success:
         _ = clean_up_temp_tables()
@@ -1905,8 +1905,8 @@ def sync_pipe_inplace(
     (apply_update_success, apply_update_msg), apply_update_results = session_execute(
         session,
         apply_update_queries,
-        with_results = True,
-        debug = debug,
+        with_results=True,
+        debug=debug,
     )
     if not apply_update_success:
         _ = clean_up_temp_tables()

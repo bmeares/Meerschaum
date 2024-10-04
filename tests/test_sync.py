@@ -479,7 +479,7 @@ def test_sync_inplace(flavor: str):
     source_pipe = Pipe(
         'test', 'inplace', 'src',
         instance=conn,
-        columns={'datetime': 'dt'}
+        columns={'datetime': 'dt', 'id': 'id'}
     )
     dest_pipe = Pipe(str(conn), 'inplace', 'dest', instance=conn)
     dest_pipe.delete()
@@ -488,7 +488,7 @@ def test_sync_inplace(flavor: str):
         str(conn), 'inplace', 'dest',
         instance=conn,
         columns={'datetime': 'dt', 'id': 'id'},
-        dtypes={'a': 'int'}, ### NOTE: casts to str for DuckDB
+        dtypes={'a': 'int', 'id': 'uuid'}, ### NOTE: casts to str for DuckDB
         parameters={
             "fetch": {
                 "definition": query,

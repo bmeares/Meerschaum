@@ -39,7 +39,7 @@ version_queries = {
 }
 SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
 DROP_IF_EXISTS_FLAVORS = {
-    'timescaledb', 'postgresql', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite'
+    'timescaledb', 'postgresql', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite',
 }
 COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'citus'}
 update_queries = {
