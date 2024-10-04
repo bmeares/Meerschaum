@@ -19,6 +19,8 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fix UUID support for SQLite, MySQL / MariaDB.**
 
+- **Set `IS_THREAD_SAFE` to `False` for Oracle.**
+
 ### v2.4.6 ― v2.4.7
 
 - **Prefix temporary tables with `##`.**  
