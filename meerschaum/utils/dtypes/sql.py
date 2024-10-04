@@ -248,8 +248,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'uuid': {
         'timescaledb': 'UUID',
         'postgresql': 'UUID',
-        'mariadb': 'TEXT',
-        'mysql': 'TEXT',
+        'mariadb': 'CHAR(36)',
+        'mysql': 'CHAR(36)',
         'mssql': 'UNIQUEIDENTIFIER',
         ### I know this is too much space, but erring on the side of caution.
         'oracle': 'NVARCHAR(2000)',
@@ -381,8 +381,8 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'uuid': {
         'timescaledb': 'Uuid',
         'postgresql': 'Uuid',
-        'mariadb': 'UnicodeText',
-        'mysql': 'UnicodeText',
+        'mariadb': 'sqlalchemy.dialects.mysql.CHAR(36)',
+        'mysql': 'sqlalchemy.dialects.mysql.CHAR(36)',
         'mssql': 'Uuid',
         'oracle': 'UnicodeText',
         'sqlite': 'UnicodeText',
@@ -456,6 +456,7 @@ def get_db_type_from_pd_type(
     The database data type for the incoming Pandas data type.
     If nothing can be found, a warning will be thrown and 'TEXT' will be returned.
     """
+    import ast
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.dtypes import are_dtypes_equal
@@ -510,9 +511,16 @@ def get_db_type_from_pd_type(
         return db_type
 
     if db_type.startswith('sqlalchemy.dialects'):
-        dialect, typ_class_name  = db_type.replace('sqlalchemy.dialects.', '').split('.', maxsplit=2)
+        dialect, typ_class_name = db_type.replace('sqlalchemy.dialects.', '').split('.', maxsplit=2)
+        arg = None
+        if '(' in typ_class_name:
+            typ_class_name, arg_str = typ_class_name.split('(', maxsplit=1)
+            arg = ast.literal_eval(arg_str.rstrip(')'))
         sqlalchemy_dialects_flavor_module = attempt_import(f'sqlalchemy.dialects.{dialect}')
-        return getattr(sqlalchemy_dialects_flavor_module, typ_class_name)
+        cls = getattr(sqlalchemy_dialects_flavor_module, typ_class_name)
+        if arg is None:
+            return cls
+        return cls(arg)
 
     if 'numeric' in db_type.lower():
         numeric_type_str = PD_TO_DB_DTYPES_FLAVORS['numeric'].get(flavor, 'NUMERIC')
