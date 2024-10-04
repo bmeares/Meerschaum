@@ -1287,11 +1287,11 @@ def get_db_version(conn: 'SQLConnector', debug: bool = False) -> Union[str, None
 
 
 def get_rename_table_queries(
-        old_table: str,
-        new_table: str,
-        flavor: str,
-        schema: Optional[str] = None,
-    ) -> List[str]:
+    old_table: str,
+    new_table: str,
+    flavor: str,
+    schema: Optional[str] = None,
+) -> List[str]:
     """
     Return queries to alter a table's name.
 
@@ -1320,7 +1320,7 @@ def get_rename_table_queries(
     if flavor == 'mssql':
         return [f"EXEC sp_rename '{old_table}', '{new_table}'"]
 
-    if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
+    if_exists_str = "IF EXISTS" if flavor in DROP_IF_EXISTS_FLAVORS else ""
     if flavor == 'duckdb':
         return [
             get_create_table_query(f"SELECT * FROM {old_table_name}", tmp_table, 'duckdb', schema),
