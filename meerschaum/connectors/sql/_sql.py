@@ -753,6 +753,7 @@ def to_sql(
         table_exists,
         json_flavors,
         truncate_item_name,
+        DROP_IF_EXISTS_FLAVORS,
     )
     from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
     from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal
@@ -827,12 +828,13 @@ def to_sql(
             'parallel': True,
         })
 
+    if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     if self.flavor == 'oracle':
         ### For some reason 'replace' doesn't work properly in pandas,
         ### so try dropping first.
         if if_exists == 'replace' and table_exists(name, self, schema=schema, debug=debug):
             success = self.exec(
-                "DROP TABLE " + sql_item_name(name, 'oracle', schema)
+                f"DROP TABLE {if_exists_str}" + sql_item_name(name, 'oracle', schema)
             ) is not None
             if not success:
                 warn(f"Unable to drop {name}")

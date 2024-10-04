@@ -82,7 +82,10 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'TIMESTAMPTZ': 'datetime64[ns, UTC]',
     'DATE': 'datetime64[ns]',
     'DATETIME': 'datetime64[ns]',
+    'DATETIME2': 'datetime64[ns]',
+    'DATETIMEOFFSET': 'datetime64[ns, UTC]',
     'TEXT': 'string[pyarrow]',
+    'VARCHAR': 'string[pyarrow]',
     'CLOB': 'string[pyarrow]',
     'BOOL': 'bool[pyarrow]',
     'BOOLEAN': 'bool[pyarrow]',
@@ -156,7 +159,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgresql': 'TIMESTAMP',
         'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
-        'mssql': 'DATETIME',
+        'mssql': 'DATETIME2',
         'oracle': 'DATE',
         'sqlite': 'DATETIME',
         'duckdb': 'TIMESTAMP',
@@ -169,7 +172,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgresql': 'TIMESTAMP',
         'mariadb': 'TIMESTAMP',
         'mysql': 'TIMESTAMP',
-        'mssql': 'TIMESTAMP',
+        'mssql': 'DATETIMEOFFSET',
         'oracle': 'TIMESTAMP',
         'sqlite': 'TIMESTAMP',
         'duckdb': 'TIMESTAMP',
@@ -245,13 +248,13 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'uuid': {
         'timescaledb': 'UUID',
         'postgresql': 'UUID',
-        'mariadb': 'CHAR(32)',
-        'mysql': 'CHAR(32)',
+        'mariadb': 'CHAR(36)',
+        'mysql': 'CHAR(36)',
         'mssql': 'UNIQUEIDENTIFIER',
         ### I know this is too much space, but erring on the side of caution.
         'oracle': 'NVARCHAR(2000)',
         'sqlite': 'TEXT',
-        'duckdb': 'UUID',
+        'duckdb': 'VARCHAR',
         'citus': 'UUID',
         'cockroachdb': 'UUID',
         'default': 'TEXT',
@@ -289,7 +292,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgresql': 'DateTime',
         'mariadb': 'DateTime',
         'mysql': 'DateTime',
-        'mssql': 'DateTime',
+        'mssql': 'sqlalchemy.dialects.mssql.DATETIME2',
         'oracle': 'DateTime',
         'sqlite': 'DateTime',
         'duckdb': 'DateTime',
@@ -302,7 +305,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgresql': 'DateTime',
         'mariadb': 'DateTime',
         'mysql': 'DateTime',
-        'mssql': 'DateTime',
+        'mssql': 'sqlalchemy.dialects.mssql.DATETIMEOFFSET',
         'oracle': 'DateTime',
         'sqlite': 'DateTime',
         'duckdb': 'DateTime',
@@ -350,16 +353,16 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'default': 'UnicodeText',
     },
     'json': {
-        'timescaledb': 'JSONB',
-        'postgresql': 'JSONB',
+        'timescaledb': 'sqlalchemy.dialects.postgresql.JSONB',
+        'postgresql': 'sqlalchemy.dialects.postgresql.JSONB',
         'mariadb': 'UnicodeText',
         'mysql': 'UnicodeText',
         'mssql': 'UnicodeText',
         'oracle': 'UnicodeText',
         'sqlite': 'UnicodeText',
         'duckdb': 'TEXT',
-        'citus': 'JSONB',
-        'cockroachdb': 'JSONB',
+        'citus': 'sqlalchemy.dialects.postgresql.JSONB',
+        'cockroachdb': 'sqlalchemy.dialects.postgresql.JSONB',
         'default': 'UnicodeText',
     },
     'numeric': {
@@ -378,12 +381,12 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'uuid': {
         'timescaledb': 'Uuid',
         'postgresql': 'Uuid',
-        'mariadb': 'Uuid',
-        'mysql': 'Uuid',
+        'mariadb': 'sqlalchemy.dialects.mysql.CHAR(36)',
+        'mysql': 'sqlalchemy.dialects.mysql.CHAR(36)',
         'mssql': 'Uuid',
         'oracle': 'UnicodeText',
-        'sqlite': 'Uuid',
-        'duckdb': 'Uuid',
+        'sqlite': 'UnicodeText',
+        'duckdb': 'UnicodeText',
         'citus': 'Uuid',
         'cockroachdb': 'Uuid',
         'default': 'Uuid',
@@ -453,6 +456,7 @@ def get_db_type_from_pd_type(
     The database data type for the incoming Pandas data type.
     If nothing can be found, a warning will be thrown and 'TEXT' will be returned.
     """
+    import ast
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.dtypes import are_dtypes_equal
@@ -505,9 +509,19 @@ def get_db_type_from_pd_type(
     db_type = flavor_types.get(flavor, default_flavor_type)
     if not as_sqlalchemy:
         return db_type
-    if db_type == 'JSONB':
-        sqlalchemy_dialects_postgresql = attempt_import('sqlalchemy.dialects.postgresql')
-        return sqlalchemy_dialects_postgresql.JSONB
+
+    if db_type.startswith('sqlalchemy.dialects'):
+        dialect, typ_class_name = db_type.replace('sqlalchemy.dialects.', '').split('.', maxsplit=2)
+        arg = None
+        if '(' in typ_class_name:
+            typ_class_name, arg_str = typ_class_name.split('(', maxsplit=1)
+            arg = ast.literal_eval(arg_str.rstrip(')'))
+        sqlalchemy_dialects_flavor_module = attempt_import(f'sqlalchemy.dialects.{dialect}')
+        cls = getattr(sqlalchemy_dialects_flavor_module, typ_class_name)
+        if arg is None:
+            return cls
+        return cls(arg)
+
     if 'numeric' in db_type.lower():
         numeric_type_str = PD_TO_DB_DTYPES_FLAVORS['numeric'].get(flavor, 'NUMERIC')
         if flavor not in NUMERIC_PRECISION_FLAVORS:

@@ -346,14 +346,14 @@ def get_pipe_data(
         try:
             response = self.get(
                 r_url + "/data",
-                params = {
+                params={
                     'select_columns': json.dumps(select_columns),
                     'omit_columns': json.dumps(omit_columns),
                     'begin': begin,
                     'end': end,
-                    'params': json.dumps(params)
+                    'params': json.dumps(params, default=str)
                 },
-                debug = debug
+                debug=debug
             )
             if not response.ok:
                 return None

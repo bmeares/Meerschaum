@@ -12,6 +12,7 @@ from meerschaum.utils.packages import attempt_import
 DEBUG: bool = True
 pd = attempt_import('pandas')
 
+
 @pytest.mark.parametrize(
     "dtype",
     [

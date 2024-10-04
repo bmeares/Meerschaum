@@ -408,8 +408,8 @@ def get_pipe_data(
             _params = None
     if not isinstance(_params, dict):
         raise fastapi.HTTPException(
-            status_code = 409,
-            detail = "Params must be a valid JSON-encoded dictionary.",
+            status_code=409,
+            detail="Params must be a valid JSON-encoded dictionary.",
         )
 
     _select_columns = []
@@ -422,8 +422,8 @@ def get_pipe_data(
             _select_columns = None
     if not isinstance(_select_columns, list):
         raise fastapi.HTTPException(
-            status_code = 409,
-            detail = "Selected columns must be a JSON-encoded list."
+            status_code=409,
+            detail="Selected columns must be a JSON-encoded list."
         )
 
     _omit_columns = []
@@ -436,35 +436,35 @@ def get_pipe_data(
             _omit_columns = None
     if _omit_columns is None:
         raise fastapi.HTTPException(
-            status_code = 409,
-            detail = "Omitted columns must be a JSON-encoded list.",
+            status_code=409,
+            detail="Omitted columns must be a JSON-encoded list.",
         )
 
     pipe = get_pipe(connector_keys, metric_key, location_key)
     if not is_pipe_registered(pipe, pipes(refresh=True)):
         raise fastapi.HTTPException(
-            status_code = 409,
-            detail = "Pipe must be registered with the datetime column specified."
+            status_code=409,
+            detail="Pipe must be registered with the datetime column specified."
         )
 
     if pipe.target in ('users', 'plugins', 'pipes'):
         raise fastapi.HTTPException(
-            status_code = 409,
-            detail = f"Cannot retrieve data from protected table '{pipe.target}'.",
+            status_code=409,
+            detail=f"Cannot retrieve data from protected table '{pipe.target}'.",
         )
 
     df = pipe.get_data(
-        select_columns = _select_columns,
-        omit_columns = _omit_columns,
-        begin = begin,
-        end = end,
-        params = _params,
-        debug = debug,
+        select_columns=_select_columns,
+        omit_columns=_omit_columns,
+        begin=begin,
+        end=end,
+        params=_params,
+        debug=debug,
     )
     if df is None:
         raise fastapi.HTTPException(
-            status_code = 400,
-            detail = f"Could not fetch data with the given parameters.",
+            status_code=400,
+            detail="Could not fetch data with the given parameters.",
         )
 
     ### NaN cannot be JSON-serialized.
@@ -482,16 +482,16 @@ def get_pipe_data(
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/csv', tags=['Pipes'])
 def get_pipe_csv(
-        connector_keys: str,
-        metric_key: str,
-        location_key: str,
-        begin: Union[str, int, None] = None,
-        end: Union[str, int, None] = None,
-        params: Optional[str] = None,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> str:
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    begin: Union[str, int, None] = None,
+    end: Union[str, int, None] = None,
+    params: Optional[str] = None,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> str:
     """
     Get a Pipe's data as a CSV file. Optionally set query boundaries.
     """
@@ -518,8 +518,8 @@ def get_pipe_csv(
 
     if not isinstance(_params, dict):
         raise fastapi.HTTPException(
-            status_code = 409,
-            detail = "Params must be a valid JSON-encoded dictionary.",
+            status_code=409,
+            detail="Params must be a valid JSON-encoded dictionary.",
         )
 
     p = get_pipe(connector_keys, metric_key, location_key)
@@ -529,7 +529,7 @@ def get_pipe_csv(
             detail = "Pipe must be registered with the datetime column specified."
         )
 
-    dt_col = pipe.columns.get('datetime', None)
+    dt_col = p.columns.get('datetime', None)
     if dt_col:
         if begin is None:
             begin = p.get_sync_time(round_down=False, newest=False)
@@ -552,13 +552,13 @@ def get_pipe_csv(
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/id', tags=['Pipes'])
 def get_pipe_id(
-        connector_keys: str,
-        metric_key: str,
-        location_key: str,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> int:
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> int:
     """
     Get a Pipe's ID.
     """
