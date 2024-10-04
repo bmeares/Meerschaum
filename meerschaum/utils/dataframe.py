@@ -61,12 +61,10 @@ def add_missing_cols_to_df(
     if set(df.columns) == set(dtypes):
         return df
 
-    import traceback
-    from meerschaum.utils.packages import import_pandas, attempt_import
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.dtypes import to_pandas_dtype
     pandas = attempt_import('pandas')
-    
+
     def build_series(dtype: str):
         return pandas.Series([], dtype=to_pandas_dtype(dtype))
 
@@ -75,7 +73,10 @@ def add_missing_cols_to_df(
         for col, typ in dtypes.items()
         if col not in df.columns
     }
-    return df.assign(**assign_kwargs)
+    df_with_cols = df.assign(**assign_kwargs)
+    for col in assign_kwargs:
+        df_with_cols[col] = df_with_cols[col].fillna(pandas.NA)
+    return df_with_cols
 
 
 def filter_unseen_df(
@@ -320,18 +321,9 @@ def filter_unseen_df(
     old_uuid_cols = get_uuid_cols(old_df)
     new_uuid_cols = get_uuid_cols(new_df)
     uuid_cols = set(new_uuid_cols + old_uuid_cols)
-    for uuid_col in old_uuid_cols:
-        old_df[uuid_col] = old_df[uuid_col].apply(
-            lambda x: f'{x}' if isinstance(x, UUID) else x
-        )
-    for uuid_col in new_uuid_cols:
-        new_df[uuid_col] = new_df[uuid_col].apply(
-            lambda x: f'{x}' if isinstance(x, UUID) else x
-        )
-
     joined_df = merge(
-        new_df.fillna(NA),
-        old_df.fillna(NA),
+        new_df.infer_objects(copy=False).fillna(NA),
+        old_df.infer_objects(copy=False).fillna(NA),
         how='left',
         on=None,
         indicator=True,
@@ -1188,9 +1180,9 @@ def query_df(
     dtypes = {col: str(typ) for col, typ in df.dtypes.items()}
 
     if inplace:
-        df.fillna(NA, inplace=True)
+        df.infer_objects(copy=False).fillna(NA, inplace=True)
     else:
-        df = df.fillna(NA)
+        df = df.infer_objects(copy=False).fillna(NA)
 
     if isinstance(begin, str):
         begin = dateutil_parser.parse(begin)
@@ -1363,7 +1355,7 @@ def to_json(
         df = df.copy()
     for col in uuid_cols:
         df[col] = df[col].astype(str)
-    return df.fillna(pd.NA).to_json(
+    return df.infer_objects(copy=False).fillna(pd.NA).to_json(
         date_format=date_format,
         date_unit=date_unit,
         orient=orient,

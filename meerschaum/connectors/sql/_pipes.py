@@ -1315,7 +1315,7 @@ def sync_pipe(
         ) if dt_col else None
 
         transact_id = generate_password(3)
-        temp_target = '-' + transact_id + '_' + pipe.target
+        temp_target = '##' + transact_id + '_' + pipe.target
         self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
@@ -2887,6 +2887,7 @@ def deduplicate_pipe(
         NO_CTE_FLAVORS,
         get_rename_table_queries,
         NO_SELECT_INTO_FLAVORS,
+        DROP_IF_EXISTS_FLAVORS,
         get_create_table_query,
         format_cte_subquery,
         get_null_replacement,
@@ -3017,6 +3018,7 @@ def deduplicate_pipe(
     ) + f"""
     ORDER BY {index_list_str_ordered}
     """
+    if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     alter_queries = flatten_list([
         get_rename_table_queries(
             pipe.target, temp_old_table, self.flavor, schema=self.get_pipe_schema(pipe)
@@ -3025,7 +3027,7 @@ def deduplicate_pipe(
             dedup_table, pipe.target, self.flavor, schema=self.get_pipe_schema(pipe)
         ),
         f"""
-        DROP TABLE {temp_old_table_name}
+        DROP TABLE {if_exists_str} {temp_old_table_name}
         """,
     ])
 
@@ -3035,9 +3037,9 @@ def deduplicate_pipe(
 
     results = self.exec_queries(
         alter_queries,
-        break_on_error = True,
-        rollback = True,
-        debug = debug,
+        break_on_error=True,
+        rollback=True,
+        debug=debug,
     )
 
     fail_query = None

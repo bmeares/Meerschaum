@@ -488,6 +488,7 @@ def test_sync_inplace(flavor: str):
         str(conn), 'inplace', 'dest',
         instance=conn,
         columns={'datetime': 'dt', 'id': 'id'},
+        dtypes={'a': 'int'}, ### NOTE: casts to str for DuckDB
         parameters={
             "fetch": {
                 "definition": query,
@@ -536,7 +537,6 @@ def test_sync_inplace(flavor: str):
         {'dt': '2023-01-01 00:04:00', 'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e'), 'a': 5},
     ]
     success, msg = source_pipe.sync(update_docs)
-    print(source_pipe.get_data())
     assert success, msg
     assert source_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
 
@@ -544,7 +544,6 @@ def test_sync_inplace(flavor: str):
     assert success, msg
     assert dest_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
 
-    print(dest_pipe.get_data())
     df = dest_pipe.get_data(params={'id': 'd7d42913-2dfe-47d6-b0e0-7f71e13e814e'})
     assert len(df) == 1
     assert df['a'][0] == 3

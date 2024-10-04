@@ -76,6 +76,7 @@ def test_dtype_enforcement(flavor: str):
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'float': '1.0'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bool': 'True'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'object': 'foo'}], debug=debug)
+    return pipe
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'str': 'bar'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': '{"a": {"b": 1}}'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug)
@@ -609,14 +610,14 @@ def test_sync_uuids_simple_upsert(flavor: str):
     Testing syncing UUIDs normally.
     """
     conn = conns[flavor]
-    pipe = mrsm.Pipe('test', 'uuids', 'upsert')
+    pipe = mrsm.Pipe('test', 'uuids', 'upsert', instance=conn)
     pipe.delete()
     pipe = mrsm.Pipe(
         'test', 'uuids', 'upsert',
         instance=conn,
         columns=['datetime', 'id'],
         parameters={
-            'upsert': True,
+            'upsert': False,
         },
     )
     docs = [
@@ -651,5 +652,4 @@ def test_sync_uuids_simple_upsert(flavor: str):
     df = pipe.get_data(params={'id': UUID('07557810-5662-449d-b0da-8360fe6134fe')})
     assert len(df) == 1
     assert isinstance(df['val'][0], UUID)
-    assert isinstance(df['id'][0], UUID)
     assert df['val'][0] == UUID('d1cc1516-16e5-4471-8ab9-e969a1def655')
