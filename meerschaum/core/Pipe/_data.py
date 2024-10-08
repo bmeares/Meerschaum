@@ -515,15 +515,14 @@ def get_backtrack_data(
     )
 
 
-
 def get_rowcount(
-        self,
-        begin: Optional[datetime] = None,
-        end: Optional['datetime'] = None,
-        params: Optional[Dict[str, Any]] = None,
-        remote: bool = False,
-        debug: bool = False
-    ) -> int:
+    self,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    remote: bool = False,
+    debug: bool = False
+) -> int:
     """
     Get a Pipe's instance or remote rowcount.
 
@@ -556,11 +555,11 @@ def get_rowcount(
         with Venv(get_connector_plugin(connector)):
             rowcount = connector.get_pipe_rowcount(
                 self,
-                begin = begin,
-                end = end,
-                params = params,
-                remote = remote,
-                debug = debug,
+                begin=begin,
+                end=end,
+                params=params,
+                remote=remote,
+                debug=debug,
             )
             if rowcount is None:
                 return 0
