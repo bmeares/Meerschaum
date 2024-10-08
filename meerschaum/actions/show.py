@@ -7,6 +7,8 @@ This module contains functions for printing elements.
 """
 
 from __future__ import annotations
+
+from datetime import datetime
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Union, Sequence, Any, Optional, List, Dict, Tuple
 
@@ -274,8 +276,8 @@ def _show_arguments(
 def _show_data(
     action: Optional[List[str]] = None,
     gui: bool = False,
-    begin: Optional[datetime.datetime] = None,
-    end: Optional[datetime.datetime] = None,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
     params: Optional[Dict[str, Any]] = None,
     chunksize: Optional[int] = -1,
     nopretty: bool = False,
@@ -401,12 +403,15 @@ def _show_columns(
 def _show_rowcounts(
     action: Optional[List[str]] = None,
     workers: Optional[int] = None,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
     """
     Show the rowcounts for pipes.
-    
+
     To see remote rowcounts (execute `COUNT(*)` on the source server),
     execute `show rowcounts remote`.
     """
@@ -421,7 +426,13 @@ def _show_rowcounts(
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     pool = get_pool(workers=workers)
     def _get_rc(_pipe):
-        return _pipe.get_rowcount(remote=remote, debug=debug)
+        return _pipe.get_rowcount(
+            begin=begin,
+            end=end,
+            params=params,
+            remote=remote,
+            debug=debug
+        )
 
     rowcounts = pool.map(_get_rc, pipes) if pool is not None else [_get_rc(p) for p in pipes]
 

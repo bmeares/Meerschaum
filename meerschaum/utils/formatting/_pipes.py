@@ -276,10 +276,10 @@ def pprint_pipe_columns(
 
 
 def pipe_repr(
-        pipe: mrsm.Pipe,
-        as_rich_text: bool = False,
-        ansi: Optional[bool] = None,
-    ) -> Union[str, 'rich.text.Text']:
+    pipe: mrsm.Pipe,
+    as_rich_text: bool = False,
+    ansi: Optional[bool] = None,
+) -> Union[str, 'rich.text.Text']:
     """
     Return a formatted string for representing a `meerschaum.Pipe`.
     """
