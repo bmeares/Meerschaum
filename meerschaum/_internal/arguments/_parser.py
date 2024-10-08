@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 import argparse
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from meerschaum.utils.typing import Union, Dict, List, Any, Tuple, Callable
 from meerschaum.utils.misc import string_to_dict
@@ -39,7 +40,7 @@ class ArgumentParser(argparse.ArgumentParser):
 
 def parse_datetime(dt_str: str) -> Union[datetime, int, str]:
     """Parse a string into a datetime."""
-    from meerschaum.utils.misc import is_int
+    from meerschaum.utils.misc import is_int, round_time
     if is_int(dt_str):
         return int(dt_str)
 
@@ -47,11 +48,43 @@ def parse_datetime(dt_str: str) -> Union[datetime, int, str]:
         return 'None'
 
     from meerschaum.utils.packages import attempt_import
-    dateutil_parser = attempt_import('dateutil.parser')
+    dateutil_parser, dateutil_relativedelta = attempt_import(
+        'dateutil.parser', 'dateutil.relativedelta'
+    )
+    relativedelta = dateutil_relativedelta.relativedelta
+
+    ago_pattern = r'(\d+)\s+(days?|minutes?|seconds?|hours?|weeks?|months?|years?)\s+ago'
+    round_pattern = r'(\d+)\s+(days?|minutes?|seconds?|hours?|weeks?|years?)'
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    ago_matches = re.findall(ago_pattern, dt_str.lower())
 
     try:
         if dt_str.lower() == 'now':
-            dt = datetime.now(timezone.utc).replace(tzinfo=None)
+            dt = now
+        elif ago_matches:
+            val_str, unit_str = ago_matches[0]
+            if not unit_str.endswith('s'):
+                unit_str += 's'
+            val = int(val_str) if is_int(val_str) else float(val_str)
+            ago_delta = relativedelta(**{unit_str: val})
+            round_part = dt_str.lower().split('ago ')[-1]
+            round_delta = None
+            if round_part:
+                round_matches = re.findall(round_pattern, round_part)
+                if round_matches:
+                    round_val_str, round_unit_str = round_matches[0]
+                    if not round_unit_str.endswith('s'):
+                        round_unit_str += 's'
+                    round_val = (
+                        int(round_val_str)
+                        if is_int(round_val_str)
+                        else float(round_val_str)
+                    )
+                    round_delta = timedelta(**{round_unit_str: round_val})
+
+            dt = now - ago_delta
+            if round_delta is not None:
+                dt = round_time(dt, round_delta)
         else:
             dt = dateutil_parser.parse(dt_str)
     except Exception as e:

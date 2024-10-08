@@ -4,6 +4,26 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.4.9
+
+- **Add relative formats to `--begin` and `--end`.**  
+  The flags `--begin` and `--end` support values in the format `[N] [unit] ago`:
+  
+  ```bash
+  mrsm sync pipes --begin '3 days ago'
+  ```
+
+  Add a second delta format (recommended to be denoted by the keyword `rounded`) to round the timestamp to a clean value:
+
+  ```bash
+  mrsm clear pipes --end '1 month ago rounded 1 day'
+  ```
+
+  Supported units are `seconds`, `minutes`, `hours`, `days`, `weeks`, `months` (`ago` only), and `years`.
+
+- **Respect `--begin`, `--end`, and `--params` in `show rowcounts`.**  
+  The flags `--begin`, `--end`, and `--params` are now handled in the action `show rowcounts`.
+
 ### v2.4.8
 
 - **Allow for syncing against `DATETIMEOFFSET` columns in MSSQL.**  

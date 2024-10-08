@@ -2075,7 +2075,7 @@ def get_pipe_rowcount(
     ----------
     pipe: mrsm.Pipe
         The pipe to query with.
-        
+
     begin: Union[datetime, int, None], default None
         The begin datetime value.
 
@@ -2124,14 +2124,14 @@ def get_pipe_rowcount(
                 warn(
                     f"No datetime could be determined for {pipe}."
                     + "\n    Ignoring begin and end...",
-                    stack = False,
+                    stack=False,
                 )
                 begin, end = None, None
             else:
                 warn(
                     f"A datetime wasn't specified for {pipe}.\n"
                     + f"    Using column \"{_dt}\" for datetime bounds...",
-                    stack = False,
+                    stack=False,
                 )
 
 
@@ -2187,6 +2187,8 @@ def get_pipe_rowcount(
         FROM ({src}) AS src
         """
     )
+    print(f"{begin=}")
+    print(f"{end=}")
     if begin is not None or end is not None:
         query += "WHERE"
     if begin is not None:

@@ -627,12 +627,12 @@ def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
 
 def get_uuid_cols(df: 'pd.DataFrame') -> List[str]:
     """
-    Get the columns which contain `decimal.Decimal` objects from a Pandas DataFrame.
+    Get the columns which contain `uuid.UUID` objects from a Pandas DataFrame.
 
     Parameters
     ----------
     df: pd.DataFrame
-        The DataFrame which may contain decimal objects.
+        The DataFrame which may contain UUID objects.
 
     Returns
     -------
