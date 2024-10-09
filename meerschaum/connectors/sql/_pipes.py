@@ -2187,8 +2187,6 @@ def get_pipe_rowcount(
         FROM ({src}) AS src
         """
     )
-    print(f"{begin=}")
-    print(f"{end=}")
     if begin is not None or end is not None:
         query += "WHERE"
     if begin is not None:

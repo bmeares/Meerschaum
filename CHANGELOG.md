@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.4.9
+### v2.4.9 – v2.4.10
 
 - **Add relative formats to `--begin` and `--end`.**  
   The flags `--begin` and `--end` support values in the format `[N] [unit] ago`:
