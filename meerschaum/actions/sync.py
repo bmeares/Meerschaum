@@ -284,8 +284,9 @@ def _sync_pipes(
     from meerschaum.utils.formatting import print_pipes_results
     from meerschaum.config.static import STATIC_CONFIG
 
+    ### NOTE: Removed MRSM_NONINTERACTIVE check.
     noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)
-    is_noninterative = noninteractive_val in ('1', 'true', 'True', 'yes')
+    _ = noninteractive_val in ('1', 'true', 'True', 'yes')
 
     run = True
     msg = ""
@@ -293,7 +294,7 @@ def _sync_pipes(
     cooldown = 2 * (min_seconds + 1)
     success_pipes, failure_pipes = [], []
     while run:
-        _progress = progress() if shell and not is_noninterative else None
+        _progress = progress() if shell else None
         cm = _progress if _progress is not None else contextlib.nullcontext()
 
         lap_begin = time.perf_counter()

@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.4.9 – v2.4.10
+### v2.4.9 – v2.4.11
 
 - **Add relative formats to `--begin` and `--end`.**  
   The flags `--begin` and `--end` support values in the format `[N] [unit] ago`:
@@ -23,6 +23,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Respect `--begin`, `--end`, and `--params` in `show rowcounts`.**  
   The flags `--begin`, `--end`, and `--params` are now handled in the action `show rowcounts`.
+
+- **Fix an issue with `Pipe.get_backtrack_data()`.**  
+  An incorrect calculation was fixed the produce the correct backtrack interval.
 
 ### v2.4.8
 

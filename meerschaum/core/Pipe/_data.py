@@ -453,7 +453,7 @@ def get_backtrack_data(
     backtrack_interval = self.get_backtrack_interval(debug=debug)
     if backtrack_minutes is None:
         backtrack_minutes = (
-            (backtrack_interval.total_seconds() * 60)
+            (backtrack_interval.total_seconds() / 60)
             if isinstance(backtrack_interval, timedelta)
             else backtrack_interval
         )
