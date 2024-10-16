@@ -4,6 +4,61 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.4.12
+
+- **Add the action `edit jobs`.**  
+  The action `edit jobs` lets you easily tweak the arguments for an existing job, so there's no need to delete and recreate jobs.
+
+- **Fix nested CTEs for MSSQL.**  
+  Pipes may now use definitions containing a `WITH` clause for Microsoft SQL Server.
+
+- **Added `wrap_query_with_cte` to `meerschaum.utils.sql`.**  
+  Reference a subquery in an encapsulating parent query, even if the subquery contains CTEs itself.
+
+  ```python
+  from meerschaum.utils.sql import wrap_query_with_cte
+  
+  sub_query = """
+  WITH [foo] AS (
+    SELECT 1 AS [val]
+  )
+  SELECT ([val] * 2) AS [newval]
+  FROM [foo]
+  """
+
+  parent_query = "SELECT (newval * 3) FROM [src]"
+
+  query = wrap_query_with_cte(
+      sub_query,
+      parent_query,
+      'mssql',
+      cte_name='src',
+  )
+  print(query)
+  # WITH [foo] AS (
+  #   SELECT 1 AS [val]
+  # ),
+  # [src] AS (
+  # SELECT ([val] * 2) AS [newval]
+  # FROM [foo]
+  #
+  # )
+  # SELECT (newval * 3) FROM [src] 
+  ```
+
+- **Fix `--yes` when running in background jobs.**  
+  The flags `--yes` and `--noask` are now properly handled when running a background job which contains prompts.
+
+- **Add an external page for jobs to the Web Console.**  
+  Like the shareable `/pipes/` links, you may now link to a specific job at the path `/dash/job/{name}`. Click the name of the job on the card to open a job in a new tab.
+
+- **Preserve the original values for `--begin` and `--end`.**  
+  When creating jobs in the shell, the original string values for `--begin` and `--end` will be preserved, such as in the case of `--begin 1 month ago`.
+  
+- **Fix `Pipe` formatting for small terminals.**  
+  Pipes with long names are now properly rendered in small terminal windows.
+  
+
 ### v2.4.9 – v2.4.11
 
 - **Add relative formats to `--begin` and `--end`.**  

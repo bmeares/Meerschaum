@@ -256,7 +256,8 @@ def parse_synonyms(
 
 
 def parse_dict_to_sysargs(
-    args_dict: Dict[str, Any]
+    args_dict: Dict[str, Any],
+    coerce_dates: bool = True,
 ) -> List[str]:
     """Revert an arguments dictionary back to a command line list."""
     import shlex
@@ -303,6 +304,19 @@ def parse_dict_to_sysargs(
             elif isinstance(args_dict[a], dict):
                 if len(args_dict[a]) > 0:
                     sysargs += [t[0], json.dumps(args_dict[a], separators=(',', ':'))]
+
+            ### Preserve the original datetime strings if possible
+            elif a in ('begin', 'end') and 'sysargs' in args_dict:
+                flag = t[0]
+                flag_ix = args_dict['sysargs'].index(flag)
+                if flag_ix < 0:
+                    continue
+                try:
+                    flag_val = args_dict['sysargs'][flag_ix + 1]
+                except IndexError:
+                    flag_val = str(args_dict[a])
+
+                sysargs += [flag, str(flag_val)]
 
             ### Account for None and other values
             elif (args_dict[a] is not None) or (args_dict[a] is None and a in allow_none_args):

@@ -322,14 +322,14 @@ def format_success_tuple(
     from meerschaum.config import get_config
     status_config = get_config('formatting', status, patch=True)
 
-    msg = (' ' * left_padding) + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
+    msg = (' ' * left_padding) + status_config[CHARSET]['icon'] + ' ' + str(highlight_pipes(tup[1]))
     lines = msg.split('\n')
     lines = [lines[0]] + [
         (('    ' + line if not line.startswith(' ') else line))
         for line in lines[1:]
     ]
     if ANSI:
-        lines[0] = fill_ansi(highlight_pipes(lines[0]), **status_config['ansi']['rich'])
+        lines[0] = fill_ansi(lines[0], **status_config['ansi']['rich'])
 
     msg = '\n'.join(lines)
     msg = ('\n' * upper_padding) + msg + ('\n' * lower_padding)

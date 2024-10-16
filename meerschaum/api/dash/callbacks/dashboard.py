@@ -98,6 +98,7 @@ _paths = {
     'plugins' : pages.plugins.layout,
     'register': pages.register.layout,
     'pipes'   : pages.pipes.layout,
+    'job'     : pages.job.layout,
 }
 _required_login = {''}
 
@@ -121,7 +122,7 @@ def update_page_layout_div(
     ----------
     pathname: str
         The path in the browser.
-        
+
     session_store_data: Dict[str, Any]:
         The stored session data.
 

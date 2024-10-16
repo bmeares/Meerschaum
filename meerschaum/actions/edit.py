@@ -10,6 +10,7 @@ from __future__ import annotations
 import meerschaum as mrsm 
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Dict
 
+
 def edit(
     action: Optional[List[str]] = None,
     **kw: Any
@@ -24,6 +25,7 @@ def edit(
         'definition': _edit_definition,
         'users'     : _edit_users,
         'plugins'   : _edit_plugins,
+        'jobs'      : _edit_jobs,
     }
     return choose_subaction(action, options, **kw)
 
@@ -370,6 +372,47 @@ def _complete_edit_plugins(
         ):
             possibilities.append(plugin_name)
     return possibilities
+
+
+def _edit_jobs(
+    action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Edit existing jobs.
+    """
+    import shlex
+    from meerschaum.jobs import get_filtered_jobs
+    from meerschaum.utils.prompt import prompt
+    from meerschaum._internal.arguments import (
+        split_pipeline_sysargs,
+        split_chained_sysargs,
+    )
+    jobs = get_filtered_jobs(executor_keys, action, debug=debug)
+    if not jobs:
+        return False, "No jobs to edit."
+
+    for name, job in jobs.items():
+        sysargs_str = shlex.join(job.sysargs)
+
+        new_sysargs_str = prompt(
+            f"Command for job '{name}':",
+            default_editable=sysargs_str,
+            wrap_lines=True,
+        )
+        new_sysargs = shlex.split(new_sysargs_str)
+        new_sysargs, pipeline_args = split_pipeline_sysargs(new_sysargs)
+        chained_sysargs = split_chained_sysargs(new_sysargs)
+
+        print('CHAINED SYSARGS')
+        mrsm.pprint(chained_sysargs)
+        print('PIPELINE ARGS')
+        mrsm.pprint(pipeline_args)
+
+
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.

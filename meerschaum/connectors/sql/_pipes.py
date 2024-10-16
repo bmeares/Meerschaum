@@ -2096,7 +2096,7 @@ def get_pipe_rowcount(
     An `int` for the number of rows if the `pipe` exists, otherwise `None`.
 
     """
-    from meerschaum.utils.sql import dateadd_str, sql_item_name, NO_CTE_FLAVORS
+    from meerschaum.utils.sql import dateadd_str, sql_item_name, wrap_query_with_cte
     from meerschaum.connectors.sql._fetch import get_pipe_query
     if remote:
         msg = f"'fetch:definition' must be an attribute of {pipe} to get a remote rowcount."
@@ -2175,18 +2175,8 @@ def get_pipe_rowcount(
         if not remote
         else get_pipe_query(pipe)
     )
-    query = (
-        f"""
-        WITH src AS ({src})
-        SELECT COUNT(*)
-        FROM src
-        """
-    ) if self.flavor not in ('mysql', 'mariadb') else (
-        f"""
-        SELECT COUNT(*)
-        FROM ({src}) AS src
-        """
-    )
+    parent_query = f"SELECT COUNT(*)\nFROM {sql_item_name('src', self.flavor)}"
+    query = wrap_query_with_cte(src, parent_query, self.flavor)
     if begin is not None or end is not None:
         query += "WHERE"
     if begin is not None:

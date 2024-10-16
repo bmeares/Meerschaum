@@ -323,7 +323,7 @@ def pipe_repr(
     )
     if as_rich_text:
         return text_obj
-    return rich_text_to_str(text_obj)
+    return rich_text_to_str(text_obj).replace('\n', '')
 
 
 def highlight_pipes(message: str) -> str:

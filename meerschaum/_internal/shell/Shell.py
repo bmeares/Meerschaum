@@ -626,7 +626,7 @@ class Shell(cmd.Cmd):
             step_action_name = step_action[0] if step_action else None
             ### NOTE: For `stack`, revert argument parsing.
             step_sysargs = (
-                parse_dict_to_sysargs(step_kwargs)
+                parse_dict_to_sysargs(step_kwargs, coerce_dates=False)
                 if step_action_name != 'stack'
                 else chained_sysargs[i]
             )
