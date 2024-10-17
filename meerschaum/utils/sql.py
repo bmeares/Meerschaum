@@ -1434,17 +1434,19 @@ def wrap_query_with_cte(
 
     Examples
     --------
-    >>> from meerschaum.utils.sql import wrap_query_with_cte
-    >>> sub_query = (
-    ...     "WITH foo AS (\n"
-    ...     "    SELECT 1 AS val\n"
-    ...     ")\n"
-    ...     "SELECT (val * 2) AS newval\n"
-    ...     "FROM foo"
-    ... )
-    >>> parent_query = "SELECT newval * 3 FROM src"
-    >>> query = wrap_query_with_cte(sub_query, parent_query, 'mysql')
-    >>> print(query)
+
+    ```python
+    from meerschaum.utils.sql import wrap_query_with_cte
+    sub_query = "WITH foo AS (SELECT 1 AS val) SELECT (val * 2) AS newval FROM foo"
+    parent_query = "SELECT newval * 3 FROM src"
+    query = wrap_query_with_cte(sub_query, parent_query, 'mssql')
+    print(query)
+    # WITH foo AS (SELECT 1 AS val),
+    # [src] AS (
+    #     SELECT (val * 2) AS newval FROM foo
+    # )
+    # SELECT newval * 3 FROM src
+    ```
 
     """
     sub_query = sub_query.lstrip()
@@ -1452,7 +1454,10 @@ def wrap_query_with_cte(
 
     if flavor in NO_CTE_FLAVORS:
         return (
-            parent_query.replace(cte_name_quoted, f"(\n{sub_query}\n) AS {cte_name_quoted}")
+            parent_query
+            .replace(cte_name, '--MRSM_SUBQUERY--')
+            .replace(cte_name_quoted, '--MRSM_SUBQUERY--')
+            .replace('--MRSM_SUBQUERY--', f"(\n{sub_query}\n) AS {cte_name_quoted}")
         )
 
     if 'with ' in sub_query.lower():
@@ -1460,7 +1465,7 @@ def wrap_query_with_cte(
         return (
             sub_query[:final_select_ix].rstrip() + ',\n'
             + f"{cte_name_quoted} AS (\n"
-            + sub_query[final_select_ix:]
+            + '    ' + sub_query[final_select_ix:]
             + "\n)\n"
             + parent_query
         )

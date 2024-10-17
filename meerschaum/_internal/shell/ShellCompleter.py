@@ -31,7 +31,6 @@ class ShellCompleter(Completer):
         ensure_readline()
         parts = document.text.split('-')
         ends_with_space = parts[0].endswith(' ')
-        #  print(f"{parts=}")
         last_action_line = parts[0].split('+')[-1]
         part_0_subbed_spaces = last_action_line.replace(' ', '_')
         parsed_text = (part_0_subbed_spaces + '-'.join(parts[1:]))
