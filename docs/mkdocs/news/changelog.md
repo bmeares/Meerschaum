@@ -6,8 +6,8 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v2.4.12
 
-- **Add the action `edit jobs`.**  
-  The action `edit jobs` lets you easily tweak the arguments for an existing job, so there's no need to delete and recreate jobs.
+- **Add the actions `edit jobs` and `bootstrap jobs`.**  
+  The action `edit jobs` lets you easily tweak the arguments for an existing job, so there's no need to delete and recreate jobs. The `bootstrap jobs` wizard also gives you a chance to review your changes before starting a job.
 
 - **Fix nested CTEs for MSSQL.**  
   Pipes may now use definitions containing a `WITH` clause for Microsoft SQL Server.
@@ -57,6 +57,9 @@ This is the current release cycle, so stay tuned for future releases!
   
 - **Fix `Pipe` formatting for small terminals.**  
   Pipes with long names are now properly rendered in small terminal windows.
+
+- **Enable shell suggestions for chained actions.**  
+  The shell auto-complete now works with chained actions.
   
 
 ### v2.4.9 – v2.4.11
