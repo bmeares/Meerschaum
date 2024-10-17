@@ -758,11 +758,11 @@ def build_where(
 
 
 def table_exists(
-        table: str,
-        connector: mrsm.connectors.sql.SQLConnector,
-        schema: Optional[str] = None,
-        debug: bool = False,
-    ) -> bool:
+    table: str,
+    connector: mrsm.connectors.sql.SQLConnector,
+    schema: Optional[str] = None,
+    debug: bool = False,
+) -> bool:
     """Check if a table exists.
 
     Parameters
@@ -793,12 +793,12 @@ def table_exists(
 
 
 def get_sqlalchemy_table(
-        table: str,
-        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
-        schema: Optional[str] = None,
-        refresh: bool = False,
-        debug: bool = False,
-    ) -> 'sqlalchemy.Table':
+    table: str,
+    connector: Optional[mrsm.connectors.sql.SQLConnector] = None,
+    schema: Optional[str] = None,
+    refresh: bool = False,
+    debug: bool = False,
+) -> Union['sqlalchemy.Table', None]:
     """
     Construct a SQLAlchemy table from its name.
 
@@ -828,6 +828,9 @@ def get_sqlalchemy_table(
     if connector is None:
         from meerschaum import get_connector
         connector = get_connector('sql')
+
+    if connector.flavor == 'duckdb':
+        return None
 
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
@@ -1455,8 +1458,8 @@ def wrap_query_with_cte(
     if flavor in NO_CTE_FLAVORS:
         return (
             parent_query
-            .replace(cte_name, '--MRSM_SUBQUERY--')
             .replace(cte_name_quoted, '--MRSM_SUBQUERY--')
+            .replace(cte_name, '--MRSM_SUBQUERY--')
             .replace('--MRSM_SUBQUERY--', f"(\n{sub_query}\n) AS {cte_name_quoted}")
         )
 
