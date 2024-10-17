@@ -2178,7 +2178,7 @@ def get_pipe_rowcount(
     parent_query = f"SELECT COUNT(*)\nFROM {sql_item_name('src', self.flavor)}"
     query = wrap_query_with_cte(src, parent_query, self.flavor)
     if begin is not None or end is not None:
-        query += "WHERE"
+        query += "\nWHERE"
     if begin is not None:
         query += f"""
         {dt} >= {dateadd_str(self.flavor, datepart='minute', number=0, begin=begin)}
