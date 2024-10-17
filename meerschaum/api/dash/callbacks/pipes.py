@@ -26,7 +26,7 @@ html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHEC
     State('pipes-location', 'search'),
     State('session-store', 'data'),
 )
-def render_page_from_url(
+def render_pipe_page_from_url(
     pathname: str,
     pipe_search: str,
     session_data: Optional[Dict[str, Any]],

@@ -8,12 +8,15 @@ Functions for bootstrapping elements
 """
 
 from __future__ import annotations
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple, List
 
+
 def bootstrap(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Launch an interactive wizard to bootstrap pipes or connectors.
     
@@ -26,23 +29,24 @@ def bootstrap(
         'pipes'      : _bootstrap_pipes,
         'connectors' : _bootstrap_connectors,
         'plugins'    : _bootstrap_plugins,
+        'jobs'       : _bootstrap_jobs,
     }
     return choose_subaction(action, options, **kw)
 
 
 def _bootstrap_pipes(
-        action: Optional[List[str]] = None,
-        connector_keys: Optional[List[str]] = None,
-        metric_keys: Optional[List[str]] = None,
-        location_keys: Optional[List[Optional[str]]] = None,
-        yes: bool = False,
-        force: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        mrsm_instance: Optional[str] = None,
-        shell: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    connector_keys: Optional[List[str]] = None,
+    metric_keys: Optional[List[str]] = None,
+    location_keys: Optional[List[Optional[str]]] = None,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    mrsm_instance: Optional[str] = None,
+    shell: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Create a new pipe.
     If no keys are provided, guide the user through the steps required.
@@ -431,6 +435,107 @@ def _bootstrap_plugins(
             return bootstrap_success, bootstrap_msg
 
     return True, "Success"
+
+
+def _bootstrap_jobs(
+    action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
+    """
+    Launch an interactive wizard to create new jobs.
+    """
+    import shlex
+    from meerschaum.utils.prompt import prompt, yes_no
+    from meerschaum.actions import actions
+    from meerschaum.utils.formatting import print_options, make_header
+    from meerschaum.utils.formatting._shell import clear_screen
+    from meerschaum.utils.warnings import info
+    from meerschaum._internal.arguments import (
+        split_pipeline_sysargs,
+        split_chained_sysargs,
+    )
+    from meerschaum.utils.misc import items_str
+    from meerschaum._internal.shell.ShellCompleter import ShellCompleter
+
+    if not action:
+        action = [prompt("What is the name of the job you'd like to create?")]
+
+    new_jobs = {}
+    for name in action:
+        clear_screen(debug=debug)
+        job = mrsm.Job(name, executor_keys=executor_keys)
+        if job.exists():
+            edit_success, edit_msg = actions['edit'](['job', name], **kwargs)
+            if not edit_success:
+                return edit_success, edit_msg
+            continue
+
+        info(
+            "Press [Esc + Enter] to submit, [CTRL + C] to exit.\n"
+            "    Tip: join multiple actions with `+`, add pipeline arguments with `:`.\n"
+            "    https://meerschaum.io/reference/actions/#chaining-actions\n"
+        )
+        try:
+            new_sysargs_str = prompt(
+                f"Arguments for job '{name}':",
+                multiline=True,
+                icon=False,
+                completer=ShellCompleter(),
+            )
+        except KeyboardInterrupt:
+            return True, "Nothing was changed."
+
+        new_sysargs = shlex.split(new_sysargs_str)
+        new_sysargs, pipeline_args = split_pipeline_sysargs(new_sysargs)
+        chained_sysargs = split_chained_sysargs(new_sysargs)
+
+        if len(chained_sysargs) > 1:
+            print_options(
+                [
+                    shlex.join(step_sysargs)
+                    for step_sysargs in chained_sysargs
+                ],
+                header=f"Steps in Job '{name}':",
+                number_options=True,
+                **kwargs
+            )
+        else:
+            print('\n' + make_header(f"Action for Job '{name}':"))
+            print(shlex.join(new_sysargs))
+
+        if pipeline_args:
+            print('\n' + make_header("Pipeline Arguments:"))
+            print(shlex.join(pipeline_args))
+
+        if not yes_no(
+            (
+                f"Are you sure you want to create job '{name}' with the above arguments?\n"
+                + "    The job will be started if you continue."
+            ),
+            default='n',
+            **kwargs
+        ):
+            return True, "Nothing was changed."
+
+        new_job = mrsm.Job(name, new_sysargs_str, executor_keys=executor_keys)
+        start_success, start_msg = new_job.start()
+        if not start_success:
+            return start_success, start_msg
+
+        new_jobs[name] = new_job
+
+    if not new_jobs:
+        return False, "No new jobs were created."
+
+    msg = (
+        "Successfully bootstrapped job"
+        + ('s' if len(new_jobs) != 1 else '')
+        + items_str(list(new_jobs.keys()))
+        + '.'
+    )
+    return True, msg
 
 
 ### NOTE: This must be the final statement of the module.

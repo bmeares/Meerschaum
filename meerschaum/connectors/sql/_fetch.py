@@ -7,27 +7,29 @@ Implement the Connector fetch() method
 """
 
 from __future__ import annotations
+
 from datetime import datetime, timedelta
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Union, Callable, Any
+from meerschaum.utils.typing import Optional, Union, Callable, Any, List, Dict
+
 
 def fetch(
-        self,
-        pipe: meerschaum.Pipe,
-        begin: Union[datetime, int, str, None] = '',
-        end: Union[datetime, int, str, None] = None,
-        check_existing: bool = True,
-        chunk_hook: Optional[Callable[[pd.DataFrame], Any]] = None,
-        chunksize: Optional[int] = -1,
-        workers: Optional[int] = None,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union['pd.DataFrame', List[Any], None]:
+    self,
+    pipe: mrsm.Pipe,
+    begin: Union[datetime, int, str, None] = '',
+    end: Union[datetime, int, str, None] = None,
+    check_existing: bool = True,
+    chunk_hook: Optional[Callable[['pd.DataFrame'], Any]] = None,
+    chunksize: Optional[int] = -1,
+    workers: Optional[int] = None,
+    debug: bool = False,
+    **kw: Any
+) -> Union['pd.DataFrame', List[Any], None]:
     """Execute the SQL definition and return a Pandas DataFrame.
 
     Parameters
     ----------
-    pipe: meerschaum.Pipe
+    pipe: mrsm.Pipe
         The pipe object which contains the `fetch` metadata.
         
         - pipe.columns['datetime']: str
@@ -63,7 +65,7 @@ def fetch(
 
     debug: bool, default False
         Verbosity toggle.
-       
+
     Returns
     -------
     A pandas DataFrame or `None`.
@@ -71,20 +73,20 @@ def fetch(
     """
     meta_def = self.get_pipe_metadef(
         pipe,
-        begin = begin,
-        end = end,
-        check_existing = check_existing,
-        debug = debug,
+        begin=begin,
+        end=end,
+        check_existing=check_existing,
+        debug=debug,
         **kw
     )
     as_hook_results = chunk_hook is not None
     chunks = self.read(
         meta_def,
-        chunk_hook = chunk_hook,
-        as_hook_results = as_hook_results,
-        chunksize = chunksize,
-        workers = workers,
-        debug = debug,
+        chunk_hook=chunk_hook,
+        as_hook_results=as_hook_results,
+        chunksize=chunksize,
+        workers=workers,
+        debug=debug,
     )
     ### if sqlite, parse for datetimes
     if not as_hook_results and self.flavor == 'sqlite':
@@ -97,8 +99,8 @@ def fetch(
         return (
             parse_df_datetimes(
                 chunk,
-                ignore_cols = ignore_cols,
-                debug = debug,
+                ignore_cols=ignore_cols,
+                debug=debug,
             )
             for chunk in chunks
         )
@@ -106,15 +108,15 @@ def fetch(
 
 
 def get_pipe_metadef(
-        self,
-        pipe: meerschaum.Pipe,
-        params: Optional[Dict[str, Any]] = None,
-        begin: Union[datetime, int, str, None] = '',
-        end: Union[datetime, int, str, None] = None,
-        check_existing: bool = True,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union[str, None]:
+    self,
+    pipe: mrsm.Pipe,
+    params: Optional[Dict[str, Any]] = None,
+    begin: Union[datetime, int, str, None] = '',
+    end: Union[datetime, int, str, None] = None,
+    check_existing: bool = True,
+    debug: bool = False,
+    **kw: Any
+) -> Union[str, None]:
     """
     Return a pipe's meta definition fetch query.
 
@@ -173,7 +175,6 @@ def get_pipe_metadef(
                     stack = False
                 )
 
-
     apply_backtrack = begin == '' and check_existing
     backtrack_interval = pipe.get_backtrack_interval(check_existing=check_existing, debug=debug)
     btm = (
@@ -189,35 +190,34 @@ def get_pipe_metadef(
 
     if begin and end and begin >= end:
         begin = None
-    
-    da = None
+
     if dt_name:
         begin_da = (
             dateadd_str(
-                flavor = self.flavor,
-                datepart = 'minute',
-                number = ((-1 * btm) if apply_backtrack else 0), 
-                begin = begin,
+                flavor=self.flavor,
+                datepart='minute',
+                number=((-1 * btm) if apply_backtrack else 0), 
+                begin=begin,
             )
             if begin
             else None
         )
         end_da = (
             dateadd_str(
-                flavor = self.flavor,
-                datepart = 'minute',
-                number = 0,
-                begin = end,
+                flavor=self.flavor,
+                datepart='minute',
+                number=0,
+                begin=end,
             )
             if end
             else None
         )
 
     meta_def = (
-        _simple_fetch_query(pipe) if (
+        _simple_fetch_query(pipe, self.flavor) if (
             (not (pipe.columns or {}).get('id', None))
             or (not get_config('system', 'experimental', 'join_fetch'))
-        ) else _join_fetch_query(pipe, debug=debug, **kw)
+        ) else _join_fetch_query(pipe, self.flavor, debug=debug, **kw)
     )
 
     has_where = 'where' in meta_def.lower()[meta_def.lower().rfind('definition'):]
@@ -300,25 +300,28 @@ def set_pipe_query(pipe: mrsm.Pipe, query: str) -> None:
     dict_to_set[key_to_set] = query
 
 
-def _simple_fetch_query(pipe, debug: bool=False, **kw) -> str:
+def _simple_fetch_query(
+    pipe: mrsm.Pipe,
+    flavor: str,
+    debug: bool = False,
+    **kw
+) -> str:
     """Build a fetch query from a pipe's definition."""
-    def_name = 'definition'
+    from meerschaum.utils.sql import format_cte_subquery
     definition = get_pipe_query(pipe)
-    return (
-        f"WITH {def_name} AS (\n{definition}\n) SELECT * FROM {def_name}"
-        if pipe.connector.flavor not in ('mysql', 'mariadb')
-        else f"SELECT * FROM (\n{definition}\n) AS {def_name}"
-    )
+    return format_cte_subquery(definition, flavor, 'definition')
+
 
 def _join_fetch_query(
-        pipe,
-        debug: bool = False,
-        new_ids: bool = True,
-        **kw
-    ) -> str:
+    pipe: mrsm.Pipe,
+    flavor: str,
+    debug: bool = False,
+    new_ids: bool = True,
+    **kw
+) -> str:
     """Build a fetch query based on the datetime and ID indices."""
     if not pipe.exists(debug=debug):
-        return _simple_fetch_query(pipe, debug=debug, **kw)
+        return _simple_fetch_query(pipe, flavor, debug=debug, **kw)
 
     from meerschaum.utils.sql import sql_item_name, dateadd_str
     pipe_instance_name = sql_item_name(
@@ -350,7 +353,8 @@ def _join_fetch_query(
     """
     sync_times = pipe.instance_connector.read(sync_times_query, debug=debug, silent=False)
     if sync_times is None:
-        return _simple_fetch_query(pipe, debug=debug, **kw)
+        return _simple_fetch_query(pipe, flavor, debug=debug, **kw)
+
     _sync_times_q = f",\n{sync_times_remote_name} AS ("
     for _id, _st in sync_times.itertuples(index=False):
         _sync_times_q += (

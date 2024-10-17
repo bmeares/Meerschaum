@@ -2096,7 +2096,7 @@ def get_pipe_rowcount(
     An `int` for the number of rows if the `pipe` exists, otherwise `None`.
 
     """
-    from meerschaum.utils.sql import dateadd_str, sql_item_name, NO_CTE_FLAVORS
+    from meerschaum.utils.sql import dateadd_str, sql_item_name, wrap_query_with_cte
     from meerschaum.connectors.sql._fetch import get_pipe_query
     if remote:
         msg = f"'fetch:definition' must be an attribute of {pipe} to get a remote rowcount."
@@ -2175,20 +2175,10 @@ def get_pipe_rowcount(
         if not remote
         else get_pipe_query(pipe)
     )
-    query = (
-        f"""
-        WITH src AS ({src})
-        SELECT COUNT(*)
-        FROM src
-        """
-    ) if self.flavor not in ('mysql', 'mariadb') else (
-        f"""
-        SELECT COUNT(*)
-        FROM ({src}) AS src
-        """
-    )
+    parent_query = f"SELECT COUNT(*)\nFROM {sql_item_name('src', self.flavor)}"
+    query = wrap_query_with_cte(src, parent_query, self.flavor)
     if begin is not None or end is not None:
-        query += "WHERE"
+        query += "\nWHERE"
     if begin is not None:
         query += f"""
         {dt} >= {dateadd_str(self.flavor, datepart='minute', number=0, begin=begin)}
@@ -2330,10 +2320,10 @@ def clear_pipe(
 
 
 def get_pipe_table(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-    ) -> sqlalchemy.Table:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> Union['sqlalchemy.Table', None]:
     """
     Return the `sqlalchemy.Table` object for a `mrsm.Pipe`.
 
@@ -2352,18 +2342,18 @@ def get_pipe_table(
         return None
     return get_sqlalchemy_table(
         pipe.target,
-        connector = self,
-        schema = self.get_pipe_schema(pipe),
-        debug = debug,
-        refresh = True,
+        connector=self,
+        schema=self.get_pipe_schema(pipe),
+        debug=debug,
+        refresh=True,
     )
 
 
 def get_pipe_columns_types(
-        self,
-        pipe: mrsm.Pipe,
-        debug: bool = False,
-    ) -> Dict[str, str]:
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> Dict[str, str]:
     """
     Get the pipe's columns and types.
 
@@ -2394,8 +2384,8 @@ def get_pipe_columns_types(
         return get_table_cols_types(
             pipe.target,
             self,
-            flavor = self.flavor,
-            schema = self.schema,
+            flavor=self.flavor,
+            schema=self.get_pipe_schema(pipe),
         )
 
     table_columns = {}
@@ -2448,6 +2438,7 @@ def get_add_columns_queries(
     from meerschaum.utils.sql import (
         sql_item_name,
         SINGLE_ALTER_TABLE_FLAVORS,
+        get_table_cols_types,
     )
     from meerschaum.utils.dtypes.sql import (
         get_pd_type_from_db_type,
@@ -2480,6 +2471,14 @@ def get_add_columns_queries(
     db_cols_types = {
         col: get_pd_type_from_db_type(str(typ.type))
         for col, typ in table_obj.columns.items()
+    } if table_obj is not None else {
+        col: get_pd_type_from_db_type(typ)
+        for col, typ in get_table_cols_types(
+            pipe.target,
+            self,
+            schema=self.get_pipe_schema(pipe),
+            debug=debug,
+        ).items()
     }
     new_cols = set(df_cols_types) - set(db_cols_types)
     if not new_cols:
@@ -2552,7 +2551,7 @@ def get_alter_columns_queries(
     """
     if not pipe.exists(debug=debug):
         return []
-    from meerschaum.utils.sql import sql_item_name, DROP_IF_EXISTS_FLAVORS
+    from meerschaum.utils.sql import sql_item_name, DROP_IF_EXISTS_FLAVORS, get_table_cols_types
     from meerschaum.utils.dataframe import get_numeric_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import (
@@ -2583,6 +2582,14 @@ def get_alter_columns_queries(
     db_cols_types = {
         col: get_pd_type_from_db_type(str(typ.type))
         for col, typ in table_obj.columns.items()
+    } if table_obj is not None else {
+        col: get_pd_type_from_db_type(typ)
+        for col, typ in get_table_cols_types(
+            pipe.target,
+            self,
+            schema=self.get_pipe_schema(pipe),
+            debug=debug,
+        ).items()
     }
     pipe_bool_cols = [col for col, typ in pipe.dtypes.items() if are_dtypes_equal(str(typ), 'bool')]
     pd_db_df_aliases = {
