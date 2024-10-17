@@ -39,12 +39,12 @@ NONINTERACTIVE_ENV: str = STATIC_CONFIG['environment']['noninteractive']
 EXECUTOR_KEYS: str = 'local'
 
 
-def _get_job(name: str):
-    systemd_job = Job(name, executor_keys='systemd')
+def _get_job(name: str, sysargs: Union[str, List[str], None] = None):
+    systemd_job = Job(name, sysargs, executor_keys='systemd')
     if systemd_job.exists():
         return systemd_job
 
-    job = Job(name, executor_keys=EXECUTOR_KEYS)
+    job = Job(name, sysargs, executor_keys=EXECUTOR_KEYS)
     return job
 
 

@@ -7,8 +7,10 @@ Functions for editing elements belong here.
 """
 
 from __future__ import annotations
+
 import meerschaum as mrsm 
 from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Dict
+
 
 def edit(
     action: Optional[List[str]] = None,
@@ -24,6 +26,7 @@ def edit(
         'definition': _edit_definition,
         'users'     : _edit_users,
         'plugins'   : _edit_plugins,
+        'jobs'      : _edit_jobs,
     }
     return choose_subaction(action, options, **kw)
 
@@ -370,6 +373,92 @@ def _complete_edit_plugins(
         ):
             possibilities.append(plugin_name)
     return possibilities
+
+
+def _edit_jobs(
+    action: Optional[List[str]] = None,
+    executor_keys: Optional[str] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Edit existing jobs.
+    """
+    import shlex
+    from meerschaum.jobs import get_filtered_jobs
+    from meerschaum.utils.prompt import prompt, yes_no
+    from meerschaum._internal.arguments import (
+        split_pipeline_sysargs,
+        split_chained_sysargs,
+    )
+    from meerschaum.utils.formatting import make_header, print_options
+    from meerschaum.utils.warnings import info
+    from meerschaum.actions import actions
+    jobs = get_filtered_jobs(executor_keys, action, debug=debug)
+    if not jobs:
+        return False, "No jobs to edit."
+
+    info(
+        "Press [Esc + Enter] to submit, [CTRL + C] to exit.\n"
+        "    Tip: join multiple actions with `+`, add pipeline arguments with `:`.\n"
+        "    https://meerschaum.io/reference/actions/#chaining-actions\n"
+    )
+
+    for name, job in jobs.items():
+        sysargs_str = shlex.join(job.sysargs)
+
+        try:
+            new_sysargs_str = prompt(
+                f"Arguments for job '{name}':",
+                default_editable=sysargs_str.lstrip().rstrip(),
+                multiline=True,
+                icon=False,
+            )
+        except KeyboardInterrupt:
+            return True, "Nothing was changed."
+
+        new_sysargs = shlex.split(new_sysargs_str)
+        new_sysargs, pipeline_args = split_pipeline_sysargs(new_sysargs)
+        chained_sysargs = split_chained_sysargs(new_sysargs)
+
+        if len(chained_sysargs) > 1:
+            print_options(
+                [
+                    shlex.join(step_sysargs)
+                    for step_sysargs in chained_sysargs
+                ],
+                header=f"Steps in Job '{name}':",
+                number_options=True,
+                **kwargs
+            )
+        else:
+            print('\n' + make_header(f"Action for Job '{name}':"))
+            print(shlex.join(new_sysargs))
+
+        if pipeline_args:
+            print('\n' + make_header("Pipeline Arguments:"))
+            print(shlex.join(pipeline_args))
+
+        if not yes_no(
+            (
+                f"Are you sure you want to recreate job '{name}' with the above arguments?\n"
+                + "    The job will be started if you continue."
+            ),
+            default='n',
+            **kwargs
+        ):
+            return True, "Nothing was changed."
+
+        delete_success, delete_msg = job.delete()
+        if not delete_success:
+            return delete_success, delete_msg
+
+        new_job = mrsm.Job(name, new_sysargs_str, executor_keys=executor_keys)
+        start_success, start_msg = new_job.start()
+        if not start_success:
+            return start_success, start_msg
+
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.

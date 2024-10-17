@@ -483,7 +483,17 @@ def test_sync_inplace(flavor: str):
     )
     dest_pipe = Pipe(str(conn), 'inplace', 'dest', instance=conn)
     dest_pipe.delete()
-    query = f"SELECT * FROM {sql_item_name(source_pipe.target, flavor)}"
+    query = f"""
+    WITH {sql_item_name('subquery', flavor)} AS (
+        SELECT *
+        FROM {sql_item_name(source_pipe.target, flavor)}
+    )
+    SELECT *
+    FROM {sql_item_name('subquery', flavor)}
+    """ if flavor not in ('mysql',) else f"""
+    SELECT *
+    FROM {sql_item_name(source_pipe.target, flavor)}
+    """
     dest_pipe = Pipe(
         str(conn), 'inplace', 'dest',
         instance=conn,

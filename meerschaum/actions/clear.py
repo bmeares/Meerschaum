@@ -6,12 +6,16 @@ Functions for clearing pipes.
 """
 
 from __future__ import annotations
+
+from datetime import datetime
+import meerschaum as mrsm
 from meerschaum.utils.typing import List, SuccessTuple, Any, Optional
 
+
 def clear(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Clear pipes of their data, or clear the screen.
 
@@ -34,24 +38,25 @@ def clear(
 
 
 def _clear_pipes(
-        action: Optional[List[str]] = None,
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
-        connector_keys: Optional[List[str]] = None,
-        metric_keys: Optional[List[str]] = None,
-        mrsm_instance: Optional[str] = None,
-        location_keys: Optional[List[str]] = None,
-        force: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    begin: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    connector_keys: Optional[List[str]] = None,
+    metric_keys: Optional[List[str]] = None,
+    mrsm_instance: Optional[str] = None,
+    location_keys: Optional[List[str]] = None,
+    yes: bool = False,
+    force: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Clear pipes' data without dropping any tables.
 
     """
     from meerschaum import get_pipes
     from meerschaum.utils.formatting import print_tuple
-    
+
     successes = {}
     fails = {}
 
@@ -61,13 +66,19 @@ def _clear_pipes(
     )
 
     if not force:
-        if not _ask_with_rowcounts(pipes, begin=begin, end=end, debug=debug, **kw):
+        if not _ask_with_rowcounts(pipes, begin=begin, end=end, debug=debug, yes=yes, **kw):
             return False, "No rows were deleted."
 
     for pipe in pipes:
-        success, msg = pipe.clear(begin=begin, end=end, debug=debug, **kw)
-        print_tuple((success, msg))
-        (successes if success else fails)[pipe] = msg
+        clear_success, clear_msg = pipe.clear(
+            begin=begin,
+            end=end,
+            yes=yes,
+            debug=debug,
+            **kw
+        )
+        print_tuple((clear_success, clear_msg))
+        (successes if clear_success else fails)[pipe] = clear_msg
 
     success = len(successes) > 0
     msg = (
@@ -79,15 +90,15 @@ def _clear_pipes(
 
 
 def _ask_with_rowcounts(
-        pipes: List[meerschaum.Pipe],
-        begin: Optional[datetime.datetime] = None,
-        end: Optional[datetime.datetime] = None,
-        yes: bool = False,
-        nopretty: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw
-    ) -> bool:
+    pipes: List[mrsm.Pipe],
+    begin: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    yes: bool = False,
+    nopretty: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kw
+) -> bool:
     """
     Count all of the pipes' rowcounts and confirm with the user that these rows need to be deleted.
 
@@ -109,13 +120,13 @@ def _ask_with_rowcounts(
                     warn(
                         f"No datetime could be determined for {pipe}!\n"
                         + "    THIS WILL DELETE THE ENTIRE TABLE!",
-                        stack = False
+                        stack=False
                     )
                 else:
                     warn(
                         f"A datetime wasn't specified for {pipe}.\n"
                         + f"    Using column \"{_dt}\" for datetime bounds...",
-                        stack = False
+                        stack=False
                     )
 
 

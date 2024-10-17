@@ -31,15 +31,18 @@ class ShellCompleter(Completer):
         ensure_readline()
         parts = document.text.split('-')
         ends_with_space = parts[0].endswith(' ')
-        part_0_subbed_spaces = parts[0].replace(' ', '_')
-        parsed_text = part_0_subbed_spaces + '-'.join(parts[1:])
+        last_action_line = parts[0].split('+')[-1]
+        part_0_subbed_spaces = last_action_line.replace(' ', '_')
+        parsed_text = (part_0_subbed_spaces + '-'.join(parts[1:]))
 
+        if not parsed_text:
+            return
 
         ### Index is the rank order (0 is closest match).
         ### Break when no results are returned.
         for i, a in enumerate(shell_actions):
             try:
-                poss = shell.complete(parsed_text, i)
+                poss = shell.complete(parsed_text.lstrip('_'), i)
                 if poss:
                     poss = poss.replace('_', ' ')
             ### Having issues with readline on portable Windows.
@@ -50,7 +53,9 @@ class ShellCompleter(Completer):
             yield Completion(poss, start_position=(-1 * len(poss)))
             yielded.append(poss)
 
-        args = parse_line(document.text)
+        line = document.text
+        current_action_line = line.split('+')[-1].lstrip()
+        args = parse_line(current_action_line)
         action_function = get_action(args['action'], _actions=shell_attrs.get('_actions', None))
         if action_function is None:
             return
@@ -74,8 +79,8 @@ class ShellCompleter(Completer):
                 shell,
                 complete_function_name
             )(
-                document.text.split(' ')[-1],
-                document.text,
+                current_action_line.split(' ')[-1],
+                current_action_line,
                 0,
                 0
             )

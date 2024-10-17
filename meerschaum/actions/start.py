@@ -9,6 +9,7 @@ Start subsystems (API server, logging daemon, etc.).
 from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any, Union, Dict
 
+
 def start(
     action: Optional[List[str]] = None,
     **kw: Any,
@@ -375,8 +376,8 @@ def _start_gui(
         webview.create_window(
             'Meerschaum Shell', 
             f'http://127.0.0.1:{port}',
-            height = 650,
-            width = 1000
+            height=650,
+            width=1000
         )
         webview.start(debug=debug)
     except Exception as e:

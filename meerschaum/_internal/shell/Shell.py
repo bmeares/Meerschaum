@@ -235,6 +235,23 @@ def get_shell_intro(with_color: bool = True) -> str:
         **get_config('shell', 'ansi', 'intro', 'rich')
     )
 
+def get_shell_session():
+    """
+    Return the `prompt_toolkit` prompt session.
+    """
+    from meerschaum.config._paths import SHELL_HISTORY_PATH
+    if 'session' in shell_attrs:
+        return shell_attrs['session']
+
+    shell_attrs['session'] = prompt_toolkit_shortcuts.PromptSession(
+        history=prompt_toolkit_history.FileHistory(SHELL_HISTORY_PATH.as_posix()),
+        auto_suggest=ValidAutoSuggest(),
+        completer=ShellCompleter(),
+        complete_while_typing=True,
+        reserve_space_for_menu=False,
+    )
+    return shell_attrs['session']
+
 
 class Shell(cmd.Cmd):
     """
@@ -264,14 +281,7 @@ class Shell(cmd.Cmd):
         except AttributeError:
             pass
 
-        from meerschaum.config._paths import SHELL_HISTORY_PATH
-        shell_attrs['session'] = prompt_toolkit_shortcuts.PromptSession(
-            history=prompt_toolkit_history.FileHistory(SHELL_HISTORY_PATH.as_posix()),
-            auto_suggest=ValidAutoSuggest(),
-            completer=ShellCompleter(),
-            complete_while_typing=True,
-            reserve_space_for_menu=False,
-        )
+        _ = get_shell_session()
 
         super().__init__()
 
@@ -626,7 +636,7 @@ class Shell(cmd.Cmd):
             step_action_name = step_action[0] if step_action else None
             ### NOTE: For `stack`, revert argument parsing.
             step_sysargs = (
-                parse_dict_to_sysargs(step_kwargs)
+                parse_dict_to_sysargs(step_kwargs, coerce_dates=False)
                 if step_action_name != 'stack'
                 else chained_sysargs[i]
             )

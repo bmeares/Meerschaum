@@ -758,11 +758,11 @@ def build_where(
 
 
 def table_exists(
-        table: str,
-        connector: mrsm.connectors.sql.SQLConnector,
-        schema: Optional[str] = None,
-        debug: bool = False,
-    ) -> bool:
+    table: str,
+    connector: mrsm.connectors.sql.SQLConnector,
+    schema: Optional[str] = None,
+    debug: bool = False,
+) -> bool:
     """Check if a table exists.
 
     Parameters
@@ -793,12 +793,12 @@ def table_exists(
 
 
 def get_sqlalchemy_table(
-        table: str,
-        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
-        schema: Optional[str] = None,
-        refresh: bool = False,
-        debug: bool = False,
-    ) -> 'sqlalchemy.Table':
+    table: str,
+    connector: Optional[mrsm.connectors.sql.SQLConnector] = None,
+    schema: Optional[str] = None,
+    refresh: bool = False,
+    debug: bool = False,
+) -> Union['sqlalchemy.Table', None]:
     """
     Construct a SQLAlchemy table from its name.
 
@@ -828,6 +828,9 @@ def get_sqlalchemy_table(
     if connector is None:
         from meerschaum import get_connector
         connector = get_connector('sql')
+
+    if connector.flavor == 'duckdb':
+        return None
 
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
@@ -1333,11 +1336,11 @@ def get_rename_table_queries(
 
 
 def get_create_table_query(
-        query: str,
-        new_table: str,
-        flavor: str,
-        schema: Optional[str] = None,
-    ) -> str:
+    query: str,
+    new_table: str,
+    flavor: str,
+    schema: Optional[str] = None,
+) -> str:
     """
     Return a query to create a new table from a `SELECT` query.
 
@@ -1365,10 +1368,8 @@ def get_create_table_query(
     new_table_name = sql_item_name(new_table, flavor, schema)
     if flavor in ('mssql',):
         query = query.lstrip()
-        original_query = query
         if 'with ' in query.lower():
             final_select_ix = query.lower().rfind('select')
-            def_name = query[len('WITH '):].split(' ', maxsplit=1)[0]
             return (
                 query[:final_select_ix].rstrip() + ',\n'
                 + f"{create_cte_name} AS (\n"
@@ -1405,12 +1406,86 @@ def get_create_table_query(
     return textwrap.dedent(create_table_query)
 
 
+def wrap_query_with_cte(
+    sub_query: str,
+    parent_query: str,
+    flavor: str,
+    cte_name: str = "src",
+) -> str:
+    """
+    Wrap a subquery in a CTE and append an encapsulating query.
+
+    Parameters
+    ----------
+    sub_query: str
+        The query to be referenced. This may itself contain CTEs.
+        Unless `cte_name` is provided, this will be aliased as `src`.
+
+    parent_query: str
+        The larger query to append which references the subquery.
+        This must not contain CTEs.
+
+    flavor: str
+        The database flavor, e.g. `'mssql'`.
+
+    cte_name: str, default 'src'
+        The CTE alias, defaults to `src`.
+
+    Returns
+    -------
+    An encapsulating query which allows you to treat `sub_query` as a temporary table.
+
+    Examples
+    --------
+
+    ```python
+    from meerschaum.utils.sql import wrap_query_with_cte
+    sub_query = "WITH foo AS (SELECT 1 AS val) SELECT (val * 2) AS newval FROM foo"
+    parent_query = "SELECT newval * 3 FROM src"
+    query = wrap_query_with_cte(sub_query, parent_query, 'mssql')
+    print(query)
+    # WITH foo AS (SELECT 1 AS val),
+    # [src] AS (
+    #     SELECT (val * 2) AS newval FROM foo
+    # )
+    # SELECT newval * 3 FROM src
+    ```
+
+    """
+    sub_query = sub_query.lstrip()
+    cte_name_quoted = sql_item_name(cte_name, flavor, None)
+
+    if flavor in NO_CTE_FLAVORS:
+        return (
+            parent_query
+            .replace(cte_name_quoted, '--MRSM_SUBQUERY--')
+            .replace(cte_name, '--MRSM_SUBQUERY--')
+            .replace('--MRSM_SUBQUERY--', f"(\n{sub_query}\n) AS {cte_name_quoted}")
+        )
+
+    if 'with ' in sub_query.lower():
+        final_select_ix = sub_query.lower().rfind('select')
+        return (
+            sub_query[:final_select_ix].rstrip() + ',\n'
+            + f"{cte_name_quoted} AS (\n"
+            + '    ' + sub_query[final_select_ix:]
+            + "\n)\n"
+            + parent_query
+        )
+
+    return (
+        f"WITH {cte_name_quoted} AS (\n"
+        f"    {sub_query}\n"
+        f")\n{parent_query}"
+    )
+
+
 def format_cte_subquery(
-        sub_query: str,
-        flavor: str,
-        sub_name: str = 'src',
-        cols_to_select: Union[List[str], str] = '*',
-    ) -> str:
+    sub_query: str,
+    flavor: str,
+    sub_name: str = 'src',
+    cols_to_select: Union[List[str], str] = '*',
+) -> str:
     """
     Given a subquery, build a wrapper query that selects from the CTE subquery.
 
@@ -1434,28 +1509,25 @@ def format_cte_subquery(
     -------
     A wrapper query that selects from the CTE.
     """
-    import textwrap
     quoted_sub_name = sql_item_name(sub_name, flavor, None)
     cols_str = (
         cols_to_select
         if isinstance(cols_to_select, str)
         else ', '.join([sql_item_name(col, flavor, None) for col in cols_to_select])
     )
-    return textwrap.dedent(
-        f"""
-        SELECT {cols_str}
-        FROM ({sub_query})"""
-        + (f' AS {quoted_sub_name}' if flavor != 'oracle' else '') + """
-        """
+    parent_query = (
+        f"SELECT {cols_str}\n"
+        f"FROM {quoted_sub_name}"
     )
+    return wrap_query_with_cte(sub_query, parent_query, flavor, cte_name=sub_name)
 
 
 def session_execute(
-        session: 'sqlalchemy.orm.session.Session',
-        queries: Union[List[str], str],
-        with_results: bool = False,
-        debug: bool = False,
-    ) -> Union[mrsm.SuccessTuple, Tuple[mrsm.SuccessTuple, List['sqlalchemy.sql.ResultProxy']]]:
+    session: 'sqlalchemy.orm.session.Session',
+    queries: Union[List[str], str],
+    with_results: bool = False,
+    debug: bool = False,
+) -> Union[mrsm.SuccessTuple, Tuple[mrsm.SuccessTuple, List['sqlalchemy.sql.ResultProxy']]]:
     """
     Similar to `SQLConnector.exec_queries()`, execute a list of queries
     and roll back when one fails.

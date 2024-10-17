@@ -11,7 +11,7 @@ import platform
 import os
 import sys
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Union, Any, Dict
+from meerschaum.utils.typing import Optional, Union, Any, Dict, Iterable
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
 from meerschaum.utils.formatting._pipes import (
@@ -322,14 +322,14 @@ def format_success_tuple(
     from meerschaum.config import get_config
     status_config = get_config('formatting', status, patch=True)
 
-    msg = (' ' * left_padding) + status_config[CHARSET]['icon'] + ' ' + str(tup[1])
+    msg = (' ' * left_padding) + status_config[CHARSET]['icon'] + ' ' + str(highlight_pipes(tup[1]))
     lines = msg.split('\n')
     lines = [lines[0]] + [
         (('    ' + line if not line.startswith(' ') else line))
         for line in lines[1:]
     ]
     if ANSI:
-        lines[0] = fill_ansi(highlight_pipes(lines[0]), **status_config['ansi']['rich'])
+        lines[0] = fill_ansi(lines[0], **status_config['ansi']['rich'])
 
     msg = '\n'.join(lines)
     msg = ('\n' * upper_padding) + msg + ('\n' * lower_padding)
@@ -337,7 +337,7 @@ def format_success_tuple(
 
 
 def print_options(
-    options: Optional[Dict[str, Any]] = None,
+    options: Optional[Iterable[Any]] = None,
     nopretty: bool = False,
     no_rich: bool = False,
     name: str = 'options',
@@ -345,6 +345,7 @@ def print_options(
     num_cols: Optional[int] = None,
     adjust_cols: bool = True,
     sort_options: bool = False,
+    number_options: bool = False,
     **kw
 ) -> None:
     """
@@ -373,6 +374,12 @@ def print_options(
     adjust_cols: bool, default True
         If `True`, adjust the number of columns depending on the terminal size.
 
+    sort_options: bool, default False
+        If `True`, print the options in sorted order.
+
+    number_options: bool, default False
+        If `True`, print the option's number in the list (1 index).
+
     """
     import os
     from meerschaum.utils.packages import import_rich
@@ -398,9 +405,10 @@ def print_options(
             print()
             print(make_header(_header))
         ### print actions
-        for option in _options:
+        for i, option in enumerate(_options):
+            marker = '-' if not number_options else (str(i + 1) + '.')
             if not nopretty:
-                print("  - ", end="")
+                print(f"  {marker} ", end="")
             print(option)
         if not nopretty:
             print()
@@ -434,11 +442,11 @@ def print_options(
 
     if _header is not None:
         table = Table(
-            title = _header,
-            box = box.SIMPLE,
-            show_header = False,
-            show_footer = False,
-            title_style = '',
+            title=_header,
+            box=box.SIMPLE,
+            show_header=False,
+            show_footer=False,
+            title_style='',
             expand = True,
         )
     else:
@@ -447,18 +455,26 @@ def print_options(
         table.add_column()
 
     if len(_options) < 12:
-        # If fewer than 12 items, use a single column
-        for option in _options:
-            table.add_row(Text.from_ansi(highlight_pipes(option)))
+        ### If fewer than 12 items, use a single column
+        for i, option in enumerate(_options):
+            item = highlight_pipes(option)
+            if number_options:
+                item = str(i + 1) + '. ' + item
+            table.add_row(Text.from_ansi(item))
     else:
-        # Otherwise, use multiple columns as before
+        ### Otherwise, use multiple columns as before
         num_rows = (len(_options) + num_cols - 1) // num_cols
+        item_ix = 0
         for i in range(num_rows):
             row = []
             for j in range(num_cols):
                 index = i + j * num_rows
                 if index < len(_options):
-                    row.append(Text.from_ansi(highlight_pipes(_options[index])))
+                    item = highlight_pipes(_options[index])
+                    if number_options:
+                        item = str(i + 1) + '. ' + item
+                    row.append(Text.from_ansi(item))
+                    item_ix += 1
                 else:
                     row.append('')
             table.add_row(*row)

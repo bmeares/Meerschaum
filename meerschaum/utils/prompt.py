@@ -10,17 +10,18 @@ from __future__ import annotations
 import os
 from meerschaum.utils.typing import Any, Union, Optional, Tuple, List
 
+
 def prompt(
-        question: str,
-        icon: bool = True,
-        default: Union[str, Tuple[str, str], None] = None,
-        default_editable: Optional[str] = None,
-        detect_password: bool = True,
-        is_password: bool = False,
-        wrap_lines: bool = True,
-        noask: bool = False,
-        **kw: Any
-    ) -> str:
+    question: str,
+    icon: bool = True,
+    default: Union[str, Tuple[str, str], None] = None,
+    default_editable: Optional[str] = None,
+    detect_password: bool = True,
+    is_password: bool = False,
+    wrap_lines: bool = True,
+    noask: bool = False,
+    **kw: Any
+) -> str:
     """
     Ask the user a question and return the answer.
     Wrapper around `prompt_toolkit.prompt()` with modified behavior.
@@ -75,7 +76,7 @@ def prompt(
     ### if a default is provided, append it to the question.
     default_answer = default
     if default is not None:
-        question += f" (default: "
+        question += " (default: "
         if isinstance(default, tuple) and len(default) > 1:
             question += f"{default[0]} [{default[1]}]"
             default_answer = default[0]
@@ -86,7 +87,7 @@ def prompt(
     ### detect password
     if (detect_password and 'password' in question.lower()) or is_password:
         kw['is_password'] = True
-  
+
     ### Add the icon and only color the first line.
     lines = question.split('\n')
     first_line = lines[0]
@@ -107,15 +108,15 @@ def prompt(
         answer = (
             prompt_toolkit.prompt(
                 prompt_toolkit.formatted_text.ANSI(question),
-                wrap_lines = wrap_lines,
-                default = default_editable or '',
+                wrap_lines=wrap_lines,
+                default=default_editable or '',
                 **filter_keywords(prompt_toolkit.prompt, **kw)
             ) if not noask else ''
         )
     else:
         print(question, end='\n', flush=True)
         try:
-            answer = input()
+            answer = input() if not noask else ''
         except EOFError:
             answer = ''
     if noask:

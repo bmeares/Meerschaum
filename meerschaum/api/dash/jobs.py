@@ -31,6 +31,7 @@ STATUS_EMOJI: Dict[str, str] = {
 
 EXECUTOR_KEYS: str = get_executor_keys_from_context()
 
+
 def get_jobs_cards(state: WebState):
     """
     Build cards and alerts lists for jobs.
@@ -42,71 +43,96 @@ def get_jobs_cards(state: WebState):
     cards = []
 
     for name, job in jobs.items():
-        footer_children = html.Div(
-            build_process_timestamps_children(job),
-            id = {'type': 'process-timestamps-div', 'index': name},
-        )
-        follow_logs_button = dbc.DropdownMenuItem(
-            "Follow logs",
-            id = {'type': 'follow-logs-button', 'index': name},
-        )
-        download_logs_button = dbc.DropdownMenuItem(
-            "Download logs",
-            id = {'type': 'job-download-logs-button', 'index': name},
-        )
-        logs_menu_children = (
-            ([follow_logs_button] if is_authenticated else []) + [download_logs_button]
-        )
-        header_children = [
-            html.Div(
-                build_status_children(job),
-                id={'type': 'manage-job-status-div', 'index': name},
-                style={'float': 'left'},
-            ),
-            html.Div(
-                dbc.DropdownMenu(
-                    logs_menu_children,
-                    label="Logs",
-                    size="sm",
-                    align_end=True,
-                    color="secondary",
-                    menu_variant='dark',
-                ),
-                style={'float': 'right'},
-            ),
-        ]
-
-        body_children = [
-            html.H4(html.B(name), className="card-title"),
-            html.Div(
-                html.P(
-                    job.label,
-                    className="card-text job-card-text",
-                    style={"word-wrap": "break-word"},
-                    id={'type': 'job-label-p', 'index': name},
-                ),
-                style={"white-space": "pre-wrap"},
-            ),
-            html.Div(
-                (
-                    build_manage_job_buttons_div_children(job)
-                    if is_authenticated
-                    else []
-                ),
-                id={'type': 'manage-job-buttons-div', 'index': name},
-            ),
-            html.Div(id={'type': 'manage-job-alert-div', 'index': name}),
-        ]
-
-        cards.append(
-            dbc.Card([
-                dbc.CardHeader(header_children),
-                dbc.CardBody(body_children),
-                dbc.CardFooter(footer_children),
-            ])
-        )
+        cards.append(build_job_card(job, authenticated=is_authenticated))
 
     return cards, []
+
+
+def build_job_card(
+    job: Job,
+    authenticated: bool = False,
+    include_follow: bool = True,
+):
+    """
+    Return a card for a given job.
+    """
+    footer_children = html.Div(
+        build_process_timestamps_children(job),
+        id={'type': 'process-timestamps-div', 'index': job.name},
+    )
+    follow_logs_button = dbc.DropdownMenuItem(
+        "Follow logs",
+        id={'type': 'follow-logs-button', 'index': job.name},
+    )
+    download_logs_button = dbc.DropdownMenuItem(
+        "Download logs",
+        id={'type': 'job-download-logs-button', 'index': job.name},
+    )
+    logs_menu_children = (
+        ([follow_logs_button] if include_follow else []) + [download_logs_button]
+        if authenticated
+        else []
+    )
+    header_children = [
+        html.Div(
+            build_status_children(job),
+            id={'type': 'manage-job-status-div', 'index': job.name},
+            style={'float': 'left'},
+        ),
+    ] + ([
+        html.Div(
+            dbc.DropdownMenu(
+                logs_menu_children,
+                label="Logs",
+                size="sm",
+                align_end=True,
+                color="secondary",
+                menu_variant='dark',
+            ),
+            style={'float': 'right'},
+        ),
+    ] if authenticated else [])
+
+    body_children = [
+        html.H4(
+            html.B(
+                html.A(
+                    "🔗 " + job.name,
+                    href=f"/dash/job/{job.name}",
+                    target="_blank",
+                    style={
+                        'color': 'white',
+                        'text-decoration': 'none',
+                    },
+                )
+            ),
+            className="card-title",
+        ),
+        html.Div(
+            html.P(
+                job.label,
+                className="card-text job-card-text",
+                style={"word-wrap": "break-word"},
+                id={'type': 'job-label-p', 'index': job.name},
+            ),
+            style={"white-space": "pre-wrap"},
+        ),
+        html.Div(
+            (
+                build_manage_job_buttons_div_children(job)
+                if authenticated
+                else []
+            ),
+            id={'type': 'manage-job-buttons-div', 'index': job.name},
+        ),
+        html.Div(id={'type': 'manage-job-alert-div', 'index': job.name}),
+    ]
+
+    return dbc.Card([
+        dbc.CardHeader(header_children),
+        dbc.CardBody(body_children),
+        dbc.CardFooter(footer_children),
+    ])
 
 
 def build_manage_job_buttons_div_children(job: Job):
