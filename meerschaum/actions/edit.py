@@ -421,7 +421,7 @@ def _edit_jobs(
 
         try:
             new_sysargs_str = prompt(
-                "Edit:",
+                "",
                 default_editable=sysargs_str.lstrip().rstrip().replace(' + ', '\n+ '),
                 multiline=True,
                 icon=False,

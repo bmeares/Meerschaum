@@ -462,7 +462,6 @@ def _bootstrap_jobs(
     if not action:
         action = [prompt("What is the name of the job you'd like to create?")]
 
-    new_jobs = {}
     for name in action:
         clear_screen(debug=debug)
         job = mrsm.Job(name, executor_keys=executor_keys)
@@ -527,15 +526,11 @@ def _bootstrap_jobs(
         if not start_success:
             return start_success, start_msg
 
-        new_jobs[name] = new_job
-
-    if not new_jobs:
-        return False, "No new jobs were created."
-
     msg = (
         "Successfully bootstrapped job"
-        + ('s' if len(new_jobs) != 1 else '')
-        + items_str(list(new_jobs.keys()))
+        + ('s' if len(action) != 1 else '')
+        + ' '
+        + items_str(action)
         + '.'
     )
     return True, msg
