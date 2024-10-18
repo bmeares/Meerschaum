@@ -154,13 +154,13 @@ def exception_with_traceback(
 
 
 def error(
-        message: str,
-        exception_class = Exception,
-        nopretty: bool = False,
-        silent: bool = True,
-        stack: bool = True,
-        raise_: bool = True,
-    ):
+    message: str,
+    exception_class = Exception,
+    nopretty: bool = False,
+    silent: bool = True,
+    stack: bool = True,
+    raise_: bool = True,
+):
     """
     Raise an exception with supressed traceback.
     """

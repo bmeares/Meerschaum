@@ -4,6 +4,21 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.4.13
+
+- **Add `--timeout` to pipeline arguments.**  
+  You may now designate the maximum number of seconds to run a pipeline with `--timeout`. This will run the entire pipeline in a subprocess rather than a persistent session.
+
+  ```bash
+  mrsm sync pipes + clear pipes --end '1 month ago' : -s daily --timeout 3600
+  ```
+
+- **Add auto-complete to `edit jobs` and `bootstrap jobs`.**
+
+- **Improve the editing experience for `edit jobs` and `bootstrap jobs`.**
+
+- **Fixed plugin detection for Python 3.9.**
+
 ### v2.4.12
 
 - **Add the actions `edit jobs` and `bootstrap jobs`.**  
@@ -60,7 +75,6 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Enable shell suggestions for chained actions.**  
   The shell auto-complete now works with chained actions.
-  
 
 ### v2.4.9 – v2.4.11
 

@@ -9,16 +9,17 @@ Upgrade your current Meerschaum environment
 from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Union
 
+
 def upgrade(
     action: Optional[List[str]] = None,
     **kw: Any
 ) -> SuccessTuple:
     """
     Upgrade Meerschaum, plugins, or packages.
-    
+
     Command:
         `upgrade {option}`
-    
+
     Example:
         `upgrade meerschaum`
     """
@@ -77,7 +78,7 @@ def _upgrade_meerschaum(
         if force:
             answer = True
         else:
-            answer = yes_no(f"Take down the stack?", default='y', yes=yes, noask=noask)
+            answer = yes_no("Take down the stack?", default='n', yes=yes, noask=noask)
 
         if answer:
             if debug:
@@ -95,7 +96,7 @@ def _upgrade_meerschaum(
     if debug:
         dprint('Upgrade meerschaum with dependencies: \"' + f'{dependencies}' + '\"')
     if not pip_install(install_name, venv=None, debug=debug):
-        return False, f"Failed to upgrade Meerschaum via pip."
+        return False, "Failed to upgrade Meerschaum via pip."
 
     if debug:
         dprint("Pulling new Docker images...")

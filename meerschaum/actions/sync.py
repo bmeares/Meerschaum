@@ -129,14 +129,12 @@ def _pipes_lap(
             stack=False,
         )
 
-
     def _task_label(count: int):
         return f"[cyan]Syncing {count} pipe{'s' if count != 1 else ''}..."
 
     _task = (
         _progress.add_task(_task_label(len(pipes)), start=True, total=len(pipes))
     ) if _progress is not None else None
-
 
     def worker_fn():
         while not stop_event.is_set():
@@ -188,7 +186,7 @@ def _pipes_lap(
                     decoded[begin_index + len(fence_begin):end_index]
                 ))
                 return
-            sys.stdout.buffer.write(line)
+            print(decoded)
 
         def timeout_handler(p, *args, **kw):
             success, msg = False, (
@@ -227,7 +225,7 @@ def _pipes_lap(
             write_line,
             timeout_seconds,
             timeout_handler,
-            (p,)
+            (p,),
         )
         return _success_tuple
 
@@ -249,18 +247,18 @@ def _pipes_lap(
 
 
 def _sync_pipes(
-        loop: bool = False,
-        min_seconds: int = 1,
-        unblock: bool = False,
-        verify: bool = False,
-        deduplicate: bool = False,
-        bounded: Optional[bool] = None,
-        chunk_interval: Union[timedelta, int, None] = None,
-        shell: bool = False,
-        nopretty: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    loop: bool = False,
+    min_seconds: int = 1,
+    unblock: bool = False,
+    verify: bool = False,
+    deduplicate: bool = False,
+    bounded: Optional[bool] = None,
+    chunk_interval: Union[timedelta, int, None] = None,
+    shell: bool = False,
+    nopretty: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Fetch and sync new data for pipes.
 

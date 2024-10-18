@@ -541,6 +541,7 @@ def _start_pipeline(
     action: Optional[List[str]] = None,
     loop: bool = False,
     min_seconds: Union[float, int, None] = 1.0,
+    timeout_seconds: Optional[int] = None,
     params: Optional[Dict[str, Any]] = None,
     **kwargs
 ) -> SuccessTuple:
@@ -557,10 +558,39 @@ def _start_pipeline(
     `show version + show arguments :: --loop`
 
     """
+    import json
     import time
+    import sys
     from meerschaum._internal.entry import entry
     from meerschaum.utils.warnings import info, warn
     from meerschaum.utils.misc import is_int
+    from meerschaum.utils.venv import venv_exec
+    from meerschaum.utils.process import poll_process
+    fence_begin, fence_end = '<MRSM_RESULT>', '</MRSM_RESULT>'
+
+    success, msg = False, "Did not run pipeline."
+    def write_line(line):
+        nonlocal success, msg
+        decoded = line.decode('utf-8')
+        begin_index, end_index = decoded.find(fence_begin), decoded.find(fence_end)
+
+        ### Found the beginning of the return value.
+        ### Don't write the parsed success tuple message.
+        if begin_index >= 0:
+            success, msg = tuple(json.loads(
+                decoded[begin_index + len(fence_begin):end_index]
+            ))
+            return
+
+        print(decoded)
+
+    def timeout_handler(*args, **kw):
+        nonlocal success, msg
+        success, msg = False, (
+            f"Failed to execute pipeline within {timeout_seconds} second"
+            + ('s' if timeout_seconds != 1 else '') + '.'
+        )
+        write_line((fence_begin + json.dumps((success, msg)) + fence_end).encode('utf-8'))
 
     do_n_times = (
         int(action[0].lstrip('x'))
@@ -578,12 +608,38 @@ def _start_pipeline(
     if min_seconds is None:
         min_seconds = 1.0
 
+    def do_entry() -> None:
+        nonlocal success, msg
+        if timeout_seconds is None:
+            success, msg = entry(sub_args_line, _patch_args=patch_args)
+            return
+
+        sub_args_line_escaped = sub_args_line.replace("'", "<QUOTE>")
+        patch_args_escaped_str = json.dumps(patch_args).replace("'", "<QUOTE>")
+        src = (
+            "import json\n"
+            "from meerschaum._internal.entry import entry\n\n"
+            f"sub_args_line = '{sub_args_line_escaped}'.replace(\"<QUOTE>\", \"'\")\n"
+            f"patch_args = json.loads('{patch_args_escaped_str}'.replace('<QUOTE>', \"'\"))\n"
+            "success, msg = entry(sub_args_line, _patch_args=patch_args)\n"
+            f"print('{fence_begin}' + json.dumps((success, msg)) + '{fence_end}')"
+        )
+        proc = venv_exec(src, venv=None, as_proc=True)
+        poll_process(
+            proc,
+            write_line,
+            timeout_seconds,
+            timeout_handler,
+        )
+
     ran_n_times = 0
-    success, msg = False, "Did not run pipeline."
     def run_loop():
         nonlocal ran_n_times, success, msg
         while True:
-            success, msg = entry(sub_args_line, _patch_args=patch_args)
+            try:
+                do_entry()
+            except Exception as e:
+                warn(e)
             ran_n_times += 1
 
             if not loop and do_n_times == 1:

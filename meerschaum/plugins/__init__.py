@@ -316,7 +316,11 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
 
         ### NOTE: Allow plugins to be installed via `pip`.
         packaged_plugin_paths = []
-        discovered_packaged_plugins_eps = entry_points(group='meerschaum.plugins')
+        try:
+            discovered_packaged_plugins_eps = entry_points(group='meerschaum.plugins')
+        except TypeError:
+            discovered_packaged_plugins_eps = []
+
         for ep in discovered_packaged_plugins_eps:
             module_name = ep.name
             for package_file_path in ep.dist.files:
@@ -330,7 +334,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
         if is_symlink(PLUGINS_RESOURCES_PATH) or not PLUGINS_RESOURCES_PATH.exists():
             try:
                 PLUGINS_RESOURCES_PATH.unlink()
-            except Exception as e:
+            except Exception:
                 pass
 
         PLUGINS_RESOURCES_PATH.mkdir(exist_ok=True)

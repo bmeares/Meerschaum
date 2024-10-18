@@ -19,7 +19,7 @@ def bootstrap(
 ) -> SuccessTuple:
     """
     Launch an interactive wizard to bootstrap pipes or connectors.
-    
+
     Example:
         `bootstrap pipes`
 
@@ -462,7 +462,6 @@ def _bootstrap_jobs(
     if not action:
         action = [prompt("What is the name of the job you'd like to create?")]
 
-    new_jobs = {}
     for name in action:
         clear_screen(debug=debug)
         job = mrsm.Job(name, executor_keys=executor_keys)
@@ -473,13 +472,14 @@ def _bootstrap_jobs(
             continue
 
         info(
-            "Press [Esc + Enter] to submit, [CTRL + C] to exit.\n"
+            f"Editing arguments for job '{name}'.\n"
+            "    Press [Esc + Enter] to submit, [CTRL + C] to exit.\n\n"
             "    Tip: join multiple actions with `+`, add pipeline arguments with `:`.\n"
             "    https://meerschaum.io/reference/actions/#chaining-actions\n"
         )
         try:
             new_sysargs_str = prompt(
-                f"Arguments for job '{name}':",
+                "",
                 multiline=True,
                 icon=False,
                 completer=ShellCompleter(),
@@ -491,6 +491,7 @@ def _bootstrap_jobs(
         new_sysargs, pipeline_args = split_pipeline_sysargs(new_sysargs)
         chained_sysargs = split_chained_sysargs(new_sysargs)
 
+        clear_screen(debug=debug)
         if len(chained_sysargs) > 1:
             print_options(
                 [
@@ -508,6 +509,7 @@ def _bootstrap_jobs(
         if pipeline_args:
             print('\n' + make_header("Pipeline Arguments:"))
             print(shlex.join(pipeline_args))
+            print()
 
         if not yes_no(
             (
@@ -524,15 +526,11 @@ def _bootstrap_jobs(
         if not start_success:
             return start_success, start_msg
 
-        new_jobs[name] = new_job
-
-    if not new_jobs:
-        return False, "No new jobs were created."
-
     msg = (
         "Successfully bootstrapped job"
-        + ('s' if len(new_jobs) != 1 else '')
-        + items_str(list(new_jobs.keys()))
+        + ('s' if len(action) != 1 else '')
+        + ' '
+        + items_str(action)
         + '.'
     )
     return True, msg
