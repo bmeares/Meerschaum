@@ -9,14 +9,15 @@ NOTE: This action may be a huge security vulnerability
 
 from meerschaum.utils.typing import SuccessTuple, List, Any, Optional
 
+
 def sh(
-        action: Optional[List[str]] = None,
-        sub_args: Optional[List[str]] = None,
-        filtered_sysargs: Optional[List[str]] = None,
-        use_bash: bool = True,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    sub_args: Optional[List[str]] = None,
+    filtered_sysargs: Optional[List[str]] = None,
+    use_bash: bool = True,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Execute system commands.
     """
@@ -50,7 +51,7 @@ def sh(
         if len(action) != 0:
             try:
                 command_list += ["-c", shlex.join(cmd_list)]
-            except Exception as e:
+            except Exception:
                 command_list += ["-c", ' '.join(cmd_list)]
     else:
         if len(action) == 0:
@@ -64,8 +65,8 @@ def sh(
     try:
         process = subprocess.Popen(
             command_list,
-            shell = False,
-            env = os.environ,
+            shell=False,
+            env=os.environ,
         )
         exit_code = process.wait()
     except FileNotFoundError:

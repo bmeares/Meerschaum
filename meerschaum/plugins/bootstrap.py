@@ -47,7 +47,6 @@ IMPORTS_LINES: Dict[str, str] = {
     ),
 }
 
-### TODO: Add feature for custom connectors.
 FEATURE_LINES: Dict[str, str] = {
     'header': (
         "#! /usr/bin/env python3\n"
@@ -94,7 +93,7 @@ FEATURE_LINES: Dict[str, str] = {
         "class {plugin_name_capitalized}Connector(Connector):\n"
         "    \"\"\"Implement '{plugin_name_lower}' connectors.\"\"\"\n\n"
         "    REQUIRED_ATTRIBUTES: list[str] = []\n"
-        "    \n"
+        "\n"
         "    def fetch(\n"
         "        self,\n"
         "        pipe: mrsm.Pipe,\n"
@@ -149,11 +148,12 @@ FEATURE_LINES: Dict[str, str] = {
     ),
 }
 
+
 def bootstrap_plugin(
-        plugin_name: str,
-        debug: bool = False,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    plugin_name: str,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Prompt the user for features and create a plugin file.
     """
@@ -177,9 +177,9 @@ def bootstrap_plugin(
     features: List[str] = choose(
         "Which of the following features would you like to add to your plugin?",
         list(FEATURE_CHOICES.items()),
-        default = 'fetch',
-        multiple = True,
-        as_indices = True,
+        default='fetch',
+        multiple=True,
+        as_indices=True,
         **kwargs
     )
 
@@ -256,7 +256,7 @@ def bootstrap_plugin(
         _ = prompt(
             f"Press [Enter] to edit plugin '{plugin_name}',"
             + " [CTRL+C] to skip.",
-            icon = False,
+            icon=False,
         )
     except (KeyboardInterrupt, Exception):
         return True, "Success"
@@ -267,7 +267,7 @@ def bootstrap_plugin(
 
 def _get_plugins_dir_path() -> pathlib.Path:
     from meerschaum.config.paths import PLUGINS_DIR_PATHS
-    
+
     if not PLUGINS_DIR_PATHS:
         raise EnvironmentError("No plugin dir path could be found.")
 
@@ -278,9 +278,9 @@ def _get_plugins_dir_path() -> pathlib.Path:
         choose(
             "In which directory do you want to write your plugin?",
             [path.as_posix() for path in PLUGINS_DIR_PATHS],
-            numeric = True,
-            multiple = False,
-            default = PLUGINS_DIR_PATHS[0].as_posix(),
+            numeric=True,
+            multiple=False,
+            default=PLUGINS_DIR_PATHS[0].as_posix(),
         )
     )
  
@@ -290,7 +290,7 @@ def _ask_to_uninstall(plugin: mrsm.Plugin, **kwargs: Any) -> SuccessTuple:
     warn(f"Plugin '{plugin}' is already installed!", stack=False)
     uninstall_plugin = yes_no(
         f"Do you want to first uninstall '{plugin}'?",
-        default = 'n',
+        default='n',
         **kwargs
     )
     if not uninstall_plugin:

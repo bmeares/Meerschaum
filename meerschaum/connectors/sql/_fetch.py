@@ -309,6 +309,8 @@ def _simple_fetch_query(
     """Build a fetch query from a pipe's definition."""
     from meerschaum.utils.sql import format_cte_subquery
     definition = get_pipe_query(pipe)
+    if definition is None:
+        raise ValueError(f"No SQL definition could be found for {pipe}.")
     return format_cte_subquery(definition, flavor, 'definition')
 
 

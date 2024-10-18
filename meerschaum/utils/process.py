@@ -178,22 +178,32 @@ def run_process(
 
     return ret
 
+
 def poll_process(
-        proc: subprocess.Popen,
-        line_callback: Callable[[bytes], Any],
-        timeout_seconds: Union[int, float, None] = None,
-        timeout_callback: Optional[Callable[[Any], Any]] = None,
-        timeout_callback_args: Optional[Tuple[Any]] = None,
-        timeout_callback_kwargs: Optional[Dict[str, Any]] = None,
-    ) -> int:
+    proc: subprocess.Popen,
+    line_callback: Callable[[bytes], Any],
+    timeout_seconds: Union[int, float, None] = None,
+    timeout_callback: Optional[Callable[[Any], Any]] = None,
+    timeout_callback_args: Optional[Tuple[Any]] = None,
+    timeout_callback_kwargs: Optional[Dict[str, Any]] = None,
+) -> int:
     """
     Poll a process and execute a callback function for each line printed to the process's `stdout`.
     """
     from meerschaum.utils.threading import Timer
+    from meerschaum.utils.warnings import warn
 
     def timeout_handler():
         nonlocal timeout_callback_args, timeout_callback_kwargs
-        proc.terminate()
+        try:
+            if platform.system() != 'Windows':
+                ### The process being killed may have children.
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            else:
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            proc.terminate()
+        except Exception as e:
+            warn(f"Failed to kill process:\n{e}")
         if timeout_callback_args is None:
             timeout_callback_args = []
         if timeout_callback_kwargs is None:
