@@ -498,7 +498,7 @@ def _complete_delete_jobs(
     action: Optional[List[str]] = None,
     executor_keys: Optional[str] = None,
     line: str = '',
-    _get_job_method: Optional[str, List[str]] = None,
+    _get_job_method: Union[str, List[str], None] = None,
     **kw
 ) -> List[str]:
     from meerschaum._internal.shell.Shell import shell_attrs

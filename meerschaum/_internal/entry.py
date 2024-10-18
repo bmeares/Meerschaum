@@ -43,6 +43,7 @@ if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
     if _systemd_stdin_path:
         sys.stdin = _StdinFile(_systemd_stdin_path)
 
+
 def entry(
     sysargs: Optional[List[str]] = None,
     _patch_args: Optional[Dict[str, Any]] = None,

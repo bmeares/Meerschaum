@@ -29,15 +29,16 @@ active_venvs = set()
 active_venvs_counts: Dict[str, int] = {}
 active_venvs_order: List[Optional[str]] = []
 threads_active_venvs: Dict[int, 'set[str]'] = {}
+CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 
 def activate_venv(
-        venv: Optional[str] = 'mrsm',
-        color: bool = True,
-        force: bool = False,
-        debug: bool = False,
-        **kw
-    ) -> bool:
+    venv: Optional[str] = 'mrsm',
+    color: bool = True,
+    force: bool = False,
+    debug: bool = False,
+    **kw
+) -> bool:
     """
     Create a virtual environment (if it doesn't exist) and add it to `sys.path` if necessary.
 
@@ -102,13 +103,13 @@ def activate_venv(
 
 
 def deactivate_venv(
-        venv: str = 'mrsm',
-        color: bool = True,
-        debug: bool = False,
-        previously_active_venvs: Union['set[str]', List[str], None] = None,
-        force: bool = False,
-        **kw
-    ) -> bool:
+    venv: str = 'mrsm',
+    color: bool = True,
+    debug: bool = False,
+    previously_active_venvs: Union['set[str]', List[str], None] = None,
+    force: bool = False,
+    **kw
+) -> bool:
     """
     Remove a virtual environment from `sys.path` (if it's been activated).
 
@@ -498,14 +499,14 @@ def venv_executable(venv: Optional[str] = 'mrsm') -> str:
 
 
 def venv_exec(
-        code: str,
-        venv: Optional[str] = 'mrsm',
-        env: Optional[Dict[str, str]] = None,
-        with_extras: bool = False,
-        as_proc: bool = False,
-        capture_output: bool = True,
-        debug: bool = False,
-    ) -> Union[bool, Tuple[int, bytes, bytes]]:
+    code: str,
+    venv: Optional[str] = 'mrsm',
+    env: Optional[Dict[str, str]] = None,
+    with_extras: bool = False,
+    as_proc: bool = False,
+    capture_output: bool = True,
+    debug: bool = False,
+) -> Union[bool, Tuple[int, bytes, bytes]]:
     """
     Execute Python code in a subprocess via a virtual environment's interpeter.
     Return `True` if the code successfully executes, `False` on failure.
@@ -538,6 +539,7 @@ def venv_exec(
     """
     import os
     import subprocess
+    import platform
     from meerschaum.utils.debug import dprint
     executable = venv_executable(venv=venv)
     cmd_list = [executable, '-c', code]
@@ -549,11 +551,20 @@ def venv_exec(
         return subprocess.call(cmd_list, env=env) == 0
 
     stdout, stderr = (None, None) if not capture_output else (subprocess.PIPE, subprocess.PIPE)
+    group_kwargs = (
+        {
+            'preexec_fn': os.setsid,
+        } if platform.system() != 'Windows'
+        else {
+            'creationflags': CREATE_NEW_PROCESS_GROUP,
+        }
+    )
     process = subprocess.Popen(
         cmd_list,
-        stdout = stdout,
-        stderr = stderr,
-        env = env,
+        stdout=stdout,
+        stderr=stderr,
+        env=env,
+        **group_kwargs
     )
     if as_proc:
         return process

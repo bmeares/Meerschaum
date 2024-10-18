@@ -19,7 +19,7 @@ def bootstrap(
 ) -> SuccessTuple:
     """
     Launch an interactive wizard to bootstrap pipes or connectors.
-    
+
     Example:
         `bootstrap pipes`
 
@@ -473,13 +473,14 @@ def _bootstrap_jobs(
             continue
 
         info(
-            "Press [Esc + Enter] to submit, [CTRL + C] to exit.\n"
+            f"Editing arguments for job '{name}'.\n"
+            "    Press [Esc + Enter] to submit, [CTRL + C] to exit.\n\n"
             "    Tip: join multiple actions with `+`, add pipeline arguments with `:`.\n"
             "    https://meerschaum.io/reference/actions/#chaining-actions\n"
         )
         try:
             new_sysargs_str = prompt(
-                f"Arguments for job '{name}':",
+                "",
                 multiline=True,
                 icon=False,
                 completer=ShellCompleter(),
@@ -491,6 +492,7 @@ def _bootstrap_jobs(
         new_sysargs, pipeline_args = split_pipeline_sysargs(new_sysargs)
         chained_sysargs = split_chained_sysargs(new_sysargs)
 
+        clear_screen(debug=debug)
         if len(chained_sysargs) > 1:
             print_options(
                 [
@@ -508,6 +510,7 @@ def _bootstrap_jobs(
         if pipeline_args:
             print('\n' + make_header("Pipeline Arguments:"))
             print(shlex.join(pipeline_args))
+            print()
 
         if not yes_no(
             (

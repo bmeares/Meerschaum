@@ -38,10 +38,17 @@ def _complete_edit(
     """
     Override the default Meerschaum `complete_` function.
     """
+    from meerschaum.actions.delete import _complete_delete_jobs
+
+    if action is None:
+        action = []
+
     options = {
         'config': _complete_edit_config,
         'plugin': _complete_edit_plugins,
         'plugins': _complete_edit_plugins,
+        'job': _complete_delete_jobs,
+        'jobs': _complete_delete_jobs,
     }
 
     if action is None:
@@ -133,7 +140,7 @@ def _edit_pipes(
 
     pipes = get_pipes(debug=debug, as_list=True, **kw)
     if pipes:
-        print_options(pipes, header=f'Pipes to be edited:')
+        print_options(pipes, header='Pipes to be edited:')
     else:
         return False, "No pipes to edit."
 
@@ -144,10 +151,10 @@ def _edit_pipes(
                     f"Press [Enter] to begin editing the above {len(pipes)} pipe"
                     + ("s" if len(pipes) != 1 else "")
                     + " or [CTRL-C] to cancel:",
-                    icon = False,
+                    icon=False,
                 )
         except KeyboardInterrupt:
-            return False, f"No pipes changed."
+            return False, "No pipes changed."
 
     interactive = (not bool(params))
     success, msg = True, ""
@@ -393,41 +400,51 @@ def _edit_jobs(
     )
     from meerschaum.utils.formatting import make_header, print_options
     from meerschaum.utils.warnings import info
-    from meerschaum.actions import actions
+    from meerschaum._internal.shell.ShellCompleter import ShellCompleter
+    from meerschaum.utils.misc import items_str
+    from meerschaum.utils.formatting._shell import clear_screen
+
     jobs = get_filtered_jobs(executor_keys, action, debug=debug)
     if not jobs:
         return False, "No jobs to edit."
 
-    info(
-        "Press [Esc + Enter] to submit, [CTRL + C] to exit.\n"
-        "    Tip: join multiple actions with `+`, add pipeline arguments with `:`.\n"
-        "    https://meerschaum.io/reference/actions/#chaining-actions\n"
-    )
-
+    num_edited = 0
     for name, job in jobs.items():
         sysargs_str = shlex.join(job.sysargs)
+        clear_screen(debug=debug)
+        info(
+            f"Editing arguments for job '{name}'.\n"
+            "    Press [Esc + Enter] to submit, [CTRL + C] to exit.\n\n"
+            "    Tip: join actions with `+`, manage pipeline with `:`.\n"
+            "    https://meerschaum.io/reference/actions/#chaining-actions\n"
+        )
 
         try:
             new_sysargs_str = prompt(
-                f"Arguments for job '{name}':",
-                default_editable=sysargs_str.lstrip().rstrip(),
+                "Edit:",
+                default_editable=sysargs_str.lstrip().rstrip().replace(' + ', '\n+ '),
                 multiline=True,
                 icon=False,
+                completer=ShellCompleter(),
             )
         except KeyboardInterrupt:
             return True, "Nothing was changed."
+
+        if new_sysargs_str.strip() == sysargs_str.strip():
+            continue
 
         new_sysargs = shlex.split(new_sysargs_str)
         new_sysargs, pipeline_args = split_pipeline_sysargs(new_sysargs)
         chained_sysargs = split_chained_sysargs(new_sysargs)
 
+        clear_screen(debug=debug)
         if len(chained_sysargs) > 1:
             print_options(
                 [
                     shlex.join(step_sysargs)
                     for step_sysargs in chained_sysargs
                 ],
-                header=f"Steps in Job '{name}':",
+                header=f"\nSteps in Job '{name}':",
                 number_options=True,
                 **kwargs
             )
@@ -438,6 +455,7 @@ def _edit_jobs(
         if pipeline_args:
             print('\n' + make_header("Pipeline Arguments:"))
             print(shlex.join(pipeline_args))
+            print()
 
         if not yes_no(
             (
@@ -457,8 +475,16 @@ def _edit_jobs(
         start_success, start_msg = new_job.start()
         if not start_success:
             return start_success, start_msg
+        num_edited += 1
 
-    return True, "Success"
+    msg = (
+        "Successfully edit job"
+        + ('s' if len(jobs) != 1 else '')
+        + ' '
+        + items_str(list(jobs.keys()))
+        + '.'
+        ) if num_edited > 0 else "Nothing was edited."
+    return True, msg
 
 
 ### NOTE: This must be the final statement of the module.
