@@ -31,7 +31,7 @@ def fetch(
     ----------
     pipe: mrsm.Pipe
         The pipe object which contains the `fetch` metadata.
-        
+
         - pipe.columns['datetime']: str
             - Name of the datetime column for the remote table.
         - pipe.parameters['fetch']: Dict[str, Any]
@@ -196,7 +196,7 @@ def get_pipe_metadef(
             dateadd_str(
                 flavor=self.flavor,
                 datepart='minute',
-                number=((-1 * btm) if apply_backtrack else 0), 
+                number=((-1 * btm) if apply_backtrack else 0),
                 begin=begin,
             )
             if begin
