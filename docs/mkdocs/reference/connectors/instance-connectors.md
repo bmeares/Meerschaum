@@ -218,7 +218,7 @@ Return the ID tied to the pipe's connector, metric, and location keys.
         The `_id` for the pipe's document or `None`.
         """
         query = {
-            'connector_keys': str(pipe.connector_keys,
+            'connector_keys': str(pipe.connector_keys),
             'metric_key': str(pipe.metric_key),
             'location_key': str(pipe.location_key),
         }
@@ -252,7 +252,7 @@ Update the `parameters` dictionary of a pipe's registration.
         A `SuccessTuple` indicating success.
         """
         query = {
-            'connector_keys': str(pipe.connector_keys,
+            'connector_keys': str(pipe.connector_keys),
             'metric_key': str(pipe.metric_key),
             'location_key': str(pipe.location_key),
         }
@@ -287,10 +287,6 @@ Delete a pipe's registration from the `pipes` table.
         -------
         A `SuccessTuple` indicating success.
         """
-        drop_success, drop_message = pipe.drop(debug=debug)
-        if not drop_success:
-            return drop_success, drop_message
-
         pipe_id = self.get_pipe_id(pipe, debug=debug)
         if pipe_id is None:
             return False, f"{pipe} is not registered."
@@ -608,7 +604,7 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
 
         ### The function `parse_df_datetimes()` is a convenience function
         ### to cast a list of dictionaries into a DataFrame and convert datetime columns.
-        from meerschaum.utils.misc import parse_df_datetimes
+        from meerschaum.utils.dataframe import parse_df_datetimes
         rows = []
         return parse_df_datetimes(rows)
     ```

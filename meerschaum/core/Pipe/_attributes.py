@@ -77,15 +77,69 @@ def columns(self) -> Union[Dict[str, str], None]:
 
 
 @columns.setter
-def columns(self, columns: Dict[str, str]) -> None:
+def columns(self, _columns: Union[Dict[str, str], List[str]]) -> None:
     """
     Override the columns dictionary of the in-memory pipe.
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
+    if isinstance(_columns, (list, tuple)):
+        _columns = {col: col for col in _columns}
     if not isinstance(columns, dict):
-        warn(f"{self}.columns must be a dictionary, received {type(columns)}")
+        warn(f"{self}.columns must be a dictionary, received {type(_columns)}.")
         return
-    self.parameters['columns'] = columns
+    self.parameters['columns'] = _columns
+
+
+@property
+def indices(self) -> Union[Dict[str, Union[str, List[str]]], None]:
+    """
+    Return the `indices` dictionary defined in `meerschaum.Pipe.parameters`.
+    """
+    indices_key = (
+        'indexes'
+        if 'indexes' in self.parameters
+        else 'indices'
+    )
+    if indices_key not in self.parameters:
+        self.parameters[indices_key] = {}
+    _indices = self.parameters[indices_key]
+    if not isinstance(_indices, dict):
+        _indices = {}
+        self.parameters[indices_key] = _indices
+    return {**self.columns, **_indices}
+
+
+@property
+def indexes(self) -> Union[Dict[str, Union[str, List[str]]], None]:
+    """
+    Alias for `meerschaum.Pipe.indices`.
+    """
+    return self.indices
+
+
+@indices.setter
+def indices(self, _indices: Union[Dict[str, Union[str, List[str]]], List[str]]) -> None:
+    """
+    Override the indices dictionary of the in-memory pipe.
+    Call `meerschaum.Pipe.edit()` to persist changes.
+    """
+    if not isinstance(_indices, dict):
+        warn(f"{self}.indices must be a dictionary, received {type(_indices)}.")
+        return
+    indices_key = (
+        'indexes'
+        if 'indexes' in self.parameters
+        else 'indices'
+    )
+    self.parameters[indices_key] = _indices
+
+
+@indexes.setter
+def indexes(self, _indexes: Union[Dict[str, Union[str, List[str]]], List[str]]) -> None:
+    """
+    Alias for `meerschaum.Pipe.indices`.
+    """
+    self.indices = _indexes
 
 
 @property
@@ -415,27 +469,55 @@ def guess_datetime(self) -> Union[str, None]:
     """
     Try to determine a pipe's datetime column.
     """
-    dtypes = self.dtypes
+    _dtypes = self.dtypes
 
     ### Abort if the user explictly disallows a datetime index.
-    if 'datetime' in dtypes:
-        if dtypes['datetime'] is None:
+    if 'datetime' in _dtypes:
+        if _dtypes['datetime'] is None:
             return None
 
+    from meerschaum.utils.dtypes import are_dtypes_equal
     dt_cols = [
-        col for col, typ in self.dtypes.items()
-        if str(typ).startswith('datetime')
+        col
+        for col, typ in _dtypes.items()
+        if are_dtypes_equal(typ, 'datetime')
     ]
     if not dt_cols:
         return None
-    return dt_cols[0]    
+    return dt_cols[0]
 
 
 def get_indices(self) -> Dict[str, str]:
     """
-    Return a dictionary in the form of `pipe.columns` but map to index names.
+    Return a dictionary mapping index keys to their names on the database.
+
+    Returns
+    -------
+    A dictionary of index keys to column names.
     """
-    return {
-        ix: (self.target + '_' + col + '_index')
-        for ix, col in self.columns.items() if col
+    _parameters = self.parameters
+    _index_template = _parameters.get('index_template', "IX_{target}_{column_names}")
+    _indices = self.indices
+    _target = self.target
+    _column_names = {
+        ix: (
+            '_'.join(cols)
+            if isinstance(cols, (list, tuple))
+            else str(cols)
+        )
+        for ix, cols in _indices.items()
+        if cols
     }
+    _index_names = {
+        ix: (
+            _index_template.format(
+                target=_target,
+                column_names=column_names,
+                connector_keys=self.connector_keys,
+                metric_key=self.connector_key,
+                location_key=self.location_key,
+            )
+        )
+        for ix, column_names in _column_names.items()
+    }
+    return _index_names

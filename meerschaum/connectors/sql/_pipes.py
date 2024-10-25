@@ -384,7 +384,7 @@ def get_create_index_queries(
 
     Returns
     -------
-    A dictionary of column names mapping to lists of queries.
+    A dictionary of index names mapping to lists of queries.
     """
     ### NOTE: Due to recent breaking changes in DuckDB, indices don't behave properly.
     if self.flavor == 'duckdb':
@@ -400,7 +400,8 @@ def get_create_index_queries(
     index_queries = {}
 
     upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in update_queries
-    indices = pipe.get_indices()
+    index_names = pipe.get_indices()
+    indices = pipe.indices
 
     _datetime = pipe.get_columns('datetime', error=False)
     _datetime_type = pipe.dtypes.get(_datetime, 'datetime64[ns]')
@@ -409,8 +410,8 @@ def get_create_index_queries(
         if _datetime is not None else None
     )
     _datetime_index_name = (
-        sql_item_name(indices['datetime'], self.flavor, None)
-        if indices.get('datetime', None)
+        sql_item_name(index_names['datetime'], self.flavor, None)
+        if index_names.get('datetime', None)
         else None
     )
     _id = pipe.get_columns('id', error=False)
@@ -421,8 +422,8 @@ def get_create_index_queries(
     )
 
     _id_index_name = (
-        sql_item_name(indices['id'], self.flavor, None)
-        if indices.get('id', None)
+        sql_item_name(index_names['id'], self.flavor, None)
+        if index_names.get('id', None)
         else None
     )
     _pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
@@ -491,18 +492,22 @@ def get_create_index_queries(
         if id_query is not None:
             index_queries[_id] = id_query if isinstance(id_query, list) else [id_query]
 
-
     ### Create indices for other labels in `pipe.columns`.
-    other_indices = {
+    other_index_names = {
         ix_key: ix_unquoted
-        for ix_key, ix_unquoted in pipe.get_indices().items()
+        for ix_key, ix_unquoted in index_names.items()
         if ix_key not in ('datetime', 'id')
     }
-    for ix_key, ix_unquoted in other_indices.items():
+    for ix_key, ix_unquoted in other_index_names.items():
         ix_name = sql_item_name(ix_unquoted, self.flavor, None)
-        col = pipe.columns[ix_key]
-        col_name = sql_item_name(col, self.flavor, None)
-        index_queries[col] = [f"CREATE INDEX {ix_name} ON {_pipe_name} ({col_name})"]
+        cols = indices[ix_key]
+        if not isinstance(cols, (list, tuple)):
+            cols = [cols]
+        cols_names = [sql_item_name(col, self.flavor, None) for col in cols if col]
+        if not cols_names:
+            continue
+        cols_names_str = ", ".join(cols_names)
+        index_queries[ix_key] = [f"CREATE INDEX {ix_name} ON {_pipe_name} ({cols_names_str})"]
 
     existing_cols_types = pipe.get_columns_types(debug=debug)
     indices_cols_str = ', '.join(

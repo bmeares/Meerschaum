@@ -6,8 +6,44 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v2.4.14
 
+- **Add `indices` to `Pipe.parameters`.**  
+  You may now explicitly state the indices to be created by defining `indices` (or `indexes`) in `Pipe.parameters` (or the `Pipe` constructor for your convenience).
+
+  ```python
+  import meerschaum as mrsm
+  
+  pipe = mrsm.Pipe(
+      'software', 'versions',
+      instance='sql:local',
+      columns=['major', 'minor', 'patch'],
+      indices={
+          'all': ['major', 'minor', 'patch'],
+      },
+  )
+  mrsm.pprint(pipe.get_indices())
+  # {
+  #     'major': 'IX_software_versions_major',
+  #     'minor': 'IX_software_versions_minor',
+  #     'patch': 'IX_software_versions_patch',
+  #     'all': 'IX_software_versions_major_minor_patch'
+  # } 
+  mrsm.pprint(pipe.get_indices(include_base_columns=False))
+  # {'all': 'IX_software_versions_major_minor_patch'}
+  ```
+
+  You may also use the key `index_template` to change the format of the generated index names (defaults to `IX_{target}_{column_names}`, where `target` is the table name and `column_names` consists of all of the index's columns joined by an underscore).
+
+  ```python
+  pipe.parameters['index_template'] = "foo_{target}_{column_names}"
+  mrsm.pprint(pipe.get_indices())
+  # {'all': 'foo_software_versions_major_minor_patch'} 
+  ```
+
 - **Enable chunking for MSSQL**  
   To improve memory usage, `chunksize` is now accepted by `SQLConnector.read()` for the flavor `mssql`.
+
+- **Disable `pyodbc` pooling.**  
+  To properly recycle the connection pool in the SQLAlchemy engine, the internal `pyodbc` pooling must be disabled. See the [SQLAlchemy documentation](https://docs.sqlalchemy.org/en/20/dialects/mssql.html#pyodbc-pooling-connection-close-behavior).
 
 - **Bugfixes**  
   Other miscellaneous bugfixes have been included in this release, such as resolving broken imports during certain edge cases.
