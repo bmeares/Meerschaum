@@ -16,9 +16,10 @@ packages dictionary is structured in the following schema:
 from __future__ import annotations
 from meerschaum.utils.typing import Dict
 
+_MRSM_PACKAGE_ARCHIVES_PREFIX: str = "https://meerschaum.io/files/archives/wheels/"
+
 packages: Dict[str, Dict[str, str]] = {
-    'required': {
-    },
+    'required': {},
     'minimal': {},
     'formatting': {
         'pprintpp'                   : 'pprintpp>=0.4.0',
@@ -36,7 +37,7 @@ packages: Dict[str, Dict[str, str]] = {
         'yaml'                       : 'PyYAML>=5.3.1',
         'pip'                        : 'pip>=22.0.4',
         'update_checker'             : 'update-checker>=0.18.0',
-        'semver'                     : 'semver>=3.0.0',
+        'semver'                     : 'semver>=3.0.2',
         'pathspec'                   : 'pathspec>=0.9.0',
         'dateutil'                   : 'python-dateutil>=2.7.5',
         'requests'                   : 'requests>=2.32.3',
@@ -51,9 +52,14 @@ packages: Dict[str, Dict[str, str]] = {
         'more_itertools'             : 'more-itertools>=8.7.0',
         'fasteners'                  : 'fasteners>=0.19.0',
         'virtualenv'                 : 'virtualenv>=20.1.0',
-        'attrs'                      : 'attrs<24.2.0',
-        'apscheduler'                : 'APScheduler>=4.0.0a5',
+        'attrs'                      : 'attrs>=24.2.0',
         'uv'                         : 'uv>=0.2.11',
+    },
+    'internal'                      : {
+        'apscheduler'                : (
+                                       f"{_MRSM_PACKAGE_ARCHIVES_PREFIX}"
+                                       "APScheduler-4.0.0a5.post75+mrsm-py3-none-any.whl>=4.0.0a5"
+        ),
     },
     'jobs': {
         'dill'                       : 'dill>=0.3.3',
@@ -179,15 +185,25 @@ def get_install_names():
             install_names[get_install_no_version(_install_name)] = _import_name
     return install_names
 
-skip_groups = {'docs', 'build', 'cli', 'dev-tools', 'portable', 'extras', 'stack', 'drivers-extras'}
+
+skip_groups = {
+    'docs',
+    'build',
+    'cli',
+    'dev-tools',
+    'portable',
+    'extras',
+    'stack',
+    'drivers-extras',
+    'internal',
+}
 full = []
 _full = {}
 for group, import_names in packages.items():
     ### omit 'cli' and 'docs' from 'full'
-    if group in skip_groups:
+    if group in skip_groups or group.startswith('_'):
         continue
     full += [ install_name for import_name, install_name in import_names.items() ]
     for import_name, install_name in import_names.items():
         _full[import_name] = install_name
 packages['full'] = _full
-

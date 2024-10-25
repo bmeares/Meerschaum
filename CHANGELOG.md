@@ -1,10 +1,10 @@
 # 🪵 Changelog
 
-## 2.4.x Releases
+## 2.5.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.4.14
+### v2.5.0
 
 - **Add `indices` to `Pipe.parameters`.**  
   You may now explicitly state the indices to be created by defining `indices` (or `indexes`) in `Pipe.parameters` (or the `Pipe` constructor for your convenience).
@@ -45,6 +45,10 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Bugfixes**  
   Other miscellaneous bugfixes have been included in this release, such as resolving broken imports during certain edge cases.
+
+## 2.4.x Releases
+
+The 2.4.x series added the `ValkeyConnector`, relative `--begin` and `--end`, pipeline timeouts, and improved MSSQL support.
 
 ### v2.4.13
 

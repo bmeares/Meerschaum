@@ -31,6 +31,8 @@ class PostInstallCommand(install):
 extras = {}
 ### NOTE: package dependencies are defined in meerschaum.utils.packages._packages
 for group in packages:
+    if group.startswith('_'):
+        continue
     extras[group] = [ install_name for import_name, install_name in packages[group].items() ]
 
 setup_kw_args = {

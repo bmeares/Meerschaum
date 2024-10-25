@@ -109,6 +109,7 @@ def _upgrade_meerschaum(
 class NoVenv:
     pass
 
+
 def _upgrade_packages(
     action: Optional[List[str]] = None,
     venv: Union[str, None, NoVenv] = NoVenv,
@@ -121,7 +122,7 @@ def _upgrade_packages(
     """
     Upgrade and install dependencies.
     If provided, upgrade only a dependency group, otherwise default to `full`.
-    
+
     Examples:
         upgrade packages
         upgrade packages full
@@ -160,7 +161,7 @@ def _upgrade_packages(
     to_install = [
         install_name
         for install_name in to_install
-        if install_name not in prereleases_to_install
+        if (install_name not in prereleases_to_install) or group == 'internal'
     ]
 
     success, msg = False, f"Nothing installed."

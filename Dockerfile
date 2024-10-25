@@ -43,7 +43,8 @@ RUN python -m pip install --user --no-cache-dir $MRSM_SRC && rm -rf $MRSM_SRC
 ### Start up Meerschaum to bootstrap its environment.
 RUN cd $MRSM_WORK_DIR && [ "$MRSM_DEP_GROUP" != "minimal" ] && \
   MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum show version || \
-  MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum --version
+  MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum --version || \
+  MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum upgrade packages internal -y
 
 VOLUME $MRSM_ROOT_DIR
 ENTRYPOINT ["python", "-m", "meerschaum"]
