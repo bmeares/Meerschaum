@@ -161,7 +161,7 @@ def _upgrade_packages(
     to_install = [
         install_name
         for install_name in to_install
-        if (install_name not in prereleases_to_install) or group == 'internal'
+        if (install_name not in prereleases_to_install) or group == '_internal'
     ]
 
     success, msg = False, f"Nothing installed."

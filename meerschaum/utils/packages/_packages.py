@@ -55,7 +55,7 @@ packages: Dict[str, Dict[str, str]] = {
         'attrs'                      : 'attrs>=24.2.0',
         'uv'                         : 'uv>=0.2.11',
     },
-    'internal'                      : {
+    '_internal'                      : {
         'apscheduler'                : (
                                        f"{_MRSM_PACKAGE_ARCHIVES_PREFIX}"
                                        "APScheduler-4.0.0a5.post75+mrsm-py3-none-any.whl>=4.0.0a5"
@@ -195,7 +195,7 @@ skip_groups = {
     'extras',
     'stack',
     'drivers-extras',
-    'internal',
+    '_internal',
 }
 full = []
 _full = {}
