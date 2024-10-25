@@ -4,6 +4,14 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.4.14
+
+- **Enable chunking for MSSQL**  
+  To improve memory usage, `chunksize` is now accepted by `SQLConnector.read()` for the flavor `mssql`.
+
+- **Bugfixes**  
+  Other miscellaneous bugfixes have been included in this release, such as resolving broken imports during certain edge cases.
+
 ### v2.4.13
 
 - **Add `--timeout` to pipeline arguments.**  
