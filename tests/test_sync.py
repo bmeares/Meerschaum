@@ -479,7 +479,8 @@ def test_sync_inplace(flavor: str):
     source_pipe = Pipe(
         'test', 'inplace', 'src',
         instance=conn,
-        columns={'datetime': 'dt', 'id': 'id'}
+        columns={'datetime': 'dt', 'id': 'id'},
+        indices={'all': ['dt', 'id']},
     )
     dest_pipe = Pipe(str(conn), 'inplace', 'dest', instance=conn)
     dest_pipe.delete()
@@ -677,6 +678,7 @@ def test_upsert_sync(flavor: str):
     pipe = Pipe(
         'test', 'upsert', instance=conn,
         columns={'datetime': 'dt', 'id': 'id'},
+        indices={'all': ['dt', 'id']},
         dtypes={'num': 'numeric'},
         parameters={'upsert': True},
     )

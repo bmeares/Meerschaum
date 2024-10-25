@@ -98,6 +98,8 @@ class Pipe:
         attributes,
         parameters,
         columns,
+        indices,
+        indexes,
         dtypes,
         get_columns,
         get_columns_types,
@@ -145,6 +147,7 @@ class Pipe:
         location: Optional[str] = None,
         parameters: Optional[Dict[str, Any]] = None,
         columns: Union[Dict[str, str], List[str], None] = None,
+        indices: Optional[Dict[str, Union[str, List[str]]]] = None,
         tags: Optional[List[str]] = None,
         target: Optional[str] = None,
         dtypes: Optional[Dict[str, str]] = None,
@@ -156,6 +159,7 @@ class Pipe:
         connector_keys: Optional[str] = None,
         metric_key: Optional[str] = None,
         location_key: Optional[str] = None,
+        indexes: Union[Dict[str, str], List[str], None] = None,
     ):
         """
         Parameters
@@ -174,9 +178,13 @@ class Pipe:
             e.g. columns and other attributes.
             You can edit these parameters with `edit pipes`.
 
-        columns: Optional[Dict[str, str]], default None
+        columns: Union[Dict[str, str], List[str], None], default None
             Set the `columns` dictionary of `parameters`.
             If `parameters` is also provided, this dictionary is added under the `'columns'` key.
+
+        indices: Optional[Dict[str, Union[str, List[str]]]], default None
+            Set the `indices` dictionary of `parameters`.
+            If `parameters` is also provided, this dictionary is added under the `'indices'` key.
 
         tags: Optional[List[str]], default None
             A list of strings to be added under the `'tags'` key of `parameters`.
@@ -254,6 +262,20 @@ class Pipe:
             self._attributes['parameters']['columns'] = columns
         elif columns is not None:
             warn(f"The provided columns are of invalid type '{type(columns)}'.")
+
+        indices = (
+            indices
+            or indexes
+            or self._attributes.get('parameters', {}).get('indices', None)
+            or self._attributes.get('parameters', {}).get('indexes', None)
+        ) or columns
+        if isinstance(indices, dict):
+            indices_key = (
+                'indexes'
+                if 'indexes' in self._attributes['parameters']
+                else 'indices'
+            )
+            self._attributes['parameters'][indices_key] = indices
 
         if isinstance(tags, (list, tuple)):
             self._attributes['parameters']['tags'] = tags

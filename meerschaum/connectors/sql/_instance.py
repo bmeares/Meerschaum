@@ -88,9 +88,9 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
     from meerschaum.connectors.sql.tables import get_tables
     sqlalchemy = mrsm.attempt_import('sqlalchemy')
     temp_tables_table = get_tables(
-        mrsm_instance = self,
-        create = False,
-        debug = debug,
+        mrsm_instance=self,
+        create=False,
+        debug=debug,
     )['temp_tables']
     query = (
         sqlalchemy.select(temp_tables_table.c.table)

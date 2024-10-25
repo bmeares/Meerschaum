@@ -11,7 +11,12 @@ from __future__ import annotations
 import importlib.util, os, pathlib, re
 from meerschaum.utils.typing import Any, List, SuccessTuple, Optional, Union, Tuple, Dict, Iterable
 from meerschaum.utils.threading import Lock, RLock
-from meerschaum.utils.packages._packages import packages, all_packages, get_install_names
+from meerschaum.utils.packages._packages import (
+    packages,
+    all_packages,
+    get_install_names,
+    _MRSM_PACKAGE_ARCHIVES_PREFIX,
+)
 from meerschaum.utils.venv import (
     activate_venv,
     deactivate_venv,
@@ -35,14 +40,14 @@ _locks = {
 }
 _checked_for_updates = set()
 _is_installed_first_check: Dict[str, bool] = {}
-_MRSM_PACKAGE_ARCHIVES_PREFIX: str = "https://meerschaum.io/files/archives/"
+
 
 def get_module_path(
-        import_name: str,
-        venv: Optional[str] = 'mrsm',
-        debug: bool = False,
-        _try_install_name_on_fail: bool = True,
-    ) -> Union[pathlib.Path, None]:
+    import_name: str,
+    venv: Optional[str] = 'mrsm',
+    debug: bool = False,
+    _try_install_name_on_fail: bool = True,
+) -> Union[pathlib.Path, None]:
     """
     Get a module's path without importing.
     """
@@ -232,10 +237,10 @@ def manually_import_module(
         if check_update:
             if need_update(
                 None,
-                import_name = root_name,
-                version = _version,
-                check_pypi = check_pypi,
-                debug = debug,
+                import_name=root_name,
+                version=_version,
+                check_pypi=check_pypi,
+                debug=debug,
             ):
                 if install:
                     if not pip_install(
@@ -491,6 +496,8 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
     import re
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     install_name = _import_to_install_name(import_name)
+    if install_name.startswith(_MRSM_PACKAGE_ARCHIVES_PREFIX):
+        return {}
     _args = ['pip', 'show', install_name]
     if venv is not None:
         cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
@@ -586,7 +593,10 @@ def need_update(
         _checked_for_updates.add(install_name)
 
     _install_no_version = get_install_no_version(install_name)
-    required_version = install_name.replace(_install_no_version, '')
+    required_version = (
+        install_name
+        .replace(_install_no_version, '')
+    )
     if ']' in required_version:
         required_version = required_version.split(']')[1]
 
@@ -681,8 +691,8 @@ def need_update(
     )
 
     if 'a' in required_version:
-        required_version = required_version.replace('a', '-dev').replace('+mrsm', '')
-        version = version.replace('a', '-dev').replace('+mrsm', '')
+        required_version = required_version.replace('a', '-pre.').replace('+mrsm', '')
+        version = version.replace('a', '-pre.').replace('+mrsm', '')
     try:
         return (
             (not semver.Version.parse(version).match(required_version))
@@ -780,7 +790,7 @@ def pip_install(
         This includes version restrictions.
         Use `_import_to_install_name()` to get the predefined `install_name` for a package
         from its import name.
-        
+
     args: Optional[List[str]], default None
         A list of command line arguments to pass to `pip`.
         If not provided, default to `['--upgrade']` if `_uninstall` is `False`, else `[]`.
@@ -975,7 +985,11 @@ def pip_install(
                 pass
 
         _packages = [
-            (install_name if not _uninstall else get_install_no_version(install_name))
+            (
+                get_install_no_version(install_name)
+                if _uninstall or install_name.startswith(_MRSM_PACKAGE_ARCHIVES_PREFIX)
+                else install_name
+            )
             for install_name in install_names
         ]
         msg = "Installing packages:" if not _uninstall else "Uninstalling packages:"
@@ -1774,13 +1788,17 @@ def is_installed(
 
         found = (
             not need_update(
-                None, import_name = root_name,
-                _run_determine_version = False,
-                check_pypi = False,
-                version = determine_version(
-                    spec_path, venv=venv, debug=debug, import_name=root_name
+                None,
+                import_name=root_name,
+                _run_determine_version=False,
+                check_pypi=False,
+                version=determine_version(
+                    spec_path,
+                    venv=venv,
+                    debug=debug,
+                    import_name=root_name,
                 ),
-                debug = debug,
+                debug=debug,
             )
         ) if spec_path is not None else False
 

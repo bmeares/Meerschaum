@@ -140,7 +140,7 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
     """
     Parse a schedule string (e.g. 'daily') into a Trigger object.
     """
-    from meerschaum.utils.misc import items_str, is_int
+    from meerschaum.utils.misc import items_str, is_int, filter_keywords
     (
         apscheduler_triggers_cron,
         apscheduler_triggers_interval,
@@ -204,10 +204,14 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
 
             trigger = (
                 apscheduler_triggers_interval.IntervalTrigger(
-                    **{
-                        schedule_unit: schedule_num,
-                        'start_time': starting_ts,
-                    }
+                    **filter_keywords(
+                        apscheduler_triggers_interval.IntervalTrigger.__init__,
+                        **{
+                            schedule_unit: schedule_num,
+                            'start_time': starting_ts,
+                            'start_date': starting_ts,
+                        }
+                    )
                 )
                 if schedule_unit not in ('months', 'years') else (
                     apscheduler_triggers_calendarinterval.CalendarIntervalTrigger(

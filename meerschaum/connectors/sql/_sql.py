@@ -17,8 +17,9 @@ from meerschaum.utils.warnings import warn
 ### database flavors that can use bulk insert
 _bulk_flavors = {'postgresql', 'timescaledb', 'citus'}
 ### flavors that do not support chunks
-_disallow_chunks_flavors = {'duckdb', 'mssql'}
+_disallow_chunks_flavors = ['duckdb']
 _max_chunks_flavors = {'sqlite': 1000,}
+SKIP_READ_TRANSACTION_FLAVORS: list[str] = ['mssql']
 
 
 def read(
@@ -97,7 +98,7 @@ def read(
         Defaults to `SQLConnector.schema`.
 
     as_chunks: bool, default False
-        If `True`, return a list of DataFrames. 
+        If `True`, return a list of DataFrames.
         Otherwise return a single DataFrame.
 
     as_iterator: bool, default False
@@ -127,7 +128,6 @@ def read(
     from meerschaum.utils.pool import get_pool
     from meerschaum.utils.dataframe import chunksize_to_npartitions, get_numeric_cols
     import warnings
-    import inspect
     import traceback
     from decimal import Decimal
     pd = import_pandas()
@@ -140,6 +140,7 @@ def read(
         chunksize = None
     schema = schema or self.schema
 
+    pool = get_pool(workers=workers)
     sqlalchemy = attempt_import("sqlalchemy")
     default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
@@ -157,7 +158,7 @@ def read(
                     f"The specified chunksize of {chunksize} exceeds the maximum of "
                     + f"{_max_chunks_flavors[self.flavor]} for flavor '{self.flavor}'.\n"
                     + f"    Falling back to a chunksize of {_max_chunks_flavors[self.flavor]}.",
-                    stacklevel = 3,
+                    stacklevel=3,
                 )
             chunksize = _max_chunks_flavors[self.flavor]
 
@@ -184,8 +185,8 @@ def read(
         truncated_table_name = truncate_item_name(str(query_or_table), self.flavor)
         if truncated_table_name != str(query_or_table) and not silent:
             warn(
-                f"Table '{name}' is too long for '{self.flavor}',"
-                + f" will instead create the table '{truncated_name}'."
+                f"Table '{query_or_table}' is too long for '{self.flavor}',"
+                + f" will instead read the table '{truncated_table_name}'."
             )
 
         query_or_table = sql_item_name(str(query_or_table), self.flavor, schema)
@@ -204,6 +205,34 @@ def read(
 
     chunk_list = []
     chunk_hook_results = []
+    def _process_chunk(_chunk, _retry_on_failure: bool = True):
+        if not as_hook_results:
+            chunk_list.append(_chunk)
+        if chunk_hook is None:
+            return None
+
+        result = None
+        try:
+            result = chunk_hook(
+                _chunk,
+                workers=workers,
+                chunksize=chunksize,
+                debug=debug,
+                **kw
+            )
+        except Exception:
+            result = False, traceback.format_exc()
+            from meerschaum.utils.formatting import get_console
+            if not silent:
+                get_console().print_exception()
+
+        ### If the chunk fails to process, try it again one more time.
+        if isinstance(result, tuple) and result[0] is False:
+            if _retry_on_failure:
+                return _process_chunk(_chunk, _retry_on_failure=False)
+
+        return result
+
     try:
         stream_results = not as_iterator and chunk_hook is not None and chunksize is not None
         with warnings.catch_warnings():
@@ -235,52 +264,32 @@ def read(
                 )
             else:
 
-                with self.engine.begin() as transaction:
-                    with transaction.execution_options(stream_results=stream_results) as connection:
-                        chunk_generator = pd.read_sql_query(
-                            formatted_query,
-                            connection,
-                            **read_sql_query_kwargs
+                def get_chunk_generator(connectable):
+                    chunk_generator = pd.read_sql_query(
+                        formatted_query,
+                        self.engine,
+                        **read_sql_query_kwargs
+                    )
+                    to_return = (
+                        chunk_generator
+                        if as_iterator or chunksize is None
+                        else (
+                            list(pool.imap(_process_chunk, chunk_generator))
+                            if as_hook_results
+                            else None
                         )
+                    )
+                    return chunk_generator, to_return
 
-                        ### `stream_results` must be False (will load everything into memory).
-                        if as_iterator or chunksize is None:
-                            return chunk_generator
+                if self.flavor in SKIP_READ_TRANSACTION_FLAVORS:
+                    chunk_generator, to_return = get_chunk_generator(self.engine)
+                else:
+                    with self.engine.begin() as transaction:
+                        with transaction.execution_options(stream_results=stream_results) as connection:
+                            chunk_generator, to_return = get_chunk_generator(connection)
 
-                        ### We must consume the generator in this context if using server-side cursors.
-                        if stream_results:
-
-                            pool = get_pool(workers=workers)
-
-                            def _process_chunk(_chunk, _retry_on_failure: bool = True):
-                                if not as_hook_results:
-                                    chunk_list.append(_chunk)
-                                result = None
-                                if chunk_hook is not None:
-                                    try:
-                                        result = chunk_hook(
-                                            _chunk,
-                                            workers = workers,
-                                            chunksize = chunksize,
-                                            debug = debug,
-                                            **kw
-                                        )
-                                    except Exception as e:
-                                        result = False, traceback.format_exc()
-                                        from meerschaum.utils.formatting import get_console
-                                        if not silent:
-                                            get_console().print_exception()
-
-                                    ### If the chunk fails to process, try it again one more time.
-                                    if isinstance(result, tuple) and result[0] is False:
-                                        if _retry_on_failure:
-                                            return _process_chunk(_chunk, _retry_on_failure=False)
-
-                                return result
-
-                            chunk_hook_results = list(pool.imap(_process_chunk, chunk_generator))
-                            if as_hook_results:
-                                return chunk_hook_results
+                if to_return is not None:
+                    return to_return
 
     except Exception as e:
         if debug:
