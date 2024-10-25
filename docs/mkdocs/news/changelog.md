@@ -27,8 +27,6 @@ This is the current release cycle, so stay tuned for future releases!
   #     'patch': 'IX_software_versions_patch',
   #     'all': 'IX_software_versions_major_minor_patch'
   # } 
-  mrsm.pprint(pipe.get_indices(include_base_columns=False))
-  # {'all': 'IX_software_versions_major_minor_patch'}
   ```
 
   You may also use the key `index_template` to change the format of the generated index names (defaults to `IX_{target}_{column_names}`, where `target` is the table name and `column_names` consists of all of the index's columns joined by an underscore).
