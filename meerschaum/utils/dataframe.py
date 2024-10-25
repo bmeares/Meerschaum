@@ -413,6 +413,7 @@ def parse_df_datetimes(
     from meerschaum.utils.packages import import_pandas, attempt_import
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import items_str
     import traceback
     pd = import_pandas()
     pandas = attempt_import('pandas')
@@ -503,14 +504,14 @@ def parse_df_datetimes(
         else:
             df[datetime_cols] = df[datetime_cols].apply(
                 pd.to_datetime,
-                utc = True,
-                axis = 1,
-                meta = {
+                utc=True,
+                axis=1,
+                meta={
                     col: 'datetime64[ns]'
                     for col in datetime_cols
                 }
             )
-    except Exception as e:
+    except Exception:
         warn(
             f"Unable to apply `pd.to_datetime` to {items_str(datetime_cols)}:\n"
             + f"{traceback.format_exc()}"
@@ -519,7 +520,7 @@ def parse_df_datetimes(
     for dt in datetime_cols:
         try:
             df[dt] = df[dt].dt.tz_localize(None)
-        except Exception as e:
+        except Exception:
             warn(f"Unable to convert column '{dt}' to naive datetime:\n{traceback.format_exc()}")
 
     return df
@@ -567,6 +568,9 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to be encoded as JSON.
     """
+    if df is None:
+        return []
+
     is_dask = 'dask' in df.__module__ if hasattr(df, '__module__') else False
     if is_dask:
         df = get_first_valid_dask_partition(df)
@@ -602,6 +606,8 @@ def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to treat as numerics.
     """
+    if df is None:
+        return []
     from decimal import Decimal
     is_dask = 'dask' in df.__module__
     if is_dask:
@@ -638,6 +644,8 @@ def get_uuid_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to treat as numerics.
     """
+    if df is None:
+        return []
     from uuid import UUID
     is_dask = 'dask' in df.__module__
     if is_dask:
@@ -883,6 +891,8 @@ def get_datetime_bound_from_df(
     -------
     The minimum or maximum datetime value in the dataframe, or `None`.
     """
+    if df is None:
+        return None
     if not datetime_column:
         return None
 
@@ -955,6 +965,8 @@ def get_unique_index_values(
     -------
     A dictionary mapping indices to unique values.
     """
+    if df is None:
+        return {}
     if 'dataframe' in str(type(df)).lower():
         pandas = mrsm.attempt_import('pandas')
         return {

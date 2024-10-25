@@ -63,6 +63,8 @@ flavor_configs = {
             'fast_executemany': True,
             'isolation_level': 'AUTOCOMMIT',
             'use_setinputsizes': False,
+            'pool_pre_ping': True,
+            'ignore_no_transaction_on_rollback': True,
         },
         'omit_create_engine': {'method',},
         'to_sql': {
@@ -189,15 +191,18 @@ def create_engine(
     ### Install and patch required drivers.
     if self.flavor in install_flavor_drivers:
         attempt_import(*install_flavor_drivers[self.flavor], debug=debug, lazy=False, warn=False)
+        if self.flavor == 'mssql':
+            pyodbc = attempt_import('pyodbc', debug=debug, lazy=False, warn=False)
+            pyodbc.pooling = False
     if self.flavor in require_patching_flavors:
         from meerschaum.utils.packages import determine_version, _monkey_patch_get_distribution
         import pathlib
         for install_name, import_name in require_patching_flavors[self.flavor]:
             pkg = attempt_import(
                 import_name,
-                debug = debug,
-                lazy = False,
-                warn = False
+                debug=debug,
+                lazy=False,
+                warn=False
             )
             _monkey_patch_get_distribution(
                 install_name, determine_version(pathlib.Path(pkg.__file__), venv='mrsm')
