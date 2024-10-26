@@ -370,10 +370,24 @@ def accordion_items_from_pipe(
             ])
             overview_rows.append(
                 html.Tr([
-                    html.Td("Indices" if len(columns_items) != 1 else "Index"),
+                    html.Td("Index Columns" if len(columns_items) != 1 else "Index Column"),
                     html.Td(html.Pre(html.Ul(columns_items))),
                 ])
             )
+        index_column_names = pipe.get_indices()
+        index_columns_items = [
+            html.Li(f"{ix_col_name}")
+            for ix_col_name in index_column_names.values()
+            if ix_col_name
+        ]
+        if index_columns_items:
+            overview_rows.append(
+                html.Tr([
+                    html.Td("Indices" if len(index_columns_items) != 1 else "Index"),
+                    html.Td(html.Pre(html.Ul(index_columns_items))),
+                ])
+            )
+
         tags = pipe.tags
         if tags:
             tags_items = html.Ul([
