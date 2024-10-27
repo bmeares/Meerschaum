@@ -13,6 +13,7 @@ from meerschaum.utils.packages import attempt_import
 from meerschaum.api.dash.sessions import is_session_authenticated
 fastapi, fastapi_responses = attempt_import('fastapi', 'fastapi.responses')
 import starlette
+httpcore = attempt_import('httpcore')
 httpx = attempt_import('httpx')
 websockets = attempt_import('websockets')
 Request = fastapi.Request

@@ -4,6 +4,17 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.5.1
+
+- **Update index information in the pipe card.**  
+  The `Indices` section of the pipe card on the web console includes more detailed information, such as composite and multi-column indices.
+
+- **Print action results during scheduled jobs.**  
+  Scheduled actions now print their result success tuples after firing.
+
+- **Other bugfixes.**  
+  A few bugs from the migration of `APScheduler` to internal management have been fixed.
+
 ### v2.5.0
 
 - **Add `indices` to `Pipe.parameters`.**  
