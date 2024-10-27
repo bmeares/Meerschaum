@@ -121,7 +121,7 @@ def schedule_function(
                     args=args,
                     kwargs=kw,
                     max_running_jobs=1,
-                    ConflictPolicy=apscheduler.ConflictPolicy.replace,
+                    conflict_policy=apscheduler.ConflictPolicy.replace,
                 )
             )
             try:
