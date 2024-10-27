@@ -13,6 +13,7 @@ import os
 import sys
 import pathlib
 
+import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any
 from meerschaum.config.static import STATIC_CONFIG as _STATIC_CONFIG
 
@@ -229,7 +230,7 @@ def entry_with_args(
         _ = get_shell(**kw).cmdloop()
         return True, "Success"
 
-    skip_schedule = False
+    _skip_schedule = False
 
     executor_keys = kw.get('executor_keys', None)
     if executor_keys is None:
@@ -246,7 +247,7 @@ def entry_with_args(
             api_label = executor_keys.split(':')[-1]
             kw['action'].insert(0, 'api')
             kw['action'].insert(1, api_label)
-            skip_schedule = True
+            _skip_schedule = True
 
     ### If the `--daemon` flag is present, prepend 'start job'.
     if kw.get('daemon', False) and kw['action'][0] != 'stack':
@@ -271,7 +272,7 @@ def entry_with_args(
         and kw['action'][0] == 'start'
         and kw['action'][1] in ('job', 'jobs')
     ):
-        skip_schedule = True
+        _skip_schedule = True
 
     kw['action'] = remove_leading_action(kw['action'], _actions=_actions)
 
@@ -279,10 +280,11 @@ def entry_with_args(
         _do_action_wrapper,
         action_function,
         plugin_name,
+        _skip_schedule=_skip_schedule,
         **kw
     )
 
-    if kw.get('schedule', None) and not skip_schedule:
+    if kw.get('schedule', None) and not _skip_schedule:
         from meerschaum.utils.schedule import schedule_function
         from meerschaum.utils.misc import interval_str
         import time
@@ -304,7 +306,12 @@ def entry_with_args(
     return result
 
 
-def _do_action_wrapper(action_function, plugin_name, **kw):
+def _do_action_wrapper(
+    action_function,
+    plugin_name,
+    _skip_schedule: bool = False,
+    **kw
+):
     from meerschaum.plugins import Plugin
     from meerschaum.utils.venv import Venv
     from meerschaum.utils.misc import filter_keywords
@@ -328,6 +335,10 @@ def _do_action_wrapper(action_function, plugin_name, **kw):
             )
         except KeyboardInterrupt:
             result = False, f"Cancelled action `{action_name.lstrip()}`."
+
+    if kw.get('schedule', None) and not _skip_schedule:
+        mrsm.pprint(result)
+
     return result
 
 _shells = []

@@ -21,7 +21,7 @@ The following database flavors are confirmed to be feature-complete through the 
 - MariaDB
 - MySQL 5.7+
 - DuckDB
-- Microsoft SQL Server (2016+ recommended)
+- Microsoft SQL Server
 - Oracle SQL
 
 ## In-place Syncs
@@ -192,9 +192,94 @@ assert not table_exists('foo', conn)
 
 #### [`build_where()`](https://docs.meerschaum.io/meerschaum/utils/sql.html#build_where)
 
+Build a `WHERE` clause based on the `params` filter.
+
+```python
+import meerschaum as mrsm
+from meerschaum.utils.sql import build_where
+
+conn = mrsm.get_connector('sql:main')
+print(build_where({'foo': [1, 2, 3]}, conn))
+# 
+# WHERE
+#     "foo" IN ('1', '2', '3')
+
+print(build_where({'foo': ['_3', '_4']}, conn))
+# 
+# WHERE
+#     ("foo" NOT IN ('3', '4'))
+```
+
+#### [`wrap_query_with_cte()`](https://docs.meerschaum.io/meerschaum/utils/sql.html#wrap_query_with_cte)
+
+Wrap a subquery in a CTE and append an encapsulating query.
+
+```python
+from meerschaum.utils.sql import wrap_query_with_cte
+sub_query = "WITH foo AS (SELECT 1 AS val) SELECT (val * 2) AS newval FROM foo"
+parent_query = "SELECT newval * 3 FROM src"
+query = wrap_query_with_cte(sub_query, parent_query, 'mssql')
+print(query)
+# WITH foo AS (SELECT 1 AS val),
+# [src] AS (
+#     SELECT (val * 2) AS newval FROM foo
+# )
+# SELECT newval * 3 FROM src
+```
+
 #### [`table_exists()`](https://docs.meerschaum.io/meerschaum/utils/sql.html#table_exists)
+
+Check if a table exists.
+
+```python
+import pandas as pd
+import meerschaum as mrsm
+
+df = pd.DataFrame([{'a': 1}])
+conn = mrsm.get_connector('sql:main')
+conn.to_sql(df, 'foo')
+
+from meerschaum.utils.sql import table_exists
+print(table_exists('foo', conn))
+# True
+
+conn.exec("DROP TABLE foo")
+print(table_exists('foo', conn))
+# False
+```
 
 #### [`get_sqlalchemy_table()`](https://docs.meerschaum.io/meerschaum/utils/sql.html#get_sqlalchemy_table)
 
+Return a SQLAlchemy table object.
+
+```python
+import pandas as pd
+import meerschaum as mrsm
+
+df = pd.DataFrame([{'a': 1}])
+conn = mrsm.get_connector('sql:main')
+conn.to_sql(df, 'foo')
+
+from meerschaum.utils.sql import get_sqlalchemy_table
+table = get_sqlalchemy_table('foo', conn)
+print(table.columns)
+# {'a': Column('a', BIGINT(), table=<foo>)}
+```
+
 #### [`get_table_cols_types()`](https://docs.meerschaum.io/meerschaum/utils/sql.html#get_table_cols_types)
 
+Return a dictionary mapping a table's columns to data types, even during a not-yet-committed session.
+
+```python
+import pandas as pd
+import meerschaum as mrsm
+
+df = pd.DataFrame([{'a': 1}])
+conn = mrsm.get_connector('sql:main')
+conn.to_sql(df, 'foo')
+
+from meerschaum.utils.sql import get_table_cols_types
+cols_types = get_table_cols_types('foo', conn)
+print(cols_types)
+# {'a': 'BIGINT'}
+```
