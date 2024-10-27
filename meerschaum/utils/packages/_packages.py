@@ -163,7 +163,8 @@ packages['api'] = {
     'fastapi'                        : 'fastapi>=0.111.0',
     'fastapi_login'                  : 'fastapi-login>=1.7.2',
     'multipart'                      : 'python-multipart>=0.0.9',
-    'httpx'                          : 'httpx>=0.24.1',
+    'httpx'                          : 'httpx>=0.27.2',
+    'httpcore'                       : 'httpcore>=1.0.6',
     'valkey'                         : 'valkey>=6.0.0',
 }
 packages['api'].update(packages['sql'])

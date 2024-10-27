@@ -1194,9 +1194,9 @@ def query_df(
     dtypes = {col: str(typ) for col, typ in df.dtypes.items()}
 
     if inplace:
-        df.infer_objects(copy=False).fillna(NA, inplace=True)
+        df.fillna(NA, inplace=True)
     else:
-        df = df.infer_objects(copy=False).fillna(NA)
+        df = df.infer_objects().fillna(NA)
 
     if isinstance(begin, str):
         begin = dateutil_parser.parse(begin)

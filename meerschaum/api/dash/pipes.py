@@ -346,6 +346,8 @@ def accordion_items_from_pipe(
     for item in skip_items:
         _ = items_titles.pop(item, None)
 
+    pipe_meta_str = json.dumps(pipe.meta, sort_keys=True)
+
     ### Only generate items if they're in the `active_items` list.
     items_bodies = {}
     if 'overview' in active_items:
@@ -358,22 +360,103 @@ def accordion_items_from_pipe(
             html.Tr([html.Td("Instance"), html.Td(html.Pre(f"{pipe.instance_keys}"))]),
             html.Tr([html.Td("Target Table"), html.Td(html.Pre(f"{pipe.target}"))]),
         ]
-        columns = pipe.columns.copy()
-        if columns:
-            datetime_index = columns.pop('datetime', None)
-            columns_items = []
-            if datetime_index:
-                columns_items.append(html.Li(f"{datetime_index} (datetime)"))
-            columns_items.extend([
-                html.Li(f"{col}")
-                for col_key, col in columns.items()
-            ])
-            overview_rows.append(
+
+        indices_header = [
+            html.Thead(
+                html.Tr(
+                    [
+                        html.Th(
+                            html.Span(
+                                "Key",
+                                id={'type': 'key-table-header', 'id': pipe_meta_str},
+                                style={"textDecoration": "underline", "cursor": "pointer"},
+                            ),
+                        ),
+                        html.Th(
+                            html.Span(
+                                "Column",
+                                id={'type': 'column-table-header', 'id': pipe_meta_str},
+                                style={"textDecoration": "underline", "cursor": "pointer"},
+                            ),
+                        ),
+                        html.Th(
+                            html.Span(
+                                "Index",
+                                id={'type': 'index-table-header', 'id': pipe_meta_str},
+                                style={"textDecoration": "underline", "cursor": "pointer"},
+                            ),
+                        ),
+                        html.Th(
+                            html.Span(
+                                "Is Composite",
+                                id={'type': 'is-composite-table-header', 'id': pipe_meta_str},
+                                style={"textDecoration": "underline", "cursor": "pointer"},
+                            ),
+                        ),
+                        dbc.Tooltip(
+                            "Unique reference name for the index "
+                            "(e.g. `datetime` for the range axis)",
+                            target={'type': 'key-table-header', 'id': pipe_meta_str},
+                        ),
+                        dbc.Tooltip(
+                            "The actual column (field name) in the target dataset.",
+                            target={'type': 'column-table-header', 'id': pipe_meta_str},
+                        ),
+                        dbc.Tooltip(
+                            "The name of the index created on the given columns.",
+                            target={'type': 'index-table-header', 'id': pipe_meta_str},
+                        ),
+                        dbc.Tooltip(
+                            "Whether the column is used in the composite primary key "
+                            "to determine updates.",
+                            target={'type': 'is-composite-table-header', 'id': pipe_meta_str},
+                        ),
+                    ]
+                )
+            )
+        ]
+
+        indices = pipe.indices
+        columns = pipe.columns
+        index_column_names = pipe.get_indices()
+        indices_rows = []
+        for ix_key, ix_name in index_column_names.items():
+            col = columns.get(ix_key, None)
+            ix_cols = indices.get(ix_key, None)
+            if not col and not ix_cols:
+                continue
+            if not isinstance(ix_cols, (list, tuple)):
+                ix_cols = [ix_cols]
+            if col:
+                col_item = html.Pre(col)
+            elif len(ix_cols) == 1:
+                col_item = html.Pre(ix_cols[0])
+            else:
+                col_item = html.Pre(html.Ul([html.Li(_c) for _c in ix_cols]))
+            is_composite_item = "✅" if col else ""
+            ix_key_item = html.Pre(ix_key) if ix_key != 'datetime' else html.Pre(f"🕓 {ix_key}")
+            indices_rows.append(
                 html.Tr([
-                    html.Td("Indices" if len(columns_items) != 1 else "Index"),
-                    html.Td(html.Pre(html.Ul(columns_items))),
+                    html.Td(ix_key_item),
+                    html.Td(col_item),
+                    html.Td(html.Pre(ix_name)),
+                    html.Td(is_composite_item),
                 ])
             )
+        indices_table = dbc.Table(
+            indices_header + [html.Tbody(indices_rows)],
+            bordered=True,
+            hover=False,
+            striped=True,
+        )
+        if indices_rows:
+            overview_rows.append(
+                html.Tr([
+                    html.Td("Indices" if len(indices_rows) != 1 else "Index"),
+                    html.Td(indices_table),
+                ])
+            )
+
         tags = pipe.tags
         if tags:
             tags_items = html.Ul([
@@ -419,7 +502,6 @@ def accordion_items_from_pipe(
             stats_rows.append(html.Tr([html.Td("Oldest time"), html.Td(str(oldest_time))]))
         if newest_time is not None:
             stats_rows.append(html.Tr([html.Td("Newest time"), html.Td(str(newest_time))]))
-
 
         items_bodies['stats'] = dbc.Table(stats_header + [html.Tbody(stats_rows)], hover=True)
 

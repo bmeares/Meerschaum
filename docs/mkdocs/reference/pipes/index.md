@@ -59,26 +59,88 @@ The screenshots below show the `clemson` pipe's parameters. On the left, you can
   </div>
 </div>
 
-Special keys in the parameters dictionary are [`columns`](#columns), [`fetch`](/reference/pipes/syncing), and [`tags`](/reference/pipes/tags/).
+Some special keys in the parameters dictionary are [`columns`](#columns), [`indices`](#indices), [`fetch`](/reference/pipes/syncing), [`verify`](/reference/pipes/syncing/#verification-syncs), and [`tags`](/reference/pipes/tags/).
 
 ### Columns
 
-Meerschaum pipes are time-series focused. In order to properly [sync your data](syncing/), you need to specify the name of the datetime column.
+The `columns` dictionary is how you specify which columns make up a composite primary key when determining updates. The keys are the reference index names, and the values are the column names as seen in the dataset.
 
-To set the column names for your pipes, run the command `edit pipes`:
+Additionally, when `upsert` is `True`, a unique index is created on the designated columns.
 
-```bash
-edit pipes -c sql:foo -m bar
-```
+!!! tip "The `datetime` column"
 
-Under the `columns` key, define the name of your `datetime` column. You may also define `id` and `value` columns:
+    To best take advantage of incremental updates, specify the `datetime` axis.
+
+??? example "`columns` example"
+
+    ```python
+    import meerschaum as mrsm
+
+    pipe = mrsm.Pipe(
+        'demo', 'temperature',
+        instance='sql:local',
+        columns={
+            'datetime': 'dt',
+            'id': 'station',
+        },
+    )
+
+    pipe.sync([
+        {'dt': '2024-01-01 00:00:00', 'station': 'KGMU', 'val': 44.1},
+        {'dt': '2024-01-01 00:00:00', 'station': 'KATL', 'val': 48.3},
+    ])
+    print(pipe.get_data())
+    #           dt station   val
+    # 0 2024-01-01    KATL  48.3
+    # 1 2024-01-01    KGMU  44.1
+
+    pipe.sync([
+        {'dt': '2024-01-01 00:00:00', 'station': 'KGMU', 'color': 'blue'},
+        {'dt': '2024-01-01 00:00:00', 'station': 'KATL', 'color': 'green'},
+    ])
+    print(pipe.get_data())
+    #           dt station   val  color
+    # 0 2024-01-01    KATL  48.3  green
+    # 1 2024-01-01    KGMU  44.1   blue
+    ```
+
+!!! note ""
+
+    The `datetime` index may be either a timestamp or an integer column. To use an integer `datetime` index, specify the column is `int` under `dtypes`.
+
+    ```yaml
+    connector: foo
+    metric: bar
+    columns:
+      datetime: RowNumber
+    dtypes:
+      RowNumber: int
+    ```
+
+### Indices
+
+You may choose to specify additional indices to be created with the `indices` dictionary (alias `indexes`). Whereas the `columns` dictionary is for specifying uniqueness, the `indices` dictionary allows you to specify multi-column indices for performance improvements. This is for extending the `columns` dictionary, so no need to restate the primary index columns.
+
+In the example below, the unique constraint is only created for the columns `ts` and `station`, and an additional multi-column index is created on the columns `city`, `state`, and `country`.
 
 ```yaml
-###################################################
-# Edit the parameters for the Pipe 'sql_foo_bar'. #
-###################################################
-
+connector: sql:main
+metric: temperature
 columns:
-  datetime: date
-  id: station_id
+  datetime: ts
+  id: station
+indices:
+  geo: ['city', 'state', 'country']
+parameters:
+  upsert: true
+  sql: |-
+    SELECT
+      ts,
+      station,
+      city,
+      state,
+      country,
+      temp_c,
+      ((1.8 * temperature_c) + 32) as temp_f
+    FROM weather
 ```

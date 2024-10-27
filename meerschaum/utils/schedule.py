@@ -111,16 +111,18 @@ def schedule_function(
     except RuntimeError:
         loop = asyncio.new_event_loop()
 
-
     async def run_scheduler():
         async with _scheduler:
             job = await _scheduler.add_schedule(
                 function,
                 trigger,
-                args=args,
-                kwargs=kw,
-                max_running_jobs=1,
-                conflict_policy=apscheduler.ConflictPolicy.replace,
+                **filter_keywords(
+                    _scheduler.add_schedule,
+                    args=args,
+                    kwargs=kw,
+                    max_running_jobs=1,
+                    conflict_policy=apscheduler.ConflictPolicy.replace,
+                )
             )
             try:
                 await _scheduler.run_until_stopped()
