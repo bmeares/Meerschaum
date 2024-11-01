@@ -624,6 +624,18 @@ def filter_existing(
         merge = pd.merge
         NA = pd.NA
 
+    primary_key = self.columns.get('primary', None)
+    autoincrement = self.parameters.get('autoincrement', False)
+    pipe_columns = self.columns.copy()
+
+    if primary_key and autoincrement and df is not None and primary_key in df.columns:
+        if safe_copy:
+            df = df.copy()
+            safe_copy = False
+        if df[primary_key].isnull().all():
+            del df[primary_key]
+            _ = self.columns.pop(primary_key, None)
+
     def get_empty_df():
         empty_df = pd.DataFrame([])
         dtypes = dict(df.dtypes) if df is not None else {}
@@ -643,8 +655,8 @@ def filter_existing(
 
     ### begin is the oldest data in the new dataframe
     begin, end = None, None
-    dt_col = self.columns.get('datetime', None)
-    dt_type = self.dtypes.get(dt_col, 'datetime64[ns]') if dt_col else None
+    dt_col = pipe_columns.get('datetime', None)
+    dt_type = self.dtypes.get(dt_col, 'datetime64[ns, UTC]') if dt_col else None
     try:
         min_dt_val = df[dt_col].min(skipna=True) if dt_col else None
         if is_dask and min_dt_val is not None:
@@ -713,7 +725,7 @@ def filter_existing(
 
     unique_index_vals = {
         col: df[col].unique()
-        for col in self.columns
+        for col in pipe_columns
         if col in df.columns and col != dt_col
     } if not date_bound_only else {}
     filter_params_index_limit = get_config('pipes', 'sync', 'filter_params_index_limit')
@@ -749,7 +761,7 @@ def filter_existing(
 
     ### Separate new rows from changed ones.
     on_cols = [
-        col for col_key, col in self.columns.items()
+        col for col_key, col in pipe_columns.items()
         if (
             col
             and

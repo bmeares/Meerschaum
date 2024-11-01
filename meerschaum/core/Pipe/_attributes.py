@@ -103,10 +103,25 @@ def indices(self) -> Union[Dict[str, Union[str, List[str]]], None]:
     if indices_key not in self.parameters:
         self.parameters[indices_key] = {}
     _indices = self.parameters[indices_key]
+    _columns = self.columns
+    dt_col = _columns.get('datetime', None)
     if not isinstance(_indices, dict):
         _indices = {}
         self.parameters[indices_key] = _indices
-    return {**self.columns, **_indices}
+    unique_cols = (
+        [dt_col]
+        if dt_col
+        else []
+    ) + [
+        col
+        for col_ix, col in _columns.items()
+        if col_ix != 'datetime'
+    ]
+    return {
+        **({'unique': unique_cols} if len(unique_cols) > 1 else {}),
+        **_columns,
+        **_indices
+    }
 
 
 @property
@@ -196,7 +211,7 @@ def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]
     ----------
     *args: str
         The column names to be retrieved.
-        
+
     error: bool, default False
         If `True`, raise an `Exception` if the specified column is not defined.
 
@@ -509,15 +524,22 @@ def get_indices(self) -> Dict[str, str]:
         if cols
     }
     _index_names = {
-        ix: (
-            _index_template.format(
-                target=_target,
-                column_names=column_names,
-                connector_keys=self.connector_keys,
-                metric_key=self.connector_key,
-                location_key=self.location_key,
-            )
+        ix: _index_template.format(
+            target=_target,
+            column_names=column_names,
+            connector_keys=self.connector_keys,
+            metric_key=self.connector_key,
+            location_key=self.location_key,
         )
         for ix, column_names in _column_names.items()
     }
-    return _index_names
+    ### NOTE: Skip any duplicate indices.
+    seen_index_names = {}
+    for ix, index_name in _index_names.items():
+        if index_name in seen_index_names:
+            continue
+        seen_index_names[index_name] = ix
+    return {
+        ix: index_name
+        for index_name, ix in seen_index_names.items()
+    }

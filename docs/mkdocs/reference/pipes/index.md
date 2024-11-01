@@ -119,28 +119,6 @@ Additionally, when `upsert` is `True`, a unique index is created on the designat
 
 ### Indices
 
-You may choose to specify additional indices to be created with the `indices` dictionary (alias `indexes`). Whereas the `columns` dictionary is for specifying uniqueness, the `indices` dictionary allows you to specify multi-column indices for performance improvements. This is for extending the `columns` dictionary, so no need to restate the primary index columns.
+You may choose to specify additional indices to be created with the `indices` dictionary (alias `indexes`). Whereas the `columns` dictionary is for specifying uniqueness, the `indices` dictionary allows you to specify multi-column indices for performance tuning. This is for extending the `columns` dictionary, so no need to restate the primary index columns.
 
-In the example below, the unique constraint is only created for the columns `ts` and `station`, and an additional multi-column index is created on the columns `city`, `state`, and `country`.
-
-```yaml
-connector: sql:main
-metric: temperature
-columns:
-  datetime: ts
-  id: station
-indices:
-  geo: ['city', 'state', 'country']
-parameters:
-  upsert: true
-  sql: |-
-    SELECT
-      ts,
-      station,
-      city,
-      state,
-      country,
-      temp_c,
-      ((1.8 * temperature_c) + 32) as temp_f
-    FROM weather
-```
+See [Indices](/reference/pipes/parameters/#indices) for more information.

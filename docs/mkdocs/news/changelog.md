@@ -1,8 +1,87 @@
 # 🪵 Changelog
 
-## 2.5.x Releases
+## 2.6.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v2.6.0
+
+- **Enforce a timezone-aware `datetime` axis.**  
+  Pipes now enforce timezone-naive datetimes as UTC, even if the underlying column type is timezone-naive.
+
+- **Designate the index name `primary` for primary keys.**  
+  Like the `datetime` index, the `primary` index is used for joins and will be created as the primary key in new tables.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'primary_key',
+      columns={'primary': 'pk'},
+      instance='sql:local',
+  )
+  ### Raises a `UNIQUE` constraint failure:
+  pipe.sync([
+      {'pk': 1},
+      {'pk': 1},
+  ])
+  ```
+- **Add `autoincrement` to `Pipe.parameters`**  
+  Like the `upsert` feature flag, you may designate an incremental integer primary key by setting `autoincrement` to `True` in the pipe parameters. Note that `autoincrement` will be `True` if you specify a `primary` index but do not specify a dtype or pass into the initial dataframe. This is only available for `sql` pipes at the moment.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'autoincrement',
+      columns={'primary': 'id'},
+      parameters={'autoincrement': True},
+      instance='sql:local',
+  )
+  pipe.sync([
+      {'color': 'red'},
+      {'color': 'blue'},
+  ])
+  print(pipe.get_data())
+  #    id color
+  # 0   1   red
+  # 1   2  blue
+
+  pipe.sync([
+      {'color': 'green', 'id': 1},
+  ])
+  print(pipe.get_data())
+  #    id  color
+  # 0   1  green
+  # 1   2   blue
+
+  ```
+
+- **Update `get_create_table_query()` to accept a `dtypes` dictionary.**  
+  You may get a `CREATE TABLE` query from a `dtypes` dictionary (in addition to a `SELECT` query). The function `meerschaum.utils.sql.get_create_table_query()` now also accepts an argument `primary_key` to designate a primary key column. 
+
+  ```python
+
+  ```
+
+- **Create a multi-column index for columns defined in `Pipe.columns`.**  
+  To disable this, set `unique` to `None` in `Pipe.indices`. 
+
+- **Default to `BIT` for boolean columns in MSSQL.**  
+  The previous workaround was to store `bool` columns as `INT`. This change now defaults to `BIT` when creating new tables. Boolean columns cannot be nullable for MSSQL.
+
+- **Improve file protection in `edit config`.**  
+  Writing an invalid config file will now stop you before committing the changes. The previous behavior would lead to data loss.
+
+- **Enable chunking for DuckDB.**  
+  Because `duckdb-engine` now supports chunking, `chunksize` is now accepted for `SQLConnector.read()` for `duckdb` connectors.
+  
+- **Catch exceptions when creating chunk labels.**  
+  If a datetime bound cannot be determined for a chunk, return `pd.NA`.
+
+## 2.5.x Releases
+
+The 2.5.x series was short and sweet, primarily introducing features relating to `Pipe.indices`.
 
 ### v2.5.1
 

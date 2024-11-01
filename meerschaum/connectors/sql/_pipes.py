@@ -404,7 +404,7 @@ def get_create_index_queries(
     indices = pipe.indices
 
     _datetime = pipe.get_columns('datetime', error=False)
-    _datetime_type = pipe.dtypes.get(_datetime, 'datetime64[ns]')
+    _datetime_type = pipe.dtypes.get(_datetime, 'datetime64[ns, UTC]')
     _datetime_name = (
         sql_item_name(_datetime, self.flavor, None)
         if _datetime is not None else None
@@ -738,7 +738,7 @@ def get_pipe_data(
                 dt_type = dtypes.get(_dt, 'object').lower()
                 if 'datetime' not in dt_type:
                     if 'int' not in dt_type:
-                        dtypes[_dt] = 'datetime64[ns]'
+                        dtypes[_dt] = 'datetime64[ns, UTC]'
     existing_cols = pipe.get_columns_types(debug=debug)
     select_columns = (
         [
@@ -1197,7 +1197,12 @@ def sync_pipe(
     A `SuccessTuple` of success (`bool`) and message (`str`).
     """
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.sql import get_update_queries, sql_item_name, json_flavors, update_queries
+    from meerschaum.utils.sql import (
+        get_update_queries,
+        sql_item_name,
+        update_queries,
+        get_create_table_queries,
+    )
     from meerschaum.utils.misc import generate_password
     from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
@@ -1232,7 +1237,6 @@ def sync_pipe(
 
     ### if table does not exist, create it with indices
     is_new = False
-    add_cols_query = None
     if not pipe.exists(debug=debug):
         check_existing = False
         is_new = True
@@ -1252,9 +1256,7 @@ def sync_pipe(
 
     ### NOTE: Oracle SQL < 23c (2023) and SQLite does not support booleans,
     ### so infer bools and persist them to `dtypes`.
-    ### MSSQL supports `BIT` for booleans, but we coerce bools to int for MSSQL
-    ### to avoid merge issues.
-    if self.flavor in ('oracle', 'sqlite', 'mssql', 'mysql', 'mariadb'):
+    if self.flavor in ('oracle', 'sqlite', 'mysql', 'mariadb'):
         pipe_dtypes = pipe.dtypes
         new_bool_cols = {
             col: 'bool[pyarrow]'
@@ -1309,7 +1311,60 @@ def sync_pipe(
         'schema': self.get_pipe_schema(pipe),
     })
 
+    primary_key = pipe.columns.get('primary', None)
+    new_dtypes = {
+        **{
+            col: str(typ)
+            for col, typ in unseen_df.dtypes.items()
+        },
+        **{
+            col: 'int'
+            for col_ix, col in pipe.columns.items()
+            if col_ix != 'primary'
+        },
+        **pipe.dtypes
+    } if is_new else {}
+    autoincrement = (
+        pipe.parameters.get('autoincrement', False)
+        or (is_new and primary_key and primary_key not in new_dtypes)
+    )
+    if autoincrement and autoincrement not in pipe.parameters:
+        pipe.parameters['autoincrement'] = autoincrement
+        edit_success, edit_msg = pipe.edit(debug=debug)
+        if not edit_success:
+            return edit_success, edit_msg
+
+    if autoincrement and primary_key and primary_key not in df.columns:
+        if unseen_df is not None and primary_key in unseen_df.columns:
+            del unseen_df[primary_key]
+        if update_df is not None and primary_key in update_df.columns:
+            del update_df[primary_key]
+        if delta_df is not None and primary_key in delta_df.columns:
+            del delta_df[primary_key]
+
+    if is_new:
+        if autoincrement:
+            _ = new_dtypes.pop(primary_key, None)
+
+        ### TODO: see if this can be removed
+        if 'datetime' in pipe.columns and self.flavor == 'timescaledb':
+            primary_key = None
+
+        create_table_queries = get_create_table_queries(
+            new_dtypes,
+            pipe.target,
+            self.flavor,
+            schema=self.get_pipe_schema(pipe),
+            primary_key=primary_key,
+        )
+        create_success = all(
+            self.exec_queries(create_table_queries, break_on_error=True, rollback=True, debug=debug)
+        )
+        if not create_success:
+            warn(f"Failed to create '{pipe.target}'. Continuing...")
+
     stats = self.to_sql(unseen_df, **unseen_kw)
+
     if is_new:
         if not self.create_indices(pipe, debug=debug):
             warn(f"Failed to create indices for {pipe}. Continuing...")
@@ -1358,7 +1413,7 @@ def sync_pipe(
         ]
         update_queries = get_update_queries(
             pipe.target,
-            temp_target, 
+            temp_target,
             self,
             join_cols,
             upsert=upsert,
@@ -1960,7 +2015,7 @@ def get_sync_time(
     table = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
 
     dt_col = pipe.columns.get('datetime', None)
-    dt_type = pipe.dtypes.get(dt_col, 'datetime64[ns]')
+    dt_type = pipe.dtypes.get(dt_col, 'datetime64[ns, UTC]')
     if not dt_col:
         _dt = pipe.guess_datetime()
         dt = sql_item_name(_dt, self.flavor, None) if _dt else None
@@ -2366,7 +2421,7 @@ def get_pipe_columns_types(
     ----------
     pipe: mrsm.Pipe:
         The pipe to get the columns for.
-        
+
     Returns
     -------
     A dictionary of columns names (`str`) and types (`str`).
@@ -2381,17 +2436,18 @@ def get_pipe_columns_types(
     }
     >>> 
     """
+    from meerschaum.utils.sql import get_table_cols_types
     if not pipe.exists(debug=debug):
         return {}
 
-    if self.flavor == 'duckdb':
-        from meerschaum.utils.sql import get_table_cols_types
-        return get_table_cols_types(
-            pipe.target,
-            self,
-            flavor=self.flavor,
-            schema=self.get_pipe_schema(pipe),
-        )
+    #  if self.flavor not in ('oracle', 'mysql', 'mariadb'):
+    return get_table_cols_types(
+        pipe.target,
+        self,
+        flavor=self.flavor,
+        schema=self.get_pipe_schema(pipe),
+        debug=debug,
+    )
 
     table_columns = {}
     try:
@@ -2823,11 +2879,11 @@ def get_alter_columns_queries(
 
 
 def get_to_sql_dtype(
-        self,
-        pipe: 'mrsm.Pipe',
-        df: 'pd.DataFrame',
-        update_dtypes: bool = True,
-    ) -> Dict[str, 'sqlalchemy.sql.visitors.TraversibleType']:
+    self,
+    pipe: 'mrsm.Pipe',
+    df: 'pd.DataFrame',
+    update_dtypes: bool = True,
+) -> Dict[str, 'sqlalchemy.sql.visitors.TraversibleType']:
     """
     Given a pipe and DataFrame, return the `dtype` dictionary for `to_sql()`.
 
@@ -2947,7 +3003,7 @@ def deduplicate_pipe(
     duplicates_cte_name = sql_item_name('dups', self.flavor, None)
     duplicate_row_number_name = sql_item_name('dup_row_num', self.flavor, None)
     previous_row_number_name = sql_item_name('prev_row_num', self.flavor, None)
-    
+
     index_list_str = (
         sql_item_name(dt_col, self.flavor, None)
         if dt_col

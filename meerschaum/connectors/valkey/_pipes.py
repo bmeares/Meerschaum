@@ -706,7 +706,7 @@ def get_sync_time(
     """
     from meerschaum.utils.dtypes import are_dtypes_equal
     dt_col = pipe.columns.get('datetime', None)
-    dt_typ = pipe.dtypes.get(dt_col, 'datetime64[ns]')
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime64[ns, UTC]')
     if not dt_col:
         return None
 

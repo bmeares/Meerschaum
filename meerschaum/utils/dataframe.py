@@ -94,14 +94,14 @@ def filter_unseen_df(
     ----------
     old_df: 'pd.DataFrame'
         The original (target) dataframe. Acts as a filter on the `new_df`.
-        
+
     new_df: 'pd.DataFrame'
         The fetched (source) dataframe. Rows that are contained in `old_df` are removed.
 
     safe_copy: bool, default True
         If `True`, create a copy before comparing and modifying the dataframes.
         Setting to `False` may mutate the DataFrames.
-        
+
     dtypes: Optional[Dict[str, Any]], default None
         Optionally specify the datatypes of the dataframe.
 
@@ -234,8 +234,10 @@ def filter_unseen_df(
     cast_dt_cols = True
     try:
         for col, typ in dt_dtypes.items():
-            tz = typ.split(',')[-1].strip() if ',' in typ else None
-            new_df[col] = coerce_timezone(pd.to_datetime(new_df[col], utc=True))
+            if col in old_df.columns:
+                old_df[col] = coerce_timezone(pd.to_datetime(old_df[col], utc=True))
+            if col in new_df.columns:
+                new_df[col] = coerce_timezone(pd.to_datetime(new_df[col], utc=True))
         cast_dt_cols = False
     except Exception as e:
         warn(f"Could not cast datetime columns:\n{e}")
@@ -363,6 +365,7 @@ def filter_unseen_df(
 def parse_df_datetimes(
     df: 'pd.DataFrame',
     ignore_cols: Optional[Iterable[str]] = None,
+    strip_timezone: bool = True,
     chunksize: Optional[int] = None,
     dtype_backend: str = 'numpy_nullable',
     debug: bool = False,
@@ -378,6 +381,9 @@ def parse_df_datetimes(
     ignore_cols: Optional[Iterable[str]], default None
         If provided, do not attempt to coerce these columns as datetimes.
 
+    strip_timezone: bool, default True
+        If `True`, remove the UTC `tzinfo` property.
+
     chunksize: Optional[int], default None
         If the pandas implementation is `'dask'`, use this chunksize for the distributed dataframe.
 
@@ -385,7 +391,7 @@ def parse_df_datetimes(
         If `df` is not a DataFrame and new one needs to be constructed,
         use this as the datatypes backend.
         Accepted values are 'numpy_nullable' and 'pyarrow'.
-        
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -447,7 +453,7 @@ def parse_df_datetimes(
                             for doc in df
                         ] for k in keys
                     },
-                    npartitions = npartitions,
+                    npartitions=npartitions,
                 )
             elif isinstance(df, dict):
                 df = pd.DataFrame.from_dict(df, npartitions=npartitions)
@@ -500,14 +506,18 @@ def parse_df_datetimes(
 
     try:
         if not using_dask:
-            df[datetime_cols] = df[datetime_cols].apply(pd.to_datetime, utc=True)
+            df[datetime_cols] = df[datetime_cols].apply(
+                pd.to_datetime,
+                utc=True,
+                format='ISO8601',
+            )
         else:
             df[datetime_cols] = df[datetime_cols].apply(
                 pd.to_datetime,
                 utc=True,
                 axis=1,
                 meta={
-                    col: 'datetime64[ns]'
+                    col: 'datetime64[ns, UTC]'
                     for col in datetime_cols
                 }
             )
@@ -517,11 +527,15 @@ def parse_df_datetimes(
             + f"{traceback.format_exc()}"
         )
 
-    for dt in datetime_cols:
-        try:
-            df[dt] = df[dt].dt.tz_localize(None)
-        except Exception:
-            warn(f"Unable to convert column '{dt}' to naive datetime:\n{traceback.format_exc()}")
+    if strip_timezone:
+        for dt in datetime_cols:
+            try:
+                df[dt] = df[dt].dt.tz_localize(None)
+            except Exception:
+                warn(
+                    f"Unable to convert column '{dt}' to naive datetime:\n"
+                    + f"{traceback.format_exc()}"
+                )
 
     return df
 
@@ -674,6 +688,7 @@ def enforce_dtypes(
     dtypes: Dict[str, str],
     safe_copy: bool = True,
     coerce_numeric: bool = True,
+    coerce_timezone: bool = True,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -695,6 +710,9 @@ def enforce_dtypes(
     coerce_numeric: bool, default True
         If `True`, convert float and int collisions to numeric.
 
+    coerce_timezone: bool, default True
+        If `True`, convert datetimes to UTC.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -703,20 +721,15 @@ def enforce_dtypes(
     The Pandas DataFrame with the types enforced.
     """
     import json
-    import traceback
-    from decimal import Decimal
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import pprint
-    from meerschaum.config.static import STATIC_CONFIG
-    from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dtypes import (
         are_dtypes_equal,
         to_pandas_dtype,
         is_dtype_numeric,
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
-        coerce_timezone,
+        coerce_timezone as _coerce_timezone,
     )
     if safe_copy:
         df = df.copy()
@@ -743,6 +756,11 @@ def enforce_dtypes(
         col
         for col, typ in dtypes.items()
         if typ == 'uuid'
+    ]
+    datetime_cols = [
+        col
+        for col, typ in dtypes.items()
+        if are_dtypes_equal(typ, 'datetime')
     ]
     df_numeric_cols = get_numeric_cols(df)
     if debug:
@@ -792,6 +810,12 @@ def enforce_dtypes(
                     if debug:
                         dprint(f"Unable to parse column '{col}' as UUID:\n{e}")
 
+    if datetime_cols and coerce_timezone:
+        if debug:
+            dprint(f"Checking for datetime conversion: {datetime_cols}")
+        for col in datetime_cols:
+            df[col] = _coerce_timezone(df[col])
+
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):
         if debug:
@@ -826,8 +850,7 @@ def enforce_dtypes(
         if debug:
             dprint(
                 "The incoming DataFrame has mostly the same types, skipping enforcement."
-                + "The only detected difference was in the following datetime columns.\n"
-                + "    Timezone information may be stripped."
+                + "The only detected difference was in the following datetime columns."
             )
             pprint(detected_dt_cols)
         return df
@@ -930,11 +953,15 @@ def get_datetime_bound_from_df(
         if datetime_column not in df.columns:
             return None
 
-        dt_val = (
-            df[datetime_column].min(skipna=True)
-            if minimum else df[datetime_column].max(skipna=True)
-        )
-        if is_dask and dt_val is not None:
+        try:
+            dt_val = (
+                df[datetime_column].min(skipna=True)
+                if minimum
+                else df[datetime_column].max(skipna=True)
+            )
+        except Exception:
+            dt_val = pandas.NA
+        if is_dask and dt_val is not None and dt_val is not pandas.NA:
             dt_val = dt_val.compute()
 
         return (
@@ -1243,12 +1270,12 @@ def query_df(
             end_tz = end.tzinfo if end is not None else None
 
             if begin_tz is not None or end_tz is not None or df_tz is not None:
-                begin = coerce_timezone(begin)
-                end = coerce_timezone(end)
+                begin = coerce_timezone(begin, strip_utc=False)
+                end = coerce_timezone(end, strip_utc=False)
                 if df_tz is not None:
                     if debug:
                         dprint(f"Casting column '{datetime_column}' to UTC...")
-                    df[datetime_column] = coerce_timezone(df[datetime_column])
+                    df[datetime_column] = coerce_timezone(df[datetime_column], strip_utc=False)
                 dprint(f"Using datetime bounds:\n{begin=}\n{end=}")
 
     in_ex_params = get_in_ex_params(params)

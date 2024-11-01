@@ -303,36 +303,6 @@ def test_id_index_col(flavor: str):
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
-def test_utc_offset_datetimes(flavor: str):
-    """
-    Verify that we are able to sync rows with UTC offset datetimes.
-    """
-    conn = conns[flavor]
-    pipe = Pipe(
-        'test_utc_offset', 'datetimes',
-        instance=conn,
-        columns={'datetime': 'dt'},
-    )
-    pipe.delete()
-
-    docs = [
-        {'dt': '2023-01-01 00:00:00+00:00'},
-        {'dt': '2023-01-02 00:00:00+01:00'},
-    ]
-
-    expected_docs = [
-        {'dt': datetime(2023, 1, 1)},
-        {'dt': datetime(2023, 1, 1, 23, 0, 0)}
-    ]
-
-    success, msg = pipe.sync(docs, debug=debug)
-    assert success, msg
-    df = pipe.get_data(debug=debug)
-    synced_docs = df.to_dict(orient='records')
-    assert synced_docs == expected_docs
-
-
-@pytest.mark.parametrize("flavor", get_flavors())
 def test_no_indices_inferred_datetime_to_text(flavor: str):
     """
     Verify that changing dtypes are handled.

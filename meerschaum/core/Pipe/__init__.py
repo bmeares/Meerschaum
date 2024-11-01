@@ -153,6 +153,7 @@ class Pipe:
         dtypes: Optional[Dict[str, str]] = None,
         instance: Optional[Union[str, InstanceConnector]] = None,
         temporary: bool = False,
+        upsert: Optional[bool] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
         debug: bool = False,
@@ -200,6 +201,9 @@ class Pipe:
 
         instance: Optional[Union[str, InstanceConnector]], default None
             Alias for `mrsm_instance`. If `mrsm_instance` is supplied, this value is ignored.
+
+        upsert: Optional[bool], default None
+            If `True`, set `upsert` to `True` in the parameters.
 
         temporary: bool, default False
             If `True`, prevent instance tables (pipes, users, plugins) from being created.
@@ -268,7 +272,7 @@ class Pipe:
             or indexes
             or self._attributes.get('parameters', {}).get('indices', None)
             or self._attributes.get('parameters', {}).get('indexes', None)
-        ) or columns
+        )
         if isinstance(indices, dict):
             indices_key = (
                 'indexes'
@@ -292,6 +296,9 @@ class Pipe:
         elif dtypes is not None:
             warn(f"The provided dtypes are of invalid type '{type(dtypes)}'.")
 
+        if isinstance(upsert, bool):
+            self._attributes['parameters']['upsert'] = upsert
+
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,
         ###       or a Pipe may be registered with parameters set in-memory first.
@@ -308,7 +315,6 @@ class Pipe:
 
         self._cache = cache and get_config('system', 'experimental', 'cache')
 
-
     @property
     def meta(self):
         """
@@ -321,7 +327,6 @@ class Pipe:
             'instance': self.instance_keys,
         }
 
-
     def keys(self) -> List[str]:
         """
         Return the ordered keys for this pipe.
@@ -331,7 +336,6 @@ class Pipe:
             for key, val in self.meta.items()
             if key != 'instance'
         }
-
 
     @property
     def instance_connector(self) -> Union[InstanceConnector, None]:
@@ -369,7 +373,6 @@ class Pipe:
                 return None
         return self._connector
 
-
     @property
     def cache_connector(self) -> Union[meerschaum.connectors.sql.SQLConnector, None]:
         """
@@ -390,7 +393,6 @@ class Pipe:
             )
 
         return self._cache_connector
-
 
     @property
     def cache_pipe(self) -> Union['meerschaum.Pipe', None]:
@@ -433,10 +435,8 @@ class Pipe:
 
         return self._cache_pipe
 
-
     def __str__(self, ansi: bool=False):
         return pipe_repr(self, ansi=ansi)
-
 
     def __eq__(self, other):
         try:
@@ -488,7 +488,6 @@ class Pipe:
         Read the state (unpickling).
         """
         self.__init__(**_state)
-
 
     def __getitem__(self, key: str) -> Any:
         """

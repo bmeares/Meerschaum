@@ -55,6 +55,36 @@ Below are the supported Meerschaum data types. See the [SQL dtypes source](https
 | `bool`     | `True`                                         | `boolean[pyarrow]`                           | `INT` for Oracle, MSSQL, MySQL / MariaDB. `FLOAT` for SQLite.                    |
 | `json`     | `{"foo": "bar"}`                               | `dict`, `list`                               | `JSONB` for PostgreSQL-like flavors, otherwise `TEXT`.                           |
 
+## `indices`
+
+The `indices` dictionary (alias `indexes`) allows you to create additional and multi-column indices. Whereas `columns` is for specifying uniqueness, `indices` is for performance tuning.
+
+The keys specified in `columns` are included in `indices` by default, as well as a multi-column index `unique` for the columns in `columns`.
+
+In the example below, the unique constraint is only created for the columns `ts` and `station`, and an additional multi-column index is created on the columns `city`, `state`, and `country`.
+
+```yaml
+connector: sql:main
+metric: temperature
+columns:
+  datetime: ts
+  id: station
+indices:
+  geo: ['city', 'state', 'country']
+parameters:
+  upsert: true
+  sql: |-
+    SELECT
+      ts,
+      station,
+      city,
+      state,
+      country,
+      temperature_c,
+      ((1.8 * temperature_c) + 32) as temperature_f
+    FROM weather
+```
+
 ## `fetch`
 
 The `fetch` key contains parameters concerning the [fetch stage](/reference/pipes/syncing/) of the syncing process.

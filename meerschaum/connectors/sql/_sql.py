@@ -17,8 +17,8 @@ from meerschaum.utils.warnings import warn
 ### database flavors that can use bulk insert
 _bulk_flavors = {'postgresql', 'timescaledb', 'citus'}
 ### flavors that do not support chunks
-_disallow_chunks_flavors = ['duckdb']
-_max_chunks_flavors = {'sqlite': 1000,}
+_disallow_chunks_flavors = []
+_max_chunks_flavors = {'sqlite': 1000}
 SKIP_READ_TRANSACTION_FLAVORS: list[str] = ['mssql']
 
 
@@ -123,7 +123,8 @@ def read(
     if chunks is not None and chunks <= 0:
         return []
     from meerschaum.utils.sql import sql_item_name, truncate_item_name
-    from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS
+    from meerschaum.utils.dtypes import are_dtypes_equal, coerce_timezone
+    from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS, TIMEZONE_NAIVE_FLAVORS
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.pool import get_pool
     from meerschaum.utils.dataframe import chunksize_to_npartitions, get_numeric_cols
@@ -139,6 +140,16 @@ def read(
     if is_dask:
         chunksize = None
     schema = schema or self.schema
+    utc_dt_cols = [
+        col
+        for col, typ in dtype.items()
+        if are_dtypes_equal(typ, 'datetime') and 'utc' in typ.lower()
+    ] if dtype else []
+
+    if dtype and utc_dt_cols and self.flavor in TIMEZONE_NAIVE_FLAVORS:
+        dtype = dtype.copy()
+        for col in utc_dt_cols:
+            dtype[col] = 'datetime64[ns]'
 
     pool = get_pool(workers=workers)
     sqlalchemy = attempt_import("sqlalchemy")
@@ -162,7 +173,6 @@ def read(
                 )
             chunksize = _max_chunks_flavors[self.flavor]
 
-    ### NOTE: A bug in duckdb_engine does not allow for chunks.
     if chunksize is not None and self.flavor in _disallow_chunks_flavors:
         chunksize = None
 
@@ -206,6 +216,9 @@ def read(
     chunk_list = []
     chunk_hook_results = []
     def _process_chunk(_chunk, _retry_on_failure: bool = True):
+        if self.flavor in TIMEZONE_NAIVE_FLAVORS:
+            for col in utc_dt_cols:
+                _chunk[col] = coerce_timezone(_chunk[col], strip_timezone=False)
         if not as_hook_results:
             chunk_list.append(_chunk)
         if chunk_hook is None:
@@ -765,7 +778,7 @@ def to_sql(
         DROP_IF_EXISTS_FLAVORS,
     )
     from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
-    from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal
+    from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal, coerce_timezone
     from meerschaum.utils.dtypes.sql import (
         NUMERIC_PRECISION_FLAVORS,
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
@@ -848,7 +861,6 @@ def to_sql(
             if not success:
                 warn(f"Unable to drop {name}")
 
-
         ### Enforce NVARCHAR(2000) as text instead of CLOB.
         dtype = to_sql_kw.get('dtype', {})
         for col, typ in df.dtypes.items():
@@ -858,11 +870,18 @@ def to_sql(
                 dtype[col] = sqlalchemy.types.INTEGER
         to_sql_kw['dtype'] = dtype
     elif self.flavor == 'mssql':
+        pass
+        ### TODO clean this up
+        #  dtype = to_sql_kw.get('dtype', {})
+        #  for col, typ in df.dtypes.items():
+            #  if are_dtypes_equal(str(typ), 'bool'):
+                #  dtype[col] = sqlalchemy.types.INTEGER
+        #  to_sql_kw['dtype'] = dtype
+    elif self.flavor == 'duckdb':
         dtype = to_sql_kw.get('dtype', {})
-        for col, typ in df.dtypes.items():
-            if are_dtypes_equal(str(typ), 'bool'):
-                dtype[col] = sqlalchemy.types.INTEGER
-        to_sql_kw['dtype'] = dtype
+        dt_cols = [col for col, typ in df.dtypes.items() if are_dtypes_equal(str(typ), 'datetime')]
+        for col in dt_cols:
+            df[col] = coerce_timezone(df[col], strip_utc=False)
 
     ### Check for JSON columns.
     if self.flavor not in json_flavors:

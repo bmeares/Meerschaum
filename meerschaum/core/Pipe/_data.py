@@ -23,8 +23,8 @@ def get_data(
     self,
     select_columns: Optional[List[str]] = None,
     omit_columns: Optional[List[str]] = None,
-    begin: Union[datetime, int, None] = None,
-    end: Union[datetime, int, None] = None,
+    begin: Union[datetime, int, str, None] = None,
+    end: Union[datetime, int, str, None] = None,
     params: Optional[Dict[str, Any]] = None,
     as_iterator: bool = False,
     as_chunks: bool = False,
@@ -48,12 +48,12 @@ def get_data(
     omit_columns: Optional[List[str]], default None
         If provided, remove these columns from the selection.
 
-    begin: Union[datetime, int, None], default None
+    begin: Union[datetime, int, str, None], default None
         Lower bound datetime to begin searching for data (inclusive).
         Translates to a `WHERE` clause like `WHERE datetime >= begin`.
         Defaults to `None`.
 
-    end: Union[datetime, int, None], default None
+    end: Union[datetime, int, str, None], default None
         Upper bound datetime to stop searching for data (inclusive).
         Translates to a `WHERE` clause like `WHERE datetime < end`.
         Defaults to `None`.
@@ -105,11 +105,12 @@ def get_data(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import iterate_chunks, items_str
-    from meerschaum.utils.dtypes import to_pandas_dtype
+    from meerschaum.utils.dtypes import to_pandas_dtype, coerce_timezone
     from meerschaum.utils.dataframe import add_missing_cols_to_df, df_is_chunk_generator
     from meerschaum.utils.packages import attempt_import
     dd = attempt_import('dask.dataframe') if as_dask else None
     dask = attempt_import('dask') if as_dask else None
+    dateutil_parser = attempt_import('dateutil.parser')
 
     if select_columns == '*':
         select_columns = None
@@ -120,11 +121,29 @@ def get_data(
         omit_columns = [omit_columns]
 
     as_iterator = as_iterator or as_chunks
+    dt_col = self.columns.get('datetime', None)
+    dt_typ = self.dtypes.get(dt_col, 'datetime64[ns, UTC]')
+    dt_is_utc = 'utc' in dt_typ.lower()
+    if isinstance(begin, str):
+        try:
+            begin = dateutil_parser.parse(begin)
+        except Exception as e:
+            warn(f"Failed to parse '{begin}' as datetime:\n{e}")
+            begin = None
+    if isinstance(end, str):
+        try:
+            end = dateutil_parser.parse(end)
+        except Exception as e:
+            warn(f"Failed to parse '{end}' as datetime:\n{e}")
+            end = None
+    if isinstance(begin, datetime):
+        begin = coerce_timezone(begin, strip_utc=(not dt_is_utc))
+    if isinstance(end, datetime):
+        end = coerce_timezone(end, strip_utc=(not dt_is_utc))
 
     def _sort_df(_df):
         if df_is_chunk_generator(_df):
             return _df
-        dt_col = self.columns.get('datetime', None)
         indices = [] if dt_col not in _df.columns else [dt_col]
         non_dt_cols = [
             col
@@ -607,7 +626,7 @@ def get_chunk_interval(
     if dt_col is None:
         return timedelta(minutes=chunk_minutes)
 
-    dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns]')
+    dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns, UTC]')
     if 'int' in dt_dtype.lower():
         return chunk_minutes
     return timedelta(minutes=chunk_minutes)

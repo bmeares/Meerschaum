@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 import pytest
-import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 from tests import debug
@@ -276,12 +276,20 @@ def test_utc_offset_datetimes(flavor: str):
     Verify that we are able to sync rows with UTC offset datetimes.
     """
     conn = conns[flavor]
+    pipe = Pipe('test_utc_offset', 'datetimes', instance=conn)
+    pipe.delete()
     pipe = Pipe(
         'test_utc_offset', 'datetimes',
-        instance = conn,
-        columns = {'datetime': 'dt'},
+        instance=conn,
+        columns={'datetime': 'dt'},
     )
-    pipe.delete()
+
+    seed_docs = [
+        {'dt': datetime(2023, 1, 1)},
+        {'dt': datetime(2023, 1, 1, 23, 0, 0)},
+    ]
+    success, msg = pipe.sync(seed_docs, debug=debug)
+    assert success, msg
 
     docs = [
         {'dt': '2023-01-01 00:00:00+00:00'},
@@ -289,8 +297,40 @@ def test_utc_offset_datetimes(flavor: str):
     ]
 
     expected_docs = [
-        {'dt': datetime.datetime(2023, 1, 1)},
-        {'dt': datetime.datetime(2023, 1, 1, 23, 0, 0)}
+        {'dt': datetime(2023, 1, 1, tzinfo=timezone.utc)},
+        {'dt': datetime(2023, 1, 1, 23, 0, 0, tzinfo=timezone.utc)}
+    ]
+
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    synced_docs = df.to_dict(orient='records')
+    assert synced_docs == expected_docs
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_explicit_utc_datetimes(flavor: str):
+    """
+    Verify that we are able to sync rows with UTC offset datetimes.
+    """
+    conn = conns[flavor]
+    pipe = Pipe('test_explicit', 'datetimes', 'utc', instance=conn)
+    pipe.delete()
+    pipe = Pipe(
+        'test_explicit', 'datetimes', 'utc',
+        instance=conn,
+        columns={'datetime': 'dt'},
+        dtypes={'dt': 'datetime64[ns, UTC]'},
+    )
+
+    docs = [
+        {'dt': '2024-01-01 00:00:00+00:00'},
+        {'dt': '2024-01-02 00:00:00+01:00'},
+    ]
+
+    expected_docs = [
+        {'dt': datetime(2024, 1, 1, tzinfo=timezone.utc)},
+        {'dt': datetime(2024, 1, 1, 23, 0, 0, tzinfo=timezone.utc)},
     ]
 
     success, msg = pipe.sync(docs, debug=debug)
@@ -308,8 +348,8 @@ def test_ignore_datetime_conversion(flavor: str):
     conn = conns[flavor]
     pipe = Pipe(
         'test_utc_offset', 'datetimes', 'ignore',
-        instance = conn,
-        dtypes = {
+        instance=conn,
+        dtypes={
             'dt': 'str',
         },
     )
@@ -340,9 +380,14 @@ def test_no_indices_inferred_datetime_to_text(flavor: str):
     conn = conns[flavor]
     pipe = Pipe(
         'test_no_indices', 'datetimes', 'text',
-        instance = conn,
+        instance=conn,
     )
     pipe.delete()
+    pipe = Pipe(
+        'test_no_indices', 'datetimes', 'text',
+        instance=conn,
+    )
+
     docs = [
         {'fake-dt': '2023-01-01', 'a': 1},
     ]
@@ -379,9 +424,9 @@ def test_sync_bools(flavor: str):
     _ = pipe.delete()
     pipe = mrsm.Pipe(
         'test', 'bools',
-        instance = conn,
-        columns = {'datetime': 'dt'},
-        dtypes = {'is_bool': 'bool'},
+        instance=conn,
+        columns={'datetime': 'dt'},
+        dtypes={'is_bool': 'bool'},
     )
     _ = pipe.drop()
     docs = [

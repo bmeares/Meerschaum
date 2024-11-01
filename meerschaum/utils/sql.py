@@ -16,6 +16,7 @@ from meerschaum.utils.dtypes.sql import (
     PD_TO_DB_DTYPES_FLAVORS,
     get_pd_type_from_db_type as get_pd_type,
     get_db_type_from_pd_type as get_db_type,
+    TIMEZONE_NAIVE_FLAVORS,
 )
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.debug import dprint
@@ -186,8 +187,11 @@ columns_types_queries = {
             COLUMN_NAME AS [column],
             DATA_TYPE AS [type]
         FROM {db_prefix}INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME LIKE '{table}%'
-            OR TABLE_NAME LIKE '{table_trunc}%'
+        WHERE TABLE_NAME IN (
+            '{table}',
+            '{table_trunc}'
+        )
+
     """,
     'mysql': """
         SELECT
@@ -349,9 +353,8 @@ def dateadd_str(
     "CAST('2022-01-01 00:00:00' AS TIMESTAMP) + INTERVAL '1 day'"
 
     """
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.warnings import error
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     dateutil_parser = attempt_import('dateutil.parser')
     if 'int' in str(type(begin)).lower():
         return str(begin)
@@ -379,26 +382,32 @@ def dateadd_str(
             begin = begin.astimezone(timezone.utc)
         begin = (
             f"'{begin.replace(tzinfo=None)}'"
-            if isinstance(begin, datetime)
+            if isinstance(begin, datetime) and flavor in TIMEZONE_NAIVE_FLAVORS
             else f"'{begin}'"
         )
+
+    dt_is_utc = begin_time.tzinfo is not None if begin_time is not None else '+' in str(begin)
+    db_type = get_db_type_from_pd_type(
+        ('datetime64[ns, UTC]' if dt_is_utc else 'datetime64[ns]'),
+        flavor=flavor,
+    )
 
     da = ""
     if flavor in ('postgresql', 'timescaledb', 'cockroachdb', 'citus'):
         begin = (
-            f"CAST({begin} AS TIMESTAMP)" if begin != 'now'
-            else "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
+            f"CAST({begin} AS {db_type})" if begin != 'now'
+            else "CAST(NOW() AT TIME ZONE 'utc' AS {db_type})"
         )
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
 
     elif flavor == 'duckdb':
-        begin = f"CAST({begin} AS TIMESTAMP)" if begin != 'now' else 'NOW()'
+        begin = f"CAST({begin} AS {db_type})" if begin != 'now' else 'NOW()'
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
 
     elif flavor in ('mssql',):
         if begin_time and begin_time.microsecond != 0:
             begin = begin[:-4] + "'"
-        begin = f"CAST({begin} AS DATETIME)" if begin != 'now' else 'GETUTCDATE()'
+        begin = f"CAST({begin} AS {db_type})" if begin != 'now' else 'GETUTCDATE()'
         da = f"DATEADD({datepart}, {number}, {begin})" if number != 0 else begin
 
     elif flavor in ('mysql', 'mariadb'):
@@ -425,9 +434,9 @@ def dateadd_str(
 
 
 def test_connection(
-        self,
-        **kw: Any
-    ) -> Union[bool, None]:
+    self,
+    **kw: Any
+) -> Union[bool, None]:
     """
     Test if a successful connection to the database may be made.
 
@@ -454,11 +463,11 @@ def test_connection(
 
 
 def get_distinct_col_count(
-        col: str,
-        query: str,
-        connector: Optional[mrsm.connectors.sql.SQLConnector] = None,
-        debug: bool = False
-    ) -> Optional[int]:
+    col: str,
+    query: str,
+    connector: Optional[mrsm.connectors.sql.SQLConnector] = None,
+    debug: bool = False
+) -> Optional[int]:
     """
     Returns the number of distinct items in a column of a SQL query.
 
@@ -624,10 +633,10 @@ def truncate_item_name(item: str, flavor: str) -> str:
 
 
 def build_where(
-        params: Dict[str, Any],
-        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
-        with_where: bool = True,
-    ) -> str:
+    params: Dict[str, Any],
+    connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+    with_where: bool = True,
+) -> str:
     """
     Build the `WHERE` clause based on the input criteria.
 
@@ -769,7 +778,7 @@ def table_exists(
     ----------
     table: str:
         The name of the table in question.
-        
+
     connector: mrsm.connectors.sql.SQLConnector
         The connector to the database which holds the table.
 
@@ -806,7 +815,7 @@ def get_sqlalchemy_table(
     ----------
     table: str
         The name of the table on the database. Does not need to be escaped.
-        
+
     connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
         The connector to the database which holds the table. 
 
@@ -822,7 +831,7 @@ def get_sqlalchemy_table(
 
     Returns
     -------
-    A `sqlalchemy.Table` object for the table. 
+    A `sqlalchemy.Table` object for the table.
 
     """
     if connector is None:
@@ -1325,35 +1334,48 @@ def get_rename_table_queries(
 
     if_exists_str = "IF EXISTS" if flavor in DROP_IF_EXISTS_FLAVORS else ""
     if flavor == 'duckdb':
-        return [
-            get_create_table_query(f"SELECT * FROM {old_table_name}", tmp_table, 'duckdb', schema),
-            get_create_table_query(f"SELECT * FROM {tmp_table_name}", new_table, 'duckdb', schema),
-            f"DROP TABLE {if_exists_str} {tmp_table_name}",
-            f"DROP TABLE {if_exists_str} {old_table_name}",
-        ]
+        return (
+            get_create_table_queries(
+                f"SELECT * FROM {old_table_name}",
+                tmp_table,
+                'duckdb',
+                schema,
+            ) + get_create_table_queries(
+                f"SELECT * FROM {tmp_table_name}",
+                new_table,
+                'duckdb',
+                schema,
+            ) + [
+                f"DROP TABLE {if_exists_str} {tmp_table_name}",
+                f"DROP TABLE {if_exists_str} {old_table_name}",
+            ]
+        )
 
     return [f"ALTER TABLE {old_table_name} RENAME TO {new_table_name}"]
 
 
 def get_create_table_query(
-    query: str,
+    query_or_dtypes: Union[str, Dict[str, str]],
     new_table: str,
     flavor: str,
     schema: Optional[str] = None,
 ) -> str:
     """
+    NOTE: This function is deprecated. Use `get_create_index_queries()` instead.
+
     Return a query to create a new table from a `SELECT` query.
 
     Parameters
     ----------
-    query: str
+    query: Union[str, Dict[str, str]]
         The select query to use for the creation of the table.
+        If a dictionary is provided, return a `CREATE TABLE` query from the given `dtypes` columns.
 
     new_table: str
         The unquoted name of the new table.
 
     flavor: str
-        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`).
 
     schema: Optional[str], default None
         The schema on which the table will reside.
@@ -1362,26 +1384,164 @@ def get_create_table_query(
     -------
     A `CREATE TABLE` (or `SELECT INTO`) query for the database flavor.
     """
+    return get_create_table_queries(
+        query_or_dtypes,
+        new_table,
+        flavor,
+        schema=schema,
+        primary_key=None,
+    )[0]
+
+
+def get_create_table_queries(
+    query_or_dtypes: Union[str, Dict[str, str]],
+    new_table: str,
+    flavor: str,
+    schema: Optional[str] = None,
+    primary_key: Optional[str] = None,
+) -> List[str]:
+    """
+    Return a query to create a new table from a `SELECT` query or a `dtypes` dictionary.
+
+    Parameters
+    ----------
+    query_or_dtypes: Union[str, Dict[str, str]]
+        The select query to use for the creation of the table.
+        If a dictionary is provided, return a `CREATE TABLE` query from the given `dtypes` columns.
+
+    new_table: str
+        The unquoted name of the new table.
+
+    flavor: str
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`).
+
+    schema: Optional[str], default None
+        The schema on which the table will reside.
+
+    primary_key: Optional[str], default None
+        If provided, designate this column as the primary key in the new table.
+
+    Returns
+    -------
+    A `CREATE TABLE` (or `SELECT INTO`) query for the database flavor.
+    """
+    if not isinstance(query_or_dtypes, (str, dict)):
+        raise TypeError("`query_or_dtypes` must be a query or a dtypes dictionary.")
+
+    method = (
+        _get_create_table_query_from_cte
+        if isinstance(query_or_dtypes, str)
+        else _get_create_table_query_from_dtypes
+    )
+    return method(
+        query_or_dtypes,
+        new_table,
+        flavor,
+        schema=schema,
+        primary_key=primary_key,
+    )
+
+
+def _get_create_table_query_from_dtypes(
+    dtypes: Dict[str, str],
+    new_table: str,
+    flavor: str,
+    schema: Optional[str] = None,
+    primary_key: Optional[str] = None,
+) -> List[str]:
+    """
+    Create a new table from a `dtypes` dictionary.
+    """
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type, AUTO_INCREMENT_COLUMN_FLAVORS
+    if not dtypes and not primary_key:
+        raise ValueError(f"Expecting columns for table '{new_table}'.")
+
+    cols_types = (
+        [(primary_key, get_db_type_from_pd_type(dtypes.get(primary_key, 'int')))]
+        if primary_key
+        else []
+    ) + [
+        (col, get_db_type_from_pd_type(typ))
+        for col, typ in dtypes.items()
+        if col != primary_key
+    ]
+
+    table_name = sql_item_name(new_table, schema=schema, flavor=flavor)
+    query = f"CREATE TABLE {table_name} ("
+    if primary_key:
+        col_db_type = cols_types[0][1]
+        auto_increment = (' ' + AUTO_INCREMENT_COLUMN_FLAVORS.get(
+            flavor,
+            AUTO_INCREMENT_COLUMN_FLAVORS['default']
+        )) if primary_key not in dtypes else ''
+        col_name = sql_item_name(primary_key, flavor=flavor, schema=None)
+
+        if flavor == 'sqlite':
+            query += f"\n    {col_name} INTEGER PRIMARY KEY{auto_increment} NOT NULL,"
+        else:
+            query += f"\n    {col_name} {col_db_type} PRIMARY KEY{auto_increment} NOT NULL,"
+
+    for col, db_type in cols_types:
+        if col == primary_key:
+            continue
+        col_name = sql_item_name(col, schema=None, flavor=flavor)
+        query += f"\n    {col_name} {db_type},"
+    query = query[:-1]
+    query += "\n)"
+
+    return [query]
+
+
+def _get_create_table_query_from_cte(
+    query: str,
+    new_table: str,
+    flavor: str,
+    schema: Optional[str] = None,
+    primary_key: Optional[str] = None,
+) -> List[str]:
+    """
+    Create a new table from a CTE query.
+    """
     import textwrap
+    from meerschaum.utils.dtypes.sql import AUTO_INCREMENT_COLUMN_FLAVORS
     create_cte = 'create_query'
     create_cte_name = sql_item_name(create_cte, flavor, None)
     new_table_name = sql_item_name(new_table, flavor, schema)
+    primary_key_constraint_name = (
+        sql_item_name(f'pk_{new_table}', flavor, None)
+        if primary_key
+        else None
+    )
+    primary_key_name = (
+        sql_item_name(primary_key, flavor, None)
+        if primary_key
+        else None
+    )
+    auto_increment = AUTO_INCREMENT_COLUMN_FLAVORS.get(
+        flavor,
+        AUTO_INCREMENT_COLUMN_FLAVORS['default']
+    )
     if flavor in ('mssql',):
         query = query.lstrip()
         if 'with ' in query.lower():
             final_select_ix = query.lower().rfind('select')
-            return (
+            create_table_query = (
                 query[:final_select_ix].rstrip() + ',\n'
                 + f"{create_cte_name} AS (\n"
                 + query[final_select_ix:]
                 + "\n)\n"
                 + f"SELECT *\nINTO {new_table_name}\nFROM {create_cte_name}"
             )
+        else:
+            create_table_query = f"""
+                SELECT *
+                INTO {new_table_name}
+                FROM ({query}) AS {create_cte_name}
+            """
 
-        create_table_query = f"""
-            SELECT *
-            INTO {new_table_name}
-            FROM ({query}) AS {create_cte_name}
+        alter_type_query = f"""
+            ALTER TABLE {new_table_name}
+            ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})
         """
     elif flavor in (None,):
         create_table_query = f"""
@@ -1390,11 +1550,21 @@ def get_create_table_query(
             SELECT *
             FROM {create_cte_name}
         """
+
+        alter_type_query = f"""
+            ALTER TABLE {new_table_name}
+            ADD PRIMARY KEY ({primary_key_name})
+        """
     elif flavor in ('sqlite', 'mysql', 'mariadb', 'duckdb', 'oracle'):
         create_table_query = f"""
             CREATE TABLE {new_table_name} AS
             SELECT *
             FROM ({query})""" + (f""" AS {create_cte_name}""" if flavor != 'oracle' else '') + """
+        """
+
+        alter_type_query = f"""
+            ALTER TABLE {new_table_name}
+            ADD PRIMARY KEY ({primary_key_name})
         """
     else:
         create_table_query = f"""
@@ -1403,7 +1573,21 @@ def get_create_table_query(
             FROM ({query}) AS {create_cte_name}
         """
 
-    return textwrap.dedent(create_table_query)
+        alter_type_query = f"""
+            ALTER TABLE {new_table_name}
+            ADD PRIMARY KEY ({primary_key_name})
+        """
+
+    create_table_query = textwrap.dedent(create_table_query)
+    if not primary_key:
+        return [create_table_query]
+
+    alter_type_query = textwrap.dedent(alter_type_query)
+
+    return [
+        create_table_query,
+        alter_type_query,
+    ]
 
 
 def wrap_query_with_cte(
