@@ -558,7 +558,7 @@ def get_pipe_id(
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
-) -> int:
+) -> Union[int, str]:
     """
     Get a Pipe's ID.
     """
@@ -573,36 +573,36 @@ def get_pipe_id(
     tags = ['Pipes']
 )
 def get_pipe_attributes(
-        connector_keys : str,
-        metric_key : str,
-        location_key : str,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> Dict[str, Any]:
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    curr_user=(
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> Dict[str, Any]:
     """Get a Pipe's attributes."""
     return get_pipe(connector_keys, metric_key, location_key).attributes
 
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists', tags=['Pipes'])
 def get_pipe_exists(
-        connector_keys: str,
-        metric_key: str,
-        location_key: str,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> bool:
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> bool:
     """Determine whether a Pipe exists."""
     return get_pipe(connector_keys, metric_key, location_key).exists()
 
 
 @app.post(endpoints['metadata'], tags=['Pipes'])
 def create_metadata(
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> bool:
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> bool:
     """Create Pipe metadata tables"""
     from meerschaum.connectors.sql.tables import get_tables
     try:
@@ -614,16 +614,16 @@ def create_metadata(
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/rowcount', tags=['Pipes'])
 def get_pipe_rowcount(
-        connector_keys: str,
-        metric_key: str,
-        location_key: str,
-        begin: Union[str, int, None] = None,
-        end: Union[str, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> int:
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    begin: Union[str, int, None] = None,
+    end: Union[str, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> int:
     """
     Return a pipe's rowcount.
     """
@@ -632,10 +632,10 @@ def get_pipe_rowcount(
     if is_int(end):
         end = int(end)
     return get_pipe(connector_keys, metric_key, location_key).get_rowcount(
-        begin = begin,
-        end = end,
-        params = params,
-        debug = debug
+        begin=begin,
+        end=end,
+        params=params,
+        debug=debug,
     )
 
 
@@ -644,13 +644,13 @@ def get_pipe_rowcount(
     tags=['Pipes']
 )
 def get_pipe_columns_types(
-        connector_keys: str,
-        metric_key: str,
-        location_key: str,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> Dict[str, str]:
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    curr_user=(
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> Dict[str, str]:
     """
     Return a dictionary of column names and types.
 
@@ -663,3 +663,21 @@ def get_pipe_columns_types(
     ```
     """
     return get_pipe(connector_keys, metric_key, location_key).dtypes
+
+
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/columns/indices',
+    tags=['Pipes']
+)
+def get_pipe_columns_indices(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    curr_user=(
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> Dict[str, List[Dict[str, str]]]:
+    """
+    Return a dictionary of column names and related indices.
+    """
+    return get_pipe(connector_keys, metric_key, location_key).get_columns_indices()

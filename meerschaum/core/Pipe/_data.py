@@ -330,6 +330,7 @@ def _get_data_as_iterator(
     Return a pipe's data as a generator.
     """
     from meerschaum.utils.misc import round_time
+    from meerschaum.utils.dtypes import coerce_timezone
     parse_begin = isinstance(begin, str)
     parse_end = isinstance(end, str)
     if parse_begin or parse_end:
@@ -351,11 +352,15 @@ def _get_data_as_iterator(
         if begin is not None
         else self.get_sync_time(round_down=False, newest=False, params=params, debug=debug)
     ) if dt_col else None
+    if isinstance(min_dt, datetime):
+        min_dt = coerce_timezone(min_dt)
     max_dt = (
         end
         if end is not None
         else self.get_sync_time(round_down=False, newest=True, params=params, debug=debug)
     ) if dt_col else None
+    if isinstance(max_dt, datetime):
+        max_dt = coerce_timezone(max_dt)
 
     ### We want to search just past the maximum value.
     if end is None:

@@ -975,13 +975,13 @@ def json_serialize_datetime(dt: datetime) -> Union[str, None]:
 
 
 def wget(
-        url: str,
-        dest: Optional[Union[str, 'pathlib.Path']] = None,
-        headers: Optional[Dict[str, Any]] = None,
-        color: bool = True,
-        debug: bool = False,
-        **kw: Any
-    ) -> 'pathlib.Path':
+    url: str,
+    dest: Optional[Union[str, 'pathlib.Path']] = None,
+    headers: Optional[Dict[str, Any]] = None,
+    color: bool = True,
+    debug: bool = False,
+    **kw: Any
+) -> 'pathlib.Path':
     """
     Mimic `wget` with `requests`.
 
@@ -989,7 +989,7 @@ def wget(
     ----------
     url: str
         The URL to the resource to be downloaded.
-        
+
     dest: Optional[Union[str, pathlib.Path]], default None
         The destination path of the downloaded file.
         If `None`, save to the current directory.

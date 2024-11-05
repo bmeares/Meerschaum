@@ -10,7 +10,7 @@ from meerschaum import Pipe
 
 from tests.connectors import conns, get_flavors
 from tests import debug
-from tests.test_users import test_register_user
+from tests.test_users import test_register_user as _test_register_user
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +18,7 @@ def run_before_and_after(flavor: str):
     """
     Ensure the test user is registered before running tests.
     """
-    test_register_user(flavor)
+    _test_register_user(flavor)
     yield
 
 

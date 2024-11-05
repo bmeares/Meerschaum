@@ -33,10 +33,12 @@ def test_deduplicate_default(flavor: str):
     conn = conns[flavor]
     if conn.type != 'sql':
         return
+    pipe = mrsm.Pipe('test', 'deduplicate', instance=conn)
+    pipe.delete()
     pipe = mrsm.Pipe(
         'test', 'deduplicate',
-        instance = conn,
-        columns = {
+        instance=conn,
+        columns={
             'datetime': 'datetime',
             'id': 'id',
         }

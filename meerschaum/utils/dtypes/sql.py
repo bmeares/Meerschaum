@@ -13,7 +13,7 @@ NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'mariadb': (38, 20),
     'mysql': (38, 20),
     'mssql': (28, 10),
-    'duckdb': (15, 4),
+    'duckdb': (15, 3),
     'sqlite': (15, 4),
 }
 TIMEZONE_NAIVE_FLAVORS = {'oracle', 'mysql', 'mariadb'}
@@ -50,6 +50,7 @@ DB_FLAVORS_CAST_DTYPES = {
         'NVARCHAR(2000)': 'NVARCHAR2(2000)',
         'NVARCHAR': 'NVARCHAR2(2000)',
         'NVARCHAR2': 'NVARCHAR2(2000)',
+        'CHAR': 'CHAR(36)',  # UUID columns
     },
     'mssql': {
         'NVARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
@@ -57,7 +58,6 @@ DB_FLAVORS_CAST_DTYPES = {
         'VARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
         'VARCHAR COLLATE "SQL_Latin1_General_CP1_CI_AS"': 'NVARCHAR(MAX)',
         'NVARCHAR': 'NVARCHAR(MAX)',
-        'BIT': 'INT',
     },
 }
 for _flavor, (_precision, _scale) in NUMERIC_PRECISION_FLAVORS.items():
@@ -174,7 +174,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'datetime64[ns, UTC]': {
         'timescaledb': 'TIMESTAMPTZ',
         'postgresql': 'TIMESTAMPTZ',
-        'mariadb': 'TIMESTAMP WITH TIME ZONE',
+        'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
         'mssql': 'DATETIMEOFFSET',
         'oracle': 'TIMESTAMP',
@@ -182,7 +182,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'duckdb': 'TIMESTAMPTZ',
         'citus': 'TIMESTAMPTZ',
         'cockroachdb': 'TIMESTAMPTZ',
-        'default': 'TIMESTAMP',
+        'default': 'TIMESTAMPTZ',
     },
     'bool': {
         'timescaledb': 'BOOLEAN',
@@ -256,7 +256,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mysql': 'CHAR(36)',
         'mssql': 'UNIQUEIDENTIFIER',
         ### I know this is too much space, but erring on the side of caution.
-        'oracle': 'NVARCHAR(2000)',
+        'oracle': 'CHAR(36)',
         'sqlite': 'TEXT',
         'duckdb': 'VARCHAR',
         'citus': 'UUID',
@@ -388,7 +388,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'sqlalchemy.dialects.mysql.CHAR(36)',
         'mysql': 'sqlalchemy.dialects.mysql.CHAR(36)',
         'mssql': 'Uuid',
-        'oracle': 'UnicodeText',
+        'oracle': 'sqlalchemy.dialects.oracle.CHAR(36)',
         'sqlite': 'UnicodeText',
         'duckdb': 'UnicodeText',
         'citus': 'Uuid',

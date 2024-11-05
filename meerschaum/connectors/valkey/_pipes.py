@@ -501,6 +501,7 @@ def sync_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
+    from meerschaum.utils.dtypes import are_dtypes_equal
     dt_col = pipe.columns.get('datetime', None)
     indices = [col for col in pipe.columns.values() if col]
     table_name = self.quote_table(pipe.target)
@@ -526,7 +527,11 @@ def sync_pipe(
 
     valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
     new_dtypes = {
-        str(key): str(val)
+        str(key): (
+            str(val)
+            if not are_dtypes_equal(str(val), 'datetime')
+            else 'datetime64[ns, UTC]'
+        )
         for key, val in df.dtypes.items()
         if str(key) not in valkey_dtypes
     }
@@ -625,7 +630,7 @@ def get_pipe_columns_types(
 
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     return {
-        col: get_db_type_from_pd_type(typ)
+        col: get_db_type_from_pd_type(typ, flavor='postgresql')
         for col, typ in pipe.parameters.get('valkey', {}).get('dtypes', {}).items()
     }
 

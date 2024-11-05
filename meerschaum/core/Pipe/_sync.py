@@ -514,9 +514,9 @@ def get_sync_time(
 
 
 def exists(
-        self,
-        debug : bool = False
-    ) -> bool:
+    self,
+    debug: bool = False
+) -> bool:
     """
     See if a Pipe's table exists.
 
@@ -549,7 +549,11 @@ def exists(
                 return _exists
 
     with Venv(get_connector_plugin(self.instance_connector)):
-        _exists = self.instance_connector.pipe_exists(pipe=self, debug=debug)
+        _exists = (
+            self.instance_connector.pipe_exists(pipe=self, debug=debug)
+            if hasattr(self.instance_connector, 'pipe_exists')
+            else False
+        )
 
     self.__dict__['_exists'] = _exists
     self.__dict__['_exists_timestamp'] = now

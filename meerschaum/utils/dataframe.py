@@ -235,9 +235,11 @@ def filter_unseen_df(
     try:
         for col, typ in dt_dtypes.items():
             if col in old_df.columns:
-                old_df[col] = coerce_timezone(pd.to_datetime(old_df[col], utc=True))
+                #  old_df[col] = coerce_timezone(pd.to_datetime(old_df[col], utc=True))
+                old_df[col] = coerce_timezone(old_df[col])
             if col in new_df.columns:
-                new_df[col] = coerce_timezone(pd.to_datetime(new_df[col], utc=True))
+                #  new_df[col] = coerce_timezone(pd.to_datetime(new_df[col], utc=True))
+                new_df[col] = coerce_timezone(new_df[col])
         cast_dt_cols = False
     except Exception as e:
         warn(f"Could not cast datetime columns:\n{e}")
@@ -365,7 +367,7 @@ def filter_unseen_df(
 def parse_df_datetimes(
     df: 'pd.DataFrame',
     ignore_cols: Optional[Iterable[str]] = None,
-    strip_timezone: bool = True,
+    strip_timezone: bool = False,
     chunksize: Optional[int] = None,
     dtype_backend: str = 'numpy_nullable',
     debug: bool = False,
@@ -381,7 +383,7 @@ def parse_df_datetimes(
     ignore_cols: Optional[Iterable[str]], default None
         If provided, do not attempt to coerce these columns as datetimes.
 
-    strip_timezone: bool, default True
+    strip_timezone: bool, default False
         If `True`, remove the UTC `tzinfo` property.
 
     chunksize: Optional[int], default None
@@ -486,7 +488,7 @@ def parse_df_datetimes(
     if len(cols_to_inspect) == 0:
         if debug:
             dprint(f"All columns are ignored, skipping datetime detection...")
-        return df
+        return df.fillna(pandas.NA)
 
     ### apply regex to columns to determine which are ISO datetimes
     iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d+'
@@ -499,7 +501,7 @@ def parse_df_datetimes(
     if not datetime_cols:
         if debug:
             dprint("No columns detected as datetimes, returning...")
-        return df
+        return df.fillna(pandas.NA)
 
     if debug:
         dprint("Converting columns to datetimes: " + str(datetime_cols))
@@ -537,7 +539,7 @@ def parse_df_datetimes(
                     + f"{traceback.format_exc()}"
                 )
 
-    return df
+    return df.fillna(pandas.NA)
 
 
 def get_unhashable_cols(df: 'pd.DataFrame') -> List[str]:
@@ -731,6 +733,8 @@ def enforce_dtypes(
         attempt_cast_to_uuid,
         coerce_timezone as _coerce_timezone,
     )
+    pandas = mrsm.attempt_import('pandas')
+    is_dask = 'dask' in df.__module__
     if safe_copy:
         df = df.copy()
     if len(df.columns) == 0:

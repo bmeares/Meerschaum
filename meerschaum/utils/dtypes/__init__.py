@@ -259,12 +259,20 @@ def coerce_timezone(
     if isinstance(dt, int):
         return dt
 
+    if isinstance(dt, str):
+        dateutil_parser = mrsm.attempt_import('dateutil.parser')
+        dt = dateutil_parser.parse(dt)
+
     dt_is_series = hasattr(dt, 'dtype')
 
     if dt_is_series:
+        is_dask = 'dask' in dt.__module__
         pandas = mrsm.attempt_import('pandas')
+        dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
         dt_series = (
             pandas.to_datetime(dt, utc=True)
+            if dd is None
+            else dd.to_datetime(dt, utc=True)
         )
         if strip_utc:
             dt_series = dt_series.apply(lambda x: x.replace(tzinfo=None))

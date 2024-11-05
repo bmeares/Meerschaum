@@ -17,7 +17,7 @@ from meerschaum.utils.warnings import warn
 ### database flavors that can use bulk insert
 _bulk_flavors = {'postgresql', 'timescaledb', 'citus'}
 ### flavors that do not support chunks
-_disallow_chunks_flavors = []
+_disallow_chunks_flavors = ['duckdb']
 _max_chunks_flavors = {'sqlite': 1000}
 SKIP_READ_TRANSACTION_FLAVORS: list[str] = ['mssql']
 
@@ -134,7 +134,7 @@ def read(
     pd = import_pandas()
     dd = None
     is_dask = 'dask' in pd.__name__
-    pd = attempt_import('pandas')
+    pandas = attempt_import('pandas')
     is_dask = dd is not None
     npartitions = chunksize_to_npartitions(chunksize)
     if is_dask:
@@ -498,6 +498,8 @@ def exec(
     commit: Optional[bool] = None,
     close: Optional[bool] = None,
     with_connection: bool = False,
+    _connection=None,
+    _transaction=None,
     **kw: Any
 ) -> Union[
         sqlalchemy.engine.result.resultProxy,
@@ -508,7 +510,7 @@ def exec(
 ]:
     """
     Execute SQL code and return the `sqlalchemy` result, e.g. when calling stored procedures.
-    
+
     If inserting data, please use bind variables to avoid SQL injection!
 
     Parameters
@@ -565,15 +567,24 @@ def exec(
     if not hasattr(query, 'compile'):
         query = sqlalchemy.text(query)
 
-    connection = self.get_connection()
+    connection = _connection if _connection is not None else self.get_connection()
 
     try:
-        transaction = connection.begin() if _commit else None
-    except sqlalchemy.exc.InvalidRequestError:
+        transaction = (
+            _transaction
+            if _transaction is not None else (
+                connection.begin()
+                if _commit
+                else None
+            )
+        )
+    except sqlalchemy.exc.InvalidRequestError as e:
+        if _connection is not None or _transaction is not None:
+            raise e
         connection = self.get_connection(rebuild=True)
         transaction = connection.begin()
 
-    if transaction is not None and not transaction.is_active:
+    if transaction is not None and not transaction.is_active and _transaction is not None:
         connection = self.get_connection(rebuild=True)
         transaction = connection.begin() if _commit else None
 
@@ -708,6 +719,8 @@ def to_sql(
     debug: bool = False,
     as_tuple: bool = False,
     as_dict: bool = False,
+    _connection=None,
+    _transaction=None,
     **kw
 ) -> Union[bool, SuccessTuple]:
     """
@@ -845,6 +858,8 @@ def to_sql(
         'method': method,
         'chunksize': chunksize,
     })
+    if _connection is not None:
+        to_sql_kw['con'] = _connection
     if is_dask:
         to_sql_kw.update({
             'parallel': True,
@@ -869,14 +884,6 @@ def to_sql(
             elif are_dtypes_equal(str(typ), 'int'):
                 dtype[col] = sqlalchemy.types.INTEGER
         to_sql_kw['dtype'] = dtype
-    elif self.flavor == 'mssql':
-        pass
-        ### TODO clean this up
-        #  dtype = to_sql_kw.get('dtype', {})
-        #  for col, typ in df.dtypes.items():
-            #  if are_dtypes_equal(str(typ), 'bool'):
-                #  dtype[col] = sqlalchemy.types.INTEGER
-        #  to_sql_kw['dtype'] = dtype
     elif self.flavor == 'duckdb':
         dtype = to_sql_kw.get('dtype', {})
         dt_cols = [col for col, typ in df.dtypes.items() if are_dtypes_equal(str(typ), 'datetime')]
@@ -916,7 +923,7 @@ def to_sql(
 
     try:
         with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', 'case sensitivity issues')
+            warnings.filterwarnings('ignore')
             df.to_sql(**to_sql_kw)
         success = True
     except Exception as e:

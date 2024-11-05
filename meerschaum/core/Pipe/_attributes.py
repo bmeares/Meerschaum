@@ -7,6 +7,8 @@ Fetch and manipulate Pipes' attributes
 """
 
 from __future__ import annotations
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optional, List
 from meerschaum.utils.warnings import warn
 
@@ -84,7 +86,7 @@ def columns(self, _columns: Union[Dict[str, str], List[str]]) -> None:
     """
     if isinstance(_columns, (list, tuple)):
         _columns = {col: col for col in _columns}
-    if not isinstance(columns, dict):
+    if not isinstance(_columns, dict):
         warn(f"{self}.columns must be a dictionary, received {type(_columns)}.")
         return
     self.parameters['columns'] = _columns
@@ -248,12 +250,19 @@ def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]
     return tuple(col_names)
 
 
-def get_columns_types(self, debug: bool = False) -> Union[Dict[str, str], None]:
+def get_columns_types(
+    self,
+    refresh: bool = False,
+    debug: bool = False,
+) -> Union[Dict[str, str], None]:
     """
     Get a dictionary of a pipe's column names and their types.
 
     Parameters
     ----------
+    refresh: bool, default False
+        If `True`, invalidate the cache and fetch directly from the instance connector.
+
     debug: bool, default False:
         Verbosity toggle.
 
@@ -265,17 +274,88 @@ def get_columns_types(self, debug: bool = False) -> Union[Dict[str, str], None]:
     --------
     >>> pipe.get_columns_types()
     {
-      'dt': 'TIMESTAMP WITHOUT TIMEZONE',
+      'dt': 'TIMESTAMP WITH TIMEZONE',
       'id': 'BIGINT',
       'val': 'DOUBLE PRECISION',
     }
     >>>
     """
-    from meerschaum.utils.venv import Venv
+    import time
     from meerschaum.connectors import get_connector_plugin
+    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.warnings import dprint
 
-    with Venv(get_connector_plugin(self.instance_connector)):
-        return self.instance_connector.get_pipe_columns_types(self, debug=debug)
+    now = time.perf_counter()
+    exists_timeout_seconds = STATIC_CONFIG['pipes']['exists_timeout_seconds']
+    if refresh:
+        _ = self.__dict__.pop('_columns_types_timestamp', None)
+        _ = self.__dict__.pop('_columns_types', None)
+    _columns_types = self.__dict__.get('_columns_types', None)
+    if _columns_types:
+        columns_types_timestamp = self.__dict__.get('_columns_types_timestamp', None)
+        if columns_types_timestamp is not None:
+            delta = now - columns_types_timestamp
+            if delta < exists_timeout_seconds:
+                if debug:
+                    dprint(
+                        f"Returning cached `columns_types` for {self} "
+                        f"({round(delta, 2)} seconds old)."
+                    )
+                return _columns_types
+
+    with mrsm.Venv(get_connector_plugin(self.instance_connector)):
+        _columns_types = (
+            self.instance_connector.get_pipe_columns_types(self, debug=debug)
+            if hasattr(self.instance_connector, 'get_pipe_columns_types')
+            else None
+        )
+
+    self.__dict__['_columns_types'] = _columns_types
+    self.__dict__['_columns_types_timestamp'] = now
+    return _columns_types or {}
+
+
+def get_columns_indices(
+    self,
+    debug: bool = False,
+    refresh: bool = False,
+) -> Dict[str, List[Dict[str, str]]]:
+    """
+    Return a dictionary mapping columns to index information.
+    """
+    import time
+    from meerschaum.connectors import get_connector_plugin
+    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.warnings import dprint
+
+    now = time.perf_counter()
+    exists_timeout_seconds = STATIC_CONFIG['pipes']['exists_timeout_seconds']
+    if refresh:
+        _ = self.__dict__.pop('_columns_indices_timestamp', None)
+        _ = self.__dict__.pop('_columns_indices', None)
+    _columns_indices = self.__dict__.get('_columns_indices', None)
+    if _columns_indices:
+        columns_indices_timestamp = self.__dict__.get('_columns_indices_timestamp', None)
+        if columns_indices_timestamp is not None:
+            delta = now - columns_indices_timestamp
+            if delta < exists_timeout_seconds:
+                if debug:
+                    dprint(
+                        f"Returning cached `columns_indices` for {self} "
+                        f"({round(delta, 2)} seconds old)."
+                    )
+                return _columns_indices
+
+    with mrsm.Venv(get_connector_plugin(self.instance_connector)):
+        _columns_indices = (
+            self.instance_connector.get_pipe_columns_indices(self, debug=debug)
+            if hasattr(self.instance_connector, 'get_pipe_columns_indices')
+            else None
+        )
+
+    self.__dict__['_columns_indices'] = _columns_indices
+    self.__dict__['_columns_indices_timestamp'] = now
+    return _columns_indices or {}
 
 
 def get_id(self, **kw: Any) -> Union[int, None]:
@@ -289,7 +369,10 @@ def get_id(self, **kw: Any) -> Union[int, None]:
     from meerschaum.connectors import get_connector_plugin
 
     with Venv(get_connector_plugin(self.instance_connector)):
-        return self.instance_connector.get_pipe_id(self, **kw)
+        if hasattr(self.instance_connector, 'get_pipe_id'):
+            return self.instance_connector.get_pipe_id(self, **kw)
+
+    return None
 
 
 @property
