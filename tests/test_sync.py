@@ -183,7 +183,9 @@ def test_target_mutable(flavor: str):
     if conn.type != 'sql':
         return
     target = 'FooBar!'
-    pipe = Pipe('foo', 'bar', target=target, instance=conn, columns={'datetime': 'dt', 'id': 'id'})
+    pipe = Pipe('target', 'mutable', target=target, instance=conn)
+    pipe.delete()
+    pipe = Pipe('target', 'mutable', target=target, instance=conn, columns={'datetime': 'dt', 'id': 'id'})
     pipe.drop(debug=debug)
     assert not pipe.exists(debug=debug)
     success, msg = pipe.sync(
@@ -589,7 +591,9 @@ def test_sync_dask_dataframe(flavor: str):
         instance=conn,
     )
     pipe2.sync(ddf, debug=debug)
-    assert pipe.get_data().to_dict() == pipe2.get_data().to_dict()
+    docs = pipe.get_data().to_dict(orient='records')
+    docs2 = pipe2.get_data().to_dict(orient='records')
+    assert docs == docs2
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -751,8 +755,11 @@ def test_autoincrement_primary_key(flavor: str):
     """
     Test that explicitly incrementing primary keys behave as expected.
     """
+    from meerschaum.utils.sql import SKIP_AUTO_INCREMENT_FLAVORS
     conn = conns[flavor]
     if conn.type != 'sql':
+        return
+    if conn.flavor in SKIP_AUTO_INCREMENT_FLAVORS:
         return
     pipe = mrsm.Pipe('test_sync', 'primary_key', 'autoincrement', instance=conn)
     pipe.delete()
@@ -803,9 +810,13 @@ def test_autoincrement_primary_key_inferred(flavor: str):
     """
     Test that implicitly incrementing primary keys behave as expected.
     """
+    from meerschaum.utils.sql import SKIP_AUTO_INCREMENT_FLAVORS
     conn = conns[flavor]
     if conn.type != 'sql':
         return
+    if conn.flavor in SKIP_AUTO_INCREMENT_FLAVORS:
+        return
+
     pipe = mrsm.Pipe('test_sync', 'primary_key', 'implicit', instance=conn)
     pipe.delete()
     pipe = mrsm.Pipe(
@@ -875,7 +886,7 @@ def test_add_primary_key_to_existing(flavor: str):
     success, msg = pipe.sync([{'id': 3, 'color': 'green'}], debug=debug)
     assert success, msg
 
-    assert pipe.get_columns_indices(debug=debug)['id']['type'] == 'PRIMARY KEY'
+    assert pipe.get_columns_indices(debug=debug)['id'][0]['type'] == 'PRIMARY KEY'
 
     df = pipe.get_data(params={'id': 3}, debug=debug)
     assert df['color'][0] == 'green'

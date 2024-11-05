@@ -42,6 +42,7 @@ SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
 DROP_IF_EXISTS_FLAVORS = {
     'timescaledb', 'postgresql', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite',
 }
+SKIP_AUTO_INCREMENT_FLAVORS = {'citus', 'duckdb'}
 COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'citus'}
 update_queries = {
     'default': """
@@ -401,7 +402,7 @@ columns_indices_queries = {
             TABLE_NAME IN ('{table}', '{table_trunc}')
     """,
 }
-reset_autoincrement_queries: Dict[str, str] = {
+reset_autoincrement_queries: Dict[str, Union[str, List[str]]] = {
     'default': """
         SELECT SETVAL(pg_get_serial_sequence('{table}', '{column}'), {val})
         FROM {table_name}
@@ -420,9 +421,20 @@ reset_autoincrement_queries: Dict[str, str] = {
         SET seq = {val}
         WHERE name = '{table}'
     """,
-    'oracle': """
-        ALTER SEQUENCE {table_seq_name} RESTART WITH {val}
-    """,
+    'oracle': [
+        """
+        DECLARE
+            max_id NUMBER := {val};
+            current_val NUMBER;
+        BEGIN
+            SELECT {table_seq_name}.NEXTVAL INTO current_val FROM dual;
+
+            WHILE current_val < max_id LOOP
+                SELECT {table_seq_name}.NEXTVAL INTO current_val FROM dual;
+            END LOOP;
+        END;
+        """,
+    ],
 }
 table_wrappers = {
     'default'    : ('"', '"'),
@@ -1794,7 +1806,7 @@ def get_create_table_queries(
         flavor,
         schema=schema,
         primary_key=primary_key,
-        autoincrement=autoincrement,
+        autoincrement=(autoincrement and flavor not in SKIP_AUTO_INCREMENT_FLAVORS),
     )
 
 
@@ -2133,8 +2145,17 @@ def get_reset_autoincrement_queries(
     schema = schema or connector.schema
     max_id_name = sql_item_name('max_id', connector.flavor)
     table_name = sql_item_name(table, connector.flavor, schema)
+    table_trunc = truncate_item_name(table, connector.flavor)
     table_seq_name = sql_item_name(table + '_' + column + '_seq', connector.flavor, schema)
     column_name = sql_item_name(column, connector.flavor)
+    if connector.flavor == 'oracle':
+        df = connector.read(f"""
+            SELECT SEQUENCE_NAME
+            FROM ALL_TAB_IDENTITY_COLS
+            WHERE TABLE_NAME IN '{table_trunc.upper()}'
+        """, debug=debug)
+        if len(df) > 0:
+            table_seq_name = df['sequence_name'][0]
 
     max_id = connector.value(
         f"""
@@ -2146,15 +2167,21 @@ def get_reset_autoincrement_queries(
     if max_id is None:
         return []
 
-    reset_autoincrement_query = reset_autoincrement_queries.get(
+    reset_queries = reset_autoincrement_queries.get(
         connector.flavor,
         reset_autoincrement_queries['default']
-    ).format(
-        column=column,
-        column_name=column_name,
-        table=table,
-        table_name=table_name,
-        table_seq_name=table_seq_name,
-        val=(max_id),
     )
-    return [reset_autoincrement_query]
+    if not isinstance(reset_queries, list):
+        reset_queries = [reset_queries]
+
+    return [
+        query.format(
+            column=column,
+            column_name=column_name,
+            table=table,
+            table_name=table_name,
+            table_seq_name=table_seq_name,
+            val=(max_id),
+        )
+        for query in reset_queries
+    ]

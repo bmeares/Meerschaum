@@ -565,6 +565,17 @@ def get_create_index_queries(
                         schema=self.get_pipe_schema(pipe),
                     )
                 )
+            elif self.flavor == 'oracle':
+                primary_queries.extend([
+                    (
+                        f"ALTER TABLE {_pipe_name}\n"
+                        f"MODIFY {primary_key_name} NOT NULL"
+                    ),
+                    (
+                        f"ALTER TABLE {_pipe_name}\n"
+                        f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
+                    )
+                ])
             else:
                 primary_queries.extend([
                     (
@@ -1529,14 +1540,14 @@ def sync_pipe(
         if not create_success:
             return create_success, create_msg
 
-    mssql_identity_insert = bool(
-        self.flavor == 'mssql'
+    do_identity_insert = bool(
+        self.flavor in ('mssql',)
         and primary_key in unseen_df.columns
         and autoincrement
     )
     with self.engine.connect() as connection:
         with connection.begin():
-            if mssql_identity_insert:
+            if do_identity_insert:
                 identity_on_result = self.exec(
                     f"SET IDENTITY_INSERT {pipe_name} ON",
                     commit=False,
@@ -1553,7 +1564,7 @@ def sync_pipe(
                 **unseen_kw
             )
 
-            if mssql_identity_insert:
+            if do_identity_insert:
                 identity_off_result = self.exec(
                     f"SET IDENTITY_INSERT {pipe_name} OFF",
                     commit=False,
@@ -1865,6 +1876,10 @@ def sync_pipe_inplace(
         sql_item_name(col, self.flavor)
         for col in new_cols
     ])
+    def get_col_typ(col: str, cols_types: Dict[str, str]) -> str:
+        if self.flavor == 'oracle' and new_cols_types.get(col, '').lower() == 'char':
+            return new_cols_types[col]
+        return cols_types[col]
 
     add_cols_queries = self.get_add_columns_queries(pipe, new_cols, debug=debug)
     if add_cols_queries:
@@ -1971,12 +1986,8 @@ def sync_pipe_inplace(
     null_replace_new_cols_str = (
         ', '.join([
             f"COALESCE({temp_table_names['new']}.{sql_item_name(col, self.flavor, None)}, "
-            + (
-                get_null_replacement(
-                    typ,
-                    self.flavor
-                )
-            ) + ") AS "
+            + get_null_replacement(get_col_typ(col, new_cols), self.flavor)
+            + ") AS "
             + sql_item_name(col, self.flavor, None)
             for col, typ in new_cols.items()
         ])
@@ -1992,10 +2003,7 @@ def sync_pipe_inplace(
                 f"COALESCE({temp_table_names['new']}."
                 + sql_item_name(c, self.flavor, None)
                 + ", "
-                + get_null_replacement(
-                    new_cols[c],
-                    self.flavor,
-                )
+                + get_null_replacement(get_col_typ(c, new_cols), self.flavor)
                 + ") "
                 + ' = '
                 + f"COALESCE({temp_table_names['backtrack']}."
@@ -2070,10 +2078,18 @@ def sync_pipe_inplace(
         + '\nAND\n'.join([
             (
                 f"COALESCE({temp_table_names['delta']}." + sql_item_name(c, self.flavor, None)
-                + ", " + get_null_replacement(typ, self.flavor) + ")"
+                + ", "
+                + get_null_replacement(
+                    get_col_typ(c, on_cols),
+                    self.flavor
+                ) + ")"
                 + ' = '
                 + f"COALESCE({temp_table_names['backtrack']}." + sql_item_name(c, self.flavor, None)
-                + ", " + get_null_replacement(typ, self.flavor) + ")"
+                + ", "
+                + get_null_replacement(
+                    get_col_typ(c, on_cols),
+                    self.flavor
+                ) + ")"
             ) for c, typ in on_cols.items()
         ])
     )
@@ -2098,7 +2114,7 @@ def sync_pipe_inplace(
         + (', '.join([
             (
                 "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor, None)
-                + " != " + get_null_replacement(typ, self.flavor)
+                + " != " + get_null_replacement(get_col_typ(c, delta_cols), self.flavor)
                 + " THEN " + sql_item_name(c + '_delta', self.flavor, None)
                 + "\n    ELSE NULL\nEND "
                 + " AS " + sql_item_name(c, self.flavor, None)
@@ -2133,7 +2149,7 @@ def sync_pipe_inplace(
         + (', '.join([
             (
                 "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor, None)
-                + " != " + get_null_replacement(typ, self.flavor)
+                + " != " + get_null_replacement(get_col_typ(c, delta_cols), self.flavor)
                 + " THEN " + sql_item_name(c + '_delta', self.flavor, None)
                 + "\n    ELSE NULL\nEND "
                 + " AS " + sql_item_name(c, self.flavor, None)
@@ -2677,7 +2693,7 @@ def get_pipe_columns_types(
     if not pipe.exists(debug=debug):
         return {}
 
-    if self.flavor not in ('oracle', 'mysql', 'mariadb'):
+    if self.flavor not in ('oracle', 'mysql', 'mariadb', 'sqlite'):
         return get_table_cols_types(
             pipe.target,
             self,

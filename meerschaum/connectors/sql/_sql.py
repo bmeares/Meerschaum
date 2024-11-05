@@ -795,6 +795,7 @@ def to_sql(
     from meerschaum.utils.dtypes.sql import (
         NUMERIC_PRECISION_FLAVORS,
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
+        get_db_type_from_pd_type,
     )
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
@@ -858,12 +859,12 @@ def to_sql(
         'method': method,
         'chunksize': chunksize,
     })
-    if _connection is not None:
-        to_sql_kw['con'] = _connection
     if is_dask:
         to_sql_kw.update({
             'parallel': True,
         })
+    elif _connection is not None:
+        to_sql_kw['con'] = _connection
 
     if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     if self.flavor == 'oracle':
@@ -889,6 +890,19 @@ def to_sql(
         dt_cols = [col for col, typ in df.dtypes.items() if are_dtypes_equal(str(typ), 'datetime')]
         for col in dt_cols:
             df[col] = coerce_timezone(df[col], strip_utc=False)
+    elif self.flavor == 'mssql':
+        dtype = to_sql_kw.get('dtype', {})
+        dt_cols = [col for col, typ in df.dtypes.items() if are_dtypes_equal(str(typ), 'datetime')]
+        new_dtype = {}
+        for col in dt_cols:
+            if col in dtype:
+                continue
+            dt_typ = get_db_type_from_pd_type(str(df.dtypes[col]), self.flavor, as_sqlalchemy=True)
+            if col not in dtype:
+                new_dtype[col] = dt_typ
+
+        dtype.update(new_dtype)
+        to_sql_kw['dtype'] = dtype
 
     ### Check for JSON columns.
     if self.flavor not in json_flavors:
