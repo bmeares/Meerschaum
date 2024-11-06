@@ -367,6 +367,7 @@ def get_pipe_data(
 
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dataframe import parse_df_datetimes, add_missing_cols_to_df
+    from meerschaum.utils.dtypes import are_dtypes_equal
     pd = import_pandas()
     try:
         df = pd.read_json(StringIO(response.text))
@@ -382,9 +383,10 @@ def get_pipe_data(
         ignore_cols = [
             col
             for col, dtype in pipe.dtypes.items()
-            if 'datetime' not in str(dtype)
+            if are_dtypes_equal(str(dtype), 'datetime')
         ],
-        debug = debug,
+        strip_timezone=(pipe.tzinfo is None),
+        debug=debug,
     )
     return df
 

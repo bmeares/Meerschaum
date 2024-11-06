@@ -689,6 +689,7 @@ def enforce_dtypes(
     safe_copy: bool = True,
     coerce_numeric: bool = True,
     coerce_timezone: bool = True,
+    strip_timezone: bool = False,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -712,6 +713,10 @@ def enforce_dtypes(
 
     coerce_timezone: bool, default True
         If `True`, convert datetimes to UTC.
+
+    strip_timezone: bool, default False
+        If `coerce_timezone` and `strip_timezone` are `True`,
+        remove timezone information from datetimes.
 
     debug: bool, default False
         Verbosity toggle.
@@ -817,7 +822,7 @@ def enforce_dtypes(
             dprint(f"Checking for datetime conversion: {datetime_cols}")
         for col in datetime_cols:
             if col in df.columns:
-                df[col] = _coerce_timezone(df[col])
+                df[col] = _coerce_timezone(df[col], strip_utc=strip_timezone)
 
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):

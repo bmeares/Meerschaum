@@ -921,7 +921,7 @@ def test_static_schema(flavor: str):
         },
         dtypes={
             'id': 'uuid',
-            'dt': 'datetime',
+            'dt': 'datetime64[ns]',
             'num': 'numeric',
             'val': 'float',
             'meta': 'json',

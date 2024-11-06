@@ -409,6 +409,7 @@ def get_pipe_data(
         return None
 
     from meerschaum.utils.dataframe import query_df, parse_df_datetimes
+    from meerschaum.utils.dtypes import are_dtypes_equal
 
     valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
     dt_col = pipe.columns.get('datetime', None)
@@ -442,13 +443,14 @@ def get_pipe_data(
     ignore_dt_cols = [
         col
         for col, dtype in pipe.dtypes.items()
-        if 'datetime' not in str(dtype)
+        if are_dtypes_equal(str(dtype), 'datetime')
     ]
 
     df = parse_df_datetimes(
         docs,
         ignore_cols=ignore_dt_cols,
         chunksize=kwargs.get('chunksize', None),
+        strip_timezone=(pipe.tzinfo is None),
         debug=debug,
     )
     for col, typ in valkey_dtypes.items():

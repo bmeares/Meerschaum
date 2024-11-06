@@ -8,6 +8,8 @@ Fetch and manipulate Pipes' attributes
 
 from __future__ import annotations
 
+from datetime import timezone
+
 import meerschaum as mrsm
 from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optional, List
 from meerschaum.utils.warnings import warn
@@ -258,6 +260,25 @@ def autoincrement(self, _autoincrement: bool) -> None:
     Set the `autoincrement` parameter for the pipe.
     """
     self.parameters['autoincrement'] = _autoincrement
+
+
+@property
+def tzinfo(self) -> Union[None, timezone]:
+    """
+    Return `timezone.utc` if the pipe is timezone-aware.
+    """
+    dt_col = self.columns.get('datetime', None)
+    if not dt_col:
+        return None
+
+    dt_typ = str(self.dtypes.get(dt_col, 'datetime64[ns, UTC]'))
+    if 'utc' in dt_typ.lower() or dt_typ == 'datetime':
+        return timezone.utc
+
+    if dt_typ == 'datetime64[ns]':
+        return None
+
+    return None
 
 
 def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]:

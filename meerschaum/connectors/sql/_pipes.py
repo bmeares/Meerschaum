@@ -872,7 +872,11 @@ def get_pipe_data(
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.misc import parse_df_datetimes, to_pandas_dtype
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dtypes import attempt_cast_to_numeric, attempt_cast_to_uuid
+    from meerschaum.utils.dtypes import (
+        attempt_cast_to_numeric,
+        attempt_cast_to_uuid,
+        are_dtypes_equal,
+    )
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
 
@@ -967,7 +971,7 @@ def get_pipe_data(
         ignore_dt_cols = [
             col
             for col, dtype in pipe.dtypes.items()
-            if 'datetime' not in str(dtype)
+            if are_dtypes_equal(str(dtype), 'datetime')
         ]
         ### NOTE: We have to consume the iterator here to ensure that datetimes are parsed correctly
         df = (
@@ -975,6 +979,7 @@ def get_pipe_data(
                 df,
                 ignore_cols=ignore_dt_cols,
                 chunksize=kw.get('chunksize', None),
+                strip_timezone=(pipe.tzinfo is None),
                 debug=debug,
             ) if isinstance(df, pd.DataFrame) else (
                 [
@@ -982,6 +987,7 @@ def get_pipe_data(
                         c,
                         ignore_cols=ignore_dt_cols,
                         chunksize=kw.get('chunksize', None),
+                        strip_timezone=(pipe.tzinfo is None),
                         debug=debug,
                     )
                     for c in df
