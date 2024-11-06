@@ -929,7 +929,7 @@ def test_static_schema(flavor: str):
     )
     docs = [
         {
-            'dt': '2024-01-01',
+            'dt': '2024-01-01 01:02:03.456789',
             'id': 'e7a57f9b-da26-4c70-bffc-ed27cdd74565',
             'num': '1.23',
             'val': '2.34',
@@ -941,7 +941,7 @@ def test_static_schema(flavor: str):
 
     new_docs = [
         {
-            'dt': '2024-01-01',
+            'dt': '2024-01-01 01:02:03.456789',
             'id': '44be2c5a-3d42-4e5f-b118-93a56697ae14',
             'val': 'foo',
             'bar': 1,

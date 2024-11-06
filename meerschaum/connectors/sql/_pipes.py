@@ -1090,6 +1090,8 @@ def get_pipe_data_query(
         if begin is not None:
             begin -= backtrack_interval
 
+    begin, end = pipe.parse_date_bounds(begin, end)
+
     cols_names = [
         sql_item_name(col, self.flavor, None)
         for col in select_columns
@@ -1661,11 +1663,14 @@ def sync_pipe(
                 'autoincrement': False,
             },
         )
-        temp_pipe._columns_types = {
-            col: get_db_type_from_pd_type(str(typ), self.flavor)
+        temp_pipe.__dict__['_columns_types'] = {
+            col: get_db_type_from_pd_type(
+                pipe.dtypes.get(col, str(typ)),
+                self.flavor,
+            )
             for col, typ in update_df.dtypes.items()
         }
-        temp_pipe._columns_types_timestamp = time.perf_counter()
+        temp_pipe.__dict__['_columns_types_timestamp'] = time.perf_counter()
         temp_success, temp_msg = temp_pipe.sync(update_df, check_existing=False, debug=debug)
         if not temp_success:
             return temp_success, temp_msg
