@@ -1872,7 +1872,7 @@ def sync_pipe_inplace(
             schema=self.get_pipe_schema(pipe),
             primary_key=primary_key,
             autoincrement=autoincrement,
-            datetime_column_name=dt_col,
+            datetime_column=dt_col,
         )
         result = self.exec_queries(create_pipe_queries, debug=debug)
         if result is None:
@@ -2147,7 +2147,7 @@ def sync_pipe_inplace(
         select_joined_query,
         temp_tables['joined'],
         self.flavor,
-        schema = internal_schema,
+        schema=internal_schema,
     )[0]
     create_joined_success, create_joined_msg = session_execute(
         session,
@@ -2218,7 +2218,7 @@ def sync_pipe_inplace(
         temp_tables['update'],
         self.flavor,
         internal_schema,
-    )
+    )[0]
     (create_update_success, create_update_msg), create_update_results = session_execute(
         session,
         create_update_query,
