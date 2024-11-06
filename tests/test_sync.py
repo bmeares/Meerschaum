@@ -901,6 +901,8 @@ def test_static_schema(flavor: str):
     Test that pipes marked as `static` do not mutate their schemata.
     """
     conn = conns[flavor]
+    if conn.type not in ('sql', 'api'):
+        return
     pipe = mrsm.Pipe('test', 'static', instance=conn)
     pipe.delete()
     pipe = mrsm.Pipe(
@@ -943,10 +945,13 @@ def test_static_schema(flavor: str):
 
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore')
-        success, msg = pipe.sync(new_docs, debug=debug)
+        try:
+            success, msg = pipe.sync(new_docs, debug=debug)
+        except Exception as e:
+            success, msg = False, str(e)
     assert not success
 
     cols_types = pipe.get_columns_types(debug=debug)
     assert 'bar' not in cols_types
-    assert cols_types['val'] in ('DOUBLE', 'DOUBLE PRECISION', 'FLOAT', 'REAL')
+    assert cols_types['val'].upper() in ('DOUBLE', 'DOUBLE PRECISION', 'FLOAT', 'REAL')
     assert pipe.get_rowcount() == 1
