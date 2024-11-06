@@ -18,6 +18,10 @@ This page catalogs useful keys in the `parameters` dictionary.
 
 ---------------
 
+## `autoincrement`
+
+If a `primary` index is defined (see [columns](#columns) below) and `autoincrement` is set, create the primary key as an auto-incrementing integer column.
+
 ## `columns`
 
 The values of the `columns` dictionary are columns to be treated as a composite primary key. For example, the following would be used for a table with the index columns `ts` and `stationId`:
@@ -34,9 +38,15 @@ columns:
 
 ### The `datetime` Index
 
-The naming of the keys does not matter with notable exception of the `datetime` key. The column specified as the `datetime` index will be used as the datetime axis for bounding.
+The column specified as the `datetime` index will be used as the datetime axis for bounding, e.g. as the time axis for a hypertable.
 
-You may specify an integer column as the `datetime` axis if you explictly set its `dtype` as `int` (see below).
+You may specify an integer column as the `datetime` axis if you explictly set its `dtype` as `int` (see [dtypes](#dtypes) below).
+
+### The `primary` Index
+
+The column specified as the `primary` index will be created as the primary key. If `autoincrement` is set, then the primary key will be created as an incremental integer column.
+
+You may designate the same column as both the `datetime` and `primary` indices.
 
 ## `dtypes`
 
@@ -126,6 +136,10 @@ schema: production
 ## `sql`, `query`
 
 Aliases for `fetch:definition`.
+
+## `static`
+
+Setting `static` will prevent new columns from being added and existing columns from changing types. This is useful for critical production situations where schemata are externally managed.
 
 ## `upsert`
 

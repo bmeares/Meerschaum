@@ -1858,9 +1858,9 @@ def _get_create_table_query_from_dtypes(
         col_name = sql_item_name(primary_key, flavor=flavor, schema=None)
 
         if flavor == 'sqlite':
-            query += f"\n    {col_name} INTEGER PRIMARY KEY{auto_increment_str} NOT NULL,"
+            query += f"\n    {col_name} {col_db_type} PRIMARY KEY{auto_increment_str} NOT NULL,"
         elif flavor == 'oracle':
-            query += f"\n    {col_name} INTEGER {auto_increment_str} PRIMARY KEY,"
+            query += f"\n    {col_name} {col_db_type} {auto_increment_str} PRIMARY KEY,"
         elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
             query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
         else:

@@ -184,6 +184,19 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'cockroachdb': 'TIMESTAMPTZ',
         'default': 'TIMESTAMPTZ',
     },
+    'datetime': {
+        'timescaledb': 'TIMESTAMPTZ',
+        'postgresql': 'TIMESTAMPTZ',
+        'mariadb': 'DATETIME',
+        'mysql': 'DATETIME',
+        'mssql': 'DATETIMEOFFSET',
+        'oracle': 'TIMESTAMP',
+        'sqlite': 'TIMESTAMP',
+        'duckdb': 'TIMESTAMPTZ',
+        'citus': 'TIMESTAMPTZ',
+        'cockroachdb': 'TIMESTAMPTZ',
+        'default': 'TIMESTAMPTZ',
+    },
     'bool': {
         'timescaledb': 'BOOLEAN',
         'postgresql': 'BOOLEAN',
@@ -476,7 +489,7 @@ def get_db_type_from_pd_type(
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PD_DTYPES
     from meerschaum.utils.misc import parse_arguments_str
     sqlalchemy_types = attempt_import('sqlalchemy.types')
 

@@ -506,8 +506,10 @@ def get_create_index_queries(
             )
         elif self.flavor == 'mssql':
             dt_query = (
-                f"CREATE CLUSTERED INDEX {_datetime_index_name} "
-                f"ON {_pipe_name} ({_datetime_name})"
+                "CREATE "
+                + ("CLUSTERED " if not primary_key else '')
+                + f"INDEX {_datetime_index_name} "
+                + f"ON {_pipe_name} ({_datetime_name})"
             )
         else: ### mssql, sqlite, etc.
             dt_query = (
@@ -1431,6 +1433,7 @@ def sync_pipe(
     from meerschaum.utils.misc import generate_password
     from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     from meerschaum import Pipe
     import time
     import copy
@@ -1652,11 +1655,17 @@ def sync_pipe(
             target=temp_target,
             temporary=True,
             parameters={
+                'static': True,
                 'schema': self.internal_schema,
                 'hypertable': False,
                 'autoincrement': False,
             },
         )
+        temp_pipe._columns_types = {
+            col: get_db_type_from_pd_type(str(typ), self.flavor)
+            for col, typ in update_df.dtypes.items()
+        }
+        temp_pipe._columns_types_timestamp = time.perf_counter()
         temp_success, temp_msg = temp_pipe.sync(update_df, check_existing=False, debug=debug)
         if not temp_success:
             return temp_success, temp_msg
@@ -2937,6 +2946,8 @@ def get_alter_columns_queries(
     """
     if not pipe.exists(debug=debug):
         return []
+    if pipe.static:
+        return
     from meerschaum.utils.sql import sql_item_name, DROP_IF_EXISTS_FLAVORS, get_table_cols_types
     from meerschaum.utils.dataframe import get_numeric_cols
     from meerschaum.utils.dtypes import are_dtypes_equal

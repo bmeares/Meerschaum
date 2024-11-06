@@ -893,3 +893,60 @@ def test_add_primary_key_to_existing(flavor: str):
 
     df = pipe.get_data(params={'id': 3}, debug=debug)
     assert df['color'][0] == 'green'
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_static_schema(flavor: str):
+    """
+    Test that pipes marked as `static` do not mutate their schemata.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'static', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'static',
+        instance=conn,
+        upsert=True,
+        static=True,
+        columns={
+            'datetime': 'dt',
+            'primary': 'id',
+        },
+        dtypes={
+            'id': 'uuid',
+            'dt': 'datetime',
+            'num': 'numeric',
+            'val': 'float',
+            'meta': 'json',
+        },
+    )
+    docs = [
+        {
+            'dt': '2024-01-01',
+            'id': 'e7a57f9b-da26-4c70-bffc-ed27cdd74565',
+            'num': '1.23',
+            'val': '2.34',
+            'meta': '{"a": 1}',
+        },
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    new_docs = [
+        {
+            'dt': '2024-01-01',
+            'id': '44be2c5a-3d42-4e5f-b118-93a56697ae14',
+            'val': 'foo',
+            'bar': 1,
+        },
+    ]
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore')
+        success, msg = pipe.sync(new_docs, debug=debug)
+    assert not success
+
+    cols_types = pipe.get_columns_types(debug=debug)
+    assert 'bar' not in cols_types
+    assert cols_types['val'] in ('DOUBLE', 'DOUBLE PRECISION', 'FLOAT', 'REAL')
+    assert pipe.get_rowcount() == 1
