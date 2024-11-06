@@ -408,6 +408,7 @@ def get_create_index_queries(
     index_queries = {}
 
     upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in update_queries
+    static = pipe.parameters.get('static', False)
     index_names = pipe.get_indices()
     indices = pipe.indices
     existing_cols_types = pipe.get_columns_types(debug=debug)
@@ -417,12 +418,12 @@ def get_create_index_queries(
     }
     existing_cols_indices = self.get_pipe_columns_indices(pipe, debug=debug)
     existing_ix_names = set()
-    existing_primary_key = None
+    existing_primary_keys = []
     for col, col_indices in existing_cols_indices.items():
         for col_ix_doc in col_indices:
             existing_ix_names.add(col_ix_doc.get('name', None))
             if col_ix_doc.get('type', None) == 'PRIMARY KEY':
-                existing_primary_key = col
+                existing_primary_keys.append(col)
 
     _datetime = pipe.get_columns('datetime', error=False)
     _datetime_name = (
@@ -519,7 +520,8 @@ def get_create_index_queries(
     primary_queries = []
     if (
         primary_key is not None
-        and primary_key != existing_primary_key
+        and primary_key not in existing_primary_keys
+        and not static
     ):
         if autoincrement and primary_key not in existing_cols_pd_types:
             autoincrement_str = AUTO_INCREMENT_COLUMN_FLAVORS.get(
@@ -576,6 +578,41 @@ def get_create_index_queries(
                         f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
                     )
                 ])
+            elif self.flavor in ('mysql', 'mariadb'):
+                primary_queries.extend([
+                    (
+                        f"ALTER TABLE {_pipe_name}\n"
+                        f"MODIFY {primary_key_name} {primary_key_db_type} NOT NULL"
+                    ),
+                    (
+                        f"ALTER TABLE {_pipe_name}\n"
+                        f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
+                    )
+                ])
+            elif self.flavor == 'timescaledb':
+                primary_queries.extend([
+                    (
+                        f"ALTER TABLE {_pipe_name}\n"
+                        f"ALTER COLUMN {primary_key_name} SET NOT NULL"
+                    ),
+                    (
+                        f"ALTER TABLE {_pipe_name}\n"
+                        f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY (" + (
+                            f"{_datetime_name}, " if _datetime_name else ""
+                        ) + f"{primary_key_name})"
+                    ),
+                ])
+            elif self.flavor in ('citus', 'postgresql', 'duckdb'):
+                primary_queries.extend([
+                    (
+                        f"ALTER TABLE {_pipe_name}\n"
+                        f"ALTER COLUMN {primary_key_name} SET NOT NULL"
+                    ),
+                    (
+                        f"ALTER TABLE {_pipe_name}\n"
+                        f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
+                    ),
+                ])
             else:
                 primary_queries.extend([
                     (
@@ -626,11 +663,11 @@ def get_create_index_queries(
         index_queries[ix_key] = [f"CREATE INDEX {ix_name} ON {_pipe_name} ({cols_names_str})"]
 
     indices_cols_str = ', '.join(
-        [
+        list({
             sql_item_name(ix, self.flavor)
             for ix_key, ix in pipe.columns.items()
             if ix and ix in existing_cols_types
-        ]
+        })
     )
     coalesce_indices_cols_str = ', '.join(
         [
@@ -1275,6 +1312,7 @@ def create_pipe_table_from_df(
     from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
     from meerschaum.utils.sql import get_create_table_queries, sql_item_name
     primary_key = pipe.columns.get('primary', None)
+    dt_col = pipe.columns.get('datetime', None)
     new_dtypes = {
         **{
             col: str(typ)
@@ -1312,6 +1350,7 @@ def create_pipe_table_from_df(
         self.flavor,
         schema=self.get_pipe_schema(pipe),
         primary_key=primary_key,
+        datetime_column=dt_col,
     )
     success = all(
         self.exec_queries(create_table_queries, break_on_error=True, rollback=True, debug=debug)
@@ -1824,6 +1863,7 @@ def sync_pipe_inplace(
             schema=self.get_pipe_schema(pipe),
             primary_key=primary_key,
             autoincrement=autoincrement,
+            datetime_column_name=dt_col,
         )
         result = self.exec_queries(create_pipe_queries, debug=debug)
         if result is None:
@@ -2774,6 +2814,9 @@ def get_add_columns_queries(
     A list of the `ALTER TABLE` SQL query or queries to be executed on the provided connector.
     """
     if not pipe.exists(debug=debug):
+        return []
+
+    if pipe.parameters.get('static', False):
         return []
 
     from decimal import Decimal

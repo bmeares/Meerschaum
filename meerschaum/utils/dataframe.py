@@ -235,10 +235,8 @@ def filter_unseen_df(
     try:
         for col, typ in dt_dtypes.items():
             if col in old_df.columns:
-                #  old_df[col] = coerce_timezone(pd.to_datetime(old_df[col], utc=True))
                 old_df[col] = coerce_timezone(old_df[col])
             if col in new_df.columns:
-                #  new_df[col] = coerce_timezone(pd.to_datetime(new_df[col], utc=True))
                 new_df[col] = coerce_timezone(new_df[col])
         cast_dt_cols = False
     except Exception as e:
@@ -818,7 +816,8 @@ def enforce_dtypes(
         if debug:
             dprint(f"Checking for datetime conversion: {datetime_cols}")
         for col in datetime_cols:
-            df[col] = _coerce_timezone(df[col])
+            if col in df.columns:
+                df[col] = _coerce_timezone(df[col])
 
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):

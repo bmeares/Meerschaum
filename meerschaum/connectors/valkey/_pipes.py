@@ -509,6 +509,7 @@ def sync_pipe(
     if is_dask:
         df = df.compute()
     upsert = pipe.parameters.get('upsert', False)
+    static = pipe.parameters.get('static', False)
 
     def _serialize_indices_docs(_docs):
         return [
@@ -544,7 +545,7 @@ def sync_pipe(
                 new_dtypes[col] = 'string'
                 df[col] = df[col].astype('string')
 
-    if new_dtypes:
+    if new_dtypes and not static:
         valkey_dtypes.update(new_dtypes)
         if 'valkey' not in pipe.parameters:
             pipe.parameters['valkey'] = {}
@@ -738,7 +739,7 @@ def get_sync_time(
         return (
             int(dt_val)
             if are_dtypes_equal(dt_typ, 'int')
-            else dateutil_parser.parse(str(dt_val)).replace(tzinfo=None)
+            else dateutil_parser.parse(str(dt_val))
         )
     except Exception as e:
         warn(f"Failed to parse sync time for {pipe}:\n{e}")

@@ -22,20 +22,20 @@ def test_verify_backfill_simple(flavor: str):
     """
     Test that simple verification syncs will fill gaps.
     """
-    conn = conns[flavor]
     pipe = stress_pipes[flavor]
     _ = pipe.drop()
 
     begin = datetime(2023, 1, 1)
     end = datetime(2023, 1, 2)
-    _ = pipe.sync(begin=begin, end=end)
+    _ = pipe.sync(begin=begin, end=end, debug=debug)
 
     clear_begin = datetime(2023, 1, 1, 12, 0)
     clear_end = datetime(2023, 1, 1, 14, 0)
-    existing_df_in_clear_interval = pipe.get_data(begin=clear_begin, end=clear_end)
+    existing_df_in_clear_interval = pipe.get_data(begin=clear_begin, end=clear_end, debug=debug)
 
-    _ = pipe.clear(begin=clear_begin, end=clear_end)
+    _ = pipe.clear(begin=clear_begin, end=clear_end, debug=debug)
     assert pipe.get_rowcount(begin=clear_begin, end=clear_end) == 0
+
     success, msg = pipe.verify(debug=debug)
     new_df_in_clear_interval = pipe.get_data(begin=clear_begin, end=clear_end)
 

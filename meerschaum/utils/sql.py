@@ -1762,6 +1762,7 @@ def get_create_table_queries(
     schema: Optional[str] = None,
     primary_key: Optional[str] = None,
     autoincrement: bool = False,
+    datetime_column: Optional[str] = None,
 ) -> List[str]:
     """
     Return a query to create a new table from a `SELECT` query or a `dtypes` dictionary.
@@ -1788,6 +1789,10 @@ def get_create_table_queries(
         If `True` and `primary_key` is provided, create the `primary_key` column
         as an auto-incrementing integer column.
 
+    datetime_column: Optional[str], default None
+        If provided, include this column in the primary key.
+        Applicable to TimescaleDB only.
+
     Returns
     -------
     A `CREATE TABLE` (or `SELECT INTO`) query for the database flavor.
@@ -1807,6 +1812,7 @@ def get_create_table_queries(
         schema=schema,
         primary_key=primary_key,
         autoincrement=(autoincrement and flavor not in SKIP_AUTO_INCREMENT_FLAVORS),
+        datetime_column=datetime_column,
     )
 
 
@@ -1817,6 +1823,7 @@ def _get_create_table_query_from_dtypes(
     schema: Optional[str] = None,
     primary_key: Optional[str] = None,
     autoincrement: bool = False,
+    datetime_column: Optional[str] = None,
 ) -> List[str]:
     """
     Create a new table from a `dtypes` dictionary.
@@ -1824,6 +1831,9 @@ def _get_create_table_query_from_dtypes(
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type, AUTO_INCREMENT_COLUMN_FLAVORS
     if not dtypes and not primary_key:
         raise ValueError(f"Expecting columns for table '{new_table}'.")
+
+    if flavor in SKIP_AUTO_INCREMENT_FLAVORS:
+        autoincrement = False
 
     cols_types = (
         [(primary_key, get_db_type_from_pd_type(dtypes.get(primary_key, 'int'), flavor=flavor))]
@@ -1836,6 +1846,8 @@ def _get_create_table_query_from_dtypes(
     ]
 
     table_name = sql_item_name(new_table, schema=schema, flavor=flavor)
+    primary_key_name = sql_item_name(primary_key, flavor) if primary_key else None
+    datetime_column_name = sql_item_name(datetime_column, flavor) if datetime_column else None
     query = f"CREATE TABLE {table_name} ("
     if primary_key:
         col_db_type = cols_types[0][1]
@@ -1849,6 +1861,8 @@ def _get_create_table_query_from_dtypes(
             query += f"\n    {col_name} INTEGER PRIMARY KEY{auto_increment_str} NOT NULL,"
         elif flavor == 'oracle':
             query += f"\n    {col_name} INTEGER {auto_increment_str} PRIMARY KEY,"
+        elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
+            query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
         else:
             query += f"\n    {col_name} {col_db_type} PRIMARY KEY{auto_increment_str} NOT NULL,"
 
@@ -1857,6 +1871,13 @@ def _get_create_table_query_from_dtypes(
             continue
         col_name = sql_item_name(col, schema=None, flavor=flavor)
         query += f"\n    {col_name} {db_type},"
+    if (
+        flavor == 'timescaledb'
+        and datetime_column
+        and primary_key
+        and datetime_column != primary_key
+    ):
+        query += f"\n    PRIMARY KEY({datetime_column_name}, {primary_key_name}),"
     query = query[:-1]
     query += "\n)"
 
@@ -1871,6 +1892,7 @@ def _get_create_table_query_from_cte(
     schema: Optional[str] = None,
     primary_key: Optional[str] = None,
     autoincrement: bool = False,
+    datetime_column: Optional[str] = None,
 ) -> List[str]:
     """
     Create a new table from a CTE query.
@@ -1888,6 +1910,11 @@ def _get_create_table_query_from_cte(
     primary_key_name = (
         sql_item_name(primary_key, flavor, None)
         if primary_key
+        else None
+    )
+    datetime_column_name = (
+        sql_item_name(datetime_column, flavor)
+        if datetime_column
         else None
     )
     if flavor in ('mssql',):
@@ -1934,6 +1961,17 @@ def _get_create_table_query_from_cte(
         alter_type_query = f"""
             ALTER TABLE {new_table_name}
             ADD PRIMARY KEY ({primary_key_name})
+        """
+    elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
+        create_table_query = f"""
+            SELECT *
+            INTO {new_table_name}
+            FROM ({query}) AS {create_cte_name}
+        """
+
+        alter_type_query = f"""
+            ALTER TABLE {new_table_name}
+            ADD PRIMARY KEY ({datetime_column_name}, {primary_key_name})
         """
     else:
         create_table_query = f"""

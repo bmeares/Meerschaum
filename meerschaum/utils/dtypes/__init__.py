@@ -263,7 +263,7 @@ def coerce_timezone(
         dateutil_parser = mrsm.attempt_import('dateutil.parser')
         dt = dateutil_parser.parse(dt)
 
-    dt_is_series = hasattr(dt, 'dtype')
+    dt_is_series = hasattr(dt, 'dtype') and hasattr(dt, '__module__')
 
     if dt_is_series:
         is_dask = 'dask' in dt.__module__

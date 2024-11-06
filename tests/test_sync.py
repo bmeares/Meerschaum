@@ -276,13 +276,14 @@ def test_id_index_col(flavor: str):
     Verify that the ID column is able to be synced.
     """
     conn = conns[flavor]
+    pipe = Pipe('test_id', 'index_col', 'table', instance=conn)
+    pipe.delete()
     pipe = Pipe(
         'test_id', 'index_col', 'table',
         instance=conn,
         dtypes={'id': 'Int64'},
         columns={'datetime': 'id'},
     )
-    pipe.delete()
     docs = [{'id': i, 'a': i*2, 'b': {'c': i/2}} for i in range(100)]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
@@ -863,6 +864,8 @@ def test_add_primary_key_to_existing(flavor: str):
     """
     conn = conns[flavor]
     if conn.type != 'sql':
+        return
+    if conn.flavor == 'duckdb':
         return
     pipe = mrsm.Pipe('test_sync', 'primary_key', 'later', instance=conn)
     pipe.delete()

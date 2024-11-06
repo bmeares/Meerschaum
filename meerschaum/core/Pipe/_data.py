@@ -120,26 +120,9 @@ def get_data(
     if isinstance(omit_columns, str):
         omit_columns = [omit_columns]
 
+    begin, end = self.parse_date_bounds(begin, end)
     as_iterator = as_iterator or as_chunks
     dt_col = self.columns.get('datetime', None)
-    dt_typ = self.dtypes.get(dt_col, 'datetime64[ns, UTC]')
-    dt_is_utc = 'utc' in dt_typ.lower()
-    if isinstance(begin, str):
-        try:
-            begin = dateutil_parser.parse(begin)
-        except Exception as e:
-            warn(f"Failed to parse '{begin}' as datetime:\n{e}")
-            begin = None
-    if isinstance(end, str):
-        try:
-            end = dateutil_parser.parse(end)
-        except Exception as e:
-            warn(f"Failed to parse '{end}' as datetime:\n{e}")
-            end = None
-    if isinstance(begin, datetime):
-        begin = coerce_timezone(begin, strip_utc=(not dt_is_utc))
-    if isinstance(end, datetime):
-        end = coerce_timezone(end, strip_utc=(not dt_is_utc))
 
     def _sort_df(_df):
         if df_is_chunk_generator(_df):
@@ -331,16 +314,7 @@ def _get_data_as_iterator(
     """
     from meerschaum.utils.misc import round_time
     from meerschaum.utils.dtypes import coerce_timezone
-    parse_begin = isinstance(begin, str)
-    parse_end = isinstance(end, str)
-    if parse_begin or parse_end:
-        from meerschaum.utils.packages import attempt_import
-        dateutil_parser = attempt_import('dateutil.parser')
-    if parse_begin:
-        begin = dateutil_parser.parse(begin)
-    if parse_end:
-        end = dateutil_parser.parse(end)
-
+    begin, end = self.parse_date_bounds(begin, end)
     if not self.exists(debug=debug):
         return
 
@@ -474,6 +448,8 @@ def get_backtrack_data(
     if not self.exists(debug=debug):
         return None
 
+    begin = self.parse_date_bounds(begin)
+
     backtrack_interval = self.get_backtrack_interval(debug=debug)
     if backtrack_minutes is None:
         backtrack_minutes = (
@@ -574,6 +550,7 @@ def get_rowcount(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
+    begin, end = self.parse_date_bounds(begin, end)
     connector = self.instance_connector if not remote else self.connector
     try:
         with Venv(get_connector_plugin(connector)):
@@ -688,6 +665,8 @@ def get_chunk_bounds(
     if begin is None and end is None:
         return [(None, None)]
 
+    begin, end = self.parse_date_bounds(begin, end)
+
     ### Set the chunk interval under `pipe.parameters['verify']['chunk_minutes']`.
     chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
     
@@ -719,3 +698,48 @@ def get_chunk_bounds(
         chunk_bounds = chunk_bounds + [(end, None)]
 
     return chunk_bounds
+
+
+def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
+    datetime,
+    int,
+    str,
+    None,
+    Tuple[Union[datetime, int, str, None]]
+]:
+    """
+    Given a date bound (begin, end), coerce a timezone if necessary.
+    """
+    from meerschaum.utils.misc import is_int
+    from meerschaum.utils.dtypes import coerce_timezone
+    from meerschaum.utils.warnings import warn
+    dateutil_parser = mrsm.attempt_import('dateutil.parser')
+
+    def _parse_date_bound(dt_val):
+        if dt_val is None:
+            return None
+
+        if isinstance(dt_val, int):
+            return dt_val
+
+        if dt_val == '':
+            return ''
+
+        if is_int(dt_val):
+            return int(dt_val)
+
+        if isinstance(dt_val, str):
+            try:
+                dt_val = dateutil_parser.parse(dt_val)
+            except Exception as e:
+                warn(f"Could not parse '{dt_val}' as datetime:\n{e}")
+                return None
+
+        dt_col = self.columns.get('datetime', None)
+        dt_typ = str(self.dtypes.get(dt_col, 'datetime64[ns, UTC]'))
+        return coerce_timezone(dt_val, strip_utc=('utc' not in dt_typ.lower()))
+
+    bounds = tuple(_parse_date_bound(dt_val) for dt_val in dt_vals)
+    if len(bounds) == 1:
+        return bounds[0]
+    return bounds

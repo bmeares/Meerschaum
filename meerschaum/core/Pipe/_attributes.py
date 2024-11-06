@@ -110,7 +110,7 @@ def indices(self) -> Union[Dict[str, Union[str, List[str]]], None]:
     if not isinstance(_indices, dict):
         _indices = {}
         self.parameters[indices_key] = _indices
-    unique_cols = (
+    unique_cols = list(set((
         [dt_col]
         if dt_col
         else []
@@ -118,7 +118,7 @@ def indices(self) -> Union[Dict[str, Union[str, List[str]]], None]:
         col
         for col_ix, col in _columns.items()
         if col_ix != 'datetime'
-    ]
+    ]))
     return {
         **({'unique': unique_cols} if len(unique_cols) > 1 else {}),
         **_columns,
@@ -205,6 +205,61 @@ def dtypes(self, _dtypes: Dict[str, Any]) -> None:
     self.parameters['dtypes'] = _dtypes
 
 
+@property
+def upsert(self) -> bool:
+    """
+    Return whether `upsert` is set for the pipe.
+    """
+    if 'upsert' not in self.parameters:
+        self.parameters['upsert'] = False
+    return self.parameters['upsert']
+
+
+@upsert.setter
+def upsert(self, _upsert: bool) -> None:
+    """
+    Set the `upsert` parameter for the pipe.
+    """
+    self.parameters['upsert'] = _upsert
+
+
+@property
+def static(self) -> bool:
+    """
+    Return whether `static` is set for the pipe.
+    """
+    if 'static' not in self.parameters:
+        self.parameters['static'] = False
+    return self.parameters['static']
+
+
+@static.setter
+def static(self, _static: bool) -> None:
+    """
+    Set the `static` parameter for the pipe.
+    """
+    self.parameters['static'] = _static
+
+
+@property
+def autoincrement(self) -> bool:
+    """
+    Return the `autoincrement` parameter for the pipe.
+    """
+    if 'autoincrement' not in self.parameters:
+        self.parameters['autoincrement'] = False
+
+    return self.parameters['autoincrement']
+
+
+@autoincrement.setter
+def autoincrement(self, _autoincrement: bool) -> None:
+    """
+    Set the `autoincrement` parameter for the pipe.
+    """
+    self.parameters['autoincrement'] = _autoincrement
+
+
 def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]:
     """
     Check if the requested columns are defined.
@@ -286,7 +341,10 @@ def get_columns_types(
     from meerschaum.utils.warnings import dprint
 
     now = time.perf_counter()
-    exists_timeout_seconds = STATIC_CONFIG['pipes']['exists_timeout_seconds']
+    cache_seconds = STATIC_CONFIG['pipes']['static_schema_cache_seconds']
+    static = self.parameters.get('static', False)
+    if not static:
+        refresh = True
     if refresh:
         _ = self.__dict__.pop('_columns_types_timestamp', None)
         _ = self.__dict__.pop('_columns_types', None)
@@ -295,7 +353,7 @@ def get_columns_types(
         columns_types_timestamp = self.__dict__.get('_columns_types_timestamp', None)
         if columns_types_timestamp is not None:
             delta = now - columns_types_timestamp
-            if delta < exists_timeout_seconds:
+            if delta < cache_seconds:
                 if debug:
                     dprint(
                         f"Returning cached `columns_types` for {self} "

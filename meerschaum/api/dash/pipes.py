@@ -33,6 +33,11 @@ html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHEC
 humanfriendly = attempt_import('humanfriendly', check_update=CHECK_UPDATE)
 pd = import_pandas()
 
+INDEX_PREFIX_EMOJI: Dict[str, str] = {
+    'datetime': '🕓',
+    'primary': '🔑',
+}
+
 
 def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, None]:
     """
@@ -420,9 +425,9 @@ def accordion_items_from_pipe(
         columns = pipe.columns
         index_column_names = pipe.get_indices()
         indices_rows = []
-        for ix_key, ix_name in index_column_names.items():
+        for ix_key, ix_cols in indices.items():
             col = columns.get(ix_key, None)
-            ix_cols = indices.get(ix_key, None)
+            ix_name = index_column_names.get(ix_key, None)
             if not col and not ix_cols:
                 continue
             if not isinstance(ix_cols, (list, tuple)):
@@ -434,12 +439,16 @@ def accordion_items_from_pipe(
             else:
                 col_item = html.Pre(html.Ul([html.Li(_c) for _c in ix_cols]))
             is_composite_item = "✅" if col else ""
-            ix_key_item = html.Pre(ix_key) if ix_key != 'datetime' else html.Pre(f"🕓 {ix_key}")
+            ix_key_item = html.Pre(
+                INDEX_PREFIX_EMOJI.get(ix_key, '')
+                + (' ' if ix_key in INDEX_PREFIX_EMOJI else '')
+                + ix_key
+            )
             indices_rows.append(
                 html.Tr([
                     html.Td(ix_key_item),
                     html.Td(col_item),
-                    html.Td(html.Pre(ix_name)),
+                    html.Td(html.Pre(ix_name or '')),
                     html.Td(is_composite_item),
                 ])
             )

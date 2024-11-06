@@ -92,6 +92,7 @@ class Pipe:
         _get_data_as_iterator,
         get_chunk_interval,
         get_chunk_bounds,
+        parse_date_bounds,
     )
     from ._register import register
     from ._attributes import (
@@ -101,6 +102,9 @@ class Pipe:
         indices,
         indexes,
         dtypes,
+        autoincrement,
+        upsert,
+        static,
         get_columns,
         get_columns_types,
         get_columns_indices,
@@ -155,6 +159,8 @@ class Pipe:
         instance: Optional[Union[str, InstanceConnector]] = None,
         temporary: bool = False,
         upsert: Optional[bool] = None,
+        autoincrement: Optional[bool] = None,
+        static: Optional[bool] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
         debug: bool = False,
@@ -205,6 +211,12 @@ class Pipe:
 
         upsert: Optional[bool], default None
             If `True`, set `upsert` to `True` in the parameters.
+
+        autoincrement: Optional[bool], default None
+            If `True`, set `autoincrement` in the parameters.
+
+        static: Optional[bool], default None
+            If `True`, set `static` in the parameters.
 
         temporary: bool, default False
             If `True`, prevent instance tables (pipes, users, plugins) from being created.
@@ -299,6 +311,12 @@ class Pipe:
 
         if isinstance(upsert, bool):
             self._attributes['parameters']['upsert'] = upsert
+
+        if isinstance(autoincrement, bool):
+            self._attributes['parameters']['autoincrement'] = autoincrement
+
+        if isinstance(static, bool):
+            self._attributes['parameters']['static'] = static
 
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,

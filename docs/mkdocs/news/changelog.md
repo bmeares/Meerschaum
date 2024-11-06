@@ -26,8 +26,9 @@ This is the current release cycle, so stay tuned for future releases!
       {'pk': 1},
   ])
   ```
+
 - **Add `autoincrement` to `Pipe.parameters`**  
-  Like the `upsert` feature flag, you may designate an incremental integer primary key by setting `autoincrement` to `True` in the pipe parameters. Note that `autoincrement` will be `True` if you specify a `primary` index but do not specify a dtype or pass into the initial dataframe. This is only available for `sql` pipes at the moment.
+  Like `upsert`, you may designate an incremental integer primary key by setting `autoincrement` to `True` in the pipe parameters. Note that `autoincrement` will be `True` if you specify a `primary` index but do not specify a dtype or pass into the initial dataframe. This is only available for `sql` pipes.
 
   ```python
   import meerschaum as mrsm
@@ -57,7 +58,7 @@ This is the current release cycle, so stay tuned for future releases!
 
   ```
 
-- **Add `get_create_table_queries()` to built from `dtypes` dictionaries.**  
+- **Add `get_create_table_queries()` to build from `dtypes` dictionaries.**  
   You may get a `CREATE TABLE` query from a `dtypes` dictionary (in addition to a `SELECT` query). The function `meerschaum.utils.sql.get_create_table_query()` now also accepts an arguments `primary_key` and `autoincrement` to designate a primary key column. 
 
   ```python
@@ -90,12 +91,40 @@ This is the current release cycle, so stay tuned for future releases!
 - **Default to `BIT` for boolean columns in MSSQL.**  
   The previous workaround was to store `bool` columns as `INT`. This change now defaults to `BIT` when creating new tables. Boolean columns cannot be nullable for MSSQL.
 
+- **Add option `static` to `Pipe.parameters` to disable schema modification.**  
+  Set `static` to `True` in a pipe's parameters to prevent any modification of the column's data types.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'static',
+      columns={
+          'primary': 'id',
+          'datetime': 'id',
+      },
+      dtypes={
+          'meta': 'json',
+          'id': 'int',
+      },
+      parameters={
+          'static': True,
+          'upsert': True,
+          'autoincrement': True,
+      },
+  )
+  pipe.sync([{'id': 1, 'meta': {'foo': 'bar'}}])
+
+  ### Abort syncing new columns when `static` is set. 
+  pipe.sync([{'id': 1, 'color': 'blue'}])
+  
+  mrsm.pprint(pipe.get_columns_types())
+  # {'id': 'BIGINT', 'meta': 'JSONB'}
+  ```
+
 - **Improve file protection in `edit config`.**  
   Writing an invalid config file will now stop you before committing the changes. The previous behavior would lead to data loss.
 
-- **Enable chunking for DuckDB.**  
-  Because `duckdb-engine` now supports chunking, `chunksize` is now accepted for `SQLConnector.read()` for `duckdb` connectors.
-  
 - **Catch exceptions when creating chunk labels.**  
   If a datetime bound cannot be determined for a chunk, return `pd.NA`.
 

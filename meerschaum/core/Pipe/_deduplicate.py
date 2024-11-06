@@ -65,14 +65,16 @@ def deduplicate(
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.pool import get_pool
 
+    begin, end = self.parse_date_bounds(begin, end)
+
     if self.cache_pipe is not None:
         success, msg = self.cache_pipe.deduplicate(
-            begin = begin,
-            end = end,
-            params = params,
-            bounded = bounded,
-            debug = debug,
-            _use_instance_method = _use_instance_method,
+            begin=begin,
+            end=end,
+            params=params,
+            bounded=bounded,
+            debug=debug,
+            _use_instance_method=_use_instance_method,
             **kwargs
         )
         if not success:
@@ -86,11 +88,11 @@ def deduplicate(
             if hasattr(self.instance_connector, 'deduplicate_pipe'):
                 return self.instance_connector.deduplicate_pipe(
                     self,
-                    begin = begin,
-                    end = end,
-                    params = params,
-                    bounded = bounded,
-                    debug = debug,
+                    begin=begin,
+                    end=end,
+                    params=params,
+                    bounded=bounded,
+                    debug=debug,
                     **kwargs
                 )
 
@@ -117,33 +119,33 @@ def deduplicate(
         )
 
     chunk_bounds = self.get_chunk_bounds(
-        bounded = bounded,
-        begin = begin,
-        end = end,
-        chunk_interval = chunk_interval,
-        debug = debug,
+        bounded=bounded,
+        begin=begin,
+        end=end,
+        chunk_interval=chunk_interval,
+        debug=debug,
     )
 
     indices = [col for col in self.columns.values() if col]
     if not indices:
-        return False, f"Cannot deduplicate without index columns."
+        return False, "Cannot deduplicate without index columns."
     dt_col = self.columns.get('datetime', None)
 
     def process_chunk_bounds(bounds) -> Tuple[
-            Tuple[
-                Union[datetime, int, None],
-                Union[datetime, int, None]
-            ],
-            SuccessTuple
-        ]:
+        Tuple[
+            Union[datetime, int, None],
+            Union[datetime, int, None]
+        ],
+        SuccessTuple
+    ]:
         ### Only selecting the index values here to keep bandwidth down.
         chunk_begin, chunk_end = bounds
         chunk_df = self.get_data(
-            select_columns = indices, 
-            begin = chunk_begin,
-            end = chunk_end,
-            params = params,
-            debug = debug,
+            select_columns=indices, 
+            begin=chunk_begin,
+            end=chunk_end,
+            params=params,
+            debug=debug,
         )
         if chunk_df is None:
             return bounds, (True, "")

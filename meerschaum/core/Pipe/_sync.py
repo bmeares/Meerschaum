@@ -141,6 +141,7 @@ def sync(
         chunksize = None
         sync_chunks = False
 
+    begin, end = self.parse_date_bounds(begin, end)
     kw.update({
         'begin': begin,
         'end': end,
@@ -460,7 +461,7 @@ def get_sync_time(
     apply_backtrack_interval: bool = False,
     round_down: bool = False,
     debug: bool = False
-) -> Union['datetime', None]:
+) -> Union['datetime', int, None]:
     """
     Get the most recent datetime value for a Pipe.
 
@@ -485,7 +486,7 @@ def get_sync_time(
 
     Returns
     -------
-    A `datetime` object if the pipe exists, otherwise `None`.
+    A `datetime` or int, if the pipe exists, otherwise `None`.
 
     """
     from meerschaum.utils.venv import Venv
@@ -510,7 +511,7 @@ def get_sync_time(
         except Exception as e:
             warn(f"Failed to apply backtrack interval:\n{e}")
 
-    return sync_time
+    return self.parse_date_bounds(sync_time)
 
 
 def exists(
