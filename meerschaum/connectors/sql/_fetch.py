@@ -95,7 +95,7 @@ def fetch(
         ignore_cols = [
             col
             for col, dtype in pipe.dtypes.items()
-            if are_dtypes_equal(str(dtype), 'datetime')
+            if not are_dtypes_equal(str(dtype), 'datetime')
         ]
         return (
             parse_df_datetimes(

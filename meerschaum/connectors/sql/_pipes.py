@@ -971,7 +971,7 @@ def get_pipe_data(
         ignore_dt_cols = [
             col
             for col, dtype in pipe.dtypes.items()
-            if are_dtypes_equal(str(dtype), 'datetime')
+            if not are_dtypes_equal(str(dtype), 'datetime')
         ]
         ### NOTE: We have to consume the iterator here to ensure that datetimes are parsed correctly
         df = (

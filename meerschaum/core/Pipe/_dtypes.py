@@ -62,7 +62,7 @@ def enforce_dtypes(
                 ignore_cols=[
                     col
                     for col, dtype in pipe_dtypes.items()
-                    if are_dtypes_equal(str(dtype), 'datetime')
+                    if not are_dtypes_equal(str(dtype), 'datetime')
                 ],
                 strip_timezone=(self.tzinfo is None),
                 chunksize=chunksize,
