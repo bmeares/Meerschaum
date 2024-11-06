@@ -7,44 +7,71 @@ Functions for editing the configuration file
 """
 
 from __future__ import annotations
-import sys
 import pathlib
 from meerschaum.utils.typing import Optional, Any, SuccessTuple, Mapping, Dict, List, Union
 
+
 def edit_config(
-        keys : Optional[List[str]] = None,
-        params : Optional[Dict[str, Any]] = None,
-        debug : bool = False,
-        **kw : Any
-    ) -> SuccessTuple:
+    keys: Optional[List[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """Edit the configuration files."""
     from meerschaum.config import get_config, config
-    from meerschaum.config._read_config import get_keyfile_path
+    from meerschaum.config._read_config import get_keyfile_path, read_config
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.utils.packages import reload_meerschaum
     from meerschaum.utils.misc import edit_file
-    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import warn, dprint
+    from meerschaum.utils.prompt import prompt
 
     if keys is None:
         keys = []
 
-    for k in keys:
-        ### If defined in default, create the config file.
-        if isinstance(config, dict) and k in config:
-            del config[k]
-        get_config(k, write_missing=True, warn=False)
-        edit_file(get_keyfile_path(k, create_new=True))
+    def _edit_key(key: str):
+        while True:
+            ### If defined in default, create the config file.
+            key_config = config.pop(key, None)
+            keyfile_path = get_keyfile_path(key, create_new=True)
+            get_config(key, write_missing=True, warn=False)
+
+            edit_file(get_keyfile_path(key, create_new=True))
+
+            ### TODO: verify that the file is valid. Retry if not.
+            try:
+                new_key_config = read_config(
+                    CONFIG_DIR_PATH,
+                    [key],
+                    write_missing=False,
+                    raise_parsing_errors=True,
+                )
+            except Exception:
+                if key_config:
+                    config[key] = key_config
+                warn(f"Could not parse key '{key}'.", stack=False)
+                _ = prompt(f"Press [Enter] to edit '{keyfile_path}', [CTRL+C] to exit.")
+                continue
+
+            if new_key_config:
+                break
+
+    try:
+        for k in keys:
+            _edit_key(k)
+    except KeyboardInterrupt:
+        return False, f""
 
     reload_meerschaum(debug=debug)
     return (True, "Success")
 
 
 def write_config(
-        config_dict: Optional[Dict[str, Any]] = None,
-        directory: Union[str, pathlib.Path, None] = None,
-        debug: bool = False,
-        **kw : Any
-    ) -> bool:
+    config_dict: Optional[Dict[str, Any]] = None,
+    directory: Union[str, pathlib.Path, None] = None,
+    debug: bool = False,
+    **kw: Any
+) -> bool:
     """Write YAML and JSON files to the configuration directory.
 
     Parameters

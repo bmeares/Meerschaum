@@ -101,18 +101,18 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
         dt_col = self.columns.get('datetime', None)
         if dt_col:
             if not self.parameters.get('dtypes', {}).get(dt_col, None):
-                dtypes[dt_col] = 'datetime64[ns]'
+                dtypes[dt_col] = 'datetime64[ns, UTC]'
         return dtypes
 
-    from meerschaum.utils.sql import get_pd_type
-    from meerschaum.utils.misc import to_pandas_dtype
+    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
+    from meerschaum.utils.dtypes import to_pandas_dtype
     columns_types = self.get_columns_types(debug=debug)
 
     ### NOTE: get_columns_types() may return either the types as
     ###       PostgreSQL- or Pandas-style.
     dtypes = {
         c: (
-            get_pd_type(t, allow_custom_dtypes=True)
+            get_pd_type_from_db_type(t, allow_custom_dtypes=True)
             if str(t).isupper()
             else to_pandas_dtype(t)
         )

@@ -19,7 +19,7 @@ MRSM_PD_DTYPES: Dict[str, str] = {
     'json': 'object',
     'numeric': 'object',
     'uuid': 'object',
-    'datetime': 'datetime64[ns]',
+    'datetime': 'datetime64[ns, UTC]',
     'bool': 'bool[pyarrow]',
     'int': 'Int64',
     'int8': 'Int8',
@@ -245,7 +245,10 @@ def quantize_decimal(x: Decimal, scale: int, precision: int) -> Decimal:
         return x
 
 
-def coerce_timezone(dt: Any) -> Any:
+def coerce_timezone(
+    dt: Any,
+    strip_utc: bool = False,
+) -> Any:
     """
     Given a `datetime`, pandas `Timestamp` or `Series` of `Timestamp`,
     return a naive datetime in terms of UTC.
@@ -256,13 +259,29 @@ def coerce_timezone(dt: Any) -> Any:
     if isinstance(dt, int):
         return dt
 
-    dt_is_series = hasattr(dt, 'dtype')
+    if isinstance(dt, str):
+        dateutil_parser = mrsm.attempt_import('dateutil.parser')
+        dt = dateutil_parser.parse(dt)
+
+    dt_is_series = hasattr(dt, 'dtype') and hasattr(dt, '__module__')
 
     if dt_is_series:
+        is_dask = 'dask' in dt.__module__
         pandas = mrsm.attempt_import('pandas')
-        return pandas.to_datetime(dt, utc=True).apply(lambda x: x.replace(tzinfo=None))
+        dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
+        dt_series = (
+            pandas.to_datetime(dt, utc=True)
+            if dd is None
+            else dd.to_datetime(dt, utc=True)
+        )
+        if strip_utc:
+            dt_series = dt_series.apply(lambda x: x.replace(tzinfo=None))
+
+        return dt_series
 
     if dt.tzinfo is None:
-        return dt
+        if strip_utc:
+            return dt
+        return dt.replace(tzinfo=timezone.utc)
 
-    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.astimezone(timezone.utc)

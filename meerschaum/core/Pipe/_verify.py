@@ -11,6 +11,7 @@ from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, L
 from meerschaum.utils.warnings import warn, info
 from meerschaum.utils.debug import dprint
 
+
 def verify(
     self,
     begin: Union[datetime, int, None] = None,
@@ -84,6 +85,8 @@ def verify(
     if bounded and end is None:
         end = self.get_sync_time(newest=True, debug=debug)
 
+    begin, end = self.parse_date_bounds(begin, end)
+
     if bounded and end is not None:
         end += (
             timedelta(minutes=1)
@@ -98,45 +101,45 @@ def verify(
 
     if cannot_determine_bounds:
         sync_success, sync_msg = self.sync(
-            begin = begin,
-            end = end,
-            params = params,
-            workers = workers,
-            debug = debug,
+            begin=begin,
+            end=end,
+            params=params,
+            workers=workers,
+            debug=debug,
             **kwargs
         )
         if not sync_success:
             return sync_success, sync_msg
+
         if deduplicate:
             return self.deduplicate(
-                begin = begin,
-                end = end,
-                params = params,
-                workers = workers,
-                debug = debug,
+                begin=begin,
+                end=end,
+                params=params,
+                workers=workers,
+                debug=debug,
                 **kwargs
             )
         return sync_success, sync_msg
 
-
     chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
     chunk_bounds = self.get_chunk_bounds(
-        begin = begin,
-        end = end,
-        chunk_interval = chunk_interval,
-        bounded = bounded,
-        debug = debug,
+        begin=begin,
+        end=end,
+        chunk_interval=chunk_interval,
+        bounded=bounded,
+        debug=debug,
     )
 
     ### Consider it a success if no chunks need to be verified.
     if not chunk_bounds:
         if deduplicate:
             return self.deduplicate(
-                begin = begin,
-                end = end,
-                params = params,
-                workers = workers,
-                debug = debug,
+                begin=begin,
+                end=end,
+                params=params,
+                workers=workers,
+                debug=debug,
                 **kwargs
             )
         return True, f"Could not determine chunks between '{begin}' and '{end}'; nothing to do."
@@ -175,21 +178,21 @@ def verify(
     ### }
     bounds_success_tuples = {}
     def process_chunk_bounds(
-            chunk_begin_and_end: Tuple[
-                Union[int, datetime],
-                Union[int, datetime]
-            ]
-        ):
+        chunk_begin_and_end: Tuple[
+            Union[int, datetime],
+            Union[int, datetime]
+        ]
+    ):
         if chunk_begin_and_end in bounds_success_tuples:
             return chunk_begin_and_end, bounds_success_tuples[chunk_begin_and_end]
 
         chunk_begin, chunk_end = chunk_begin_and_end
         return chunk_begin_and_end, self.sync(
-            begin = chunk_begin,
-            end = chunk_end,
-            params = params,
-            workers = workers,
-            debug = debug,
+            begin=chunk_begin,
+            end=chunk_end,
+            params=params,
+            workers=workers,
+            debug=debug,
             **kwargs
         )
 
@@ -216,11 +219,11 @@ def verify(
         msg = get_chunks_success_message(bounds_success_tuples, header=message_header)
         if deduplicate:
             deduplicate_success, deduplicate_msg = self.deduplicate(
-                begin = begin,
-                end = end,
-                params = params,
-                workers = workers,
-                debug = debug,
+                begin=begin,
+                end=end,
+                params=params,
+                workers=workers,
+                debug=debug,
                 **kwargs
             )
             return deduplicate_success, msg + '\n\n' + deduplicate_msg
@@ -239,7 +242,7 @@ def verify(
         warn(
             f"Will resync the following failed chunks:\n    "
             + '\n    '.join(bounds_to_print),
-            stack = False,
+            stack=False,
         )
 
     retry_bounds_success_tuples = dict(pool.map(process_chunk_bounds, chunk_bounds_to_resync))
@@ -256,11 +259,11 @@ def verify(
         )
         if deduplicate:
             deduplicate_success, deduplicate_msg = self.deduplicate(
-                begin = begin,
-                end = end,
-                params = params,
-                workers = workers,
-                debug = debug,
+                begin=begin,
+                end=end,
+                params=params,
+                workers=workers,
+                debug=debug,
                 **kwargs
             )
             return deduplicate_success, message + '\n\n' + deduplicate_msg
@@ -269,11 +272,11 @@ def verify(
     message = get_chunks_success_message(bounds_success_tuples, header=message_header)
     if deduplicate:
         deduplicate_success, deduplicate_msg = self.deduplicate(
-            begin = begin,
-            end = end,
-            params = params,
-            workers = workers,
-            debug = debug,
+            begin=begin,
+            end=end,
+            params=params,
+            workers=workers,
+            debug=debug,
             **kwargs
         )
         return deduplicate_success, message + '\n\n' + deduplicate_msg
@@ -394,7 +397,7 @@ def get_bound_interval(self, debug: bool = False) -> Union[timedelta, int, None]
     if not dt_col:
         return bound_time_value
 
-    dt_typ = self.dtypes.get(dt_col, 'datetime64[ns]')
+    dt_typ = self.dtypes.get(dt_col, 'datetime64[ns, UTC]')
     if 'int' in dt_typ.lower():
         return int(bound_time_value)
 
@@ -417,7 +420,7 @@ def get_bound_time(self, debug: bool = False) -> Union[datetime, int, None]:
     -------
     A `datetime` or `int` corresponding to the
     `begin` bound for verification and deduplication syncs.
-    """ 
+    """
     bound_interval = self.get_bound_interval(debug=debug)
     if bound_interval is None:
         return None

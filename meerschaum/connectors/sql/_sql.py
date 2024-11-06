@@ -18,7 +18,7 @@ from meerschaum.utils.warnings import warn
 _bulk_flavors = {'postgresql', 'timescaledb', 'citus'}
 ### flavors that do not support chunks
 _disallow_chunks_flavors = ['duckdb']
-_max_chunks_flavors = {'sqlite': 1000,}
+_max_chunks_flavors = {'sqlite': 1000}
 SKIP_READ_TRANSACTION_FLAVORS: list[str] = ['mssql']
 
 
@@ -123,7 +123,8 @@ def read(
     if chunks is not None and chunks <= 0:
         return []
     from meerschaum.utils.sql import sql_item_name, truncate_item_name
-    from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS
+    from meerschaum.utils.dtypes import are_dtypes_equal, coerce_timezone
+    from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS, TIMEZONE_NAIVE_FLAVORS
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.pool import get_pool
     from meerschaum.utils.dataframe import chunksize_to_npartitions, get_numeric_cols
@@ -133,12 +134,22 @@ def read(
     pd = import_pandas()
     dd = None
     is_dask = 'dask' in pd.__name__
-    pd = attempt_import('pandas')
+    pandas = attempt_import('pandas')
     is_dask = dd is not None
     npartitions = chunksize_to_npartitions(chunksize)
     if is_dask:
         chunksize = None
     schema = schema or self.schema
+    utc_dt_cols = [
+        col
+        for col, typ in dtype.items()
+        if are_dtypes_equal(typ, 'datetime') and 'utc' in typ.lower()
+    ] if dtype else []
+
+    if dtype and utc_dt_cols and self.flavor in TIMEZONE_NAIVE_FLAVORS:
+        dtype = dtype.copy()
+        for col in utc_dt_cols:
+            dtype[col] = 'datetime64[ns]'
 
     pool = get_pool(workers=workers)
     sqlalchemy = attempt_import("sqlalchemy")
@@ -162,7 +173,6 @@ def read(
                 )
             chunksize = _max_chunks_flavors[self.flavor]
 
-    ### NOTE: A bug in duckdb_engine does not allow for chunks.
     if chunksize is not None and self.flavor in _disallow_chunks_flavors:
         chunksize = None
 
@@ -206,6 +216,9 @@ def read(
     chunk_list = []
     chunk_hook_results = []
     def _process_chunk(_chunk, _retry_on_failure: bool = True):
+        if self.flavor in TIMEZONE_NAIVE_FLAVORS:
+            for col in utc_dt_cols:
+                _chunk[col] = coerce_timezone(_chunk[col], strip_timezone=False)
         if not as_hook_results:
             chunk_list.append(_chunk)
         if chunk_hook is None:
@@ -485,6 +498,8 @@ def exec(
     commit: Optional[bool] = None,
     close: Optional[bool] = None,
     with_connection: bool = False,
+    _connection=None,
+    _transaction=None,
     **kw: Any
 ) -> Union[
         sqlalchemy.engine.result.resultProxy,
@@ -495,7 +510,7 @@ def exec(
 ]:
     """
     Execute SQL code and return the `sqlalchemy` result, e.g. when calling stored procedures.
-    
+
     If inserting data, please use bind variables to avoid SQL injection!
 
     Parameters
@@ -552,15 +567,24 @@ def exec(
     if not hasattr(query, 'compile'):
         query = sqlalchemy.text(query)
 
-    connection = self.get_connection()
+    connection = _connection if _connection is not None else self.get_connection()
 
     try:
-        transaction = connection.begin() if _commit else None
-    except sqlalchemy.exc.InvalidRequestError:
+        transaction = (
+            _transaction
+            if _transaction is not None else (
+                connection.begin()
+                if _commit
+                else None
+            )
+        )
+    except sqlalchemy.exc.InvalidRequestError as e:
+        if _connection is not None or _transaction is not None:
+            raise e
         connection = self.get_connection(rebuild=True)
         transaction = connection.begin()
 
-    if transaction is not None and not transaction.is_active:
+    if transaction is not None and not transaction.is_active and _transaction is not None:
         connection = self.get_connection(rebuild=True)
         transaction = connection.begin() if _commit else None
 
@@ -695,6 +719,8 @@ def to_sql(
     debug: bool = False,
     as_tuple: bool = False,
     as_dict: bool = False,
+    _connection=None,
+    _transaction=None,
     **kw
 ) -> Union[bool, SuccessTuple]:
     """
@@ -765,10 +791,11 @@ def to_sql(
         DROP_IF_EXISTS_FLAVORS,
     )
     from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
-    from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal
+    from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal, coerce_timezone
     from meerschaum.utils.dtypes.sql import (
         NUMERIC_PRECISION_FLAVORS,
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
+        get_db_type_from_pd_type,
     )
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
@@ -836,6 +863,8 @@ def to_sql(
         to_sql_kw.update({
             'parallel': True,
         })
+    elif _connection is not None:
+        to_sql_kw['con'] = _connection
 
     if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     if self.flavor == 'oracle':
@@ -848,7 +877,6 @@ def to_sql(
             if not success:
                 warn(f"Unable to drop {name}")
 
-
         ### Enforce NVARCHAR(2000) as text instead of CLOB.
         dtype = to_sql_kw.get('dtype', {})
         for col, typ in df.dtypes.items():
@@ -857,11 +885,23 @@ def to_sql(
             elif are_dtypes_equal(str(typ), 'int'):
                 dtype[col] = sqlalchemy.types.INTEGER
         to_sql_kw['dtype'] = dtype
+    elif self.flavor == 'duckdb':
+        dtype = to_sql_kw.get('dtype', {})
+        dt_cols = [col for col, typ in df.dtypes.items() if are_dtypes_equal(str(typ), 'datetime')]
+        for col in dt_cols:
+            df[col] = coerce_timezone(df[col], strip_utc=False)
     elif self.flavor == 'mssql':
         dtype = to_sql_kw.get('dtype', {})
-        for col, typ in df.dtypes.items():
-            if are_dtypes_equal(str(typ), 'bool'):
-                dtype[col] = sqlalchemy.types.INTEGER
+        dt_cols = [col for col, typ in df.dtypes.items() if are_dtypes_equal(str(typ), 'datetime')]
+        new_dtype = {}
+        for col in dt_cols:
+            if col in dtype:
+                continue
+            dt_typ = get_db_type_from_pd_type(str(df.dtypes[col]), self.flavor, as_sqlalchemy=True)
+            if col not in dtype:
+                new_dtype[col] = dt_typ
+
+        dtype.update(new_dtype)
         to_sql_kw['dtype'] = dtype
 
     ### Check for JSON columns.
@@ -897,7 +937,7 @@ def to_sql(
 
     try:
         with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', 'case sensitivity issues')
+            warnings.filterwarnings('ignore')
             df.to_sql(**to_sql_kw)
         success = True
     except Exception as e:

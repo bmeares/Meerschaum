@@ -688,6 +688,37 @@ You may take advantage of automatic dtype enforcement by implementing this metho
         return columns_types
     ```
 
+### `#!python get_pipe_columns_indices()` (optional)
+
+You may choose to implement `get_pipe_columns_indices()`, which returns a dictionary mapping columns to a list of related indices.
+
+??? example
+
+```python
+def get_pipe_columns_indices(
+    debug: bool = False,
+) -> Dict[str, List[Dict[str, str]]]:
+    """
+    Return a dictionary mapping columns to metadata about related indices.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table has related indices.
+
+    Returns
+    -------
+    A list of dictionaries with the keys "type" and "name".
+
+    Examples
+    --------
+    >>> pipe = mrsm.Pipe('demo', 'shirts', columns={'primary': 'id'}, indices={'size_color': ['color', 'size']})
+    >>> pipe.sync([{'color': 'red', 'size': 'M'}])
+    >>> pipe.get_columns_indices()
+    {'id': [{'name': 'demo_shirts_pkey', 'type': 'PRIMARY KEY'}], 'color': [{'name': 'IX_demo_shirts_color_size', 'type': 'INDEX'}], 'size': [{'name': 'IX_demo_shirts_color_size', 'type': 'INDEX'}]}
+    """
+```
+
 ## `#!python get_pipe_rowcount()`
 
 Return the number of rows in the pipe's target table within the `begin`, `end`, and `params` bounds:

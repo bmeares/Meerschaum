@@ -58,12 +58,14 @@ def clear(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
+    begin, end = self.parse_date_bounds(begin, end)
+
     if self.cache_pipe is not None:
         success, msg = self.cache_pipe.clear(
-            begin = begin,
-            end = end,
-            params = params,
-            debug = debug,
+            begin=begin,
+            end=end,
+            params=params,
+            debug=debug,
             **kwargs
         )
         if not success:
@@ -72,9 +74,9 @@ def clear(
     with Venv(get_connector_plugin(self.instance_connector)):
         return self.instance_connector.clear_pipe(
             self,
-            begin = begin,
-            end = end,
-            params = params,
-            debug = debug,
+            begin=begin,
+            end=end,
+            params=params,
+            debug=debug,
             **kwargs
         )

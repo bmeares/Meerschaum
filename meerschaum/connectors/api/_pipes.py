@@ -669,11 +669,11 @@ def clear_pipe(
     kw.pop('force', None)
     return self.do_action_legacy(
         ['clear', 'pipes'],
-        connector_keys = pipe.connector_keys,
-        metric_keys = pipe.metric_key,
-        location_keys = pipe.location_key,
-        force = True,
-        debug = debug,
+        connector_keys=pipe.connector_keys,
+        metric_keys=pipe.metric_key,
+        location_keys=pipe.location_key,
+        force=True,
+        debug=debug,
         **kw
     )
 
@@ -690,7 +690,7 @@ def get_pipe_columns_types(
     ----------
     pipe: meerschaum.Pipe
         The pipe whose columns to be queried.
-        
+
     Returns
     -------
     A dictionary mapping column names to their database types.
@@ -707,11 +707,42 @@ def get_pipe_columns_types(
     r_url = pipe_r_url(pipe) + '/columns/types'
     response = self.get(
         r_url,
-        debug = debug
+        debug=debug
     )
     j = response.json()
     if isinstance(j, dict) and 'detail' in j and len(j.keys()) == 1:
-        from meerschaum.utils.warnings import warn
+        warn(j['detail'])
+        return None
+    if not isinstance(j, dict):
+        warn(response.text)
+        return None
+    return j
+
+
+def get_pipe_columns_indices(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> Union[Dict[str, str], None]:
+    """
+    Fetch the index information for a pipe.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose columns to be queried.
+
+    Returns
+    -------
+    A dictionary mapping column names to a list of associated index information.
+    """
+    r_url = pipe_r_url(pipe) + '/columns/indices'
+    response = self.get(
+        r_url,
+        debug=debug
+    )
+    j = response.json()
+    if isinstance(j, dict) and 'detail' in j and len(j.keys()) == 1:
         warn(j['detail'])
         return None
     if not isinstance(j, dict):

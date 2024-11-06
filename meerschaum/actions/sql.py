@@ -14,6 +14,7 @@ exec_methods = {
     'exec',
 }
 
+
 def sql(
     action: Optional[List[str]] = None,
     gui: bool = False,
@@ -22,40 +23,40 @@ def sql(
     **kw: Any
 ):
     """Execute a SQL query or launch an interactive CLI. All positional arguments are optional.
-    
+
     Usage:
         `sql {label} {method} {query / table}`
-    
+
     Options:
         - `sql {label}`
             Launch an interactive CLI. If {label} is omitted, use 'main'.
-    
+
         - `sql {label} read [query / table]`
             Read a table or query as a pandas DataFrame and print the result.
-    
+
         - `sql {label} exec [query]`
             Execute a query and print the success status.
-    
+
     Examples:
         - `sql`
             Open an interactive CLI for `sql:main`.
-    
+
         - `sql local`
             Open an interactive CLI for `sql:local`.
-    
+
         - `sql table`
             Read from `table` on `sql:main`
               (translates to `SELECT * FROM table`).
-    
+
         - `sql local table`
             Read from `table` on `sql:local`.
-    
+
         - `sql local read table`
             Read from `table` on `sql:local`.
-    
+
         - `sql "SELECT * FROM table WHERE id = 1"`
             Execute the above query on `sql:main` and print the results.
-    
+
         - `sql local exec "INSERT INTO table (id) VALUES (1)"
             Execute the above query on `sql:local`.
     """

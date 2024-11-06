@@ -16,6 +16,7 @@ from meerschaum.utils.dtypes.sql import (
     PD_TO_DB_DTYPES_FLAVORS,
     get_pd_type_from_db_type as get_pd_type,
     get_db_type_from_pd_type as get_db_type,
+    TIMEZONE_NAIVE_FLAVORS,
 )
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.debug import dprint
@@ -41,6 +42,7 @@ SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
 DROP_IF_EXISTS_FLAVORS = {
     'timescaledb', 'postgresql', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite',
 }
+SKIP_AUTO_INCREMENT_FLAVORS = {'citus', 'duckdb'}
 COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'citus'}
 update_queries = {
     'default': """
@@ -173,7 +175,7 @@ columns_types_queries = {
             p.name "column",
             p.type "type"
         FROM sqlite_master m
-        LEFT OUTER JOIN pragma_table_info((m.name)) p
+        LEFT OUTER JOIN pragma_table_info(m.name) p
             ON m.name <> p.name
         WHERE m.type = 'table'
             AND m.name IN ('{table}', '{table_trunc}')
@@ -186,8 +188,11 @@ columns_types_queries = {
             COLUMN_NAME AS [column],
             DATA_TYPE AS [type]
         FROM {db_prefix}INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME LIKE '{table}%'
-            OR TABLE_NAME LIKE '{table_trunc}%'
+        WHERE TABLE_NAME IN (
+            '{table}',
+            '{table_trunc}'
+        )
+
     """,
     'mysql': """
         SELECT
@@ -230,6 +235,206 @@ columns_types_queries = {
 hypertable_queries = {
     'timescaledb': 'SELECT hypertable_size(\'{table_name}\')',
     'citus': 'SELECT citus_table_size(\'{table_name}\')',
+}
+columns_indices_queries = {
+    'default': """
+        SELECT
+            current_database() AS "database",
+            n.nspname AS "schema",
+            t.relname AS "table",
+            c.column_name AS "column",
+            i.relname AS "index",
+            CASE WHEN con.contype = 'p' THEN 'PRIMARY KEY' ELSE 'INDEX' END AS "index_type"
+        FROM pg_class t
+        INNER JOIN pg_index AS ix
+            ON t.oid = ix.indrelid
+        INNER JOIN pg_class AS i
+            ON i.oid = ix.indexrelid
+        INNER JOIN pg_namespace AS n
+            ON n.oid = t.relnamespace
+        INNER JOIN pg_attribute AS a
+            ON a.attnum = ANY(ix.indkey)
+            AND a.attrelid = t.oid
+        INNER JOIN information_schema.columns AS c
+            ON c.column_name = a.attname
+            AND c.table_name = t.relname
+            AND c.table_schema = n.nspname
+        LEFT JOIN pg_constraint AS con
+            ON con.conindid = i.oid
+            AND con.contype = 'p'
+        WHERE
+            t.relname IN ('{table}', '{table_trunc}')
+            AND n.nspname = '{schema}'
+    """,
+    'sqlite': """
+        WITH indexed_columns AS (
+            SELECT
+                '{table}' AS table_name,
+                pi.name AS column_name,
+                i.name AS index_name,
+                'INDEX' AS index_type
+            FROM
+                sqlite_master AS i,
+                pragma_index_info(i.name) AS pi
+            WHERE
+                i.type = 'index'
+                AND i.tbl_name = '{table}'
+        ),
+        primary_key_columns AS (
+            SELECT
+                '{table}' AS table_name,
+                ti.name AS column_name,
+                'PRIMARY_KEY' AS index_name,
+                'PRIMARY KEY' AS index_type
+            FROM
+                pragma_table_info('{table}') AS ti
+            WHERE
+                ti.pk > 0
+        )
+        SELECT
+            NULL AS "database",
+            NULL AS "schema",
+            "table_name" AS "table",
+            "column_name" AS "column",
+            "index_name" AS "index",
+            "index_type"
+        FROM indexed_columns
+        UNION ALL
+        SELECT
+            NULL AS "database",
+            NULL AS "schema",
+            table_name AS "table",
+            column_name AS "column",
+            index_name AS "index",
+            index_type
+        FROM primary_key_columns
+    """,
+    'mssql': """
+        SELECT
+            NULL AS [database],
+            s.name AS [schema],
+            t.name AS [table],
+            c.name AS [column],
+            i.name AS [index],
+            CASE
+                WHEN kc.type = 'PK' THEN 'PRIMARY KEY'
+                ELSE 'INDEX'
+            END AS [index_type]
+        FROM
+            sys.schemas s
+        INNER JOIN sys.tables t
+            ON s.schema_id = t.schema_id
+        INNER JOIN sys.indexes i
+            ON t.object_id = i.object_id
+        INNER JOIN sys.index_columns ic
+            ON i.object_id = ic.object_id
+            AND i.index_id = ic.index_id
+        INNER JOIN sys.columns c
+            ON ic.object_id = c.object_id
+            AND ic.column_id = c.column_id
+        LEFT JOIN sys.key_constraints kc
+            ON kc.parent_object_id = i.object_id
+            AND kc.type = 'PK'
+            AND kc.name = i.name
+        WHERE
+            t.name IN ('{table}', '{table_trunc}')
+            AND s.name = 'dbo'
+            AND i.type IN (1, 2)  -- 1 = CLUSTERED, 2 = NONCLUSTERED
+    """,
+    'oracle': """
+        SELECT
+            NULL AS "database",
+            ic.table_owner AS "schema",
+            ic.table_name AS "table",
+            ic.column_name AS "column",
+            i.index_name AS "index",
+            CASE
+                WHEN c.constraint_type = 'P' THEN 'PRIMARY KEY'
+                WHEN i.uniqueness = 'UNIQUE' THEN 'UNIQUE INDEX'
+                ELSE 'INDEX'
+            END AS index_type
+        FROM
+            all_ind_columns ic
+        INNER JOIN all_indexes i
+            ON ic.index_name = i.index_name
+            AND ic.table_owner = i.owner
+        LEFT JOIN all_constraints c
+            ON i.index_name = c.constraint_name
+            AND i.table_owner = c.owner
+            AND c.constraint_type = 'P'
+        WHERE ic.table_name IN (
+            '{table}',
+            '{table_trunc}',
+            '{table_upper}',
+            '{table_upper_trunc}'
+        )
+    """,
+    'mysql': """
+        SELECT
+            TABLE_SCHEMA AS `database`,
+            TABLE_SCHEMA AS `schema`,
+            TABLE_NAME AS `table`,
+            COLUMN_NAME AS `column`,
+            INDEX_NAME AS `index`,
+            CASE
+                WHEN NON_UNIQUE = 0 THEN 'PRIMARY KEY'
+                ELSE 'INDEX'
+            END AS `index_type`
+        FROM
+            information_schema.STATISTICS
+        WHERE
+            TABLE_NAME IN ('{table}', '{table_trunc}')
+    """,
+    'mariadb': """
+        SELECT
+            TABLE_SCHEMA AS `database`,
+            TABLE_SCHEMA AS `schema`,
+            TABLE_NAME AS `table`,
+            COLUMN_NAME AS `column`,
+            INDEX_NAME AS `index`,
+            CASE
+                WHEN NON_UNIQUE = 0 THEN 'PRIMARY KEY'
+                ELSE 'INDEX'
+            END AS `index_type`
+        FROM
+            information_schema.STATISTICS
+        WHERE
+            TABLE_NAME IN ('{table}', '{table_trunc}')
+    """,
+}
+reset_autoincrement_queries: Dict[str, Union[str, List[str]]] = {
+    'default': """
+        SELECT SETVAL(pg_get_serial_sequence('{table}', '{column}'), {val})
+        FROM {table_name}
+    """,
+    'mssql': """
+        DBCC CHECKIDENT ('{table}', RESEED, {val})
+    """,
+    'mysql': """
+        ALTER TABLE {table_name} AUTO_INCREMENT = {val}
+    """,
+    'mariadb': """
+        ALTER TABLE {table_name} AUTO_INCREMENT = {val}
+    """,
+    'sqlite': """
+        UPDATE sqlite_sequence
+        SET seq = {val}
+        WHERE name = '{table}'
+    """,
+    'oracle': [
+        """
+        DECLARE
+            max_id NUMBER := {val};
+            current_val NUMBER;
+        BEGIN
+            SELECT {table_seq_name}.NEXTVAL INTO current_val FROM dual;
+
+            WHILE current_val < max_id LOOP
+                SELECT {table_seq_name}.NEXTVAL INTO current_val FROM dual;
+            END LOOP;
+        END;
+        """,
+    ],
 }
 table_wrappers = {
     'default'    : ('"', '"'),
@@ -349,9 +554,8 @@ def dateadd_str(
     "CAST('2022-01-01 00:00:00' AS TIMESTAMP) + INTERVAL '1 day'"
 
     """
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.warnings import error
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     dateutil_parser = attempt_import('dateutil.parser')
     if 'int' in str(type(begin)).lower():
         return str(begin)
@@ -379,26 +583,32 @@ def dateadd_str(
             begin = begin.astimezone(timezone.utc)
         begin = (
             f"'{begin.replace(tzinfo=None)}'"
-            if isinstance(begin, datetime)
+            if isinstance(begin, datetime) and flavor in TIMEZONE_NAIVE_FLAVORS
             else f"'{begin}'"
         )
+
+    dt_is_utc = begin_time.tzinfo is not None if begin_time is not None else '+' in str(begin)
+    db_type = get_db_type_from_pd_type(
+        ('datetime64[ns, UTC]' if dt_is_utc else 'datetime64[ns]'),
+        flavor=flavor,
+    )
 
     da = ""
     if flavor in ('postgresql', 'timescaledb', 'cockroachdb', 'citus'):
         begin = (
-            f"CAST({begin} AS TIMESTAMP)" if begin != 'now'
-            else "CAST(NOW() AT TIME ZONE 'utc' AS TIMESTAMP)"
+            f"CAST({begin} AS {db_type})" if begin != 'now'
+            else "CAST(NOW() AT TIME ZONE 'utc' AS {db_type})"
         )
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
 
     elif flavor == 'duckdb':
-        begin = f"CAST({begin} AS TIMESTAMP)" if begin != 'now' else 'NOW()'
+        begin = f"CAST({begin} AS {db_type})" if begin != 'now' else 'NOW()'
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
 
     elif flavor in ('mssql',):
         if begin_time and begin_time.microsecond != 0:
             begin = begin[:-4] + "'"
-        begin = f"CAST({begin} AS DATETIME)" if begin != 'now' else 'GETUTCDATE()'
+        begin = f"CAST({begin} AS {db_type})" if begin != 'now' else 'GETUTCDATE()'
         da = f"DATEADD({datepart}, {number}, {begin})" if number != 0 else begin
 
     elif flavor in ('mysql', 'mariadb'):
@@ -425,9 +635,9 @@ def dateadd_str(
 
 
 def test_connection(
-        self,
-        **kw: Any
-    ) -> Union[bool, None]:
+    self,
+    **kw: Any
+) -> Union[bool, None]:
     """
     Test if a successful connection to the database may be made.
 
@@ -454,11 +664,11 @@ def test_connection(
 
 
 def get_distinct_col_count(
-        col: str,
-        query: str,
-        connector: Optional[mrsm.connectors.sql.SQLConnector] = None,
-        debug: bool = False
-    ) -> Optional[int]:
+    col: str,
+    query: str,
+    connector: Optional[mrsm.connectors.sql.SQLConnector] = None,
+    debug: bool = False
+) -> Optional[int]:
     """
     Returns the number of distinct items in a column of a SQL query.
 
@@ -624,10 +834,10 @@ def truncate_item_name(item: str, flavor: str) -> str:
 
 
 def build_where(
-        params: Dict[str, Any],
-        connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
-        with_where: bool = True,
-    ) -> str:
+    params: Dict[str, Any],
+    connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+    with_where: bool = True,
+) -> str:
     """
     Build the `WHERE` clause based on the input criteria.
 
@@ -769,7 +979,7 @@ def table_exists(
     ----------
     table: str:
         The name of the table in question.
-        
+
     connector: mrsm.connectors.sql.SQLConnector
         The connector to the database which holds the table.
 
@@ -783,7 +993,6 @@ def table_exists(
     Returns
     -------
     A `bool` indicating whether or not the table exists on the database.
-
     """
     sqlalchemy = mrsm.attempt_import('sqlalchemy')
     schema = schema or connector.schema
@@ -806,7 +1015,7 @@ def get_sqlalchemy_table(
     ----------
     table: str
         The name of the table on the database. Does not need to be escaped.
-        
+
     connector: Optional[meerschaum.connectors.sql.SQLConnector], default None:
         The connector to the database which holds the table. 
 
@@ -822,7 +1031,7 @@ def get_sqlalchemy_table(
 
     Returns
     -------
-    A `sqlalchemy.Table` object for the table. 
+    A `sqlalchemy.Table` object for the table.
 
     """
     if connector is None:
@@ -888,6 +1097,7 @@ def get_table_cols_types(
     connectable: Union[
         'mrsm.connectors.sql.SQLConnector',
         'sqlalchemy.orm.session.Session',
+        'sqlalchemy.engine.base.Engine'
     ]
         The connection object used to fetch the columns and types.
 
@@ -1003,6 +1213,164 @@ def get_table_cols_types(
             ): doc['type'].upper()
             for doc in cols_types_docs_filtered
         }
+    except Exception as e:
+        warn(f"Failed to fetch columns for table '{table}':\n{e}")
+        return {}
+
+
+def get_table_cols_indices(
+    table: str,
+    connectable: Union[
+        'mrsm.connectors.sql.SQLConnector',
+        'sqlalchemy.orm.session.Session',
+        'sqlalchemy.engine.base.Engine'
+    ],
+    flavor: Optional[str] = None,
+    schema: Optional[str] = None,
+    database: Optional[str] = None,
+    debug: bool = False,
+) -> Dict[str, List[str]]:
+    """
+    Return a dictionary mapping a table's columns to lists of indices.
+    This is useful for inspecting tables creating during a not-yet-committed session.
+
+    NOTE: This may return incorrect columns if the schema is not explicitly stated.
+        Use this function if you are confident the table name is unique or if you have
+        and explicit schema.
+        To use the configured schema, get the columns from `get_sqlalchemy_table()` instead.
+
+    Parameters
+    ----------
+    table: str
+        The name of the table (unquoted).
+
+    connectable: Union[
+        'mrsm.connectors.sql.SQLConnector',
+        'sqlalchemy.orm.session.Session',
+        'sqlalchemy.engine.base.Engine'
+    ]
+        The connection object used to fetch the columns and types.
+
+    flavor: Optional[str], default None
+        The database dialect flavor to use for the query.
+        If omitted, default to `connectable.flavor`.
+
+    schema: Optional[str], default None
+        If provided, restrict the query to this schema.
+
+    database: Optional[str]. default None
+        If provided, restrict the query to this database.
+
+    Returns
+    -------
+    A dictionary mapping column names to a list of indices.
+    """
+    from collections import defaultdict
+    from meerschaum.connectors import SQLConnector
+    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    flavor = flavor or getattr(connectable, 'flavor', None)
+    if not flavor:
+        raise ValueError("Please provide a database flavor.")
+    if flavor == 'duckdb' and not isinstance(connectable, SQLConnector):
+        raise ValueError("You must provide a SQLConnector when using DuckDB.")
+    if flavor in NO_SCHEMA_FLAVORS:
+        schema = None
+    if schema is None:
+        schema = DEFAULT_SCHEMA_FLAVORS.get(flavor, None)
+    if flavor in ('sqlite', 'duckdb', 'oracle'):
+        database = None
+    table_trunc = truncate_item_name(table, flavor=flavor)
+    table_lower = table.lower()
+    table_upper = table.upper()
+    table_lower_trunc = truncate_item_name(table_lower, flavor=flavor)
+    table_upper_trunc = truncate_item_name(table_upper, flavor=flavor)
+    db_prefix = (
+        "tempdb."
+        if flavor == 'mssql' and table.startswith('#')
+        else ""
+    )
+
+    cols_indices_query = sqlalchemy.text(
+        columns_indices_queries.get(
+            flavor,
+            columns_indices_queries['default']
+        ).format(
+            table=table,
+            table_trunc=table_trunc,
+            table_lower=table_lower,
+            table_lower_trunc=table_lower_trunc,
+            table_upper=table_upper,
+            table_upper_trunc=table_upper_trunc,
+            db_prefix=db_prefix,
+            schema=schema,
+        )
+    )
+
+    cols = ['database', 'schema', 'table', 'column', 'index', 'index_type']
+    result_cols_ix = dict(enumerate(cols))
+
+    debug_kwargs = {'debug': debug} if isinstance(connectable, SQLConnector) else {}
+    if not debug_kwargs and debug:
+        dprint(cols_indices_query)
+
+    try:
+        result_rows = (
+            [
+                row
+                for row in connectable.execute(cols_indices_query, **debug_kwargs).fetchall()
+            ]
+            if flavor != 'duckdb'
+            else [
+                tuple([doc[col] for col in cols])
+                for doc in connectable.read(cols_indices_query, debug=debug).to_dict(orient='records')
+            ]
+        )
+        cols_types_docs = [
+            {
+                result_cols_ix[i]: val
+                for i, val in enumerate(row)
+            }
+            for row in result_rows
+        ]
+        cols_types_docs_filtered = [
+            doc
+            for doc in cols_types_docs
+            if (
+                (
+                    not schema
+                    or doc['schema'] == schema
+                )
+                and
+                (
+                    not database
+                    or doc['database'] == database
+                )
+            )
+        ]
+
+        ### NOTE: This may return incorrect columns if the schema is not explicitly stated.
+        if cols_types_docs and not cols_types_docs_filtered:
+            cols_types_docs_filtered = cols_types_docs
+
+        cols_indices = defaultdict(lambda: [])
+        for doc in cols_types_docs_filtered:
+            col = (
+                doc['column']
+                if flavor != 'oracle'
+                else (
+                    doc['column'].lower()
+                    if (doc['column'].isupper() and doc['column'].replace('_', '').isalpha())
+                    else doc['column']
+                )
+            )
+            cols_indices[col].append(
+                {
+                    'name': doc.get('index', None),
+                    'type': doc.get('index_type', None),
+                }
+            )
+
+        return dict(cols_indices)
     except Exception as e:
         warn(f"Failed to fetch columns for table '{table}':\n{e}")
         return {}
@@ -1248,10 +1616,11 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     A value which may stand in place of NULL for this type.
     `'None'` is returned if a value cannot be determined.
     """
+    from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import DB_FLAVORS_CAST_DTYPES
     if 'int' in typ.lower() or typ.lower() in ('numeric', 'number'):
         return '-987654321'
-    if 'bool' in typ.lower():
+    if 'bool' in typ.lower() or typ.lower() == 'bit':
         bool_typ = (
             PD_TO_DB_DTYPES_FLAVORS
             .get('bool', {})
@@ -1261,7 +1630,7 @@ def get_null_replacement(typ: str, flavor: str) -> str:
             bool_typ = DB_FLAVORS_CAST_DTYPES[flavor].get(bool_typ, bool_typ)
         val_to_cast = (
             -987654321
-            if flavor in ('mysql', 'mariadb', 'sqlite', 'mssql')
+            if flavor in ('mysql', 'mariadb')
             else 0
         )
         return f'CAST({val_to_cast} AS {bool_typ})'
@@ -1269,6 +1638,8 @@ def get_null_replacement(typ: str, flavor: str) -> str:
         return dateadd_str(flavor=flavor, begin='1900-01-01')
     if 'float' in typ.lower() or 'double' in typ.lower() or typ.lower() in ('decimal',):
         return '-987654321.0'
+    if flavor == 'oracle' and typ.lower().split('(', maxsplit=1)[0] == 'char':
+        return "'-987654321'"
     if typ.lower() in ('uniqueidentifier', 'guid', 'uuid'):
         magic_val = 'DEADBEEF-ABBA-BABE-CAFE-DECAFC0FFEE5'
         if flavor == 'mssql':
@@ -1325,35 +1696,48 @@ def get_rename_table_queries(
 
     if_exists_str = "IF EXISTS" if flavor in DROP_IF_EXISTS_FLAVORS else ""
     if flavor == 'duckdb':
-        return [
-            get_create_table_query(f"SELECT * FROM {old_table_name}", tmp_table, 'duckdb', schema),
-            get_create_table_query(f"SELECT * FROM {tmp_table_name}", new_table, 'duckdb', schema),
-            f"DROP TABLE {if_exists_str} {tmp_table_name}",
-            f"DROP TABLE {if_exists_str} {old_table_name}",
-        ]
+        return (
+            get_create_table_queries(
+                f"SELECT * FROM {old_table_name}",
+                tmp_table,
+                'duckdb',
+                schema,
+            ) + get_create_table_queries(
+                f"SELECT * FROM {tmp_table_name}",
+                new_table,
+                'duckdb',
+                schema,
+            ) + [
+                f"DROP TABLE {if_exists_str} {tmp_table_name}",
+                f"DROP TABLE {if_exists_str} {old_table_name}",
+            ]
+        )
 
     return [f"ALTER TABLE {old_table_name} RENAME TO {new_table_name}"]
 
 
 def get_create_table_query(
-    query: str,
+    query_or_dtypes: Union[str, Dict[str, str]],
     new_table: str,
     flavor: str,
     schema: Optional[str] = None,
 ) -> str:
     """
+    NOTE: This function is deprecated. Use `get_create_table_queries()` instead.
+
     Return a query to create a new table from a `SELECT` query.
 
     Parameters
     ----------
-    query: str
+    query: Union[str, Dict[str, str]]
         The select query to use for the creation of the table.
+        If a dictionary is provided, return a `CREATE TABLE` query from the given `dtypes` columns.
 
     new_table: str
         The unquoted name of the new table.
 
     flavor: str
-        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`.
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`).
 
     schema: Optional[str], default None
         The schema on which the table will reside.
@@ -1362,26 +1746,202 @@ def get_create_table_query(
     -------
     A `CREATE TABLE` (or `SELECT INTO`) query for the database flavor.
     """
+    return get_create_table_queries(
+        query_or_dtypes,
+        new_table,
+        flavor,
+        schema=schema,
+        primary_key=None,
+    )[0]
+
+
+def get_create_table_queries(
+    query_or_dtypes: Union[str, Dict[str, str]],
+    new_table: str,
+    flavor: str,
+    schema: Optional[str] = None,
+    primary_key: Optional[str] = None,
+    autoincrement: bool = False,
+    datetime_column: Optional[str] = None,
+) -> List[str]:
+    """
+    Return a query to create a new table from a `SELECT` query or a `dtypes` dictionary.
+
+    Parameters
+    ----------
+    query_or_dtypes: Union[str, Dict[str, str]]
+        The select query to use for the creation of the table.
+        If a dictionary is provided, return a `CREATE TABLE` query from the given `dtypes` columns.
+
+    new_table: str
+        The unquoted name of the new table.
+
+    flavor: str
+        The database flavor to use for the query (e.g. `'mssql'`, `'postgresql'`).
+
+    schema: Optional[str], default None
+        The schema on which the table will reside.
+
+    primary_key: Optional[str], default None
+        If provided, designate this column as the primary key in the new table.
+
+    autoincrement: bool, default False
+        If `True` and `primary_key` is provided, create the `primary_key` column
+        as an auto-incrementing integer column.
+
+    datetime_column: Optional[str], default None
+        If provided, include this column in the primary key.
+        Applicable to TimescaleDB only.
+
+    Returns
+    -------
+    A `CREATE TABLE` (or `SELECT INTO`) query for the database flavor.
+    """
+    if not isinstance(query_or_dtypes, (str, dict)):
+        raise TypeError("`query_or_dtypes` must be a query or a dtypes dictionary.")
+
+    method = (
+        _get_create_table_query_from_cte
+        if isinstance(query_or_dtypes, str)
+        else _get_create_table_query_from_dtypes
+    )
+    return method(
+        query_or_dtypes,
+        new_table,
+        flavor,
+        schema=schema,
+        primary_key=primary_key,
+        autoincrement=(autoincrement and flavor not in SKIP_AUTO_INCREMENT_FLAVORS),
+        datetime_column=datetime_column,
+    )
+
+
+def _get_create_table_query_from_dtypes(
+    dtypes: Dict[str, str],
+    new_table: str,
+    flavor: str,
+    schema: Optional[str] = None,
+    primary_key: Optional[str] = None,
+    autoincrement: bool = False,
+    datetime_column: Optional[str] = None,
+) -> List[str]:
+    """
+    Create a new table from a `dtypes` dictionary.
+    """
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type, AUTO_INCREMENT_COLUMN_FLAVORS
+    if not dtypes and not primary_key:
+        raise ValueError(f"Expecting columns for table '{new_table}'.")
+
+    if flavor in SKIP_AUTO_INCREMENT_FLAVORS:
+        autoincrement = False
+
+    cols_types = (
+        [(primary_key, get_db_type_from_pd_type(dtypes.get(primary_key, 'int'), flavor=flavor))]
+        if primary_key
+        else []
+    ) + [
+        (col, get_db_type_from_pd_type(typ, flavor=flavor))
+        for col, typ in dtypes.items()
+        if col != primary_key
+    ]
+
+    table_name = sql_item_name(new_table, schema=schema, flavor=flavor)
+    primary_key_name = sql_item_name(primary_key, flavor) if primary_key else None
+    datetime_column_name = sql_item_name(datetime_column, flavor) if datetime_column else None
+    query = f"CREATE TABLE {table_name} ("
+    if primary_key:
+        col_db_type = cols_types[0][1]
+        auto_increment_str = (' ' + AUTO_INCREMENT_COLUMN_FLAVORS.get(
+            flavor,
+            AUTO_INCREMENT_COLUMN_FLAVORS['default']
+        )) if autoincrement or primary_key not in dtypes else ''
+        col_name = sql_item_name(primary_key, flavor=flavor, schema=None)
+
+        if flavor == 'sqlite':
+            query += (
+                f"\n    {col_name} "
+                + (f"{col_db_type}" if not auto_increment_str else 'INTEGER')
+                + f" PRIMARY KEY{auto_increment_str} NOT NULL,"
+            )
+        elif flavor == 'oracle':
+            query += f"\n    {col_name} {col_db_type} {auto_increment_str} PRIMARY KEY,"
+        elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
+            query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
+        else:
+            query += f"\n    {col_name} {col_db_type} PRIMARY KEY{auto_increment_str} NOT NULL,"
+
+    for col, db_type in cols_types:
+        if col == primary_key:
+            continue
+        col_name = sql_item_name(col, schema=None, flavor=flavor)
+        query += f"\n    {col_name} {db_type},"
+    if (
+        flavor == 'timescaledb'
+        and datetime_column
+        and primary_key
+        and datetime_column != primary_key
+    ):
+        query += f"\n    PRIMARY KEY({datetime_column_name}, {primary_key_name}),"
+    query = query[:-1]
+    query += "\n)"
+
+    queries = [query]
+    return queries
+
+
+def _get_create_table_query_from_cte(
+    query: str,
+    new_table: str,
+    flavor: str,
+    schema: Optional[str] = None,
+    primary_key: Optional[str] = None,
+    autoincrement: bool = False,
+    datetime_column: Optional[str] = None,
+) -> List[str]:
+    """
+    Create a new table from a CTE query.
+    """
     import textwrap
+    from meerschaum.utils.dtypes.sql import AUTO_INCREMENT_COLUMN_FLAVORS
     create_cte = 'create_query'
     create_cte_name = sql_item_name(create_cte, flavor, None)
     new_table_name = sql_item_name(new_table, flavor, schema)
+    primary_key_constraint_name = (
+        sql_item_name(f'pk_{new_table}', flavor, None)
+        if primary_key
+        else None
+    )
+    primary_key_name = (
+        sql_item_name(primary_key, flavor, None)
+        if primary_key
+        else None
+    )
+    datetime_column_name = (
+        sql_item_name(datetime_column, flavor)
+        if datetime_column
+        else None
+    )
     if flavor in ('mssql',):
         query = query.lstrip()
         if 'with ' in query.lower():
             final_select_ix = query.lower().rfind('select')
-            return (
+            create_table_query = (
                 query[:final_select_ix].rstrip() + ',\n'
                 + f"{create_cte_name} AS (\n"
                 + query[final_select_ix:]
                 + "\n)\n"
                 + f"SELECT *\nINTO {new_table_name}\nFROM {create_cte_name}"
             )
+        else:
+            create_table_query = f"""
+                SELECT *
+                INTO {new_table_name}
+                FROM ({query}) AS {create_cte_name}
+            """
 
-        create_table_query = f"""
-            SELECT *
-            INTO {new_table_name}
-            FROM ({query}) AS {create_cte_name}
+        alter_type_query = f"""
+            ALTER TABLE {new_table_name}
+            ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})
         """
     elif flavor in (None,):
         create_table_query = f"""
@@ -1390,11 +1950,32 @@ def get_create_table_query(
             SELECT *
             FROM {create_cte_name}
         """
+
+        alter_type_query = f"""
+            ALTER TABLE {new_table_name}
+            ADD PRIMARY KEY ({primary_key_name})
+        """
     elif flavor in ('sqlite', 'mysql', 'mariadb', 'duckdb', 'oracle'):
         create_table_query = f"""
             CREATE TABLE {new_table_name} AS
             SELECT *
             FROM ({query})""" + (f""" AS {create_cte_name}""" if flavor != 'oracle' else '') + """
+        """
+
+        alter_type_query = f"""
+            ALTER TABLE {new_table_name}
+            ADD PRIMARY KEY ({primary_key_name})
+        """
+    elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
+        create_table_query = f"""
+            SELECT *
+            INTO {new_table_name}
+            FROM ({query}) AS {create_cte_name}
+        """
+
+        alter_type_query = f"""
+            ALTER TABLE {new_table_name}
+            ADD PRIMARY KEY ({datetime_column_name}, {primary_key_name})
         """
     else:
         create_table_query = f"""
@@ -1403,7 +1984,21 @@ def get_create_table_query(
             FROM ({query}) AS {create_cte_name}
         """
 
-    return textwrap.dedent(create_table_query)
+        alter_type_query = f"""
+            ALTER TABLE {new_table_name}
+            ADD PRIMARY KEY ({primary_key_name})
+        """
+
+    create_table_query = textwrap.dedent(create_table_query)
+    if not primary_key:
+        return [create_table_query]
+
+    alter_type_query = textwrap.dedent(alter_type_query)
+
+    return [
+        create_table_query,
+        alter_type_query,
+    ]
 
 
 def wrap_query_with_cte(
@@ -1574,3 +2169,61 @@ def session_execute(
     if with_results:
         return (success, msg), results
     return success, msg
+
+
+def get_reset_autoincrement_queries(
+    table: str,
+    column: str,
+    connector: mrsm.connectors.SQLConnector,
+    schema: Optional[str] = None,
+    debug: bool = False,
+) -> List[str]:
+    """
+    Return a list of queries to reset a table's auto-increment counter.
+    """
+    if not table_exists(table, connector, schema=schema, debug=debug):
+        return []
+
+    schema = schema or connector.schema
+    max_id_name = sql_item_name('max_id', connector.flavor)
+    table_name = sql_item_name(table, connector.flavor, schema)
+    table_trunc = truncate_item_name(table, connector.flavor)
+    table_seq_name = sql_item_name(table + '_' + column + '_seq', connector.flavor, schema)
+    column_name = sql_item_name(column, connector.flavor)
+    if connector.flavor == 'oracle':
+        df = connector.read(f"""
+            SELECT SEQUENCE_NAME
+            FROM ALL_TAB_IDENTITY_COLS
+            WHERE TABLE_NAME IN '{table_trunc.upper()}'
+        """, debug=debug)
+        if len(df) > 0:
+            table_seq_name = df['sequence_name'][0]
+
+    max_id = connector.value(
+        f"""
+        SELECT COALESCE(MAX({column_name}), 0) AS {max_id_name}
+        FROM {table_name}
+        """,
+        debug=debug,
+    )
+    if max_id is None:
+        return []
+
+    reset_queries = reset_autoincrement_queries.get(
+        connector.flavor,
+        reset_autoincrement_queries['default']
+    )
+    if not isinstance(reset_queries, list):
+        reset_queries = [reset_queries]
+
+    return [
+        query.format(
+            column=column,
+            column_name=column_name,
+            table=table,
+            table_name=table_name,
+            table_seq_name=table_seq_name,
+            val=(max_id),
+        )
+        for query in reset_queries
+    ]

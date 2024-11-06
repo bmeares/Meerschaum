@@ -2,25 +2,28 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-import pytest
-import sys
+import warnings
 from datetime import datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
-from tests import debug
-from tests.pipes import all_pipes, stress_pipes, remote_pipes
-from tests.connectors import conns, get_flavors
-from tests.test_users import test_register_user
+
+import pytest
 import meerschaum as mrsm
 from meerschaum import Pipe
 from meerschaum.actions import actions
+
+from tests import debug
+from tests.pipes import all_pipes, stress_pipes, remote_pipes
+from tests.connectors import conns, get_flavors
+from tests.test_users import test_register_user as _test_register_user
+
 
 @pytest.fixture(autouse=True)
 def run_before_and_after(flavor: str):
     """
     Ensure the test user is registered before running tests.
     """
-    test_register_user(flavor)
+    _test_register_user(flavor)
     yield
 
 
@@ -180,7 +183,9 @@ def test_target_mutable(flavor: str):
     if conn.type != 'sql':
         return
     target = 'FooBar!'
-    pipe = Pipe('foo', 'bar', target=target, instance=conn, columns={'datetime': 'dt', 'id': 'id'})
+    pipe = Pipe('target', 'mutable', target=target, instance=conn)
+    pipe.delete()
+    pipe = Pipe('target', 'mutable', target=target, instance=conn, columns={'datetime': 'dt', 'id': 'id'})
     pipe.drop(debug=debug)
     assert not pipe.exists(debug=debug)
     success, msg = pipe.sync(
@@ -271,13 +276,14 @@ def test_id_index_col(flavor: str):
     Verify that the ID column is able to be synced.
     """
     conn = conns[flavor]
+    pipe = Pipe('test_id', 'index_col', 'table', instance=conn)
+    pipe.delete()
     pipe = Pipe(
         'test_id', 'index_col', 'table',
         instance=conn,
         dtypes={'id': 'Int64'},
         columns={'datetime': 'id'},
     )
-    pipe.delete()
     docs = [{'id': i, 'a': i*2, 'b': {'c': i/2}} for i in range(100)]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
@@ -300,36 +306,6 @@ def test_id_index_col(flavor: str):
     assert len(small_df) == len(new_docs)
     small_synced_docs = small_df.to_dict(orient='records')
     assert small_synced_docs == new_docs
-
-
-@pytest.mark.parametrize("flavor", get_flavors())
-def test_utc_offset_datetimes(flavor: str):
-    """
-    Verify that we are able to sync rows with UTC offset datetimes.
-    """
-    conn = conns[flavor]
-    pipe = Pipe(
-        'test_utc_offset', 'datetimes',
-        instance=conn,
-        columns={'datetime': 'dt'},
-    )
-    pipe.delete()
-
-    docs = [
-        {'dt': '2023-01-01 00:00:00+00:00'},
-        {'dt': '2023-01-02 00:00:00+01:00'},
-    ]
-
-    expected_docs = [
-        {'dt': datetime(2023, 1, 1)},
-        {'dt': datetime(2023, 1, 1, 23, 0, 0)}
-    ]
-
-    success, msg = pipe.sync(docs, debug=debug)
-    assert success, msg
-    df = pipe.get_data(debug=debug)
-    synced_docs = df.to_dict(orient='records')
-    assert synced_docs == expected_docs
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -594,12 +570,13 @@ def test_sync_dask_dataframe(flavor: str):
     Verify that we are able to sync Dask DataFrames.
     """
     conn = conns[flavor]
+    pipe = mrsm.Pipe('dask', 'demo', instance=conn)
+    pipe.delete()
     pipe = mrsm.Pipe(
         'dask', 'demo',
         columns={'datetime': 'dt'},
         instance=conn,
     )
-    pipe.drop()
     pipe.sync([
         {'dt': '2023-01-01', 'id': 1},
         {'dt': '2023-01-02', 'id': 2},
@@ -607,14 +584,17 @@ def test_sync_dask_dataframe(flavor: str):
     ])
     ddf = pipe.get_data(as_dask=True, debug=debug)
 
+    pipe2 = mrsm.Pipe('dask', 'insert', instance=conn)
+    pipe2.delete()
     pipe2 = mrsm.Pipe(
         'dask', 'insert',
         columns=pipe.columns,
         instance=conn,
     )
-    pipe2.drop()
     pipe2.sync(ddf, debug=debug)
-    assert pipe.get_data().to_dict() == pipe2.get_data().to_dict()
+    docs = pipe.get_data().to_dict(orient='records')
+    docs2 = pipe2.get_data().to_dict(orient='records')
+    assert docs == docs2
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -729,3 +709,254 @@ def test_upsert_no_value_cols(flavor: str):
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
     assert pipe.get_rowcount() == 3
+
+
+@pytest.mark.filterwarnings("ignore:UNIQUE constraint failed")
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_primary_key(flavor: str):
+    """
+    Test that regular primary keys are enforced.
+    """
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+    pipe = mrsm.Pipe('test_sync', 'primary', 'key', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test_sync', 'primary', 'key',
+        instance=conn,
+        columns={
+            'primary': 'pk',
+        },
+    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore')
+        success, msg = pipe.sync([
+            {'pk': 1},
+            {'pk': 1},
+        ], debug=debug)
+    assert not success
+
+    pipe.drop()
+
+    success, msg = pipe.sync([{'pk': 1}], debug=debug)
+    assert success, msg
+
+    success, msg = pipe.sync([{'pk': 1}], debug=debug)
+    assert success
+
+    success, msg = pipe.sync([{'pk': 2}], debug=debug)
+    assert success, msg
+
+    assert pipe.get_rowcount(debug=debug) == 2
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_autoincrement_primary_key(flavor: str):
+    """
+    Test that explicitly incrementing primary keys behave as expected.
+    """
+    from meerschaum.utils.sql import SKIP_AUTO_INCREMENT_FLAVORS
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+    if conn.flavor in SKIP_AUTO_INCREMENT_FLAVORS:
+        return
+    pipe = mrsm.Pipe('test_sync', 'primary_key', 'autoincrement', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test_sync', 'primary_key', 'autoincrement',
+        instance=conn,
+        columns={
+            'primary': 'id',
+        },
+        parameters={
+            'autoincrement': True,
+        },
+    )
+    success, msg = pipe.sync([
+        {'color': 'red'},
+        {'color': 'blue'},
+    ], debug=debug)
+    assert success
+
+    df = pipe.get_data(['id'])
+    assert list(df['id']) == [1, 2]
+
+    success, msg = pipe.sync([{'id': 1, 'color': 'green'}], debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(params={'id': 1})
+    assert df['color'][0] == 'green'
+
+    success, msg = pipe.sync([{'id': 4, 'shirt_size': 'L'}, {'id': 5, 'shirt_size': 'M'}], debug=debug)
+    assert success
+
+    df = pipe.get_data(['shirt_size'], params={'id': [4, 5]}, debug=debug)
+    assert list(df['shirt_size']) == ['L', 'M']
+
+    success, msg = pipe.sync([{'color': 'purple'}, {'shirt_size': 'S'}], debug=debug)
+    assert success, msg
+
+    df = pipe.get_data()
+    print(df)
+    df = pipe.get_data(['shirt_size'], params={'id': 7}, debug=debug)
+    assert df['shirt_size'][0] == 'S'
+
+    assert pipe.get_rowcount(debug=debug) == 6
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_autoincrement_primary_key_inferred(flavor: str):
+    """
+    Test that implicitly incrementing primary keys behave as expected.
+    """
+    from meerschaum.utils.sql import SKIP_AUTO_INCREMENT_FLAVORS
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+    if conn.flavor in SKIP_AUTO_INCREMENT_FLAVORS:
+        return
+
+    pipe = mrsm.Pipe('test_sync', 'primary_key', 'implicit', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test_sync', 'primary_key', 'implicit',
+        instance=conn,
+        columns={
+            'primary': 'id',
+        },
+    )
+    success, msg = pipe.sync([
+        {'color': 'red'},
+        {'color': 'blue'},
+    ], debug=debug)
+    assert success
+
+    df = pipe.get_data(['id'])
+    assert list(df['id']) == [1, 2]
+
+    success, msg = pipe.sync([{'id': 1, 'color': 'green'}], debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(params={'id': 1})
+    assert df['color'][0] == 'green'
+
+    success, msg = pipe.sync([{'id': 4, 'shirt_size': 'L'}, {'id': 5, 'shirt_size': 'M'}], debug=debug)
+    assert success
+
+    df = pipe.get_data(['shirt_size'], params={'id': [4, 5]}, debug=debug)
+    assert list(df['shirt_size']) == ['L', 'M']
+
+    success, msg = pipe.sync([{'color': 'purple'}], debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(['color'], params={'id': 6}, debug=debug)
+    assert df['color'][0] == 'purple'
+
+    assert pipe.get_rowcount(debug=debug) == 5
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_add_primary_key_to_existing(flavor: str):
+    """
+    Test that a pipe can have a primary key added later.
+    """
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+    if conn.flavor == 'duckdb':
+        return
+    pipe = mrsm.Pipe('test_sync', 'primary_key', 'later', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test_sync', 'primary_key', 'later',
+        instance=conn,
+    )
+    success, msg = pipe.sync([
+        {'id': 1, 'color': 'red'},
+        {'id': 2, 'color': 'blue'},
+    ], debug=debug)
+    assert success
+
+    df = pipe.get_data(['id'])
+    assert list(df['id']) == [1, 2]
+
+    pipe.columns = {'primary': 'id'}
+    success = pipe.instance_connector.create_indices(pipe, debug=debug)
+    assert success
+
+    success, msg = pipe.sync([{'id': 3, 'color': 'green'}], debug=debug)
+    assert success, msg
+
+    columns_indices = pipe.get_columns_indices(debug=debug)
+    id_index_types = [
+        columns_indices['id'][i]['type']
+        for i in range(len(columns_indices['id']))
+    ]
+
+    assert 'PRIMARY KEY' in id_index_types
+    df = pipe.get_data(params={'id': 3}, debug=debug)
+    assert df['color'][0] == 'green'
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_static_schema(flavor: str):
+    """
+    Test that pipes marked as `static` do not mutate their schemata.
+    """
+    conn = conns[flavor]
+    if conn.type not in ('sql', 'api'):
+        return
+    pipe = mrsm.Pipe('test', 'static', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'static',
+        instance=conn,
+        upsert=True,
+        static=True,
+        columns={
+            'datetime': 'dt',
+            'primary': 'id',
+        },
+        dtypes={
+            'id': 'uuid',
+            'dt': 'datetime',
+            'num': 'numeric',
+            'val': 'float',
+            'meta': 'json',
+        },
+    )
+    docs = [
+        {
+            'dt': '2024-01-01',
+            'id': 'e7a57f9b-da26-4c70-bffc-ed27cdd74565',
+            'num': '1.23',
+            'val': '2.34',
+            'meta': '{"a": 1}',
+        },
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    new_docs = [
+        {
+            'dt': '2024-01-01',
+            'id': '44be2c5a-3d42-4e5f-b118-93a56697ae14',
+            'val': 'foo',
+            'bar': 1,
+        },
+    ]
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore')
+        try:
+            success, msg = pipe.sync(new_docs, debug=debug)
+        except Exception as e:
+            success, msg = False, str(e)
+    assert not success
+
+    cols_types = pipe.get_columns_types(debug=debug)
+    assert 'bar' not in cols_types
+    assert cols_types['val'].upper() in ('DOUBLE', 'DOUBLE PRECISION', 'FLOAT', 'REAL')
+    assert pipe.get_rowcount() == 1

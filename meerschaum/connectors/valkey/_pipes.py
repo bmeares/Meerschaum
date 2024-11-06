@@ -501,6 +501,7 @@ def sync_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
+    from meerschaum.utils.dtypes import are_dtypes_equal
     dt_col = pipe.columns.get('datetime', None)
     indices = [col for col in pipe.columns.values() if col]
     table_name = self.quote_table(pipe.target)
@@ -508,6 +509,7 @@ def sync_pipe(
     if is_dask:
         df = df.compute()
     upsert = pipe.parameters.get('upsert', False)
+    static = pipe.parameters.get('static', False)
 
     def _serialize_indices_docs(_docs):
         return [
@@ -526,7 +528,11 @@ def sync_pipe(
 
     valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
     new_dtypes = {
-        str(key): str(val)
+        str(key): (
+            str(val)
+            if not are_dtypes_equal(str(val), 'datetime')
+            else 'datetime64[ns, UTC]'
+        )
         for key, val in df.dtypes.items()
         if str(key) not in valkey_dtypes
     }
@@ -539,7 +545,7 @@ def sync_pipe(
                 new_dtypes[col] = 'string'
                 df[col] = df[col].astype('string')
 
-    if new_dtypes:
+    if new_dtypes and not static:
         valkey_dtypes.update(new_dtypes)
         if 'valkey' not in pipe.parameters:
             pipe.parameters['valkey'] = {}
@@ -625,7 +631,7 @@ def get_pipe_columns_types(
 
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     return {
-        col: get_db_type_from_pd_type(typ)
+        col: get_db_type_from_pd_type(typ, flavor='postgresql')
         for col, typ in pipe.parameters.get('valkey', {}).get('dtypes', {}).items()
     }
 
@@ -706,7 +712,7 @@ def get_sync_time(
     """
     from meerschaum.utils.dtypes import are_dtypes_equal
     dt_col = pipe.columns.get('datetime', None)
-    dt_typ = pipe.dtypes.get(dt_col, 'datetime64[ns]')
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime64[ns, UTC]')
     if not dt_col:
         return None
 
@@ -733,7 +739,7 @@ def get_sync_time(
         return (
             int(dt_val)
             if are_dtypes_equal(dt_typ, 'int')
-            else dateutil_parser.parse(str(dt_val)).replace(tzinfo=None)
+            else dateutil_parser.parse(str(dt_val))
         )
     except Exception as e:
         warn(f"Failed to parse sync time for {pipe}:\n{e}")

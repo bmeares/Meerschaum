@@ -33,10 +33,12 @@ def test_deduplicate_default(flavor: str):
     conn = conns[flavor]
     if conn.type != 'sql':
         return
+    pipe = mrsm.Pipe('test', 'deduplicate', 'default_method', instance=conn)
+    pipe.delete()
     pipe = mrsm.Pipe(
-        'test', 'deduplicate',
-        instance = conn,
-        columns = {
+        'test', 'deduplicate', 'default_method',
+        instance=conn,
+        columns={
             'datetime': 'datetime',
             'id': 'id',
         }
@@ -52,10 +54,10 @@ def test_deduplicate_default(flavor: str):
         {'datetime': '2023-01-03 00:00:00', 'id': 3},
         {'datetime': '2023-01-03 00:00:00', 'id': 4},
     ]
-    df = parse_df_datetimes(docs)
+    df = parse_df_datetimes(docs, strip_timezone=False)
     num_distinct = len(set([json.dumps(doc) for doc in docs]))
 
-    conn.to_sql(df, pipe.target)
+    conn.to_sql(df, pipe.target, debug=debug)
     assert pipe.get_rowcount() == len(docs)
 
     success, msg = pipe.deduplicate(debug=debug)
