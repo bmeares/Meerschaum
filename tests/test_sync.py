@@ -889,8 +889,13 @@ def test_add_primary_key_to_existing(flavor: str):
     success, msg = pipe.sync([{'id': 3, 'color': 'green'}], debug=debug)
     assert success, msg
 
-    assert pipe.get_columns_indices(debug=debug)['id'][0]['type'] == 'PRIMARY KEY'
+    columns_indices = pipe.get_columns_indices(debug=debug)
+    id_index_types = [
+        columns_indices['id'][i]['type']
+        for i in range(len(columns_indices['id']))
+    ]
 
+    assert 'PRIMARY KEY' in id_index_types
     df = pipe.get_data(params={'id': 3}, debug=debug)
     assert df['color'][0] == 'green'
 
