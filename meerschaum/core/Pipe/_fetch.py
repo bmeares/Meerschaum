@@ -18,14 +18,14 @@ if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
 
 def fetch(
-        self,
-        begin: Union[datetime, str, None] = '',
-        end: Optional[datetime] = None,
-        check_existing: bool = True,
-        sync_chunks: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> Union['pd.DataFrame', Iterator['pd.DataFrame'], None]:
+    self,
+    begin: Union[datetime, int, str, None] = '',
+    end: Union[datetime, int, None] = None,
+    check_existing: bool = True,
+    sync_chunks: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> Union['pd.DataFrame', Iterator['pd.DataFrame'], None]:
     """
     Fetch a Pipe's latest data from its connector.
 
@@ -76,6 +76,8 @@ def fetch(
                 chunk_message = '\n' + chunk_label + '\n' + chunk_message
             return chunk_success, chunk_message
 
+    begin, end = self.parse_date_bounds(begin, end)
+
     with mrsm.Venv(get_connector_plugin(self.connector)):
         _args, _kwargs = filter_arguments(
             self.connector.fetch,
@@ -125,7 +127,7 @@ def get_backtrack_interval(
     if dt_col is None:
         return backtrack_interval
 
-    dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns]')
+    dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns, UTC]')
     if 'int' in dt_dtype.lower():
         return backtrack_minutes
 
@@ -164,6 +166,6 @@ def _determine_begin(
         backtrack_interval = timedelta(minutes=backtrack_interval)
     try:
         return sync_time - backtrack_interval
-    except Exception as e:
+    except Exception:
         warn(f"Unable to substract backtrack interval {backtrack_interval} from {sync_time}.")
     return sync_time

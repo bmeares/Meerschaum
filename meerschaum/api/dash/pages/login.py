@@ -19,13 +19,13 @@ allow_user_registration = permissions_config['registration']['users']
 
 registration_div = html.Div(
     id = 'registration-div',
-    style = {'height' : '100%'},
-    children = (
+    style={'height' : '100%'},
+    children=(
         [
             dcc.Link(
                 'No account? Create one here.',
-                href = (dash_endpoint + '/register'),
-                refresh = False
+                href=(dash_endpoint + '/register'),
+                refresh=False
             ),
         ] if allow_user_registration
         else [
@@ -36,12 +36,12 @@ registration_div = html.Div(
             dbc.Button(
                 'More information.',
                 id = 'show-user-registration-disabled-button',
-                color = 'link',
-                size = 'sm',
+                color='link',
+                size='sm',
             ),
             dbc.Collapse(
-                id = 'user-registration-disabled-collapse',
-                children = [
+                id='user-registration-disabled-collapse',
+                children=[
                     dcc.Markdown(
                         "For example, to register user `newuser` on instance `sql:main`:"
                     ),
@@ -60,10 +60,10 @@ registration_div = html.Div(
                     html.Pre(
                         html.Code(
                             json.dumps({
-                                'api' : {
-                                    'permissions' : {
-                                        'registration' : {
-                                            'users' : True,
+                                'api': {
+                                    'permissions': {
+                                        'registration': {
+                                            'users': True,
                                         },
                                     }
                                 }
@@ -112,11 +112,11 @@ layout = dbc.Container([
                 dbc.Row([
                     dbc.Col([
                         html.Button(
-                            children = 'Login',
-                            n_clicks = 0,
-                            type = 'submit',
-                            id = 'login-button',
-                            className = 'btn btn-primary btn-lg'
+                            children='Login',
+                            n_clicks=0,
+                            type='submit',
+                            id='login-button',
+                            className='btn btn-primary btn-lg'
                         ),
                     ]),
                 ]),

@@ -214,20 +214,20 @@ def parse_config_substitution(
 
 
 def edit_file(
-        path: Union[pathlib.Path, str],
-        default_editor: str = 'pyvim',
-        debug: bool = False
-    ) -> bool:
+    path: Union['pathlib.Path', str],
+    default_editor: str = 'pyvim',
+    debug: bool = False
+) -> bool:
     """
     Open a file for editing.
-    
+
     Attempt to launch the user's defined `$EDITOR`, otherwise use `pyvim`.
 
     Parameters
     ----------
     path: Union[pathlib.Path, str]
         The path to the file to be edited.
-        
+
     default_editor: str, default 'pyvim'
         If `$EDITOR` is not set, use this instead.
         If `pyvim` is not installed, it will install it from PyPI.
@@ -250,7 +250,7 @@ def edit_file(
         rc = call([EDITOR, path])
     except Exception as e: ### can't open with default editors
         if debug:
-            dprint(e)
+            dprint(str(e))
             dprint('Failed to open file with system editor. Falling back to pyvim...')
         pyvim = attempt_import('pyvim', lazy=False)
         rc = run_python_package('pyvim', [path], venv=package_venv(pyvim), debug=debug)
@@ -258,10 +258,10 @@ def edit_file(
 
 
 def is_pipe_registered(
-        pipe: mrsm.Pipe,
-        pipes: PipesDict,
-        debug: bool = False
-    ) -> bool:
+    pipe: mrsm.Pipe,
+    pipes: PipesDict,
+    debug: bool = False
+) -> bool:
     """
     Check if a Pipe is inside the pipes dictionary.
 
@@ -269,10 +269,10 @@ def is_pipe_registered(
     ----------
     pipe: meerschaum.Pipe
         The pipe to see if it's in the dictionary.
-        
+
     pipes: PipesDict
         The dictionary to search inside.
-        
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -975,13 +975,13 @@ def json_serialize_datetime(dt: datetime) -> Union[str, None]:
 
 
 def wget(
-        url: str,
-        dest: Optional[Union[str, 'pathlib.Path']] = None,
-        headers: Optional[Dict[str, Any]] = None,
-        color: bool = True,
-        debug: bool = False,
-        **kw: Any
-    ) -> 'pathlib.Path':
+    url: str,
+    dest: Optional[Union[str, 'pathlib.Path']] = None,
+    headers: Optional[Dict[str, Any]] = None,
+    color: bool = True,
+    debug: bool = False,
+    **kw: Any
+) -> 'pathlib.Path':
     """
     Mimic `wget` with `requests`.
 
@@ -989,7 +989,7 @@ def wget(
     ----------
     url: str
         The URL to the resource to be downloaded.
-        
+
     dest: Optional[Union[str, pathlib.Path]], default None
         The destination path of the downloaded file.
         If `None`, save to the current directory.
@@ -1426,7 +1426,40 @@ def flatten_list(list_: List[Any]) -> List[Any]:
             yield item
 
 
-def make_symlink(src_path: pathlib.Path, dest_path: pathlib.Path) -> SuccessTuple:
+def parse_arguments_str(args_str: str) -> Tuple[Tuple[Any], Dict[str, Any]]:
+    """
+    Parse a string containing the text to be passed into a function
+    and return a tuple of args, kwargs.
+
+    Parameters
+    ----------
+    args_str: str
+        The contents of the function parameter (as a string).
+
+    Returns
+    -------
+    A tuple of args (tuple) and kwargs (dict[str, Any]).
+
+    Examples
+    --------
+    >>> parse_arguments_str('123, 456, foo=789, bar="baz"')
+    (123, 456), {'foo': 789, 'bar': 'baz'}
+    """
+    import ast
+    args = []
+    kwargs = {}
+
+    for part in args_str.split(','):
+        if '=' in part:
+            key, val = part.split('=', 1)
+            kwargs[key.strip()] = ast.literal_eval(val)
+        else:
+            args.append(ast.literal_eval(part.strip()))
+
+    return tuple(args), kwargs
+
+
+def make_symlink(src_path: 'pathlib.Path', dest_path: 'pathlib.Path') -> SuccessTuple:
     """
     Wrap around `pathlib.Path.symlink_to`, but add support for Windows.
 
@@ -1452,7 +1485,7 @@ def make_symlink(src_path: pathlib.Path, dest_path: pathlib.Path) -> SuccessTupl
         msg = str(e)
     if success:
         return success, "Success"
-    
+
     ### Failed to create a symlink.
     ### If we're not on Windows, return an error.
     import platform
@@ -1477,7 +1510,7 @@ def make_symlink(src_path: pathlib.Path, dest_path: pathlib.Path) -> SuccessTupl
         shutil.copy(src_path, dest_path)
     except Exception as e:
         return False, str(e)
-    
+
     return True, "Success"
 
 

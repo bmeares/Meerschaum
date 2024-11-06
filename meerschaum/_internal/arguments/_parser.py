@@ -90,8 +90,13 @@ def parse_datetime(dt_str: str) -> Union[datetime, int, str]:
     except Exception as e:
         dt = None
     if dt is None:
-        from meerschaum.utils.warnings import warn, error
+        from meerschaum.utils.warnings import error
         error(f"'{dt_str}' is not a valid datetime format.", stack=False)
+
+    if isinstance(dt, datetime):
+        from meerschaum.utils.dtypes import coerce_timezone
+        dt = coerce_timezone(dt)
+
     return dt
 
 

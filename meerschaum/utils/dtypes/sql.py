@@ -7,15 +7,16 @@ Utility functions for working with SQL data types.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Dict, Union, Tuple
+from meerschaum.utils.typing import Dict, Union, Tuple, List
 
 NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'mariadb': (38, 20),
     'mysql': (38, 20),
     'mssql': (28, 10),
-    'duckdb': (15, 4),
+    'duckdb': (15, 3),
     'sqlite': (15, 4),
 }
+TIMEZONE_NAIVE_FLAVORS = {'oracle', 'mysql', 'mariadb'}
 
 ### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
 DB_FLAVORS_CAST_DTYPES = {
@@ -49,6 +50,7 @@ DB_FLAVORS_CAST_DTYPES = {
         'NVARCHAR(2000)': 'NVARCHAR2(2000)',
         'NVARCHAR': 'NVARCHAR2(2000)',
         'NVARCHAR2': 'NVARCHAR2(2000)',
+        'CHAR': 'CHAR(36)',  # UUID columns
     },
     'mssql': {
         'NVARCHAR COLLATE "SQL Latin1 General CP1 CI AS"': 'NVARCHAR(MAX)',
@@ -78,7 +80,9 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'NUMBER': 'numeric',
     'NUMERIC': 'numeric',
     'TIMESTAMP': 'datetime64[ns]',
+    'TIMESTAMP WITHOUT TIMEZONE': 'datetime64[ns]',
     'TIMESTAMP WITH TIMEZONE': 'datetime64[ns, UTC]',
+    'TIMESTAMP WITH TIME ZONE': 'datetime64[ns, UTC]',
     'TIMESTAMPTZ': 'datetime64[ns, UTC]',
     'DATE': 'datetime64[ns]',
     'DATETIME': 'datetime64[ns]',
@@ -160,7 +164,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
         'mssql': 'DATETIME2',
-        'oracle': 'DATE',
+        'oracle': 'TIMESTAMP',
         'sqlite': 'DATETIME',
         'duckdb': 'TIMESTAMP',
         'citus': 'TIMESTAMP',
@@ -168,24 +172,37 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'default': 'DATETIME',
     },
     'datetime64[ns, UTC]': {
-        'timescaledb': 'TIMESTAMP',
-        'postgresql': 'TIMESTAMP',
-        'mariadb': 'TIMESTAMP',
-        'mysql': 'TIMESTAMP',
+        'timescaledb': 'TIMESTAMPTZ',
+        'postgresql': 'TIMESTAMPTZ',
+        'mariadb': 'DATETIME',
+        'mysql': 'DATETIME',
         'mssql': 'DATETIMEOFFSET',
         'oracle': 'TIMESTAMP',
         'sqlite': 'TIMESTAMP',
-        'duckdb': 'TIMESTAMP',
-        'citus': 'TIMESTAMP',
-        'cockroachdb': 'TIMESTAMP',
-        'default': 'TIMESTAMP',
+        'duckdb': 'TIMESTAMPTZ',
+        'citus': 'TIMESTAMPTZ',
+        'cockroachdb': 'TIMESTAMPTZ',
+        'default': 'TIMESTAMPTZ',
+    },
+    'datetime': {
+        'timescaledb': 'TIMESTAMPTZ',
+        'postgresql': 'TIMESTAMPTZ',
+        'mariadb': 'DATETIME',
+        'mysql': 'DATETIME',
+        'mssql': 'DATETIMEOFFSET',
+        'oracle': 'TIMESTAMP',
+        'sqlite': 'TIMESTAMP',
+        'duckdb': 'TIMESTAMPTZ',
+        'citus': 'TIMESTAMPTZ',
+        'cockroachdb': 'TIMESTAMPTZ',
+        'default': 'TIMESTAMPTZ',
     },
     'bool': {
         'timescaledb': 'BOOLEAN',
         'postgresql': 'BOOLEAN',
         'mariadb': 'BOOLEAN',
         'mysql': 'BOOLEAN',
-        'mssql': 'INTEGER',
+        'mssql': 'BIT',
         'oracle': 'INTEGER',
         'sqlite': 'FLOAT',
         'duckdb': 'BOOLEAN',
@@ -252,7 +269,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mysql': 'CHAR(36)',
         'mssql': 'UNIQUEIDENTIFIER',
         ### I know this is too much space, but erring on the side of caution.
-        'oracle': 'NVARCHAR(2000)',
+        'oracle': 'CHAR(36)',
         'sqlite': 'TEXT',
         'duckdb': 'VARCHAR',
         'citus': 'UUID',
@@ -301,24 +318,24 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'default': 'DateTime',
     },
     'datetime64[ns, UTC]': {
-        'timescaledb': 'DateTime',
-        'postgresql': 'DateTime',
-        'mariadb': 'DateTime',
-        'mysql': 'DateTime',
+        'timescaledb': 'DateTime(timezone=True)',
+        'postgresql': 'DateTime(timezone=True)',
+        'mariadb': 'DateTime(timezone=True)',
+        'mysql': 'DateTime(timezone=True)',
         'mssql': 'sqlalchemy.dialects.mssql.DATETIMEOFFSET',
-        'oracle': 'DateTime',
-        'sqlite': 'DateTime',
-        'duckdb': 'DateTime',
-        'citus': 'DateTime',
-        'cockroachdb': 'DateTime',
-        'default': 'DateTime',
+        'oracle': 'sqlalchemy.dialects.oracle.TIMESTAMP(timezone=True)',
+        'sqlite': 'DateTime(timezone=True)',
+        'duckdb': 'DateTime(timezone=True)',
+        'citus': 'DateTime(timezone=True)',
+        'cockroachdb': 'DateTime(timezone=True)',
+        'default': 'DateTime(timezone=True)',
     },
     'bool': {
         'timescaledb': 'Boolean',
         'postgresql': 'Boolean',
         'mariadb': 'Integer',
         'mysql': 'Integer',
-        'mssql': 'Integer',
+        'mssql': 'sqlalchemy.dialects.mssql.BIT',
         'oracle': 'Integer',
         'sqlite': 'Float',
         'duckdb': 'Boolean',
@@ -384,13 +401,27 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'sqlalchemy.dialects.mysql.CHAR(36)',
         'mysql': 'sqlalchemy.dialects.mysql.CHAR(36)',
         'mssql': 'Uuid',
-        'oracle': 'UnicodeText',
+        'oracle': 'sqlalchemy.dialects.oracle.CHAR(36)',
         'sqlite': 'UnicodeText',
         'duckdb': 'UnicodeText',
         'citus': 'Uuid',
         'cockroachdb': 'Uuid',
         'default': 'Uuid',
     },
+}
+
+AUTO_INCREMENT_COLUMN_FLAVORS: Dict[str, str] = {
+    'timescaledb': 'GENERATED BY DEFAULT AS IDENTITY',
+    'postgresql': 'GENERATED BY DEFAULT AS IDENTITY',
+    'mariadb': 'AUTO_INCREMENT',
+    'mysql': 'AUTO_INCREMENT',
+    'mssql': 'IDENTITY(1,1)',
+    'oracle': 'GENERATED BY DEFAULT ON NULL AS IDENTITY',
+    'sqlite': 'AUTOINCREMENT',
+    'duckdb': 'GENERATED BY DEFAULT',
+    'citus': 'GENERATED BY DEFAULT',
+    'cockroachdb': 'GENERATED BY DEFAULT AS IDENTITY',
+    'default': 'GENERATED BY DEFAULT AS IDENTITY',
 }
 
 
@@ -456,10 +487,10 @@ def get_db_type_from_pd_type(
     The database data type for the incoming Pandas data type.
     If nothing can be found, a warning will be thrown and 'TEXT' will be returned.
     """
-    import ast
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PD_DTYPES
+    from meerschaum.utils.misc import parse_arguments_str
     sqlalchemy_types = attempt_import('sqlalchemy.types')
 
     types_registry = (
@@ -512,15 +543,16 @@ def get_db_type_from_pd_type(
 
     if db_type.startswith('sqlalchemy.dialects'):
         dialect, typ_class_name = db_type.replace('sqlalchemy.dialects.', '').split('.', maxsplit=2)
-        arg = None
+        cls_args, cls_kwargs = None, None
         if '(' in typ_class_name:
-            typ_class_name, arg_str = typ_class_name.split('(', maxsplit=1)
-            arg = ast.literal_eval(arg_str.rstrip(')'))
+            typ_class_name, args_str = typ_class_name.split('(', maxsplit=1)
+            args_str = args_str.rstrip(')')
+            cls_args, cls_kwargs = parse_arguments_str(args_str)
         sqlalchemy_dialects_flavor_module = attempt_import(f'sqlalchemy.dialects.{dialect}')
         cls = getattr(sqlalchemy_dialects_flavor_module, typ_class_name)
-        if arg is None:
+        if cls_args is None:
             return cls
-        return cls(arg)
+        return cls(*cls_args, **cls_kwargs)
 
     if 'numeric' in db_type.lower():
         numeric_type_str = PD_TO_DB_DTYPES_FLAVORS['numeric'].get(flavor, 'NUMERIC')
@@ -528,4 +560,15 @@ def get_db_type_from_pd_type(
             return sqlalchemy_types.Numeric
         precision, scale = NUMERIC_PRECISION_FLAVORS[flavor]
         return sqlalchemy_types.Numeric(precision, scale)
-    return getattr(sqlalchemy_types, db_type)
+
+    cls_args, cls_kwargs = None, None
+    typ_class_name = db_type
+    if '(' in db_type:
+        typ_class_name, args_str = db_type.split('(', maxsplit=1)
+        args_str = args_str.rstrip(')')
+        cls_args, cls_kwargs = parse_arguments_str(args_str)
+
+    cls = getattr(sqlalchemy_types, typ_class_name)
+    if cls_args is None:
+        return cls
+    return cls(*cls_args, **cls_kwargs)

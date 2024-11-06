@@ -3,12 +3,12 @@
 # vim:fenc=utf-8
 
 import pytest
-import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 from tests import debug
 from tests.connectors import conns, get_flavors
-from tests.test_users import test_register_user
+from tests.test_users import test_register_user as _test_register_user
 import meerschaum as mrsm
 from meerschaum import Pipe
 from meerschaum.utils.dtypes import are_dtypes_equal
@@ -17,7 +17,7 @@ from meerschaum.utils.dtypes.sql import PD_TO_DB_DTYPES_FLAVORS
 
 @pytest.fixture(autouse=True)
 def run_before_and_after(flavor: str):
-    test_register_user(flavor)
+    _test_register_user(flavor)
     yield
 
 
@@ -276,12 +276,20 @@ def test_utc_offset_datetimes(flavor: str):
     Verify that we are able to sync rows with UTC offset datetimes.
     """
     conn = conns[flavor]
+    pipe = Pipe('test_utc_offset', 'datetimes', instance=conn)
+    pipe.delete()
     pipe = Pipe(
         'test_utc_offset', 'datetimes',
-        instance = conn,
-        columns = {'datetime': 'dt'},
+        instance=conn,
+        columns={'datetime': 'dt'},
     )
-    pipe.delete()
+
+    seed_docs = [
+        {'dt': datetime(2023, 1, 1)},
+        {'dt': datetime(2023, 1, 1, 23, 0, 0)},
+    ]
+    success, msg = pipe.sync(seed_docs, debug=debug)
+    assert success, msg
 
     docs = [
         {'dt': '2023-01-01 00:00:00+00:00'},
@@ -289,8 +297,40 @@ def test_utc_offset_datetimes(flavor: str):
     ]
 
     expected_docs = [
-        {'dt': datetime.datetime(2023, 1, 1)},
-        {'dt': datetime.datetime(2023, 1, 1, 23, 0, 0)}
+        {'dt': datetime(2023, 1, 1, tzinfo=timezone.utc)},
+        {'dt': datetime(2023, 1, 1, 23, 0, 0, tzinfo=timezone.utc)}
+    ]
+
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    synced_docs = df.to_dict(orient='records')
+    assert synced_docs == expected_docs
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_explicit_utc_datetimes(flavor: str):
+    """
+    Verify that we are able to sync rows with UTC offset datetimes.
+    """
+    conn = conns[flavor]
+    pipe = Pipe('test_explicit', 'datetimes', 'utc', instance=conn)
+    pipe.delete()
+    pipe = Pipe(
+        'test_explicit', 'datetimes', 'utc',
+        instance=conn,
+        columns={'datetime': 'dt'},
+        dtypes={'dt': 'datetime64[ns, UTC]'},
+    )
+
+    docs = [
+        {'dt': '2024-01-01 00:00:00+00:00'},
+        {'dt': '2024-01-02 00:00:00+01:00'},
+    ]
+
+    expected_docs = [
+        {'dt': datetime(2024, 1, 1, tzinfo=timezone.utc)},
+        {'dt': datetime(2024, 1, 1, 23, 0, 0, tzinfo=timezone.utc)},
     ]
 
     success, msg = pipe.sync(docs, debug=debug)
@@ -308,8 +348,8 @@ def test_ignore_datetime_conversion(flavor: str):
     conn = conns[flavor]
     pipe = Pipe(
         'test_utc_offset', 'datetimes', 'ignore',
-        instance = conn,
-        dtypes = {
+        instance=conn,
+        dtypes={
             'dt': 'str',
         },
     )
@@ -340,9 +380,14 @@ def test_no_indices_inferred_datetime_to_text(flavor: str):
     conn = conns[flavor]
     pipe = Pipe(
         'test_no_indices', 'datetimes', 'text',
-        instance = conn,
+        instance=conn,
     )
     pipe.delete()
+    pipe = Pipe(
+        'test_no_indices', 'datetimes', 'text',
+        instance=conn,
+    )
+
     docs = [
         {'fake-dt': '2023-01-01', 'a': 1},
     ]
@@ -379,9 +424,9 @@ def test_sync_bools(flavor: str):
     _ = pipe.delete()
     pipe = mrsm.Pipe(
         'test', 'bools',
-        instance = conn,
-        columns = {'datetime': 'dt'},
-        dtypes = {'is_bool': 'bool'},
+        instance=conn,
+        columns={'datetime': 'dt'},
+        dtypes={'is_bool': 'bool'},
     )
     _ = pipe.drop()
     docs = [
@@ -504,6 +549,7 @@ def test_sync_bools_inplace(flavor: str):
                 'definition': f"SELECT * FROM {pipe_table}",
                 'pipe': pipe.keys(),
             },
+            'parents': [pipe.meta],
         },
     )
     _ = pipe.drop()
@@ -512,7 +558,7 @@ def test_sync_bools_inplace(flavor: str):
         {'dt': '2023-01-02', 'id': 2, 'is_bool': False},
         {'dt': '2023-01-03', 'id': 3, 'is_bool': None},
     ]
-    success, msg = pipe.sync(docs)
+    success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
 
     success, msg = inplace_pipe.sync(debug=debug)
@@ -521,19 +567,22 @@ def test_sync_bools_inplace(flavor: str):
     assert 'bool' in inplace_pipe.dtypes['is_bool']
     assert inplace_pipe.get_rowcount() == len(docs)
 
-    df = inplace_pipe.get_data()
-
-    pipe.sync([{'dt': '2023-01-03', 'id': 3, 'is_bool': True}])
+    pipe.sync([{'dt': '2023-01-03', 'id': 3, 'is_bool': True}], debug=debug)
     success, msg = inplace_pipe.sync(debug=debug)
     assert success, msg
-    df = inplace_pipe.get_data(params={'id': 3})
+
+    df = pipe.get_data(params={'id': 3}, debug=debug)
     assert 'true' in str(df['is_bool'][0]).lower()
 
-    pipe.sync([{'dt': '2023-01-03', 'id': 3, 'is_bool': None}])
+    df = inplace_pipe.get_data(params={'id': 3}, debug=debug)
+    assert 'true' in str(df['is_bool'][0]).lower()
+
+    pipe.sync([{'dt': '2023-01-03', 'id': 3, 'is_bool': None}], debug=debug)
     success, msg = inplace_pipe.sync(debug=debug)
     assert success, msg
-    df = inplace_pipe.get_data(params={'id': 3})
+    df = inplace_pipe.get_data(params={'id': 3}, debug=True)
     assert 'na' in str(df['is_bool'][0]).lower()
+    return pipe, inplace_pipe
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -574,7 +623,7 @@ def test_sync_uuids_inplace(flavor: str):
         {'dt': '2023-01-02', 'id': 2, 'uuid_col': UUID('2854eeed-2911-4641-8d67-6ecd217392cc')},
         {'dt': '2023-01-03', 'id': 3},
     ]
-    success, msg = pipe.sync(docs)
+    success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
 
     success, msg = inplace_pipe.sync(debug=debug)
@@ -582,15 +631,13 @@ def test_sync_uuids_inplace(flavor: str):
 
     assert 'uuid' in inplace_pipe.dtypes['uuid_col']
     assert inplace_pipe.get_rowcount() == len(docs)
-    db_col = inplace_pipe.get_columns_types()['uuid_col']
+    db_col = inplace_pipe.get_columns_types(refresh=True)['uuid_col']
     if flavor in PD_TO_DB_DTYPES_FLAVORS['uuid']:
         uuid_typ = PD_TO_DB_DTYPES_FLAVORS['uuid'][flavor]
-        assert db_col == uuid_typ
+        assert db_col.split('(',  maxsplit=1)[0] == uuid_typ.split('(', maxsplit=1)[0]
 
-    df = inplace_pipe.get_data()
-
-    update_uuid = UUID('a12bbc7c-4595-4bfe-a9b6-8b81c6e329c8')
-    pipe.sync([{'dt': '2023-01-03', 'id': 3, 'uuid_col': update_uuid}])
+    update_uuid = UUID('7befa9bd-fbb3-404b-b8e1-6389db6b6e84')
+    pipe.sync([{'dt': '2023-01-03', 'id': 3, 'uuid_col': update_uuid}], debug=debug)
     success, msg = inplace_pipe.sync(debug=debug)
     assert success, msg
     df = inplace_pipe.get_data(params={'id': 3})

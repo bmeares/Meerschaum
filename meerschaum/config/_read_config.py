@@ -6,22 +6,26 @@ Import the config yaml file
 """
 
 from __future__ import annotations
+import pathlib
+
 from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
 from meerschaum.config import get_config
 
+
 def read_config(
-    directory: Optional[str] = None,
+    directory: Union[pathlib.Path, str, None] = None,
     keys: Optional[List[str]] = None,
-    write_missing : bool = True,
-    substitute : bool = True,
-    with_filenames : bool = False,
+    write_missing: bool = True,
+    substitute: bool = True,
+    with_filenames: bool = False,
+    raise_parsing_errors: bool = False,
 ) -> Union[Dict[str, Any], Tuple[Dict[str, Any], List[str]]]:
     """
     Read the configuration directory.
 
     Parameters
     ----------
-    directory: Optional[str], default None
+    directory: Union[pathlib.Path, str, None], default None
         The directory with configuration files (.json and .yaml).
 
     keys: Optional[List[str]], default None
@@ -36,7 +40,10 @@ def read_config(
 
     with_filename: bool, default False
         If `True`, return a tuple of the configuration dictionary with a list of read filenames.
-        
+
+    raise_parsing_errors: bool, default False
+        If `True`, re-raise parsing exceptions.
+
     Examples
     --------
     >>> read_config(keys=['meerschaum'], with_filename=True)
@@ -63,9 +70,9 @@ def read_config(
 
     default_filetype = STATIC_CONFIG['config']['default_filetype']
     filetype_loaders = {
-        'yml' : yaml.load,
-        'yaml' : yaml.load,
-        'json' : json.load,
+        'yml': yaml.load,
+        'yaml': yaml.load,
+        'json': json.load,
     }
 
     ### Construct filekeys (files to parse).
@@ -167,6 +174,8 @@ def read_config(
                         _config_key = filetype_loaders[_type](f)
                     except Exception as e:
                         print(f"Error processing file: {filepath}")
+                        if raise_parsing_errors:
+                            raise e
                         import traceback
                         traceback.print_exc()
                         _config_key = {}
@@ -184,6 +193,8 @@ def read_config(
                     config[symlinks_key][key] = _single_key_config[symlinks_key][key]
                 break
             except Exception as e:
+                if raise_parsing_errors:
+                    raise e
                 print(f"Unable to parse {filename}!")
                 import traceback
                 traceback.print_exc()

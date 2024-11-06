@@ -58,6 +58,7 @@ class APIConnector(Connector):
         drop_pipe,
         clear_pipe,
         get_pipe_columns_types,
+        get_pipe_columns_indices,
     )
     from ._fetch import fetch
     from ._plugins import (

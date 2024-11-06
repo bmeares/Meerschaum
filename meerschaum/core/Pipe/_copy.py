@@ -55,6 +55,8 @@ def copy_to(
     if str(instance_keys) == self.instance_keys:
         return False, f"Cannot copy {self} to instance '{instance_keys}'."
 
+    begin, end = self.parse_date_bounds(begin, end)
+
     new_pipe = mrsm.Pipe(
         self.connector_keys,
         self.metric_key,

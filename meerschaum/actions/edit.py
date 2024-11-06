@@ -65,24 +65,24 @@ def _complete_edit(
     from meerschaum._internal.shell import default_action_completer
     return default_action_completer(action=(['edit'] + action), **kw)
 
-def _edit_config(action : Optional[List[str]] = None, **kw : Any) -> SuccessTuple:
+
+def _edit_config(action: Optional[List[str]] = None, **kw : Any) -> SuccessTuple:
     """
     Edit Meerschaum configuration files.
-    
+
     Specify a specific configuration key to edit.
     Defaults to editing `meerschaum` configuration (connectors, instance, etc.).
-    
+
     Examples:
         ```
         ### Edit the main 'meerschaum' configuration.
         edit config
-    
+
         ### Edit 'system' configuration.
         edit config system
-    
+
         ### Create a new configuration file called 'myconfig'.
         edit config myconfig
-    
         ```
     """
     from meerschaum.config._edit import edit_config

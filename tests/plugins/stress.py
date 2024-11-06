@@ -6,15 +6,14 @@
 Stress test for pipes.
 """
 
-__version__ = '0.3.7'
+__version__ = '0.3.9'
 
 from datetime import datetime, timezone, timedelta
 import random
-import math
 
 import meerschaum as mrsm
-from meerschaum.utils.misc import iterate_chunks
 from meerschaum.utils.typing import Optional
+
 
 def register(pipe):
     """
@@ -33,6 +32,7 @@ def register(pipe):
         'upsert': True,
     }
 
+
 def fetch(
     pipe: mrsm.Pipe,
     chunksize: Optional[int] = None,
@@ -43,22 +43,22 @@ def fetch(
     """
     Yield random chunks of data.
     """
-    _edit_pipe = False
-
-    sync_time = pipe.get_sync_time(round_down=False)
     now = (
         begin
         if begin is not None
         else (
             sync_time
-            if sync_time is not None
-            else datetime.now(timezone.utc).replace(tzinfo=None)
+            if (sync_time := pipe.get_sync_time(round_down=False)) is not None
+            else datetime.now(timezone.utc)
         )
     )
     if chunksize is None or chunksize < 1:
         chunksize = 1440
 
     dt_col, id_col, val_col = 'datetime', 'id', 'val'
+    print(f"{begin=}")
+    print(f"{end=}")
+    #  print(f"{sync_time=}")
 
     fetch_params = pipe.parameters.get('fetch', {})
     row_limit = fetch_params.get('rows', None) or 1440

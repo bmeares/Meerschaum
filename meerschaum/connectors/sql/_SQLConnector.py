@@ -67,6 +67,8 @@ class SQLConnector(Connector):
         get_pipe_columns_types,
         get_to_sql_dtype,
         get_pipe_schema,
+        create_pipe_table_from_df,
+        get_pipe_columns_indices,
     )
     from ._plugins import (
         register_plugin,
@@ -141,9 +143,9 @@ class SQLConnector(Connector):
             if uri.startswith('postgres') and not uri.startswith('postgresql'):
                 uri = uri.replace('postgres', 'postgresql', 1)
             if uri.startswith('postgresql') and not uri.startswith('postgresql+'):
-                uri = uri.replace('postgresql://', 'postgresql+psycopg', 1)
+                uri = uri.replace('postgresql://', 'postgresql+psycopg://', 1)
             if uri.startswith('timescaledb://'):
-                uri = uri.replace('timescaledb://', 'postgresql://', 1)
+                uri = uri.replace('timescaledb://', 'postgresql+psycopg://', 1)
                 flavor = 'timescaledb'
             kw['uri'] = uri
             from_uri_params = self.from_uri(kw['uri'], as_dict=True)
@@ -154,7 +156,6 @@ class SQLConnector(Connector):
             kw.update(from_uri_params)
             if flavor:
                 kw['flavor'] = flavor
-
 
         ### set __dict__ in base class
         super().__init__(

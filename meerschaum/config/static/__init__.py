@@ -148,6 +148,7 @@ STATIC_CONFIG: Dict[str, Any] = {
             'min_ratio_columns_changed_for_full_astype': 0.5,
         },
         'exists_timeout_seconds': 5.0,
+        'static_schema_cache_seconds': 60.0,
     },
     'jobs': {
         'check_restart_seconds': 1.0,

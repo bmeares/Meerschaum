@@ -408,6 +408,7 @@ class ValkeyConnector(Connector):
         -------
         A list of dictionaries, where all keys and values are strings.
         """
+        from meerschaum.utils.dtypes import coerce_timezone
         table_name = self.quote_table(table)
         datetime_column_key = self.get_datetime_column_key(table)
         datetime_column = self.get(datetime_column_key)
@@ -424,10 +425,10 @@ class ValkeyConnector(Connector):
         dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
         if isinstance(begin, str):
-            begin = dateutil_parser.parse(begin)
+            begin = coerce_timezone(dateutil_parser.parse(begin))
 
         if isinstance(end, str):
-            end = dateutil_parser.parse(end)
+            end = coerce_timezone(dateutil_parser.parse(end))
 
         begin_ts = (
             (
