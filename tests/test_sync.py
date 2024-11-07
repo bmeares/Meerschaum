@@ -575,6 +575,7 @@ def test_sync_dask_dataframe(flavor: str):
     pipe = mrsm.Pipe(
         'dask', 'demo',
         columns={'datetime': 'dt'},
+        dtypes={'dt': 'datetime'},
         instance=conn,
     )
     pipe.sync([
@@ -589,11 +590,14 @@ def test_sync_dask_dataframe(flavor: str):
     pipe2 = mrsm.Pipe(
         'dask', 'insert',
         columns=pipe.columns,
+        dtypes=pipe.dtypes,
         instance=conn,
     )
     pipe2.sync(ddf, debug=debug)
-    docs = pipe.get_data().to_dict(orient='records')
-    docs2 = pipe2.get_data().to_dict(orient='records')
+    df = pipe.get_data()
+    df2 = pipe2.get_data()
+    docs = df.to_dict(orient='records')
+    docs2 = df2.to_dict(orient='records')
     assert docs == docs2
 
 
