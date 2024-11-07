@@ -307,6 +307,8 @@ def test_utc_offset_datetimes(flavor: str):
     assert success, msg
     df = pipe.get_data(debug=debug)
     synced_docs = df.to_dict(orient='records')
+    mrsm.pprint(synced_docs)
+    mrsm.pprint(expected_docs)
     assert synced_docs == expected_docs
 
 
