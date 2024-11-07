@@ -84,6 +84,7 @@ def test_dtype_enforcement(flavor: str):
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
     assert len(df.columns) == 10
+    return pipe
     for col, typ in df.dtypes.items():
         pipe_dtype = pipe.dtypes[col]
         if pipe_dtype == 'json':

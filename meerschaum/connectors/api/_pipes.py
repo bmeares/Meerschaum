@@ -383,7 +383,7 @@ def get_pipe_data(
         ignore_cols = [
             col
             for col, dtype in pipe.dtypes.items()
-            if are_dtypes_equal(str(dtype), 'datetime')
+            if not are_dtypes_equal(str(dtype), 'datetime')
         ],
         strip_timezone=(pipe.tzinfo is None),
         debug=debug,
@@ -393,7 +393,7 @@ def get_pipe_data(
 
 def get_pipe_id(
     self,
-    pipe: meerschuam.Pipe,
+    pipe: mrsm.Pipe,
     debug: bool = False,
 ) -> int:
     """Get a Pipe's ID from the API."""
@@ -415,7 +415,7 @@ def get_pipe_id(
 
 def get_pipe_attributes(
     self,
-    pipe: meerschaum.Pipe,
+    pipe: mrsm.Pipe,
     debug: bool = False,
 ) -> Dict[str, Any]:
     """Get a Pipe's attributes from the API
@@ -441,7 +441,7 @@ def get_pipe_attributes(
 
 def get_sync_time(
     self,
-    pipe: 'meerschaum.Pipe',
+    pipe: mrsm.Pipe,
     params: Optional[Dict[str, Any]] = None,
     newest: bool = True,
     debug: bool = False,

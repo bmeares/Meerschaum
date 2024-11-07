@@ -14,6 +14,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optional, List
 from meerschaum.utils.warnings import warn
 
+
 @property
 def attributes(self) -> Dict[str, Any]:
     """
@@ -54,6 +55,13 @@ def parameters(self) -> Optional[Dict[str, Any]]:
     """
     if 'parameters' not in self.attributes:
         self.attributes['parameters'] = {}
+    _parameters = self.attributes['parameters']
+    dt_col = _parameters.get('columns', {}).get('datetime', None)
+    dt_typ = _parameters.get('dtypes', {}).get(dt_col, None) if dt_col else None
+    if dt_col and not dt_typ:
+        if 'dtypes' not in _parameters:
+            self.attributes['parameters']['dtypes'] = {}
+        self.attributes['parameters']['dtypes'][dt_col] = 'datetime'
     return self.attributes['parameters']
 
 
