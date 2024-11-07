@@ -338,7 +338,7 @@ columns_indices_queries = {
             AND kc.name = i.name
         WHERE
             t.name IN ('{table}', '{table_trunc}')
-            AND s.name = 'dbo'
+            AND s.name = '{schema}'
             AND i.type IN (1, 2)  -- 1 = CLUSTERED, 2 = NONCLUSTERED
     """,
     'oracle': """
