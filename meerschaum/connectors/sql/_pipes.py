@@ -1980,19 +1980,20 @@ def sync_pipe_inplace(
             "SELECT\n"
             f"    MIN({dt_col_name}) AS {sql_item_name('min_dt', self.flavor)},\n"
             f"    MAX({dt_col_name}) AS {sql_item_name('max_dt', self.flavor)}\n"
-            f"FROM {temp_table_names['new']}\n"
+            f"FROM {temp_table_names['new' if not upsert else 'update']}\n"
             f"WHERE {dt_col_name} IS NOT NULL"
         ],
         with_results=True,
         debug=debug,
-    )
+    ) if not upsert else ((True, "Success"), None)
     if not new_dt_bounds_success:
         return (
             new_dt_bounds_success,
             f"Could not determine in-place datetime bounds:\n{new_dt_bounds_msg}"
         )
 
-    begin, end = new_dt_bounds_results[0].fetchone()
+    if not upsert:
+        begin, end = new_dt_bounds_results[0].fetchone()
 
     backtrack_def = self.get_pipe_data_query(
         pipe,
@@ -2010,7 +2011,7 @@ def sync_pipe_inplace(
         self.flavor,
         schema=internal_schema,
     )[0]
-    (create_backtrack_success, create_backtrack_msg), create_new_results = session_execute(
+    (create_backtrack_success, create_backtrack_msg), create_backtrack_results = session_execute(
         session,
         create_backtrack_query,
         with_results=True,

@@ -112,15 +112,14 @@ def test_infer_json_dtype(flavor: str):
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', session_id, instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('foo', 'bar', session_id, instance=conn)
+    pipe = Pipe('foo', 'bar', session_id, instance=conn, columns=['id'])
     success, msg = pipe.sync([
-        {'a': ['b', 'c']},
-        {'a': {'b': 1}},
+        {'id': 1, 'a': ['b', 'c']},
+        {'id': 2, 'a': {'b': 1}},
     ])
     assert success, msg
     pprint(pipe.get_columns_types())
     df = pipe.get_data(debug=debug)
-    print(df)
     assert isinstance(df['a'][0], list)
     assert isinstance(df['a'][1], dict)
 
