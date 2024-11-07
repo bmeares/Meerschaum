@@ -105,6 +105,7 @@ class Pipe:
         autoincrement,
         upsert,
         static,
+        tzinfo,
         get_columns,
         get_columns_types,
         get_columns_indices,

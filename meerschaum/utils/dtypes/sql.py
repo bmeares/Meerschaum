@@ -304,6 +304,19 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'cockroachdb': 'Float',
         'default': 'Float',
     },
+    'datetime': {
+        'timescaledb': 'DateTime(timezone=True)',
+        'postgresql': 'DateTime(timezone=True)',
+        'mariadb': 'DateTime(timezone=True)',
+        'mysql': 'DateTime(timezone=True)',
+        'mssql': 'sqlalchemy.dialects.mssql.DATETIMEOFFSET',
+        'oracle': 'sqlalchemy.dialects.oracle.TIMESTAMP(timezone=True)',
+        'sqlite': 'DateTime(timezone=True)',
+        'duckdb': 'DateTime(timezone=True)',
+        'citus': 'DateTime(timezone=True)',
+        'cockroachdb': 'DateTime(timezone=True)',
+        'default': 'DateTime(timezone=True)',
+    },
     'datetime64[ns]': {
         'timescaledb': 'DateTime',
         'postgresql': 'DateTime',
@@ -489,7 +502,7 @@ def get_db_type_from_pd_type(
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PD_DTYPES
+    from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.misc import parse_arguments_str
     sqlalchemy_types = attempt_import('sqlalchemy.types')
 

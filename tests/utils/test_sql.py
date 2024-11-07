@@ -69,7 +69,10 @@ def test_build_where(params: Dict[str, Any], expected_subqueries: List[str]):
     """
     where_subquery = build_where(
         params,
-        mrsm.get_connector('sql', 'build_where_test', uri='postgresql://foo:bar@localhost:5432/baz')
+        mrsm.get_connector(
+            'sql', 'build_where_test',
+            uri='postgresql+psycopg2://foo:bar@localhost:5432/baz'
+        )
     )
     for subquery in expected_subqueries:
         assert subquery in where_subquery

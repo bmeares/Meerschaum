@@ -4,6 +4,33 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.6.1
+
+- **Add `Pipe.tzinfo`.**  
+  Check if a pipe is timezone-aware with `tzinfo`:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'timezone', 'aware',
+      columns={'datetime': 'dt'},
+  )
+  print(pipe.tzinfo)
+  # UTC
+
+  pipe = mrsm.Pipe(
+      'demo', 'timezone', 'naive',
+      columns={'datetime': 'dt'},
+      dtypes={'dt': 'datetime64[ns]'},
+  )
+  print(pipe.tzinfo)
+  # None
+  ```
+
+- **Improve timezone enforcement when syncing.**
+- **Fix timezone-aware datetime truncation for MSSQL**
+
 ### v2.6.0
 
 - **Enforce a timezone-aware `datetime` axis by default.**  

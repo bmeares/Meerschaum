@@ -367,6 +367,7 @@ def get_pipe_data(
 
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dataframe import parse_df_datetimes, add_missing_cols_to_df
+    from meerschaum.utils.dtypes import are_dtypes_equal
     pd = import_pandas()
     try:
         df = pd.read_json(StringIO(response.text))
@@ -382,16 +383,17 @@ def get_pipe_data(
         ignore_cols = [
             col
             for col, dtype in pipe.dtypes.items()
-            if 'datetime' not in str(dtype)
+            if not are_dtypes_equal(str(dtype), 'datetime')
         ],
-        debug = debug,
+        strip_timezone=(pipe.tzinfo is None),
+        debug=debug,
     )
     return df
 
 
 def get_pipe_id(
     self,
-    pipe: meerschuam.Pipe,
+    pipe: mrsm.Pipe,
     debug: bool = False,
 ) -> int:
     """Get a Pipe's ID from the API."""
@@ -413,7 +415,7 @@ def get_pipe_id(
 
 def get_pipe_attributes(
     self,
-    pipe: meerschaum.Pipe,
+    pipe: mrsm.Pipe,
     debug: bool = False,
 ) -> Dict[str, Any]:
     """Get a Pipe's attributes from the API
@@ -439,7 +441,7 @@ def get_pipe_attributes(
 
 def get_sync_time(
     self,
-    pipe: 'meerschaum.Pipe',
+    pipe: mrsm.Pipe,
     params: Optional[Dict[str, Any]] = None,
     newest: bool = True,
     debug: bool = False,

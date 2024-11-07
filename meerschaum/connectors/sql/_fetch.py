@@ -90,16 +90,18 @@ def fetch(
     )
     ### if sqlite, parse for datetimes
     if not as_hook_results and self.flavor == 'sqlite':
-        from meerschaum.utils.misc import parse_df_datetimes
+        from meerschaum.utils.dataframe import parse_df_datetimes
+        from meerschaum.utils.dtypes import are_dtypes_equal
         ignore_cols = [
             col
             for col, dtype in pipe.dtypes.items()
-            if 'datetime' not in str(dtype)
+            if not are_dtypes_equal(str(dtype), 'datetime')
         ]
         return (
             parse_df_datetimes(
                 chunk,
                 ignore_cols=ignore_cols,
+                strip_timezone=(pipe.tzinfo is None),
                 debug=debug,
             )
             for chunk in chunks
