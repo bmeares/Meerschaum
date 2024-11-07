@@ -606,7 +606,7 @@ def dateadd_str(
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
 
     elif flavor in ('mssql',):
-        if begin_time and begin_time.microsecond != 0:
+        if begin_time and begin_time.microsecond != 0 and not dt_is_utc:
             begin = begin[:-4] + "'"
         begin = f"CAST({begin} AS {db_type})" if begin != 'now' else 'GETUTCDATE()'
         da = f"DATEADD({datepart}, {number}, {begin})" if number != 0 else begin

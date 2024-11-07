@@ -30,6 +30,7 @@ def enforce_dtypes(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.dataframe import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
+    from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas(debug=debug)
     if df is None:
@@ -51,6 +52,7 @@ def enforce_dtypes(
                     for col, dtype in pipe_dtypes.items()
                     if 'datetime' not in str(dtype)
                 ],
+                strip_timezone=(self.tzinfo is None),
                 chunksize=chunksize,
                 debug=debug,
             )
@@ -60,8 +62,9 @@ def enforce_dtypes(
                 ignore_cols=[
                     col
                     for col, dtype in pipe_dtypes.items()
-                    if 'datetime' not in str(dtype)
+                    if not are_dtypes_equal(str(dtype), 'datetime')
                 ],
+                strip_timezone=(self.tzinfo is None),
                 chunksize=chunksize,
                 debug=debug,
             )
@@ -77,7 +80,14 @@ def enforce_dtypes(
             )
         return df
 
-    return _enforce_dtypes(df, pipe_dtypes, safe_copy=safe_copy, debug=debug)
+    return _enforce_dtypes(
+        df,
+        pipe_dtypes,
+        safe_copy=safe_copy,
+        strip_timezone=(self.tzinfo is None),
+        coerce_timezone=True,
+        debug=debug,
+    )
 
 
 def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, Any]:

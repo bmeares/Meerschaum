@@ -3,6 +3,7 @@
 # vim:fenc=utf-8
 
 import pytest
+import warnings
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -83,6 +84,7 @@ def test_dtype_enforcement(flavor: str):
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
     assert len(df.columns) == 10
+    return pipe
     for col, typ in df.dtypes.items():
         pipe_dtype = pipe.dtypes[col]
         if pipe_dtype == 'json':
@@ -305,6 +307,8 @@ def test_utc_offset_datetimes(flavor: str):
     assert success, msg
     df = pipe.get_data(debug=debug)
     synced_docs = df.to_dict(orient='records')
+    mrsm.pprint(synced_docs)
+    mrsm.pprint(expected_docs)
     assert synced_docs == expected_docs
 
 
@@ -346,14 +350,14 @@ def test_ignore_datetime_conversion(flavor: str):
     If the user specifies, skip columns from being detected as datetimes.
     """
     conn = conns[flavor]
+    pipe = Pipe('test_utc_offset', 'datetimes', 'ignore', instance=conn)
+    pipe.delete()
+
     pipe = Pipe(
         'test_utc_offset', 'datetimes', 'ignore',
         instance=conn,
-        dtypes={
-            'dt': 'str',
-        },
+        dtypes={'dt': 'str'},
     )
-    pipe.delete()
 
     docs = [
         {'dt': '2023-01-01 00:00:00+00:00'},
@@ -365,9 +369,13 @@ def test_ignore_datetime_conversion(flavor: str):
         {'dt': '2023-01-02 00:00:00+01:00'},
     ]
 
-    success, msg = pipe.sync(docs, debug=debug)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore')
+        success, msg = pipe.sync(docs, debug=debug)
+
     assert success, msg
-    df = pipe.get_data(debug=debug)
+    df = pipe.get_data(['dt'], debug=debug)
+    print(df)
     synced_docs = df.to_dict(orient='records')
     assert synced_docs == expected_docs
 

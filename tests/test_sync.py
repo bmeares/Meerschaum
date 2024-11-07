@@ -575,6 +575,7 @@ def test_sync_dask_dataframe(flavor: str):
     pipe = mrsm.Pipe(
         'dask', 'demo',
         columns={'datetime': 'dt'},
+        dtypes={'dt': 'datetime'},
         instance=conn,
     )
     pipe.sync([
@@ -589,11 +590,14 @@ def test_sync_dask_dataframe(flavor: str):
     pipe2 = mrsm.Pipe(
         'dask', 'insert',
         columns=pipe.columns,
+        dtypes=pipe.dtypes,
         instance=conn,
     )
     pipe2.sync(ddf, debug=debug)
-    docs = pipe.get_data().to_dict(orient='records')
-    docs2 = pipe2.get_data().to_dict(orient='records')
+    df = pipe.get_data()
+    df2 = pipe2.get_data()
+    docs = df.to_dict(orient='records')
+    docs2 = df2.to_dict(orient='records')
     assert docs == docs2
 
 
@@ -921,7 +925,7 @@ def test_static_schema(flavor: str):
         },
         dtypes={
             'id': 'uuid',
-            'dt': 'datetime',
+            'dt': 'datetime64[ns]',
             'num': 'numeric',
             'val': 'float',
             'meta': 'json',
@@ -929,7 +933,7 @@ def test_static_schema(flavor: str):
     )
     docs = [
         {
-            'dt': '2024-01-01',
+            'dt': '2024-01-01 01:02:03.456789',
             'id': 'e7a57f9b-da26-4c70-bffc-ed27cdd74565',
             'num': '1.23',
             'val': '2.34',
@@ -941,7 +945,7 @@ def test_static_schema(flavor: str):
 
     new_docs = [
         {
-            'dt': '2024-01-01',
+            'dt': '2024-01-01 01:02:03.456789',
             'id': '44be2c5a-3d42-4e5f-b118-93a56697ae14',
             'val': 'foo',
             'bar': 1,
