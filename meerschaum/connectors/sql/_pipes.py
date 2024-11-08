@@ -877,10 +877,21 @@ def get_pipe_data(
         attempt_cast_to_uuid,
         are_dtypes_equal,
     )
+    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
 
-    dtypes = pipe.dtypes
+    cols_types = pipe.get_columns_types(debug=debug)
+    dtypes = {
+        **{
+            col: get_pd_type_from_db_type(typ)
+            for col, typ in cols_types.items()
+        },
+        **{
+            p_col: to_pandas_dtype(p_typ)
+            for p_col, p_typ in pipe.dtypes.items()
+        }
+    }
     if dtypes:
         if self.flavor == 'sqlite':
             if not pipe.columns.get('datetime', None):
