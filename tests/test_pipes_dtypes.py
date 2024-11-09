@@ -136,10 +136,10 @@ def test_force_json_dtype(flavor: str):
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'json'})
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'json'})
+    pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'json'}, columns=['id'])
     success, msg = pipe.sync([
-        {'a': json.dumps(['b', 'c'])},
-        {'a': json.dumps({'b': 1})},
+        {'id': 1, 'a': json.dumps(['b', 'c'])},
+        {'id': 2, 'a': json.dumps({'b': 1})},
     ])
     assert success, msg
     pprint(pipe.get_columns_types())
@@ -171,10 +171,10 @@ def test_infer_numeric_dtype(flavor: str):
     conn = conns[flavor]
     pipe = Pipe('infer', 'numeric', instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('infer', 'numeric', instance=conn)
+    pipe = Pipe('infer', 'numeric', instance=conn, columns=['id'])
     success, msg = pipe.sync([
-        {'a': Decimal('1')},
-        {'a': Decimal(numeric_str)},
+        {'id': 1, 'a': Decimal('1')},
+        {'id': 2, 'a': Decimal(numeric_str)},
     ])
     assert success, msg
     pprint(pipe.get_columns_types())
@@ -195,11 +195,11 @@ def test_infer_uuid_dtype(flavor: str):
     conn = conns[flavor]
     pipe = Pipe('infer', 'uuid', instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('infer', 'uuid', instance=conn)
+    pipe = Pipe('infer', 'uuid', instance=conn, columns=['id'])
     uuid_str = "e6f3a4ea-f1af-4e93-8da9-716b57672206"
     success, msg = pipe.sync(
         [
-            {'a': UUID(uuid_str)},
+            {'id': 1, 'a': UUID(uuid_str)},
         ],
         debug=debug,
     )
@@ -222,10 +222,10 @@ def test_infer_numeric_from_mixed_types(flavor: str):
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', session_id, instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('foo', 'bar', session_id, instance=conn)
-    success, msg = pipe.sync([{'a': 1}])
+    pipe = Pipe('foo', 'bar', session_id, instance=conn, columns=['id'])
+    success, msg = pipe.sync([{'id': 1, 'a': 1}])
     assert success, msg
-    success, msg = pipe.sync([{'a': 2.1}])
+    success, msg = pipe.sync([{'id': 2, 'a': 2.1}])
     assert success, msg
     pprint(pipe.get_columns_types())
     df = pipe.get_data(debug=debug)
@@ -247,10 +247,10 @@ def test_force_numeric_dtype(flavor: str):
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'numeric'})
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'numeric'})
+    pipe = Pipe('foo', 'bar', session_id, instance=conn, dtypes={'a': 'numeric'}, columns=['id'])
     success, msg = pipe.sync([
-        {'a': '1'},
-        {'a': '2.1'},
+        {'id': 1, 'a': '1'},
+        {'id': 2, 'a': '2.1'},
     ])
     assert success, msg
     pprint(pipe.get_columns_types())
@@ -747,3 +747,53 @@ def test_mixed_timezone_aware_and_naive(flavor: str):
     df = pipe.get_data(begin='2024-01-01 05:00:00+00:00', debug=debug)
     assert len(df) == 1
     assert df['val'][0] == 4
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_parse_date_bounds(flavor: str):
+    """
+    Test that datetime bounds are parsed correctly.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'parse_date_bounds', 'tz', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe('test', 'parse_date_bounds', 'tz', instance=conn, columns={'datetime': 'ts'})
+    success, msg = pipe.sync([{'ts': '2024-01-01'}], debug=debug)
+    assert success, msg
+
+    naive_begin = datetime(2024, 1, 1)
+    naive_end = datetime(2024, 1, 2)
+    aware_begin = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    aware_end = datetime(2024, 2, 1, tzinfo=timezone.utc)
+
+    begin, end = pipe.parse_date_bounds(naive_begin, naive_end)
+    assert begin.tzinfo is not None
+    assert end.tzinfo is not None
+    begin, end = pipe.parse_date_bounds(aware_begin, aware_end)
+    assert begin.tzinfo is not None
+    assert end.tzinfo is not None
+    begin, end = pipe.parse_date_bounds(naive_begin, aware_end)
+    assert begin.tzinfo is not None
+    assert end.tzinfo is not None
+
+    pipe = mrsm.Pipe('test', 'parse_date_bounds', 'naive', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'parse_date_bounds', 'naive',
+        instance=conn,
+        columns={'datetime': 'ts'},
+        dtypes={'ts': 'datetime64[ns]'},
+    )
+
+    success, msg = pipe.sync([{'ts': '2024-01-01'}], debug=debug)
+    assert success, msg
+
+    begin, end = pipe.parse_date_bounds(naive_begin, naive_end)
+    assert begin.tzinfo is None
+    assert end.tzinfo is None
+    begin, end = pipe.parse_date_bounds(aware_begin, aware_end)
+    assert begin.tzinfo is None
+    assert end.tzinfo is None
+    begin, end = pipe.parse_date_bounds(naive_begin, aware_end)
+    assert begin.tzinfo is None
+    assert end.tzinfo is None

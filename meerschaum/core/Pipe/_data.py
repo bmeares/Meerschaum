@@ -737,6 +737,8 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
 
         dt_col = self.columns.get('datetime', None)
         dt_typ = str(self.dtypes.get(dt_col, 'datetime64[ns, UTC]'))
+        if dt_typ == 'datetime':
+            dt_typ = 'datetime64[ns, UTC]'
         return coerce_timezone(dt_val, strip_utc=('utc' not in dt_typ.lower()))
 
     bounds = tuple(_parse_date_bound(dt_val) for dt_val in dt_vals)

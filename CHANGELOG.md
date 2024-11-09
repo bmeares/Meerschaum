@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.6.1 – v2.6.4
+### v2.6.1 – v2.6.5
 
 - **Add `Pipe.tzinfo`.**  
   Check if a pipe is timezone-aware with `tzinfo`:
