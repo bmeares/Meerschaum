@@ -706,3 +706,44 @@ def test_sync_uuids_simple_upsert(flavor: str):
     assert len(df) == 1
     assert isinstance(df['val'][0], UUID)
     assert df['val'][0] == UUID('d1cc1516-16e5-4471-8ab9-e969a1def655')
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_mixed_timezone_aware_and_naive(flavor: str):
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+
+    pd = mrsm.attempt_import('pandas')
+    target = 'test_timezone_mix'
+    pipe = mrsm.Pipe('test', 'timezone', 'aware_naive', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'timezone', 'aware_naive',
+        instance=conn,
+        columns={'datetime': 'ts'},
+        target=target,
+    )
+
+    src_df = pd.DataFrame([{'ts': datetime(2024, 1, 1), 'val': 2}])
+    conn.to_sql(src_df, target, debug=debug)
+
+    df = pipe.get_data(debug=debug)
+    unseen, update, delta = pipe.filter_existing(src_df, debug=debug)
+    assert len(unseen) == 0
+    assert len(update) == 0
+    assert len(delta) == 0
+
+    success, msg = pipe.sync([{'ts': '2024-01-01 05:00:00', 'val': 3}])
+    assert success, msg
+
+    df = pipe.get_data(begin='2024-01-01 05:00:00', debug=debug)
+    assert len(df) == 1
+    assert df['val'][0] == 3
+
+    success, msg = pipe.sync([{'ts': '2024-01-01 05:00:00+00:00', 'val': 4}])
+    assert success, msg
+
+    df = pipe.get_data(begin='2024-01-01 05:00:00+00:00', debug=debug)
+    assert len(df) == 1
+    assert df['val'][0] == 4

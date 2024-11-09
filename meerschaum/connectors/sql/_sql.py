@@ -641,7 +641,7 @@ def exec_queries(
         will be considered a callable hook that returns a list of queries to be executed
         before the next item in the list.
 
-    break_on_error: bool, default True
+    break_on_error: bool, default False
         If `True`, stop executing when a query fails.
 
     rollback: bool, default True
