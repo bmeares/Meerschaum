@@ -416,7 +416,7 @@ def get_pipe_data(
     table_name = self.quote_table(pipe.target)
     indices = [col for col in pipe.columns.values() if col]
     ix_docs = [
-        string_to_dict(doc['ix'].replace(COLON, ':'))
+        string_to_dict(doc.get('ix', '').replace(COLON, ':'))
         for doc in self.read_docs(
             pipe.target,
             begin=begin,

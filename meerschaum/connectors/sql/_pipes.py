@@ -877,10 +877,21 @@ def get_pipe_data(
         attempt_cast_to_uuid,
         are_dtypes_equal,
     )
+    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
 
-    dtypes = pipe.dtypes
+    cols_types = pipe.get_columns_types(debug=debug)
+    dtypes = {
+        **{
+            p_col: to_pandas_dtype(p_typ)
+            for p_col, p_typ in pipe.dtypes.items()
+        },
+        **{
+            col: get_pd_type_from_db_type(typ)
+            for col, typ in cols_types.items()
+        }
+    }
     if dtypes:
         if self.flavor == 'sqlite':
             if not pipe.columns.get('datetime', None):
@@ -1078,7 +1089,12 @@ def get_pipe_data_query(
     """
     from meerschaum.utils.misc import items_str
     from meerschaum.utils.sql import sql_item_name, dateadd_str
+    from meerschaum.utils.dtypes import coerce_timezone
+    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
+
+    dt_col = pipe.columns.get('datetime', None)
     existing_cols = pipe.get_columns_types(debug=debug)
+    dt_typ = get_pd_type_from_db_type(existing_cols[dt_col]) if dt_col in existing_cols else None
     select_columns = (
         [col for col in existing_cols]
         if not select_columns
@@ -1097,6 +1113,10 @@ def get_pipe_data_query(
             begin -= backtrack_interval
 
     begin, end = pipe.parse_date_bounds(begin, end)
+    if isinstance(begin, datetime) and dt_typ:
+        begin = coerce_timezone(begin, strip_utc=('utc' not in dt_typ.lower()))
+    if isinstance(end, datetime) and dt_typ:
+        end = coerce_timezone(end, strip_utc=('utc' not in dt_typ.lower()))
 
     cols_names = [
         sql_item_name(col, self.flavor, None)
