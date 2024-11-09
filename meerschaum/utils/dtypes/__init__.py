@@ -284,4 +284,7 @@ def coerce_timezone(
             return dt
         return dt.replace(tzinfo=timezone.utc)
 
-    return dt.astimezone(timezone.utc)
+    utc_dt = dt.astimezone(timezone.utc)
+    if strip_utc:
+        return utc_dt.replace(tzinfo=None)
+    return utc_dt
