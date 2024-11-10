@@ -547,7 +547,7 @@ def sync_pipe(
                 new_dtypes[col] = 'string'
                 df[col] = df[col].astype('string')
 
-    if new_dtypes and not static:
+    if new_dtypes and (not static or not valkey_dtypes):
         valkey_dtypes.update(new_dtypes)
         if 'valkey' not in pipe.parameters:
             pipe.parameters['valkey'] = {}

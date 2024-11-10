@@ -87,9 +87,11 @@ update_queries = {
         WHERE {date_bounds_subquery}
     """,
     'mysql-upsert': """
-        REPLACE INTO {target_table_name} ({patch_cols_str})
+        INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
+        ON DUPLICATE KEY UPDATE
+            {cols_equal_values}
     """,
     'mariadb': """
         UPDATE {target_table_name} AS f
@@ -99,9 +101,11 @@ update_queries = {
         WHERE {date_bounds_subquery}
     """,
     'mariadb-upsert': """
-        REPLACE INTO {target_table_name} ({patch_cols_str})
+        INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
+        ON DUPLICATE KEY UPDATE
+            {cols_equal_values}
     """,
     'mssql': """
         MERGE {target_table_name} f
@@ -1578,6 +1582,13 @@ def get_update_queries(
         f"     UPDATE {sets_subquery('', 'p.')}"
     )
 
+    cols_equal_values = '\n,'.join(
+        [
+            f"{sql_item_name(c_name, flavor)} = VALUES({sql_item_name(c_name, flavor)})"
+            for c_name, c_type in value_cols
+        ]
+    )
+
     return [
         base_query.format(
             sets_subquery_none=sets_subquery('', 'p.'),
@@ -1594,6 +1605,7 @@ def get_update_queries(
             coalesce_join_cols_str=coalesce_join_cols_str,
             update_or_nothing=update_or_nothing,
             when_matched_update_sets_subquery_none=when_matched_update_sets_subquery_none,
+            cols_equal_values=cols_equal_values,
         )
         for base_query in base_queries
     ]

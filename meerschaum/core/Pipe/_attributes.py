@@ -371,8 +371,7 @@ def get_columns_types(
 
     now = time.perf_counter()
     cache_seconds = STATIC_CONFIG['pipes']['static_schema_cache_seconds']
-    static = self.parameters.get('static', False)
-    if not static:
+    if not self.static:
         refresh = True
     if refresh:
         _ = self.__dict__.pop('_columns_types_timestamp', None)
