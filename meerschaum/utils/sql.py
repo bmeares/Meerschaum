@@ -87,10 +87,10 @@ update_queries = {
         WHERE {date_bounds_subquery}
     """,
     'mysql-upsert': """
-        INSERT INTO {target_table_name} ({patch_cols_str})
+        INSERT {ignore}INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
-        ON DUPLICATE KEY UPDATE
+        {on_duplicate_key_update}
             {cols_equal_values}
     """,
     'mariadb': """
@@ -101,10 +101,10 @@ update_queries = {
         WHERE {date_bounds_subquery}
     """,
     'mariadb-upsert': """
-        INSERT INTO {target_table_name} ({patch_cols_str})
+        INSERT {ignore}INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
-        ON DUPLICATE KEY UPDATE
+        {on_duplicate_key_update}
             {cols_equal_values}
     """,
     'mssql': """
@@ -1588,6 +1588,12 @@ def get_update_queries(
             for c_name, c_type in value_cols
         ]
     )
+    on_duplicate_key_update = (
+        "ON DUPLICATE KEY UPDATE"
+        if value_cols
+        else ""
+    )
+    ignore = "IGNORE " if not value_cols else ""
 
     return [
         base_query.format(
@@ -1606,6 +1612,8 @@ def get_update_queries(
             update_or_nothing=update_or_nothing,
             when_matched_update_sets_subquery_none=when_matched_update_sets_subquery_none,
             cols_equal_values=cols_equal_values,
+            on_duplicate_key_update=on_duplicate_key_update,
+            ignore=ignore,
         )
         for base_query in base_queries
     ]

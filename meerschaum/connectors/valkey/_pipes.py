@@ -305,6 +305,14 @@ def drop_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
+    for chunk_begin, chunk_end in pipe.get_chunk_bounds(debug=debug):
+        clear_chunk_success, clear_chunk_msg = pipe.clear(
+            begin=chunk_begin,
+            end=chunk_end,
+            debug=debug,
+        )
+        if not clear_chunk_success:
+            return clear_chunk_success, clear_chunk_msg
     try:
         self.drop_table(pipe.target, debug=debug)
     except Exception as e:
@@ -560,19 +568,19 @@ def sync_pipe(
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(df, include_unchanged_columns=True, debug=debug)
         if check_existing and not upsert
-        else (df, None, df)
+        else (None, df, df)
     )
     num_insert = len(unseen_df) if unseen_df is not None else 0
     num_update = len(update_df) if update_df is not None else 0
     msg = (
         f"Inserted {num_insert}, updated {num_update} rows."
         if not upsert
-        else f"Upserted {num_insert} rows."
+        else f"Upserted {num_update} rows."
     )
     if len(delta_df) == 0:
         return True, msg
 
-    unseen_docs = unseen_df.to_dict(orient='records')
+    unseen_docs = unseen_df.to_dict(orient='records') if unseen_df is not None else []
     unseen_indices_docs = _serialize_indices_docs(unseen_docs)
     unseen_ix_vals = {
         get_document_key(doc, indices, table_name): serialize_document(doc)
@@ -599,11 +607,53 @@ def sync_pipe(
         get_document_key(doc, indices, table_name): doc
         for doc in update_docs
     }
-    for key, doc in update_ix_docs.items():
+    existing_docs_data = {
+        key: self.get(key)
+        for key in update_ix_docs
+    } if pipe.exists(debug=debug) else {}
+    existing_docs = {
+        key: json.loads(data)
+        for key, data in existing_docs_data.items()
+        if data
+    }
+    new_update_docs = {
+        key: doc
+        for key, doc in update_ix_docs.items()
+        if key not in existing_docs
+    }
+    new_ix_vals = {
+        get_document_key(doc, indices, table_name): serialize_document(doc)
+        for doc in new_update_docs.values()
+    }
+    for key, val in new_ix_vals.items():
         try:
-            old_doc = json.loads(self.get(key))
-            old_doc.update(doc)
-            self.set(key, serialize_document(old_doc))
+            self.set(key, val)
+        except Exception as e:
+            return False, f"Failed to set keys for {pipe}:\n{e}"
+
+    old_update_docs = {
+        key: {
+            **existing_docs[key],
+            **doc
+        }
+        for key, doc in update_ix_docs.items()
+        if key in existing_docs
+    }
+    new_indices_docs = _serialize_indices_docs([doc for doc in new_update_docs.values()])
+    try:
+        if new_indices_docs:
+            self.push_docs(
+                new_indices_docs,
+                pipe.target,
+                datetime_column=dt_col,
+                debug=debug,
+            )
+    except Exception as e:
+        return False, f"Failed to upsert '{pipe.target}':\n{e}"
+
+    for key, doc in old_update_docs.items():
+        try:
+            self.set(key, serialize_document(doc))
         except Exception as e:
             return False, f"Failed to set keys for {pipe}:\n{e}"
 
@@ -667,9 +717,6 @@ def clear_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
-    if begin is None and end is None and params is None:
-        return self.drop_pipe(pipe, debug=debug)
-
     dt_col = pipe.columns.get('datetime', None)
 
     existing_df = pipe.get_data(
