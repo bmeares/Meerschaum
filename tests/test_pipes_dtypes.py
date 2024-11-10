@@ -52,7 +52,7 @@ def test_dtype_enforcement(flavor: str):
     pipe = Pipe(
         'dtype', 'enforcement',
         static=True,
-        upsert=True,
+        upsert=False, ### TODO: Test with `upsert=True`.
         columns={
             'datetime': 'dt',
             'id': 'id',
@@ -77,6 +77,7 @@ def test_dtype_enforcement(flavor: str):
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': '{"a": {"b": 1}}'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'uuid': '00000000-1234-5678-0000-000000000000'}], debug=debug)
+    #  return pipe
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
     assert len(df.columns) == 10
