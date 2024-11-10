@@ -416,7 +416,11 @@ def get_columns_indices(
     from meerschaum.utils.warnings import dprint
 
     now = time.perf_counter()
-    exists_timeout_seconds = STATIC_CONFIG['pipes']['exists_timeout_seconds']
+    cache_seconds = (
+        STATIC_CONFIG['pipes']['static_schema_cache_seconds']
+        if self.static
+        else STATIC_CONFIG['pipes']['exists_timeout_seconds']
+    )
     if refresh:
         _ = self.__dict__.pop('_columns_indices_timestamp', None)
         _ = self.__dict__.pop('_columns_indices', None)
@@ -425,7 +429,7 @@ def get_columns_indices(
         columns_indices_timestamp = self.__dict__.get('_columns_indices_timestamp', None)
         if columns_indices_timestamp is not None:
             delta = now - columns_indices_timestamp
-            if delta < exists_timeout_seconds:
+            if delta < cache_seconds:
                 if debug:
                     dprint(
                         f"Returning cached `columns_indices` for {self} "

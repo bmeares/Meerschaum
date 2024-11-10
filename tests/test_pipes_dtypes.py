@@ -51,6 +51,8 @@ def test_dtype_enforcement(flavor: str):
     pipe.delete(debug=debug)
     pipe = Pipe(
         'dtype', 'enforcement',
+        static=True,
+        upsert=True,
         columns={
             'datetime': 'dt',
             'id': 'id',
@@ -78,7 +80,6 @@ def test_dtype_enforcement(flavor: str):
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
     assert len(df.columns) == 10
-    return pipe
     for col, typ in df.dtypes.items():
         pipe_dtype = pipe.dtypes[col]
         if pipe_dtype == 'json':
@@ -583,7 +584,6 @@ def test_sync_bools_inplace(flavor: str):
     assert success, msg
     df = inplace_pipe.get_data(params={'id': 3}, debug=True)
     assert 'na' in str(df['is_bool'][0]).lower()
-    return pipe, inplace_pipe
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
