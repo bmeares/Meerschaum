@@ -103,6 +103,7 @@ packages: Dict[str, Dict[str, str]] = {
         'pytest_xdist'               : 'pytest-xdist>=3.2.1',
         'heartrate'                  : 'heartrate>=0.2.1',
         'build'                      : 'build>=1.2.1',
+        'attrs'                      : 'attrs>=24.2.0',
     },
     'setup': {
     },
