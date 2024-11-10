@@ -85,7 +85,7 @@ def columns(self) -> Union[Dict[str, str], None]:
     if not isinstance(cols, dict):
         cols = {}
         self.parameters['columns'] = cols
-    return cols
+    return {col_ix: col for col_ix, col in cols.items() if col}
 
 
 @columns.setter
@@ -127,11 +127,11 @@ def indices(self) -> Union[Dict[str, Union[str, List[str]]], None]:
     ) + [
         col
         for col_ix, col in _columns.items()
-        if col_ix != 'datetime'
+        if col and col_ix != 'datetime'
     ]))
     return {
         **({'unique': unique_cols} if len(unique_cols) > 1 else {}),
-        **_columns,
+        **{col_ix: col for col_ix, col in _columns.items() if col},
         **_indices
     }
 

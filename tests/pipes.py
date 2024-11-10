@@ -17,8 +17,8 @@ for _label, instance in conns.items():
     all_pipes[_label], remote_pipes[_label] = [], []
     stress_pipe = Pipe(
         'plugin:stress', 'test',
-        mrsm_instance = instance,
-        parameters = {
+        mrsm_instance=instance,
+        parameters={
             'columns': {
                 'datetime': 'datetime',
                 'id': 'id',

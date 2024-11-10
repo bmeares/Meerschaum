@@ -2179,7 +2179,25 @@ def get_reset_autoincrement_queries(
     debug: bool = False,
 ) -> List[str]:
     """
-    Return a list of queries to reset a table's auto-increment counter.
+    Return a list of queries to reset a table's auto-increment counter to the next largest value.
+
+    Parameters
+    ----------
+    table: str
+        The name of the table on which the auto-incrementing column exists.
+
+    column: str
+        The name of the auto-incrementing column.
+
+    connector: mrsm.connectors.SQLConnector
+        The SQLConnector to the database on which the table exists.
+
+    schema: Optional[str], default None
+        The schema of the table. Defaults to `connector.schema`.
+
+    Returns
+    -------
+    A list of queries to be executed to reset the auto-incrementing column.
     """
     if not table_exists(table, connector, schema=schema, debug=debug):
         return []

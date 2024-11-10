@@ -9,9 +9,7 @@ Test pipe verification syncs.
 import pytest
 from datetime import datetime, timedelta
 from tests import debug
-from tests.pipes import all_pipes, stress_pipes, remote_pipes
 from tests.connectors import conns, get_flavors
-from tests.test_users import test_register_user
 import meerschaum as mrsm
 from meerschaum import Pipe
 from meerschaum.actions import actions
@@ -22,8 +20,20 @@ def test_verify_backfill_simple(flavor: str):
     """
     Test that simple verification syncs will fill gaps.
     """
-    pipe = stress_pipes[flavor]
-    _ = pipe.drop()
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('plugin:stress', 'test', 'verify_backfill_simple', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'plugin:stress', 'test', 'verify_backfill_simple',
+        instance=conn,
+        columns=['datetime', 'id'],
+        parameters={
+            'fetch': {
+                'rows': 100,
+                'id': 3,
+            },
+        },
+    )
 
     begin = datetime(2023, 1, 1)
     end = datetime(2023, 1, 2)
@@ -61,8 +71,22 @@ def test_verify_backfill_inplace(flavor: str):
     conn = conns[flavor]
     if not hasattr(conn, 'sync_pipe_inplace'):
         return
-    source_pipe = stress_pipes[flavor]
+    source_pipe = mrsm.Pipe('plugin:stress', 'test', 'verify_backfill_inplace', instance=conn)
+    source_pipe.delete()
+    source_pipe = mrsm.Pipe(
+        'plugin:stress', 'test', 'verify_backfill_inplace',
+        instance=conn,
+        columns=['datetime', 'id'],
+        parameters={
+            'fetch': {
+                'rows': 100,
+                'id': 3,
+            },
+        },
+    )
     source_table_name = sql_item_name(source_pipe.target, source_pipe.instance_connector.flavor)
+    target_pipe = mrsm.Pipe(source_pipe.instance_connector, 'test_verify', 'backfill', instance=conn)
+    target_pipe.delete()
     target_pipe = Pipe(
         source_pipe.instance_connector, 'test_verify', 'backfill',
         instance=conn,
@@ -77,22 +101,27 @@ def test_verify_backfill_inplace(flavor: str):
             }
         },
     )
-    _ = target_pipe.drop()
-    _ = source_pipe.drop()
 
     begin = datetime(2023, 1, 1)
     end = datetime(2023, 1, 2)
-    _ = source_pipe.sync(begin=begin, end=end)
-    _ = target_pipe.sync()
+    success, msg = source_pipe.sync(begin=begin, end=end, debug=debug)
+    assert success, msg
+    success, msg = target_pipe.sync(debug=debug)
+    assert success, msg
 
-    source_rowcount = source_pipe.get_rowcount()
-    target_rowcount = target_pipe.get_rowcount()
+    source_rowcount = source_pipe.get_rowcount(debug=debug)
+    target_rowcount = target_pipe.get_rowcount(debug=debug)
     assert source_rowcount == target_rowcount
 
     backfill_begin = datetime(2022, 12, 24)
     backfill_end = datetime(2022, 12, 26)
-    _ = source_pipe.sync(begin=backfill_begin, end=backfill_end)
+
+    success, msg = source_pipe.sync(begin=backfill_begin, end=backfill_end, debug=debug)
+    assert success, msg
+
     success, msg = target_pipe.verify(debug=debug)
-    new_source_rowcount = source_pipe.get_rowcount()
-    new_target_rowcount = target_pipe.get_rowcount()
+    assert success, msg
+
+    new_source_rowcount = source_pipe.get_rowcount(debug=debug)
+    new_target_rowcount = target_pipe.get_rowcount(debug=debug)
     assert new_source_rowcount == new_target_rowcount

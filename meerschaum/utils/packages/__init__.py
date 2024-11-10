@@ -1467,7 +1467,6 @@ def import_pandas(
     """
     Quality-of-life function to attempt to import the configured version of `pandas`.
     """
-    import sys
     pandas_module_name = pandas_name()
     global emitted_pandas_warning
 
@@ -1482,11 +1481,11 @@ def import_pandas(
                         + f"'{pandas_module_name}'"
                         + "\n   Features may not work as expected."
                     ),
-                    stack = False,
+                    stack=False,
                 )
 
     pytz = attempt_import('pytz', debug=debug, lazy=False, **kw)
-    pandas = attempt_import('pandas', debug=debug, lazy=False, **kw)
+    pandas, pyarrow = attempt_import('pandas', 'pyarrow', debug=debug, lazy=False, **kw)
     pd = attempt_import(pandas_module_name, debug=debug, lazy=lazy, **kw)
     return pd
 

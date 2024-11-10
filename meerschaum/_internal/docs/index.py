@@ -741,10 +741,11 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.sql.get_null_replacement()</code></li>
       <li><code>meerschaum.utils.sql.get_db_version()</code></li>
       <li><code>meerschaum.utils.sql.get_rename_table_queries()</code></li>
-      <li><code>meerschaum.utils.sql.get_create_table_query()</code></li>
+      <li><code>meerschaum.utils.sql.get_create_table_queries()</code></li>
       <li><code>meerschaum.utils.sql.wrap_query_with_cte()</code></li>
       <li><code>meerschaum.utils.sql.format_cte_subquery()</code></li>
       <li><code>meerschaum.utils.sql.session_execute()</code></li>
+      <li><code>meerschaum.utils.sql.get_reset_autoincrement_queries()</code></li>
     </ul>
   </details>
   </ul>

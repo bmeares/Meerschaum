@@ -102,11 +102,17 @@ true && \
 [ "$rc" != '0' ] && exit "$rc"
 
 $PYTHON_BIN -m pytest \
+  -n=auto \
+  tests/test_users.py; rc="$?"
+[ "$rc" != '0' ] && exit "$rc"
+
+$PYTHON_BIN -m pytest \
   --durations=0 \
   --ignore=portable/ \
   --ignore=test_root/ \
   --ignore=tests/data/ \
   --ignore=docs/ \
+  -n=auto \
   --ff \
   -v; rc="$?"
 

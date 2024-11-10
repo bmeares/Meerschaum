@@ -1349,9 +1349,9 @@ def create_pipe_table_from_df(
             for col, typ in df.dtypes.items()
         },
         **{
-            col: 'int'
+            col: str(df.dtypes.get(col, 'int'))
             for col_ix, col in pipe.columns.items()
-            if col_ix != 'primary'
+            if col and col_ix != 'primary'
         },
         **{
             col: 'uuid'

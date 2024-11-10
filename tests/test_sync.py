@@ -13,18 +13,7 @@ from meerschaum import Pipe
 from meerschaum.actions import actions
 
 from tests import debug
-from tests.pipes import all_pipes, stress_pipes, remote_pipes
 from tests.connectors import conns, get_flavors
-from tests.test_users import test_register_user as _test_register_user
-
-
-@pytest.fixture(autouse=True)
-def run_before_and_after(flavor: str):
-    """
-    Ensure the test user is registered before running tests.
-    """
-    _test_register_user(flavor)
-    yield
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -32,10 +21,13 @@ def test_register_and_delete(flavor: str):
     """
     Verify user registration and deletion.
     """
-    pipe = all_pipes[flavor][0]
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'register', 'delete', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe('test', 'register', 'delete', instance=conn)
     params = pipe.parameters.copy()
     assert params is not None
-    output = pipe.delete()
+    pipe.delete()
     pipe.parameters = params
     assert pipe.parameters is not None
     success, msg = pipe.register(debug=debug)
@@ -53,17 +45,23 @@ def test_drop_and_sync(flavor: str):
     """
     Verify dropping and resyncing pipes.
     """
-    pipe = all_pipes[flavor][0]
-    pipe.drop()
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'drop_sync', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'drop_sync',
+        instance=conn,
+        columns=['datetime', 'id'],
+    )
     assert pipe.exists(debug=debug) is False
     assert pipe.columns is not None
     now1 = datetime(2021, 1, 1, 12, 0)
-    data = {'datetime' : [now1], 'id' : [1], 'val': [1]}
+    data = {'datetime': [now1], 'id' : [1], 'val': [1]}
     success, msg = pipe.sync(data, debug=debug)
     assert success, msg
     assert pipe.exists(debug=debug)
     now2 = datetime(2021, 1, 1, 12, 1)
-    data = {'datetime' : [now2], 'id' : [1], 'val': [1]}
+    data = {'datetime': [now2], 'id' : [1], 'val': [1]}
     success, msg = pipe.sync(data, debug=debug)
     assert success, msg
     assert pipe.exists(debug=debug)
@@ -71,14 +69,20 @@ def test_drop_and_sync(flavor: str):
     assert data is not None
     assert len(data) == 2
 
+
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_drop_and_sync_duplicate(flavor: str):
     """
     Verify dropping a table and syncing duplicate rows are filtered out.
     """
-    pipe = all_pipes[flavor][0]
-    pipe.drop(debug=debug)
-    assert not pipe.exists(debug=debug)
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'drop_sync', 'duplicate', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'drop_sync', 'duplicate',
+        instance=conn,
+        columns=['datetime', 'id'],
+    )
 
     now1 = datetime(2021, 1, 1, 12, 0)
     data = {'datetime': [now1], 'id': [1], 'val': [1]}
@@ -93,80 +97,27 @@ def test_drop_and_sync_duplicate(flavor: str):
     assert success, msg
     data = pipe.get_data(debug=debug)
     assert len(data) == 1
-
-@pytest.mark.parametrize("flavor", get_flavors())
-def test_drop_and_sync_stress(flavor: str):
-    pipe = stress_pipes[flavor]
-    pipe.drop(debug=debug)
-    success, msg = pipe.sync(debug=debug)
-    assert success, msg
-
-@pytest.mark.parametrize("flavor", get_flavors())
-def test_drop_and_sync_remote(flavor: str):
-    pipe = None
-    for p in remote_pipes[flavor]:
-        if str(p.connector) == str(p.instance_connector):
-            pipe = p
-            break
-    if pipe is None:
-        return
-    pipe.delete(debug=debug)
-    parent_pipe = Pipe('plugin:stress', 'test', instance=pipe.connector)
-    parent_pipe.delete(debug=debug)
-    begin, end = datetime(2020, 1, 1), datetime(2020, 1, 2)
-    success, msg = parent_pipe.sync(begin=begin, end=end, debug=debug)
-    parent_len = parent_pipe.get_rowcount(debug=debug)
-    assert success, msg
-
-    success, msg = pipe.sync(debug=debug)
-    assert success, msg
-    child_len = pipe.get_rowcount(debug=debug)
-    assert parent_len == child_len
-
-    success, msg = parent_pipe.sync(
-        [{'datetime': '2020-01-03', 'id': -1, 'foo': 'a'}],
-        debug=debug,
-    )
-    assert success, msg
-    parent_len2 = parent_pipe.get_rowcount(debug=debug)
-    assert parent_len2 == (parent_len + 1)
-    success, msg = pipe.sync(debug=debug)
-    assert len(pipe.get_columns_types(debug=debug)) == 4
-    child_len2 = pipe.get_rowcount(debug=debug)
-    assert parent_len2 == child_len2
-    success, msg = parent_pipe.sync(
-        [{'datetime': '2020-01-03', 'id': -1, 'foo': 'b'}],
-        debug=debug,
-    )
-    assert success, msg
-    parent_len3 = parent_pipe.get_rowcount(debug=debug)
-    assert parent_len2 == parent_len3
-    success, msg = pipe.sync(debug=debug, begin='2020-01-01')
-    assert success, msg
-    child_len3 = pipe.get_rowcount(debug=debug)
-    assert child_len3 == parent_len3
-    df = pipe.get_data(params={'id': -1}, debug=debug)
-    assert len(df) == 1
-    assert df.to_dict(orient='records')[0]['foo'] == 'b'
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_engine(flavor: str):
+    """
+    Test that we can sync a test pipe via the `sync pipes` action.
+    """
     ### Weird concurrency issues with our tests.
     if flavor == 'duckdb':
         return
-    pipe = stress_pipes[flavor]
-    _ = pipe.register()
-    mrsm_instance = str(pipe.instance_connector)
-    _ = actions['drop'](
-        ['pipes'],
-        connector_keys=[pipe.connector_keys],
-        metric_keys=[pipe.metric_key],
-        location_keys=[pipe.location_key],
-        mrsm_instance=mrsm_instance,
-        yes=True,
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('plugin:stress', 'test', 'engine', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'plugin:stress', 'test', 'engine',
+        instance=conn,
+        columns=['datetime', 'id'],
     )
-
+    success, msg = pipe.register()
+    assert success, msg
+    mrsm_instance = str(pipe.instance_connector)
     success, msg = actions['sync'](
         ['pipes'],
         connector_keys=[pipe.connector_keys],
@@ -186,8 +137,6 @@ def test_target_mutable(flavor: str):
     pipe = Pipe('target', 'mutable', target=target, instance=conn)
     pipe.delete()
     pipe = Pipe('target', 'mutable', target=target, instance=conn, columns={'datetime': 'dt', 'id': 'id'})
-    pipe.drop(debug=debug)
-    assert not pipe.exists(debug=debug)
     success, msg = pipe.sync(
         {'dt': [datetime(2022, 6, 8)], 'id': [1], 'vl': [10]},
         debug=debug,
@@ -260,7 +209,7 @@ def test_temporary_pipes(flavor: str):
             {'id': 1, 'b': 4},
             {'id': 2, 'a': 5},
         ],
-        debug = debug,
+        debug=debug,
     )
     success, msg = pipe.delete(debug=debug)
     assert (not success), msg

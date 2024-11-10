@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.6.1 – v2.6.5
+### v2.6.1 – v2.6.6
 
 - **Add `Pipe.tzinfo`.**  
   Check if a pipe is timezone-aware with `tzinfo`:
@@ -32,6 +32,7 @@ This is the current release cycle, so stay tuned for future releases!
 - **Fix inplace syncs with `upsert=True`.**
 - **Fix timezone-aware datetime truncation for MSSQL**
 - **Fix timezone detection for existing timezone-naive tables.**
+- **Fix new ID column dtype detection.**
 
 ### v2.6.0
 
