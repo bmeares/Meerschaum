@@ -4,6 +4,20 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.6.6
+
+- **Improve metadata performance when syncing.**  
+  Syncs via the SQLConnector now cache schema and index metadata, speeding up transactions.
+  
+- **Fix upserts for MySQL / MariaDB.**  
+  Upserts in MySQL and MariaDB now use `ON DUPLICATE` instead of `REPLACE INTO`.
+
+- **Fix dtype detection for index columns.**  
+  A bug where new index columns were incorrectly created as `INT` has been fixed.
+
+- **Delete old keys when dropping Valkey pipes.**  
+  Dropping a pipe from Valkey now clears all old index keys.
+
 ### v2.6.1 – v2.6.5
 
 - **Add `Pipe.tzinfo`.**  

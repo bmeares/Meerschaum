@@ -1349,9 +1349,9 @@ def create_pipe_table_from_df(
             for col, typ in df.dtypes.items()
         },
         **{
-            col: 'int'
+            col: str(df.dtypes.get(col, 'int'))
             for col_ix, col in pipe.columns.items()
-            if col_ix != 'primary'
+            if col and col_ix != 'primary'
         },
         **{
             col: 'uuid'
@@ -1696,7 +1696,9 @@ def sync_pipe(
             )
             for col, typ in update_df.dtypes.items()
         }
-        temp_pipe.__dict__['_columns_types_timestamp'] = time.perf_counter()
+        now_ts = time.perf_counter()
+        temp_pipe.__dict__['_columns_types_timestamp'] = now_ts
+        temp_pipe.__dict__['_skip_check_indices'] = True
         temp_success, temp_msg = temp_pipe.sync(update_df, check_existing=False, debug=debug)
         if not temp_success:
             return temp_success, temp_msg
@@ -1867,6 +1869,7 @@ def sync_pipe_inplace(
     )
     pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
     upsert = pipe.parameters.get('upsert', False) and f'{self.flavor}-upsert' in update_queries
+    static = pipe.parameters.get('static', False)
     database = getattr(self, 'database', self.parse_uri(self.URI).get('database', None))
     primary_key = pipe.columns.get('primary', None)
     autoincrement = pipe.parameters.get('autoincrement', False)
@@ -1944,7 +1947,7 @@ def sync_pipe_inplace(
         schema=internal_schema,
         database=database,
         debug=debug,
-    )
+    ) if not static else pipe.get_columns_types(debug=debug)
     if not new_cols_types:
         return False, f"Failed to get new columns for {pipe}."
 
@@ -2049,7 +2052,7 @@ def sync_pipe_inplace(
         schema=internal_schema,
         database=database,
         debug=debug,
-    ) if not upsert else new_cols_types
+    ) if not (upsert or static) else new_cols_types
 
     common_cols = [col for col in new_cols if col in backtrack_cols_types]
     on_cols = {
@@ -2123,7 +2126,7 @@ def sync_pipe_inplace(
         schema=internal_schema,
         database=database,
         debug=debug,
-    ) if not upsert else new_cols_types
+    ) if not (upsert or static) else new_cols_types
 
     ### This is a weird bug on SQLite.
     ### Sometimes the backtrack dtypes are all empty strings.
@@ -2812,12 +2815,13 @@ def get_pipe_columns_indices(
     pipe: mrsm.Pipe
         The pipe to be queried against.
 
-
     Returns
     -------
     A dictionary mapping columns names to lists of dictionaries.
     The dictionaries in the lists contain the name and type of the indices.
     """
+    if pipe.__dict__.get('_skip_check_indices', False):
+        return {}
     from meerschaum.utils.sql import get_table_cols_indices
     return get_table_cols_indices(
         pipe.target,

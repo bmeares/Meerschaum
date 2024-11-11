@@ -11,7 +11,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Any, Union
 
 from meerschaum.connectors import Connector
-from meerschaum.utils.warnings import error
+from meerschaum.utils.warnings import error, warn
 
 
 class SQLConnector(Connector):
@@ -212,7 +212,6 @@ class SQLConnector(Connector):
 
         if connect:
             if not self.test_connection(debug=debug):
-                from meerschaum.utils.warnings import warn
                 warn(f"Failed to connect with connector '{self}'!", stack=False)
 
     @property
@@ -230,8 +229,11 @@ class SQLConnector(Connector):
 
     @property
     def engine(self):
-        import os, threading
-        ### build the sqlalchemy engine
+        """
+        Return the SQLAlchemy engine connected to the configured database.
+        """
+        import os
+        import threading
         if '_engine' not in self.__dict__:
             self._engine, self._engine_str = self.create_engine(include_uri=True)
 
@@ -242,13 +244,14 @@ class SQLConnector(Connector):
         if not same_process:
             self._pid = os.getpid()
             self._thread = threading.current_thread()
-            from meerschaum.utils.warnings import warn
-            warn(f"Different PID detected. Disposing of connections...")
+            warn("Different PID detected. Disposing of connections...")
             self._engine.dispose()
 
         ### handle different threads
         if not same_thread:
-            pass
+            if self.flavor == 'duckdb':
+                warn("Different thread detected.")
+                self._engine.dispose()
 
         return self._engine
 

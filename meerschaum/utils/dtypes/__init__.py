@@ -270,9 +270,9 @@ def coerce_timezone(
         pandas = mrsm.attempt_import('pandas')
         dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
         dt_series = (
-            pandas.to_datetime(dt, utc=True)
+            pandas.to_datetime(dt, utc=True, format='ISO8601')
             if dd is None
-            else dd.to_datetime(dt, utc=True)
+            else dd.to_datetime(dt, utc=True, format='ISO8601')
         )
         if strip_utc:
             dt_series = dt_series.apply(lambda x: x.replace(tzinfo=None))
