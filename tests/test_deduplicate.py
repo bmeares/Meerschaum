@@ -6,28 +6,22 @@
 Test pipe deduplication syncs.
 """
 
-import pytest
 import json
 from datetime import datetime, timedelta
-from tests import debug
-from tests.pipes import all_pipes, stress_pipes, remote_pipes
-from tests.connectors import conns, get_flavors
-from tests.test_users import test_register_user
-import meerschaum as mrsm
-from meerschaum import Pipe
-from meerschaum.actions import actions
 
-@pytest.fixture(autouse=True)
-def run_before_and_after(flavor: str):
-    test_register_user(flavor)
-    yield
+import pytest
+
+import meerschaum as mrsm
+
+from tests import debug
+from tests.connectors import conns, get_flavors
+
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_deduplicate_default(flavor: str):
     """
     Test that verification will fill any backtracked docs.
     """
-    import pandas as pd
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.dataframe import parse_df_datetimes
     conn = conns[flavor]
@@ -70,16 +64,16 @@ def test_deduplicate_without_instance_method(flavor: str):
     """
     Test that verification will fill any backtracked docs.
     """
-    import pandas as pd
-    from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.dataframe import parse_df_datetimes
     conn = conns[flavor]
     if conn.type != 'sql':
         return
+    pipe = mrsm.Pipe('test', 'deduplicate', 'chunked', instance=conn)
+    pipe.delete()
     pipe = mrsm.Pipe(
         'test', 'deduplicate', 'chunked',
-        instance = conn,
-        columns = {
+        instance=conn,
+        columns={
             'datetime': 'datetime',
             'id': 'id',
         }

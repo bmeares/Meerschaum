@@ -1284,7 +1284,8 @@ def query_df(
                     if debug:
                         dprint(f"Casting column '{datetime_column}' to UTC...")
                     df[datetime_column] = coerce_timezone(df[datetime_column], strip_utc=False)
-                dprint(f"Using datetime bounds:\n{begin=}\n{end=}")
+                if debug:
+                    dprint(f"Using datetime bounds:\n{begin=}\n{end=}")
 
     in_ex_params = get_in_ex_params(params)
 

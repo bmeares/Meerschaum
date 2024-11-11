@@ -9,17 +9,11 @@ from decimal import Decimal
 from uuid import UUID
 from tests import debug
 from tests.connectors import conns, get_flavors
-from tests.test_users import test_register_user as _test_register_user
 import meerschaum as mrsm
 from meerschaum import Pipe
 from meerschaum.utils.dtypes import are_dtypes_equal
 from meerschaum.utils.sql import sql_item_name
 from meerschaum.utils.dtypes.sql import PD_TO_DB_DTYPES_FLAVORS
-
-@pytest.fixture(autouse=True)
-def run_before_and_after(flavor: str):
-    _test_register_user(flavor)
-    yield
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -57,11 +51,14 @@ def test_dtype_enforcement(flavor: str):
     pipe.delete(debug=debug)
     pipe = Pipe(
         'dtype', 'enforcement',
+        static=True,
+        upsert=True, ### TODO: Test with `upsert=True`.
         columns={
             'datetime': 'dt',
             'id': 'id',
         },
         dtypes={
+            'id': 'int',
             'int': 'int',
             'float': 'float',
             'bool': 'bool',
@@ -84,7 +81,6 @@ def test_dtype_enforcement(flavor: str):
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
     assert len(df.columns) == 10
-    return pipe
     for col, typ in df.dtypes.items():
         pipe_dtype = pipe.dtypes[col]
         if pipe_dtype == 'json':
@@ -480,12 +476,12 @@ def test_sync_bools_inferred(flavor: str):
     Test that pipes are able to sync bools.
     """
     conn = conns[flavor]
-    pipe = mrsm.Pipe('test', 'bools', instance=conn)
+    pipe = mrsm.Pipe('test', 'bools', 'inferred', instance=conn)
     _ = pipe.delete()
     pipe = mrsm.Pipe(
-        'test', 'bools',
-        instance = conn,
-        columns = {'datetime': 'dt'},
+        'test', 'bools', 'inferred',
+        instance=conn,
+        columns={'datetime': 'dt'},
     )
     _ = pipe.drop()
     docs = [
@@ -589,7 +585,6 @@ def test_sync_bools_inplace(flavor: str):
     assert success, msg
     df = inplace_pipe.get_data(params={'id': 3}, debug=True)
     assert 'na' in str(df['is_bool'][0]).lower()
-    return pipe, inplace_pipe
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

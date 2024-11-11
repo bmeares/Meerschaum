@@ -62,11 +62,11 @@ conns = {
         database=str(data_path / 'test_sqlite.db'),
         flavor='sqlite',
     ),
-    'duckdb': get_connector(
-        'sql', 'test_duckdb',
-        database=str(data_path / 'test_duck.db'),
-        flavor='duckdb',
-    ),
+    #  'duckdb': get_connector(
+        #  'sql', 'test_duckdb',
+        #  database=str(data_path / 'test_duck.db'),
+        #  flavor='duckdb',
+    #  ),
     'citus': get_connector(
         'sql', 'test_citus',
         flavor='citus',

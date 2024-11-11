@@ -9,6 +9,7 @@ Drop a Pipe's table but keep its registration
 from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any
 
+
 def drop(
     self,
     debug: bool = False,
@@ -39,4 +40,8 @@ def drop(
 
     with Venv(get_connector_plugin(self.instance_connector)):
         result = self.instance_connector.drop_pipe(self, debug=debug, **kw)
+
+    _ = self.__dict__.pop('_exists', None)
+    _ = self.__dict__.pop('_exists_timestamp', None)
+
     return result
