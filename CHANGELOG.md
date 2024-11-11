@@ -4,7 +4,21 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.6.1 – v2.6.6
+### v2.6.6
+
+- **Improve metadata performance when syncing.**  
+  Syncs via the SQLConnector now cache schema and index metadata, speeding up transactions.
+  
+- **Fix upserts for MySQL / MariaDB.**  
+  Upserts in MySQL and MariaDB now use `ON DUPLICATE` instead of `REPLACE INTO`.
+
+- **Fix dtype detection for index columns.**  
+  A bug where new index columns were incorrectly created as `INT` has been fixed.
+
+- **Delete old keys when dropping Valkey pipes.**  
+  Dropping a pipe from Valkey now clears all old index keys.
+
+### v2.6.1 – v2.6.5
 
 - **Add `Pipe.tzinfo`.**  
   Check if a pipe is timezone-aware with `tzinfo`:
@@ -32,7 +46,6 @@ This is the current release cycle, so stay tuned for future releases!
 - **Fix inplace syncs with `upsert=True`.**
 - **Fix timezone-aware datetime truncation for MSSQL**
 - **Fix timezone detection for existing timezone-naive tables.**
-- **Fix new ID column dtype detection.**
 
 ### v2.6.0
 
