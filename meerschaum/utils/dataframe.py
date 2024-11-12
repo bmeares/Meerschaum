@@ -194,7 +194,7 @@ def filter_unseen_df(
         warn(
             "Was not able to cast old columns onto new DataFrame. " +
             f"Are both DataFrames the same shape? Error:\n{e}",
-            stacklevel = 3,
+            stacklevel=3,
         )
         return new_df[list(new_df_dtypes.keys())]
 
@@ -314,15 +314,21 @@ def filter_unseen_df(
         if are_dtypes_equal(str(typ), 'datetime')
     ]
     for col in old_dt_cols:
-        old_df[col] = coerce_timezone(old_df[col])
+        strip_utc = (
+            (dtypes or {}).get(col, 'datetime') == 'datetime64[ns]'
+        )
+        old_df[col] = coerce_timezone(old_df[col], strip_utc=strip_utc)
 
     new_dt_cols = [
         col
-        for col, typ in old_df.dtypes.items()
+        for col, typ in new_df.dtypes.items()
         if are_dtypes_equal(str(typ), 'datetime')
     ]
     for col in new_dt_cols:
-        new_df[col] = coerce_timezone(new_df[col])
+        strip_utc = (
+            (dtypes or {}).get(col, 'datetime') == 'datetime64[ns]'
+        )
+        new_df[col] = coerce_timezone(new_df[col], strip_utc=strip_utc)
 
     old_uuid_cols = get_uuid_cols(old_df)
     new_uuid_cols = get_uuid_cols(new_df)
@@ -1256,7 +1262,7 @@ def query_df(
         if debug:
             dprint("Checking for datetime column compatability.")
 
-        from meerschaum.utils.dtypes import are_dtypes_equal, coerce_timezone
+        from meerschaum.utils.dtypes import coerce_timezone
         df_is_dt = are_dtypes_equal(str(df.dtypes[datetime_column]), 'datetime')
         begin_is_int = are_dtypes_equal(str(type(begin)), 'int')
         end_is_int = are_dtypes_equal(str(type(end)), 'int')
@@ -1358,6 +1364,7 @@ def query_df(
         safe_copy=False,
         debug=debug,
         coerce_numeric=False,
+        coerce_timezone=False,
     )
 
     if select_columns == ['*']:
