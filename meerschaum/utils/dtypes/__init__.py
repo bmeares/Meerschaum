@@ -275,7 +275,8 @@ def coerce_timezone(
             else dd.to_datetime(dt, utc=True, format='ISO8601')
         )
         if strip_utc:
-            dt_series = dt_series.apply(lambda x: x.replace(tzinfo=None))
+            if dt_series.dt.tz is not None:
+                dt_series = dt_series.dt.tz_localize(None)
 
         return dt_series
 

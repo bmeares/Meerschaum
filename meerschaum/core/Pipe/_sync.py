@@ -618,8 +618,7 @@ def filter_existing(
     from meerschaum.config import get_config
     pd = import_pandas()
     pandas = attempt_import('pandas')
-    if 'dataframe' not in str(type(df)).lower():
-        df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+    df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
     is_dask = 'dask' in df.__module__
     if is_dask:
         dd = attempt_import('dask.dataframe')
@@ -760,6 +759,8 @@ def filter_existing(
             dprint(f"No backtrack data was found for {self}.")
         return df, get_empty_df(), df
 
+    backtrack_df = self.enforce_dtypes(backtrack_df, chunksize=chunksize, debug=debug)
+
     if debug:
         dprint(f"Existing data for {self}:\n" + str(backtrack_df), **kw)
         dprint(f"Existing dtypes for {self}:\n" + str(backtrack_df.dtypes))
@@ -795,6 +796,7 @@ def filter_existing(
         ),
         on_cols_dtypes,
     )
+    delta_df = self.enforce_dtypes(delta_df, chunksize=chunksize, debug=debug)
 
     ### Cast dicts or lists to strings so we can merge.
     serializer = functools.partial(json.dumps, sort_keys=True, separators=(',', ':'), default=str)
@@ -818,6 +820,7 @@ def filter_existing(
         indicator=True,
         suffixes=('', '_old'),
     ) if on_cols else delta_df
+    joined_df = self.enforce_dtypes(joined_df, chunksize=chunksize, debug=debug)
     for col in casted_cols:
         if col in joined_df.columns:
             joined_df[col] = joined_df[col].apply(deserializer)
@@ -834,6 +837,7 @@ def filter_existing(
         .dropna(how='all')[cols]
         .reset_index(drop=True)
     ) if on_cols else delta_df
+    unseen_df = self.enforce_dtypes(unseen_df, chunksize=chunksize, debug=debug)
 
     ### Rows that have already been inserted but values have changed.
     update_df = (
@@ -842,6 +846,7 @@ def filter_existing(
         .dropna(how='all')[cols]
         .reset_index(drop=True)
     ) if on_cols else get_empty_df()
+    update_df = self.enforce_dtypes(update_df, chunksize=chunksize, debug=debug)
 
     if include_unchanged_columns and on_cols:
         unchanged_backtrack_cols = [
