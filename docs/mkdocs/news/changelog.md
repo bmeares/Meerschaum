@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.6.6 – v2.6.7
+### v2.6.6 – v2.6.8
 
 - **Improve metadata performance when syncing.**  
   Syncs via the SQLConnector now cache schema and index metadata, speeding up transactions.
