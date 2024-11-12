@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.6.6
+### v2.6.6 – v2.6.7
 
 - **Improve metadata performance when syncing.**  
   Syncs via the SQLConnector now cache schema and index metadata, speeding up transactions.
@@ -17,6 +17,8 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Delete old keys when dropping Valkey pipes.**  
   Dropping a pipe from Valkey now clears all old index keys.
+
+- **Fix timezone-aware enforcement bugs.**
 
 ### v2.6.1 – v2.6.5
 

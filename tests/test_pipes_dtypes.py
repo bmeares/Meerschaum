@@ -756,6 +756,9 @@ def test_parse_date_bounds(flavor: str):
     success, msg = pipe.sync([{'ts': '2024-01-01'}], debug=debug)
     assert success, msg
 
+    success, msg = pipe.sync([{'ts': '2024-01-02'}], debug=debug)
+    assert success, msg
+
     naive_begin = datetime(2024, 1, 1)
     naive_end = datetime(2024, 1, 2)
     aware_begin = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -781,6 +784,9 @@ def test_parse_date_bounds(flavor: str):
     )
 
     success, msg = pipe.sync([{'ts': '2024-01-01'}], debug=debug)
+    assert success, msg
+
+    success, msg = pipe.sync([{'ts': '2024-01-02'}], debug=debug)
     assert success, msg
 
     begin, end = pipe.parse_date_bounds(naive_begin, naive_end)

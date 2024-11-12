@@ -234,10 +234,13 @@ def filter_unseen_df(
     cast_dt_cols = True
     try:
         for col, typ in dt_dtypes.items():
+            strip_utc = (
+                (dtypes or {}).get(col, 'datetime') == 'datetime64[ns]'
+            )
             if col in old_df.columns:
-                old_df[col] = coerce_timezone(old_df[col])
+                old_df[col] = coerce_timezone(old_df[col], strip_utc=strip_utc)
             if col in new_df.columns:
-                new_df[col] = coerce_timezone(new_df[col])
+                new_df[col] = coerce_timezone(new_df[col], strip_utc=strip_utc)
         cast_dt_cols = False
     except Exception as e:
         warn(f"Could not cast datetime columns:\n{e}")
