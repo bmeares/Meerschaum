@@ -56,7 +56,7 @@ def enforce_dtypes(
                 chunksize=chunksize,
                 debug=debug,
             )
-        else:
+        elif isinstance(df, (dict, list)):
             df = parse_df_datetimes(
                 df,
                 ignore_cols=[

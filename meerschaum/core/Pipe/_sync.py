@@ -567,6 +567,7 @@ def filter_existing(
     safe_copy: bool = True,
     date_bound_only: bool = False,
     include_unchanged_columns: bool = False,
+    enforce_dtypes: bool = False,
     chunksize: Optional[int] = -1,
     debug: bool = False,
     **kw
@@ -590,6 +591,10 @@ def filter_existing(
     include_unchanged_columns: bool, default False
         If `True`, include the backtrack columns which haven't changed in the update dataframe.
         This is useful if you can't update individual keys.
+
+    enforce_dtypes: bool, default False
+        If `True`, ensure the given and intermediate dataframes are enforced to the correct dtypes.
+        Setting `enforce_dtypes=True` may impact performance.
 
     chunksize: Optional[int], default -1
         The `chunksize` used when fetching existing data.
@@ -618,8 +623,9 @@ def filter_existing(
     from meerschaum.config import get_config
     pd = import_pandas()
     pandas = attempt_import('pandas')
-    df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
-    is_dask = 'dask' in df.__module__
+    if enforce_dtypes or 'dataframe' not in str(type(df)).lower():
+        df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+    is_dask = hasattr('df', '__module__') and 'dask' in df.__module__
     if is_dask:
         dd = attempt_import('dask.dataframe')
         merge = dd.merge
@@ -759,7 +765,8 @@ def filter_existing(
             dprint(f"No backtrack data was found for {self}.")
         return df, get_empty_df(), df
 
-    backtrack_df = self.enforce_dtypes(backtrack_df, chunksize=chunksize, debug=debug)
+    if enforce_dtypes:
+        backtrack_df = self.enforce_dtypes(backtrack_df, chunksize=chunksize, debug=debug)
 
     if debug:
         dprint(f"Existing data for {self}:\n" + str(backtrack_df), **kw)
@@ -796,7 +803,8 @@ def filter_existing(
         ),
         on_cols_dtypes,
     )
-    delta_df = self.enforce_dtypes(delta_df, chunksize=chunksize, debug=debug)
+    if enforce_dtypes:
+        delta_df = self.enforce_dtypes(delta_df, chunksize=chunksize, debug=debug)
 
     ### Cast dicts or lists to strings so we can merge.
     serializer = functools.partial(json.dumps, sort_keys=True, separators=(',', ':'), default=str)
@@ -820,7 +828,6 @@ def filter_existing(
         indicator=True,
         suffixes=('', '_old'),
     ) if on_cols else delta_df
-    joined_df = self.enforce_dtypes(joined_df, chunksize=chunksize, debug=debug)
     for col in casted_cols:
         if col in joined_df.columns:
             joined_df[col] = joined_df[col].apply(deserializer)
@@ -837,7 +844,6 @@ def filter_existing(
         .dropna(how='all')[cols]
         .reset_index(drop=True)
     ) if on_cols else delta_df
-    unseen_df = self.enforce_dtypes(unseen_df, chunksize=chunksize, debug=debug)
 
     ### Rows that have already been inserted but values have changed.
     update_df = (
@@ -846,7 +852,6 @@ def filter_existing(
         .dropna(how='all')[cols]
         .reset_index(drop=True)
     ) if on_cols else get_empty_df()
-    update_df = self.enforce_dtypes(update_df, chunksize=chunksize, debug=debug)
 
     if include_unchanged_columns and on_cols:
         unchanged_backtrack_cols = [
@@ -854,6 +859,8 @@ def filter_existing(
             for col in backtrack_df.columns
             if col in on_cols or col not in update_df.columns
         ]
+        if enforce_dtypes:
+            update_df = self.enforce_dtypes(update_df, chunksize=chunksize, debug=debug)
         update_df = merge(
             backtrack_df[unchanged_backtrack_cols],
             update_df,

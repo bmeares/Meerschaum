@@ -267,8 +267,18 @@ def coerce_timezone(
 
     if dt_is_series:
         is_dask = 'dask' in dt.__module__
-        pandas = mrsm.attempt_import('pandas')
+        pandas = mrsm.attempt_import('pandas', lazy=False)
         dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
+
+        if (
+            pandas.api.types.is_datetime64_any_dtype(dt) and (
+                (dt.dt.tz is not None and not strip_utc)
+                or
+                (dt.dt.tz is None and strip_utc)
+            )
+        ):
+            return dt
+
         dt_series = (
             pandas.to_datetime(dt, utc=True, format='ISO8601')
             if dd is None
