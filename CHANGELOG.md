@@ -29,6 +29,9 @@ This is the current release cycle, so stay tuned for future releases!
   print(delta)
   ```
 
+- **Fix `query_df()` for null parameters.**  
+  This is useful for when you may use `query_df()` with only `select_columns` or `omit_columns`.
+
 ### v2.6.6 – v2.6.9
 
 - **Improve metadata performance when syncing.**  

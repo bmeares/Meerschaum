@@ -1330,15 +1330,24 @@ def query_df(
     ]
     for col in bool_cols:
         df[col] = df[col].astype('boolean[pyarrow]')
-    df['__mrsm_mask'] = query_mask.astype('boolean[pyarrow]')
 
-    if inplace:
-        df.where(query_mask, other=NA, inplace=True)
-        df.dropna(how='all', inplace=True)
-        result_df = df
+    if not isinstance(query_mask, bool):
+        df['__mrsm_mask'] = (
+            query_mask.astype('boolean[pyarrow]')
+            if hasattr(query_mask, 'astype')
+            else query_mask
+        )
+
+        if inplace:
+            df.where(query_mask, other=NA, inplace=True)
+            df.dropna(how='all', inplace=True)
+            result_df = df
+        else:
+            result_df = df.where(query_mask, other=NA)
+            result_df.dropna(how='all', inplace=True)
+
     else:
-        result_df = df.where(query_mask, other=NA)
-        result_df.dropna(how='all', inplace=True)
+        result_df = df
 
     if '__mrsm_mask' in df.columns:
         del df['__mrsm_mask']
