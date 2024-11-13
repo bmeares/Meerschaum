@@ -4,6 +4,31 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.6.10
+
+- **Improve datetime timezone-awareness enforcement performance.**  
+  Datetime columns are only parsed for timezone awareness if the desired awareness differs. This drastically speeds up sync times.
+
+- **Switch to `tz_localize()` when stripping timezone information.**  
+  The previous method of using a lambda to replace individual `tzinfo` attributes did not scale well. Using `tz_localize()` can be vectorized and greatly speeds up syncs, especially with large chunks.
+
+- **Add `enforce_dtypes` to `Pipe.filter_existing()`.**  
+  You may optionally enforce dtype information during `filter_existing()`. This may be useful when implementing custom syncs for instance connectors. Note this may impact memory and compute performance.
+
+  ```python
+  import meerschaum as mrsm
+  import pandas as pd
+
+  pipe = mrsm.Pipe('a', 'b', instance='sql:local')
+  pipe.sync([{'a': 1}])
+
+  df = pd.DataFrame([{'a': '2'}])
+
+  ### `enforce_dtypes=True` will suppress the differing dtypes warning.
+  unseen, update, delta = pipe.filter_existing(df, enforce_dtypes=True)
+  print(delta)
+  ```
+
 ### v2.6.6 – v2.6.9
 
 - **Improve metadata performance when syncing.**  
