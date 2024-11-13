@@ -1283,18 +1283,8 @@ def query_df(
                 if debug:
                     dprint(f"`end` will be cast to '{end}'.")
 
-            begin_tz = begin.tzinfo if begin is not None else None
-            end_tz = end.tzinfo if end is not None else None
-
-            if begin_tz is not None or end_tz is not None or df_tz is not None:
-                begin = coerce_timezone(begin, strip_utc=False)
-                end = coerce_timezone(end, strip_utc=False)
-                if df_tz is not None:
-                    if debug:
-                        dprint(f"Casting column '{datetime_column}' to UTC...")
-                    df[datetime_column] = coerce_timezone(df[datetime_column], strip_utc=False)
-                if debug:
-                    dprint(f"Using datetime bounds:\n{begin=}\n{end=}")
+            begin = coerce_timezone(begin, strip_utc=(df_tz is None)) if begin is not None else None
+            end = coerce_timezone(end, strip_utc=(df_tz is None)) if begin is not None else None
 
     in_ex_params = get_in_ex_params(params)
 
@@ -1340,15 +1330,24 @@ def query_df(
     ]
     for col in bool_cols:
         df[col] = df[col].astype('boolean[pyarrow]')
-    df['__mrsm_mask'] = query_mask.astype('boolean[pyarrow]')
 
-    if inplace:
-        df.where(query_mask, other=NA, inplace=True)
-        df.dropna(how='all', inplace=True)
-        result_df = df
+    if not isinstance(query_mask, bool):
+        df['__mrsm_mask'] = (
+            query_mask.astype('boolean[pyarrow]')
+            if hasattr(query_mask, 'astype')
+            else query_mask
+        )
+
+        if inplace:
+            df.where(query_mask, other=NA, inplace=True)
+            df.dropna(how='all', inplace=True)
+            result_df = df
+        else:
+            result_df = df.where(query_mask, other=NA)
+            result_df.dropna(how='all', inplace=True)
+
     else:
-        result_df = df.where(query_mask, other=NA)
-        result_df.dropna(how='all', inplace=True)
+        result_df = df
 
     if '__mrsm_mask' in df.columns:
         del df['__mrsm_mask']
