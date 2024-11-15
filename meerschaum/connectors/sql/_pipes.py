@@ -1664,7 +1664,7 @@ def sync_pipe(
 
     if update_df is not None and len(update_df) > 0:
         transact_id = generate_password(3)
-        temp_prefix = '##' if self.flavor != 'oracle' else ''
+        temp_prefix = '##' if self.flavor != 'oracle' else '_'
         temp_target = temp_prefix + transact_id + '_' + pipe.target
         self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
         temp_pipe = Pipe(
