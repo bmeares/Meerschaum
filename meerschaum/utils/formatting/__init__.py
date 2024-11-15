@@ -501,11 +501,12 @@ def fill_ansi(string: str, style: str = '') -> str:
     """
     from meerschaum.utils.packages import import_rich, attempt_import
     from meerschaum.utils.misc import iterate_chunks
-    rich = import_rich()
-    Text = attempt_import('rich.text').Text
+    _ = import_rich()
+    rich_ansi, rich_text = attempt_import('rich.ansi', 'rich.text')
+    Text = rich_text.Text
     try:
         msg = Text.from_ansi(string)
-    except AttributeError as e:
+    except AttributeError:
         import traceback
         traceback.print_stack()
         msg = ''

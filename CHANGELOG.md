@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.6.10
+### v2.6.10 – v2.6.11
 
 - **Improve datetime timezone-awareness enforcement performance.**  
   Datetime columns are only parsed for timezone awareness if the desired awareness differs. This drastically speeds up sync times.
@@ -31,6 +31,8 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fix `query_df()` for null parameters.**  
   This is useful for when you may use `query_df()` with only `select_columns` or `omit_columns`.
+
+- **Fix autoincrementing IDs for Oracle SQL.**
 
 ### v2.6.6 – v2.6.9
 
