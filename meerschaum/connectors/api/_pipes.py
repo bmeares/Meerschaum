@@ -50,10 +50,15 @@ def register_pipe(
     )
     if debug:
         dprint(response.text)
-    if isinstance(response.json(), list):
-        response_tuple = response.__bool__(), response.json()[1]
+
+    if not response:
+        return False, response.text
+
+    response_data = response.json()
+    if isinstance(response_data, list):
+        response_tuple = response_data[0], response_data[1]
     elif 'detail' in response.json():
-        response_tuple = response.__bool__(), response.json()['detail']
+        response_tuple = response.__bool__(), response_data['detail']
     else:
         response_tuple = response.__bool__(), response.text
     return response_tuple
@@ -80,10 +85,13 @@ def edit_pipe(
     )
     if debug:
         dprint(response.text)
+
+    response_data = response.json()
+
     if isinstance(response.json(), list):
-        response_tuple = response.__bool__(), response.json()[1]
+        response_tuple = response_data[0], response_data[1]
     elif 'detail' in response.json():
-        response_tuple = response.__bool__(), response.json()['detail']
+        response_tuple = response.__bool__(), response_data['detail']
     else:
         response_tuple = response.__bool__(), response.text
     return response_tuple
@@ -318,10 +326,12 @@ def delete_pipe(
     )
     if debug:
         dprint(response.text)
+
+    response_data = response.json()
     if isinstance(response.json(), list):
-        response_tuple = response.__bool__(), response.json()[1]
+        response_tuple = response_data[0], response_data[1]
     elif 'detail' in response.json():
-        response_tuple = response.__bool__(), response.json()['detail']
+        response_tuple = response.__bool__(), response_data['detail']
     else:
         response_tuple = response.__bool__(), response.text
     return response_tuple
@@ -637,7 +647,7 @@ def drop_pipe(
         return False, f"Failed to drop {pipe}."
 
     if isinstance(data, list):
-        response_tuple = response.__bool__(), data[1]
+        response_tuple = data[0], data[1]
     elif 'detail' in response.json():
         response_tuple = response.__bool__(), data['detail']
     else:
