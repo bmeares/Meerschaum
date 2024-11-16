@@ -17,28 +17,6 @@ from meerschaum.config import get_config
 
 actions_endpoint = endpoints['actions']
 
-def is_user_allowed_to_execute(user) -> SuccessTuple:
-    if user is None:
-        return False, "Could not load user."
-
-    if user.type == 'admin':
-        return True, "Success"
-
-    allow_non_admin = get_config(
-        'system', 'api', 'permissions', 'actions', 'non_admin', patch=True
-    )
-    if not allow_non_admin:
-        return False, (
-            "The administrator for this server has not allowed users to perform actions.\n\n"
-            + "Please contact the system administrator, or if you are running this server, "
-            + "open the configuration file with `edit config system` "
-            + "and search for 'permissions'. "
-            + "\nUnder the keys 'api:permissions:actions', "
-            + "you can allow non-admin users to perform actions."
-        )
-
-    return True, "Success"
-
 
 @app.get(actions_endpoint, tags=['Actions'])
 def get_actions(
