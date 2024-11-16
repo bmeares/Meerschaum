@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.6.10 – v2.6.11
+### v2.6.10 – v2.6.12
 
 - **Improve datetime timezone-awareness enforcement performance.**  
   Datetime columns are only parsed for timezone awareness if the desired awareness differs. This drastically speeds up sync times.
@@ -33,6 +33,9 @@ This is the current release cycle, so stay tuned for future releases!
   This is useful for when you may use `query_df()` with only `select_columns` or `omit_columns`.
 
 - **Fix autoincrementing IDs for Oracle SQL.**
+
+- **Enforce security settings for creating jobs.**  
+  Jobs and remote actions will only be accessible to admin users when running with `--secure` (`system:permissions:actions:non_admin` in config).
 
 ### v2.6.6 – v2.6.9
 

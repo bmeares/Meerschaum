@@ -23,7 +23,7 @@ def test_create_job():
     success, msg = job.start()
     assert success, msg
 
-    duration = 2.0
+    duration = 4.0
     time.sleep(duration)
 
     success, msg = job.stop()
