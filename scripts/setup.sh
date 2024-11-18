@@ -11,9 +11,9 @@ reqs_file="/tmp/mrsm_dev_setup_reqs.txt"
 $PYTHON_BIN -m meerschaum install package wheel --venv None --debug
 $PYTHON_BIN -m meerschaum show packages dev-tools --nopretty > "$reqs_file"
 $PYTHON_BIN -m meerschaum show packages docs --nopretty >> "$reqs_file"
-$PYTHON_BIN -m pip install --upgrade -r "$reqs_file" || exit 1
+$PYTHON_BIN -m pip install --upgrade --break-system-packages -r "$reqs_file" || exit 1
 ### Install pdoc outside of the declared docs dependencies.
-$PYTHON_BIN -m pip install --upgrade pdoc || exit 1
+$PYTHON_BIN -m pip install --upgrade --break-system-packages pdoc || exit 1
 rm -f "$reqs_file"
 
 ### Enable docker buildx.
