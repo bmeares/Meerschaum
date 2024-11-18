@@ -30,6 +30,7 @@ from meerschaum.api import (
     endpoints,
     manager,
     no_auth,
+    debug,
 )
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.core.User import is_user_allowed_to_execute
@@ -143,7 +144,7 @@ def create_job(
     """
     Create and start a new job.
     """
-    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user)
+    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user, debug=debug)
     if not allowed_success:
         return allowed_success, allowed_msg
 
@@ -178,7 +179,7 @@ def delete_job(
     """
     Delete a job.
     """
-    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user)
+    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user, debug=debug)
     if not allowed_success:
         return allowed_success, allowed_msg
     job = _get_job(name)
@@ -230,7 +231,7 @@ def start_job(
     """
     Start a job if stopped.
     """
-    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user)
+    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user, debug=debug)
     if not allowed_success:
         return allowed_success, allowed_msg
 
@@ -253,7 +254,7 @@ def stop_job(
     """
     Stop a job if running.
     """
-    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user)
+    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user, debug=debug)
     if not allowed_success:
         return allowed_success, allowed_msg
 
@@ -276,7 +277,7 @@ def pause_job(
     """
     Pause a job if running.
     """
-    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user)
+    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user, debug=debug)
     if not allowed_success:
         return allowed_success, allowed_msg
 

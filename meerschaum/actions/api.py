@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
+
 def api(
     action: Optional[List[str]] = None,
     sysargs: Optional[List[str]] = None,
@@ -36,7 +37,6 @@ def api(
 
     """
     from meerschaum.utils.warnings import warn, info
-    from meerschaum.utils.formatting import print_tuple
     from meerschaum._internal.arguments._parse_arguments import parse_dict_to_sysargs
 
     if action is None:
@@ -87,6 +87,7 @@ def api(
     sysargs = parse_dict_to_sysargs(kw)
     success, message = api_conn.do_action(sysargs)
     return success, message
+
 
 def _api_start(
     action: Optional[List[str]] = None,
@@ -191,7 +192,7 @@ def _api_start(
 
     if keyfile or certfile:
         if not keyfile or not certfile:
-            return False, f"HTTPS requires both `--keyfile` and `--certfile`."
+            return False, "HTTPS requires both `--keyfile` and `--certfile`."
 
     pool = get_pool(workers=workers)
     if pool is None:
