@@ -978,9 +978,9 @@ def sign_out_button_click(
     Input({'type': 'parameters-as-json-button', 'index': MATCH}, 'n_clicks'),
 )
 def parameters_as_yaml_or_json_click(
-        yaml_n_clicks: Optional[int],
-        json_n_clicks: Optional[int],
-    ):
+    yaml_n_clicks: Optional[int],
+    json_n_clicks: Optional[int],
+):
     """
     When the `YAML` button is clicked under the parameters editor, switch the content to YAML.
     """

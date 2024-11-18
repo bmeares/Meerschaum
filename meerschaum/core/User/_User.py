@@ -11,12 +11,15 @@ import os
 import hashlib
 import hmac
 from binascii import b2a_base64, a2b_base64, Error as _BinAsciiError
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, Union
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn
 
 
 __all__ = ('hash_password', 'verify_password', 'User')
+
 
 def hash_password(
     password: str,
@@ -113,8 +116,10 @@ _BASE64_STRIP = b"=\n"
 _BASE64_PAD1 = b"="
 _BASE64_PAD2 = b"=="
 
+
 def ab64_encode(data):
     return b64s_encode(data).replace(b"+", b".")
+
 
 def ab64_decode(data):
     """
@@ -132,6 +137,7 @@ def ab64_decode(data):
 
 def b64s_encode(data):
     return b2a_base64(data).rstrip(_BASE64_STRIP)
+
 
 def b64s_decode(data):
     """
@@ -222,5 +228,6 @@ class User:
         _password_hash = self.__dict__.get('_password_hash', None)
         if _password_hash is not None:
             return _password_hash
+
         self._password_hash = hash_password(self.password)
         return self._password_hash

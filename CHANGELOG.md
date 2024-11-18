@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.6.10 – v2.6.12
+### v2.6.10 – v2.6.13
 
 - **Improve datetime timezone-awareness enforcement performance.**  
   Datetime columns are only parsed for timezone awareness if the desired awareness differs. This drastically speeds up sync times.

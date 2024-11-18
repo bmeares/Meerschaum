@@ -7,24 +7,24 @@ Manage access and refresh tokens.
 """
 
 from datetime import datetime, timedelta, timezone
+
 import fastapi
 from fastapi import Request, status
 from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi.exceptions import RequestValidationError
-from starlette.responses import Response, JSONResponse
+from starlette.responses import JSONResponse
+
 from meerschaum.api import endpoints, get_api_connector, app, debug, manager, no_auth
 from meerschaum.core import User
 from meerschaum.config.static import STATIC_CONFIG
-from meerschaum.utils.typing import Dict, Any, Optional
+from meerschaum.utils.typing import Dict, Any
 from meerschaum.core.User._User import verify_password
 from meerschaum.utils.warnings import warn
 from meerschaum.api._oauth2 import CustomOAuth2PasswordRequestForm
 
 
 @manager.user_loader()
-def load_user(
-    username: str
-) -> User:
+def load_user(username: str) -> User:
     """
     Create the `meerschaum.core.User` object from the username.
     """
@@ -56,8 +56,8 @@ def login(
     expires_delta = timedelta(minutes=expires_minutes)
     expires_dt = datetime.now(timezone.utc).replace(tzinfo=None) + expires_delta
     access_token = manager.create_access_token(
-        data = {'sub': username},
-        expires = expires_delta
+        data={'sub': username},
+        expires=expires_delta
     )
     return {
         'access_token': access_token,
@@ -73,6 +73,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """
     warn(f"Validation error: {exc.errors()}", stack=False)
     return JSONResponse(
-        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content = {"detail": exc.errors()},
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors()},
     )

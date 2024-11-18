@@ -10,7 +10,6 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional
 
 import threading
-import traceback
 Lock = threading.Lock
 RLock = threading.RLock
 Event = threading.Event
@@ -67,8 +66,8 @@ class Worker(threading.Thread):
     def run(self):
         while True:
             try:
-                item = self.queue.get(timeout=self.timeout)
-            except queue.Empty:
+                _ = self.queue.get(timeout=self.timeout)
+            except self.queue.Empty:
                 return None
 
             self.queue.task_done()
@@ -79,9 +78,21 @@ class RepeatTimer(Timer):
     Fire the timer's target function in a loop, every `interval` seconds.
     """
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._is_running = False
+
+    def is_running(self) -> bool:
+        """
+        Return whether this timer has been started and is running.
+        """
+        return self._is_running
+
     def run(self) -> None:
         """
         Fire the target function in a loop.
         """
+        self._is_running = True
         while not self.finished.wait(self.interval):
             self.function(*self.args, **self.kwargs)
+        self._is_running = False
