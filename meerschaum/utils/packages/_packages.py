@@ -60,6 +60,7 @@ packages: Dict[str, Dict[str, str]] = {
                                        f"{_MRSM_PACKAGE_ARCHIVES_PREFIX}"
                                        "APScheduler-4.0.0a5.post75+mrsm-py3-none-any.whl>=4.0.0a5"
         ),
+        'dataclass_wizard'           : 'dataclass-wizard>=0.28.0',
     },
     'jobs': {
         'dill'                       : 'dill>=0.3.3',
@@ -152,7 +153,6 @@ packages['dash'] = {
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.2.1',
     'dash_ace'                       : 'dash-ace>=0.2.1',
     'dash_extensions'                : 'dash-extensions>=1.0.4',
-    'dataclass_wizard'               : 'dataclass-wizard>=0.28.0',
     'dash_daq'                       : 'dash-daq>=0.5.0',
     'terminado'                      : 'terminado>=0.12.1',
     'tornado'                        : 'tornado>=6.1.0',
