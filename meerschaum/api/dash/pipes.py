@@ -18,6 +18,7 @@ from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
 from meerschaum.utils.sql import get_pd_type
 from meerschaum.utils.yaml import yaml
+from meerschaum.utils.warnings import warn
 from meerschaum.utils.dataframe import to_json
 from meerschaum.connectors.sql._fetch import get_pipe_query
 from meerschaum.api import CHECK_UPDATE
@@ -49,7 +50,7 @@ def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, N
         ### Because Dash JSON-ifies the ID dictionary and we are including a JSON-ified dictionary,
         ### we have to do some crazy parsing to get the pipe's meta-dict back out of it
         meta = json.loads(json.loads(ctx[0]['prop_id'].split('.' + trigger_property)[0])['index'])
-    except Exception as e:
+    except Exception:
         meta = None
     if meta is None:
         return None
@@ -115,6 +116,7 @@ def build_pipe_card(
     pipe: mrsm.Pipe,
     authenticated: bool = False,
     include_manage: bool = True,
+    _build_parents_num: int = 10,
     _build_children_num: int = 10,
 ) -> 'dbc.Card':
     """
@@ -220,6 +222,7 @@ def build_pipe_card(
                 accordion_items_from_pipe(
                     pipe,
                     authenticated=authenticated,
+                    _build_parents_num=_build_parents_num,
                     _build_children_num=_build_children_num,
                 ),
                 flush=True,
@@ -235,7 +238,7 @@ def build_pipe_card(
     if pipe.instance_keys != default_instance:
         query_params['instance'] = pipe.instance_keys
     pipe_url = (
-        f"/dash/pipes/"
+        "/dash/pipes/"
         + f"{pipe.connector_keys}/"
         + f"{pipe.metric_key}/"
         + (f"{pipe.location_key}" if pipe.location_key is not None else '')
@@ -322,6 +325,7 @@ def accordion_items_from_pipe(
     pipe: mrsm.Pipe,
     active_items: Optional[List[str]] = None,
     authenticated: bool = False,
+    _build_parents_num: int = 10,
     _build_children_num: int = 10,
 ) -> 'List[dbc.AccordionItem]':
     """
@@ -494,7 +498,7 @@ def accordion_items_from_pipe(
                 else None
             )
             rowcount = pipe.get_rowcount(debug=debug)
-        except Exception as e:
+        except Exception:
             oldest_time = None
             newest_time = None
             interval = None
@@ -532,44 +536,44 @@ def accordion_items_from_pipe(
             ]
             columns_body = [html.Tbody(columns_rows)]
             columns_table = dbc.Table(columns_header + columns_body, bordered=False, hover=True)
-        except Exception as e:
+        except Exception:
             columns_table = html.P("Could not retrieve columns ― please try again.")
         items_bodies['columns'] = columns_table
 
     if 'parameters' in active_items:
         parameters_editor = dash_ace.DashAceEditor(
-            value = yaml.dump(pipe.parameters),
-            mode = 'norm',
-            tabSize = 4,
-            theme = 'twilight',
-            id = {'type': 'parameters-editor', 'index': json.dumps(pipe.meta)},
-            width = '100%',
-            height = '500px',
-            readOnly = False,
-            showGutter = True,
-            showPrintMargin = True,
-            highlightActiveLine = True,
-            wrapEnabled = True,
-            style = {'min-height': '120px'},
+            value=yaml.dump(pipe.parameters),
+            mode='norm',
+            tabSize=4,
+            theme='twilight',
+            id={'type': 'parameters-editor', 'index': json.dumps(pipe.meta)},
+            width='100%',
+            height='500px',
+            readOnly=False,
+            showGutter=True,
+            showPrintMargin=True,
+            highlightActiveLine=True,
+            wrapEnabled=True,
+            style={'min-height': '120px'},
         )
         update_parameters_button = dbc.Button(
             "Update",
-            id = {'type': 'update-parameters-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'update-parameters-button', 'index': json.dumps(pipe.meta)},
         )
 
         as_yaml_button = dbc.Button(
             "YAML",
-            id = {'type': 'parameters-as-yaml-button', 'index': json.dumps(pipe.meta)},
-            color = 'link',
-            size = 'sm',
-            style = {'text-decoration': 'none'},
+            id={'type': 'parameters-as-yaml-button', 'index': json.dumps(pipe.meta)},
+            color='link',
+            size='sm',
+            style={'text-decoration': 'none'},
         )
         as_json_button = dbc.Button(
             "JSON",
-            id = {'type': 'parameters-as-json-button', 'index': json.dumps(pipe.meta)},
-            color = 'link',
-            size = 'sm',
-            style = {'text-decoration': 'none', 'margin-left': '10px'},
+            id={'type': 'parameters-as-json-button', 'index': json.dumps(pipe.meta)},
+            color='link',
+            size='sm',
+            style={'text-decoration': 'none', 'margin-left': '10px'},
         )
         parameters_div_children = [
             parameters_editor,
@@ -593,6 +597,20 @@ def accordion_items_from_pipe(
                 )
             ]),
         ]
+
+        if _build_parents_num > 0 and pipe.parents:
+            parents_cards = [
+                build_pipe_card(
+                    parent_pipe,
+                    authenticated = authenticated,
+                    _build_parents_num = (_build_parents_num - 1),
+                )
+                for parent_pipe in pipe.parents
+            ]
+            parents_grid = build_cards_grid(parents_cards, num_columns=1)
+            parents_div_items = [html.Br(), html.H3('Parent Pipes'), html.Br(), parents_grid]
+            parameters_div_children.extend([html.Br()] + parents_div_items)
+
         if _build_children_num > 0 and pipe.children:
             children_cards = [
                 build_pipe_card(
@@ -603,31 +621,31 @@ def accordion_items_from_pipe(
                 for child_pipe in pipe.children
             ]
             children_grid = build_cards_grid(children_cards, num_columns=1)
-            chidren_div_items = [html.Br(), html.H3('Children Pipes'), html.Br(), children_grid]
-            parameters_div_children.extend([html.Br()] + chidren_div_items)
+            children_div_items = [html.Br(), html.H3('Children Pipes'), html.Br(), children_grid]
+            parameters_div_children.extend([html.Br()] + children_div_items)
 
         items_bodies['parameters'] = html.Div(parameters_div_children)
 
     if 'sql' in active_items:
         query = dedent((get_pipe_query(pipe, warn=False) or "")).lstrip().rstrip()
         sql_editor = dash_ace.DashAceEditor(
-            value = query,
-            mode = 'sql',
-            tabSize = 4,
-            theme = 'twilight',
-            id = {'type': 'sql-editor', 'index': json.dumps(pipe.meta)},
-            width = '100%',
-            height = '500px',
-            readOnly = False,
-            showGutter = True,
-            showPrintMargin = False,
-            highlightActiveLine = True,
-            wrapEnabled = True,
-            style = {'min-height': '120px'},
+            value=query,
+            mode='sql',
+            tabSize=4,
+            theme='twilight',
+            id={'type': 'sql-editor', 'index': json.dumps(pipe.meta)},
+            width='100%',
+            height='500px',
+            readOnly=False,
+            showGutter=True,
+            showPrintMargin=False,
+            highlightActiveLine=True,
+            wrapEnabled=True,
+            style={'min-height': '120px'},
         )
         update_sql_button = dbc.Button(
             "Update",
-            id = {'type': 'update-sql-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'update-sql-button', 'index': json.dumps(pipe.meta)},
         )
         items_bodies['sql'] = html.Div([
             sql_editor,
@@ -648,7 +666,7 @@ def accordion_items_from_pipe(
         try:
             df = pipe.get_backtrack_data(backtrack_minutes=10, limit=10, debug=debug).astype(str)
             table = dbc.Table.from_dataframe(df, bordered=False, hover=True) 
-        except Exception as e:
+        except Exception:
             table = html.P("Could not retrieve recent data.")
         items_bodies['recent-data'] = table
 

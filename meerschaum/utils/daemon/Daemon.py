@@ -315,7 +315,13 @@ class Daemon:
                     with open(self.pid_path, 'w+', encoding='utf-8') as f:
                         f.write(str(os.getpid()))
 
-                    self._log_refresh_timer.start()
+                    ### NOTE: The timer fails to start for remote actions to localhost.
+                    try:
+                        if not self._log_refresh_timer.is_running():
+                            self._log_refresh_timer.start()
+                    except Exception:
+                        pass
+
                     self.properties['result'] = None
                     self._capture_process_timestamp('began')
                     result = self.target(*self.target_args, **self.target_kw)
@@ -345,7 +351,7 @@ class Daemon:
                         except BrokenPipeError:
                             pass
 
-        except Exception as e:
+        except Exception:
             daemon_error = traceback.format_exc()
             with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
                 f.write(daemon_error)

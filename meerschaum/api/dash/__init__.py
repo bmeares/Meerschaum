@@ -33,6 +33,7 @@ import warnings
 ### Suppress the depreciation warnings from importing enrich.
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
+    _ = attempt_import('dataclass_wizard', lazy=False)
     enrich = attempt_import('dash_extensions.enrich', lazy=False)
 html, dcc = import_html(), import_dcc()
 from meerschaum.api.dash.components import location

@@ -10,10 +10,17 @@ from __future__ import annotations
 
 from meerschaum.utils.typing import SuccessTuple, List, Dict, Any
 from meerschaum.api import (
-    fastapi, app, endpoints, get_api_connector, debug, manager, private, no_auth
+    fastapi,
+    app,
+    endpoints,
+    get_api_connector,
+    debug,
+    manager,
+    private,
+    no_auth,
 )
 from meerschaum.actions import actions
-from meerschaum.config import get_config
+from meerschaum.core.User import is_user_allowed_to_execute
 
 actions_endpoint = endpoints['actions']
 
@@ -53,19 +60,9 @@ def do_action_legacy(
     -------
     A `SuccessTuple`.
     """
-    if curr_user is not None and curr_user.type != 'admin':
-        allow_non_admin = get_config(
-            'system', 'api', 'permissions', 'actions', 'non_admin', patch=True
-        )
-        if not allow_non_admin:
-            return False, (
-                "The administrator for this server has not allowed users to perform actions.\n\n"
-                + "Please contact the system administrator, or if you are running this server, "
-                + "open the configuration file with `edit config system` "
-                + "and search for 'permissions'. "
-                + "\nUnder the keys 'api:permissions:actions', "
-                + "you can allow non-admin users to perform actions."
-            )
+    allowed_success, allowed_msg = is_user_allowed_to_execute(curr_user, debug=debug)
+    if not allowed_success:
+        return allowed_success, allowed_msg
 
     if action not in actions:
         return False, f"Invalid action '{action}'."
