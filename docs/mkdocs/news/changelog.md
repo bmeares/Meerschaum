@@ -4,6 +4,28 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.6.15
+
+- **Fix inplace syncs without a `datetime` axis.**  
+  A bug introduced by a performance optimization has been fixed. Inplace pipes without a `datetime` axis will skip searching for date bounds. Setting `upsert` to `true` will bypass this bug for previous releases.
+
+- **Skip invoking `get_sync_time()` for pipes without a `datetime` axis.**  
+  Invoking an instance connector's `get_sync_time()` method will now only occur when `datetime` is set.
+
+- **Remove `guess_datetime()` check from `SQLConnector.get_sync_time()`.**  
+  Because sync times are only checked for pipes with a dedicated `datetime` column, the `guess_datetime()` check has been removed from the `SQLConnector.get_sync_time()` method.
+
+- **Skip persisting default `target` to parameters.**  
+  The default target table name will no longer be persisted to `parameters`. This helps avoid accidentally setting the wrong target table when copying pipes.
+
+- **Default to "no" for syncing data when copying pipes.**  
+  The action `copy pipes` will no longer sync data by default, instead requiring an explicit yes to begin syncing.
+
+- **Fix the "Update query" button behavior on the Web Console.**  
+  Existing but null keys are now accounted for when update a SQL pipe's query.
+
+- **Fix another Oracle autoincrement edge case.**
+
 ### v2.6.10 – v2.6.14
 
 - **Improve datetime timezone-awareness enforcement performance.**  

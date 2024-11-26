@@ -1770,8 +1770,8 @@ def sync_pipe_inplace(
     self,
     pipe: 'mrsm.Pipe',
     params: Optional[Dict[str, Any]] = None,
-    begin: Optional[datetime] = None,
-    end: Optional[datetime] = None,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
     chunksize: Optional[int] = -1,
     check_existing: bool = True,
     debug: bool = False,
@@ -1790,11 +1790,11 @@ def sync_pipe_inplace(
         Optional params dictionary to build the `WHERE` clause.
         See `meerschaum.utils.sql.build_where`.
 
-    begin: Optional[datetime], default None
+    begin: Union[datetime, int, None], default None
         Optionally specify the earliest datetime to search for data.
         Defaults to `None`.
 
-    end: Optional[datetime], default None
+    end: Union[datetime, int, None], default None
         Optionally specify the latest datetime to search for data.
         Defaults to `None`.
 
@@ -1834,7 +1834,7 @@ def sync_pipe_inplace(
         session_execute,
         update_queries,
     )
-    from meerschaum.utils.dtypes import coerce_timezone, are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import (
         get_pd_type_from_db_type,
     )
@@ -1842,7 +1842,7 @@ def sync_pipe_inplace(
 
     transact_id = generate_password(3)
     def get_temp_table_name(label: str) -> str:
-        temp_prefix = '##' if self.flavor != 'oracle' else ''
+        temp_prefix = '##' if self.flavor != 'oracle' else '_'
         return temp_prefix + transact_id + '_' + label + '_' + pipe.target
 
     internal_schema = self.internal_schema
@@ -1875,7 +1875,6 @@ def sync_pipe_inplace(
     autoincrement = pipe.parameters.get('autoincrement', False)
     dt_col = pipe.columns.get('datetime', None)
     dt_col_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
-    dt_typ = pipe.dtypes.get(dt_col, 'datetime64[ns, UTC]') if dt_col else None
 
     def clean_up_temp_tables(ready_to_drop: bool = False):
         log_success, log_msg = self._log_temporary_tables_creation(
@@ -2008,14 +2007,14 @@ def sync_pipe_inplace(
         ],
         with_results=True,
         debug=debug,
-    ) if not upsert else ((True, "Success"), None)
+    ) if dt_col and not upsert else ((True, "Success"), None)
     if not new_dt_bounds_success:
         return (
             new_dt_bounds_success,
             f"Could not determine in-place datetime bounds:\n{new_dt_bounds_msg}"
         )
 
-    if not upsert:
+    if dt_col and not upsert:
         begin, end = new_dt_bounds_results[0].fetchone()
 
     backtrack_def = self.get_pipe_data_query(
@@ -2352,18 +2351,9 @@ def get_sync_time(
     table = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
 
     dt_col = pipe.columns.get('datetime', None)
-    dt_type = pipe.dtypes.get(dt_col, 'datetime64[ns, UTC]')
-    if not dt_col:
-        _dt = pipe.guess_datetime()
-        dt = sql_item_name(_dt, self.flavor, None) if _dt else None
-        is_guess = True
-    else:
-        _dt = dt_col
-        dt = sql_item_name(_dt, self.flavor, None)
-        is_guess = False
-
-    if _dt is None:
+    if dt_col is None:
         return None
+    dt_col_name = sql_item_name(dt_col, self.flavor, None)
 
     ASC_or_DESC = "DESC" if newest else "ASC"
     existing_cols = pipe.get_columns_types(debug=debug)
@@ -2373,16 +2363,17 @@ def get_sync_time(
 
     ### If no bounds are provided for the datetime column,
     ### add IS NOT NULL to the WHERE clause.
-    if _dt not in valid_params:
-        valid_params[_dt] = '_None'
+    if dt_col not in valid_params:
+        valid_params[dt_col] = '_None'
     where = "" if not valid_params else build_where(valid_params, self)
-    q = f"SELECT {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}\nLIMIT 1"
+    q = f"SELECT {dt_col_name}\nFROM {table}{where}\nORDER BY {dt_col_name} {ASC_or_DESC}\nLIMIT 1"
     if self.flavor == 'mssql':
-        q = f"SELECT TOP 1 {dt}\nFROM {table}{where}\nORDER BY {dt} {ASC_or_DESC}"
+        q = f"SELECT TOP 1 {dt_col_name}\nFROM {table}{where}\nORDER BY {dt_col_name} {ASC_or_DESC}"
     elif self.flavor == 'oracle':
         q = (
             "SELECT * FROM (\n"
-            + f"    SELECT {dt}\nFROM {table}{where}\n    ORDER BY {dt} {ASC_or_DESC}\n"
+            + f"    SELECT {dt_col_name}\nFROM {table}{where}\n    "
+            + f"ORDER BY {dt_col_name} {ASC_or_DESC}\n"
             + ") WHERE ROWNUM = 1"
         )
 
