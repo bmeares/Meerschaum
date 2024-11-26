@@ -532,7 +532,7 @@ Delete a pipe's data within a bounded or unbounded interval without dropping the
 
 ### `#!python deduplicate_pipe()` (optional)
 
-Like `sync_pipe_inplace()`, you may choose to implement `deduplicate_pipe()` for a performance boost. Otherwise, the default implementation relies upon `get_pipe_data()`, `clear_pipe()`, and `get_pipe_rowcount()`. See the [`#!python SQLConnector.deduplicate_pipe()`](https://docs.meerschaum.io/connectors/sql/SQLConnector.html#meerschaum.connectors.sql.SQLConnector.SQLConnector.deduplicate_pipe) method for reference.
+Like `sync_pipe_inplace()`, you may choose to implement `deduplicate_pipe()` for a performance boost. Otherwise, the default implementation relies upon `get_pipe_data()`, `clear_pipe()`, and `get_pipe_rowcount()`. See the [`#!python SQLConnector.deduplicate_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.deduplicate_pipe) method for reference.
 ## `#!python get_pipe_data()`
 
 Return the target table's data according to the filters.

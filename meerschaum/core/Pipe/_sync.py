@@ -493,6 +493,9 @@ def get_sync_time(
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import round_time
 
+    if not self.columns.get('datetime', None):
+        return None
+
     with Venv(get_connector_plugin(self.instance_connector)):
         sync_time = self.instance_connector.get_sync_time(
             self,

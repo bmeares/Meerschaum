@@ -584,6 +584,103 @@ def test_sync_inplace_upsert(flavor: str):
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_inplace_no_datetime(flavor: str):
+    """
+    Verify that in-place syncing works as expected.
+    """
+    from meerschaum.utils.sql import sql_item_name
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+    source_pipe = Pipe('test', 'inplace', 'no-datetime', instance=conn)
+    source_pipe.delete()
+    source_pipe = Pipe(
+        'test', 'inplace', 'no-datetime',
+        instance=conn,
+        columns={'id': 'id'},
+        upsert=False,
+    )
+    dest_pipe = Pipe(str(conn), 'inplace', 'no-datetime', instance=conn)
+    dest_pipe.delete()
+    query = f"""
+    WITH {sql_item_name('subquery', flavor)} AS (
+        SELECT *
+        FROM {sql_item_name(source_pipe.target, flavor)}
+    )
+    SELECT *
+    FROM {sql_item_name('subquery', flavor)}
+    """ if flavor not in ('mysql',) else f"""
+    SELECT *
+    FROM {sql_item_name(source_pipe.target, flavor)}
+    """
+    dest_pipe = Pipe(
+        str(conn), 'inplace', 'no-datetime',
+        instance=conn,
+        columns={'id': 'id'},
+        dtypes={'a': 'int', 'id': 'uuid'},
+        upsert=False,
+        static=False,
+        parameters={
+            "fetch": {
+                "definition": query,
+            }
+        },
+    )
+
+    docs = [
+        {'id': UUID('9f680a72-b5f7-4336-8f7c-30927ec21cb1')},
+        {'id': UUID('335b0322-4b54-40aa-8019-07666cbefa52')},
+        {'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'd': 7},
+        {'id': UUID('7e194a2c-26b4-4632-af02-e0a8b2c6ce1e')},
+        {'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e')},
+    ]
+    success, msg = source_pipe.sync(docs)
+    assert success, msg
+
+    success, msg = dest_pipe.sync(debug=debug)
+    assert success, msg
+    assert dest_pipe.get_rowcount(debug=debug) == len(docs)
+
+    success, msg = dest_pipe.sync(debug=debug)
+    assert success, msg
+    assert dest_pipe.get_rowcount(debug=debug) == len(docs)
+
+    new_docs = [
+        {'id': UUID('afb0b31b-15dc-485e-ac6f-d8622b6d03d4'), 'c': 9},
+        {'id': UUID('8b7bf428-d0ed-40fa-951b-bb115a03eac5'), 'c': 8},
+        {'id': UUID('36aed9b4-4c7a-4566-a321-d1774ef1015a'), 'c': 7},
+        {'id': UUID('7a4ef6cc-37d8-4899-9ddb-07b4998d0b53'), 'c': 6},
+        {'id': UUID('59244211-fdb8-46f1-b14b-8631146758c0'), 'c': 5},
+    ]
+    success, msg = source_pipe.sync(new_docs)
+    assert success, msg
+
+    success, msg = dest_pipe.sync(debug=debug)
+    assert success, msg
+    assert dest_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
+
+    update_docs = [
+        {'id': UUID('9f680a72-b5f7-4336-8f7c-30927ec21cb1'), 'a': 1},
+        {'id': UUID('335b0322-4b54-40aa-8019-07666cbefa52'), 'a': 2},
+        {'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'a': 3},
+        {'id': UUID('7e194a2c-26b4-4632-af02-e0a8b2c6ce1e'), 'a': 4},
+        {'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e'), 'a': 5},
+    ]
+    success, msg = source_pipe.sync(update_docs)
+    assert success, msg
+    assert source_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
+
+    success, msg = dest_pipe.verify(debug=debug)
+    assert success, msg
+    assert dest_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
+
+    df = dest_pipe.get_data(params={'id': 'd7d42913-2dfe-47d6-b0e0-7f71e13e814e'})
+    assert len(df) == 1
+    assert df['a'][0] == 3
+    assert df['d'][0] == 7
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_nested_chunks(flavor: str):
     """
     Sync nested chunk generators.

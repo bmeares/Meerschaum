@@ -54,10 +54,9 @@ def _bootstrap_pipes(
     """
     from meerschaum import get_pipes
     from meerschaum.config import get_config
-    from meerschaum.utils.warnings import info, warn, error
-    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.warnings import info, warn
     from meerschaum.utils.prompt import yes_no, prompt, choose
-    from meerschaum.connectors.parse import is_valid_connector_keys, parse_instance_keys
+    from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.misc import get_connector_labels
     from meerschaum.utils.formatting._shell import clear_screen
 
@@ -102,7 +101,7 @@ def _bootstrap_pipes(
         ### Get the connector.
         new_label = 'New'
         info(
-            f"To create a pipe without explicitly using a connector, "
+            "To create a pipe without explicitly using a connector, "
             + "use the `register pipes` command.\n"
         )
         try:
@@ -133,7 +132,7 @@ def _bootstrap_pipes(
                     break
                 elif isinstance(tup[0], bool) and not tup[0]:
                     return abort_tuple
-                warn(f"Please register a new connector or press CTRL+C to cancel.", stack=False)
+                warn("Please register a new connector or press CTRL+C to cancel.", stack=False)
         connector_keys = [ck]
 
         ### Get the metric.
@@ -142,9 +141,9 @@ def _bootstrap_pipes(
                 clear_screen(debug=debug)
             try:
                 mk = prompt(
-                    f"What kind of data is this?\n\n" +
-                    f"    The metric is the label for the contents of the pipe.\n" +
-                    f"    For example, 'weather' might be a metric for weather station data.\n\n" +
+                    "What kind of data is this?\n\n" +
+                    "    The metric is the label for the contents of the pipe.\n" +
+                    "    For example, 'weather' might be a metric for weather station data.\n\n" +
                     f" {get_config('formatting', 'emoji', 'metric')} Metric:"
                 )
             except KeyboardInterrupt:
@@ -224,6 +223,7 @@ def _bootstrap_pipes(
 
     return (successes > 0), msg
 
+
 def _bootstrap_connectors(
     action: Optional[List[str]] = None,
     connector_keys: Optional[List[str]] = None,
@@ -237,7 +237,6 @@ def _bootstrap_connectors(
     """
     Prompt the user for the details necessary to create a Connector.
     """
-    from meerschaum.connectors.parse import is_valid_connector_keys
     from meerschaum.connectors import (
         connectors,
         get_connector,
