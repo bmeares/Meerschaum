@@ -284,15 +284,15 @@ def set_pipe_query(pipe: mrsm.Pipe, query: str) -> None:
     - query
     - sql
     """
-    if pipe.parameters.get('fetch', {}).get('definition', None):
+    if 'fetch' in pipe.parameters and 'definition' in pipe.parameters['fetch']:
         if pipe.parameters.get('fetch', None) is None:
             pipe.parameters['fetch'] = {}
         dict_to_set = pipe.parameters['fetch']
         key_to_set = 'definition'
-    elif pipe.parameters.get('definition', None):
+    elif 'definition' in pipe.parameters:
         dict_to_set = pipe.parameters
         key_to_set = 'definition'
-    elif pipe.parameters.get('query', None):
+    elif 'query' in pipe.parameters:
         dict_to_set = pipe.parameters
         key_to_set = 'query'
     else:

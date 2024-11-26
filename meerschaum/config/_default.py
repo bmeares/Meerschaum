@@ -131,7 +131,6 @@ default_pipes_config = {
     'parameters': {
         'columns': {
             'datetime': None,
-            'id': None,
         },
         'fetch': {
             'backtrack_minutes': 1440,

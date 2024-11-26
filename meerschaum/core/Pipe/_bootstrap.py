@@ -7,17 +7,18 @@ Attempt to create a pipe's requirements in one method.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Optional, Dict, Any
+from meerschaum.utils.typing import SuccessTuple, Dict, Any
+
 
 def bootstrap(
-        self,
-        debug: bool = False,
-        yes: bool = False,
-        force: bool = False,
-        noask: bool = False,
-        shell: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    self,
+    debug: bool = False,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    shell: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Prompt the user to create a pipe's requirements all from one method.
     This method shouldn't be used in any automated scripts because it interactively
@@ -46,7 +47,7 @@ def bootstrap(
 
     """
 
-    from meerschaum.utils.warnings import warn, info, error
+    from meerschaum.utils.warnings import info
     from meerschaum.utils.prompt import prompt, yes_no
     from meerschaum.utils.formatting import pprint
     from meerschaum.config import get_config
@@ -74,8 +75,8 @@ def bootstrap(
             f"\n    Press [Enter] to register {self} with the above configuration:",
             icon = False
         )
-    except KeyboardInterrupt as e:
-        return False, f"Aborting bootstrapping {self}."
+    except KeyboardInterrupt:
+        return False, f"Aborted bootstrapping {self}."
 
     with Venv(get_connector_plugin(self.instance_connector)):
         register_tuple = self.instance_connector.register_pipe(self, debug=debug)
@@ -119,7 +120,7 @@ def bootstrap(
 
     print_tuple((True, f"Finished bootstrapping {self}!"))
     info(
-        f"You can edit this pipe later with `edit pipes` "
+        "You can edit this pipe later with `edit pipes` "
         + "or set the definition with `edit pipes definition`.\n"
         + "    To sync data into your pipe, run `sync pipes`."
     )
@@ -128,7 +129,7 @@ def bootstrap(
 
 
 def _get_parameters(pipe, debug: bool = False) -> Dict[str, Any]:
-    from meerschaum.utils.prompt import prompt, yes_no
+    from meerschaum.utils.prompt import prompt
     from meerschaum.utils.warnings import warn, info
     from meerschaum.config import get_config
     from meerschaum.config._patch import apply_patch_to_config
@@ -139,36 +140,22 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, Any]:
     _types_defaults = {
         'sql': {
             'fetch': {
+                'backtrack_minutes': get_config(
+                    'pipes', 'parameters', 'fetch', 'backtrack_minutes'
+                ),
                 'definition': None,
             },
-            'parents': [
-                {
-                    'connector': None,
-                    'metric': None,
-                    'location': None,
-                    'instance': None,
-                },
-            ],
+            'verify': {
+                'chunk_minutes': get_config('pipes', 'parameters', 'verify', 'chunk_minutes'),
+            },
         },
         'api': {
-            'fetch': {
-                'connector': None,
-                'metric': None,
-                'location': None,
-            },
-            'parents': [
-                {
-                    'connector': None,
-                    'metric': None,
-                    'location': None,
-                    'instance': None,
-                },
-            ],
+            'fetch': {},
         },
     }
     try:
         conn_type = pipe.connector.type
-    except Exception as e:
+    except Exception:
         conn_type = None
     _parameters = _types_defaults.get(conn_type, {})
 
@@ -210,7 +197,7 @@ def _get_parameters(pipe, debug: bool = False) -> Dict[str, Any]:
         _parameters['tags'] = [
             t.strip() for t in prompt(f"Tags for {pipe} (empty to omit):").split(',') if t
         ]
-    except Exception as e:
+    except Exception:
         _parameters['tags'] = []
 
     return _parameters

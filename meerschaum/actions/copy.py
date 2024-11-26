@@ -38,7 +38,6 @@ def _complete_copy(
     """
     Override the default Meerschaum `complete_` function.
     """
-    from meerschaum.actions.edit import _complete_edit_config
     if action is None:
         action = []
 
@@ -71,7 +70,7 @@ def _copy_pipes(
     """
     from meerschaum import get_pipes, Pipe
     from meerschaum.utils.prompt import prompt, yes_no
-    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.formatting._shell import clear_screen
     pipes = get_pipes(as_list=True, **kw)
@@ -110,7 +109,9 @@ def _copy_pipes(
                     f"Do you want to copy data from {p} into {_new_pipe}?\n\n"
                     + "If you specified `--begin`, `--end` or `--params`, data will be filtered."
                 ),
-                    noask=noask, yes=yes
+                    noask=noask,
+                    yes=yes,
+                    default='n',
                 )
         ):
             _new_pipe.sync(

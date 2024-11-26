@@ -612,24 +612,31 @@ def target(self) -> str:
       - `target_table_name`
     """
     if 'target' not in self.parameters:
-        target = self._target_legacy()
+        default_target = self._target_legacy()
+        default_targets = {default_target}
         potential_keys = ('target_name', 'target_table', 'target_table_name')
+        _target = None
         for k in potential_keys:
             if k in self.parameters:
-                target = self.parameters[k]
+                _target = self.parameters[k]
                 break
+
+        _target = _target or default_target
 
         if self.instance_connector.type == 'sql':
             from meerschaum.utils.sql import truncate_item_name
-            truncated_target = truncate_item_name(target, self.instance_connector.flavor)
-            if truncated_target != target:
+            truncated_target = truncate_item_name(_target, self.instance_connector.flavor)
+            default_targets.add(truncated_target)
+            if truncated_target != _target:
                 warn(
-                    f"The target '{target}' is too long for '{self.instance_connector.flavor}', "
+                    f"The target '{_target}' is too long for '{self.instance_connector.flavor}', "
                     + f"will use {truncated_target} instead."
                 )
-                target = truncated_target
+                _target = truncated_target
 
-        self.target = target
+        if _target in default_targets:
+            return _target
+        self.target = _target
     return self.parameters['target']
 
 

@@ -127,15 +127,15 @@ def prompt(
 
 
 def yes_no(
-        question: str = '',
-        options: Tuple[str, str] = ('y', 'n'),
-        default: str = 'y',
-        wrappers: Tuple[str, str] = ('[', ']'),
-        icon: bool = True,
-        yes: bool = False,
-        noask: bool = False,
-        **kw : Any
-    ) -> bool:
+    question: str = '',
+    options: Tuple[str, str] = ('y', 'n'),
+    default: str = 'y',
+    wrappers: Tuple[str, str] = ('[', ']'),
+    icon: bool = True,
+    yes: bool = False,
+    noask: bool = False,
+    **kw : Any
+) -> bool:
     """
     Print a question and prompt the user with a yes / no input.
     Returns `True` for `'yes'`, False for `'no'`.
