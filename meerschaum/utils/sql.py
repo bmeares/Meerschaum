@@ -2229,11 +2229,22 @@ def get_reset_autoincrement_queries(
     table_seq_name = sql_item_name(table + '_' + column + '_seq', connector.flavor, schema)
     column_name = sql_item_name(column, connector.flavor)
     if connector.flavor == 'oracle':
-        df = connector.read(f"""
+        potential_table_names = set([
+            f"'{table_trunc.upper()}'",
+            f"'{table_trunc}'",
+            f"'{table_name}'",
+            f"'{table_name.upper()}'",
+        ])
+        df = connector.read(
+            """
             SELECT SEQUENCE_NAME
             FROM ALL_TAB_IDENTITY_COLS
-            WHERE TABLE_NAME IN '{table_trunc.upper()}'
-        """, debug=debug)
+            WHERE TABLE_NAME IN ("""
+            + ", ".join([name for name in potential_table_names])
+            + """)
+            """,
+            debug=debug
+        )
         if len(df) > 0:
             table_seq_name = df['sequence_name'][0]
 

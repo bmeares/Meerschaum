@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.6.15
+### v2.6.15 – v2.6.16
 
 - **Fix inplace syncs without a `datetime` axis.**  
   A bug introduced by a performance optimization has been fixed. Inplace pipes without a `datetime` axis will skip searching for date bounds. Setting `upsert` to `true` will bypass this bug for previous releases.
@@ -24,7 +24,8 @@ This is the current release cycle, so stay tuned for future releases!
 - **Fix the "Update query" button behavior on the Web Console.**  
   Existing but null keys are now accounted for when update a SQL pipe's query.
 
-- **Fix another Oracle autoincrement edge case.**
+- **Fix another Oracle autoincrement edge case.**  
+  Resetting the autoincrementing primary key value on Oracle will now behave as expected.
 
 ### v2.6.10 – v2.6.14
 
