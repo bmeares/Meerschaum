@@ -107,7 +107,7 @@ flavor_configs = {
         },
     },
     'oracle': {
-        'engine': 'oracle+cx_oracle',
+        'engine': 'oracle+oracledb',
         'create_engine': default_create_engine_args,
         'omit_create_engine': {'method',},
         'to_sql': {
@@ -164,7 +164,7 @@ install_flavor_drivers = {
     'citus': ['psycopg'],
     'cockroachdb': ['psycopg', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg'],
     'mssql': ['pyodbc'],
-    'oracle': ['cx_Oracle'],
+    'oracle': ['oracledb'],
 }
 require_patching_flavors = {'cockroachdb': [('sqlalchemy-cockroachdb', 'sqlalchemy_cockroachdb')]}
 

@@ -58,18 +58,18 @@ install_oracle_fedora(){
 case $DISTRO in
   Ubuntu)
     install_mssql_ubuntu;
-    install_oracle_ubuntu;
+    # install_oracle_ubuntu;
     ;;
   Debian)
     install_mssql_ubuntu;
-    install_oracle_ubuntu;
+    # install_oracle_ubuntu;
     ;;
   Fedora)
     install_mssql_fedora;
-    install_oracle_fedora;
+    # install_oracle_fedora;
     ;;
   CentOS)
     install_mssql_fedora;
-    install_oracle_fedora;
+    # install_oracle_fedora;
     ;;
 esac
