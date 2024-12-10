@@ -132,7 +132,7 @@ def schedule_function(
 
     try:
         loop.run_until_complete(run_scheduler())
-    except (KeyboardInterrupt, SystemExit) as e:
+    except (KeyboardInterrupt, SystemExit):
         loop.run_until_complete(_stop_scheduler())
 
     return True, "Success"
@@ -159,13 +159,13 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
     )
 
     starting_ts = parse_start_time(schedule, now=now)
-    schedule = schedule.split(STARTING_KEYWORD)[0].strip()
+    schedule = schedule.split(STARTING_KEYWORD, maxsplit=1)[0].strip()
     for alias_keyword, true_keyword in SCHEDULE_ALIASES.items():
         schedule = schedule.replace(alias_keyword, true_keyword)
 
     ### TODO Allow for combining `and` + `or` logic.
     if '&' in schedule and '|' in schedule:
-        raise ValueError(f"Cannot accept both 'and' + 'or' logic in the schedule frequency.")
+        raise ValueError("Cannot accept both 'and' + 'or' logic in the schedule frequency.")
 
     join_str = '|' if '|' in schedule else '&'
     join_trigger = (
@@ -300,6 +300,11 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
     try:
         if starting_str == 'now':
             starting_ts = now
+        elif starting_str.startswith('in '):
+            delta_vals = starting_str.replace('in ', '').split(' ', maxsplit=1)
+            delta_unit = delta_vals[-1].rstrip('s') + 's'
+            delta_num = float(delta_vals[0])
+            starting_ts = now + timedelta(**{delta_unit: delta_num})
         elif 'tomorrow' in starting_str or 'today' in starting_str:
             today = round_time(now, timedelta(days=1))
             tomorrow = today + timedelta(days=1)

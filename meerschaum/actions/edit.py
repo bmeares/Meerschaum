@@ -397,6 +397,7 @@ def _edit_jobs(
     from meerschaum._internal.arguments import (
         split_pipeline_sysargs,
         split_chained_sysargs,
+        parse_arguments,
     )
     from meerschaum.utils.formatting import make_header, print_options
     from meerschaum.utils.warnings import info
@@ -410,7 +411,26 @@ def _edit_jobs(
 
     num_edited = 0
     for name, job in jobs.items():
-        sysargs_str = shlex.join(job.sysargs)
+        try:
+            sub_args_line = None
+            pipeline_args_line = None
+            if job.sysargs[:2] == ['start', 'pipeline']:
+                job_args = parse_arguments(job.sysargs)
+                mrsm.pprint(job_args)
+                sub_args_line = job_args['params']['sub_args_line']
+                params_index = job.sysargs[2:].index('-P')
+                indices_to_skip = (params_index, params_index + 1)
+                pipeline_args_line = shlex.join(
+                    [a for i, a in enumerate(job.sysargs[2:]) if i not in indices_to_skip]
+                )
+        except (ValueError, IndexError):
+            sub_args_line = None
+
+        sysargs_str = (
+            f"{sub_args_line} : {pipeline_args_line}"
+            if sub_args_line is not None and pipeline_args_line is not None
+            else shlex.join(job.sysargs)
+        )
         clear_screen(debug=debug)
         info(
             f"Editing arguments for job '{name}'.\n"
@@ -422,7 +442,7 @@ def _edit_jobs(
         try:
             new_sysargs_str = prompt(
                 "",
-                default_editable=sysargs_str.lstrip().rstrip().replace(' + ', '\n+ '),
+                default_editable=job.label,
                 multiline=True,
                 icon=False,
                 completer=ShellCompleter(),

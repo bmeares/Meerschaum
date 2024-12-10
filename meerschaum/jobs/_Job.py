@@ -873,7 +873,7 @@ class Job:
         """
         from meerschaum._internal.arguments import compress_pipeline_sysargs
         sysargs = compress_pipeline_sysargs(self.sysargs)
-        return shlex.join(sysargs).replace(' + ', '\n+ ')
+        return shlex.join(sysargs).replace(' + ', '\n+ ').replace(' : ', '\n: ').lstrip().rstrip()
 
     @property
     def _externally_managed_file(self) -> pathlib.Path:
@@ -915,6 +915,7 @@ class Job:
             'PYTHONUNBUFFERED': '1',
             'LINES': str(get_config('jobs', 'terminal', 'lines')),
             'COLUMNS': str(get_config('jobs', 'terminal', 'columns')),
+            STATIC_CONFIG['environment']['noninteractive']: 'true',
         }
         self._env = {**default_env, **_env}
         return self._env

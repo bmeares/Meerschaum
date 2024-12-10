@@ -4,6 +4,27 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.6.17
+
+- **Add relative deltas to `starting in ` scheduler syntax.**  
+  You may specify a delta in the job scheduler `starting` syntax:
+
+  ```
+  mrsm sync pipes -s 'daily starting in 30 seconds'
+  ```
+
+- **Fix `drop pipes` for pipes on custom schemas.**  
+  Pipes created under a specific schema are now correctly dropped.
+
+- **Enhance editing pipeline jobs.**  
+  Pipeline jobs now provide the job label as the default text to be edited. Pipeline arguments are now placed on a separate line to improve legibility.
+
+- **Disable the progress timer for jobs.**  
+  The `sync pipes` progress timer will now be hidden when running through a job.
+
+- **Unset `MRSM_NOASK` for daemons.**  
+  Now that jobs may accept user input, the environment variable `MRSM_NOASK` is no longer needed for jobs run as daemons (executor `local`).
+
 ### v2.6.15 – v2.6.16
 
 - **Fix inplace syncs without a `datetime` axis.**  

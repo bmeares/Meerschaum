@@ -2591,7 +2591,7 @@ def get_pipe_rowcount(
     result = self.value(query, debug=debug, silent=True)
     try:
         return int(result)
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -2616,10 +2616,11 @@ def drop_pipe(
     from meerschaum.utils.sql import table_exists, sql_item_name, DROP_IF_EXISTS_FLAVORS
     success = True
     target = pipe.target
+    schema = self.get_pipe_schema(pipe)
     target_name = (
-        sql_item_name(target, self.flavor, self.get_pipe_schema(pipe))
+        sql_item_name(target, self.flavor, schema)
     )
-    if table_exists(target, self, debug=debug):
+    if table_exists(target, self, schema=schema, debug=debug):
         if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
         success = self.exec(
             f"DROP TABLE {if_exists_str} {target_name}", silent=True, debug=debug
