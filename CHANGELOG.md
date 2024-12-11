@@ -25,6 +25,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Unset `MRSM_NOASK` for daemons.**  
   Now that jobs may accept user input, the environment variable `MRSM_NOASK` is no longer needed for jobs run as daemons (executor `local`).
 
+- **Replace `Cx_Oracle` with `oracledb`.**  
+  The Oracle SQL driver is no longer required now that the default Python binding for Oracle is `oracledb`.
+
 - **Fix Oracle auto-incrementing for good.**  
   At long last, the mystery of Oracle auto-incrementing identity columns has been laid to rest. 
 
