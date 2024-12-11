@@ -226,7 +226,7 @@ def parse_line(line: str) -> Dict[str, Any]:
     import shlex
     try:
         return parse_arguments(shlex.split(line))
-    except Exception as e:
+    except Exception:
         return {'action': [], 'text': line}
 
 

@@ -119,16 +119,16 @@ mrsm sync pipes -s 'daily starting 00:00' -d
 
 Append the phrase `starting [time]` to a schedule to set the reference point. If the starting time is in the past, the schedule will also fire immediately.
 
-!!! tip "Tip: Add `tomorrow` to keep a job from immediately firing."
-    If you are creating long-running jobs that run at night, add `tomorrow` to your start time so that the job does not immediately fire (e.g. `daily starting tomorrow 10:00`).
+!!! tip "Tip: Add `tomorrow` or `in 1 minute` to keep a job from immediately firing."
+    If you are creating long-running jobs that run at night, add `tomorrow` or `in 1 minute` to your start time so that the job does not immediately fire (e.g. `daily starting tomorrow 10:00`, `daily starting in 1 minute`).
 
  Schedule | Description 
 ----------|-------------
+ `every 10 minutes starting in 30 seconds` | Beginning 30 seconds from now, fire every 10 seconds.
  `hourly starting 00:30` | Fire every hour on the 30th minute.
  `daily starting tomorrow 00:30` | Beginning at 30 minutes past midnight UTC, fire daily.
  `weekly starting Monday at 12:15 PM` | Fire every week on Monday at 12:15 PM.
  `monthly starting 2nd` | Fire once at 00:00 UTC on the second day of the month (will fire immediately if the current day is greater than 2).
- `every 10 seconds starting 2024-01-01` | Relative to the first second of 2024 (UTC), fire every 10 seconds.
  `yearly starting 2025-07-01 12:00` | Beginning in 2025, fire at noon UTC every July 1st.
 
 !!! note ""

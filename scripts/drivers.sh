@@ -14,7 +14,7 @@ if [ -z "$DISTRO" ]; then
 fi
 
 install_mssql_ubuntu(){
-  if ! [[ "18.04 20.04 22.04" == *"$(lsb_release -rs)"* ]]; then
+  if ! [[ "18.04 20.04 22.04 24.04 24.10 26.04" == *"$(lsb_release -rs)"* ]]; then
     echo "Ubuntu $(lsb_release -rs) is not currently supported for MSSQL ODBC.";
     exit 1;
   fi
@@ -58,18 +58,18 @@ install_oracle_fedora(){
 case $DISTRO in
   Ubuntu)
     install_mssql_ubuntu;
-    install_oracle_ubuntu;
+    # install_oracle_ubuntu;
     ;;
   Debian)
     install_mssql_ubuntu;
-    install_oracle_ubuntu;
+    # install_oracle_ubuntu;
     ;;
   Fedora)
     install_mssql_fedora;
-    install_oracle_fedora;
+    # install_oracle_fedora;
     ;;
   CentOS)
     install_mssql_fedora;
-    install_oracle_fedora;
+    # install_oracle_fedora;
     ;;
 esac
