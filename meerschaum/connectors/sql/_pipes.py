@@ -1589,17 +1589,23 @@ def sync_pipe(
         if not edit_success:
             return edit_success, edit_msg
 
-    autoincrement_needs_reset = False
+    def _check_pk(_df_to_clear):
+        if _df_to_clear is None:
+            return
+        if primary_key not in _df_to_clear.columns:
+            return
+        if not _df_to_clear[primary_key].notnull().any():
+            del _df_to_clear[primary_key]
+
+    autoincrement_needs_reset = bool(
+        autoincrement
+        and primary_key
+        and primary_key in unseen_df.columns
+        and unseen_df[primary_key].notnull().any()
+    )
     if autoincrement and primary_key:
-        if primary_key not in df.columns:
-            if unseen_df is not None and primary_key in unseen_df.columns:
-                del unseen_df[primary_key]
-            if update_df is not None and primary_key in update_df.columns:
-                del update_df[primary_key]
-            if delta_df is not None and primary_key in delta_df.columns:
-                del delta_df[primary_key]
-        elif unseen_df[primary_key].notnull().any():
-            autoincrement_needs_reset = True
+        for _df_to_clear in (unseen_df, update_df, delta_df):
+            _check_pk(_df_to_clear)
 
     if is_new:
         create_success, create_msg = self.create_pipe_table_from_df(
@@ -1612,6 +1618,7 @@ def sync_pipe(
 
     do_identity_insert = bool(
         self.flavor in ('mssql',)
+        and primary_key
         and primary_key in unseen_df.columns
         and autoincrement
     )
@@ -2591,7 +2598,7 @@ def get_pipe_rowcount(
     result = self.value(query, debug=debug, silent=True)
     try:
         return int(result)
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -2616,10 +2623,11 @@ def drop_pipe(
     from meerschaum.utils.sql import table_exists, sql_item_name, DROP_IF_EXISTS_FLAVORS
     success = True
     target = pipe.target
+    schema = self.get_pipe_schema(pipe)
     target_name = (
-        sql_item_name(target, self.flavor, self.get_pipe_schema(pipe))
+        sql_item_name(target, self.flavor, schema)
     )
-    if table_exists(target, self, debug=debug):
+    if table_exists(target, self, schema=schema, debug=debug):
         if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
         success = self.exec(
             f"DROP TABLE {if_exists_str} {target_name}", silent=True, debug=debug

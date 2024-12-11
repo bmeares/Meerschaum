@@ -102,7 +102,6 @@ true && \
 [ "$rc" != '0' ] && exit "$rc"
 
 $PYTHON_BIN -m pytest \
-  -n=auto \
   tests/test_users.py; rc="$?"
 [ "$rc" != '0' ] && exit "$rc"
 

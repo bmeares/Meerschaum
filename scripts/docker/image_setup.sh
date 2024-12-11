@@ -38,13 +38,6 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
     apt-get update
     ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev || exit 1
 
-    ### Install the Oracle driver.
-    curl https://download.oracle.com/otn_software/linux/instantclient/217000/oracle-instantclient-basic-21.7.0.0.0-1.el8.x86_64.rpm \
-      -o /tmp/_oracle.rpm
-    alien -i /tmp/_oracle.rpm || exit 1
-    rm -f /tmp/_oracle.rpm
-    apt-get purge alien -y && apt-get autoremove -y
-
     ### Install GUI libraries.
     apt-get install -y --no-install-recommends \
       libglib2.0-dev \

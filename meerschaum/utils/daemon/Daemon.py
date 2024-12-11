@@ -432,7 +432,7 @@ class Daemon:
             + "allow_dirty_run=True)"
         )
         env = dict(os.environ)
-        env['MRSM_NOASK'] = 'true'
+        env[STATIC_CONFIG['environment']['noninteractive']] = 'true'
         _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug, venv=None, env=env)
         msg = (
             "Success"
@@ -1000,7 +1000,7 @@ class Daemon:
         try:
             with open(self.properties_path, 'r', encoding='utf-8') as file:
                 properties = json.load(file)
-        except Exception as e:
+        except Exception:
             properties = {}
         
         return properties

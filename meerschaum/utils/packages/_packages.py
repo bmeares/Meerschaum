@@ -79,7 +79,7 @@ packages: Dict[str, Dict[str, str]] = {
     },
     'drivers-extras': {
         'pyodbc'                     : 'pyodbc>=4.0.30',
-        'cx_Oracle'                  : 'cx_Oracle>=8.3.0',
+        'oracledb'                   : 'oracledb>=2.5.0',
     },
     'cli': {
         'pgcli'                      : 'pgcli>=3.1.0',
