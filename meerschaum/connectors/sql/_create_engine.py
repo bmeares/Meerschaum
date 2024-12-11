@@ -239,7 +239,7 @@ def create_engine(
             self._sys_config['create_engine'] = {}
         if 'connect_args' not in self._sys_config['create_engine']:
             self._sys_config['create_engine']['connect_args'] = {}
-        self._sys_config['create_engine']['connect_args'].update({"check_same_thread" : False})
+        self._sys_config['create_engine']['connect_args'].update({"check_same_thread": False})
     else:
         engine_str = (
             _engine + "://" + (_username if _username is not None else '') +

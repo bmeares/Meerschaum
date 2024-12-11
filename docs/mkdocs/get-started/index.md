@@ -66,7 +66,7 @@ Your default instance is `sql:main` from the [pre-configured stack](/reference/s
 
 To test the connection, run the command `mrsm show pipes`. A successful connection should return the message:
 <div style="background-color: black; padding: 15px;">
-<pre style="color: red">💢 No pipes to show.</pre>
+<pre style="color: #66ff00"><b>🎉 No pipes to show.</b></pre>
 </div>
 ??? tip "Change your default instance"
 

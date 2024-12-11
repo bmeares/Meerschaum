@@ -26,7 +26,6 @@ I've included a list of the dynamic dependencies below to credit the open source
 
   - [Amethyst Reese <amy@n7.gg>](mailto:Amethyst Reese <amy@n7.gg>)
 
-
 ### APScheduler
 
 *In-process task scheduler with Cron-like capabilities*
@@ -50,6 +49,13 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [MagicStack Inc <hello@magic.io>](mailto:MagicStack Inc <hello@magic.io>)
   - License: Apache License, Version 2.0
 
+### attrs
+
+*Classes Without Boilerplate*
+
+  - [Hynek Schlawack <hs@ox.cx>](mailto:Hynek Schlawack <hs@ox.cx>)
+
+
 ### binaryornot
 
 *Ultra-lightweight pure Python package to check if a file is binary or text.*
@@ -58,6 +64,15 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [aroy@alum.mit.edu](mailto:aroy@alum.mit.edu)
   - [https://github.com/audreyr/binaryornot](https://github.com/audreyr/binaryornot)
   - License: BSD
+
+### certifi
+
+*Python package for providing Mozilla's CA Bundle.*
+
+  - Kenneth Reitz
+  - [me@kennethreitz.com](mailto:me@kennethreitz.com)
+  - [https://github.com/certifi/python-certifi](https://github.com/certifi/python-certifi)
+  - License: MPL-2.0
 
 ### colorama
 
@@ -71,6 +86,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *cryptography is a package which provides cryptographic recipes and primitives to Python developers.*
 
+  - The cryptography developers <cryptography-dev@python.org>
   - [The Python Cryptographic Authority and individual contributors <cryptography-dev@python.org>](mailto:The Python Cryptographic Authority and individual contributors <cryptography-dev@python.org>)
   - [https://github.com/pyca/cryptography](https://github.com/pyca/cryptography)
   - License: Apache-2.0 OR BSD-3-Clause
@@ -168,7 +184,6 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [Sebastián Ramírez](mailto:Sebastián Ramírez)
   - [https://github.com/tiangolo/fastapi](https://github.com/tiangolo/fastapi)
 
-
 ### fastapi-login
 
 *Flask-Login like package for FastAPI*
@@ -203,13 +218,21 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [https://gunicorn.org](https://gunicorn.org)
   - License: MIT
 
+### httpcore
+
+*A minimal low-level HTTP client.*
+
+  - [Tom Christie <tom@tomchristie.com>](mailto:Tom Christie <tom@tomchristie.com>)
+  - [https://www.encode.io/httpcore/](https://www.encode.io/httpcore/)
+  - License: BSD-3-Clause
+
 ### httpx
 
 *The next generation HTTP client.*
 
   - [Tom Christie <tom@tomchristie.com>](mailto:Tom Christie <tom@tomchristie.com>)
   - [https://github.com/encode/httpx](https://github.com/encode/httpx)
-
+  - License: BSD-3-Clause
 
 ### humanfriendly
 
@@ -219,6 +242,13 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [peter@peterodding.com](mailto:peter@peterodding.com)
   - [https://humanfriendly.readthedocs.io](https://humanfriendly.readthedocs.io)
   - License: MIT
+
+### idna
+
+*Internationalized Domain Names in Applications (IDNA)*
+
+  - [Kim Davies <kim+pypi@gumleaf.org>](mailto:Kim Davies <kim+pypi@gumleaf.org>)
+
 
 ### joblib
 
@@ -267,6 +297,13 @@ I've included a list of the dynamic dependencies below to credit the open source
   - [The Pandas Development Team <pandas-dev@python.org>](mailto:The Pandas Development Team <pandas-dev@python.org>)
   - [https://pandas.pydata.org](https://pandas.pydata.org)
   - License: BSD 3-Clause License
+
+### partd
+
+*Appendable key-value storage*
+
+  - [http://github.com/dask/partd/](http://github.com/dask/partd/)
+  - License: BSD
 
 ### pathspec
 
@@ -331,7 +368,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 *Python library for Apache Arrow*
 
   - [https://arrow.apache.org/](https://arrow.apache.org/)
-  - License: Apache License, Version 2.0
+  - License: Apache Software License
 
 ### pycparser
 
@@ -361,10 +398,8 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *Library to implement a well-behaved Unix daemon process.*
 
-  - Ben Finney
-  - [ben+python@benfinney.id.au](mailto:ben+python@benfinney.id.au)
-  - [https://pagure.io/python-daemon/](https://pagure.io/python-daemon/)
-  - License: Apache-2
+  - [Ben Finney <ben+python@benfinney.id.au>](mailto:Ben Finney <ben+python@benfinney.id.au>)
+  - License: Copying this work
 
 ### python-dateutil
 
@@ -388,9 +423,9 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *A streaming multipart parser for Python*
 
-  - [Andrew Dunham <andrew@du.nham.ca>](mailto:Andrew Dunham <andrew@du.nham.ca>)
-  - [https://github.com/andrew-d/python-multipart](https://github.com/andrew-d/python-multipart)
-
+  - [Andrew Dunham <andrew@du.nham.ca>, Marcelo Trylesinski <marcelotryle@gmail.com>](mailto:Andrew Dunham <andrew@du.nham.ca>, Marcelo Trylesinski <marcelotryle@gmail.com>)
+  - [https://github.com/Kludex/python-multipart](https://github.com/Kludex/python-multipart)
+  - License: Apache-2.0
 
 ### pytz
 
@@ -411,11 +446,6 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 ### pywebview
 
-*Build GUI for your Python program with JavaScript, HTML, and CSS*
-
-  - [Roman Sirokov <roman@flowrl.com>](mailto:Roman Sirokov <roman@flowrl.com>)
-  - [https://pywebview.flowrl.com/](https://pywebview.flowrl.com/)
-  - License: BSD 3-Clause License
 
 ### PyYAML
 
@@ -488,11 +518,6 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 ### toga
 
-*A Python native, OS native GUI toolkit.*
-
-  - [Russell Keith-Magee <russell@keith-magee.com>](mailto:Russell Keith-Magee <russell@keith-magee.com>)
-  - [https://beeware.org/project/projects/libraries/toga/](https://beeware.org/project/projects/libraries/toga/)
-  - License: New BSD
 
 ### tornado
 
@@ -521,7 +546,7 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 ### uv
 
-*An extremely fast Python package installer and resolver, written in Rust.*
+*An extremely fast Python package and project manager, written in Rust.*
 
   - uv
   - ["Astral Software Inc." <hey@astral.sh>](mailto:"Astral Software Inc." <hey@astral.sh>)
@@ -532,16 +557,25 @@ I've included a list of the dynamic dependencies below to credit the open source
 
 *The lightning-fast ASGI server.*
 
-  - [Tom Christie <tom@tomchristie.com>](mailto:Tom Christie <tom@tomchristie.com>)
+  - [Tom Christie <tom@tomchristie.com>, Marcelo Trylesinski <marcelotryle@gmail.com>](mailto:Tom Christie <tom@tomchristie.com>, Marcelo Trylesinski <marcelotryle@gmail.com>)
   - [https://www.uvicorn.org/](https://www.uvicorn.org/)
+  - License: BSD-3-Clause
 
+### valkey
+
+*Python client for Valkey forked from redis-py*
+
+  - valkey-py authors
+  - [valkey-py@lists.valkey.io](mailto:valkey-py@lists.valkey.io)
+  - [https://github.com/valkey-io/valkey-py](https://github.com/valkey-io/valkey-py)
+  - License: MIT
 
 ### virtualenv
 
 *Virtual Python Environment builder*
 
   - [https://github.com/pypa/virtualenv](https://github.com/pypa/virtualenv)
-
+  - License: MIT
 
 ### watchfiles
 
