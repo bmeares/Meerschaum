@@ -109,23 +109,28 @@ update_queries = {
     """,
     'mssql': """
         MERGE {target_table_name} f
-            USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
+            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
             ON {and_subquery_f}
             AND {date_bounds_subquery}
         WHEN MATCHED THEN
             UPDATE
             {sets_subquery_none};
     """,
-    'mssql-upsert': """
+    'mssql-upsert': [
+        "{identity_insert_on}",
+        """
+        {with_temp_date_bounds}
         MERGE {target_table_name} f
-            USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
+            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
             ON {and_subquery_f}
             AND {date_bounds_subquery}
         {when_matched_update_sets_subquery_none}
         WHEN NOT MATCHED THEN
             INSERT ({patch_cols_str})
             VALUES ({patch_cols_prefixed_str});
-    """,
+        """,
+        "{identity_insert_off}",
+    ],
     'oracle': """
         MERGE INTO {target_table_name} f
             USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
@@ -1383,6 +1388,7 @@ def get_update_queries(
     datetime_col: Optional[str] = None,
     schema: Optional[str] = None,
     patch_schema: Optional[str] = None,
+    identity_insert: bool = False,
     debug: bool = False,
 ) -> List[str]:
     """
@@ -1419,6 +1425,10 @@ def get_update_queries(
     patch_schema: Optional[str], default None
         If provided, use this schema when quoting the patch table.
         Defaults to `schema`.
+
+    identity_insert: bool, default False
+        If `True`, include `SET IDENTITY_INSERT` queries before and after the update queries.
+        Only applies for MSSQL upserts.
 
     debug: bool, default False
         Verbosity toggle.
@@ -1554,16 +1564,35 @@ def get_update_queries(
             ) for c_name, c_type in join_cols_types
         ])
 
+    skip_query_val = ""
     target_table_name = sql_item_name(target, flavor, schema)
     patch_table_name = sql_item_name(patch, flavor, patch_schema)
     dt_col_name = sql_item_name(datetime_col, flavor, None) if datetime_col else None
+    date_bounds_table = patch_table_name if flavor != 'mssql' else '[date_bounds]'
+    min_dt_col_name = f"MIN({dt_col_name})" if flavor != 'mssql' else '[Min_dt]'
+    max_dt_col_name = f"MAX({dt_col_name})" if flavor != 'mssql' else '[Max_dt]'
     date_bounds_subquery = (
         f"""
-        f.{dt_col_name} >= (SELECT MIN({dt_col_name}) FROM {patch_table_name})
-        AND f.{dt_col_name} <= (SELECT MAX({dt_col_name}) FROM {patch_table_name})
+        f.{dt_col_name} >= (SELECT {min_dt_col_name} FROM {date_bounds_table})
+        AND f.{dt_col_name} <= (SELECT {max_dt_col_name} FROM {date_bounds_table})
         """
         if datetime_col
         else "1 = 1"
+    )
+    with_temp_date_bounds = f"""
+    WITH [date_bounds] AS (
+        SELECT MIN({dt_col_name}) AS {min_dt_col_name}, MAX({dt_col_name}) AS {max_dt_col_name}
+        FROM {patch_table_name}
+    )""" if datetime_col else ""
+    identity_insert_on = (
+        f"SET IDENTITY_INSERT {target_table_name} ON"
+        if identity_insert
+        else skip_query_val
+    )
+    identity_insert_off = (
+        f"SET IDENTITY_INSERT {target_table_name} OFF"
+        if identity_insert
+        else skip_query_val
     )
 
     ### NOTE: MSSQL upserts must exclude the update portion if only upserting indices.
@@ -1585,7 +1614,7 @@ def get_update_queries(
     )
     ignore = "IGNORE " if not value_cols else ""
 
-    return [
+    formatted_queries = [
         base_query.format(
             sets_subquery_none=sets_subquery('', 'p.'),
             sets_subquery_none_excluded=sets_subquery('', 'EXCLUDED.'),
@@ -1604,9 +1633,15 @@ def get_update_queries(
             cols_equal_values=cols_equal_values,
             on_duplicate_key_update=on_duplicate_key_update,
             ignore=ignore,
+            with_temp_date_bounds=with_temp_date_bounds,
+            identity_insert_on=identity_insert_on,
+            identity_insert_off=identity_insert_off,
         )
         for base_query in base_queries
     ]
+
+    ### NOTE: Allow for skipping some queries.
+    return [query for query in formatted_queries if query]
 
 
 def get_null_replacement(typ: str, flavor: str) -> str:
@@ -1857,7 +1892,17 @@ def _get_create_table_query_from_dtypes(
 
     table_name = sql_item_name(new_table, schema=schema, flavor=flavor)
     primary_key_name = sql_item_name(primary_key, flavor) if primary_key else None
+    primary_key_constraint_name = (
+        sql_item_name(f'PK_{new_table}', flavor, None)
+        if primary_key
+        else None
+    )
     datetime_column_name = sql_item_name(datetime_column, flavor) if datetime_column else None
+    primary_key_clustered = (
+        "CLUSTERED"
+        if not datetime_column or datetime_column == primary_key
+        else "NONCLUSTERED"
+    )
     query = f"CREATE TABLE {table_name} ("
     if primary_key:
         col_db_type = cols_types[0][1]
@@ -1877,6 +1922,8 @@ def _get_create_table_query_from_dtypes(
             query += f"\n    {col_name} {col_db_type} {auto_increment_str} PRIMARY KEY,"
         elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
             query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
+        elif flavor == 'mssql':
+            query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
         else:
             query += f"\n    {col_name} {col_db_type} PRIMARY KEY{auto_increment_str} NOT NULL,"
 
@@ -1892,6 +1939,10 @@ def _get_create_table_query_from_dtypes(
         and datetime_column != primary_key
     ):
         query += f"\n    PRIMARY KEY({datetime_column_name}, {primary_key_name}),"
+
+    if flavor == 'mssql' and primary_key:
+        query += f"\n    CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name}),"
+
     query = query[:-1]
     query += "\n)"
 
@@ -1917,7 +1968,7 @@ def _get_create_table_query_from_cte(
     create_cte_name = sql_item_name(create_cte, flavor, None)
     new_table_name = sql_item_name(new_table, flavor, schema)
     primary_key_constraint_name = (
-        sql_item_name(f'pk_{new_table}', flavor, None)
+        sql_item_name(f'PK_{new_table}', flavor, None)
         if primary_key
         else None
     )
@@ -1926,6 +1977,7 @@ def _get_create_table_query_from_cte(
         if primary_key
         else None
     )
+    primary_key_clustered = "CLUSTERED" if not datetime_column else "NONCLUSTERED"
     datetime_column_name = (
         sql_item_name(datetime_column, flavor)
         if datetime_column
@@ -1933,7 +1985,7 @@ def _get_create_table_query_from_cte(
     )
     if flavor in ('mssql',):
         query = query.lstrip()
-        if 'with ' in query.lower():
+        if query.lower().startswith('with '):
             final_select_ix = query.lower().rfind('select')
             create_table_query = (
                 query[:final_select_ix].rstrip() + ',\n'
@@ -1951,7 +2003,7 @@ def _get_create_table_query_from_cte(
 
         alter_type_query = f"""
             ALTER TABLE {new_table_name}
-            ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})
+            ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name})
         """
     elif flavor in (None,):
         create_table_query = f"""

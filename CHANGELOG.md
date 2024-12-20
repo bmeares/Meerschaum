@@ -1,5 +1,29 @@
 # 🪵 Changelog
 
+## 2.7.x Releases
+
+### v2.7.0
+
+- **Allow for pipes to use the same column for `datetime`, `primary`, and `autoincrement=True`.**  
+  Pipes may now use the same column as the `datetime` axis and `primary` with `autoincrement` set to `True`.
+
+  ```python
+  pipe = mrsm.Pipe(
+      'demo', 'datetime_primary_key', 'autoincrement',
+      instance='sql:local',
+      columns={
+          'datetime': 'Id',
+          'primary': 'Id',
+      },
+      autoincrement=True,
+  )
+  ```
+
+- **Only join on `primary` when present.**  
+  When the index `primary` is set, use the column as the primary joining index.
+
+- **Create the `datetime` axis as a clustered index for MSSQL.**
+
 ## 2.6.x Releases
 
 This is the current release cycle, so stay tuned for future releases!

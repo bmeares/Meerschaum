@@ -460,9 +460,15 @@ def get_create_index_queries(
         else None
     )
     primary_key_constraint_name = (
-        sql_item_name(f'pk_{pipe.target}', self.flavor, None)
+        sql_item_name(f'PK_{pipe.target}', self.flavor, None)
         if primary_key is not None
         else None
+    )
+    primary_key_clustered = "CLUSTERED" if _datetime is None else "NONCLUSTERED"
+    datetime_clustered = (
+        "CLUSTERED"
+        if not existing_primary_keys and _datetime is not None
+        else "NONCLUSTERED"
     )
 
     _id_index_name = (
@@ -474,6 +480,7 @@ def get_create_index_queries(
     _create_space_partition = get_config('system', 'experimental', 'space')
 
     ### create datetime index
+    dt_query = None
     if _datetime is not None:
         if self.flavor == 'timescaledb' and pipe.parameters.get('hypertable', True):
             _id_count = (
@@ -504,19 +511,19 @@ def get_create_index_queries(
                 + 'if_not_exists => true, '
                 + "migrate_data => true);"
             )
-        elif self.flavor == 'mssql':
-            dt_query = (
-                "CREATE "
-                + ("CLUSTERED " if not primary_key else '')
-                + f"INDEX {_datetime_index_name} "
-                + f"ON {_pipe_name} ({_datetime_name})"
-            )
-        else: ### mssql, sqlite, etc.
-            dt_query = (
-                f"CREATE INDEX {_datetime_index_name} "
-                + f"ON {_pipe_name} ({_datetime_name})"
-            )
+        elif _datetime_index_name:
+            if self.flavor == 'mssql':
+                dt_query = (
+                    f"CREATE {datetime_clustered} INDEX {_datetime_index_name} "
+                    f"ON {_pipe_name} ({_datetime_name})"
+                )
+            else:
+                dt_query = (
+                    f"CREATE INDEX {_datetime_index_name} "
+                    + f"ON {_pipe_name} ({_datetime_name})"
+                )
 
+    if dt_query:
         index_queries[_datetime] = [dt_query]
 
     primary_queries = []
@@ -623,7 +630,7 @@ def get_create_index_queries(
                     ),
                     (
                         f"ALTER TABLE {_pipe_name}\n"
-                        f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
+                        f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name})"
                     ),
                 ])
         index_queries[primary_key] = primary_queries
@@ -1572,6 +1579,7 @@ def sync_pipe(
         'schema': self.get_pipe_schema(pipe),
     })
 
+    dt_col = pipe.columns.get('datetime', None)
     primary_key = pipe.columns.get('primary', None)
     autoincrement = (
         pipe.parameters.get('autoincrement', False)
@@ -1714,7 +1722,7 @@ def sync_pipe(
             col
             for col_key, col in pipe.columns.items()
             if col and col in existing_cols
-        ]
+        ] if not primary_key else [primary_key]
         update_queries = get_update_queries(
             pipe.target,
             temp_target,
@@ -1723,7 +1731,8 @@ def sync_pipe(
             upsert=upsert,
             schema=self.get_pipe_schema(pipe),
             patch_schema=self.internal_schema,
-            datetime_col=pipe.columns.get('datetime', None),
+            datetime_col=(dt_col if dt_col in update_df.columns else None),
+            identity_insert=(autoincrement and primary_key in update_df.columns),
             debug=debug,
         )
         update_success = all(
@@ -2061,6 +2070,7 @@ def sync_pipe_inplace(
     ) if not (upsert or static) else new_cols_types
 
     common_cols = [col for col in new_cols if col in backtrack_cols_types]
+    primary_key = pipe.columns.get('primary', None)
     on_cols = {
         col: new_cols.get(col)
         for col_key, col in pipe.columns.items()
@@ -2071,7 +2081,7 @@ def sync_pipe_inplace(
             and col in backtrack_cols_types
             and col in new_cols
         )
-    }
+    } if not primary_key else {primary_key: new_cols.get(primary_key)}
 
     null_replace_new_cols_str = (
         ', '.join([

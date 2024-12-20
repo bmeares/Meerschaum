@@ -465,6 +465,7 @@ class Daemon:
             self._write_stop_file('kill')
             return True, "Process has already stopped."
 
+        psutil = attempt_import('psutil')
         process = self.process
         try:
             process.terminate()
@@ -473,10 +474,16 @@ class Daemon:
         except Exception as e:
             return False, f"Failed to kill job {self} with exception: {e}"
 
+        try:
+            if process.status():
+                return False, "Failed to stop daemon '{self}' ({process})."
+        except psutil.NoSuchProcess:
+            pass
+
         if self.pid_path.exists():
             try:
                 self.pid_path.unlink()
-            except Exception as e:
+            except Exception:
                 pass
 
         self._write_stop_file('kill')
@@ -534,7 +541,7 @@ class Daemon:
         if not timeout:
             try:
                 success = self.process.status() == 'stopped'
-            except psutil.NoSuchProcess as e:
+            except psutil.NoSuchProcess:
                 success = True
             msg = "Success" if success else f"Failed to suspend daemon '{self.daemon_id}'."
             if success:
@@ -677,11 +684,11 @@ class Daemon:
         raise SystemExit(0)
 
     def _send_signal(
-            self,
-            signal_to_send,
-            timeout: Union[float, int, None] = None,
-            check_timeout_interval: Union[float, int, None] = None,
-        ) -> SuccessTuple:
+        self,
+        signal_to_send,
+        timeout: Union[float, int, None] = None,
+        check_timeout_interval: Union[float, int, None] = None,
+    ) -> SuccessTuple:
         """Send a signal to the daemon process.
 
         Parameters
@@ -709,7 +716,7 @@ class Daemon:
                 )
             
             os.kill(pid, signal_to_send)
-        except Exception as e:
+        except Exception:
             return False, f"Failed to send signal {signal_to_send}:\n{traceback.format_exc()}"
 
         timeout = self.get_timeout_seconds(timeout)
@@ -745,7 +752,7 @@ class Daemon:
         if _already_exists and not allow_dirty_run:
             error(
                 f"Daemon '{self.daemon_id}' already exists. " +
-                f"To allow this daemon to run, do one of the following:\n"
+                "To allow this daemon to run, do one of the following:\n"
                 + "  - Execute `daemon.cleanup()`.\n"
                 + f"  - Delete the directory '{self.path}'.\n"
                 + "  - Pass `allow_dirty_run=True` to `daemon.run()`.\n",
@@ -764,7 +771,7 @@ class Daemon:
         if '_process' not in self.__dict__ or self.__dict__['_process'].pid != int(pid):
             try:
                 self._process = psutil.Process(int(pid))
-            except Exception as e:
+            except Exception:
                 if self.pid_path.exists():
                     self.pid_path.unlink()
                 return None
@@ -788,7 +795,7 @@ class Daemon:
             if self.pid_path.exists():
                 try:
                     self.pid_path.unlink()
-                except Exception as e:
+                except Exception:
                     pass
             return 'stopped'
 

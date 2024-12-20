@@ -669,9 +669,16 @@ def filter_existing(
     ### begin is the oldest data in the new dataframe
     begin, end = None, None
     dt_col = pipe_columns.get('datetime', None)
+    primary_key = pipe_columns.get('primary', None)
     dt_type = self.dtypes.get(dt_col, 'datetime64[ns, UTC]') if dt_col else None
+
+    if autoincrement and primary_key == dt_col and dt_col not in df.columns:
+        if enforce_dtypes:
+            df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+        return df, get_empty_df(), df
+
     try:
-        min_dt_val = df[dt_col].min(skipna=True) if dt_col else None
+        min_dt_val = df[dt_col].min(skipna=True) if dt_col and dt_col in df.columns else None
         if is_dask and min_dt_val is not None:
             min_dt_val = min_dt_val.compute()
         min_dt = (
@@ -699,7 +706,7 @@ def filter_existing(
 
     ### end is the newest data in the new dataframe
     try:
-        max_dt_val = df[dt_col].max(skipna=True) if dt_col else None
+        max_dt_val = df[dt_col].max(skipna=True) if dt_col and dt_col in df.columns else None
         if is_dask and max_dt_val is not None:
             max_dt_val = max_dt_val.compute()
         max_dt = (
@@ -723,7 +730,7 @@ def filter_existing(
                 to='down'
             ) + timedelta(minutes=1)
         )
-    elif dt_type and 'int' in dt_type.lower():
+    elif dt_type and 'int' in dt_type.lower() and max_dt is not None:
         end = max_dt + 1
 
     if max_dt is not None and min_dt is not None and min_dt > max_dt:
@@ -738,7 +745,7 @@ def filter_existing(
 
     unique_index_vals = {
         col: df[col].unique()
-        for col in pipe_columns
+        for col in (pipe_columns if not primary_key else [primary_key])
         if col in df.columns and col != dt_col
     } if not date_bound_only else {}
     filter_params_index_limit = get_config('pipes', 'sync', 'filter_params_index_limit')
@@ -777,14 +784,15 @@ def filter_existing(
 
     ### Separate new rows from changed ones.
     on_cols = [
-        col for col_key, col in pipe_columns.items()
+        col
+        for col_key, col in pipe_columns.items()
         if (
             col
             and
             col_key != 'value'
             and col in backtrack_df.columns
         )
-    ]
+    ] if not primary_key else [primary_key]
     self_dtypes = self.dtypes
     on_cols_dtypes = {
         col: to_pandas_dtype(typ)
