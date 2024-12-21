@@ -1722,7 +1722,11 @@ def sync_pipe(
             col
             for col_key, col in pipe.columns.items()
             if col and col in existing_cols
-        ] if not primary_key else [primary_key]
+        ] if not primary_key else (
+            [dt_col, primary_key]
+            if self.flavor == 'timescaledb' and dt_col and dt_col in update_df.columns
+            else [primary_key]
+        )
         update_queries = get_update_queries(
             pipe.target,
             temp_target,

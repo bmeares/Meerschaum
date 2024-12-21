@@ -255,11 +255,11 @@ class Plugin:
 
 
     def install(
-            self,
-            skip_deps: bool = False,
-            force: bool = False,
-            debug: bool = False,
-        ) -> SuccessTuple:
+        self,
+        skip_deps: bool = False,
+        force: bool = False,
+        debug: bool = False,
+    ) -> SuccessTuple:
         """
         Extract a plugin's tar archive to the plugins directory.
         
@@ -359,7 +359,7 @@ class Plugin:
             is_same_version = new_version and old_version and (
                 packaging_version.parse(old_version) == packaging_version.parse(new_version)
             )
-        except Exception as e:
+        except Exception:
             is_new_version, is_same_version = True, False
 
         ### Determine where to permanently store the new plugin.
@@ -404,7 +404,7 @@ class Plugin:
                         dprint(f"Moving '{src_file}' to '{dst_dir}'...")
                     try:
                         shutil.move(src_file, dst_dir)
-                    except Exception as e:
+                    except Exception:
                         success, msg = False, (
                             f"Failed to install plugin '{self}': " +
                             f"Could not move file '{src_file}' to '{dst_dir}'"
