@@ -617,11 +617,13 @@ def filter_existing(
         filter_unseen_df,
         add_missing_cols_to_df,
         get_unhashable_cols,
-        get_numeric_cols,
     )
     from meerschaum.utils.dtypes import (
         to_pandas_dtype,
         none_if_null,
+        to_datetime,
+        are_dtypes_equal,
+        value_is_null,
     )
     from meerschaum.config import get_config
     pd = import_pandas()
@@ -682,14 +684,15 @@ def filter_existing(
         if is_dask and min_dt_val is not None:
             min_dt_val = min_dt_val.compute()
         min_dt = (
-            pandas.to_datetime(min_dt_val).to_pydatetime()
-            if min_dt_val is not None and 'datetime' in str(dt_type)
+            to_datetime(min_dt_val, as_pydatetime=True)
+            if min_dt_val is not None and are_dtypes_equal(dt_type, 'datetime')
             else min_dt_val
         )
     except Exception:
         min_dt = None
-    if not ('datetime' in str(type(min_dt))) or str(min_dt) == 'NaT':
-        if 'int' not in str(type(min_dt)).lower():
+
+    if not are_dtypes_equal('datetime', str(type(min_dt))) or value_is_null(min_dt):
+        if not are_dtypes_equal('int', str(type(min_dt))):
             min_dt = None
 
     if isinstance(min_dt, datetime):
@@ -710,7 +713,7 @@ def filter_existing(
         if is_dask and max_dt_val is not None:
             max_dt_val = max_dt_val.compute()
         max_dt = (
-            pandas.to_datetime(max_dt_val).to_pydatetime()
+            to_datetime(max_dt_val, as_pydatetime=True)
             if max_dt_val is not None and 'datetime' in str(dt_type)
             else max_dt_val
         )
@@ -719,8 +722,8 @@ def filter_existing(
         traceback.print_exc()
         max_dt = None
 
-    if ('datetime' not in str(type(max_dt))) or str(min_dt) == 'NaT':
-        if 'int' not in str(type(max_dt)).lower():
+    if not are_dtypes_equal('datetime', str(type(max_dt))) or value_is_null(max_dt):
+        if not are_dtypes_equal('int', str(type(max_dt))):
             max_dt = None
 
     if isinstance(max_dt, datetime):

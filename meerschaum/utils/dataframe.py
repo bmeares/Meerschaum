@@ -429,6 +429,7 @@ def parse_df_datetimes(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import items_str
+    from meerschaum.utils.dtypes import to_datetime
     import traceback
     pd = import_pandas()
     pandas = attempt_import('pandas')
@@ -494,7 +495,7 @@ def parse_df_datetimes(
 
     if len(cols_to_inspect) == 0:
         if debug:
-            dprint(f"All columns are ignored, skipping datetime detection...")
+            dprint("All columns are ignored, skipping datetime detection...")
         return df.fillna(pandas.NA)
 
     ### apply regex to columns to determine which are ISO datetimes
@@ -515,14 +516,10 @@ def parse_df_datetimes(
 
     try:
         if not using_dask:
-            df[datetime_cols] = df[datetime_cols].apply(
-                pd.to_datetime,
-                utc=True,
-                format='ISO8601',
-            )
+            df[datetime_cols] = df[datetime_cols].apply(to_datetime)
         else:
             df[datetime_cols] = df[datetime_cols].apply(
-                pd.to_datetime,
+                to_datetime,
                 utc=True,
                 axis=1,
                 meta={
@@ -931,6 +928,8 @@ def get_datetime_bound_from_df(
     -------
     The minimum or maximum datetime value in the dataframe, or `None`.
     """
+    from meerschaum.utils.dtypes import to_datetime, value_is_null
+
     if df is None:
         return None
     if not datetime_column:
@@ -982,9 +981,9 @@ def get_datetime_bound_from_df(
             dt_val = dt_val.compute()
 
         return (
-            pandas.to_datetime(dt_val).to_pydatetime()
+            to_datetime(dt_val, as_pydatetime=True)
             if are_dtypes_equal(str(type(dt_val)), 'datetime')
-            else (dt_val if dt_val is not pandas.NA else None)
+            else (dt_val if not value_is_null(dt_val) else None)
         )
 
     return None
@@ -1127,7 +1126,7 @@ def get_first_valid_dask_partition(ddf: 'dask.dataframe.DataFrame') -> Union['pd
     for partition in ddf.partitions:
         try:
             pdf = partition.compute()
-        except Exception as e:
+        except Exception:
             continue
         if len(pdf) > 0:
             return pdf
