@@ -108,6 +108,7 @@ update_queries = {
             {cols_equal_values}
     """,
     'mssql': """
+        {with_temp_date_bounds}
         MERGE {target_table_name} f
             USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
             ON {and_subquery_f}

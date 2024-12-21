@@ -7,9 +7,10 @@ Verify the contents of a pipe by resyncing its interval.
 """
 
 from datetime import datetime, timedelta
-from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, List, Dict
+
+import meerschaum as mrsm
+from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, Dict
 from meerschaum.utils.warnings import warn, info
-from meerschaum.utils.debug import dprint
 
 
 def verify(
@@ -94,9 +95,6 @@ def verify(
             else 1
         )
 
-    sync_less_than_begin = not bounded and begin is None
-    sync_greater_than_end = not bounded and end is None
-
     cannot_determine_bounds = not self.exists(debug=debug)
 
     if cannot_determine_bounds:
@@ -164,7 +162,7 @@ def verify(
     )
 
     info(
-        f"Syncing {len(chunk_bounds)} chunk" + ('s' if len(chunk_bounds) != 1 else '')
+        f"Verifying {self}:\n    Syncing {len(chunk_bounds)} chunk" + ('s' if len(chunk_bounds) != 1 else '')
         + f" ({'un' if not bounded else ''}bounded)"
         + f" of size '{interval_str(chunk_interval)}'"
         + f" between '{begin_to_print}' and '{end_to_print}'."
@@ -187,7 +185,7 @@ def verify(
             return chunk_begin_and_end, bounds_success_tuples[chunk_begin_and_end]
 
         chunk_begin, chunk_end = chunk_begin_and_end
-        return chunk_begin_and_end, self.sync(
+        chunk_success, chunk_msg = self.sync(
             begin=chunk_begin,
             end=chunk_end,
             params=params,
@@ -195,6 +193,9 @@ def verify(
             debug=debug,
             **kwargs
         )
+        chunk_msg = chunk_msg.strip()
+        mrsm.pprint((chunk_success, chunk_msg))
+        return chunk_begin_and_end, (chunk_success, chunk_msg)
 
     ### If we have more than one chunk, attempt to sync the first one and return if its fails.
     if len(chunk_bounds) > 1:

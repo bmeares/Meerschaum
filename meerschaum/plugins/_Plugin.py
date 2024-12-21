@@ -817,10 +817,10 @@ class Plugin:
 
 
     def install_dependencies(
-            self,
-            force: bool = False,
-            debug: bool = False,
-        ) -> bool:
+        self,
+        force: bool = False,
+        debug: bool = False,
+    ) -> bool:
         """
         If specified, install dependencies.
         
@@ -841,12 +841,9 @@ class Plugin:
         Returns
         -------
         A bool indicating success.
-
         """
         from meerschaum.utils.packages import pip_install, venv_contains_package
-        from meerschaum.utils.debug import dprint
         from meerschaum.utils.warnings import warn, info
-        from meerschaum.connectors.parse import parse_repo_keys
         _deps = self.get_dependencies(debug=debug)
         if not _deps and self.requirements_file_path is None:
             return True
