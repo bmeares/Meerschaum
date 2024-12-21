@@ -34,10 +34,10 @@ class Venv:
     """
 
     def __init__(
-            self,
-            venv: Union[str, 'meerschaum.plugins.Plugin', None] = 'mrsm',
-            debug: bool = False,
-        ) -> None:
+        self,
+        venv: Union[str, 'meerschaum.plugins.Plugin', None] = 'mrsm',
+        debug: bool = False,
+    ) -> None:
         from meerschaum.utils.venv import activate_venv, deactivate_venv, active_venvs
         ### For some weird threading issue,
         ### we can't use `isinstance` here.

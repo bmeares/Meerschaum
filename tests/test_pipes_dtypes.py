@@ -798,3 +798,32 @@ def test_parse_date_bounds(flavor: str):
     begin, end = pipe.parse_date_bounds(naive_begin, aware_end)
     assert begin.tzinfo is None
     assert end.tzinfo is None
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_distant_datetimes(flavor: str):
+    """
+    Test that extremely distant datetimes may be synced.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'datetimes', 'distant', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'datetimes', 'distant',
+        instance=conn,
+        columns={
+            'datetime': 'ts',
+        },
+        dtypes={
+            'ts': 'datetime64[s, UTC]',
+        },
+    )
+    docs = [
+        {'ts': '0001-01-01'},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data()
+    print(f"df=\n{df}")
+    assert df['ts'][0].year == 1

@@ -65,10 +65,9 @@ def activate_venv(
     if active_venvs_order and active_venvs_order[0] == venv:
         if not force:
             return True
-    import sys, platform, os
+    import sys
+    import os
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    if debug:
-        from meerschaum.utils.debug import dprint
     if venv is not None:
         init_venv(venv=venv, debug=debug)
     with LOCKS['active_venvs']:
@@ -80,12 +79,18 @@ def activate_venv(
         else:
             threads_active_venvs[thread_id][venv] += 1
 
-        target = venv_target_path(venv, debug=debug).as_posix()
+        target_path = venv_target_path(venv, debug=debug, allow_nonexistent=True)
+        if not target_path.exists():
+            init_venv(venv=venv, force=True, debug=debug)
+        if not target_path.exists():
+            raise EnvironmentError(f"Could not activate virtual environment '{venv}'.")
+        target = target_path.as_posix()
+
         if venv in active_venvs_order:
             sys.path.remove(target)
             try:
                 active_venvs_order.remove(venv)
-            except Exception as e:
+            except Exception:
                 pass
         if venv is not None:
             sys.path.insert(0, target)
@@ -96,7 +101,7 @@ def activate_venv(
                 sys.path.insert(0, target)
         try:
             active_venvs_order.insert(0, venv)
-        except Exception as e:
+        except Exception:
             pass
 
     return True
@@ -245,7 +250,7 @@ def verify_venv(
                     print(f"Unable to remove symlink {current_python_in_venv_path}:\n{e}")
             try:
                 make_symlink(current_python_in_sys_path, current_python_in_venv_path)
-            except Exception as e:
+            except Exception:
                 print(
                     f"Unable to create symlink {current_python_in_venv_path} "
                     + f"to {current_python_in_sys_path}."
@@ -302,7 +307,7 @@ def verify_venv(
             if not real_path.exists():
                 try:
                     python_path.unlink()
-                except Exception as e:
+                except Exception:
                     pass
                 init_venv(venv, verify=False, force=True, debug=debug)
                 if not python_path.exists():
@@ -313,7 +318,7 @@ def verify_venv(
 
             try:
                 python_path.unlink()
-            except Exception as e:
+            except Exception:
                 pass
             success, msg = make_symlink(real_path, python_path)
             if not success:
@@ -369,6 +374,7 @@ def init_venv(
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.packages import is_uv_enabled
     venv_path = VIRTENV_RESOURCES_PATH / venv
+    vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
     docker_home_venv_path = pathlib.Path('/home/meerschaum/venvs/mrsm')
 
     runtime_env_var = STATIC_CONFIG['environment']['runtime']
@@ -397,6 +403,11 @@ def init_venv(
         virtualenv = None
 
     _venv_success = False
+    temp_vtp = vtp.parent / '.site-packages.old'
+    rename_vtp = vtp.exists()
+
+    if rename_vtp:
+        vtp.rename(temp_vtp)
 
     if uv is not None:
         _venv_success = run_python_package(
@@ -431,6 +442,8 @@ def init_venv(
                 "Failed to import `venv` or `virtualenv`! "
                 + "Please install `virtualenv` via pip then restart Meerschaum."
             )
+            if rename_vtp and temp_vtp.exists():
+                temp_vtp.rename(vtp)
             return False
 
         tried_virtualenv = True
@@ -448,7 +461,7 @@ def init_venv(
             if bin_path.exists():
                 try:
                     shutil.rmtree(bin_path)
-                except Exception as e:
+                except Exception:
                     import traceback
                     traceback.print_exc()
             virtualenv.cli_run([venv_path.as_posix()])
@@ -464,13 +477,19 @@ def init_venv(
                 #  shutil.move(local_bin_path, bin_path)
                 shutil.rmtree(local_bin_path)
 
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
+            if rename_vtp and temp_vtp.exists():
+                temp_vtp.rename(vtp)
             return False
     if verify:
         verify_venv(venv, debug=debug)
         verified_venvs.add(venv)
+
+    if rename_vtp and temp_vtp.exists():
+        temp_vtp.rename(vtp)
+
     return True
 
 
@@ -479,7 +498,8 @@ def venv_executable(venv: Optional[str] = 'mrsm') -> str:
     The Python interpreter executable for a given virtual environment.
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    import sys, platform, os
+    import sys
+    import platform
     return (
         sys.executable if venv is None
         else str(

@@ -1,8 +1,38 @@
 # 🪵 Changelog
 
-## 2.6.x Releases
+## 2.7.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v2.7.0
+
+- **Allow for pipes to use the same column for `datetime`, `primary`, and `autoincrement=True`.**  
+  Pipes may now use the same column as the `datetime` axis and `primary` with `autoincrement` set to `True`.
+
+  ```python
+  pipe = mrsm.Pipe(
+      'demo', 'datetime_primary_key', 'autoincrement',
+      instance='sql:local',
+      columns={
+          'datetime': 'Id',
+          'primary': 'Id',
+      },
+      autoincrement=True,
+  )
+  ```
+
+- **Only join on `primary` when present.**  
+  When the index `primary` is set, use the column as the primary joining index. This will improve performance when syncing tables with a primary key.
+
+- **Create the `datetime` axis as a clustered index for MSSQL, even when a `primary` index is specififed.**  
+  Specifying a `datetime` and `primary` index will create a nonclustered `PRIMARY KEY`. Specifying the same column as both `datetime` and `primary` will create a clustered primary key (tip: this is useful when `autoincrement=True`).
+
+- **Increase the default chunk interval to 43200 minutes.**  
+  New hypertables will use a default chunksize of 30 days (43200 minutes).
+
+## 2.6.x Releases
+
+The 2.6 series added the `primary` index, `autoincrement`, and migrated to timezone-aware datetimes by default, as well as many quality-of-life improvements, especially for MSSQL.
 
 ### v2.6.17
 

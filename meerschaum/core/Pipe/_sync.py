@@ -617,11 +617,13 @@ def filter_existing(
         filter_unseen_df,
         add_missing_cols_to_df,
         get_unhashable_cols,
-        get_numeric_cols,
     )
     from meerschaum.utils.dtypes import (
         to_pandas_dtype,
         none_if_null,
+        to_datetime,
+        are_dtypes_equal,
+        value_is_null,
     )
     from meerschaum.config import get_config
     pd = import_pandas()
@@ -669,20 +671,28 @@ def filter_existing(
     ### begin is the oldest data in the new dataframe
     begin, end = None, None
     dt_col = pipe_columns.get('datetime', None)
+    primary_key = pipe_columns.get('primary', None)
     dt_type = self.dtypes.get(dt_col, 'datetime64[ns, UTC]') if dt_col else None
+
+    if autoincrement and primary_key == dt_col and dt_col not in df.columns:
+        if enforce_dtypes:
+            df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+        return df, get_empty_df(), df
+
     try:
-        min_dt_val = df[dt_col].min(skipna=True) if dt_col else None
+        min_dt_val = df[dt_col].min(skipna=True) if dt_col and dt_col in df.columns else None
         if is_dask and min_dt_val is not None:
             min_dt_val = min_dt_val.compute()
         min_dt = (
-            pandas.to_datetime(min_dt_val).to_pydatetime()
-            if min_dt_val is not None and 'datetime' in str(dt_type)
+            to_datetime(min_dt_val, as_pydatetime=True)
+            if min_dt_val is not None and are_dtypes_equal(dt_type, 'datetime')
             else min_dt_val
         )
     except Exception:
         min_dt = None
-    if not ('datetime' in str(type(min_dt))) or str(min_dt) == 'NaT':
-        if 'int' not in str(type(min_dt)).lower():
+
+    if not are_dtypes_equal('datetime', str(type(min_dt))) or value_is_null(min_dt):
+        if not are_dtypes_equal('int', str(type(min_dt))):
             min_dt = None
 
     if isinstance(min_dt, datetime):
@@ -699,11 +709,11 @@ def filter_existing(
 
     ### end is the newest data in the new dataframe
     try:
-        max_dt_val = df[dt_col].max(skipna=True) if dt_col else None
+        max_dt_val = df[dt_col].max(skipna=True) if dt_col and dt_col in df.columns else None
         if is_dask and max_dt_val is not None:
             max_dt_val = max_dt_val.compute()
         max_dt = (
-            pandas.to_datetime(max_dt_val).to_pydatetime()
+            to_datetime(max_dt_val, as_pydatetime=True)
             if max_dt_val is not None and 'datetime' in str(dt_type)
             else max_dt_val
         )
@@ -712,8 +722,8 @@ def filter_existing(
         traceback.print_exc()
         max_dt = None
 
-    if ('datetime' not in str(type(max_dt))) or str(min_dt) == 'NaT':
-        if 'int' not in str(type(max_dt)).lower():
+    if not are_dtypes_equal('datetime', str(type(max_dt))) or value_is_null(max_dt):
+        if not are_dtypes_equal('int', str(type(max_dt))):
             max_dt = None
 
     if isinstance(max_dt, datetime):
@@ -723,7 +733,7 @@ def filter_existing(
                 to='down'
             ) + timedelta(minutes=1)
         )
-    elif dt_type and 'int' in dt_type.lower():
+    elif dt_type and 'int' in dt_type.lower() and max_dt is not None:
         end = max_dt + 1
 
     if max_dt is not None and min_dt is not None and min_dt > max_dt:
@@ -738,7 +748,7 @@ def filter_existing(
 
     unique_index_vals = {
         col: df[col].unique()
-        for col in pipe_columns
+        for col in (pipe_columns if not primary_key else [primary_key])
         if col in df.columns and col != dt_col
     } if not date_bound_only else {}
     filter_params_index_limit = get_config('pipes', 'sync', 'filter_params_index_limit')
@@ -777,14 +787,15 @@ def filter_existing(
 
     ### Separate new rows from changed ones.
     on_cols = [
-        col for col_key, col in pipe_columns.items()
+        col
+        for col_key, col in pipe_columns.items()
         if (
             col
             and
             col_key != 'value'
             and col in backtrack_df.columns
         )
-    ]
+    ] if not primary_key else [primary_key]
     self_dtypes = self.dtypes
     on_cols_dtypes = {
         col: to_pandas_dtype(typ)

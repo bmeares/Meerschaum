@@ -6,7 +6,7 @@
 Stress test for pipes.
 """
 
-__version__ = '0.3.9'
+__version__ = '0.4.0'
 
 from datetime import datetime, timezone, timedelta
 import random
@@ -56,9 +56,6 @@ def fetch(
         chunksize = 1440
 
     dt_col, id_col, val_col = 'datetime', 'id', 'val'
-    print(f"{begin=}")
-    print(f"{end=}")
-    #  print(f"{sync_time=}")
 
     fetch_params = pipe.parameters.get('fetch', {})
     row_limit = fetch_params.get('rows', None) or 1440

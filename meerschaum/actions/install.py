@@ -175,7 +175,7 @@ def _install_packages(
             + f" into the virtual environment '{venv}'."
         )
     return False, (
-        f"Failed to install package" + ("s" if len(action) != 1 else '') + f" {items_str(action)}."
+        "Failed to install package" + ("s" if len(action) != 1 else '') + f" {items_str(action)}."
     )
 
 
@@ -200,7 +200,6 @@ def _install_required(
     from meerschaum.core import Plugin
     from meerschaum.utils.warnings import warn, info
     from meerschaum.connectors.parse import parse_repo_keys
-    from meerschaum.utils.formatting import print_tuple
     from meerschaum.plugins import get_plugins_names
     repo_connector = parse_repo_keys(repository)
 

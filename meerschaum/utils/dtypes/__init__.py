@@ -95,7 +95,7 @@ def are_dtypes_equal(
     try:
         if ldtype == rdtype:
             return True
-    except Exception as e:
+    except Exception:
         warn(f"Exception when comparing dtypes, returning False:\n{traceback.format_exc()}")
         return False
 
@@ -185,7 +185,7 @@ def attempt_cast_to_numeric(value: Any) -> Any:
             if not value_is_null(value)
             else Decimal('NaN')
         )
-    except Exception as e:
+    except Exception:
         return value
 
 
@@ -201,7 +201,7 @@ def attempt_cast_to_uuid(value: Any) -> Any:
             if not value_is_null(value)
             else None
         )
-    except Exception as e:
+    except Exception:
         return value
 
 
@@ -251,7 +251,7 @@ def coerce_timezone(
 ) -> Any:
     """
     Given a `datetime`, pandas `Timestamp` or `Series` of `Timestamp`,
-    return a naive datetime in terms of UTC.
+    return a UTC timestamp (strip timezone if `strip_utc` is `True`.
     """
     if dt is None:
         return None
@@ -266,9 +266,7 @@ def coerce_timezone(
     dt_is_series = hasattr(dt, 'dtype') and hasattr(dt, '__module__')
 
     if dt_is_series:
-        is_dask = 'dask' in dt.__module__
         pandas = mrsm.attempt_import('pandas', lazy=False)
-        dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
 
         if (
             pandas.api.types.is_datetime64_any_dtype(dt) and (
@@ -279,11 +277,7 @@ def coerce_timezone(
         ):
             return dt
 
-        dt_series = (
-            pandas.to_datetime(dt, utc=True, format='ISO8601')
-            if dd is None
-            else dd.to_datetime(dt, utc=True, format='ISO8601')
-        )
+        dt_series = to_datetime(dt, coerce_utc=False)
         if strip_utc:
             if dt_series.dt.tz is not None:
                 dt_series = dt_series.dt.tz_localize(None)
@@ -299,3 +293,39 @@ def coerce_timezone(
     if strip_utc:
         return utc_dt.replace(tzinfo=None)
     return utc_dt
+
+
+def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = True) -> Any:
+    """
+    Wrap `pd.to_datetime()` and add support for out-of-bounds values.
+    """
+    pandas, dateutil_parser = mrsm.attempt_import('pandas', 'dateutil.parser', lazy=False)
+    is_dask = 'dask' in getattr(dt_val, '__module__', '')
+    dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
+    dt_is_series = hasattr(dt_val, 'dtype') and hasattr(dt_val, '__module__')
+    pd = pandas if dd is None else dd
+
+    try:
+        new_dt_val = pd.to_datetime(dt_val, utc=True, format='ISO8601')
+        if as_pydatetime:
+            return new_dt_val.to_pydatetime()
+        return new_dt_val
+    except (pd.errors.OutOfBoundsDatetime, ValueError):
+        pass
+
+    def parse(x: Any) -> Any:
+        try:
+            return dateutil_parser.parse(x)
+        except Exception:
+            return x
+
+    if dt_is_series:
+        new_series = dt_val.apply(parse)
+        if coerce_utc:
+            return coerce_timezone(new_series)
+        return new_series
+
+    new_dt_val = parse(dt_val)
+    if coerce_utc:
+        return new_dt_val
+    return coerce_timezone(new_dt_val)
