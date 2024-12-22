@@ -1062,7 +1062,7 @@ def get_sqlalchemy_table(
                 connector.metadata,
                 **table_kwargs
             )
-        except sqlalchemy.exc.NoSuchTableError as e:
+        except sqlalchemy.exc.NoSuchTableError:
             warn(f"Table '{truncated_table_name}' does not exist in '{connector}'.")
             return None
     return tables[truncated_table_name]

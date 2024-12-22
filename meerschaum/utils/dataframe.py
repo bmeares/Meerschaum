@@ -662,7 +662,7 @@ def get_uuid_cols(df: 'pd.DataFrame') -> List[str]:
 
     Returns
     -------
-    A list of columns to treat as numerics.
+    A list of columns to treat as UUIDs.
     """
     if df is None:
         return []
@@ -686,6 +686,98 @@ def get_uuid_cols(df: 'pd.DataFrame') -> List[str]:
             and
             isinstance(df.loc[ix][col], UUID)
         )
+    ]
+
+
+def get_datetime_cols(
+    df: 'pd.DataFrame',
+    timezone_aware: bool = True,
+    timezone_naive: bool = True,
+) -> List[str]:
+    """
+    Get the columns which contain `datetime` or `Timestamp` objects from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain `datetime` or `Timestamp` objects.
+
+    timezone_aware: bool, default True
+        If `True`, include timezone-aware datetime columns.
+
+    timezone_naive: bool, default True
+        If `True`, include timezone-naive datetime columns.
+
+    Returns
+    -------
+    A list of columns to treat as datetimes.
+    """
+    if not timezone_aware and not timezone_naive:
+        raise ValueError("`timezone_aware` and `timezone_naive` cannot both be `False`.")
+
+    if df is None:
+        return []
+
+    from datetime import datetime
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+
+    known_dt_cols = [
+        col
+        for col, typ in df.dtypes.items()
+        if are_dtypes_equal('datetime', str(typ))
+    ]
+
+    if len(df) == 0:
+        return known_dt_cols
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+        if col not in known_dt_cols
+    }
+    pydt_cols = [
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and
+            isinstance(df.loc[ix][col], datetime)
+        )
+    ]
+    dt_cols_set = set(known_dt_cols + pydt_cols)
+    all_dt_cols = [
+        col
+        for col in df.columns
+        if col in dt_cols_set
+    ]
+    if timezone_aware and timezone_naive:
+        return all_dt_cols
+
+    known_timezone_aware_dt_cols = [
+        col
+        for col in known_dt_cols
+        if getattr(df[col], 'tz', None) is not None
+    ]
+    timezone_aware_pydt_cols = [
+        col
+        for col in pydt_cols
+        if df.loc[cols_indices[col]][col].tzinfo is not None
+    ]
+    timezone_aware_dt_cols_set = set(known_timezone_aware_dt_cols + timezone_aware_pydt_cols)
+    if timezone_aware:
+        return [
+            col
+            for col in all_dt_cols
+            if col in timezone_aware_pydt_cols
+        ]
+
+    return [
+        col
+        for col in all_dt_cols
+        if col not in timezone_aware_dt_cols_set
     ]
 
 

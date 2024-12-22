@@ -814,12 +814,9 @@ def test_distant_datetimes(flavor: str):
         columns={
             'datetime': 'ts',
         },
-        dtypes={
-            'ts': 'datetime64[s, UTC]',
-        },
     )
     docs = [
-        {'ts': '0001-01-01'},
+        {'ts': datetime(1, 1, 1)},
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg

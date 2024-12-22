@@ -971,7 +971,7 @@ def get_pipe_data(
 
     df = self.read(
         query,
-        dtype=dtypes,
+        #  dtype=dtypes,
         debug=debug,
         **kw
     )
@@ -1346,7 +1346,12 @@ def create_pipe_table_from_df(
     """
     Create a pipe's table from its configured dtypes and an incoming dataframe.
     """
-    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
+    from meerschaum.utils.dataframe import (
+        get_json_cols,
+        get_numeric_cols,
+        get_uuid_cols,
+        get_datetime_cols,
+    )
     from meerschaum.utils.sql import get_create_table_queries, sql_item_name
     primary_key = pipe.columns.get('primary', None)
     dt_col = pipe.columns.get('datetime', None)
@@ -1371,6 +1376,14 @@ def create_pipe_table_from_df(
         **{
             col: 'numeric'
             for col in get_numeric_cols(df)
+        },
+        **{
+            col: 'datetime64[ns, UTC]'
+            for col in get_datetime_cols(df, timezone_aware=True, timezone_naive=False)
+        },
+        **{
+            col: 'datetime64[ns]'
+            for col in get_datetime_cols(df, timezone_aware=False, timezone_naive=True)
         },
         **pipe.dtypes
     }
@@ -1854,7 +1867,6 @@ def sync_pipe_inplace(
         session_execute,
         update_queries,
     )
-    from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import (
         get_pd_type_from_db_type,
     )

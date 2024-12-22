@@ -15,7 +15,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Union, Any
 from meerschaum.utils.warnings import warn
 
-MRSM_PD_DTYPES: Dict[str, str] = {
+MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
     'numeric': 'object',
     'uuid': 'object',
@@ -27,6 +27,7 @@ MRSM_PD_DTYPES: Dict[str, str] = {
     'int32': 'Int32',
     'int64': 'Int64',
     'str': 'string[python]',
+    None: 'object',
 }
 
 
@@ -279,8 +280,11 @@ def coerce_timezone(
 
         dt_series = to_datetime(dt, coerce_utc=False)
         if strip_utc:
-            if dt_series.dt.tz is not None:
-                dt_series = dt_series.dt.tz_localize(None)
+            try:
+                if dt_series.dt.tz is not None:
+                    dt_series = dt_series.dt.tz_localize(None)
+            except Exception:
+                pass
 
         return dt_series
 
@@ -326,6 +330,6 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
         return new_series
 
     new_dt_val = parse(dt_val)
-    if coerce_utc:
+    if not coerce_utc:
         return new_dt_val
     return coerce_timezone(new_dt_val)
