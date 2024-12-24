@@ -162,12 +162,14 @@ class Pipe:
         upsert: Optional[bool] = None,
         autoincrement: Optional[bool] = None,
         static: Optional[bool] = None,
+        enforce: Optional[bool] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
         debug: bool = False,
         connector_keys: Optional[str] = None,
         metric_key: Optional[str] = None,
         location_key: Optional[str] = None,
+        instance_keys: Optional[str] = None,
         indexes: Union[Dict[str, str], List[str], None] = None,
     ):
         """
@@ -218,6 +220,10 @@ class Pipe:
 
         static: Optional[bool], default None
             If `True`, set `static` in the parameters.
+
+        enforce: Optionanl[bool], default None
+            If `False`, skip data type enforcement.
+            Default behavior is `True`.
 
         temporary: bool, default False
             If `True`, prevent instance tables (pipes, users, plugins) from being created.
@@ -319,11 +325,13 @@ class Pipe:
         if isinstance(static, bool):
             self._attributes['parameters']['static'] = static
 
+        if isinstance(enforce, bool):
+            self._attributes['parameters']['enforce'] = enforce
+
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,
         ###       or a Pipe may be registered with parameters set in-memory first.
-        #  from meerschaum.config import get_config
-        _mrsm_instance = mrsm_instance if mrsm_instance is not None else instance
+        _mrsm_instance = mrsm_instance if mrsm_instance is not None else (instance or instance_keys)
         if _mrsm_instance is None:
             _mrsm_instance = get_config('meerschaum', 'instance', patch=True)
 
@@ -341,10 +349,10 @@ class Pipe:
         Return the four keys needed to reconstruct this pipe.
         """
         return {
-            'connector': self.connector_keys,
-            'metric': self.metric_key,
-            'location': self.location_key,
-            'instance': self.instance_keys,
+            'connector_keys': self.connector_keys,
+            'metric_key': self.metric_key,
+            'location_key': self.location_key,
+            'instance_keys': self.instance_keys,
         }
 
     def keys(self) -> List[str]:
@@ -385,7 +393,7 @@ class Pipe:
                 warnings.simplefilter('ignore')
                 try:
                     conn = parse_instance_keys(self.connector_keys)
-                except Exception as e:
+                except Exception:
                     conn = None
             if conn:
                 self._connector = conn
@@ -429,7 +437,7 @@ class Pipe:
             _fetch_patch = {
                 'fetch': ({
                     'definition': (
-                        f"SELECT * FROM "
+                        "SELECT * FROM "
                         + sql_item_name(
                             str(self.target),
                             self.instance_connector.flavor,
@@ -467,7 +475,7 @@ class Pipe:
                 and self.location_key == other.location_key
                 and self.instance_keys == other.instance_keys
             )
-        except Exception as e:
+        except Exception:
             return False
 
     def __hash__(self):
@@ -496,11 +504,11 @@ class Pipe:
         Define the state dictionary (pickling).
         """
         return {
-            'connector': self.connector_keys,
-            'metric': self.metric_key,
-            'location': self.location_key,
+            'connector_keys': self.connector_keys,
+            'metric_key': self.metric_key,
+            'location_key': self.location_key,
             'parameters': self.parameters,
-            'instance': self.instance_keys,
+            'instance_keys': self.instance_keys,
         }
 
     def __setstate__(self, _state: Dict[str, Any]):

@@ -289,6 +289,25 @@ def tzinfo(self) -> Union[None, timezone]:
     return None
 
 
+@property
+def enforce(self) -> bool:
+    """
+    Return the `enforce` parameter for the pipe.
+    """
+    if 'enforce' not in self.parameters:
+        self.parameters['enforce'] = True
+
+    return self.parameters['enforce']
+
+
+@enforce.setter
+def enforce(self, _enforce: bool) -> None:
+    """
+    Set the `enforce` parameter for the pipe.
+    """
+    self.parameters['_enforce'] = _enforce
+
+
 def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]:
     """
     Check if the requested columns are defined.

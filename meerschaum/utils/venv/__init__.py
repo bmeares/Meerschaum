@@ -371,7 +371,7 @@ def init_venv(
     from contextlib import redirect_stdout, redirect_stderr
     import sys, platform, os, pathlib, shutil
     from meerschaum.config.static import STATIC_CONFIG
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH, VENVS_CACHE_RESOURCES_PATH
     from meerschaum.utils.packages import is_uv_enabled
     venv_path = VIRTENV_RESOURCES_PATH / venv
     vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
@@ -403,7 +403,7 @@ def init_venv(
         virtualenv = None
 
     _venv_success = False
-    temp_vtp = vtp.parent / '.site-packages.old'
+    temp_vtp = VENVS_CACHE_RESOURCES_PATH / str(venv)
     rename_vtp = vtp.exists()
 
     if rename_vtp:
