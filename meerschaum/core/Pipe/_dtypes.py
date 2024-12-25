@@ -80,6 +80,9 @@ def enforce_dtypes(
             )
         return df
 
+    if not self.enforce:
+        return df
+
     return _enforce_dtypes(
         df,
         pipe_dtypes,

@@ -106,6 +106,7 @@ class Pipe:
         upsert,
         static,
         tzinfo,
+        enforce,
         get_columns,
         get_columns_types,
         get_columns_indices,

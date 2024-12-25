@@ -898,17 +898,15 @@ def get_pipe_data(
             col: get_pd_type_from_db_type(typ)
             for col, typ in cols_types.items()
         }
-    }
+    } if pipe.enforce else {}
     if dtypes:
         if self.flavor == 'sqlite':
             if not pipe.columns.get('datetime', None):
                 _dt = pipe.guess_datetime()
                 dt = sql_item_name(_dt, self.flavor, None) if _dt else None
-                is_guess = True
             else:
                 _dt = pipe.get_columns('datetime')
                 dt = sql_item_name(_dt, self.flavor, None)
-                is_guess = False
 
             if _dt:
                 dt_type = dtypes.get(_dt, 'object').lower()
@@ -936,7 +934,7 @@ def get_pipe_data(
         col: to_pandas_dtype(typ)
         for col, typ in dtypes.items()
         if col in select_columns and col not in (omit_columns or [])
-    }
+    } if pipe.enforce else {}
     query = self.get_pipe_data_query(
         pipe,
         select_columns=select_columns,
@@ -971,7 +969,7 @@ def get_pipe_data(
 
     df = self.read(
         query,
-        #  dtype=dtypes,
+        dtype=dtypes,
         debug=debug,
         **kw
     )

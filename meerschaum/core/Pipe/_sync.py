@@ -696,12 +696,11 @@ def filter_existing(
             min_dt = None
 
     if isinstance(min_dt, datetime):
-        begin = (
-            round_time(
-                min_dt,
-                to='down'
-            ) - timedelta(minutes=1)
-        )
+        rounded_min_dt = round_time(min_dt, to='down')
+        try:
+            begin = rounded_min_dt - timedelta(minutes=1)
+        except OverflowError:
+            begin = rounded_min_dt
     elif dt_type and 'int' in dt_type.lower():
         begin = min_dt
     elif dt_col is None:

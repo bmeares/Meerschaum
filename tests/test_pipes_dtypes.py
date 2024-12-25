@@ -814,6 +814,7 @@ def test_distant_datetimes(flavor: str):
         columns={
             'datetime': 'ts',
         },
+        enforce=False,
     )
     docs = [
         {'ts': datetime(1, 1, 1)},

@@ -944,7 +944,6 @@ def test_autoincrement_primary_key(flavor: str):
     df = pipe.get_data(['shirt_size'], params={'id': [4, 5]}, debug=debug)
     assert list(df['shirt_size']) == ['L', 'M']
 
-    return pipe
     success, msg = pipe.sync([{'color': 'purple'}, {'shirt_size': 'S'}], debug=debug)
     assert success, msg
 
