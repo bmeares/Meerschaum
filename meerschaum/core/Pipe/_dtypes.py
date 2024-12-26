@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
 
+
 def enforce_dtypes(
     self,
     df: 'pd.DataFrame',
@@ -30,7 +31,7 @@ def enforce_dtypes(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.dataframe import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PD_DTYPES
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas(debug=debug)
     if df is None:
@@ -41,7 +42,11 @@ def enforce_dtypes(
             )
         return df
 
-    pipe_dtypes = self.dtypes if self.enforce else {}
+    pipe_dtypes = self.dtypes if self.enforce else {
+        col: typ
+        for col, typ in self.dtypes.items()
+        if typ in MRSM_PD_DTYPES
+    }
 
     try:
         if isinstance(df, str):

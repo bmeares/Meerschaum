@@ -528,7 +528,7 @@ def get_db_type_from_pd_type(
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_ALIAS_DTYPES
     from meerschaum.utils.misc import parse_arguments_str
     sqlalchemy_types = attempt_import('sqlalchemy.types')
 
@@ -537,6 +537,9 @@ def get_db_type_from_pd_type(
         if not as_sqlalchemy
         else PD_TO_SQLALCHEMY_DTYPES_FLAVORS
     )
+
+    if pd_type in MRSM_ALIAS_DTYPES:
+        pd_type = MRSM_ALIAS_DTYPES[pd_type]
 
     ### Check whether we are able to match this type (e.g. pyarrow support).
     found_db_type = False

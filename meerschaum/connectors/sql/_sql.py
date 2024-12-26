@@ -715,6 +715,7 @@ def to_sql(
     method: str = "",
     chunksize: Optional[int] = -1,
     schema: Optional[str] = None,
+    safe_copy: bool = True,
     silent: bool = False,
     debug: bool = False,
     as_tuple: bool = False,
@@ -729,7 +730,7 @@ def to_sql(
     Parameters
     ----------
     df: pd.DataFrame
-        The DataFrame to be uploaded.
+        The DataFrame to be inserted.
 
     name: str
         The name of the table to be created.
@@ -751,6 +752,9 @@ def to_sql(
     schema: Optional[str], default None
         Optionally override the schema for the table.
         Defaults to `SQLConnector.schema`.
+
+    safe_copy: bool, defaul True
+        If `True`, copy the dataframe before making any changes.
 
     as_tuple: bool, default False
         If `True`, return a (success_bool, message) tuple instead of a `bool`.
@@ -796,7 +800,12 @@ def to_sql(
         get_uuid_cols,
         get_bytes_cols,
     )
-    from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal, coerce_timezone
+    from meerschaum.utils.dtypes import (
+        are_dtypes_equal,
+        quantize_decimal,
+        coerce_timezone,
+        encode_bytes_for_bytea,
+    )
     from meerschaum.utils.dtypes.sql import (
         NUMERIC_PRECISION_FLAVORS,
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
@@ -808,14 +817,25 @@ def to_sql(
     pd = import_pandas()
     is_dask = 'dask' in df.__module__
 
-    stats = {'target': name, }
+    bytes_cols = get_bytes_cols(df)
+
+    stats = {'target': name,}
     ### resort to defaults if None
+    use_psql_copy = False
     if method == "":
         if self.flavor in _bulk_flavors:
             method = functools.partial(psql_insert_copy, schema=self.schema)
+            use_psql_copy = True
         else:
             ### Should resolve to 'multi' or `None`.
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
+
+    if bytes_cols and (use_psql_copy or self.flavor == 'oracle'):
+        if safe_copy:
+            df = df.copy()
+        for col in bytes_cols:
+            df[col] = df[col].apply(encode_bytes_for_bytea, with_prefix=(self.flavor != 'oracle'))
+
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
 
     default_chunksize = self._sys_config.get('chunksize', None)

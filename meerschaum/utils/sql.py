@@ -495,7 +495,8 @@ def dateadd_str(
     flavor: str = 'postgresql',
     datepart: str = 'day',
     number: Union[int, float] = 0,
-    begin: Union[str, datetime, int] = 'now'
+    begin: Union[str, datetime, int] = 'now',
+    db_type: Optional[str] = None,
 ) -> str:
     """
     Generate a `DATEADD` clause depending on database flavor.
@@ -534,6 +535,10 @@ def dateadd_str(
     begin: Union[str, datetime], default `'now'`
         Base datetime to which to add dateparts.
 
+    db_type: Optional[str], default None
+        If provided, cast the datetime string as the type.
+        Otherwise, infer this from the input datetime value.
+
     Returns
     -------
     The appropriate `DATEADD` string for the corresponding database flavor.
@@ -545,7 +550,7 @@ def dateadd_str(
     ...     begin = datetime(2022, 1, 1, 0, 0),
     ...     number = 1,
     ... )
-    "DATEADD(day, 1, CAST('2022-01-01 00:00:00' AS DATETIME))"
+    "DATEADD(day, 1, CAST('2022-01-01 00:00:00' AS DATETIME2))"
     >>> dateadd_str(
     ...     flavor = 'postgresql',
     ...     begin = datetime(2022, 1, 1, 0, 0),
@@ -588,7 +593,7 @@ def dateadd_str(
         )
 
     dt_is_utc = begin_time.tzinfo is not None if begin_time is not None else '+' in str(begin)
-    db_type = get_db_type_from_pd_type(
+    db_type = db_type or get_db_type_from_pd_type(
         ('datetime64[ns, UTC]' if dt_is_utc else 'datetime64[ns]'),
         flavor=flavor,
     )
@@ -1681,7 +1686,7 @@ def get_null_replacement(typ: str, flavor: str) -> str:
         )
         return f'CAST({val_to_cast} AS {bool_typ})'
     if 'time' in typ.lower() or 'date' in typ.lower():
-        return dateadd_str(flavor=flavor, begin='1900-01-01')
+        return dateadd_str(flavor=flavor, begin='1900-01-01', db_type=typ)
     if 'float' in typ.lower() or 'double' in typ.lower() or typ.lower() in ('decimal',):
         return '-987654321.0'
     if flavor == 'oracle' and typ.lower().split('(', maxsplit=1)[0] == 'char':

@@ -231,11 +231,11 @@ def attempt_cast_to_bytes(value: Any) -> Any:
     """
     Given a value, attempt to coerce it into a bytestring.
     """
-    if isinstance(value, uuid.UUID):
+    if isinstance(value, bytes):
         return value
     try:
         return (
-            deserialize_base64(str(value))
+            deserialize_bytes_string(str(value))
             if not value_is_null(value)
             else None
         )
@@ -382,9 +382,55 @@ def serialize_bytes(data: bytes) -> str:
     return base64.b64encode(data).decode('utf-8')
 
 
+def deserialize_bytes_string(data: str | None, force_hex: bool = False) -> bytes | None:
+    """
+    Given a serialized ASCII string of bytes data, return the original bytes.
+    The input data may either be base64- or hex-encoded.
+
+    Parameters
+    ----------
+    data: str | None
+        The string to be deserialized into bytes.
+        May be base64- or hex-encoded (prefixed with `'\\x'`).
+
+    force_hex: bool = False
+        If `True`, treat the input string as hex-encoded.
+        If `data` does not begin with the prefix `'\\x'`, set `force_hex` to `True`.
+        This will still strip the leading `'\\x'` prefix if present.
+
+    Returns
+    -------
+    The original bytes used to produce the encoded string `data`.
+    """
+    if not isinstance(data, str) and value_is_null(data):
+        return data
+
+    import binascii
+    import base64
+
+    is_hex = force_hex or data.startswith('\\x')
+
+    if is_hex:
+        if data.startswith('\\x'):
+            data = data[2:]
+        return binascii.unhexlify(data)
+
+    return base64.b64decode(data)
+
+
 def deserialize_base64(data: str) -> bytes:
     """
     Return the original bytestring from the given base64-encoded string.
     """
     import base64
     return base64.b64decode(data)
+
+
+def encode_bytes_for_bytea(data: bytes, with_prefix: bool = True) -> str | None:
+    """
+    Return the given bytes as a hex string for PostgreSQL's `BYTEA` type.
+    """
+    import binascii
+    if not isinstance(data, bytes) and value_is_null(data):
+        return data
+    return ('\\x' if with_prefix else '') + binascii.hexlify(data).decode('utf-8')

@@ -889,7 +889,7 @@ def get_pipe_data(
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
 
-    cols_types = pipe.get_columns_types(debug=debug)
+    cols_types = pipe.get_columns_types(debug=debug) if pipe.enforce else {}
     dtypes = {
         **{
             p_col: to_pandas_dtype(p_typ)
@@ -904,17 +904,16 @@ def get_pipe_data(
         if self.flavor == 'sqlite':
             if not pipe.columns.get('datetime', None):
                 _dt = pipe.guess_datetime()
-                dt = sql_item_name(_dt, self.flavor, None) if _dt else None
             else:
                 _dt = pipe.get_columns('datetime')
-                dt = sql_item_name(_dt, self.flavor, None)
 
             if _dt:
                 dt_type = dtypes.get(_dt, 'object').lower()
                 if 'datetime' not in dt_type:
                     if 'int' not in dt_type:
                         dtypes[_dt] = 'datetime64[ns, UTC]'
-    existing_cols = pipe.get_columns_types(debug=debug)
+
+    existing_cols = cols_types.keys()
     select_columns = (
         [
             col
@@ -928,7 +927,7 @@ def get_pipe_data(
             if col in existing_cols
             and col not in (omit_columns or [])
         ]
-    )
+    ) if pipe.enforce else select_columns
     if select_columns:
         dtypes = {col: typ for col, typ in dtypes.items() if col in select_columns}
     dtypes = {
@@ -1109,12 +1108,13 @@ def get_pipe_data_query(
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
 
     dt_col = pipe.columns.get('datetime', None)
-    existing_cols = pipe.get_columns_types(debug=debug)
+    existing_cols = pipe.get_columns_types(debug=debug) if pipe.enforce else []
+    skip_existing_cols_check = skip_existing_cols_check or not pipe.enforce
     dt_typ = get_pd_type_from_db_type(existing_cols[dt_col]) if dt_col in existing_cols else None
     select_columns = (
         [col for col in existing_cols]
         if not select_columns
-        else [col for col in select_columns if col in existing_cols or skip_existing_cols_check]
+        else [col for col in select_columns if skip_existing_cols_check or col in existing_cols]
     )
     if omit_columns:
         select_columns = [col for col in select_columns if col not in omit_columns]
@@ -1599,6 +1599,7 @@ def sync_pipe(
         'if_exists': if_exists,
         'debug': debug,
         'as_dict': True,
+        'safe_copy': kw.get('safe_copy', False),
         'chunksize': chunksize,
         'dtype': self.get_to_sql_dtype(pipe, unseen_df, update_dtypes=True),
         'schema': self.get_pipe_schema(pipe),
@@ -1722,11 +1723,12 @@ def sync_pipe(
             },
             target=temp_target,
             temporary=True,
+            enforce=False,
+            static=True,
+            autoincrement=False,
             parameters={
-                'static': True,
                 'schema': self.internal_schema,
                 'hypertable': False,
-                'autoincrement': False,
             },
         )
         temp_pipe.__dict__['_columns_types'] = {

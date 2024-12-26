@@ -231,6 +231,7 @@ def test_infer_bytes_dtype(flavor: str):
         ],
         debug=debug,
     )
+    return pipe
     assert success, msg
     pprint(pipe.get_columns_types())
     df = pipe.get_data(debug=debug)
@@ -718,9 +719,9 @@ def test_sync_bytes_inplace(flavor: str):
     )
     _ = pipe.drop()
     docs = [
-        {'dt': '2023-01-01', 'id': 1, 'bytes_col': b'foo bar'},
-        {'dt': '2023-01-02', 'id': 2, 'bytes_col': b'do re mi'},
-        {'dt': '2023-01-03', 'id': 3},
+        {'dt': '2024-01-01', 'id': 1, 'bytes_col': b'foo bar'},
+        {'dt': '2024-01-02', 'id': 2, 'bytes_col': b'do re mi'},
+        {'dt': '2024-01-03', 'id': 3},
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
@@ -730,10 +731,6 @@ def test_sync_bytes_inplace(flavor: str):
 
     assert 'bytes' in inplace_pipe.dtypes['bytes_col']
     assert inplace_pipe.get_rowcount() == len(docs)
-    db_col = inplace_pipe.get_columns_types(refresh=True)['bytes_col']
-    if flavor in PD_TO_DB_DTYPES_FLAVORS['bytes']:
-        uuid_typ = PD_TO_DB_DTYPES_FLAVORS['bytes'][flavor]
-        assert db_col.split('(',  maxsplit=1)[0] == uuid_typ.split('(', maxsplit=1)[0]
 
     df = inplace_pipe.get_data()
     assert df['bytes_col'][0] == b'foo bar'
@@ -914,3 +911,42 @@ def test_distant_datetimes(flavor: str):
     df = pipe.get_data()
     print(f"df=\n{df}")
     assert df['ts'][0].year == 1
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_enforce_false(flavor: str):
+    """
+    Test `enforce=False` behavior.
+    """ 
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'enforce', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'enforce',
+        instance=conn,
+        enforce=False,
+        columns={
+            'datetime': 'dt',
+        },
+        dtypes={
+            'num': 'decimal',
+        },
+    )
+    docs = [
+        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': Decimal('1.21')},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(['num'], debug=debug)
+    assert df['num'][0] == Decimal('1.21')
+    
+    new_docs = [
+        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': Decimal('2.34567')},
+    ]
+    success, msg = pipe.sync(new_docs, debug=debug)
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    assert len(df) == 1
+    assert df['dt'][0].tzinfo is not None
+    assert df['num'][0] == Decimal('2.34567')

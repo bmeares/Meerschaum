@@ -203,7 +203,7 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
     configured_dtypes = self.parameters.get('dtypes', {})
     remote_dtypes = self.infer_dtypes(persist=False)
     patched_dtypes = apply_patch_to_config(remote_dtypes, configured_dtypes)
-    return patched_dtypes
+    return {col: typ for col, typ in patched_dtypes.items() if col and typ}
 
 
 @dtypes.setter

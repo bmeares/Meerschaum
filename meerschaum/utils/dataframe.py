@@ -494,7 +494,7 @@ def parse_df_datetimes(
     ### skip parsing if DataFrame is empty
     if len(pdf) == 0:
         if debug:
-            dprint(f"df is empty. Returning original DataFrame without casting datetime columns...")
+            dprint("df is empty. Returning original DataFrame without casting datetime columns...")
         return df
 
     ignore_cols = set(
@@ -509,7 +509,7 @@ def parse_df_datetimes(
     if len(cols_to_inspect) == 0:
         if debug:
             dprint("All columns are ignored, skipping datetime detection...")
-        return df.fillna(pandas.NA)
+        return df.infer_objects(copy=False).fillna(pandas.NA)
 
     ### apply regex to columns to determine which are ISO datetimes
     iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d+'
@@ -522,7 +522,7 @@ def parse_df_datetimes(
     if not datetime_cols:
         if debug:
             dprint("No columns detected as datetimes, returning...")
-        return df.fillna(pandas.NA)
+        return df.infer_objects(copy=False).fillna(pandas.NA)
 
     if debug:
         dprint("Converting columns to datetimes: " + str(datetime_cols))
