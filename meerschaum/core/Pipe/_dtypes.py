@@ -119,7 +119,6 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
     ###       PostgreSQL- or Pandas-style.
     columns_types = self.get_columns_types(debug=debug)
 
-    dtypes = self.parameters.get('dtypes', {})
     remote_pd_dtypes = {
         c: (
             get_pd_type_from_db_type(t, allow_custom_dtypes=True)
@@ -128,12 +127,15 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
         )
         for c, t in columns_types.items()
     } if columns_types else {}
+    if not persist:
+        return remote_pd_dtypes
+
+    dtypes = self.parameters.get('dtypes', {})
     dtypes.update({
         col: typ
         for col, typ in remote_pd_dtypes.items()
         if col not in dtypes
     })
-    if persist:
-        self.dtypes = dtypes
-        self.edit(interactive=False, debug=debug)
-    return dtypes
+    self.dtypes = dtypes
+    self.edit(interactive=False, debug=debug)
+    return remote_pd_dtypes
