@@ -882,6 +882,7 @@ def get_pipe_data(
     from meerschaum.utils.dtypes import (
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
+        attempt_cast_to_bytes,
         are_dtypes_equal,
     )
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
@@ -964,6 +965,11 @@ def get_pipe_data(
         for col, typ in pipe.dtypes.items()
         if typ == 'uuid' and col in dtypes
     ]
+    bytes_columns = [
+        col
+        for col, typ in pipe.dtypes.items()
+        if typ == 'bytes' and col in dtypes
+    ]
 
     kw['coerce_float'] = kw.get('coerce_float', (len(numeric_columns) == 0))
 
@@ -982,6 +988,11 @@ def get_pipe_data(
         if col not in df.columns:
             continue
         df[col] = df[col].apply(attempt_cast_to_uuid)
+
+    for col in bytes_columns:
+        if col not in df.columns:
+            continue
+        df[col] = df[col].apply(attempt_cast_to_bytes)
 
     if self.flavor == 'sqlite':
         ignore_dt_cols = [
@@ -1349,6 +1360,7 @@ def create_pipe_table_from_df(
         get_numeric_cols,
         get_uuid_cols,
         get_datetime_cols,
+        get_bytes_cols,
     )
     from meerschaum.utils.sql import get_create_table_queries, sql_item_name
     primary_key = pipe.columns.get('primary', None)
@@ -1374,6 +1386,10 @@ def create_pipe_table_from_df(
         **{
             col: 'numeric'
             for col in get_numeric_cols(df)
+        },
+        **{
+            col: 'bytes'
+            for col in get_bytes_cols(df)
         },
         **{
             col: 'datetime64[ns, UTC]'
@@ -1473,11 +1489,9 @@ def sync_pipe(
         get_update_queries,
         sql_item_name,
         update_queries,
-        get_create_table_queries,
         get_reset_autoincrement_queries,
     )
     from meerschaum.utils.misc import generate_password
-    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     from meerschaum import Pipe

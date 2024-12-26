@@ -15,6 +15,18 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Union, Any
 from meerschaum.utils.warnings import warn
 
+MRSM_ALIAS_DTYPES: Dict[str, str] = {
+    'decimal': 'numeric',
+    'number': 'numeric',
+    'jsonl': 'json',
+    'JSON': 'json',
+    'binary': 'bytes',
+    'blob': 'bytes',
+    'varbinary': 'bytes',
+    'bytea': 'bytes',
+    'guid': 'uuid',
+    'UUID': 'uuid',
+}
 MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
     'numeric': 'object',
@@ -27,6 +39,7 @@ MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'int32': 'Int32',
     'int64': 'Int64',
     'str': 'string[python]',
+    'bytes': 'object',
     None: 'object',
 }
 
@@ -38,6 +51,10 @@ def to_pandas_dtype(dtype: str) -> str:
     known_dtype = MRSM_PD_DTYPES.get(dtype, None)
     if known_dtype is not None:
         return known_dtype
+
+    alias_dtype = MRSM_ALIAS_DTYPES.get(dtype, None)
+    if alias_dtype is not None:
+        return MRSM_PD_DTYPES[alias_dtype]
 
     ### NOTE: Kind of a hack, but if the first word of the given dtype is in all caps,
     ### treat it as a SQL db type.
@@ -114,6 +131,10 @@ def are_dtypes_equal(
 
     uuid_dtypes = ('uuid', 'object')
     if ldtype in uuid_dtypes and rdtype in uuid_dtypes:
+        return True
+
+    bytes_dtypes = ('bytes', 'object')
+    if ldtype in bytes_dtypes and rdtype in bytes_dtypes:
         return True
 
     ldtype_clean = ldtype.split('[', maxsplit=1)[0]
@@ -199,6 +220,22 @@ def attempt_cast_to_uuid(value: Any) -> Any:
     try:
         return (
             uuid.UUID(str(value))
+            if not value_is_null(value)
+            else None
+        )
+    except Exception:
+        return value
+
+
+def attempt_cast_to_bytes(value: Any) -> Any:
+    """
+    Given a value, attempt to coerce it into a bytestring.
+    """
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return (
+            deserialize_base64(str(value))
             if not value_is_null(value)
             else None
         )
@@ -333,3 +370,21 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
     if not coerce_utc:
         return new_dt_val
     return coerce_timezone(new_dt_val)
+
+
+def serialize_bytes(data: bytes) -> str:
+    """
+    Return the given bytes as a base64-encoded string.
+    """
+    import base64
+    if not isinstance(data, bytes) and value_is_null(data):
+        return data
+    return base64.b64encode(data).decode('utf-8')
+
+
+def deserialize_base64(data: str) -> bytes:
+    """
+    Return the original bytestring from the given base64-encoded string.
+    """
+    import base64
+    return base64.b64decode(data)

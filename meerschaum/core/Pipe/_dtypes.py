@@ -41,7 +41,7 @@ def enforce_dtypes(
             )
         return df
 
-    pipe_dtypes = self.dtypes
+    pipe_dtypes = self.dtypes if self.enforce else {}
 
     try:
         if isinstance(df, str):
@@ -78,9 +78,6 @@ def enforce_dtypes(
                 f"Could not find dtypes for {self}.\n"
                 + "    Skipping dtype enforcement..."
             )
-        return df
-
-    if not self.enforce:
         return df
 
     return _enforce_dtypes(

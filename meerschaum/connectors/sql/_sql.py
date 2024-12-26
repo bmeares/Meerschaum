@@ -790,7 +790,12 @@ def to_sql(
         truncate_item_name,
         DROP_IF_EXISTS_FLAVORS,
     )
-    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
+    from meerschaum.utils.dataframe import (
+        get_json_cols,
+        get_numeric_cols,
+        get_uuid_cols,
+        get_bytes_cols,
+    )
     from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal, coerce_timezone
     from meerschaum.utils.dtypes.sql import (
         NUMERIC_PRECISION_FLAVORS,

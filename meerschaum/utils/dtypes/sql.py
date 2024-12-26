@@ -276,6 +276,19 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'cockroachdb': 'UUID',
         'default': 'TEXT',
     },
+    'bytes': {
+        'timescaledb': 'BYTEA',
+        'postgresql': 'BYTEA',
+        'mariadb': 'BLOB',
+        'mysql': 'BLOB',
+        'mssql': 'VARBINARY(MAX)',
+        'oracle': 'BLOB',
+        'sqlite': 'BLOB',
+        'duckdb': 'BLOB',
+        'citus': 'BYTEA',
+        'cockroachdb': 'BYTEA',
+        'default': 'BLOB',
+    },
 }
 PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'int': {
@@ -420,6 +433,19 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'citus': 'Uuid',
         'cockroachdb': 'Uuid',
         'default': 'Uuid',
+    },
+    'bytes': {
+        'timescaledb': 'LargeBinary',
+        'postgresql': 'LargeBinary',
+        'mariadb': 'LargeBinary',
+        'mysql': 'LargeBinary',
+        'mssql': 'LargeBinary',
+        'oracle': 'LargeBinary',
+        'sqlite': 'LargeBinary',
+        'duckdb': 'LargeBinary',
+        'citus': 'LargeBinary',
+        'cockroachdb': 'LargeBinary',
+        'default': 'LargeBinary',
     },
 }
 

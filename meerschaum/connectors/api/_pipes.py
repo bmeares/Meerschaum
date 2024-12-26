@@ -15,7 +15,8 @@ from datetime import datetime
 import meerschaum as mrsm
 from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn, error
-from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, Mapping, List, Dict, Tuple
+from meerschaum.utils.typing import SuccessTuple, Union, Any, Optional, List, Dict, Tuple
+
 
 def pipe_r_url(
     pipe: mrsm.Pipe
@@ -30,6 +31,7 @@ def pipe_r_url(
         + f"{pipe.connector_keys}/{pipe.metric_key}/{location_key}"
     )
 
+
 def register_pipe(
     self,
     pipe: mrsm.Pipe,
@@ -39,7 +41,6 @@ def register_pipe(
     Returns a tuple of (success_bool, response_dict).
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.config.static import STATIC_CONFIG
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
     ###       then `pipe.parameters` will exist and not be fetched from the database.
     r_url = pipe_r_url(pipe)
@@ -180,7 +181,7 @@ def sync_pipe(
     from meerschaum.utils.misc import json_serialize_datetime, items_str
     from meerschaum.config import get_config
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dataframe import get_numeric_cols, to_json
+    from meerschaum.utils.dataframe import get_numeric_cols, to_json, get_bytes_cols
     begin = time.time()
     more_itertools = attempt_import('more_itertools')
     if df is None:

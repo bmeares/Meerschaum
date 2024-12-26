@@ -368,10 +368,11 @@ def sync(
         ### Cast to a dataframe and ensure datatypes are what we expect.
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
 
-        ### Capture `numeric`, `uuid`, and `json` columns.
+        ### Capture `numeric`, `uuid`, `json`, and `bytes` columns.
         self._persist_new_json_columns(df, debug=debug)
         self._persist_new_numeric_columns(df, debug=debug)
         self._persist_new_uuid_columns(df, debug=debug)
+        self._persist_new_bytes_columns(df, debug=debug)
 
         if debug:
             dprint(
@@ -1026,6 +1027,35 @@ def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
         edit_success, edit_msg = self.edit(interactive=False, debug=debug)
         if not edit_success:
             warn(f"Unable to update JSON dtypes for {self}:\n{edit_msg}")
+
+        return edit_success, edit_msg
+
+    return True, "Success"
+
+
+def _persist_new_bytes_columns(self, df, debug: bool = False) -> SuccessTuple:
+    """
+    Check for new `bytes` columns and update the parameters.
+    """
+    from meerschaum.utils.dataframe import get_bytes_cols
+    bytes_cols = get_bytes_cols(df)
+    existing_bytes_cols = [col for col, typ in self.dtypes.items() if typ == 'bytes']
+    new_bytes_cols = [col for col in bytes_cols if col not in existing_bytes_cols]
+    if not new_bytes_cols:
+        return True, "Success"
+
+    self._attributes_sync_time = None
+    dt_col = self.columns.get('datetime', None)
+    dtypes = self.parameters.get('dtypes', {})
+    if dt_col not in dtypes:
+        dtypes[dt_col] = 'datetime'
+    dtypes.update({col: 'bytes' for col in bytes_cols})
+    self.parameters['dtypes'] = dtypes
+
+    if not self.temporary:
+        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
+        if not edit_success:
+            warn(f"Unable to update bytes dtypes for {self}:\n{edit_msg}")
 
         return edit_success, edit_msg
 

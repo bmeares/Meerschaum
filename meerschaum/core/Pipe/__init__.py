@@ -133,6 +133,7 @@ class Pipe:
         _persist_new_json_columns,
         _persist_new_numeric_columns,
         _persist_new_uuid_columns,
+        _persist_new_bytes_columns,
     )
     from ._verify import (
         verify,

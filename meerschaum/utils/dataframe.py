@@ -139,7 +139,6 @@ def filter_unseen_df(
     import functools
     import traceback
     from decimal import Decimal
-    from uuid import UUID
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import import_pandas, attempt_import
     from meerschaum.utils.dtypes import (
@@ -147,6 +146,7 @@ def filter_unseen_df(
         are_dtypes_equal,
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
+        attempt_cast_to_bytes,
         coerce_timezone,
     )
     pd = import_pandas(debug=debug)
@@ -333,6 +333,11 @@ def filter_unseen_df(
     old_uuid_cols = get_uuid_cols(old_df)
     new_uuid_cols = get_uuid_cols(new_df)
     uuid_cols = set(new_uuid_cols + old_uuid_cols)
+
+    old_bytes_cols = get_bytes_cols(old_df)
+    new_bytes_cols = get_bytes_cols(new_df)
+    bytes_cols = set(new_bytes_cols + old_bytes_cols)
+
     joined_df = merge(
         new_df.infer_objects(copy=False).fillna(NA),
         old_df.infer_objects(copy=False).fillna(NA),
@@ -367,6 +372,14 @@ def filter_unseen_df(
             delta_df[uuid_col] = delta_df[uuid_col].apply(attempt_cast_to_uuid)
         except Exception:
             warn(f"Unable to parse numeric column '{uuid_col}':\n{traceback.format_exc()}")
+
+    for bytes_col in bytes_cols:
+        if bytes_col not in delta_df.columns:
+            continue
+        try:
+            delta_df[bytes_col] = delta_df[bytes_col].apply(attempt_cast_to_bytes)
+        except Exception:
+            warn(f"Unable to parse bytes column '{bytes_col}':\n{traceback.format_exc()}")
 
     return delta_df
 
@@ -781,6 +794,43 @@ def get_datetime_cols(
     ]
 
 
+def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the columns which contain bytes strings from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain bytes strings.
+
+    Returns
+    -------
+    A list of columns to treat as bytes.
+    """
+    if df is None:
+        return []
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+
+    if len(df) == 0:
+        return []
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+    }
+    return [
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and
+            isinstance(df.loc[ix][col], bytes)
+        )
+    ]
+
+
 def enforce_dtypes(
     df: 'pd.DataFrame',
     dtypes: Dict[str, str],
@@ -832,6 +882,7 @@ def enforce_dtypes(
         is_dtype_numeric,
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
+        attempt_cast_to_bytes,
         coerce_timezone as _coerce_timezone,
     )
     pandas = mrsm.attempt_import('pandas')
@@ -861,6 +912,11 @@ def enforce_dtypes(
         col
         for col, typ in dtypes.items()
         if typ == 'uuid'
+    ]
+    bytes_cols = [
+        col
+        for col, typ in dtypes.items()
+        if typ == 'bytes'
     ]
     datetime_cols = [
         col
@@ -914,6 +970,17 @@ def enforce_dtypes(
                 except Exception as e:
                     if debug:
                         dprint(f"Unable to parse column '{col}' as UUID:\n{e}")
+
+    if bytes_cols:
+        if debug:
+            dprint(f"Checking for bytes: {bytes_cols}")
+        for col in bytes_cols:
+            if col in df.columns:
+                try:
+                    df[col] = df[col].apply(attempt_cast_to_bytes)
+                except Exception as e:
+                    if debug:
+                        dprint(f"Unable to parse column '{col}' as bytes:\n{e}")
 
     if datetime_cols and coerce_timezone:
         if debug:
@@ -1499,12 +1566,16 @@ def to_json(
     A JSON string.
     """
     from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.dtypes import serialize_bytes
     pd = import_pandas()
     uuid_cols = get_uuid_cols(df)
-    if uuid_cols and safe_copy:
+    bytes_cols = get_bytes_cols(df)
+    if safe_copy and bool(uuid_cols or bytes_cols):
         df = df.copy()
     for col in uuid_cols:
         df[col] = df[col].astype(str)
+    for col in bytes_cols:
+        df[col] = df[col].apply(serialize_bytes)
     return df.infer_objects(copy=False).fillna(pd.NA).to_json(
         date_format=date_format,
         date_unit=date_unit,

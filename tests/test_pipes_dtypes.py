@@ -51,8 +51,9 @@ def test_dtype_enforcement(flavor: str):
     pipe.delete(debug=debug)
     pipe = Pipe(
         'dtype', 'enforcement',
-        static=True,
+        static=False,
         upsert=True, ### TODO: Test with `upsert=True`.
+        enforce=True,
         columns={
             'datetime': 'dt',
             'id': 'id',
@@ -67,6 +68,7 @@ def test_dtype_enforcement(flavor: str):
             'numeric': 'numeric',
             'str': 'str',
             'uuid': 'uuid',
+            'bytes': 'bytes',
         },
         instance=conn,
     )
@@ -78,9 +80,11 @@ def test_dtype_enforcement(flavor: str):
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': '{"a": {"b": 1}}'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'uuid': '00000000-1234-5678-0000-000000000000'}], debug=debug)
+    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bytes': 'Zm9vIGJhcg=='}], debug=debug)
+    return pipe
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
-    assert len(df.columns) == 10
+    assert len(df.columns) == 11
     for col, typ in df.dtypes.items():
         pipe_dtype = pipe.dtypes[col]
         if pipe_dtype == 'json':
@@ -91,6 +95,9 @@ def test_dtype_enforcement(flavor: str):
             pipe_dtype = 'object'
         elif pipe_dtype == 'uuid':
             assert isinstance(df[col][0], UUID)
+            pipe_dtype = 'object'
+        elif pipe_dtype == 'bytes':
+            assert isinstance(df[col][0], bytes)
             pipe_dtype = 'object'
         elif pipe_dtype == 'str':
             assert isinstance(df[col][0], str)
@@ -205,6 +212,31 @@ def test_infer_uuid_dtype(flavor: str):
     print(df)
     assert isinstance(df['a'][0], UUID)
     assert df['a'][0] == UUID(uuid_str)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_infer_bytes_dtype(flavor: str):
+    """
+    Ensure that `bytes` are persisted as `bytes`.
+    """
+    from meerschaum.utils.formatting import pprint
+    conn = conns[flavor]
+    pipe = Pipe('infer', 'bytes', instance=conn)
+    _ = pipe.delete(debug=debug)
+    pipe = Pipe('infer', 'bytes', instance=conn, columns=['id'])
+    bytes_data = b'foo bar'
+    success, msg = pipe.sync(
+        [
+            {'id': 1, 'a': bytes_data},
+        ],
+        debug=debug,
+    )
+    assert success, msg
+    pprint(pipe.get_columns_types())
+    df = pipe.get_data(debug=debug)
+    print(df)
+    assert isinstance(df['a'][0], bytes)
+    assert df['a'][0] == bytes_data
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -650,6 +682,63 @@ def test_sync_uuids_inplace(flavor: str):
     assert success, msg
     df = inplace_pipe.get_data(params={'id': 3})
     assert df['uuid_col'][0] is None
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_bytes_inplace(flavor: str):
+    """
+    Test that pipes are able to sync bytes in-place.
+    """
+    conn = conns[flavor]
+    if conn.type not in ('api', 'sql'):
+        return
+    pipe = mrsm.Pipe('test', 'bytes', 'inplace', instance=conn)
+    _ = pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'bytes', 'inplace',
+        instance=conn,
+        columns={'datetime': 'dt', 'id': 'id'},
+    )
+    pipe_table = sql_item_name(pipe.target, conn.flavor) if conn.type == 'sql' else pipe.target
+    inplace_pipe = mrsm.Pipe(conn, 'bytes', 'inplace', instance=conn)
+    _ = inplace_pipe.delete()
+    inplace_pipe = mrsm.Pipe(
+        conn, 'bytes', 'inplace',
+        instance=conn,
+        columns=pipe.columns,
+        dtypes={
+            'bytes_col': 'bytes',
+        },
+        parameters={
+            'fetch': {
+                'definition': f"SELECT * FROM {pipe_table}",
+                'pipe': pipe.keys(),
+            },
+        },
+    )
+    _ = pipe.drop()
+    docs = [
+        {'dt': '2023-01-01', 'id': 1, 'bytes_col': b'foo bar'},
+        {'dt': '2023-01-02', 'id': 2, 'bytes_col': b'do re mi'},
+        {'dt': '2023-01-03', 'id': 3},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    success, msg = inplace_pipe.sync(debug=debug)
+    assert success, msg
+
+    assert 'bytes' in inplace_pipe.dtypes['bytes_col']
+    assert inplace_pipe.get_rowcount() == len(docs)
+    db_col = inplace_pipe.get_columns_types(refresh=True)['bytes_col']
+    if flavor in PD_TO_DB_DTYPES_FLAVORS['bytes']:
+        uuid_typ = PD_TO_DB_DTYPES_FLAVORS['bytes'][flavor]
+        assert db_col.split('(',  maxsplit=1)[0] == uuid_typ.split('(', maxsplit=1)[0]
+
+    df = inplace_pipe.get_data()
+    assert df['bytes_col'][0] == b'foo bar'
+    assert df['bytes_col'][1] == b'do re mi'
+    assert df['bytes_col'][2] is None
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
