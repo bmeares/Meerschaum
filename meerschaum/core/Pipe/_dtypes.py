@@ -110,22 +110,17 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
     A dictionary of strings containing the pandas data types for this Pipe.
     """
     if not self.exists(debug=debug):
-        dtypes = {}
-        if not self.columns:
-            return {}
-        dt_col = self.columns.get('datetime', None)
-        if dt_col:
-            if not self.parameters.get('dtypes', {}).get(dt_col, None):
-                dtypes[dt_col] = 'datetime64[ns, UTC]'
-        return dtypes
+        return {}
 
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     from meerschaum.utils.dtypes import to_pandas_dtype
-    columns_types = self.get_columns_types(debug=debug)
 
     ### NOTE: get_columns_types() may return either the types as
     ###       PostgreSQL- or Pandas-style.
-    dtypes = {
+    columns_types = self.get_columns_types(debug=debug)
+
+    dtypes = self.parameters.get('dtypes', {})
+    remote_pd_dtypes = {
         c: (
             get_pd_type_from_db_type(t, allow_custom_dtypes=True)
             if str(t).isupper()
@@ -133,6 +128,11 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
         )
         for c, t in columns_types.items()
     } if columns_types else {}
+    dtypes.update({
+        col: typ
+        for col, typ in remote_pd_dtypes.items()
+        if col not in dtypes
+    })
     if persist:
         self.dtypes = dtypes
         self.edit(interactive=False, debug=debug)

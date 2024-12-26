@@ -161,7 +161,7 @@ def sync(
     self._exists = None
 
     def _sync(
-        p: 'meerschaum.Pipe',
+        p: mrsm.Pipe,
         df: Union[
             'pd.DataFrame',
             Dict[str, List[Any]],
@@ -960,10 +960,7 @@ def _persist_new_numeric_columns(self, df, debug: bool = False) -> SuccessTuple:
         return True, "Success"
 
     self._attributes_sync_time = None
-    dt_col = self.columns.get('datetime', None)
     dtypes = self.parameters.get('dtypes', {})
-    if dt_col not in dtypes:
-        dtypes[dt_col] = 'datetime'
     dtypes.update({col: 'numeric' for col in numeric_cols})
     self.parameters['dtypes'] = dtypes
     if not self.temporary:
@@ -988,10 +985,7 @@ def _persist_new_uuid_columns(self, df, debug: bool = False) -> SuccessTuple:
         return True, "Success"
 
     self._attributes_sync_time = None
-    dt_col = self.columns.get('datetime', None)
     dtypes = self.parameters.get('dtypes', {})
-    if dt_col not in dtypes:
-        dtypes[dt_col] = 'datetime'
     dtypes.update({col: 'uuid' for col in uuid_cols})
     self.parameters['dtypes'] = dtypes
     if not self.temporary:
@@ -1016,10 +1010,7 @@ def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
         return True, "Success"
 
     self._attributes_sync_time = None
-    dt_col = self.columns.get('datetime', None)
     dtypes = self.parameters.get('dtypes', {})
-    if dt_col not in dtypes:
-        dtypes[dt_col] = 'datetime'
     dtypes.update({col: 'json' for col in json_cols})
     self.parameters['dtypes'] = dtypes
 
@@ -1045,10 +1036,7 @@ def _persist_new_bytes_columns(self, df, debug: bool = False) -> SuccessTuple:
         return True, "Success"
 
     self._attributes_sync_time = None
-    dt_col = self.columns.get('datetime', None)
     dtypes = self.parameters.get('dtypes', {})
-    if dt_col not in dtypes:
-        dtypes[dt_col] = 'datetime'
     dtypes.update({col: 'bytes' for col in bytes_cols})
     self.parameters['dtypes'] = dtypes
 

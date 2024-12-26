@@ -13,9 +13,8 @@ NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'mariadb': (38, 20),
     'mysql': (38, 20),
     'mssql': (28, 10),
-    'duckdb': (15, 3),
-    'sqlite': (15, 4),
 }
+NUMERIC_AS_TEXT_FLAVORS = {'sqlite', 'duckdb'}
 TIMEZONE_NAIVE_FLAVORS = {'oracle', 'mysql', 'mariadb'}
 
 ### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
@@ -256,8 +255,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mysql': f'DECIMAL{NUMERIC_PRECISION_FLAVORS["mysql"]}',
         'mssql': f'NUMERIC{NUMERIC_PRECISION_FLAVORS["mssql"]}',
         'oracle': 'NUMBER',
-        'sqlite': f'DECIMAL{NUMERIC_PRECISION_FLAVORS["sqlite"]}',
-        'duckdb': 'NUMERIC',
+        'sqlite': 'TEXT',
+        'duckdb': 'TEXT',
         'citus': 'NUMERIC',
         'cockroachdb': 'NUMERIC',
         'default': 'NUMERIC',
@@ -415,7 +414,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mysql': 'Numeric',
         'mssql': 'Numeric',
         'oracle': 'Numeric',
-        'sqlite': 'Numeric',
+        'sqlite': 'UnicodeText',
         'duckdb': 'Numeric',
         'citus': 'Numeric',
         'cockroachdb': 'Numeric',
@@ -597,7 +596,6 @@ def get_db_type_from_pd_type(
         return cls(*cls_args, **cls_kwargs)
 
     if 'numeric' in db_type.lower():
-        numeric_type_str = PD_TO_DB_DTYPES_FLAVORS['numeric'].get(flavor, 'NUMERIC')
         if flavor not in NUMERIC_PRECISION_FLAVORS:
             return sqlalchemy_types.Numeric
         precision, scale = NUMERIC_PRECISION_FLAVORS[flavor]

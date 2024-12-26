@@ -81,7 +81,6 @@ def test_dtype_enforcement(flavor: str):
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'uuid': '00000000-1234-5678-0000-000000000000'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bytes': 'Zm9vIGJhcg=='}], debug=debug)
-    return pipe
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
     assert len(df.columns) == 11
@@ -161,7 +160,7 @@ def test_infer_numeric_dtype(flavor: str):
     from meerschaum.utils.misc import generate_password
     from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS
     scale, precision = NUMERIC_PRECISION_FLAVORS.get(
-        flavor, NUMERIC_PRECISION_FLAVORS['sqlite']
+        flavor, NUMERIC_PRECISION_FLAVORS['mssql']
     )
     digits = (list(reversed(range(0, 10))) * 4)[:(-1 * (40 - scale))]
     decimal_digits = digits[(-1 * precision):]
@@ -231,7 +230,6 @@ def test_infer_bytes_dtype(flavor: str):
         ],
         debug=debug,
     )
-    return pipe
     assert success, msg
     pprint(pipe.get_columns_types())
     df = pipe.get_data(debug=debug)
@@ -243,18 +241,17 @@ def test_infer_bytes_dtype(flavor: str):
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_infer_numeric_from_mixed_types(flavor: str):
     """
-    Ensure that new pipes with complex columns (dict or list) as enforced as NUMERIC. 
+    Ensure that new pipes with mixed int and floats as enforced as NUMERIC. 
     """
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.misc import generate_password
-    session_id = generate_password(6)
     conn = conns[flavor]
-    pipe = Pipe('foo', 'bar', session_id, instance=conn)
+    pipe = Pipe('test', 'infer_numeric', 'mixed', instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('foo', 'bar', session_id, instance=conn, columns=['id'])
-    success, msg = pipe.sync([{'id': 1, 'a': 1}])
+    pipe = Pipe('test', 'infer_numeric', 'mixed', instance=conn, columns=['id'])
+    success, msg = pipe.sync([{'id': 1, 'a': 1}], debug=debug)
     assert success, msg
-    success, msg = pipe.sync([{'id': 2, 'a': 2.1}])
+    success, msg = pipe.sync([{'id': 2, 'a': 2.1}], debug=debug)
     assert success, msg
     pprint(pipe.get_columns_types())
     df = pipe.get_data(debug=debug)

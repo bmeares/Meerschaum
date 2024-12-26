@@ -1686,7 +1686,8 @@ def get_null_replacement(typ: str, flavor: str) -> str:
         )
         return f'CAST({val_to_cast} AS {bool_typ})'
     if 'time' in typ.lower() or 'date' in typ.lower():
-        return dateadd_str(flavor=flavor, begin='1900-01-01', db_type=typ)
+        db_type = typ if typ.isupper() else None
+        return dateadd_str(flavor=flavor, begin='1900-01-01', db_type=db_type)
     if 'float' in typ.lower() or 'double' in typ.lower() or typ.lower() in ('decimal',):
         return '-987654321.0'
     if flavor == 'oracle' and typ.lower().split('(', maxsplit=1)[0] == 'char':

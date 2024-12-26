@@ -808,6 +808,7 @@ def to_sql(
     )
     from meerschaum.utils.dtypes.sql import (
         NUMERIC_PRECISION_FLAVORS,
+        NUMERIC_AS_TEXT_FLAVORS,
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
         get_db_type_from_pd_type,
     )
@@ -818,9 +819,11 @@ def to_sql(
     is_dask = 'dask' in df.__module__
 
     bytes_cols = get_bytes_cols(df)
+    numeric_cols = get_numeric_cols(df)
 
     stats = {'target': name,}
     ### resort to defaults if None
+    copied = False
     use_psql_copy = False
     if method == "":
         if self.flavor in _bulk_flavors:
@@ -831,10 +834,18 @@ def to_sql(
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
 
     if bytes_cols and (use_psql_copy or self.flavor == 'oracle'):
-        if safe_copy:
+        if safe_copy and not copied:
             df = df.copy()
+            copied = True
         for col in bytes_cols:
             df[col] = df[col].apply(encode_bytes_for_bytea, with_prefix=(self.flavor != 'oracle'))
+
+    if self.flavor in NUMERIC_AS_TEXT_FLAVORS:
+        if safe_copy and not copied:
+            df = df.copy()
+            copied = True
+        for col in numeric_cols:
+            df[col] = df[col].astype(str)
 
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
 
@@ -945,7 +956,6 @@ def to_sql(
     ### Check for numeric columns.
     numeric_scale, numeric_precision = NUMERIC_PRECISION_FLAVORS.get(self.flavor, (None, None))
     if numeric_precision is not None and numeric_scale is not None:
-        numeric_cols = get_numeric_cols(df)
         for col in numeric_cols:
             df[col] = df[col].apply(
                 lambda x: (

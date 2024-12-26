@@ -200,10 +200,15 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
     from meerschaum.config._patch import apply_patch_to_config
+    from meerschaum.utils.dtypes import MRSM_ALIAS_DTYPES
     configured_dtypes = self.parameters.get('dtypes', {})
     remote_dtypes = self.infer_dtypes(persist=False)
     patched_dtypes = apply_patch_to_config(remote_dtypes, configured_dtypes)
-    return {col: typ for col, typ in patched_dtypes.items() if col and typ}
+    return {
+        col: MRSM_ALIAS_DTYPES.get(typ, typ)
+        for col, typ in patched_dtypes.items()
+        if col and typ
+    }
 
 
 @dtypes.setter

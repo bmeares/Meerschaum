@@ -94,6 +94,11 @@ This is the current release cycle, so stay tuned for future releases!
 - **Virtual environment bugfixes.**  
   Existing virtual environment packages are backed up before re-initializing a virtual environment. This fixes the issue of disappearing dependencies.
 
+- **Store `numeric` as `TEXT` for SQLite and DuckDB.**  
+  Due to limited precision, `numeric` columns are now stored as `TEXT`, then parsed into `Decimal` objects upon retrieval.
+
+- **Improve dtype inference.** 
+
 ## 2.6.x Releases
 
 The 2.6 series added the `primary` index, `autoincrement`, and migrated to timezone-aware datetimes by default, as well as many quality-of-life improvements, especially for MSSQL.
