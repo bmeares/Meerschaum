@@ -97,7 +97,6 @@ def edit_pipe(
     if pipe.id is None:
         return False, f"{pipe} is not registered and cannot be edited."
 
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import json_flavors
     if not patch:
@@ -172,7 +171,7 @@ def fetch_pipes_keys(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.misc import separate_negation_values, flatten_list
+    from meerschaum.utils.misc import separate_negation_values
     from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS, table_exists
     from meerschaum.config.static import STATIC_CONFIG
     import json
@@ -792,8 +791,6 @@ def delete_pipe(
     """
     Delete a Pipe's registration.
     """
-    from meerschaum.utils.sql import sql_item_name
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
@@ -876,7 +873,6 @@ def get_pipe_data(
 
     """
     import json
-    from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.misc import parse_df_datetimes, to_pandas_dtype
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dtypes import (
@@ -1280,7 +1276,6 @@ def get_pipe_id(
     if pipe.temporary:
         return None
     from meerschaum.utils.packages import attempt_import
-    import json
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
     pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
@@ -3378,9 +3373,7 @@ def deduplicate_pipe(
     """
     from meerschaum.utils.sql import (
         sql_item_name,
-        NO_CTE_FLAVORS,
         get_rename_table_queries,
-        NO_SELECT_INTO_FLAVORS,
         DROP_IF_EXISTS_FLAVORS,
         get_create_table_query,
         format_cte_subquery,
@@ -3502,7 +3495,6 @@ def deduplicate_pipe(
     dedup_table = '-' + session_id + f'_dedup_{pipe.target}'
     temp_old_table = '-' + session_id + f"_old_{pipe.target}"
 
-    dedup_table_name = sql_item_name(dedup_table, self.flavor, self.get_pipe_schema(pipe))
     temp_old_table_name = sql_item_name(temp_old_table, self.flavor, self.get_pipe_schema(pipe))
 
     create_temporary_table_query = get_create_table_query(

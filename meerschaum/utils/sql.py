@@ -134,14 +134,26 @@ update_queries = {
     ],
     'oracle': """
         MERGE INTO {target_table_name} f
-            USING (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) p
+            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
             ON (
                 {and_subquery_f}
                 AND {date_bounds_subquery}
             )
-        WHEN MATCHED THEN
-            UPDATE
-            {sets_subquery_none}
+            WHEN MATCHED THEN
+                UPDATE
+                {sets_subquery_none}
+    """,
+    'oracle-upsert': """
+        MERGE INTO {target_table_name} f
+            USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
+            ON (
+                {and_subquery_f}
+                AND {date_bounds_subquery}
+            )
+            {when_matched_update_sets_subquery_none}
+            WHEN NOT MATCHED THEN
+                INSERT ({patch_cols_str})
+                VALUES ({patch_cols_prefixed_str})
     """,
     'sqlite-upsert': """
         INSERT INTO {target_table_name} ({patch_cols_str})
@@ -1445,7 +1457,8 @@ def get_update_queries(
     """
     from meerschaum.connectors import SQLConnector
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.dtypes.sql import DB_FLAVORS_CAST_DTYPES
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes.sql import DB_FLAVORS_CAST_DTYPES, get_pd_type_from_db_type
     flavor = flavor or (connectable.flavor if isinstance(connectable, SQLConnector) else None)
     if not flavor:
         raise ValueError("Provide a flavor if using a SQLAlchemy session.")
@@ -1538,16 +1551,30 @@ def get_update_queries(
     def sets_subquery(l_prefix: str, r_prefix: str):
         if not value_cols:
             return ''
+
+        cast_func_cols = {
+            c_name: (
+                ('', '', '')
+                if (
+                    flavor == 'oracle'
+                    and are_dtypes_equal(get_pd_type_from_db_type(c_type), 'bytes')
+                )
+                else (
+                    ('CAST(', f" AS {c_type.replace('_', ' ')}", ')')
+                    if flavor != 'sqlite'
+                    else ('', '', '')
+                )
+            )
+            for c_name, c_type in value_cols
+        }
         return 'SET ' + ',\n'.join([
             (
                 l_prefix + sql_item_name(c_name, flavor, None)
                 + ' = '
-                + ('CAST(' if flavor != 'sqlite' else '')
-                + r_prefix
-                + sql_item_name(c_name, flavor, None)
-                + (' AS ' if flavor != 'sqlite' else '')
-                + (c_type.replace('_', ' ') if flavor != 'sqlite' else '')
-                + (')' if flavor != 'sqlite' else '')
+                + cast_func_cols[c_name][0]
+                + r_prefix + sql_item_name(c_name, flavor, None)
+                + cast_func_cols[c_name][1]
+                + cast_func_cols[c_name][2]
             ) for c_name, c_type in value_cols
         ])
 
@@ -1692,6 +1719,8 @@ def get_null_replacement(typ: str, flavor: str) -> str:
         return '-987654321.0'
     if flavor == 'oracle' and typ.lower().split('(', maxsplit=1)[0] == 'char':
         return "'-987654321'"
+    if flavor == 'oracle' and typ.lower() in ('blob', 'bytes'):
+        return '00'
     if typ.lower() in ('uniqueidentifier', 'guid', 'uuid'):
         magic_val = 'DEADBEEF-ABBA-BABE-CAFE-DECAFC0FFEE5'
         if flavor == 'mssql':
