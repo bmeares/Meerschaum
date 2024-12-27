@@ -15,7 +15,19 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Union, Any
 from meerschaum.utils.warnings import warn
 
-MRSM_PD_DTYPES: Dict[str, str] = {
+MRSM_ALIAS_DTYPES: Dict[str, str] = {
+    'decimal': 'numeric',
+    'number': 'numeric',
+    'jsonl': 'json',
+    'JSON': 'json',
+    'binary': 'bytes',
+    'blob': 'bytes',
+    'varbinary': 'bytes',
+    'bytea': 'bytes',
+    'guid': 'uuid',
+    'UUID': 'uuid',
+}
+MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
     'numeric': 'object',
     'uuid': 'object',
@@ -27,6 +39,8 @@ MRSM_PD_DTYPES: Dict[str, str] = {
     'int32': 'Int32',
     'int64': 'Int64',
     'str': 'string[python]',
+    'bytes': 'object',
+    None: 'object',
 }
 
 
@@ -37,6 +51,10 @@ def to_pandas_dtype(dtype: str) -> str:
     known_dtype = MRSM_PD_DTYPES.get(dtype, None)
     if known_dtype is not None:
         return known_dtype
+
+    alias_dtype = MRSM_ALIAS_DTYPES.get(dtype, None)
+    if alias_dtype is not None:
+        return MRSM_PD_DTYPES[alias_dtype]
 
     ### NOTE: Kind of a hack, but if the first word of the given dtype is in all caps,
     ### treat it as a SQL db type.
@@ -95,7 +113,7 @@ def are_dtypes_equal(
     try:
         if ldtype == rdtype:
             return True
-    except Exception as e:
+    except Exception:
         warn(f"Exception when comparing dtypes, returning False:\n{traceback.format_exc()}")
         return False
 
@@ -113,6 +131,10 @@ def are_dtypes_equal(
 
     uuid_dtypes = ('uuid', 'object')
     if ldtype in uuid_dtypes and rdtype in uuid_dtypes:
+        return True
+
+    bytes_dtypes = ('bytes', 'object')
+    if ldtype in bytes_dtypes and rdtype in bytes_dtypes:
         return True
 
     ldtype_clean = ldtype.split('[', maxsplit=1)[0]
@@ -185,7 +207,7 @@ def attempt_cast_to_numeric(value: Any) -> Any:
             if not value_is_null(value)
             else Decimal('NaN')
         )
-    except Exception as e:
+    except Exception:
         return value
 
 
@@ -201,7 +223,23 @@ def attempt_cast_to_uuid(value: Any) -> Any:
             if not value_is_null(value)
             else None
         )
-    except Exception as e:
+    except Exception:
+        return value
+
+
+def attempt_cast_to_bytes(value: Any) -> Any:
+    """
+    Given a value, attempt to coerce it into a bytestring.
+    """
+    if isinstance(value, bytes):
+        return value
+    try:
+        return (
+            deserialize_bytes_string(str(value))
+            if not value_is_null(value)
+            else None
+        )
+    except Exception:
         return value
 
 
@@ -251,7 +289,7 @@ def coerce_timezone(
 ) -> Any:
     """
     Given a `datetime`, pandas `Timestamp` or `Series` of `Timestamp`,
-    return a naive datetime in terms of UTC.
+    return a UTC timestamp (strip timezone if `strip_utc` is `True`.
     """
     if dt is None:
         return None
@@ -266,9 +304,7 @@ def coerce_timezone(
     dt_is_series = hasattr(dt, 'dtype') and hasattr(dt, '__module__')
 
     if dt_is_series:
-        is_dask = 'dask' in dt.__module__
         pandas = mrsm.attempt_import('pandas', lazy=False)
-        dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
 
         if (
             pandas.api.types.is_datetime64_any_dtype(dt) and (
@@ -279,14 +315,13 @@ def coerce_timezone(
         ):
             return dt
 
-        dt_series = (
-            pandas.to_datetime(dt, utc=True, format='ISO8601')
-            if dd is None
-            else dd.to_datetime(dt, utc=True, format='ISO8601')
-        )
+        dt_series = to_datetime(dt, coerce_utc=False)
         if strip_utc:
-            if dt_series.dt.tz is not None:
-                dt_series = dt_series.dt.tz_localize(None)
+            try:
+                if dt_series.dt.tz is not None:
+                    dt_series = dt_series.dt.tz_localize(None)
+            except Exception:
+                pass
 
         return dt_series
 
@@ -299,3 +334,103 @@ def coerce_timezone(
     if strip_utc:
         return utc_dt.replace(tzinfo=None)
     return utc_dt
+
+
+def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = True) -> Any:
+    """
+    Wrap `pd.to_datetime()` and add support for out-of-bounds values.
+    """
+    pandas, dateutil_parser = mrsm.attempt_import('pandas', 'dateutil.parser', lazy=False)
+    is_dask = 'dask' in getattr(dt_val, '__module__', '')
+    dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
+    dt_is_series = hasattr(dt_val, 'dtype') and hasattr(dt_val, '__module__')
+    pd = pandas if dd is None else dd
+
+    try:
+        new_dt_val = pd.to_datetime(dt_val, utc=True, format='ISO8601')
+        if as_pydatetime:
+            return new_dt_val.to_pydatetime()
+        return new_dt_val
+    except (pd.errors.OutOfBoundsDatetime, ValueError):
+        pass
+
+    def parse(x: Any) -> Any:
+        try:
+            return dateutil_parser.parse(x)
+        except Exception:
+            return x
+
+    if dt_is_series:
+        new_series = dt_val.apply(parse)
+        if coerce_utc:
+            return coerce_timezone(new_series)
+        return new_series
+
+    new_dt_val = parse(dt_val)
+    if not coerce_utc:
+        return new_dt_val
+    return coerce_timezone(new_dt_val)
+
+
+def serialize_bytes(data: bytes) -> str:
+    """
+    Return the given bytes as a base64-encoded string.
+    """
+    import base64
+    if not isinstance(data, bytes) and value_is_null(data):
+        return data
+    return base64.b64encode(data).decode('utf-8')
+
+
+def deserialize_bytes_string(data: str | None, force_hex: bool = False) -> bytes | None:
+    """
+    Given a serialized ASCII string of bytes data, return the original bytes.
+    The input data may either be base64- or hex-encoded.
+
+    Parameters
+    ----------
+    data: str | None
+        The string to be deserialized into bytes.
+        May be base64- or hex-encoded (prefixed with `'\\x'`).
+
+    force_hex: bool = False
+        If `True`, treat the input string as hex-encoded.
+        If `data` does not begin with the prefix `'\\x'`, set `force_hex` to `True`.
+        This will still strip the leading `'\\x'` prefix if present.
+
+    Returns
+    -------
+    The original bytes used to produce the encoded string `data`.
+    """
+    if not isinstance(data, str) and value_is_null(data):
+        return data
+
+    import binascii
+    import base64
+
+    is_hex = force_hex or data.startswith('\\x')
+
+    if is_hex:
+        if data.startswith('\\x'):
+            data = data[2:]
+        return binascii.unhexlify(data)
+
+    return base64.b64decode(data)
+
+
+def deserialize_base64(data: str) -> bytes:
+    """
+    Return the original bytestring from the given base64-encoded string.
+    """
+    import base64
+    return base64.b64decode(data)
+
+
+def encode_bytes_for_bytea(data: bytes, with_prefix: bool = True) -> str | None:
+    """
+    Return the given bytes as a hex string for PostgreSQL's `BYTEA` type.
+    """
+    import binascii
+    if not isinstance(data, bytes) and value_is_null(data):
+        return data
+    return ('\\x' if with_prefix else '') + binascii.hexlify(data).decode('utf-8')

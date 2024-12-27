@@ -1,8 +1,107 @@
 # 🪵 Changelog
 
-## 2.6.x Releases
+## 2.7.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v2.7.0
+
+- **Introduce the `bytes` data type.**  
+  Instance connectors which support binary data (e.g. `SQLConnector`) may now take advantage of the `bytes` dtype. Other connectors (e.g. `ValkeyConnector`) may use `meerschaum.utils.dtypes.serialize_bytes()` to store binary data as a base64-encoded string.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'bytes',
+      instance='sql:memory',
+      dtypes={'blob': 'bytes'},
+  )
+  pipe.sync([
+      {'blob': b'hello, world!'},
+  ])
+
+  df = pipe.get_data()
+  binary_data = df['blob'][0]
+  print(binary_data.decode('utf-8'))
+  # hello, world!
+
+  from meerschaum.utils.dtypes import serialize_bytes, attempt_cast_to_bytes
+  df['encoded'] = df['blob'].apply(serialize_bytes)
+  df['decoded'] = df['encoded'].apply(attempt_cast_to_bytes)
+  print(df)
+  #                blob               encoded           decoded
+  # 0  b'hello, world!'  aGVsbG8sIHdvcmxkIQ==  b'hello, world!'
+  ```
+
+- **Allow for pipes to use the same column for `datetime`, `primary`, and `autoincrement=True`.**  
+  Pipes may now use the same column as the `datetime` axis and `primary` with `autoincrement` set to `True`.
+
+  ```python
+  pipe = mrsm.Pipe(
+      'demo', 'datetime_primary_key', 'autoincrement',
+      instance='sql:local',
+      columns={
+          'datetime': 'Id',
+          'primary': 'Id',
+      },
+      autoincrement=True,
+  )
+  ```
+
+- **Only join on `primary` when present.**  
+  When the index `primary` is set, use the column as the primary joining index. This will improve performance when syncing tables with a primary key.
+
+
+- **Add the parameter `enforce`.**  
+  The parameter `enforce` (default `True`) toggles data type enforcement behavior. When `enforce` is `False`, incoming data will not be cast to the desired data types. For static datasets where the incoming data is always expected to be of the correct dtypes, then it is recommended to set `enforce` to `False` and `static` to `True`.
+
+
+  ```python
+  from decimal import Decimal
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'enforce',
+      instance='sql:memory',
+      enforce=False,
+      static=True,
+      autoincrement=True,
+      columns={
+          'primary': 'Id',
+          'datetime': 'Id',
+      },
+      dtypes={
+          'Id': 'int',
+          'Amount': 'numeric',
+      },
+  )
+  pipe.sync([
+      {'Amount': Decimal('1.11')},
+      {'Amount': Decimal('2.22')},
+  ]) 
+
+  df = pipe.get_data()
+  print(df)
+  ```
+
+- **Create the `datetime` axis as a clustered index for MSSQL, even when a `primary` index is specififed.**  
+  Specifying a `datetime` and `primary` index will create a nonclustered `PRIMARY KEY`. Specifying the same column as both `datetime` and `primary` will create a clustered primary key (tip: this is useful when `autoincrement=True`).
+
+- **Increase the default chunk interval to 43200 minutes.**  
+  New hypertables will use a default chunksize of 30 days (43200 minutes).
+
+- **Virtual environment bugfixes.**  
+  Existing virtual environment packages are backed up before re-initializing a virtual environment. This fixes the issue of disappearing dependencies.
+
+- **Store `numeric` as `TEXT` for SQLite and DuckDB.**  
+  Due to limited precision, `numeric` columns are now stored as `TEXT`, then parsed into `Decimal` objects upon retrieval.
+
+- **Improve dtype inference.** 
+
+## 2.6.x Releases
+
+The 2.6 series added the `primary` index, `autoincrement`, and migrated to timezone-aware datetimes by default, as well as many quality-of-life improvements, especially for MSSQL.
 
 ### v2.6.17
 

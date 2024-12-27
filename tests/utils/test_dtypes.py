@@ -27,6 +27,7 @@ pd = import_pandas(debug=DEBUG)
         ('float', 'object', False),
         ('datetime', 'object', False),
         ('uuid', 'object', True),
+        ('bytes', 'object', True),
     ]
 )
 def test_are_dtypes_equal(ldtype: str, rdtype: str, are_equal: bool):

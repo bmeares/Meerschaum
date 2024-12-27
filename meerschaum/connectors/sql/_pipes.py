@@ -97,7 +97,6 @@ def edit_pipe(
     if pipe.id is None:
         return False, f"{pipe} is not registered and cannot be edited."
 
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import json_flavors
     if not patch:
@@ -172,7 +171,7 @@ def fetch_pipes_keys(
     """
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.misc import separate_negation_values, flatten_list
+    from meerschaum.utils.misc import separate_negation_values
     from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS, table_exists
     from meerschaum.config.static import STATIC_CONFIG
     import json
@@ -316,7 +315,6 @@ def create_indices(
     """
     Create a pipe's indices.
     """
-    from meerschaum.utils.sql import sql_item_name, update_queries
     from meerschaum.utils.debug import dprint
     if debug:
         dprint(f"Creating indices for {pipe}...")
@@ -419,11 +417,14 @@ def get_create_index_queries(
     existing_cols_indices = self.get_pipe_columns_indices(pipe, debug=debug)
     existing_ix_names = set()
     existing_primary_keys = []
+    existing_clustered_primary_keys = []
     for col, col_indices in existing_cols_indices.items():
         for col_ix_doc in col_indices:
             existing_ix_names.add(col_ix_doc.get('name', None))
             if col_ix_doc.get('type', None) == 'PRIMARY KEY':
                 existing_primary_keys.append(col)
+                if col_ix_doc.get('clustered', True):
+                    existing_clustered_primary_keys.append(col)
 
     _datetime = pipe.get_columns('datetime', error=False)
     _datetime_name = (
@@ -460,9 +461,15 @@ def get_create_index_queries(
         else None
     )
     primary_key_constraint_name = (
-        sql_item_name(f'pk_{pipe.target}', self.flavor, None)
+        sql_item_name(f'PK_{pipe.target}', self.flavor, None)
         if primary_key is not None
         else None
+    )
+    primary_key_clustered = "CLUSTERED" if _datetime is None else "NONCLUSTERED"
+    datetime_clustered = (
+        "CLUSTERED"
+        if not existing_clustered_primary_keys and _datetime is not None
+        else "NONCLUSTERED"
     )
 
     _id_index_name = (
@@ -474,6 +481,7 @@ def get_create_index_queries(
     _create_space_partition = get_config('system', 'experimental', 'space')
 
     ### create datetime index
+    dt_query = None
     if _datetime is not None:
         if self.flavor == 'timescaledb' and pipe.parameters.get('hypertable', True):
             _id_count = (
@@ -504,19 +512,19 @@ def get_create_index_queries(
                 + 'if_not_exists => true, '
                 + "migrate_data => true);"
             )
-        elif self.flavor == 'mssql':
-            dt_query = (
-                "CREATE "
-                + ("CLUSTERED " if not primary_key else '')
-                + f"INDEX {_datetime_index_name} "
-                + f"ON {_pipe_name} ({_datetime_name})"
-            )
-        else: ### mssql, sqlite, etc.
-            dt_query = (
-                f"CREATE INDEX {_datetime_index_name} "
-                + f"ON {_pipe_name} ({_datetime_name})"
-            )
+        elif _datetime_index_name:
+            if self.flavor == 'mssql':
+                dt_query = (
+                    f"CREATE {datetime_clustered} INDEX {_datetime_index_name} "
+                    f"ON {_pipe_name} ({_datetime_name})"
+                )
+            else:
+                dt_query = (
+                    f"CREATE INDEX {_datetime_index_name} "
+                    + f"ON {_pipe_name} ({_datetime_name})"
+                )
 
+    if dt_query:
         index_queries[_datetime] = [dt_query]
 
     primary_queries = []
@@ -623,7 +631,7 @@ def get_create_index_queries(
                     ),
                     (
                         f"ALTER TABLE {_pipe_name}\n"
-                        f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
+                        f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name})"
                     ),
                 ])
         index_queries[primary_key] = primary_queries
@@ -658,6 +666,8 @@ def get_create_index_queries(
         cols = indices[ix_key]
         if not isinstance(cols, (list, tuple)):
             cols = [cols]
+        if ix_key == 'unique' and upsert:
+            continue
         cols_names = [sql_item_name(col, self.flavor, None) for col in cols if col]
         if not cols_names:
             continue
@@ -785,8 +795,6 @@ def delete_pipe(
     """
     Delete a Pipe's registration.
     """
-    from meerschaum.utils.sql import sql_item_name
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy')
 
@@ -869,19 +877,19 @@ def get_pipe_data(
 
     """
     import json
-    from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.misc import parse_df_datetimes, to_pandas_dtype
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dtypes import (
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
+        attempt_cast_to_bytes,
         are_dtypes_equal,
     )
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
 
-    cols_types = pipe.get_columns_types(debug=debug)
+    cols_types = pipe.get_columns_types(debug=debug) if pipe.enforce else {}
     dtypes = {
         **{
             p_col: to_pandas_dtype(p_typ)
@@ -891,24 +899,21 @@ def get_pipe_data(
             col: get_pd_type_from_db_type(typ)
             for col, typ in cols_types.items()
         }
-    }
+    } if pipe.enforce else {}
     if dtypes:
         if self.flavor == 'sqlite':
             if not pipe.columns.get('datetime', None):
                 _dt = pipe.guess_datetime()
-                dt = sql_item_name(_dt, self.flavor, None) if _dt else None
-                is_guess = True
             else:
                 _dt = pipe.get_columns('datetime')
-                dt = sql_item_name(_dt, self.flavor, None)
-                is_guess = False
 
             if _dt:
                 dt_type = dtypes.get(_dt, 'object').lower()
                 if 'datetime' not in dt_type:
                     if 'int' not in dt_type:
                         dtypes[_dt] = 'datetime64[ns, UTC]'
-    existing_cols = pipe.get_columns_types(debug=debug)
+
+    existing_cols = cols_types.keys()
     select_columns = (
         [
             col
@@ -922,14 +927,14 @@ def get_pipe_data(
             if col in existing_cols
             and col not in (omit_columns or [])
         ]
-    )
+    ) if pipe.enforce else select_columns
     if select_columns:
         dtypes = {col: typ for col, typ in dtypes.items() if col in select_columns}
     dtypes = {
         col: to_pandas_dtype(typ)
         for col, typ in dtypes.items()
         if col in select_columns and col not in (omit_columns or [])
-    }
+    } if pipe.enforce else {}
     query = self.get_pipe_data_query(
         pipe,
         select_columns=select_columns,
@@ -959,6 +964,11 @@ def get_pipe_data(
         for col, typ in pipe.dtypes.items()
         if typ == 'uuid' and col in dtypes
     ]
+    bytes_columns = [
+        col
+        for col, typ in pipe.dtypes.items()
+        if typ == 'bytes' and col in dtypes
+    ]
 
     kw['coerce_float'] = kw.get('coerce_float', (len(numeric_columns) == 0))
 
@@ -977,6 +987,11 @@ def get_pipe_data(
         if col not in df.columns:
             continue
         df[col] = df[col].apply(attempt_cast_to_uuid)
+
+    for col in bytes_columns:
+        if col not in df.columns:
+            continue
+        df[col] = df[col].apply(attempt_cast_to_bytes)
 
     if self.flavor == 'sqlite':
         ignore_dt_cols = [
@@ -1093,12 +1108,13 @@ def get_pipe_data_query(
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
 
     dt_col = pipe.columns.get('datetime', None)
-    existing_cols = pipe.get_columns_types(debug=debug)
+    existing_cols = pipe.get_columns_types(debug=debug) if pipe.enforce else []
+    skip_existing_cols_check = skip_existing_cols_check or not pipe.enforce
     dt_typ = get_pd_type_from_db_type(existing_cols[dt_col]) if dt_col in existing_cols else None
     select_columns = (
         [col for col in existing_cols]
         if not select_columns
-        else [col for col in select_columns if col in existing_cols or skip_existing_cols_check]
+        else [col for col in select_columns if skip_existing_cols_check or col in existing_cols]
     )
     if omit_columns:
         select_columns = [col for col in select_columns if col not in omit_columns]
@@ -1185,7 +1201,7 @@ def get_pipe_data_query(
             number=begin_add_minutes,
             begin=begin,
         )
-        where += f"{dt} >= {begin_da}" + (" AND " if end is not None else "")
+        where += f"\n    {dt} >= {begin_da}" + ("\n    AND\n    " if end is not None else "")
         is_dt_bound = True
 
     if end is not None and (_dt in existing_cols or skip_existing_cols_check):
@@ -1197,7 +1213,7 @@ def get_pipe_data_query(
             number=end_add_minutes,
             begin=end
         )
-        where += f"{dt} < {end_da}"
+        where += f"{dt} <  {end_da}"
         is_dt_bound = True
 
     if params is not None:
@@ -1209,7 +1225,7 @@ def get_pipe_data_query(
         }
         if valid_params:
             where += build_where(valid_params, self).replace(
-                'WHERE', ('AND' if is_dt_bound else "")
+                'WHERE', ('    AND' if is_dt_bound else "    ")
             )
 
     if len(where) > 0:
@@ -1264,7 +1280,6 @@ def get_pipe_id(
     if pipe.temporary:
         return None
     from meerschaum.utils.packages import attempt_import
-    import json
     sqlalchemy = attempt_import('sqlalchemy')
     from meerschaum.connectors.sql.tables import get_tables
     pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
@@ -1339,7 +1354,13 @@ def create_pipe_table_from_df(
     """
     Create a pipe's table from its configured dtypes and an incoming dataframe.
     """
-    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
+    from meerschaum.utils.dataframe import (
+        get_json_cols,
+        get_numeric_cols,
+        get_uuid_cols,
+        get_datetime_cols,
+        get_bytes_cols,
+    )
     from meerschaum.utils.sql import get_create_table_queries, sql_item_name
     primary_key = pipe.columns.get('primary', None)
     dt_col = pipe.columns.get('datetime', None)
@@ -1364,6 +1385,18 @@ def create_pipe_table_from_df(
         **{
             col: 'numeric'
             for col in get_numeric_cols(df)
+        },
+        **{
+            col: 'bytes'
+            for col in get_bytes_cols(df)
+        },
+        **{
+            col: 'datetime64[ns, UTC]'
+            for col in get_datetime_cols(df, timezone_aware=True, timezone_naive=False)
+        },
+        **{
+            col: 'datetime64[ns]'
+            for col in get_datetime_cols(df, timezone_aware=False, timezone_naive=True)
         },
         **pipe.dtypes
     }
@@ -1455,11 +1488,9 @@ def sync_pipe(
         get_update_queries,
         sql_item_name,
         update_queries,
-        get_create_table_queries,
         get_reset_autoincrement_queries,
     )
     from meerschaum.utils.misc import generate_password
-    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     from meerschaum import Pipe
@@ -1567,11 +1598,13 @@ def sync_pipe(
         'if_exists': if_exists,
         'debug': debug,
         'as_dict': True,
+        'safe_copy': kw.get('safe_copy', False),
         'chunksize': chunksize,
         'dtype': self.get_to_sql_dtype(pipe, unseen_df, update_dtypes=True),
         'schema': self.get_pipe_schema(pipe),
     })
 
+    dt_col = pipe.columns.get('datetime', None)
     primary_key = pipe.columns.get('primary', None)
     autoincrement = (
         pipe.parameters.get('autoincrement', False)
@@ -1622,35 +1655,37 @@ def sync_pipe(
         and primary_key in unseen_df.columns
         and autoincrement
     )
-    with self.engine.connect() as connection:
-        with connection.begin():
-            if do_identity_insert:
-                identity_on_result = self.exec(
-                    f"SET IDENTITY_INSERT {pipe_name} ON",
-                    commit=False,
-                    _connection=connection,
-                    close=False,
-                    debug=debug,
-                )
-                if identity_on_result is None:
-                    return False, f"Could not enable identity inserts on {pipe}."
+    stats = {'success': True, 'msg': 'Success'}
+    if len(unseen_df) > 0:
+        with self.engine.connect() as connection:
+            with connection.begin():
+                if do_identity_insert:
+                    identity_on_result = self.exec(
+                        f"SET IDENTITY_INSERT {pipe_name} ON",
+                        commit=False,
+                        _connection=connection,
+                        close=False,
+                        debug=debug,
+                    )
+                    if identity_on_result is None:
+                        return False, f"Could not enable identity inserts on {pipe}."
 
-            stats = self.to_sql(
-                unseen_df,
-                _connection=connection,
-                **unseen_kw
-            )
-
-            if do_identity_insert:
-                identity_off_result = self.exec(
-                    f"SET IDENTITY_INSERT {pipe_name} OFF",
-                    commit=False,
+                stats = self.to_sql(
+                    unseen_df,
                     _connection=connection,
-                    close=False,
-                    debug=debug,
+                    **unseen_kw
                 )
-                if identity_off_result is None:
-                    return False, f"Could not disable identity inserts on {pipe}."
+
+                if do_identity_insert:
+                    identity_off_result = self.exec(
+                        f"SET IDENTITY_INSERT {pipe_name} OFF",
+                        commit=False,
+                        _connection=connection,
+                        close=False,
+                        debug=debug,
+                    )
+                    if identity_off_result is None:
+                        return False, f"Could not disable identity inserts on {pipe}."
 
     if is_new:
         if not self.create_indices(pipe, debug=debug):
@@ -1689,11 +1724,12 @@ def sync_pipe(
             },
             target=temp_target,
             temporary=True,
+            enforce=False,
+            static=True,
+            autoincrement=False,
             parameters={
-                'static': True,
-                'schema': self.internal_schema,
+                'schema': (self.internal_schema if self.flavor != 'mssql' else None),
                 'hypertable': False,
-                'autoincrement': False,
             },
         )
         temp_pipe.__dict__['_columns_types'] = {
@@ -1714,7 +1750,11 @@ def sync_pipe(
             col
             for col_key, col in pipe.columns.items()
             if col and col in existing_cols
-        ]
+        ] if not primary_key or self.flavor == 'oracle' else (
+            [dt_col, primary_key]
+            if self.flavor == 'timescaledb' and dt_col and dt_col in update_df.columns
+            else [primary_key]
+        )
         update_queries = get_update_queries(
             pipe.target,
             temp_target,
@@ -1723,12 +1763,17 @@ def sync_pipe(
             upsert=upsert,
             schema=self.get_pipe_schema(pipe),
             patch_schema=self.internal_schema,
-            datetime_col=pipe.columns.get('datetime', None),
+            datetime_col=(dt_col if dt_col in update_df.columns else None),
+            identity_insert=(autoincrement and primary_key in update_df.columns),
             debug=debug,
         )
-        update_success = all(
-            self.exec_queries(update_queries, break_on_error=True, rollback=True, debug=debug)
+        update_results = self.exec_queries(
+            update_queries,
+            break_on_error=True,
+            rollback=True,
+            debug=debug,
         )
+        update_success = all(update_results)
         self._log_temporary_tables_creation(
             temp_target,
             ready_to_drop=True,
@@ -1737,6 +1782,8 @@ def sync_pipe(
         )
         if not update_success:
             warn(f"Failed to apply update to {pipe}.")
+        stats['success'] = stats['success'] and update_success
+        stats['msg'] = (stats.get('msg', '') + f'\nFailed to apply update to {pipe}.').lstrip()
 
     stop = time.perf_counter()
     success = stats['success']
@@ -1841,7 +1888,6 @@ def sync_pipe_inplace(
         session_execute,
         update_queries,
     )
-    from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import (
         get_pd_type_from_db_type,
     )
@@ -1914,8 +1960,8 @@ def sync_pipe_inplace(
             autoincrement=autoincrement,
             datetime_column=dt_col,
         )
-        result = self.exec_queries(create_pipe_queries, debug=debug)
-        if result is None:
+        results = self.exec_queries(create_pipe_queries, debug=debug)
+        if not all(results):
             _ = clean_up_temp_tables()
             return False, f"Could not insert new data into {pipe} from its SQL query definition."
 
@@ -2061,6 +2107,7 @@ def sync_pipe_inplace(
     ) if not (upsert or static) else new_cols_types
 
     common_cols = [col for col in new_cols if col in backtrack_cols_types]
+    primary_key = pipe.columns.get('primary', None)
     on_cols = {
         col: new_cols.get(col)
         for col_key, col in pipe.columns.items()
@@ -2071,7 +2118,7 @@ def sync_pipe_inplace(
             and col in backtrack_cols_types
             and col in new_cols
         )
-    }
+    } if not primary_key or self.flavor == 'oracle' else {primary_key: new_cols.get(primary_key)}
 
     null_replace_new_cols_str = (
         ', '.join([
@@ -3338,9 +3385,7 @@ def deduplicate_pipe(
     """
     from meerschaum.utils.sql import (
         sql_item_name,
-        NO_CTE_FLAVORS,
         get_rename_table_queries,
-        NO_SELECT_INTO_FLAVORS,
         DROP_IF_EXISTS_FLAVORS,
         get_create_table_query,
         format_cte_subquery,
@@ -3462,7 +3507,6 @@ def deduplicate_pipe(
     dedup_table = '-' + session_id + f'_dedup_{pipe.target}'
     temp_old_table = '-' + session_id + f"_old_{pipe.target}"
 
-    dedup_table_name = sql_item_name(dedup_table, self.flavor, self.get_pipe_schema(pipe))
     temp_old_table_name = sql_item_name(temp_old_table, self.flavor, self.get_pipe_schema(pipe))
 
     create_temporary_table_query = get_create_table_query(

@@ -139,7 +139,6 @@ def filter_unseen_df(
     import functools
     import traceback
     from decimal import Decimal
-    from uuid import UUID
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import import_pandas, attempt_import
     from meerschaum.utils.dtypes import (
@@ -147,6 +146,7 @@ def filter_unseen_df(
         are_dtypes_equal,
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
+        attempt_cast_to_bytes,
         coerce_timezone,
     )
     pd = import_pandas(debug=debug)
@@ -333,6 +333,11 @@ def filter_unseen_df(
     old_uuid_cols = get_uuid_cols(old_df)
     new_uuid_cols = get_uuid_cols(new_df)
     uuid_cols = set(new_uuid_cols + old_uuid_cols)
+
+    old_bytes_cols = get_bytes_cols(old_df)
+    new_bytes_cols = get_bytes_cols(new_df)
+    bytes_cols = set(new_bytes_cols + old_bytes_cols)
+
     joined_df = merge(
         new_df.infer_objects(copy=False).fillna(NA),
         old_df.infer_objects(copy=False).fillna(NA),
@@ -367,6 +372,14 @@ def filter_unseen_df(
             delta_df[uuid_col] = delta_df[uuid_col].apply(attempt_cast_to_uuid)
         except Exception:
             warn(f"Unable to parse numeric column '{uuid_col}':\n{traceback.format_exc()}")
+
+    for bytes_col in bytes_cols:
+        if bytes_col not in delta_df.columns:
+            continue
+        try:
+            delta_df[bytes_col] = delta_df[bytes_col].apply(attempt_cast_to_bytes)
+        except Exception:
+            warn(f"Unable to parse bytes column '{bytes_col}':\n{traceback.format_exc()}")
 
     return delta_df
 
@@ -429,6 +442,7 @@ def parse_df_datetimes(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import items_str
+    from meerschaum.utils.dtypes import to_datetime
     import traceback
     pd = import_pandas()
     pandas = attempt_import('pandas')
@@ -480,7 +494,7 @@ def parse_df_datetimes(
     ### skip parsing if DataFrame is empty
     if len(pdf) == 0:
         if debug:
-            dprint(f"df is empty. Returning original DataFrame without casting datetime columns...")
+            dprint("df is empty. Returning original DataFrame without casting datetime columns...")
         return df
 
     ignore_cols = set(
@@ -494,8 +508,8 @@ def parse_df_datetimes(
 
     if len(cols_to_inspect) == 0:
         if debug:
-            dprint(f"All columns are ignored, skipping datetime detection...")
-        return df.fillna(pandas.NA)
+            dprint("All columns are ignored, skipping datetime detection...")
+        return df.infer_objects(copy=False).fillna(pandas.NA)
 
     ### apply regex to columns to determine which are ISO datetimes
     iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d+'
@@ -508,21 +522,17 @@ def parse_df_datetimes(
     if not datetime_cols:
         if debug:
             dprint("No columns detected as datetimes, returning...")
-        return df.fillna(pandas.NA)
+        return df.infer_objects(copy=False).fillna(pandas.NA)
 
     if debug:
         dprint("Converting columns to datetimes: " + str(datetime_cols))
 
     try:
         if not using_dask:
-            df[datetime_cols] = df[datetime_cols].apply(
-                pd.to_datetime,
-                utc=True,
-                format='ISO8601',
-            )
+            df[datetime_cols] = df[datetime_cols].apply(to_datetime)
         else:
             df[datetime_cols] = df[datetime_cols].apply(
-                pd.to_datetime,
+                to_datetime,
                 utc=True,
                 axis=1,
                 meta={
@@ -665,7 +675,7 @@ def get_uuid_cols(df: 'pd.DataFrame') -> List[str]:
 
     Returns
     -------
-    A list of columns to treat as numerics.
+    A list of columns to treat as UUIDs.
     """
     if df is None:
         return []
@@ -688,6 +698,135 @@ def get_uuid_cols(df: 'pd.DataFrame') -> List[str]:
             ix is not None
             and
             isinstance(df.loc[ix][col], UUID)
+        )
+    ]
+
+
+def get_datetime_cols(
+    df: 'pd.DataFrame',
+    timezone_aware: bool = True,
+    timezone_naive: bool = True,
+) -> List[str]:
+    """
+    Get the columns which contain `datetime` or `Timestamp` objects from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain `datetime` or `Timestamp` objects.
+
+    timezone_aware: bool, default True
+        If `True`, include timezone-aware datetime columns.
+
+    timezone_naive: bool, default True
+        If `True`, include timezone-naive datetime columns.
+
+    Returns
+    -------
+    A list of columns to treat as datetimes.
+    """
+    if not timezone_aware and not timezone_naive:
+        raise ValueError("`timezone_aware` and `timezone_naive` cannot both be `False`.")
+
+    if df is None:
+        return []
+
+    from datetime import datetime
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+
+    known_dt_cols = [
+        col
+        for col, typ in df.dtypes.items()
+        if are_dtypes_equal('datetime', str(typ))
+    ]
+
+    if len(df) == 0:
+        return known_dt_cols
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+        if col not in known_dt_cols
+    }
+    pydt_cols = [
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and
+            isinstance(df.loc[ix][col], datetime)
+        )
+    ]
+    dt_cols_set = set(known_dt_cols + pydt_cols)
+    all_dt_cols = [
+        col
+        for col in df.columns
+        if col in dt_cols_set
+    ]
+    if timezone_aware and timezone_naive:
+        return all_dt_cols
+
+    known_timezone_aware_dt_cols = [
+        col
+        for col in known_dt_cols
+        if getattr(df[col], 'tz', None) is not None
+    ]
+    timezone_aware_pydt_cols = [
+        col
+        for col in pydt_cols
+        if df.loc[cols_indices[col]][col].tzinfo is not None
+    ]
+    timezone_aware_dt_cols_set = set(known_timezone_aware_dt_cols + timezone_aware_pydt_cols)
+    if timezone_aware:
+        return [
+            col
+            for col in all_dt_cols
+            if col in timezone_aware_pydt_cols
+        ]
+
+    return [
+        col
+        for col in all_dt_cols
+        if col not in timezone_aware_dt_cols_set
+    ]
+
+
+def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the columns which contain bytes strings from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain bytes strings.
+
+    Returns
+    -------
+    A list of columns to treat as bytes.
+    """
+    if df is None:
+        return []
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+
+    if len(df) == 0:
+        return []
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+    }
+    return [
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and
+            isinstance(df.loc[ix][col], bytes)
         )
     ]
 
@@ -743,6 +882,7 @@ def enforce_dtypes(
         is_dtype_numeric,
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
+        attempt_cast_to_bytes,
         coerce_timezone as _coerce_timezone,
     )
     pandas = mrsm.attempt_import('pandas')
@@ -772,6 +912,11 @@ def enforce_dtypes(
         col
         for col, typ in dtypes.items()
         if typ == 'uuid'
+    ]
+    bytes_cols = [
+        col
+        for col, typ in dtypes.items()
+        if typ == 'bytes'
     ]
     datetime_cols = [
         col
@@ -825,6 +970,17 @@ def enforce_dtypes(
                 except Exception as e:
                     if debug:
                         dprint(f"Unable to parse column '{col}' as UUID:\n{e}")
+
+    if bytes_cols:
+        if debug:
+            dprint(f"Checking for bytes: {bytes_cols}")
+        for col in bytes_cols:
+            if col in df.columns:
+                try:
+                    df[col] = df[col].apply(attempt_cast_to_bytes)
+                except Exception as e:
+                    if debug:
+                        dprint(f"Unable to parse column '{col}' as bytes:\n{e}")
 
     if datetime_cols and coerce_timezone:
         if debug:
@@ -931,6 +1087,8 @@ def get_datetime_bound_from_df(
     -------
     The minimum or maximum datetime value in the dataframe, or `None`.
     """
+    from meerschaum.utils.dtypes import to_datetime, value_is_null
+
     if df is None:
         return None
     if not datetime_column:
@@ -982,9 +1140,9 @@ def get_datetime_bound_from_df(
             dt_val = dt_val.compute()
 
         return (
-            pandas.to_datetime(dt_val).to_pydatetime()
+            to_datetime(dt_val, as_pydatetime=True)
             if are_dtypes_equal(str(type(dt_val)), 'datetime')
-            else (dt_val if dt_val is not pandas.NA else None)
+            else (dt_val if not value_is_null(dt_val) else None)
         )
 
     return None
@@ -1127,7 +1285,7 @@ def get_first_valid_dask_partition(ddf: 'dask.dataframe.DataFrame') -> Union['pd
     for partition in ddf.partitions:
         try:
             pdf = partition.compute()
-        except Exception as e:
+        except Exception:
             continue
         if len(pdf) > 0:
             return pdf
@@ -1408,12 +1566,16 @@ def to_json(
     A JSON string.
     """
     from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.dtypes import serialize_bytes
     pd = import_pandas()
     uuid_cols = get_uuid_cols(df)
-    if uuid_cols and safe_copy:
+    bytes_cols = get_bytes_cols(df)
+    if safe_copy and bool(uuid_cols or bytes_cols):
         df = df.copy()
     for col in uuid_cols:
         df[col] = df[col].astype(str)
+    for col in bytes_cols:
+        df[col] = df[col].apply(serialize_bytes)
     return df.infer_objects(copy=False).fillna(pd.NA).to_json(
         date_format=date_format,
         date_unit=date_unit,

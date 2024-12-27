@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
 
+
 def enforce_dtypes(
     self,
     df: 'pd.DataFrame',
@@ -30,7 +31,7 @@ def enforce_dtypes(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.dataframe import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PD_DTYPES
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas(debug=debug)
     if df is None:
@@ -41,7 +42,11 @@ def enforce_dtypes(
             )
         return df
 
-    pipe_dtypes = self.dtypes
+    pipe_dtypes = self.dtypes if self.enforce else {
+        col: typ
+        for col, typ in self.dtypes.items()
+        if typ in MRSM_PD_DTYPES
+    }
 
     try:
         if isinstance(df, str):
@@ -105,22 +110,16 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
     A dictionary of strings containing the pandas data types for this Pipe.
     """
     if not self.exists(debug=debug):
-        dtypes = {}
-        if not self.columns:
-            return {}
-        dt_col = self.columns.get('datetime', None)
-        if dt_col:
-            if not self.parameters.get('dtypes', {}).get(dt_col, None):
-                dtypes[dt_col] = 'datetime64[ns, UTC]'
-        return dtypes
+        return {}
 
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     from meerschaum.utils.dtypes import to_pandas_dtype
-    columns_types = self.get_columns_types(debug=debug)
 
     ### NOTE: get_columns_types() may return either the types as
     ###       PostgreSQL- or Pandas-style.
-    dtypes = {
+    columns_types = self.get_columns_types(debug=debug)
+
+    remote_pd_dtypes = {
         c: (
             get_pd_type_from_db_type(t, allow_custom_dtypes=True)
             if str(t).isupper()
@@ -128,7 +127,15 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
         )
         for c, t in columns_types.items()
     } if columns_types else {}
-    if persist:
-        self.dtypes = dtypes
-        self.edit(interactive=False, debug=debug)
-    return dtypes
+    if not persist:
+        return remote_pd_dtypes
+
+    dtypes = self.parameters.get('dtypes', {})
+    dtypes.update({
+        col: typ
+        for col, typ in remote_pd_dtypes.items()
+        if col not in dtypes
+    })
+    self.dtypes = dtypes
+    self.edit(interactive=False, debug=debug)
+    return remote_pd_dtypes

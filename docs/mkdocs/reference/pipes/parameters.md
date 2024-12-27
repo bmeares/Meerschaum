@@ -50,20 +50,45 @@ You may designate the same column as both the `datetime` and `primary` indices.
 
 ## `dtypes`
 
-Meerschaum data types allow you to specify how columns should be parsed, deserialized, and stored. With the exception of special types like `numeric`, `uuid`, and `json`, you may specify other Pandas data types (e.g. `datetime64[ns]` for `datetime`).
+Meerschaum data types allow you to specify how columns should be parsed, deserialized, and stored. In addition to special types like `numeric`, `uuid`, `json`, and `bytes`, you may specify other Pandas data types (e.g. `datetime64[ns]`).
 
 Below are the supported Meerschaum data types. See the [SQL dtypes source](https://github.com/bmeares/Meerschaum/blob/main/meerschaum/utils/dtypes/sql.py) to see which types map to specific database types.
 
-| Data Type  | Example                                        | Python, Pandas Types                         | SQL Types Notes                                                                  |
-|------------|------------------------------------------------|----------------------------------------------|----------------------------------------------------------------------------------|
-| `int`      | `1`                                            | `int`, `Int64`, `int64[pyarrow]`, etc.       | `BIGINT`                                                                         |
-| `float`    | `1.1`                                          | `float`, `float64`, `float64[pyarrow]`, etc. | `DOUBLE PRECISION`, `FLOAT`                                                      |
-| `string`   | `'foo'`                                        | `str`, `string[python]`                      | `TEXT`. `NVARCHAR(MAX)` for MSSQL, `NVARCHAR2(2000)` for Oracle.                 |
-| `datetime` | `Timestamp('2024-01-01 00:00:00')`             | `datetime`, `Timestamp`                      | `TIMESTAMP`. Offsets are applied and stripped. All datetimes are treated as UTC. |
-| `numeric`  | `Decimal('1.000')`                             | `Decimal`                                    | `NUMERIC`, `DECIMAL`                                                             |
-| `uuid`     | `UUID('df2572b5-e42e-410d-a624-a14519f73e00')` | `UUID`                                       | `UUID` where supported. `UNIQUEIDENTIFIER` for MSSQL.                            |
-| `bool`     | `True`                                         | `boolean[pyarrow]`                           | `INT` for Oracle, MSSQL, MySQL / MariaDB. `FLOAT` for SQLite.                    |
-| `json`     | `{"foo": "bar"}`                               | `dict`, `list`                               | `JSONB` for PostgreSQL-like flavors, otherwise `TEXT`.                           |
+| Data Type  | Example                                           | Python, Pandas Types                                                            | SQL Types Notes                                                                     |
+|------------|---------------------------------------------------|---------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| `int`      | `1`                                               | `int`, `Int64`, `int64[pyarrow]`, etc.                                          | `BIGINT`                                                                            |
+| `float`    | `1.1`                                             | `float`, `float64`, `float64[pyarrow]`, etc.                                    | `DOUBLE PRECISION`, `FLOAT`                                                         |
+| `string`   | `'foo'`                                           | `str`, `string[python]`                                                         | `TEXT`, `NVARCHAR(MAX)` for MSSQL, `NVARCHAR2(2000)` for Oracle.                    |
+| `datetime` | `Timestamp('2024-12-26 00:00:00+0000', tz='UTC')` | `datetime`, `datetime64[ns]`, `datetime64[ns, UTC]` (timezone-aware by default) | `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIMEOFFSET` for MSSQL. Offsets are coerced to UTC. |
+| `numeric`  | `Decimal('1.000')`                                | `Decimal`                                                                       | `NUMERIC`, `DECIMAL`                                                                |
+| `uuid`     | `UUID('df2572b5-e42e-410d-a624-a14519f73e00')`    | `UUID`                                                                          | `UUID` where supported. `UNIQUEIDENTIFIER` for MSSQL                                |
+| `bool`     | `True`                                            | `boolean[pyarrow]`                                                              | `BOOL`, `BIT`, `INT` for Oracle, MSSQL, MySQL / MariaDB, `FLOAT` for SQLite.        |
+| `json`     | `{"foo": "bar"}`                                  | `dict`, `list`                                                                  | `JSONB` for PostgreSQL-like flavors, otherwise `TEXT`.                              |
+| `bytes`    | `b'foo bar'`                                      | `bytes`                                                                         | `BYTEA`, `BLOB`, `VARBINARY`                                                        |
+
+## `enforce`
+
+The `enforce` parameter controls whether a pipe coerces incoming data to match the set data types (default `True`). For example, 
+
+## `fetch`
+
+The `fetch` key contains parameters concerning the [fetch stage](/reference/pipes/syncing/) of the syncing process.
+
+### `fetch:backtrack_minutes`
+
+How many minutes of overlap to request when fetching new rows ― see [Backtracking](/reference/pipes/syncing/#backtracking). Defaults to 1440.
+
+### `fetch:definition`
+
+!!! example inline end ""
+    ```yaml
+    fetch:
+      definition: |-
+        SELECT *
+        FROM foo
+    ```
+    
+The base SQL query to be run when fetching new rows. Aliased as `sql` for convenience. This only applies to pipes with [`SQLConnectors`](/reference/connectors/sql-connectors/) as connectors.
 
 ## `indices`
 
@@ -94,26 +119,6 @@ parameters:
       ((1.8 * temperature_c) + 32) as temperature_f
     FROM weather
 ```
-
-## `fetch`
-
-The `fetch` key contains parameters concerning the [fetch stage](/reference/pipes/syncing/) of the syncing process.
-
-### `fetch:backtrack_minutes`
-
-How many minutes of overlap to request when fetching new rows ― see [Backtracking](/reference/pipes/syncing/#backtracking). Defaults to 1440.
-
-### `fetch:definition`
-
-!!! example inline end ""
-    ```yaml
-    fetch:
-      definition: |-
-        SELECT *
-        FROM foo
-    ```
-    
-The base SQL query to be run when fetching new rows. Aliased as `sql` for convenience. This only applies to pipes with [`SQLConnectors`](/reference/connectors/sql-connectors/) as connectors.
 
 ## `tags`
 

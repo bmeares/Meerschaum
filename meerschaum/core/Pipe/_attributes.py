@@ -200,10 +200,15 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
     from meerschaum.config._patch import apply_patch_to_config
+    from meerschaum.utils.dtypes import MRSM_ALIAS_DTYPES
     configured_dtypes = self.parameters.get('dtypes', {})
     remote_dtypes = self.infer_dtypes(persist=False)
     patched_dtypes = apply_patch_to_config(remote_dtypes, configured_dtypes)
-    return patched_dtypes
+    return {
+        col: MRSM_ALIAS_DTYPES.get(typ, typ)
+        for col, typ in patched_dtypes.items()
+        if col and typ
+    }
 
 
 @dtypes.setter
@@ -287,6 +292,25 @@ def tzinfo(self) -> Union[None, timezone]:
         return None
 
     return None
+
+
+@property
+def enforce(self) -> bool:
+    """
+    Return the `enforce` parameter for the pipe.
+    """
+    if 'enforce' not in self.parameters:
+        self.parameters['enforce'] = True
+
+    return self.parameters['enforce']
+
+
+@enforce.setter
+def enforce(self, _enforce: bool) -> None:
+    """
+    Set the `enforce` parameter for the pipe.
+    """
+    self.parameters['_enforce'] = _enforce
 
 
 def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]:
