@@ -315,7 +315,6 @@ def create_indices(
     """
     Create a pipe's indices.
     """
-    from meerschaum.utils.sql import sql_item_name, update_queries
     from meerschaum.utils.debug import dprint
     if debug:
         dprint(f"Creating indices for {pipe}...")
@@ -469,6 +468,9 @@ def get_create_index_queries(
         if not existing_primary_keys and _datetime is not None
         else "NONCLUSTERED"
     )
+    print('########################################')
+    if primary_key_clustered == 'NONCLUSTERED' and datetime_clustered == 'NONCLUSTERED':
+        print(f"{existing_primary_keys=}")
 
     _id_index_name = (
         sql_item_name(index_names['id'], self.flavor, None)
@@ -664,6 +666,8 @@ def get_create_index_queries(
         cols = indices[ix_key]
         if not isinstance(cols, (list, tuple)):
             cols = [cols]
+        if ix_key == 'unique' and upsert:
+            continue
         cols_names = [sql_item_name(col, self.flavor, None) for col in cols if col]
         if not cols_names:
             continue
@@ -1744,7 +1748,7 @@ def sync_pipe(
             col
             for col_key, col in pipe.columns.items()
             if col and col in existing_cols
-        ] if not primary_key else (
+        ] if not primary_key or self.flavor == 'oracle' else (
             [dt_col, primary_key]
             if self.flavor == 'timescaledb' and dt_col and dt_col in update_df.columns
             else [primary_key]
@@ -2106,7 +2110,7 @@ def sync_pipe_inplace(
             and col in backtrack_cols_types
             and col in new_cols
         )
-    } if not primary_key else {primary_key: new_cols.get(primary_key)}
+    } if not primary_key or self.flavor == 'oracle' else {primary_key: new_cols.get(primary_key)}
 
     null_replace_new_cols_str = (
         ', '.join([

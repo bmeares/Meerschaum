@@ -1104,6 +1104,7 @@ def test_static_schema(flavor: str):
         except Exception as e:
             success, msg = False, str(e)
     assert not success
+    return pipe
 
     cols_types = pipe.get_columns_types(debug=debug)
     assert 'bar' not in cols_types

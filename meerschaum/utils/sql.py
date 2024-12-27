@@ -1630,7 +1630,7 @@ def get_update_queries(
 
     ### NOTE: MSSQL upserts must exclude the update portion if only upserting indices.
     when_matched_update_sets_subquery_none = "" if not value_cols else (
-        "WHEN MATCHED THEN"
+        "WHEN MATCHED THEN\n"
         f"     UPDATE {sets_subquery('', 'p.')}"
     )
 
