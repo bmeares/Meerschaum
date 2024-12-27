@@ -13,9 +13,8 @@ NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'mariadb': (38, 20),
     'mysql': (38, 20),
     'mssql': (28, 10),
-    'duckdb': (15, 3),
-    'sqlite': (15, 4),
 }
+NUMERIC_AS_TEXT_FLAVORS = {'sqlite', 'duckdb'}
 TIMEZONE_NAIVE_FLAVORS = {'oracle', 'mysql', 'mariadb'}
 
 ### MySQL doesn't allow for casting as BIGINT, so this is a workaround.
@@ -102,6 +101,10 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'JSONB': 'json',
     'UUID': 'uuid',
     'UNIQUEIDENTIFIER': 'uuid',
+    'BYTEA': 'bytes',
+    'BLOB': 'bytes',
+    'VARBINARY': 'bytes',
+    'VARBINARY(MAX)': 'bytes',
     'substrings': {
         'CHAR': 'string[pyarrow]',
         'TIMESTAMP': 'datetime64[ns]',
@@ -114,6 +117,9 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
         'INT': 'int64[pyarrow]',
         'BOOL': 'bool[pyarrow]',
         'JSON': 'json',
+        'BYTE': 'bytes',
+        'LOB': 'bytes',
+        'BINARY': 'bytes',
     },
     'default': 'object',
 }
@@ -256,8 +262,8 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mysql': f'DECIMAL{NUMERIC_PRECISION_FLAVORS["mysql"]}',
         'mssql': f'NUMERIC{NUMERIC_PRECISION_FLAVORS["mssql"]}',
         'oracle': 'NUMBER',
-        'sqlite': f'DECIMAL{NUMERIC_PRECISION_FLAVORS["sqlite"]}',
-        'duckdb': 'NUMERIC',
+        'sqlite': 'TEXT',
+        'duckdb': 'TEXT',
         'citus': 'NUMERIC',
         'cockroachdb': 'NUMERIC',
         'default': 'NUMERIC',
@@ -275,6 +281,19 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'citus': 'UUID',
         'cockroachdb': 'UUID',
         'default': 'TEXT',
+    },
+    'bytes': {
+        'timescaledb': 'BYTEA',
+        'postgresql': 'BYTEA',
+        'mariadb': 'BLOB',
+        'mysql': 'BLOB',
+        'mssql': 'VARBINARY(MAX)',
+        'oracle': 'BLOB',
+        'sqlite': 'BLOB',
+        'duckdb': 'BLOB',
+        'citus': 'BYTEA',
+        'cockroachdb': 'BYTEA',
+        'default': 'BLOB',
     },
 }
 PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
@@ -402,7 +421,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mysql': 'Numeric',
         'mssql': 'Numeric',
         'oracle': 'Numeric',
-        'sqlite': 'Numeric',
+        'sqlite': 'UnicodeText',
         'duckdb': 'Numeric',
         'citus': 'Numeric',
         'cockroachdb': 'Numeric',
@@ -420,6 +439,19 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'citus': 'Uuid',
         'cockroachdb': 'Uuid',
         'default': 'Uuid',
+    },
+    'bytes': {
+        'timescaledb': 'LargeBinary',
+        'postgresql': 'LargeBinary',
+        'mariadb': 'LargeBinary',
+        'mysql': 'LargeBinary',
+        'mssql': 'LargeBinary',
+        'oracle': 'LargeBinary',
+        'sqlite': 'LargeBinary',
+        'duckdb': 'LargeBinary',
+        'citus': 'LargeBinary',
+        'cockroachdb': 'LargeBinary',
+        'default': 'LargeBinary',
     },
 }
 
@@ -502,7 +534,7 @@ def get_db_type_from_pd_type(
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_ALIAS_DTYPES
     from meerschaum.utils.misc import parse_arguments_str
     sqlalchemy_types = attempt_import('sqlalchemy.types')
 
@@ -511,6 +543,9 @@ def get_db_type_from_pd_type(
         if not as_sqlalchemy
         else PD_TO_SQLALCHEMY_DTYPES_FLAVORS
     )
+
+    if pd_type in MRSM_ALIAS_DTYPES:
+        pd_type = MRSM_ALIAS_DTYPES[pd_type]
 
     ### Check whether we are able to match this type (e.g. pyarrow support).
     found_db_type = False
@@ -568,7 +603,6 @@ def get_db_type_from_pd_type(
         return cls(*cls_args, **cls_kwargs)
 
     if 'numeric' in db_type.lower():
-        numeric_type_str = PD_TO_DB_DTYPES_FLAVORS['numeric'].get(flavor, 'NUMERIC')
         if flavor not in NUMERIC_PRECISION_FLAVORS:
             return sqlalchemy_types.Numeric
         precision, scale = NUMERIC_PRECISION_FLAVORS[flavor]

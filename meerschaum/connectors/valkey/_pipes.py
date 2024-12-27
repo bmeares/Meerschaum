@@ -46,9 +46,20 @@ def serialize_document(doc: Dict[str, Any]) -> str:
     -------
     A serialized string for the document.
     """
+    from meerschaum.utils.dtypes import serialize_bytes
     return json.dumps(
         doc,
-        default=(lambda x: json_serialize_datetime(x) if hasattr(x, 'tzinfo') else str(x)),
+        default=(
+            lambda x: (
+                json_serialize_datetime(x)
+                if hasattr(x, 'tzinfo')
+                else (
+                    serialize_bytes(x)
+                    if isinstance(x, bytes)
+                    else str(x)
+                )
+            )
+        ),
         separators=(',', ':'),
         sort_keys=True,
     )

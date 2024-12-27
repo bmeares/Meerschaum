@@ -177,14 +177,14 @@ def string_to_dict(
         keys = _keys[:-1]
         try:
             val = ast.literal_eval(_keys[-1])
-        except Exception as e:
+        except Exception:
             val = str(_keys[-1])
 
         c = params_dict
         for _k in keys[:-1]:
             try:
                 k = ast.literal_eval(_k)
-            except Exception as e:
+            except Exception:
                 k = str(_k)
             if k not in c:
                 c[k] = {}
@@ -196,12 +196,12 @@ def string_to_dict(
 
 
 def parse_config_substitution(
-        value: str,
-        leading_key: str = 'MRSM',
-        begin_key: str = '{',
-        end_key: str = '}',
-        delimeter: str = ':'
-    ) -> List[Any]:
+    value: str,
+    leading_key: str = 'MRSM',
+    begin_key: str = '{',
+    end_key: str = '}',
+    delimeter: str = ':'
+) -> List[Any]:
     """
     Parse Meerschaum substitution syntax
     E.g. MRSM{value1:value2} => ['value1', 'value2']

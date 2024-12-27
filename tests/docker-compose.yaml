@@ -59,11 +59,13 @@ services:
       - "mysql_volume:/var/lib/mysql"
 
   oracle:
-    image: "konnecteam/docker-oracle-12c:sequelize"
+    image: "container-registry.oracle.com/database/express:latest"
     ports:
       - "1529:1521"
+    environment:
+      ORACLE_PWD: "oracle"
     volumes:
-      - "oracle_volume:/u01/app/oracle"
+      - "oracle_volume:/opt/oracle/oradata"
 
   citus:
     image: "citusdata/citus:11.0.2"

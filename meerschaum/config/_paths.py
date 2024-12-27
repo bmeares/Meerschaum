@@ -103,7 +103,7 @@ if ENVIRONMENT_VENVS_DIR in os.environ:
     if not _VENVS_DIR_PATH.exists():
         try:
             _VENVS_DIR_PATH.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
+        except Exception:
             print(
                 f"Invalid path set for environment variable '{ENVIRONMENT_VENVS_DIR}':\n"
                 + f"{_VENVS_DIR_PATH}"
@@ -148,6 +148,7 @@ paths = {
     'CACHE_RESOURCES_PATH'           : ('{ROOT_DIR_PATH}', '.cache'),
     'PIPES_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'pipes'),
     'USERS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'users'),
+    'VENVS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'venvs'),
 
     'PLUGINS_RESOURCES_PATH'         : ('{INTERNAL_RESOURCES_PATH}', 'plugins'),
     'PLUGINS_INTERNAL_LOCK_PATH'     : ('{INTERNAL_RESOURCES_PATH}', 'plugins.lock'),

@@ -9,8 +9,7 @@ Define utilities for instance connectors.
 import time
 from datetime import datetime, timezone, timedelta
 import meerschaum as mrsm
-from meerschaum.utils.typing import Dict, SuccessTuple, Optional, Union, List
-from meerschaum.utils.warnings import warn
+from meerschaum.utils.typing import Dict, SuccessTuple, Union, List
 
 
 _in_memory_temp_tables: Dict[str, bool] = {}
@@ -28,9 +27,9 @@ def _log_temporary_tables_creation(
     from meerschaum.connectors.sql.tables import get_tables
     sqlalchemy = mrsm.attempt_import('sqlalchemy')
     temp_tables_table = get_tables(
-        mrsm_instance = self,
-        create = create,
-        debug = debug,
+        mrsm_instance=self,
+        create=create,
+        debug=debug,
     )['temp_tables']
     if isinstance(tables, str):
         tables = [tables]
@@ -72,7 +71,9 @@ def _drop_temporary_table(
             return True, "Success"
 
     drop_query = f"DROP TABLE {if_exists} " + sql_item_name(
-        table, self.flavor, schema=self.internal_schema
+        table,
+        self.flavor,
+        schema=self.internal_schema
     )
     drop_success = self.exec(drop_query, silent=True, debug=debug) is not None
     drop_msg = "Success" if drop_success else f"Failed to drop temporary table '{table}'."
@@ -83,7 +84,6 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
     """
     Drop all tables in the internal schema that are marked as ready to be dropped.
     """
-    from meerschaum.utils.sql import sql_item_name, table_exists
     from meerschaum.utils.misc import items_str
     from meerschaum.connectors.sql.tables import get_tables
     sqlalchemy = mrsm.attempt_import('sqlalchemy')
@@ -141,16 +141,15 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
 
 
 def _drop_old_temporary_tables(
-        self,
-        refresh: bool = True,
-        debug: bool = False,
-    ) -> SuccessTuple:
+    self,
+    refresh: bool = True,
+    debug: bool = False,
+) -> SuccessTuple:
     """
     Drop temporary tables older than the configured interval (24 hours by default).
     """
     from meerschaum.config import get_config
     from meerschaum.connectors.sql.tables import get_tables
-    from meerschaum.utils.misc import items_str
     sqlalchemy = mrsm.attempt_import('sqlalchemy')
     temp_tables_table = get_tables(mrsm_instance=self, create=False, debug=debug)['temp_tables']
     last_check = getattr(self, '_stale_temporary_tables_check_timestamp', 0)

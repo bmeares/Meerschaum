@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import io
 import json
-import fastapi
 from decimal import Decimal
 import datetime
 
@@ -359,16 +358,16 @@ def sync_pipe(
     p = get_pipe(connector_keys, metric_key, location_key)
     if p.target in ('users', 'plugins', 'pipes'):
         raise fastapi.HTTPException(
-            status_code = 409,
-            detail = f"Cannot sync data to protected table '{p.target}'.",
+            status_code=409,
+            detail=f"Cannot sync data to protected table '{p.target}'.",
         )
 
     if not p.columns and columns is not None:
         p.columns = json.loads(columns)
     if not p.columns and not is_pipe_registered(p, pipes(refresh=True)):
         raise fastapi.HTTPException(
-            status_code = 409,
-            detail = "Pipe must be registered with the datetime column specified."
+            status_code=409,
+            detail="Pipe must be registered with index columns specified."
         )
 
     result = list(p.sync(
@@ -412,7 +411,7 @@ def get_pipe_data(
     if params is not None:
         try:
             _params = json.loads(params)
-        except Exception as e:
+        except Exception:
             _params = None
     if not isinstance(_params, dict):
         raise fastapi.HTTPException(
@@ -426,7 +425,7 @@ def get_pipe_data(
     if select_columns is not None:
         try:
             _select_columns = json.loads(select_columns)
-        except Exception as e:
+        except Exception:
             _select_columns = None
     if not isinstance(_select_columns, list):
         raise fastapi.HTTPException(
@@ -440,7 +439,7 @@ def get_pipe_data(
     if omit_columns is not None:
         try:
             _omit_columns = json.loads(omit_columns)
-        except Exception as e:
+        except Exception:
             _omit_columns = None
     if _omit_columns is None:
         raise fastapi.HTTPException(

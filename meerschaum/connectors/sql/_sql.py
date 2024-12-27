@@ -624,7 +624,7 @@ def exec_queries(
     rollback: bool = True,
     silent: bool = False,
     debug: bool = False,
-) -> List[sqlalchemy.engine.cursor.LegacyCursorResult]:
+) -> List[Union[sqlalchemy.engine.cursor.CursorResult, None]]:
     """
     Execute a list of queries in a single transaction.
 
@@ -688,6 +688,7 @@ def exec_queries(
             if result is None and break_on_error:
                 if rollback:
                     session.rollback()
+                results.append(result)
                 break
             elif result is not None and hook is not None:
                 hook_queries = hook(session)
@@ -715,6 +716,7 @@ def to_sql(
     method: str = "",
     chunksize: Optional[int] = -1,
     schema: Optional[str] = None,
+    safe_copy: bool = True,
     silent: bool = False,
     debug: bool = False,
     as_tuple: bool = False,
@@ -729,7 +731,7 @@ def to_sql(
     Parameters
     ----------
     df: pd.DataFrame
-        The DataFrame to be uploaded.
+        The DataFrame to be inserted.
 
     name: str
         The name of the table to be created.
@@ -752,6 +754,9 @@ def to_sql(
         Optionally override the schema for the table.
         Defaults to `SQLConnector.schema`.
 
+    safe_copy: bool, defaul True
+        If `True`, copy the dataframe before making any changes.
+
     as_tuple: bool, default False
         If `True`, return a (success_bool, message) tuple instead of a `bool`.
         Defaults to `False`.
@@ -770,8 +775,7 @@ def to_sql(
     """
     import time
     import json
-    import decimal
-    from decimal import Decimal, Context
+    from decimal import Decimal
     from meerschaum.utils.warnings import error, warn
     import warnings
     import functools
@@ -790,10 +794,21 @@ def to_sql(
         truncate_item_name,
         DROP_IF_EXISTS_FLAVORS,
     )
-    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
-    from meerschaum.utils.dtypes import are_dtypes_equal, quantize_decimal, coerce_timezone
+    from meerschaum.utils.dataframe import (
+        get_json_cols,
+        get_numeric_cols,
+        get_uuid_cols,
+        get_bytes_cols,
+    )
+    from meerschaum.utils.dtypes import (
+        are_dtypes_equal,
+        quantize_decimal,
+        coerce_timezone,
+        encode_bytes_for_bytea,
+    )
     from meerschaum.utils.dtypes.sql import (
         NUMERIC_PRECISION_FLAVORS,
+        NUMERIC_AS_TEXT_FLAVORS,
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
         get_db_type_from_pd_type,
     )
@@ -803,14 +818,35 @@ def to_sql(
     pd = import_pandas()
     is_dask = 'dask' in df.__module__
 
-    stats = {'target': name, }
+    bytes_cols = get_bytes_cols(df)
+    numeric_cols = get_numeric_cols(df)
+
+    stats = {'target': name,}
     ### resort to defaults if None
+    copied = False
+    use_psql_copy = False
     if method == "":
         if self.flavor in _bulk_flavors:
             method = functools.partial(psql_insert_copy, schema=self.schema)
+            use_psql_copy = True
         else:
             ### Should resolve to 'multi' or `None`.
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
+
+    if bytes_cols and (use_psql_copy or self.flavor == 'oracle'):
+        if safe_copy and not copied:
+            df = df.copy()
+            copied = True
+        for col in bytes_cols:
+            df[col] = df[col].apply(encode_bytes_for_bytea, with_prefix=(self.flavor != 'oracle'))
+
+    if self.flavor in NUMERIC_AS_TEXT_FLAVORS:
+        if safe_copy and not copied:
+            df = df.copy()
+            copied = True
+        for col in numeric_cols:
+            df[col] = df[col].astype(str)
+
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
 
     default_chunksize = self._sys_config.get('chunksize', None)
@@ -920,7 +956,6 @@ def to_sql(
     ### Check for numeric columns.
     numeric_scale, numeric_precision = NUMERIC_PRECISION_FLAVORS.get(self.flavor, (None, None))
     if numeric_precision is not None and numeric_scale is not None:
-        numeric_cols = get_numeric_cols(df)
         for col in numeric_cols:
             df[col] = df[col].apply(
                 lambda x: (

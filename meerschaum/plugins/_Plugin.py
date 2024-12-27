@@ -255,11 +255,11 @@ class Plugin:
 
 
     def install(
-            self,
-            skip_deps: bool = False,
-            force: bool = False,
-            debug: bool = False,
-        ) -> SuccessTuple:
+        self,
+        skip_deps: bool = False,
+        force: bool = False,
+        debug: bool = False,
+    ) -> SuccessTuple:
         """
         Extract a plugin's tar archive to the plugins directory.
         
@@ -359,7 +359,7 @@ class Plugin:
             is_same_version = new_version and old_version and (
                 packaging_version.parse(old_version) == packaging_version.parse(new_version)
             )
-        except Exception as e:
+        except Exception:
             is_new_version, is_same_version = True, False
 
         ### Determine where to permanently store the new plugin.
@@ -404,7 +404,7 @@ class Plugin:
                         dprint(f"Moving '{src_file}' to '{dst_dir}'...")
                     try:
                         shutil.move(src_file, dst_dir)
-                    except Exception as e:
+                    except Exception:
                         success, msg = False, (
                             f"Failed to install plugin '{self}': " +
                             f"Could not move file '{src_file}' to '{dst_dir}'"
@@ -817,10 +817,10 @@ class Plugin:
 
 
     def install_dependencies(
-            self,
-            force: bool = False,
-            debug: bool = False,
-        ) -> bool:
+        self,
+        force: bool = False,
+        debug: bool = False,
+    ) -> bool:
         """
         If specified, install dependencies.
         
@@ -841,12 +841,9 @@ class Plugin:
         Returns
         -------
         A bool indicating success.
-
         """
         from meerschaum.utils.packages import pip_install, venv_contains_package
-        from meerschaum.utils.debug import dprint
         from meerschaum.utils.warnings import warn, info
-        from meerschaum.connectors.parse import parse_repo_keys
         _deps = self.get_dependencies(debug=debug)
         if not _deps and self.requirements_file_path is None:
             return True

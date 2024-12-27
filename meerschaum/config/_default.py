@@ -137,7 +137,7 @@ default_pipes_config = {
         },
         'verify': {
             'bound_days': 366,
-            'chunk_minutes': 1440,
+            'chunk_minutes': 43200,
         },
     },
     'attributes': {

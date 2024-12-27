@@ -200,6 +200,8 @@ class Job:
             if root_dir is None:
                 from meerschaum.config.paths import ROOT_DIR_PATH
                 root_dir = ROOT_DIR_PATH
+            else:
+                root_dir = pathlib.Path(root_dir)
             jobs_dir = root_dir / DAEMON_RESOURCES_PATH.name
             daemon_dir = jobs_dir / daemon_id
             pid_file = daemon_dir / 'process.pid'
