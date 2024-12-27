@@ -472,7 +472,7 @@ class Daemon:
             process.kill()
             process.wait(timeout=timeout)
         except Exception as e:
-            return False, f"Failed to kill job {self} with exception: {e}"
+            return False, f"Failed to kill job {self} ({process}) with exception: {e}"
 
         try:
             if process.status():
@@ -734,7 +734,7 @@ class Daemon:
             time.sleep(check_timeout_interval)
 
         return False, (
-            f"Failed to stop daemon '{self.daemon_id}' within {timeout} second"
+            f"Failed to stop daemon '{self.daemon_id}' (PID: {pid}) within {timeout} second"
             + ('s' if timeout != 1 else '') + '.'
         )
 

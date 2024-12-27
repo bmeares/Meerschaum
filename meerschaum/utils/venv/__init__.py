@@ -218,17 +218,22 @@ def is_venv_active(
 
 verified_venvs = set()
 def verify_venv(
-        venv: str,
-        debug: bool = False,
-    ) -> None:
+    venv: str,
+    debug: bool = False,
+) -> None:
     """
     Verify that the virtual environment matches the expected state.
     """
-    import pathlib, platform, os, shutil, subprocess, sys
+    import pathlib
+    import platform
+    import os
+    import shutil
+    import sys
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.process import run_process
     from meerschaum.utils.misc import make_symlink, is_symlink
     from meerschaum.utils.warnings import warn
+
     venv_path = VIRTENV_RESOURCES_PATH / venv
     bin_path = venv_path / (
         'bin' if platform.system() != 'Windows' else "Scripts"
@@ -368,16 +373,21 @@ def init_venv(
         return True
 
     import io
-    from contextlib import redirect_stdout, redirect_stderr
-    import sys, platform, os, pathlib, shutil
+    from contextlib import redirect_stdout
+    import sys
+    import platform
+    import os
+    import pathlib
+    import shutil
+
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH, VENVS_CACHE_RESOURCES_PATH
     from meerschaum.utils.packages import is_uv_enabled
+
     venv_path = VIRTENV_RESOURCES_PATH / venv
     vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
     docker_home_venv_path = pathlib.Path('/home/meerschaum/venvs/mrsm')
 
-    runtime_env_var = STATIC_CONFIG['environment']['runtime']
     work_dir_env_var = STATIC_CONFIG['environment']['work_dir']
     if (
         not force
@@ -404,10 +414,13 @@ def init_venv(
 
     _venv_success = False
     temp_vtp = VENVS_CACHE_RESOURCES_PATH / str(venv)
-    rename_vtp = vtp.exists()
+    rename_vtp = vtp.exists() and not temp_vtp.exists()
 
     if rename_vtp:
-        vtp.rename(temp_vtp)
+        try:
+            vtp.rename(temp_vtp)
+        except FileExistsError:
+            pass
 
     if uv is not None:
         _venv_success = run_python_package(

@@ -292,7 +292,7 @@ def sync_pipe(
 
         try:
             j = tuple(j)
-        except Exception as e:
+        except Exception:
             return False, response.text
 
         if debug:
@@ -314,12 +314,12 @@ def sync_pipe(
 
 def delete_pipe(
     self,
-    pipe: Optional[meerschaum.Pipe] = None,
+    pipe: Optional[mrsm.Pipe] = None,
     debug: bool = None,        
 ) -> SuccessTuple:
     """Delete a Pipe and drop its table."""
     if pipe is None:
-        error(f"Pipe cannot be None.")
+        error("Pipe cannot be None.")
     r_url = pipe_r_url(pipe)
     response = self.delete(
         r_url + '/delete',
@@ -340,7 +340,7 @@ def delete_pipe(
 
 def get_pipe_data(
     self,
-    pipe: meerschaum.Pipe,
+    pipe: mrsm.Pipe,
     select_columns: Optional[List[str]] = None,
     omit_columns: Optional[List[str]] = None,
     begin: Union[str, datetime, int, None] = None,
@@ -352,7 +352,6 @@ def get_pipe_data(
 ) -> Union[pandas.DataFrame, None]:
     """Fetch data from the API."""
     r_url = pipe_r_url(pipe)
-    chunks_list = []
     while True:
         try:
             response = self.get(
@@ -376,12 +375,19 @@ def get_pipe_data(
             return False, j['detail']
         break
 
-    from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dataframe import parse_df_datetimes, add_missing_cols_to_df
     from meerschaum.utils.dtypes import are_dtypes_equal
-    pd = import_pandas()
     try:
-        df = pd.read_json(StringIO(response.text))
+        df = parse_df_datetimes(
+            j,
+            ignore_cols=[
+                col
+                for col, dtype in pipe.dtypes.items()
+                if not are_dtypes_equal(str(dtype), 'datetime')
+            ],
+            strip_timezone=(pipe.tzinfo is None),
+            debug=debug,
+        )
     except Exception as e:
         warn(f"Failed to parse response for {pipe}:\n{e}")
         return None
@@ -389,16 +395,6 @@ def get_pipe_data(
     if len(df.columns) == 0:
         return add_missing_cols_to_df(df, pipe.dtypes)
 
-    df = parse_df_datetimes(
-        df,
-        ignore_cols = [
-            col
-            for col, dtype in pipe.dtypes.items()
-            if not are_dtypes_equal(str(dtype), 'datetime')
-        ],
-        strip_timezone=(pipe.tzinfo is None),
-        debug=debug,
-    )
     return df
 
 
