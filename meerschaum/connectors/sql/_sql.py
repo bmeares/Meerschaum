@@ -624,7 +624,7 @@ def exec_queries(
     rollback: bool = True,
     silent: bool = False,
     debug: bool = False,
-) -> List[sqlalchemy.engine.cursor.LegacyCursorResult]:
+) -> List[Union[sqlalchemy.engine.cursor.CursorResult, None]]:
     """
     Execute a list of queries in a single transaction.
 
@@ -688,6 +688,7 @@ def exec_queries(
             if result is None and break_on_error:
                 if rollback:
                     session.rollback()
+                results.append(result)
                 break
             elif result is not None and hook is not None:
                 hook_queries = hook(session)
@@ -774,8 +775,7 @@ def to_sql(
     """
     import time
     import json
-    import decimal
-    from decimal import Decimal, Context
+    from decimal import Decimal
     from meerschaum.utils.warnings import error, warn
     import warnings
     import functools

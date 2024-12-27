@@ -7,6 +7,7 @@ Flavor-specific SQL tools.
 """
 
 from __future__ import annotations
+
 from datetime import datetime, timezone, timedelta
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, Union, List, Iterable, Tuple
@@ -50,10 +51,12 @@ update_queries = {
         {sets_subquery_none}
         FROM {target_table_name} AS t
         INNER JOIN (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
-            ON {and_subquery_t}
+            ON
+                {and_subquery_t}
         WHERE
             {and_subquery_f}
-            AND {date_bounds_subquery}
+            AND
+            {date_bounds_subquery}
     """,
     'timescaledb-upsert': """
         INSERT INTO {target_table_name} ({patch_cols_str})
@@ -82,9 +85,11 @@ update_queries = {
     'mysql': """
         UPDATE {target_table_name} AS f
         JOIN (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
-        ON {and_subquery_f}
+        ON
+            {and_subquery_f}
         {sets_subquery_f}
-        WHERE {date_bounds_subquery}
+        WHERE
+            {date_bounds_subquery}
     """,
     'mysql-upsert': """
         INSERT {ignore}INTO {target_table_name} ({patch_cols_str})
@@ -96,9 +101,11 @@ update_queries = {
     'mariadb': """
         UPDATE {target_table_name} AS f
         JOIN (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
-        ON {and_subquery_f}
+        ON
+            {and_subquery_f}
         {sets_subquery_f}
-        WHERE {date_bounds_subquery}
+        WHERE
+            {date_bounds_subquery}
     """,
     'mariadb-upsert': """
         INSERT {ignore}INTO {target_table_name} ({patch_cols_str})
@@ -111,8 +118,10 @@ update_queries = {
         {with_temp_date_bounds}
         MERGE {target_table_name} f
             USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
-            ON {and_subquery_f}
-            AND {date_bounds_subquery}
+            ON
+                {and_subquery_f}
+            AND
+                {date_bounds_subquery}
         WHEN MATCHED THEN
             UPDATE
             {sets_subquery_none};
@@ -123,9 +132,10 @@ update_queries = {
         {with_temp_date_bounds}
         MERGE {target_table_name} f
             USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
-            ON {and_subquery_f}
-            AND {date_bounds_subquery}
-        {when_matched_update_sets_subquery_none}
+            ON
+                {and_subquery_f}
+            AND
+                {date_bounds_subquery}{when_matched_update_sets_subquery_none}
         WHEN NOT MATCHED THEN
             INSERT ({patch_cols_str})
             VALUES ({patch_cols_prefixed_str});
@@ -137,7 +147,8 @@ update_queries = {
             USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
             ON (
                 {and_subquery_f}
-                AND {date_bounds_subquery}
+                AND
+                {date_bounds_subquery}
             )
             WHEN MATCHED THEN
                 UPDATE
@@ -148,9 +159,9 @@ update_queries = {
             USING (SELECT {patch_cols_str} FROM {patch_table_name}) p
             ON (
                 {and_subquery_f}
-                AND {date_bounds_subquery}
-            )
-            {when_matched_update_sets_subquery_none}
+                AND
+                {date_bounds_subquery}
+            ){when_matched_update_sets_subquery_none}
             WHEN NOT MATCHED THEN
                 INSERT ({patch_cols_str})
                 VALUES ({patch_cols_prefixed_str})
@@ -341,7 +352,11 @@ columns_indices_queries = {
             CASE
                 WHEN kc.type = 'PK' THEN 'PRIMARY KEY'
                 ELSE 'INDEX'
-            END AS [index_type]
+            END AS [index_type],
+            CASE
+                WHEN i.type = 1 THEN CAST(1 AS BIT)
+                ELSE CAST(0 AS BIT)
+            END AS [clustered]
         FROM
             sys.schemas s
         INNER JOIN sys.tables t
@@ -730,7 +745,7 @@ def get_distinct_col_count(
     result = connector.value(_meta_query, debug=debug)
     try:
         return int(result)
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -740,11 +755,14 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
 
     Parameters
     ----------
-    item: str :
+    item: str
         The database item (table, view, etc.) in need of quotes.
         
-    flavor: str :
+    flavor: str
         The database flavor (`'postgresql'`, `'mssql'`, `'sqllite'`, etc.).
+
+    schema: Optional[str], default None
+        If provided, prefix the table name with the schema.
 
     Returns
     -------
@@ -776,6 +794,8 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
 
     ### NOTE: SQLite does not support schemas.
     if flavor == 'sqlite':
+        schema = None
+    elif flavor == 'mssql' and str(item).startswith('#'):
         schema = None
 
     schema_prefix = (
@@ -1132,6 +1152,7 @@ def get_table_cols_types(
     -------
     A dictionary mapping column names to data types.
     """
+    import textwrap
     from meerschaum.connectors import SQLConnector
     sqlalchemy = mrsm.attempt_import('sqlalchemy')
     flavor = flavor or getattr(connectable, 'flavor', None)
@@ -1157,7 +1178,7 @@ def get_table_cols_types(
     )
 
     cols_types_query = sqlalchemy.text(
-        columns_types_queries.get(
+        textwrap.dedent(columns_types_queries.get(
             flavor,
             columns_types_queries['default']
         ).format(
@@ -1168,7 +1189,7 @@ def get_table_cols_types(
             table_upper=table_upper,
             table_upper_trunc=table_upper_trunc,
             db_prefix=db_prefix,
-        )
+        )).lstrip().rstrip()
     )
 
     cols = ['database', 'schema', 'table', 'column', 'type']
@@ -1282,6 +1303,7 @@ def get_table_cols_indices(
     -------
     A dictionary mapping column names to a list of indices.
     """
+    import textwrap
     from collections import defaultdict
     from meerschaum.connectors import SQLConnector
     sqlalchemy = mrsm.attempt_import('sqlalchemy')
@@ -1308,7 +1330,7 @@ def get_table_cols_indices(
     )
 
     cols_indices_query = sqlalchemy.text(
-        columns_indices_queries.get(
+        textwrap.dedent(columns_indices_queries.get(
             flavor,
             columns_indices_queries['default']
         ).format(
@@ -1320,10 +1342,12 @@ def get_table_cols_indices(
             table_upper_trunc=table_upper_trunc,
             db_prefix=db_prefix,
             schema=schema,
-        )
+        )).lstrip().rstrip()
     )
 
     cols = ['database', 'schema', 'table', 'column', 'index', 'index_type']
+    if flavor == 'mssql':
+        cols.append('clustered')
     result_cols_ix = dict(enumerate(cols))
 
     debug_kwargs = {'debug': debug} if isinstance(connectable, SQLConnector) else {}
@@ -1364,7 +1388,6 @@ def get_table_cols_indices(
                 )
             )
         ]
-
         ### NOTE: This may return incorrect columns if the schema is not explicitly stated.
         if cols_types_docs and not cols_types_docs_filtered:
             cols_types_docs_filtered = cols_types_docs
@@ -1380,12 +1403,13 @@ def get_table_cols_indices(
                     else doc['column']
                 )
             )
-            cols_indices[col].append(
-                {
-                    'name': doc.get('index', None),
-                    'type': doc.get('index_type', None),
-                }
-            )
+            index_doc = {
+                'name': doc.get('index', None),
+                'type': doc.get('index_type', None)
+            }
+            if flavor == 'mssql':
+                index_doc['clustered'] = doc.get('clustered', None)
+            cols_indices[col].append(index_doc)
 
         return dict(cols_indices)
     except Exception as e:
@@ -1455,6 +1479,7 @@ def get_update_queries(
     -------
     A list of query strings to perform the update operation.
     """
+    import textwrap
     from meerschaum.connectors import SQLConnector
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.dtypes import are_dtypes_equal
@@ -1579,7 +1604,7 @@ def get_update_queries(
         ])
 
     def and_subquery(l_prefix: str, r_prefix: str):
-        return '\nAND\n'.join([
+        return '\n            AND\n                '.join([
             (
                 "COALESCE("
                 + l_prefix
@@ -1587,7 +1612,7 @@ def get_update_queries(
                 + ", "
                 + get_null_replacement(c_type, flavor)
                 + ")"
-                + ' = '
+                + '\n                =\n                '
                 + "COALESCE("
                 + r_prefix
                 + sql_item_name(c_name, flavor, None)
@@ -1605,15 +1630,13 @@ def get_update_queries(
     min_dt_col_name = f"MIN({dt_col_name})" if flavor != 'mssql' else '[Min_dt]'
     max_dt_col_name = f"MAX({dt_col_name})" if flavor != 'mssql' else '[Max_dt]'
     date_bounds_subquery = (
-        f"""
-        f.{dt_col_name} >= (SELECT {min_dt_col_name} FROM {date_bounds_table})
-        AND f.{dt_col_name} <= (SELECT {max_dt_col_name} FROM {date_bounds_table})
-        """
+        f"""f.{dt_col_name} >= (SELECT {min_dt_col_name} FROM {date_bounds_table})
+            AND
+                f.{dt_col_name} <= (SELECT {max_dt_col_name} FROM {date_bounds_table})"""
         if datetime_col
         else "1 = 1"
     )
-    with_temp_date_bounds = f"""
-    WITH [date_bounds] AS (
+    with_temp_date_bounds = f"""WITH [date_bounds] AS (
         SELECT MIN({dt_col_name}) AS {min_dt_col_name}, MAX({dt_col_name}) AS {max_dt_col_name}
         FROM {patch_table_name}
     )""" if datetime_col else ""
@@ -1630,8 +1653,8 @@ def get_update_queries(
 
     ### NOTE: MSSQL upserts must exclude the update portion if only upserting indices.
     when_matched_update_sets_subquery_none = "" if not value_cols else (
-        "WHEN MATCHED THEN\n"
-        f"     UPDATE {sets_subquery('', 'p.')}"
+        "\n        WHEN MATCHED THEN\n"
+        f"            UPDATE {sets_subquery('', 'p.')}"
     )
 
     cols_equal_values = '\n,'.join(
@@ -1648,7 +1671,7 @@ def get_update_queries(
     ignore = "IGNORE " if not value_cols else ""
 
     formatted_queries = [
-        base_query.format(
+        textwrap.dedent(base_query.format(
             sets_subquery_none=sets_subquery('', 'p.'),
             sets_subquery_none_excluded=sets_subquery('', 'EXCLUDED.'),
             sets_subquery_f=sets_subquery('f.', 'p.'),
@@ -1669,7 +1692,7 @@ def get_update_queries(
             with_temp_date_bounds=with_temp_date_bounds,
             identity_insert_on=identity_insert_on,
             identity_insert_off=identity_insert_off,
-        )
+        )).lstrip().rstrip()
         for base_query in base_queries
     ]
 
@@ -1999,7 +2022,6 @@ def _get_create_table_query_from_cte(
     Create a new table from a CTE query.
     """
     import textwrap
-    from meerschaum.utils.dtypes.sql import AUTO_INCREMENT_COLUMN_FLAVORS
     create_cte = 'create_query'
     create_cte_name = sql_item_name(create_cte, flavor, None)
     new_table_name = sql_item_name(new_table, flavor, schema)
@@ -2087,11 +2109,11 @@ def _get_create_table_query_from_cte(
             ADD PRIMARY KEY ({primary_key_name})
         """
 
-    create_table_query = textwrap.dedent(create_table_query)
+    create_table_query = textwrap.dedent(create_table_query).lstrip().rstrip()
     if not primary_key:
         return [create_table_query]
 
-    alter_type_query = textwrap.dedent(alter_type_query)
+    alter_type_query = textwrap.dedent(alter_type_query).lstrip().rstrip()
 
     return [
         create_table_query,

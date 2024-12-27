@@ -417,11 +417,14 @@ def get_create_index_queries(
     existing_cols_indices = self.get_pipe_columns_indices(pipe, debug=debug)
     existing_ix_names = set()
     existing_primary_keys = []
+    existing_clustered_primary_keys = []
     for col, col_indices in existing_cols_indices.items():
         for col_ix_doc in col_indices:
             existing_ix_names.add(col_ix_doc.get('name', None))
             if col_ix_doc.get('type', None) == 'PRIMARY KEY':
                 existing_primary_keys.append(col)
+                if col_ix_doc.get('clustered', True):
+                    existing_clustered_primary_keys.append(col)
 
     _datetime = pipe.get_columns('datetime', error=False)
     _datetime_name = (
@@ -465,12 +468,9 @@ def get_create_index_queries(
     primary_key_clustered = "CLUSTERED" if _datetime is None else "NONCLUSTERED"
     datetime_clustered = (
         "CLUSTERED"
-        if not existing_primary_keys and _datetime is not None
+        if not existing_clustered_primary_keys and _datetime is not None
         else "NONCLUSTERED"
     )
-    print('########################################')
-    if primary_key_clustered == 'NONCLUSTERED' and datetime_clustered == 'NONCLUSTERED':
-        print(f"{existing_primary_keys=}")
 
     _id_index_name = (
         sql_item_name(index_names['id'], self.flavor, None)
@@ -1201,7 +1201,7 @@ def get_pipe_data_query(
             number=begin_add_minutes,
             begin=begin,
         )
-        where += f"{dt} >= {begin_da}" + (" AND " if end is not None else "")
+        where += f"\n    {dt} >= {begin_da}" + ("\n    AND\n    " if end is not None else "")
         is_dt_bound = True
 
     if end is not None and (_dt in existing_cols or skip_existing_cols_check):
@@ -1213,7 +1213,7 @@ def get_pipe_data_query(
             number=end_add_minutes,
             begin=end
         )
-        where += f"{dt} < {end_da}"
+        where += f"{dt} <  {end_da}"
         is_dt_bound = True
 
     if params is not None:
@@ -1225,7 +1225,7 @@ def get_pipe_data_query(
         }
         if valid_params:
             where += build_where(valid_params, self).replace(
-                'WHERE', ('AND' if is_dt_bound else "")
+                'WHERE', ('    AND' if is_dt_bound else "    ")
             )
 
     if len(where) > 0:
@@ -1655,35 +1655,37 @@ def sync_pipe(
         and primary_key in unseen_df.columns
         and autoincrement
     )
-    with self.engine.connect() as connection:
-        with connection.begin():
-            if do_identity_insert:
-                identity_on_result = self.exec(
-                    f"SET IDENTITY_INSERT {pipe_name} ON",
-                    commit=False,
-                    _connection=connection,
-                    close=False,
-                    debug=debug,
-                )
-                if identity_on_result is None:
-                    return False, f"Could not enable identity inserts on {pipe}."
+    stats = {'success': True, 'msg': 'Success'}
+    if len(unseen_df) > 0:
+        with self.engine.connect() as connection:
+            with connection.begin():
+                if do_identity_insert:
+                    identity_on_result = self.exec(
+                        f"SET IDENTITY_INSERT {pipe_name} ON",
+                        commit=False,
+                        _connection=connection,
+                        close=False,
+                        debug=debug,
+                    )
+                    if identity_on_result is None:
+                        return False, f"Could not enable identity inserts on {pipe}."
 
-            stats = self.to_sql(
-                unseen_df,
-                _connection=connection,
-                **unseen_kw
-            )
-
-            if do_identity_insert:
-                identity_off_result = self.exec(
-                    f"SET IDENTITY_INSERT {pipe_name} OFF",
-                    commit=False,
+                stats = self.to_sql(
+                    unseen_df,
                     _connection=connection,
-                    close=False,
-                    debug=debug,
+                    **unseen_kw
                 )
-                if identity_off_result is None:
-                    return False, f"Could not disable identity inserts on {pipe}."
+
+                if do_identity_insert:
+                    identity_off_result = self.exec(
+                        f"SET IDENTITY_INSERT {pipe_name} OFF",
+                        commit=False,
+                        _connection=connection,
+                        close=False,
+                        debug=debug,
+                    )
+                    if identity_off_result is None:
+                        return False, f"Could not disable identity inserts on {pipe}."
 
     if is_new:
         if not self.create_indices(pipe, debug=debug):
@@ -1726,7 +1728,7 @@ def sync_pipe(
             static=True,
             autoincrement=False,
             parameters={
-                'schema': self.internal_schema,
+                'schema': (self.internal_schema if self.flavor != 'mssql' else None),
                 'hypertable': False,
             },
         )
@@ -1765,9 +1767,13 @@ def sync_pipe(
             identity_insert=(autoincrement and primary_key in update_df.columns),
             debug=debug,
         )
-        update_success = all(
-            self.exec_queries(update_queries, break_on_error=True, rollback=True, debug=debug)
+        update_results = self.exec_queries(
+            update_queries,
+            break_on_error=True,
+            rollback=True,
+            debug=debug,
         )
+        update_success = all(update_results)
         self._log_temporary_tables_creation(
             temp_target,
             ready_to_drop=True,
@@ -1776,6 +1782,8 @@ def sync_pipe(
         )
         if not update_success:
             warn(f"Failed to apply update to {pipe}.")
+        stats['success'] = stats['success'] and update_success
+        stats['msg'] = (stats.get('msg', '') + f'\nFailed to apply update to {pipe}.').lstrip()
 
     stop = time.perf_counter()
     success = stats['success']
@@ -1952,8 +1960,8 @@ def sync_pipe_inplace(
             autoincrement=autoincrement,
             datetime_column=dt_col,
         )
-        result = self.exec_queries(create_pipe_queries, debug=debug)
-        if result is None:
+        results = self.exec_queries(create_pipe_queries, debug=debug)
+        if not all(results):
             _ = clean_up_temp_tables()
             return False, f"Could not insert new data into {pipe} from its SQL query definition."
 
