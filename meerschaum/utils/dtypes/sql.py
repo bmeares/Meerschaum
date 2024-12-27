@@ -101,6 +101,10 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'JSONB': 'json',
     'UUID': 'uuid',
     'UNIQUEIDENTIFIER': 'uuid',
+    'BYTEA': 'bytes',
+    'BLOB': 'bytes',
+    'VARBINARY': 'bytes',
+    'VARBINARY(MAX)': 'bytes',
     'substrings': {
         'CHAR': 'string[pyarrow]',
         'TIMESTAMP': 'datetime64[ns]',
@@ -113,6 +117,9 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
         'INT': 'int64[pyarrow]',
         'BOOL': 'bool[pyarrow]',
         'JSON': 'json',
+        'BYTE': 'bytes',
+        'LOB': 'bytes',
+        'BINARY': 'bytes',
     },
     'default': 'object',
 }
