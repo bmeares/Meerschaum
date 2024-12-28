@@ -17,9 +17,9 @@ window.addEventListener(
   (event) => {
     if (!event.isTrusted){ return; }
 
-    action_str = event.data.action;
-    subaction_str = event.data['subaction'] ? event.data['subaction'] : '';
-    subaction_text = event.data['subaction_text'] ? event.data['subaction_text'] : '';
+    let action_str = event.data.action;
+    let subaction_str = event.data['subaction'] ? event.data['subaction'] : '';
+    let subaction_text = event.data['subaction_text'] ? event.data['subaction_text'] : '';
     if (subaction_str.length > 0){
         action_str += ' ' + subaction_str;
     }
@@ -27,45 +27,53 @@ window.addEventListener(
         action_str += ' ' + subaction_text;
     }
 
-    connector_keys = event.data['connector_keys'] ? event.data['connector_keys'] : [];
-    metric_keys = event.data['metric_keys'] ? event.data['metric_keys'] : [];
-    location_keys = event.data['location_keys'] ? event.data['location_keys'] : [];
-    connector_keys_str = " -c";
-    for (ck of connector_keys){
-        quote_str = ck.includes(" ") ? "'" : "";
-        connector_keys_str += " " + quote_str + ck + quote_str;
+    let connector_keys = event.data['connector_keys'] ? event.data['connector_keys'] : [];
+    let metric_keys = event.data['metric_keys'] ? event.data['metric_keys'] : [];
+    let location_keys = event.data['location_keys'] ? event.data['location_keys'] : [];
+    let connector_keys_str = " -c";
+    for (let ck of connector_keys){
+        if (typeof ck === "string"){
+            let quote_str = ck.includes(" ") ? "'" : "";
+            connector_keys_str += " " + quote_str + ck + quote_str;
+        }
     }
     if (connector_keys.length === 0){
         connector_keys_str = "";
     }
-    metric_keys_str = " -m";
+    let metric_keys_str = " -m";
     for (mk of metric_keys){
-        quote_str = mk.includes(" ") ? "'" : "";
-        metric_keys_str += " " + quote_str + mk + quote_str;
+        if (typeof mk === "string"){
+            let quote_str = mk.includes(" ") ? "'" : "";
+            metric_keys_str += " " + quote_str + mk + quote_str;
+        }
     }
     if (metric_keys.length === 0){
         metric_keys_str = "";
     }
-    location_keys_str = " -l";
+    let location_keys_str = " -l";
     for (lk of location_keys){
-        quote_str = lk.includes(" ") ? "'" : "";
-        location_keys_str += " " + quote_str + lk + quote_str;
+        if (typeof lk === "string"){
+            quote_str = lk.includes(" ") ? "'" : "";
+            location_keys_str += " " + quote_str + lk + quote_str;
+        }
     }
     if (location_keys.length === 0){
         location_keys_str = "";
     }
 
-    instance = event.data['instance'] ? event.data['instance'] : '';
-    flags_str = "";
+    let instance = event.data['instance'] ? event.data['instance'] : '';
+    let flags_str = "";
     if (instance.length > 0){
         flags_str += " -i " + instance;
     }
-    flags = event.data['flags'] ? event.data['flags'] : [];
+    let flags = event.data['flags'] ? event.data['flags'] : [];
     for (fl of flags){
-        flags_str += " " + fl;
+        if (typeof fl === "string"){
+            flags_str += " " + fl;
+        }
     }
     // NOTE: Input flags are not quoted to allow for multiple arguments.
-    input_flags = event.data['input_flags'] ? event.data['input_flags'] : [];
+    let input_flags = event.data['input_flags'] ? event.data['input_flags'] : [];
     for (const [index, fl] of input_flags.entries()){
         if (!fl){ continue; }
         fl_val = event.data['input_flags_texts'][index];
