@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.7.0
+### v2.7.0 – v2.7.1
 
 - **Introduce the `bytes` data type.**  
   Instance connectors which support binary data (e.g. `SQLConnector`) may now take advantage of the `bytes` dtype. Other connectors (e.g. `ValkeyConnector`) may use `meerschaum.utils.dtypes.serialize_bytes()` to store binary data as a base64-encoded string.

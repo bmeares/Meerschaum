@@ -190,7 +190,12 @@ def create_engine(
     import copy
     ### Install and patch required drivers.
     if self.flavor in install_flavor_drivers:
-        attempt_import(*install_flavor_drivers[self.flavor], debug=debug, lazy=False, warn=False)
+        _ = attempt_import(
+            *install_flavor_drivers[self.flavor],
+            debug=debug,
+            lazy=False,
+            warn=False,
+        )
         if self.flavor == 'mssql':
             pyodbc = attempt_import('pyodbc', debug=debug, lazy=False, warn=False)
             pyodbc.pooling = False

@@ -11,6 +11,8 @@ from __future__ import annotations
 import textwrap
 import json
 import uuid
+from datetime import datetime, timezone
+
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum.utils.typing import List, Optional, Any, Tuple
@@ -191,6 +193,7 @@ def update_page_layout_div(
     Input('get-plugins-button', 'n_clicks'),
     Input('get-users-button', 'n_clicks'),
     Input('get-graphs-button', 'n_clicks'),
+    Input('instance-select', 'value'),
     State('mrsm-location', 'href'),
     State('session-store', 'data'),
     State('webterm-div', 'children'),
@@ -210,7 +213,7 @@ def update_content(*args):
     ### Open the webterm on the initial load.
     if not ctx.triggered:
         initial_load = True
-        trigger = 'open-shell-button'
+        trigger = 'instance-select'
 
     trigger = ctx.triggered[0]['prop_id'].split('.')[0] if not trigger else trigger
 
@@ -232,7 +235,7 @@ def update_content(*args):
         'get-plugins-button': get_plugins_cards,
         'get-users-button': get_users_cards,
         'get-graphs-button': get_graphs_cards,
-        'open-shell-button': lambda x: ([], []),
+        'instance-select': lambda x: ([], []),
     }
     ### Defaults to 3 if not in dict.
     trigger_num_cols = {
@@ -248,7 +251,7 @@ def update_content(*args):
     webterm_style = {
         'display': (
             'none'
-            if trigger not in ('open-shell-button', 'cancel-button', 'go-button')
+            if trigger not in ('instance-select', 'cancel-button', 'go-button')
             else 'block'
         )
     }
@@ -284,9 +287,9 @@ dash_app.clientside_callback(
         input_flags_texts,
         instance,
     ){
-        if (!n_clicks){ return url; }
+        if (!n_clicks){ return dash_clientside.no_update; }
         iframe = document.getElementById('webterm-iframe');
-        if (!iframe){ return url; }
+        if (!iframe){ return dash_clientside.no_update; }
 
         // Actions must be obtained from the DOM because of dynamic subactions.
         action = document.getElementById('action-dropdown').value;
@@ -308,7 +311,7 @@ dash_app.clientside_callback(
             },
             url
         );
-        return url;
+        return dash_clientside.no_update;
     }
     """,
     Output('mrsm-location', 'href'),
@@ -472,29 +475,30 @@ def update_flags(input_flags_dropdown_values, n_clicks, input_flags_texts):
 
 
 @dash_app.callback(
-    Output(component_id='connector-keys-dropdown', component_property='options'),
-    Output(component_id='connector-keys-list', component_property='children'),
-    Output(component_id='connector-keys-dropdown', component_property='value'),
-    Output(component_id='metric-keys-dropdown', component_property='options'),
-    Output(component_id='metric-keys-list', component_property='children'),
-    Output(component_id='metric-keys-dropdown', component_property='value'),
-    Output(component_id='location-keys-dropdown', component_property='options'),
-    Output(component_id='location-keys-list', component_property='children'),
-    Output(component_id='location-keys-dropdown', component_property='value'),
-    Output(component_id='instance-select', component_property='value'),
-    Output(component_id='instance-alert-div', component_property='children'),
-    Input(component_id='connector-keys-dropdown', component_property='value'),
-    Input(component_id='metric-keys-dropdown', component_property='value'),
-    Input(component_id='location-keys-dropdown', component_property='value'),
-    Input(component_id='instance-select', component_property='value'),
-    *keys_state
+    Output('connector-keys-dropdown', 'options'),
+    Output('connector-keys-list', 'children'),
+    Output('connector-keys-dropdown', 'value'),
+    Output('metric-keys-dropdown', 'options'),
+    Output('metric-keys-list', 'children'),
+    Output('metric-keys-dropdown', 'value'),
+    Output('location-keys-dropdown', 'options'),
+    Output('location-keys-list', 'children'),
+    Output('location-keys-dropdown', 'value'),
+    Output('instance-select', 'value'),
+    Output('instance-alert-div', 'children'),
+    Output('instance-store', 'data'),
+    Input('connector-keys-dropdown', 'value'),
+    Input('metric-keys-dropdown', 'value'),
+    Input('location-keys-dropdown', 'value'),
+    Input('instance-select', 'value'),
+    State('instance-store', 'data'),
 )
 def update_keys_options(
     connector_keys: Optional[List[str]],
     metric_keys: Optional[List[str]],
     location_keys: Optional[List[str]],
     instance_keys: Optional[str],
-    *keys
+    instance_store_data: Optional[Dict[str, Any]],
 ):
     """
     Update the keys dropdown menus' options.
@@ -503,11 +507,24 @@ def update_keys_options(
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
     instance_click = trigger == 'instance-select'
 
+    session_instance = instance_store_data.get('session_instance', None)
+
     ### Update the instance first.
     update_instance_keys = False
     if not instance_keys:
+        ### NOTE: Set to `session_instance` to restore the last used session.
+        ###       Choosing not to do this in order to keep the dashboard and webterm in sync.
         instance_keys = str(get_api_connector())
         update_instance_keys = True
+
+    instance_store_data_to_return = (
+        {**(instance_store_data or {}), **{'session_instance': instance_keys}}
+        if update_instance_keys or session_instance != instance_keys
+        else dash.no_update
+    )
+    if not trigger and not update_instance_keys:
+        raise PreventUpdate
+
     instance_alerts = []
     try:
         parse_instance_keys(instance_keys)
@@ -609,6 +626,7 @@ def update_keys_options(
         location_keys,
         (instance_keys if update_instance_keys else dash.no_update),
         instance_alerts,
+        instance_store_data_to_return,
     )
 
 dash_app.clientside_callback(
@@ -617,14 +635,13 @@ dash_app.clientside_callback(
         instance,
         url,
     ){
-        window.instance = instance;
-        if (!instance){ return url; }
-        iframe = document.getElementById('webterm-iframe');
-        if (!iframe){ return url; }
         if (!window.instance){
             window.instance = instance;
             return url;
         }
+        if (!instance){ return url; }
+        iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return url; }
         window.instance = instance;
 
         iframe.contentWindow.postMessage(
@@ -639,6 +656,7 @@ dash_app.clientside_callback(
     """,
     Output('mrsm-location', 'href'),
     Input('instance-select', 'value'),
+    State('mrsm-location', 'href'),
 )
 
 
@@ -698,7 +716,7 @@ dash_app.clientside_callback(
     """
     function(console_children, url){
         if (!console_children){
-            return console_children;
+            return dash_clientside.no_update;
         }
         var ansi_up = new AnsiUp;
         var html = ansi_up.ansi_to_html(console_children);
@@ -707,7 +725,7 @@ dash_app.clientside_callback(
             "<pre id=\\"console-pre\\">" + html + "</pre>"
         );
         console_div.scrollTop = console_div.scrollHeight;
-        return url;
+        return dash_clientside.no_update;;
     }
     """,
     Output('mrsm-location', 'href'),
@@ -885,8 +903,8 @@ dash_app.clientside_callback(
 
         iframe = document.getElementById('webterm-iframe');
         if (!iframe){ return dash_clientside.no_update; }
-        var location = pipe_meta.location;
-        if (!pipe_meta.location){
+        var location = pipe_meta.location_key;
+        if (!pipe_meta.location_key){
             location = "None";
         }
 
@@ -894,25 +912,25 @@ dash_app.clientside_callback(
         if (action == "python"){
             subaction = (
                 '"' + "pipe = mrsm.Pipe('"
-                + pipe_meta.connector
+                + pipe_meta.connector_keys
                 + "', '"
-                + pipe_meta.metric
+                + pipe_meta.metric_key
                 + "'"
             );
             if (location != "None"){
                 subaction += ", '" + location + "'";
             }
-            subaction += ", instance='" + pipe_meta.instance + "')" + '"';
+            subaction += ", instance='" + pipe_meta.instance_keys + "')" + '"';
         }
 
         iframe.contentWindow.postMessage(
             {
                 action: action,
                 subaction: subaction,
-                connector_keys: [pipe_meta.connector],
-                metric_keys: [pipe_meta.metric],
-                location_keys: [location],
-                instance: pipe_meta.instance,
+                connector_keys: [pipe_meta.connector_keys],
+                metric_keys: [pipe_meta.metric_key],
+                location_keys: [pipe_meta.location_key],
+                instance: pipe_meta.instance_keys,
             },
             url
         );
