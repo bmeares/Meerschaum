@@ -7,15 +7,16 @@ Functions for interacting with Meerschaum connectors via the Web Interface.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import WebState, Union, Optional
+
+import meerschaum as mrsm
+from meerschaum.utils.typing import WebState, Union
 from meerschaum.connectors.parse import parse_instance_keys
-from meerschaum.config import get_config
 from meerschaum.api import debug, get_api_connector
 
-def get_web_connector(state : WebState) -> Union[
-        meerschaum.connectors.api.APIConnector,
-        meerschaum.connectors.sql.SQLConnector,
-    ]:
+def get_web_connector(state: WebState) -> Union[
+    mrsm.connectors.api.APIConnector,
+    mrsm.connectors.sql.SQLConnector,
+]:
     """
     Parse the web instance keys into a connector.
     """
@@ -24,7 +25,4 @@ def get_web_connector(state : WebState) -> Union[
         if not state.get('instance-select.value', None)
         else state['instance-select.value']
     )
-
     return parse_instance_keys(instance_keys, debug=debug)
-
-

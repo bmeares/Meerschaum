@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.7.0 – v2.7.1
+### v2.7.0 – v2.7.2
 
 - **Introduce the `bytes` data type.**  
   Instance connectors which support binary data (e.g. `SQLConnector`) may now take advantage of the `bytes` dtype. Other connectors (e.g. `ValkeyConnector`) may use `meerschaum.utils.dtypes.serialize_bytes()` to store binary data as a base64-encoded string.
@@ -96,6 +96,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Store `numeric` as `TEXT` for SQLite and DuckDB.**  
   Due to limited precision, `numeric` columns are now stored as `TEXT`, then parsed into `Decimal` objects upon retrieval.
+
+- **Show the Webterm by default when changing instances.**  
+  On the Web Console, changing the instance select will make the Webterm visible.
 
 - **Improve dtype inference.** 
 

@@ -486,19 +486,18 @@ def update_flags(input_flags_dropdown_values, n_clicks, input_flags_texts):
     Output('location-keys-dropdown', 'value'),
     Output('instance-select', 'value'),
     Output('instance-alert-div', 'children'),
-    Output('instance-store', 'data'),
     Input('connector-keys-dropdown', 'value'),
     Input('metric-keys-dropdown', 'value'),
     Input('location-keys-dropdown', 'value'),
     Input('instance-select', 'value'),
-    State('instance-store', 'data'),
+    *keys_state  ### NOTE: Necessary for `ctx.states`.
 )
 def update_keys_options(
     connector_keys: Optional[List[str]],
     metric_keys: Optional[List[str]],
     location_keys: Optional[List[str]],
     instance_keys: Optional[str],
-    instance_store_data: Optional[Dict[str, Any]],
+    *keys
 ):
     """
     Update the keys dropdown menus' options.
@@ -506,8 +505,6 @@ def update_keys_options(
     ctx = dash.callback_context
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
     instance_click = trigger == 'instance-select'
-
-    session_instance = instance_store_data.get('session_instance', None)
 
     ### Update the instance first.
     update_instance_keys = False
@@ -517,11 +514,6 @@ def update_keys_options(
         instance_keys = str(get_api_connector())
         update_instance_keys = True
 
-    instance_store_data_to_return = (
-        {**(instance_store_data or {}), **{'session_instance': instance_keys}}
-        if update_instance_keys or session_instance != instance_keys
-        else dash.no_update
-    )
     if not trigger and not update_instance_keys:
         raise PreventUpdate
 
@@ -626,7 +618,6 @@ def update_keys_options(
         location_keys,
         (instance_keys if update_instance_keys else dash.no_update),
         instance_alerts,
-        instance_store_data_to_return,
     )
 
 dash_app.clientside_callback(
