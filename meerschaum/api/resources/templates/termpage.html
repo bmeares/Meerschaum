@@ -37,7 +37,7 @@ window.addEventListener(
             connector_keys_str += " " + quote_str + ck + quote_str;
         }
     }
-    if (connector_keys.length === 0){
+    if (connector_keys_str === " -c"){
         connector_keys_str = "";
     }
     let metric_keys_str = " -m";
@@ -47,7 +47,7 @@ window.addEventListener(
             metric_keys_str += " " + quote_str + mk + quote_str;
         }
     }
-    if (metric_keys.length === 0){
+    if (metric_keys_str === " -m"){
         metric_keys_str = "";
     }
     let location_keys_str = " -l";
@@ -57,7 +57,7 @@ window.addEventListener(
             location_keys_str += " " + quote_str + lk + quote_str;
         }
     }
-    if (location_keys.length === 0){
+    if (location_keys_str === " -l"){
         location_keys_str = "";
     }
 
