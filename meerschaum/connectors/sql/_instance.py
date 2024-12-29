@@ -96,15 +96,15 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
         sqlalchemy.select(temp_tables_table.c.table)
         .where(temp_tables_table.c.ready_to_drop.is_not(None))
     )
-    tables_to_drop = [
+    tables_to_drop = {
         table
         for table, ready_to_drop in _in_memory_temp_tables.items()
         if ready_to_drop
-    ]
+    }
     if not tables_to_drop:
         df = self.read(query, silent=True, debug=debug)
         tables_to_drop = (
-            list(df['table'])
+            set(df['table'])
             if df is not None
             else []
         )
@@ -126,7 +126,7 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
             sqlalchemy.delete(temp_tables_table)
             .where(temp_tables_table.c.table.in_(dropped_tables))
         )
-        delete_result = self.exec(delete_query, silent=True, debug=debug)
+        _ = self.exec(delete_query, silent=True, debug=debug)
 
     success = len(failed_tables) == 0
     msg = (

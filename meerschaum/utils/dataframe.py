@@ -1263,7 +1263,7 @@ def df_from_literal(
         import ast
         try:
             val = ast.literal_eval(literal)
-        except Exception as e:
+        except Exception:
             warn(
                 "Failed to parse value from string:\n" + f"{literal}" +
                 "\n\nWill cast as a string instead."\

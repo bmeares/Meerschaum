@@ -45,7 +45,7 @@ DROP_IF_EXISTS_FLAVORS = {
 }
 SKIP_AUTO_INCREMENT_FLAVORS = {'citus', 'duckdb'}
 COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'citus'}
-update_queries = {
+UPDATE_QUERIES = {
     'default': """
         UPDATE {target_table_name} AS f
         {sets_subquery_none}
@@ -587,7 +587,7 @@ def dateadd_str(
 
     """
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type, get_pd_type_from_db_type
     dateutil_parser = attempt_import('dateutil.parser')
     if 'int' in str(type(begin)).lower():
         return str(begin)
@@ -619,7 +619,14 @@ def dateadd_str(
             else f"'{begin}'"
         )
 
-    dt_is_utc = begin_time.tzinfo is not None if begin_time is not None else '+' in str(begin)
+    dt_is_utc = (
+        begin_time.tzinfo is not None
+        if begin_time is not None
+        else ('+' in str(begin) or '-' in str(begin).split(':', maxsplit=1)[-1])
+    )
+    if db_type:
+        db_type_is_utc = 'utc' in get_pd_type_from_db_type(db_type).lower()
+        dt_is_utc = dt_is_utc or db_type_is_utc
     db_type = db_type or get_db_type_from_pd_type(
         ('datetime64[ns, UTC]' if dt_is_utc else 'datetime64[ns]'),
         flavor=flavor,
@@ -629,22 +636,32 @@ def dateadd_str(
     if flavor in ('postgresql', 'timescaledb', 'cockroachdb', 'citus'):
         begin = (
             f"CAST({begin} AS {db_type})" if begin != 'now'
-            else "CAST(NOW() AT TIME ZONE 'utc' AS {db_type})"
+            else f"CAST(NOW() AT TIME ZONE 'utc' AS {db_type})"
         )
+        if dt_is_utc:
+            begin += " AT TIME ZONE 'UTC'"
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
 
     elif flavor == 'duckdb':
         begin = f"CAST({begin} AS {db_type})" if begin != 'now' else 'NOW()'
+        if dt_is_utc:
+            begin += " AT TIME ZONE 'UTC'"
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
 
     elif flavor in ('mssql',):
         if begin_time and begin_time.microsecond != 0 and not dt_is_utc:
             begin = begin[:-4] + "'"
         begin = f"CAST({begin} AS {db_type})" if begin != 'now' else 'GETUTCDATE()'
+        if dt_is_utc:
+            begin += " AT TIME ZONE 'UTC'"
         da = f"DATEADD({datepart}, {number}, {begin})" if number != 0 else begin
 
     elif flavor in ('mysql', 'mariadb'):
-        begin = f"CAST({begin} AS DATETIME(6))" if begin != 'now' else 'UTC_TIMESTAMP(6)'
+        begin = (
+            f"CAST({begin} AS DATETIME(6))"
+            if begin != 'now'
+            else 'UTC_TIMESTAMP(6)'
+        )
         da = (f"DATE_ADD({begin}, INTERVAL {number} {datepart})" if number != 0 else begin)
 
     elif flavor == 'sqlite':
@@ -653,10 +670,10 @@ def dateadd_str(
     elif flavor == 'oracle':
         if begin == 'now':
             begin = str(
-                datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y:%m:%d %M:%S.%f')
+                datetime.now(timezone.utc).replace(tzinfo=None).strftime(r'%Y:%m:%d %M:%S.%f')
             )
         elif begin_time:
-            begin = str(begin_time.strftime('%Y-%m-%d %H:%M:%S.%f'))
+            begin = str(begin_time.strftime(r'%Y-%m-%d %H:%M:%S.%f'))
         dt_format = 'YYYY-MM-DD HH24:MI:SS.FF'
         _begin = f"'{begin}'" if begin_time else begin
         da = (
@@ -1494,9 +1511,9 @@ def get_update_queries(
     ):
         flavor = 'sqlite_delete_insert'
     flavor_key = (f'{flavor}-upsert' if upsert else flavor)
-    base_queries = update_queries.get(
+    base_queries = UPDATE_QUERIES.get(
         flavor_key,
-        update_queries['default']
+        UPDATE_QUERIES['default']
     )
     if not isinstance(base_queries, list):
         base_queries = [base_queries]
@@ -1577,6 +1594,12 @@ def get_update_queries(
         if not value_cols:
             return ''
 
+        utc_value_cols = {
+            c_name
+            for c_name, c_type in value_cols
+            if ('utc' in get_pd_type_from_db_type(c_type).lower())
+        } if flavor not in TIMEZONE_NAIVE_FLAVORS else set()
+
         cast_func_cols = {
             c_name: (
                 ('', '', '')
@@ -1585,7 +1608,11 @@ def get_update_queries(
                     and are_dtypes_equal(get_pd_type_from_db_type(c_type), 'bytes')
                 )
                 else (
-                    ('CAST(', f" AS {c_type.replace('_', ' ')}", ')')
+                    ('CAST(', f" AS {c_type.replace('_', ' ')}", ')' + (
+                        " AT TIME ZONE 'UTC'"
+                        if c_name in utc_value_cols
+                        else ''
+                    ))
                     if flavor != 'sqlite'
                     else ('', '', '')
                 )
@@ -2053,61 +2080,61 @@ def _get_create_table_query_from_cte(
                 + f"SELECT *\nINTO {new_table_name}\nFROM {create_cte_name}"
             )
         else:
-            create_table_query = f"""
-                SELECT *
-                INTO {new_table_name}
-                FROM ({query}) AS {create_cte_name}
-            """
+            create_table_query = (
+                "SELECT *\n"
+                f"INTO {new_table_name}\n"
+                f"FROM (\n{query}\n) AS {create_cte_name}"
+            )
 
-        alter_type_query = f"""
-            ALTER TABLE {new_table_name}
-            ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name})
-        """
+        alter_type_query = (
+            f"ALTER TABLE {new_table_name}\n"
+            f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name})"
+        )
     elif flavor in (None,):
-        create_table_query = f"""
-            WITH {create_cte_name} AS ({query})
-            CREATE TABLE {new_table_name} AS
-            SELECT *
-            FROM {create_cte_name}
-        """
+        create_table_query = (
+            f"WITH {create_cte_name} AS (\n{query}\n)\n"
+            f"CREATE TABLE {new_table_name} AS\n"
+            "SELECT *\n"
+            f"FROM {create_cte_name}"
+        )
 
-        alter_type_query = f"""
-            ALTER TABLE {new_table_name}
-            ADD PRIMARY KEY ({primary_key_name})
-        """
+        alter_type_query = (
+            f"ALTER TABLE {new_table_name}\n"
+            f"ADD PRIMARY KEY ({primary_key_name})"
+        )
     elif flavor in ('sqlite', 'mysql', 'mariadb', 'duckdb', 'oracle'):
-        create_table_query = f"""
-            CREATE TABLE {new_table_name} AS
-            SELECT *
-            FROM ({query})""" + (f""" AS {create_cte_name}""" if flavor != 'oracle' else '') + """
-        """
+        create_table_query = (
+            f"CREATE TABLE {new_table_name} AS\n"
+            "SELECT *\n"
+            f"FROM (\n{query}\n)" + (f" AS {create_cte_name}" if flavor != 'oracle' else '')
+        )
 
-        alter_type_query = f"""
-            ALTER TABLE {new_table_name}
-            ADD PRIMARY KEY ({primary_key_name})
-        """
+        alter_type_query = (
+            f"ALTER TABLE {new_table_name}\n"
+            "ADD PRIMARY KEY ({primary_key_name})"
+        )
     elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
-        create_table_query = f"""
-            SELECT *
-            INTO {new_table_name}
-            FROM ({query}) AS {create_cte_name}
-        """
+        create_table_query = (
+            "SELECT *\n"
+            f"INTO {new_table_name}\n"
+            f"FROM (\n{query}\n) AS {create_cte_name}\n"
+        )
 
-        alter_type_query = f"""
-            ALTER TABLE {new_table_name}
-            ADD PRIMARY KEY ({datetime_column_name}, {primary_key_name})
-        """
+        alter_type_query = (
+            f"ALTER TABLE {new_table_name}\n"
+            f"ADD PRIMARY KEY ({datetime_column_name}, {primary_key_name})"
+        )
     else:
-        create_table_query = f"""
-            SELECT *
-            INTO {new_table_name}
-            FROM ({query}) AS {create_cte_name}
-        """
+        create_table_query = (
+            "SELECT *\n"
+            f"INTO {new_table_name}\n"
+            f"FROM (\n{query}\n) AS {create_cte_name}"
+        )
 
-        alter_type_query = f"""
-            ALTER TABLE {new_table_name}
-            ADD PRIMARY KEY ({primary_key_name})
-        """
+        alter_type_query = (
+            f"ALTER TABLE {new_table_name}\n"
+            f"ADD PRIMARY KEY ({primary_key_name})"
+        )
 
     create_table_query = textwrap.dedent(create_table_query).lstrip().rstrip()
     if not primary_key:
@@ -2269,6 +2296,8 @@ def session_execute(
         queries = [queries]
     successes, msgs, results = [], [], []
     for query in queries:
+        if debug:
+            dprint(query)
         query_text = sqlalchemy.text(query)
         fail_msg = "Failed to execute queries."
         try:
@@ -2283,6 +2312,8 @@ def session_execute(
         msgs.append(query_msg)
         results.append(result)
         if not query_success:
+            if debug:
+                dprint("Rolling back session.")
             session.rollback()
             break
     success, msg = all(successes), '\n'.join(msgs)

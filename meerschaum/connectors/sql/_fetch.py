@@ -144,37 +144,37 @@ def get_pipe_metadef(
     -------
     A pipe's meta definition fetch query string.
     """
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.warnings import warn
     from meerschaum.utils.sql import sql_item_name, dateadd_str, build_where
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     from meerschaum.utils.misc import is_int
     from meerschaum.config import get_config
 
-    definition = get_pipe_query(pipe)
-
-    if not pipe.columns.get('datetime', None):
-        _dt = pipe.guess_datetime()
-        dt_name = sql_item_name(_dt, self.flavor, None) if _dt else None
+    dt_col = pipe.columns.get('datetime', None)
+    if not dt_col:
+        dt_col = pipe.guess_datetime()
+        dt_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
         is_guess = True
     else:
-        _dt = pipe.get_columns('datetime')
-        dt_name = sql_item_name(_dt, self.flavor, None)
+        dt_name = sql_item_name(dt_col, self.flavor, None)
         is_guess = False
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime') if dt_col else None
+    db_dt_typ = get_db_type_from_pd_type(dt_typ, self.flavor)
 
     if begin not in (None, '') or end is not None:
         if is_guess:
-            if _dt is None:
+            if dt_col is None:
                 warn(
                     f"Unable to determine a datetime column for {pipe}."
                     + "\n    Ignoring begin and end...",
-                    stack = False,
+                    stack=False,
                 )
                 begin, end = '', None
             else:
                 warn(
                     f"A datetime wasn't specified for {pipe}.\n"
-                    + f"    Using column \"{_dt}\" for datetime bounds...",
-                    stack = False
+                    + f"    Using column \"{dt_col}\" for datetime bounds...",
+                    stack=False
                 )
 
     apply_backtrack = begin == '' and check_existing
@@ -200,6 +200,7 @@ def get_pipe_metadef(
                 datepart='minute',
                 number=((-1 * btm) if apply_backtrack else 0),
                 begin=begin,
+                db_type=db_dt_typ,
             )
             if begin
             else None
@@ -210,11 +211,13 @@ def get_pipe_metadef(
                 datepart='minute',
                 number=0,
                 begin=end,
+                db_type=db_dt_typ,
             )
             if end
             else None
         )
 
+    definition_name = sql_item_name('definition', self.flavor, None)
     meta_def = (
         _simple_fetch_query(pipe, self.flavor) if (
             (not (pipe.columns or {}).get('id', None))
@@ -225,9 +228,9 @@ def get_pipe_metadef(
     has_where = 'where' in meta_def.lower()[meta_def.lower().rfind('definition'):]
     if dt_name and (begin_da or end_da):
         definition_dt_name = (
-            dateadd_str(self.flavor, 'minute', 0, f"definition.{dt_name}")
+            dateadd_str(self.flavor, 'minute', 0, f"{definition_name}.{dt_name}", db_type=db_dt_typ)
             if not is_int((begin_da or end_da))
-            else f"definition.{dt_name}"
+            else f"{definition_name}.{dt_name}"
         )
         meta_def += "\n" + ("AND" if has_where else "WHERE") + " "
         has_where = True
@@ -331,11 +334,7 @@ def _join_fetch_query(
     pipe_instance_name = sql_item_name(
         pipe.target, pipe.instance_connector.flavor, pipe.instance_connector.schema
     )
-    #  pipe_remote_name = sql_item_name(pipe.target, pipe.connector.flavor)
     sync_times_table = pipe.target + "_sync_times"
-    sync_times_instance_name = sql_item_name(
-        sync_times_table, pipe.instance_connector.flavor, None
-    )
     sync_times_remote_name = sql_item_name(
         sync_times_table, pipe.connector.flavor, None
     )
