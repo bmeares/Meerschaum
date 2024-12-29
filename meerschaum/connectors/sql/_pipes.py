@@ -1928,6 +1928,7 @@ def sync_pipe_inplace(
         table_root: sql_item_name(table_root, self.flavor)
         for table_root in temp_table_roots
     }
+    table_alias_as = " AS" if self.flavor != 'oracle' else ''
     metadef = self.get_pipe_metadef(
         pipe,
         params=params,
@@ -2053,7 +2054,8 @@ def sync_pipe_inplace(
     insert_queries = [
         (
             f"INSERT INTO {pipe_name} ({new_cols_str})\n"
-            + f"SELECT {new_cols_str}\nFROM {temp_table_names['new']} AS {temp_table_aliases['new']}"
+            f"SELECT {new_cols_str}\nFROM {temp_table_names['new']}{table_alias_as}"
+            f" {temp_table_aliases['new']}"
         )
     ] if not check_existing and not upsert else []
 
@@ -2145,7 +2147,7 @@ def sync_pipe_inplace(
 
     null_replace_new_cols_str = (
         '\n    ' + ',\n    '.join([
-            f"COALESCE({temp_table_aliases['new']}.{sql_item_name(col, self.flavor, None)}, "
+            f"COALESCE({temp_table_aliases['new']}.{sql_item_name(col, self.flavor)}, "
             + get_null_replacement(get_col_typ(col, new_cols_types), self.flavor)
             + ") AS "
             + sql_item_name(col, self.flavor, None)
@@ -2156,8 +2158,8 @@ def sync_pipe_inplace(
     select_delta_query = (
         "SELECT"
         + null_replace_new_cols_str
-        + f"\nFROM {temp_table_names['new']} AS {temp_table_aliases['new']}\n"
-        + f"LEFT OUTER JOIN {temp_table_names['backtrack']} AS {temp_table_aliases['backtrack']}"
+        + f"\nFROM {temp_table_names['new']}{table_alias_as} {temp_table_aliases['new']}\n"
+        + f"LEFT OUTER JOIN {temp_table_names['backtrack']}{table_alias_as} {temp_table_aliases['backtrack']}"
         + "\n    ON\n    "
         + '\n    AND\n    '.join([
             (
@@ -2234,8 +2236,9 @@ def sync_pipe_inplace(
                 + " AS " + sql_item_name(c + '_backtrack', self.flavor, None)
             ) for c in backtrack_cols_types
         ]))
-        + f"\nFROM {temp_table_names['delta']} AS {temp_table_aliases['delta']}\n"
-        + f"LEFT OUTER JOIN {temp_table_names['backtrack']} AS {temp_table_aliases['backtrack']}"
+        + f"\nFROM {temp_table_names['delta']}{table_alias_as} {temp_table_aliases['delta']}\n"
+        + f"LEFT OUTER JOIN {temp_table_names['backtrack']}{table_alias_as}"
+        + f" {temp_table_aliases['backtrack']}"
         + "\n    ON\n    "
         + '\n    AND\n    '.join([
             (
@@ -2276,7 +2279,7 @@ def sync_pipe_inplace(
                 + " AS " + sql_item_name(c, self.flavor, None)
             ) for c, typ in delta_cols.items()
         ]))
-        + f"\nFROM {temp_table_names['joined']} AS {temp_table_aliases['joined']}\n"
+        + f"\nFROM {temp_table_names['joined']}{table_alias_as} {temp_table_aliases['joined']}\n"
         + "WHERE\n    "
         + '\n    AND\n    '.join([
             (
@@ -2311,7 +2314,7 @@ def sync_pipe_inplace(
                 + " AS " + sql_item_name(c, self.flavor, None)
             ) for c, typ in delta_cols.items()
         ]))
-        + f"\nFROM {temp_table_names['joined']} AS {temp_table_aliases['joined']}\n"
+        + f"\nFROM {temp_table_names['joined']}{table_alias_as} {temp_table_aliases['joined']}\n"
         + "WHERE\n    "
         + '\n    OR\n    '.join([
             (
