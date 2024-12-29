@@ -137,7 +137,7 @@ def _ask_with_rowcounts(
     )
     total_num_rows = sum([rc for p, rc in pipes_rowcounts.items()])
     question = (
-        f"Are you sure you want to delete {total_num_rows} rows across {len(pipes)} pipe"
+        f"Are you sure you want to delete {total_num_rows:,} rows across {len(pipes)} pipe"
         + ('s' if len(pipes) != 1 else '')
         + " in the following range?\n"
     )

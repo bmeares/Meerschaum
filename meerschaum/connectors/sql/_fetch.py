@@ -9,6 +9,7 @@ Implement the Connector fetch() method
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Union, Callable, Any, List, Dict
 
@@ -159,7 +160,7 @@ def get_pipe_metadef(
         dt_name = sql_item_name(dt_col, self.flavor, None)
         is_guess = False
     dt_typ = pipe.dtypes.get(dt_col, 'datetime') if dt_col else None
-    db_dt_typ = get_db_type_from_pd_type(dt_typ, self.flavor)
+    db_dt_typ = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
 
     if begin not in (None, '') or end is not None:
         if is_guess:
@@ -235,19 +236,19 @@ def get_pipe_metadef(
         meta_def += "\n" + ("AND" if has_where else "WHERE") + " "
         has_where = True
         if begin_da:
-            meta_def += f"{definition_dt_name} >= {begin_da}"
+            meta_def += f"\n    {definition_dt_name}\n    >=\n    {begin_da}\n"
         if begin_da and end_da:
-            meta_def += " AND "
+            meta_def += "    AND"
         if end_da:
-            meta_def += f"{definition_dt_name} < {end_da}"
+            meta_def += f"\n    {definition_dt_name}\n    <\n    {end_da}\n"
 
     if params is not None:
         params_where = build_where(params, self, with_where=False)
-        meta_def += "\n" + ("AND" if has_where else "WHERE") + " "
+        meta_def += "\n    " + ("AND" if has_where else "WHERE") + "    "
         has_where = True
         meta_def += params_where
 
-    return meta_def
+    return meta_def.rstrip()
 
 
 def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
@@ -259,7 +260,11 @@ def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
     - query
     - sql
     """
+    import re
+    import textwrap
     from meerschaum.utils.warnings import warn as _warn
+    from meerschaum.utils.misc import parse_arguments_str
+    from meerschaum.utils.sql import sql_item_name
     if pipe.parameters.get('fetch', {}).get('definition', None):
         definition = pipe.parameters['fetch']['definition']
     elif pipe.parameters.get('definition', None):
@@ -275,7 +280,23 @@ def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
                 + "    Set the key `query` in `pipe.parameters` to a valid SQL query."
             )
         return None
-    return definition
+
+    def replace_pipe_match(pipe_match):
+        try:
+            args_str = pipe_match.group(1)
+            args, kwargs = parse_arguments_str(args_str)
+            pipe = mrsm.Pipe(*args, **kwargs)
+        except Exception as e:
+            if warn:
+                _warn(f"Failed to parse pipe from SQL definition:\n{e}")
+            raise e
+
+        target = pipe.target
+        schema = pipe.instance_connector.get_pipe_schema(pipe)
+        return sql_item_name(target, pipe.instance_connector.flavor, schema)
+
+    definition = re.sub(r'\{\{Pipe\((.*?)\)\}\}', replace_pipe_match, definition)
+    return textwrap.dedent(definition.lstrip().rstrip())
 
 
 def set_pipe_query(pipe: mrsm.Pipe, query: str) -> None:
@@ -392,4 +413,3 @@ def _join_fetch_query(
     WHERE definition.{dt_remote_name} > st.{dt_remote_name}
     """ + (f"  OR st.{id_remote_name} IS NULL" if new_ids else "")
     return query
-

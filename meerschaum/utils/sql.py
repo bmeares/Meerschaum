@@ -50,7 +50,7 @@ UPDATE_QUERIES = {
         UPDATE {target_table_name} AS f
         {sets_subquery_none}
         FROM {target_table_name} AS t
-        INNER JOIN (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
+        INNER JOIN (SELECT {patch_cols_str} FROM {patch_table_name}) AS p
             ON
                 {and_subquery_t}
         WHERE
@@ -84,7 +84,7 @@ UPDATE_QUERIES = {
     """,
     'mysql': """
         UPDATE {target_table_name} AS f
-        JOIN (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
+        JOIN (SELECT {patch_cols_str} FROM {patch_table_name}) AS p
         ON
             {and_subquery_f}
         {sets_subquery_f}
@@ -100,7 +100,7 @@ UPDATE_QUERIES = {
     """,
     'mariadb': """
         UPDATE {target_table_name} AS f
-        JOIN (SELECT DISTINCT {patch_cols_str} FROM {patch_table_name}) AS p
+        JOIN (SELECT {patch_cols_str} FROM {patch_table_name}) AS p
         ON
             {and_subquery_f}
         {sets_subquery_f}
@@ -179,13 +179,13 @@ UPDATE_QUERIES = {
         WHERE ROWID IN (
             SELECT t.ROWID
             FROM {target_table_name} AS t
-            INNER JOIN (SELECT DISTINCT * FROM {patch_table_name}) AS p
+            INNER JOIN (SELECT * FROM {patch_table_name}) AS p
                 ON {and_subquery_t}
         );
         """,
         """
         INSERT INTO {target_table_name} AS f
-        SELECT DISTINCT {patch_cols_str} FROM {patch_table_name} AS p
+        SELECT {patch_cols_str} FROM {patch_table_name} AS p
         """,
     ],
 }
@@ -573,15 +573,15 @@ def dateadd_str(
     Examples
     --------
     >>> dateadd_str(
-    ...     flavor = 'mssql',
-    ...     begin = datetime(2022, 1, 1, 0, 0),
-    ...     number = 1,
+    ...     flavor='mssql',
+    ...     begin=datetime(2022, 1, 1, 0, 0),
+    ...     number=1,
     ... )
     "DATEADD(day, 1, CAST('2022-01-01 00:00:00' AS DATETIME2))"
     >>> dateadd_str(
-    ...     flavor = 'postgresql',
-    ...     begin = datetime(2022, 1, 1, 0, 0),
-    ...     number = 1,
+    ...     flavor='postgresql',
+    ...     begin=datetime(2022, 1, 1, 0, 0),
+    ...     number=1,
     ... )
     "CAST('2022-01-01 00:00:00' AS TIMESTAMP) + INTERVAL '1 day'"
 
@@ -708,7 +708,7 @@ def test_connection(
         warnings.filterwarnings('ignore', 'Could not')
         try:
             return retry_connect(**_default_kw)
-        except Exception as e:
+        except Exception:
             return False
 
 
@@ -2055,6 +2055,7 @@ def _get_create_table_query_from_cte(
     """
     Create a new table from a CTE query.
     """
+    import textwrap
     create_cte = 'create_query'
     create_cte_name = sql_item_name(create_cte, flavor, None)
     new_table_name = sql_item_name(new_table, flavor, schema)
@@ -2086,7 +2087,7 @@ def _get_create_table_query_from_cte(
                 (
                     query[:final_select_ix].rstrip() + ',\n'
                     + f"{create_cte_name} AS (\n"
-                    + query[final_select_ix:]
+                    + textwrap.indent(query[final_select_ix:], '    ')
                     + "\n)\n"
                     + f"SELECT *\nINTO {new_table_name}\nFROM {create_cte_name}"
                 ),
@@ -2096,7 +2097,7 @@ def _get_create_table_query_from_cte(
                 (
                     "SELECT *\n"
                     f"INTO {new_table_name}\n"
-                    f"FROM (\n{query}\n) AS {create_cte_name}"
+                    f"FROM (\n{textwrap.indent(query, '    ')}\n) AS {create_cte_name}"
                 ),
             ]
 
@@ -2118,7 +2119,7 @@ def _get_create_table_query_from_cte(
     elif flavor in (None,):
         create_table_queries = [
             (
-                f"WITH {create_cte_name} AS (\n{query}\n)\n"
+                f"WITH {create_cte_name} AS (\n{textwrap.index(query, '    ')}\n)\n"
                 f"CREATE TABLE {new_table_name} AS\n"
                 "SELECT *\n"
                 f"FROM {create_cte_name}"
@@ -2136,7 +2137,8 @@ def _get_create_table_query_from_cte(
             (
                 f"CREATE TABLE {new_table_name} AS\n"
                 "SELECT *\n"
-                f"FROM (\n{query}\n)" + (f" AS {create_cte_name}" if flavor != 'oracle' else '')
+                f"FROM (\n{textwrap.indent(query, '    ')}\n)"
+                + (f" AS {create_cte_name}" if flavor != 'oracle' else '')
             ),
         ]
 
@@ -2151,7 +2153,7 @@ def _get_create_table_query_from_cte(
             (
                 "SELECT *\n"
                 f"INTO {new_table_name}\n"
-                f"FROM (\n{query}\n) AS {create_cte_name}\n"
+                f"FROM (\n{textwrap.indent(query, '    ')}\n) AS {create_cte_name}\n"
             ),
         ]
 
@@ -2166,7 +2168,7 @@ def _get_create_table_query_from_cte(
             (
                 "SELECT *\n"
                 f"INTO {new_table_name}\n"
-                f"FROM (\n{query}\n) AS {create_cte_name}"
+                f"FROM (\n{textwrap.indent(query, '    ')}\n) AS {create_cte_name}"
             ),
         ]
 
@@ -2229,6 +2231,7 @@ def wrap_query_with_cte(
     ```
 
     """
+    import textwrap
     sub_query = sub_query.lstrip()
     cte_name_quoted = sql_item_name(cte_name, flavor, None)
 
@@ -2252,7 +2255,7 @@ def wrap_query_with_cte(
 
     return (
         f"WITH {cte_name_quoted} AS (\n"
-        f"    {sub_query}\n"
+        f"{textwrap.indent(sub_query, '    ')}\n"
         f")\n{parent_query}"
     )
 

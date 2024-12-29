@@ -50,6 +50,7 @@ def sync(
     retries: int = 10,
     min_seconds: int = 1,
     check_existing: bool = True,
+    enforce_dtypes: bool = True,
     blocking: bool = True,
     workers: Optional[int] = None,
     callback: Optional[Callable[[Tuple[bool, str]], Any]] = None,
@@ -89,6 +90,10 @@ def sync(
     check_existing: bool, default True
         If `True`, pull and diff with existing data from the pipe.
 
+    enforce_dtypes: bool, default True
+        If `True`, enforce dtypes on incoming data.
+        Set this to `False` if the incoming rows are expected to be of the correct dtypes.
+
     blocking: bool, default True
         If `True`, wait for sync to finish and return its result, otherwise
         asyncronously sync (oxymoron?) and return success. Defaults to `True`.
@@ -123,8 +128,6 @@ def sync(
     A `SuccessTuple` of success (`bool`) and message (`str`).
     """
     from meerschaum.utils.debug import dprint, _checkpoint
-    from meerschaum.connectors import custom_types
-    from meerschaum.plugins import Plugin
     from meerschaum.utils.formatting import get_console
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
@@ -366,7 +369,12 @@ def sync(
             return success, msg
 
         ### Cast to a dataframe and ensure datatypes are what we expect.
-        df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+        df = self.enforce_dtypes(
+            df,
+            chunksize=chunksize,
+            enforce=enforce_dtypes,
+            debug=debug,
+        )
 
         ### Capture `numeric`, `uuid`, `json`, and `bytes` columns.
         self._persist_new_json_columns(df, debug=debug)

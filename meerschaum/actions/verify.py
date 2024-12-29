@@ -10,9 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple, List
 
 def verify(
-        action: Optional[List[str]] = None,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Verify the states of pipes, packages, and more.
     """
@@ -36,19 +36,17 @@ def _verify_pipes(**kwargs) -> SuccessTuple:
 
 
 def _verify_packages(
-        debug: bool = False,
-        venv: Optional[str] = 'mrsm',
-        **kw
-    ) -> SuccessTuple:
+    debug: bool = False,
+    venv: Optional[str] = 'mrsm',
+    **kw
+) -> SuccessTuple:
     """
     Verify the versions of packages.
     """
     from meerschaum.utils.packages import (
-        attempt_import, need_update, all_packages, is_installed, venv_contains_package,
+        attempt_import, all_packages, is_installed, venv_contains_package,
         _monkey_patch_get_distribution, manually_import_module,
     )
-    from meerschaum.utils.formatting import pprint
-    from meerschaum.utils.debug import dprint
 
     venv_packages, base_packages, miss_packages = [], [], []
 
@@ -80,10 +78,10 @@ def _verify_packages(
 
 
 def _verify_venvs(
-        action: Optional[List[str]],
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    action: Optional[List[str]],
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Verify your virtual environments.
     """
@@ -94,15 +92,14 @@ def _verify_venvs(
 
 
 def _verify_plugins(
-        action: Optional[List[str]] = None,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Verify that all of the available plugins are able to be imported as expected.
     """
-    from meerschaum.utils.formatting import print_options, UNICODE, print_tuple
-    from meerschaum.plugins import import_plugins, get_plugins_names, Plugin
-    from meerschaum.config import get_config
+    from meerschaum.utils.formatting import print_options, print_tuple
+    from meerschaum.plugins import get_plugins_names, Plugin
     from meerschaum.utils.misc import items_str
 
     plugins_names_to_verify = action or get_plugins_names()
@@ -135,7 +132,7 @@ def _verify_plugins(
         f"Successfully imported {len(plugins_names_to_verify)} plugins."
         if success
         else (
-            f"Failed to import plugin"
+            "Failed to import plugin"
             + ('s' if len(failed_to_import) != 1 else '')
             + f" {items_str(failed_to_import)}."
         )

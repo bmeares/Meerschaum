@@ -390,6 +390,7 @@ def parse_df_datetimes(
     strip_timezone: bool = False,
     chunksize: Optional[int] = None,
     dtype_backend: str = 'numpy_nullable',
+    ignore_all: bool = False,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -413,6 +414,9 @@ def parse_df_datetimes(
         If `df` is not a DataFrame and new one needs to be constructed,
         use this as the datatypes backend.
         Accepted values are 'numpy_nullable' and 'pyarrow'.
+
+    ignore_all: bool, default False
+        If `True`, do not attempt to cast any columns to datetimes.
 
     debug: bool, default False
         Verbosity toggle.
@@ -504,7 +508,11 @@ def parse_df_datetimes(
             if 'datetime' in str(dtype)
         ]
     )
-    cols_to_inspect = [col for col in pdf.columns if col not in ignore_cols]
+    cols_to_inspect = [
+        col
+        for col in pdf.columns
+        if col not in ignore_cols
+    ] if not ignore_all else []
 
     if len(cols_to_inspect) == 0:
         if debug:

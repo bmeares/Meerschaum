@@ -20,6 +20,7 @@ def enforce_dtypes(
     self,
     df: 'pd.DataFrame',
     chunksize: Optional[int] = -1,
+    enforce: bool = True,
     safe_copy: bool = True,
     debug: bool = False,
 ) -> 'pd.DataFrame':
@@ -31,7 +32,7 @@ def enforce_dtypes(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.dataframe import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
-    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PD_DTYPES
+    from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas(debug=debug)
     if df is None:
@@ -42,11 +43,9 @@ def enforce_dtypes(
             )
         return df
 
-    pipe_dtypes = self.dtypes if self.enforce else {
-        col: typ
-        for col, typ in self.dtypes.items()
-        if typ in MRSM_PD_DTYPES
-    }
+    if not self.enforce:
+        enforce = False
+    pipe_dtypes = self.dtypes if enforce else {}
 
     try:
         if isinstance(df, str):
@@ -55,8 +54,9 @@ def enforce_dtypes(
                 ignore_cols=[
                     col
                     for col, dtype in pipe_dtypes.items()
-                    if 'datetime' not in str(dtype)
+                    if (not enforce or not are_dtypes_equal(dtype, 'datetime'))
                 ],
+                ignore_all=(not enforce),
                 strip_timezone=(self.tzinfo is None),
                 chunksize=chunksize,
                 debug=debug,
@@ -67,7 +67,7 @@ def enforce_dtypes(
                 ignore_cols=[
                     col
                     for col, dtype in pipe_dtypes.items()
-                    if not are_dtypes_equal(str(dtype), 'datetime')
+                    if (not enforce or not are_dtypes_equal(str(dtype), 'datetime'))
                 ],
                 strip_timezone=(self.tzinfo is None),
                 chunksize=chunksize,
@@ -90,7 +90,7 @@ def enforce_dtypes(
         pipe_dtypes,
         safe_copy=safe_copy,
         strip_timezone=(self.tzinfo is None),
-        coerce_timezone=True,
+        coerce_timezone=enforce,
         debug=debug,
     )
 

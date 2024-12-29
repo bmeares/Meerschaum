@@ -1809,12 +1809,12 @@ def sync_pipe(
     update_count = len(update_df.index) if update_df is not None else 0
     msg = (
         (
-            f"Inserted {unseen_count}, "
-            + f"updated {update_count} rows."
+            f"Inserted {unseen_count:,}, "
+            + f"updated {update_count:,} rows."
         )
         if not upsert
         else (
-            f"Upserted {update_count} row"
+            f"Upserted {update_count:,} row"
             + ('s' if update_count != 1 else '')
             + "."
         )
@@ -1901,6 +1901,7 @@ def sync_pipe_inplace(
         get_create_table_queries,
         get_table_cols_types,
         session_execute,
+        dateadd_str,
         UPDATE_QUERIES,
     )
     from meerschaum.utils.dtypes.sql import (
@@ -1951,6 +1952,8 @@ def sync_pipe_inplace(
     autoincrement = pipe.parameters.get('autoincrement', False)
     dt_col = pipe.columns.get('datetime', None)
     dt_col_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime') if dt_col else None
+    dt_db_type = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
 
     def clean_up_temp_tables(ready_to_drop: bool = False):
         log_success, log_msg = self._log_temporary_tables_creation(
@@ -1994,7 +1997,7 @@ def sync_pipe_inplace(
 
         rowcount = pipe.get_rowcount(debug=debug)
         _ = clean_up_temp_tables()
-        return True, f"Inserted {rowcount}, updated 0 rows."
+        return True, f"Inserted {rowcount:,}, updated 0 rows."
 
     session = sqlalchemy_orm.Session(self.engine)
     connectable = session if self.flavor != 'duckdb' else self
@@ -2074,12 +2077,13 @@ def sync_pipe_inplace(
         _ = clean_up_temp_tables()
         return True, f"Inserted {new_count}, updated 0 rows."
 
+    dt_col_name_da = dateadd_str(flavor=self.flavor, begin=dt_col_name, db_type=dt_db_type)
     (new_dt_bounds_success, new_dt_bounds_msg), new_dt_bounds_results = session_execute(
         session,
         [
             "SELECT\n"
-            f"    MIN({dt_col_name}) AS {sql_item_name('min_dt', self.flavor)},\n"
-            f"    MAX({dt_col_name}) AS {sql_item_name('max_dt', self.flavor)}\n"
+            f"    MIN({dt_col_name_da}) AS {sql_item_name('min_dt', self.flavor)},\n"
+            f"    MAX({dt_col_name_da}) AS {sql_item_name('max_dt', self.flavor)}\n"
             f"FROM {temp_table_names['new' if not upsert else 'update']}\n"
             f"WHERE {dt_col_name} IS NOT NULL"
         ],
@@ -2388,9 +2392,9 @@ def sync_pipe_inplace(
     session.commit()
 
     msg = (
-        f"Inserted {unseen_count}, updated {update_count} rows."
+        f"Inserted {unseen_count:,}, updated {update_count:,} rows."
         if not upsert
-        else f"Upserted {update_count} row" + ('s' if update_count != 1 else '') + "."
+        else f"Upserted {update_count:,} row" + ('s' if update_count != 1 else '') + "."
     )
     _ = clean_up_temp_tables(ready_to_drop=True)
 
@@ -3446,7 +3450,6 @@ def deduplicate_pipe(
     ]
     indices_names = [sql_item_name(index_col, self.flavor, None) for index_col in indices]
     existing_cols_names = [sql_item_name(col, self.flavor, None) for col in existing_cols]
-    duplicates_cte_name = sql_item_name('dups', self.flavor, None)
     duplicate_row_number_name = sql_item_name('dup_row_num', self.flavor, None)
     previous_row_number_name = sql_item_name('prev_row_num', self.flavor, None)
 
@@ -3586,7 +3589,7 @@ def deduplicate_pipe(
         (
             f"Successfully deduplicated table {pipe_table_name}"
             + (
-                f"\nfrom {old_rowcount} to {new_rowcount} rows"
+                f"\nfrom {old_rowcount:,} to {new_rowcount:,} rows"
                 if old_rowcount != new_rowcount
                 else ''
             )
