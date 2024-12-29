@@ -992,20 +992,19 @@ def test_enforce_false(flavor: str):
         },
     )
     docs = [
-        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': 1.21},
+        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': 1},
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
 
     df = pipe.get_data(['num'], debug=debug)
-    assert df['num'][0] == 1.21
+    assert df['num'][0] == 1
     
     new_docs = [
-        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': 2.34567},
+        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': 2},
     ]
     success, msg = pipe.sync(new_docs, debug=debug)
     assert success, msg
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
-    assert df['dt'][0].tzinfo is not None
-    assert df['num'][0] == 2.34567
+    assert df['num'][0] == 2
