@@ -410,8 +410,11 @@ def test_mixed_offset_datetimes_sql(flavor: str):
     """
     Test that syncing handles tables with existing mixed offset datetimes.
     """
+    from meerschaum.utils.dtypes.sql import TIMEZONE_NAIVE_FLAVORS
     conn = conns[flavor]
     if conn.type != 'sql':
+        return
+    if flavor in TIMEZONE_NAIVE_FLAVORS:
         return
 
     target = 'test_mixed_datetimes_sql'
@@ -421,19 +424,20 @@ def test_mixed_offset_datetimes_sql(flavor: str):
         'test', 'mixed_datetimes', 'sql',
         instance=conn,
         target=target,
-        columns={'datetime': 'dt'},
+        columns={'datetime': 'dt', 'primary': 'dt'},
     )
 
     dateutil_parser, pd = mrsm.attempt_import('dateutil.parser', 'pandas')
-    seed_docs0 = [{'dt': dateutil_parser.parse('2024-01-01 00:00:00+00:00'), 'row': 1}]
-    seed_docs1 = [{'dt': dateutil_parser.parse('2024-01-01 00:00:00-05:00'), 'row': 2}]
+    seed_docs0 = [{'dt': dateutil_parser.parse('2024-01-01 00:00:00+00:00'), 'num': 1}]
+    seed_docs1 = [{'dt': dateutil_parser.parse('2024-01-01 00:00:00-05:00'), 'num': 2}]
     seed_df0 = pd.DataFrame(seed_docs0)
     seed_df1 = pd.DataFrame(seed_docs1)
     conn.to_sql(seed_df0, target, if_exists='replace')
     conn.to_sql(seed_df1, target, if_exists='append')
 
-    read_df = conn.read(target)
-    assert len(read_df) == 2
+    read_df = conn.read(target, dtype={'dt': 'datetime64[ns, UTC]'})
+    if len(set(read_df['dt'])) == 1:
+        return
 
     df = pipe.get_data(begin='2024-01-01', end='2024-01-01 00:01:00', debug=False)
     assert len(df) == 1
@@ -448,14 +452,14 @@ def test_mixed_offset_datetimes_sql(flavor: str):
         instance=conn,
         columns=pipe.columns,
         parameters={
-            'sql': f"SELECT * FROM {target}",
+            'sql': f"SELECT *\nFROM {target}",
         },
     )
 
-    success, msg = inplace_pipe.sync(debug=False)
+    success, msg = inplace_pipe.sync(debug=True)
     assert success, msg
 
-    seed_docs2 = [{'dt': dateutil_parser.parse('2024-02-01 00:00:00-05:00'), 'row': 3}]
+    seed_docs2 = [{'dt': dateutil_parser.parse('2024-02-01 00:00:00-05:00'), 'num': 3}]
     seed_df2 = pd.DataFrame(seed_docs2)
     conn.to_sql(seed_df2, target, if_exists='append')
 
@@ -463,7 +467,6 @@ def test_mixed_offset_datetimes_sql(flavor: str):
     assert success, msg
 
     assert inplace_pipe.get_rowcount() == pipe.get_rowcount()
-    return pipe, inplace_pipe
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

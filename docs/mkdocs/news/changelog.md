@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.7.0 – v2.7.2
+### v2.7.0 – v2.7.3
 
 - **Introduce the `bytes` data type.**  
   Instance connectors which support binary data (e.g. `SQLConnector`) may now take advantage of the `bytes` dtype. Other connectors (e.g. `ValkeyConnector`) may use `meerschaum.utils.dtypes.serialize_bytes()` to store binary data as a base64-encoded string.
@@ -99,6 +99,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Show the Webterm by default when changing instances.**  
   On the Web Console, changing the instance select will make the Webterm visible.
+  
+- **Explicitly cast timezone-aware datetimes as UTC in SQL syncs.**  
+  Certain database flavors (e.g. MSSQL) consider timezone-aware timestamps equivalent only if they share offsets. This patch coerces all timezone-aware datetimes into UTC before checking equality.
 
 - **Improve dtype inference.** 
 

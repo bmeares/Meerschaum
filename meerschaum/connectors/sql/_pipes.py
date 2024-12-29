@@ -512,7 +512,7 @@ def get_create_index_queries(
                 + 'if_not_exists => true, '
                 + "migrate_data => true);"
             )
-        elif _datetime_index_name:
+        elif _datetime_index_name and _datetime != primary_key:
             if self.flavor == 'mssql':
                 dt_query = (
                     f"CREATE {datetime_clustered} INDEX {_datetime_index_name} "
@@ -1365,7 +1365,18 @@ def create_pipe_table_from_df(
         get_bytes_cols,
     )
     from meerschaum.utils.sql import get_create_table_queries, sql_item_name
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     primary_key = pipe.columns.get('primary', None)
+    primary_key_typ = (
+        pipe.dtypes.get(primary_key, str(df.dtypes.get(primary_key)))
+        if primary_key
+        else None
+    )
+    primary_key_db_type = (
+        get_db_type_from_pd_type(primary_key_typ, self.flavor)
+        if primary_key
+        else None
+    )
     dt_col = pipe.columns.get('datetime', None)
     new_dtypes = {
         **{
@@ -1416,6 +1427,7 @@ def create_pipe_table_from_df(
         self.flavor,
         schema=self.get_pipe_schema(pipe),
         primary_key=primary_key,
+        primary_key_db_type=primary_key_db_type,
         datetime_column=dt_col,
     )
     success = all(
@@ -1893,6 +1905,7 @@ def sync_pipe_inplace(
     )
     from meerschaum.utils.dtypes.sql import (
         get_pd_type_from_db_type,
+        get_db_type_from_pd_type,
     )
     from meerschaum.utils.misc import generate_password
 
@@ -1908,12 +1921,12 @@ def sync_pipe_inplace(
         for table_root in temp_table_roots
     }
     temp_table_names = {
-        table_root: sql_item_name(
-            table_name_raw,
-            self.flavor,
-            internal_schema,
-        )
+        table_root: sql_item_name(table_name_raw, self.flavor, internal_schema)
         for table_root, table_name_raw in temp_tables.items()
+    }
+    temp_table_aliases = {
+        table_root: sql_item_name(table_root, self.flavor)
+        for table_root in temp_table_roots
     }
     metadef = self.get_pipe_metadef(
         pipe,
@@ -1928,6 +1941,12 @@ def sync_pipe_inplace(
     static = pipe.parameters.get('static', False)
     database = getattr(self, 'database', self.parse_uri(self.URI).get('database', None))
     primary_key = pipe.columns.get('primary', None)
+    primary_key_typ = pipe.dtypes.get(primary_key, None) if primary_key else None
+    primary_key_db_type = (
+        get_db_type_from_pd_type(primary_key_typ, self.flavor)
+        if primary_key_typ
+        else None
+    )
     autoincrement = pipe.parameters.get('autoincrement', False)
     dt_col = pipe.columns.get('datetime', None)
     dt_col_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
@@ -1960,6 +1979,7 @@ def sync_pipe_inplace(
             self.flavor,
             schema=self.get_pipe_schema(pipe),
             primary_key=primary_key,
+            primary_key_db_type=primary_key_db_type,
             autoincrement=autoincrement,
             datetime_column=dt_col,
         )
@@ -2010,7 +2030,7 @@ def sync_pipe_inplace(
         str(col_name): get_pd_type_from_db_type(str(col_type))
         for col_name, col_type in new_cols_types.items()
     }
-    new_cols_str = ', '.join([
+    new_cols_str = '\n    ' + ',\n    '.join([
         sql_item_name(col, self.flavor)
         for col in new_cols
     ])
@@ -2033,7 +2053,7 @@ def sync_pipe_inplace(
     insert_queries = [
         (
             f"INSERT INTO {pipe_name} ({new_cols_str})\n"
-            + f"SELECT {new_cols_str}\nFROM {temp_table_names['new']}"
+            + f"SELECT {new_cols_str}\nFROM {temp_table_names['new']} AS {temp_table_aliases['new']}"
         )
     ] if not check_existing and not upsert else []
 
@@ -2124,8 +2144,8 @@ def sync_pipe_inplace(
     } if not primary_key or self.flavor == 'oracle' else {primary_key: new_cols.get(primary_key)}
 
     null_replace_new_cols_str = (
-        ', '.join([
-            f"COALESCE({temp_table_names['new']}.{sql_item_name(col, self.flavor, None)}, "
+        '\n    ' + ',\n    '.join([
+            f"COALESCE({temp_table_aliases['new']}.{sql_item_name(col, self.flavor, None)}, "
             + get_null_replacement(get_col_typ(col, new_cols_types), self.flavor)
             + ") AS "
             + sql_item_name(col, self.flavor, None)
@@ -2134,29 +2154,30 @@ def sync_pipe_inplace(
     )
 
     select_delta_query = (
-        "SELECT\n"
-        + null_replace_new_cols_str + "\n"
-        + f"\nFROM {temp_table_names['new']}\n"
-        + f"LEFT OUTER JOIN {temp_table_names['backtrack']}\nON\n"
-        + '\nAND\n'.join([
+        "SELECT"
+        + null_replace_new_cols_str
+        + f"\nFROM {temp_table_names['new']} AS {temp_table_aliases['new']}\n"
+        + f"LEFT OUTER JOIN {temp_table_names['backtrack']} AS {temp_table_aliases['backtrack']}"
+        + "\n    ON\n    "
+        + '\n    AND\n    '.join([
             (
-                f"COALESCE({temp_table_names['new']}."
+                f"    COALESCE({temp_table_aliases['new']}."
                 + sql_item_name(c, self.flavor, None)
                 + ", "
                 + get_null_replacement(get_col_typ(c, new_cols_types), self.flavor)
-                + ") "
-                + ' = '
-                + f"COALESCE({temp_table_names['backtrack']}."
+                + ")"
+                + '\n        =\n    '
+                + f"    COALESCE({temp_table_aliases['backtrack']}."
                 + sql_item_name(c, self.flavor, None)
                 + ", "
                 + get_null_replacement(get_col_typ(c, backtrack_cols_types), self.flavor)
                 + ") "
             ) for c in common_cols
         ])
-        + "\nWHERE\n"
-        + '\nAND\n'.join([
+        + "\nWHERE\n    "
+        + '\n    AND\n    '.join([
             (
-                f"{temp_table_names['backtrack']}." + sql_item_name(c, self.flavor, None) + ' IS NULL'
+                f"{temp_table_aliases['backtrack']}." + sql_item_name(c, self.flavor) + ' IS NULL'
             ) for c in common_cols
         ])
     )
@@ -2199,29 +2220,30 @@ def sync_pipe_inplace(
     ])
 
     select_joined_query = (
-        "SELECT "
-        + (', '.join([
+        "SELECT\n    "
+        + (',\n    '.join([
             (
-                f"{temp_table_names['delta']}." + sql_item_name(c, self.flavor, None)
+                f"{temp_table_aliases['delta']}." + sql_item_name(c, self.flavor, None)
                 + " AS " + sql_item_name(c + '_delta', self.flavor, None)
             ) for c in delta_cols
         ]))
-        + ", "
-        + (', '.join([
+        + ",\n    "
+        + (',\n    '.join([
             (
-                f"{temp_table_names['backtrack']}." + sql_item_name(c, self.flavor, None)
+                f"{temp_table_aliases['backtrack']}." + sql_item_name(c, self.flavor, None)
                 + " AS " + sql_item_name(c + '_backtrack', self.flavor, None)
             ) for c in backtrack_cols_types
         ]))
-        + f"\nFROM {temp_table_names['delta']}\n"
-        + f"LEFT OUTER JOIN {temp_table_names['backtrack']}\nON\n"
-        + '\nAND\n'.join([
+        + f"\nFROM {temp_table_names['delta']} AS {temp_table_aliases['delta']}\n"
+        + f"LEFT OUTER JOIN {temp_table_names['backtrack']} AS {temp_table_aliases['backtrack']}"
+        + "\n    ON\n    "
+        + '\n    AND\n    '.join([
             (
-                f"COALESCE({temp_table_names['delta']}." + sql_item_name(c, self.flavor, None)
+                f"    COALESCE({temp_table_aliases['delta']}." + sql_item_name(c, self.flavor)
                 + ", "
                 + get_null_replacement(get_col_typ(c, new_cols_types), self.flavor) + ")"
-                + ' = '
-                + f"COALESCE({temp_table_names['backtrack']}." + sql_item_name(c, self.flavor, None)
+                + '\n        =\n    '
+                + f"    COALESCE({temp_table_aliases['backtrack']}." + sql_item_name(c, self.flavor)
                 + ", "
                 + get_null_replacement(get_col_typ(c, new_cols_types), self.flavor) + ")"
             ) for c, typ in on_cols.items()
@@ -2244,19 +2266,19 @@ def sync_pipe_inplace(
         return create_joined_success, create_joined_msg
 
     select_unseen_query = (
-        "SELECT "
-        + (', '.join([
+        "SELECT\n    "
+        + (',\n    '.join([
             (
-                "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor, None)
+                "CASE\n        WHEN " + sql_item_name(c + '_delta', self.flavor, None)
                 + " != " + get_null_replacement(get_col_typ(c, delta_cols_types), self.flavor)
                 + " THEN " + sql_item_name(c + '_delta', self.flavor, None)
-                + "\n    ELSE NULL\nEND "
+                + "\n        ELSE NULL\n    END"
                 + " AS " + sql_item_name(c, self.flavor, None)
             ) for c, typ in delta_cols.items()
         ]))
-        + f"\nFROM {temp_table_names['joined']}\n"
-        + "WHERE "
-        + '\nAND\n'.join([
+        + f"\nFROM {temp_table_names['joined']} AS {temp_table_aliases['joined']}\n"
+        + "WHERE\n    "
+        + '\n    AND\n    '.join([
             (
                 sql_item_name(c + '_backtrack', self.flavor, None) + ' IS NULL'
             ) for c in delta_cols
@@ -2279,19 +2301,19 @@ def sync_pipe_inplace(
         return create_unseen_success, create_unseen_msg
 
     select_update_query = (
-        "SELECT "
-        + (', '.join([
+        "SELECT\n    "
+        + (',\n    '.join([
             (
-                "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor, None)
+                "CASE\n        WHEN " + sql_item_name(c + '_delta', self.flavor, None)
                 + " != " + get_null_replacement(get_col_typ(c, delta_cols_types), self.flavor)
                 + " THEN " + sql_item_name(c + '_delta', self.flavor, None)
-                + "\n    ELSE NULL\nEND "
+                + "\n        ELSE NULL\n    END"
                 + " AS " + sql_item_name(c, self.flavor, None)
             ) for c, typ in delta_cols.items()
         ]))
-        + f"\nFROM {temp_table_names['joined']}\n"
-        + "WHERE "
-        + '\nOR\n'.join([
+        + f"\nFROM {temp_table_names['joined']} AS {temp_table_aliases['joined']}\n"
+        + "WHERE\n    "
+        + '\n    OR\n    '.join([
             (
                 sql_item_name(c + '_backtrack', self.flavor, None) + ' IS NOT NULL'
             ) for c in delta_cols
@@ -3405,7 +3427,6 @@ def deduplicate_pipe(
 
     ### TODO: Handle deleting duplicates without a datetime axis.
     dt_col = pipe.columns.get('datetime', None)
-    dt_col_name = sql_item_name(dt_col, self.flavor, None)
     cols_types = pipe.get_columns_types(debug=debug)
     existing_cols = pipe.get_columns_types(debug=debug)
 
@@ -3455,7 +3476,7 @@ def deduplicate_pipe(
             and
             int(self.db_version.split('.')[0]) < 8
         )
-    except Exception as e:
+    except Exception:
         is_old_mysql = False
 
     src_query = f"""

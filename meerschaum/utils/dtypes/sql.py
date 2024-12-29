@@ -7,7 +7,7 @@ Utility functions for working with SQL data types.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Dict, Union, Tuple, List
+from meerschaum.utils.typing import Dict, Union, Tuple
 
 NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'mariadb': (38, 20),

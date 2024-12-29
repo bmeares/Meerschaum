@@ -801,7 +801,7 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
         ### NOTE: System-reserved words must be quoted.
         if truncated_item.lower() in (
             'float', 'varchar', 'nvarchar', 'clob',
-            'boolean', 'integer', 'table',
+            'boolean', 'integer', 'table', 'row',
         ):
             wrappers = ('"', '"')
         else:
@@ -1892,6 +1892,7 @@ def get_create_table_queries(
     flavor: str,
     schema: Optional[str] = None,
     primary_key: Optional[str] = None,
+    primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
 ) -> List[str]:
@@ -1915,6 +1916,9 @@ def get_create_table_queries(
 
     primary_key: Optional[str], default None
         If provided, designate this column as the primary key in the new table.
+
+    primary_key_db_type: Optional[str], default None
+        If provided, alter the primary key to this type (to set NOT NULL constraint).
 
     autoincrement: bool, default False
         If `True` and `primary_key` is provided, create the `primary_key` column
@@ -1942,6 +1946,7 @@ def get_create_table_queries(
         flavor,
         schema=schema,
         primary_key=primary_key,
+        primary_key_db_type=primary_key_db_type,
         autoincrement=(autoincrement and flavor not in SKIP_AUTO_INCREMENT_FLAVORS),
         datetime_column=datetime_column,
     )
@@ -1953,6 +1958,7 @@ def _get_create_table_query_from_dtypes(
     flavor: str,
     schema: Optional[str] = None,
     primary_key: Optional[str] = None,
+    primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
 ) -> List[str]:
@@ -2042,13 +2048,13 @@ def _get_create_table_query_from_cte(
     flavor: str,
     schema: Optional[str] = None,
     primary_key: Optional[str] = None,
+    primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
 ) -> List[str]:
     """
     Create a new table from a CTE query.
     """
-    import textwrap
     create_cte = 'create_query'
     create_cte_name = sql_item_name(create_cte, flavor, None)
     new_table_name = sql_item_name(new_table, flavor, schema)
@@ -2062,7 +2068,11 @@ def _get_create_table_query_from_cte(
         if primary_key
         else None
     )
-    primary_key_clustered = "CLUSTERED" if not datetime_column else "NONCLUSTERED"
+    primary_key_clustered = (
+        "CLUSTERED"
+        if not datetime_column or datetime_column == primary_key
+        else "NONCLUSTERED"
+    )
     datetime_column_name = (
         sql_item_name(datetime_column, flavor)
         if datetime_column
@@ -2072,80 +2082,105 @@ def _get_create_table_query_from_cte(
         query = query.lstrip()
         if query.lower().startswith('with '):
             final_select_ix = query.lower().rfind('select')
-            create_table_query = (
-                query[:final_select_ix].rstrip() + ',\n'
-                + f"{create_cte_name} AS (\n"
-                + query[final_select_ix:]
-                + "\n)\n"
-                + f"SELECT *\nINTO {new_table_name}\nFROM {create_cte_name}"
-            )
+            create_table_queries = [
+                (
+                    query[:final_select_ix].rstrip() + ',\n'
+                    + f"{create_cte_name} AS (\n"
+                    + query[final_select_ix:]
+                    + "\n)\n"
+                    + f"SELECT *\nINTO {new_table_name}\nFROM {create_cte_name}"
+                ),
+            ]
         else:
-            create_table_query = (
+            create_table_queries = [
+                (
+                    "SELECT *\n"
+                    f"INTO {new_table_name}\n"
+                    f"FROM (\n{query}\n) AS {create_cte_name}"
+                ),
+            ]
+
+        alter_type_queries = []
+        if primary_key_db_type:
+            alter_type_queries.extend([
+                (
+                    f"ALTER TABLE {new_table_name}\n"
+                    f"ALTER COLUMN {primary_key_name} {primary_key_db_type} NOT NULL"
+                ),
+            ])
+        alter_type_queries.extend([
+            (
+                f"ALTER TABLE {new_table_name}\n"
+                f"ADD CONSTRAINT {primary_key_constraint_name} "
+                f"PRIMARY KEY {primary_key_clustered} ({primary_key_name})"
+            ),
+        ])
+    elif flavor in (None,):
+        create_table_queries = [
+            (
+                f"WITH {create_cte_name} AS (\n{query}\n)\n"
+                f"CREATE TABLE {new_table_name} AS\n"
+                "SELECT *\n"
+                f"FROM {create_cte_name}"
+            ),
+        ]
+
+        alter_type_queries = [
+            (
+                f"ALTER TABLE {new_table_name}\n"
+                f"ADD PRIMARY KEY ({primary_key_name})"
+            ),
+        ]
+    elif flavor in ('sqlite', 'mysql', 'mariadb', 'duckdb', 'oracle'):
+        create_table_queries = [
+            (
+                f"CREATE TABLE {new_table_name} AS\n"
+                "SELECT *\n"
+                f"FROM (\n{query}\n)" + (f" AS {create_cte_name}" if flavor != 'oracle' else '')
+            ),
+        ]
+
+        alter_type_queries = [
+            (
+                f"ALTER TABLE {new_table_name}\n"
+                "ADD PRIMARY KEY ({primary_key_name})"
+            ),
+        ]
+    elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
+        create_table_queries = [
+            (
+                "SELECT *\n"
+                f"INTO {new_table_name}\n"
+                f"FROM (\n{query}\n) AS {create_cte_name}\n"
+            ),
+        ]
+
+        alter_type_queries = [
+            (
+                f"ALTER TABLE {new_table_name}\n"
+                f"ADD PRIMARY KEY ({datetime_column_name}, {primary_key_name})"
+            ),
+        ]
+    else:
+        create_table_queries = [
+            (
                 "SELECT *\n"
                 f"INTO {new_table_name}\n"
                 f"FROM (\n{query}\n) AS {create_cte_name}"
-            )
+            ),
+        ]
 
-        alter_type_query = (
-            f"ALTER TABLE {new_table_name}\n"
-            f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name})"
-        )
-    elif flavor in (None,):
-        create_table_query = (
-            f"WITH {create_cte_name} AS (\n{query}\n)\n"
-            f"CREATE TABLE {new_table_name} AS\n"
-            "SELECT *\n"
-            f"FROM {create_cte_name}"
-        )
+        alter_type_queries = [
+            (
+                f"ALTER TABLE {new_table_name}\n"
+                f"ADD PRIMARY KEY ({primary_key_name})"
+            ),
+        ]
 
-        alter_type_query = (
-            f"ALTER TABLE {new_table_name}\n"
-            f"ADD PRIMARY KEY ({primary_key_name})"
-        )
-    elif flavor in ('sqlite', 'mysql', 'mariadb', 'duckdb', 'oracle'):
-        create_table_query = (
-            f"CREATE TABLE {new_table_name} AS\n"
-            "SELECT *\n"
-            f"FROM (\n{query}\n)" + (f" AS {create_cte_name}" if flavor != 'oracle' else '')
-        )
-
-        alter_type_query = (
-            f"ALTER TABLE {new_table_name}\n"
-            "ADD PRIMARY KEY ({primary_key_name})"
-        )
-    elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
-        create_table_query = (
-            "SELECT *\n"
-            f"INTO {new_table_name}\n"
-            f"FROM (\n{query}\n) AS {create_cte_name}\n"
-        )
-
-        alter_type_query = (
-            f"ALTER TABLE {new_table_name}\n"
-            f"ADD PRIMARY KEY ({datetime_column_name}, {primary_key_name})"
-        )
-    else:
-        create_table_query = (
-            "SELECT *\n"
-            f"INTO {new_table_name}\n"
-            f"FROM (\n{query}\n) AS {create_cte_name}"
-        )
-
-        alter_type_query = (
-            f"ALTER TABLE {new_table_name}\n"
-            f"ADD PRIMARY KEY ({primary_key_name})"
-        )
-
-    create_table_query = textwrap.dedent(create_table_query).lstrip().rstrip()
     if not primary_key:
-        return [create_table_query]
+        return create_table_queries
 
-    alter_type_query = textwrap.dedent(alter_type_query).lstrip().rstrip()
-
-    return [
-        create_table_query,
-        alter_type_query,
-    ]
+    return create_table_queries + alter_type_queries
 
 
 def wrap_query_with_cte(
