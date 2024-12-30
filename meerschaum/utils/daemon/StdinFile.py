@@ -104,7 +104,10 @@ class StdinFile(io.TextIOBase):
         if self._file_handler is not None:
             self.sel.unregister(self._file_handler)
             self._file_handler.close()
-            os.close(self._fd)
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
             self._file_handler = None
             self._fd = None
 
