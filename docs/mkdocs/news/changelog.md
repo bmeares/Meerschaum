@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.7.3
+### v2.7.3 – v2.7.4
 
 - **Allow for dynamic targets in SQL queries.**  
   Include a pipe definition in double curly braces (à la Jinja) to substitute a pipe's target into a templated query.
@@ -44,6 +44,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Explicitly cast timezone-aware datetimes as UTC in SQL syncs.**  
   By default, timezone-aware columns are now cast as time zone UTC in SQL. This may be skipped by setting `enforce` to `False`.
+
+- **Added virtual environment inter-process locks.**  
+  Competing processes now cooperate for virtual environment verification, which protects installed packages.
 
 ### v2.7.0 – v2.7.2
 

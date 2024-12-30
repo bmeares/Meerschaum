@@ -6,8 +6,6 @@
 Higher-level utilities for managing `meerschaum.utils.daemon.Daemon`.
 """
 
-import pathlib
-
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Optional, List, SuccessTuple
 

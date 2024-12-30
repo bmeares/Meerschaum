@@ -395,9 +395,13 @@ def init_venv(
 
     def update_lock(active: bool):
         try:
-            if active:
+            if not active:
+                if debug:
+                    print(f"Releasing lock: '{lock_path}'")
                 lock_path.unlink()
             else:
+                if debug:
+                    print(f"Acquiring lock: '{lock_path}'")
                 lock_path.touch()
         except Exception:
             pass
@@ -408,7 +412,10 @@ def init_venv(
         init_venv_check_start = time.perf_counter()
         while (time.perf_counter() - init_venv_check_start < max_lock_seconds):
             if not lock_path.exists():
-                continue
+                break
+
+            if debug:
+                print(f"Lock exists for '{venv}', sleeping...")
             time.sleep(step_sleep_seconds)
         update_lock(False)
 
@@ -441,10 +448,9 @@ def init_venv(
     rename_vtp = vtp.exists() and not temp_vtp.exists()
 
     if rename_vtp:
-        try:
-            vtp.rename(temp_vtp)
-        except FileExistsError:
-            pass
+        if debug:
+            print(f"Moving '{vtp}' to '{temp_vtp}'...")
+        shutil.move(vtp, temp_vtp)
 
     wait_for_lock()
     update_lock(True)
@@ -491,7 +497,9 @@ def init_venv(
                 + "Please install `virtualenv` via pip then restart Meerschaum."
             )
             if rename_vtp and temp_vtp.exists():
-                temp_vtp.rename(vtp)
+                if debug:
+                    print(f"Moving '{temp_vtp}' back to '{vtp}'...")
+                shutil.move(temp_vtp, vtp)
             update_lock(False)
             return False
 
@@ -530,7 +538,7 @@ def init_venv(
             import traceback
             traceback.print_exc()
             if rename_vtp and temp_vtp.exists():
-                temp_vtp.rename(vtp)
+                shutil.move(temp_vtp, vtp)
             update_lock(False)
             return False
     if verify:
@@ -538,7 +546,9 @@ def init_venv(
         verified_venvs.add(venv)
 
     if rename_vtp and temp_vtp.exists():
-        temp_vtp.rename(vtp)
+        if debug:
+            print(f"Cleanup: move '{temp_vtp}' back to '{vtp}'.")
+        shutil.move(temp_vtp, vtp)
 
     update_lock(False)
     return True
