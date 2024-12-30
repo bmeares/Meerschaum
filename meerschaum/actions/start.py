@@ -183,7 +183,7 @@ def _start_jobs(
         ### Cannot find dameon_id
         else:
             msg = (
-                f"Unknown job" + ('s' if len(action) != 1 else '') + ' '
+                "Unknown job" + ('s' if len(action) != 1 else '') + ' '
                 + items_str(action, and_str='or') + '.'
             )
             return False, msg
@@ -216,7 +216,7 @@ def _start_jobs(
         return job.start(debug=debug), name
 
     def _run_existing_job(name: str):
-        job = Job(name, executor_keys=executor_keys)
+        job = jobs.get(name, Job(name, executor_keys=executor_keys))
         return job.start(debug=debug), name
 
     if not names:

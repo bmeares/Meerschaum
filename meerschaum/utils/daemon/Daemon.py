@@ -13,7 +13,6 @@ import pathlib
 import json
 import shutil
 import signal
-import sys
 import time
 import traceback
 from functools import partial
@@ -301,6 +300,7 @@ class Daemon:
             os.environ['LINES'], os.environ['COLUMNS'] = str(int(lines)), str(int(columns))
             with self._daemon_context:
                 sys.stdin = self.stdin_file
+                _ = os.environ.pop(STATIC_CONFIG['environment']['systemd_stdin_path'], None)
                 os.environ[STATIC_CONFIG['environment']['daemon_id']] = self.daemon_id
                 os.environ['PYTHONUNBUFFERED'] = '1'
 
