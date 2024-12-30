@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.7.3 – v2.7.4
+### v2.7.3 – v2.7.5
 
 - **Allow for dynamic targets in SQL queries.**  
   Include a pipe definition in double curly braces (à la Jinja) to substitute a pipe's target into a templated query.
