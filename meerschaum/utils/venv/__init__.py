@@ -176,23 +176,26 @@ def deactivate_venv(
     if sys.path is None:
         return False
 
-    target = venv_target_path(venv, allow_nonexistent=force, debug=debug).as_posix()
+    target = venv_target_path(venv, allow_nonexistent=True, debug=debug).as_posix()
     with LOCKS['sys.path']:
         if target in sys.path:
-            sys.path.remove(target)
+            try:
+                sys.path.remove(target)
+            except Exception:
+                pass
             try:
                 active_venvs_order.remove(venv)
-            except Exception as e:
+            except Exception:
                 pass
 
     return True
 
 
 def is_venv_active(
-        venv: str = 'mrsm',
-        color : bool = True,
-        debug: bool = False
-    ) -> bool:
+    venv: str = 'mrsm',
+    color : bool = True,
+    debug: bool = False
+) -> bool:
     """
     Check if a virtual environment is active.
 
@@ -663,10 +666,10 @@ def venv_exists(venv: Union[str, None], debug: bool = False) -> bool:
 
 
 def venv_target_path(
-        venv: Union[str, None],
-        allow_nonexistent: bool = False,
-        debug: bool = False,
-    ) -> 'pathlib.Path':
+    venv: Union[str, None],
+    allow_nonexistent: bool = False,
+    debug: bool = False,
+) -> 'pathlib.Path':
     """
     Return a virtual environment's site-package path.
 
@@ -683,7 +686,11 @@ def venv_target_path(
     The `pathlib.Path` object for the virtual environment's path.
 
     """
-    import os, sys, platform, pathlib, site
+    import os
+    import sys
+    import platform
+    import pathlib
+    import site
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.config.static import STATIC_CONFIG
 
