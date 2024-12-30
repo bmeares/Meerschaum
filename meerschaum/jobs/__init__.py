@@ -342,7 +342,7 @@ def check_restart_jobs(
 
 def _check_restart_jobs_against_lock(*args, **kwargs):
     from meerschaum.config.paths import CHECK_JOBS_LOCK_PATH
-    fasteners = mrsm.attempt_import('fasteners')
+    fasteners = mrsm.attempt_import('fasteners', lazy=False)
     lock = fasteners.InterProcessLock(CHECK_JOBS_LOCK_PATH)
     with lock:
         check_restart_jobs(*args, **kwargs)

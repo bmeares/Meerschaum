@@ -391,7 +391,7 @@ def get_create_index_queries(
     from meerschaum.utils.sql import (
         sql_item_name,
         get_distinct_col_count,
-        update_queries,
+        UPDATE_QUERIES,
         get_null_replacement,
         get_create_table_queries,
         get_rename_table_queries,
@@ -405,7 +405,7 @@ def get_create_index_queries(
     from meerschaum.config import get_config
     index_queries = {}
 
-    upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in update_queries
+    upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in UPDATE_QUERIES
     static = pipe.parameters.get('static', False)
     index_names = pipe.get_indices()
     indices = pipe.indices
@@ -512,7 +512,7 @@ def get_create_index_queries(
                 + 'if_not_exists => true, '
                 + "migrate_data => true);"
             )
-        elif _datetime_index_name:
+        elif _datetime_index_name and _datetime != primary_key:
             if self.flavor == 'mssql':
                 dt_query = (
                     f"CREATE {datetime_clustered} INDEX {_datetime_index_name} "
@@ -1105,12 +1105,13 @@ def get_pipe_data_query(
     from meerschaum.utils.misc import items_str
     from meerschaum.utils.sql import sql_item_name, dateadd_str
     from meerschaum.utils.dtypes import coerce_timezone
-    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
+    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type, get_db_type_from_pd_type
 
     dt_col = pipe.columns.get('datetime', None)
     existing_cols = pipe.get_columns_types(debug=debug) if pipe.enforce else []
     skip_existing_cols_check = skip_existing_cols_check or not pipe.enforce
     dt_typ = get_pd_type_from_db_type(existing_cols[dt_col]) if dt_col in existing_cols else None
+    dt_db_type = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
     select_columns = (
         [col for col in existing_cols]
         if not select_columns
@@ -1200,6 +1201,7 @@ def get_pipe_data_query(
             datepart='minute',
             number=begin_add_minutes,
             begin=begin,
+            db_type=dt_db_type,
         )
         where += f"\n    {dt} >= {begin_da}" + ("\n    AND\n    " if end is not None else "")
         is_dt_bound = True
@@ -1211,7 +1213,8 @@ def get_pipe_data_query(
             flavor=self.flavor,
             datepart='minute',
             number=end_add_minutes,
-            begin=end
+            begin=end,
+            db_type=dt_db_type,
         )
         where += f"{dt} <  {end_da}"
         is_dt_bound = True
@@ -1362,7 +1365,18 @@ def create_pipe_table_from_df(
         get_bytes_cols,
     )
     from meerschaum.utils.sql import get_create_table_queries, sql_item_name
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     primary_key = pipe.columns.get('primary', None)
+    primary_key_typ = (
+        pipe.dtypes.get(primary_key, str(df.dtypes.get(primary_key)))
+        if primary_key
+        else None
+    )
+    primary_key_db_type = (
+        get_db_type_from_pd_type(primary_key_typ, self.flavor)
+        if primary_key
+        else None
+    )
     dt_col = pipe.columns.get('datetime', None)
     new_dtypes = {
         **{
@@ -1413,6 +1427,7 @@ def create_pipe_table_from_df(
         self.flavor,
         schema=self.get_pipe_schema(pipe),
         primary_key=primary_key,
+        primary_key_db_type=primary_key_db_type,
         datetime_column=dt_col,
     )
     success = all(
@@ -1487,7 +1502,7 @@ def sync_pipe(
     from meerschaum.utils.sql import (
         get_update_queries,
         sql_item_name,
-        update_queries,
+        UPDATE_QUERIES,
         get_reset_autoincrement_queries,
     )
     from meerschaum.utils.misc import generate_password
@@ -1563,7 +1578,7 @@ def sync_pipe(
             if not infer_bool_success:
                 return infer_bool_success, infer_bool_msg
 
-    upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in update_queries
+    upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in UPDATE_QUERIES
     if upsert:
         check_existing = False
     kw['safe_copy'] = kw.get('safe_copy', False)
@@ -1794,12 +1809,12 @@ def sync_pipe(
     update_count = len(update_df.index) if update_df is not None else 0
     msg = (
         (
-            f"Inserted {unseen_count}, "
-            + f"updated {update_count} rows."
+            f"Inserted {unseen_count:,}, "
+            + f"updated {update_count:,} rows."
         )
         if not upsert
         else (
-            f"Upserted {update_count} row"
+            f"Upserted {update_count:,} row"
             + ('s' if update_count != 1 else '')
             + "."
         )
@@ -1886,10 +1901,12 @@ def sync_pipe_inplace(
         get_create_table_queries,
         get_table_cols_types,
         session_execute,
-        update_queries,
+        dateadd_str,
+        UPDATE_QUERIES,
     )
     from meerschaum.utils.dtypes.sql import (
         get_pd_type_from_db_type,
+        get_db_type_from_pd_type,
     )
     from meerschaum.utils.misc import generate_password
 
@@ -1905,13 +1922,14 @@ def sync_pipe_inplace(
         for table_root in temp_table_roots
     }
     temp_table_names = {
-        table_root: sql_item_name(
-            table_name_raw,
-            self.flavor,
-            internal_schema,
-        )
+        table_root: sql_item_name(table_name_raw, self.flavor, internal_schema)
         for table_root, table_name_raw in temp_tables.items()
     }
+    temp_table_aliases = {
+        table_root: sql_item_name(table_root, self.flavor)
+        for table_root in temp_table_roots
+    }
+    table_alias_as = " AS" if self.flavor != 'oracle' else ''
     metadef = self.get_pipe_metadef(
         pipe,
         params=params,
@@ -1921,13 +1939,21 @@ def sync_pipe_inplace(
         debug=debug,
     )
     pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
-    upsert = pipe.parameters.get('upsert', False) and f'{self.flavor}-upsert' in update_queries
+    upsert = pipe.parameters.get('upsert', False) and f'{self.flavor}-upsert' in UPDATE_QUERIES
     static = pipe.parameters.get('static', False)
     database = getattr(self, 'database', self.parse_uri(self.URI).get('database', None))
     primary_key = pipe.columns.get('primary', None)
+    primary_key_typ = pipe.dtypes.get(primary_key, None) if primary_key else None
+    primary_key_db_type = (
+        get_db_type_from_pd_type(primary_key_typ, self.flavor)
+        if primary_key_typ
+        else None
+    )
     autoincrement = pipe.parameters.get('autoincrement', False)
     dt_col = pipe.columns.get('datetime', None)
     dt_col_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime') if dt_col else None
+    dt_db_type = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
 
     def clean_up_temp_tables(ready_to_drop: bool = False):
         log_success, log_msg = self._log_temporary_tables_creation(
@@ -1957,6 +1983,7 @@ def sync_pipe_inplace(
             self.flavor,
             schema=self.get_pipe_schema(pipe),
             primary_key=primary_key,
+            primary_key_db_type=primary_key_db_type,
             autoincrement=autoincrement,
             datetime_column=dt_col,
         )
@@ -1970,7 +1997,7 @@ def sync_pipe_inplace(
 
         rowcount = pipe.get_rowcount(debug=debug)
         _ = clean_up_temp_tables()
-        return True, f"Inserted {rowcount}, updated 0 rows."
+        return True, f"Inserted {rowcount:,}, updated 0 rows."
 
     session = sqlalchemy_orm.Session(self.engine)
     connectable = session if self.flavor != 'duckdb' else self
@@ -2007,7 +2034,7 @@ def sync_pipe_inplace(
         str(col_name): get_pd_type_from_db_type(str(col_type))
         for col_name, col_type in new_cols_types.items()
     }
-    new_cols_str = ', '.join([
+    new_cols_str = '\n    ' + ',\n    '.join([
         sql_item_name(col, self.flavor)
         for col in new_cols
     ])
@@ -2030,7 +2057,8 @@ def sync_pipe_inplace(
     insert_queries = [
         (
             f"INSERT INTO {pipe_name} ({new_cols_str})\n"
-            + f"SELECT {new_cols_str}\nFROM {temp_table_names['new']}"
+            f"SELECT {new_cols_str}\nFROM {temp_table_names['new']}{table_alias_as}"
+            f" {temp_table_aliases['new']}"
         )
     ] if not check_existing and not upsert else []
 
@@ -2049,12 +2077,13 @@ def sync_pipe_inplace(
         _ = clean_up_temp_tables()
         return True, f"Inserted {new_count}, updated 0 rows."
 
+    dt_col_name_da = dateadd_str(flavor=self.flavor, begin=dt_col_name, db_type=dt_db_type)
     (new_dt_bounds_success, new_dt_bounds_msg), new_dt_bounds_results = session_execute(
         session,
         [
             "SELECT\n"
-            f"    MIN({dt_col_name}) AS {sql_item_name('min_dt', self.flavor)},\n"
-            f"    MAX({dt_col_name}) AS {sql_item_name('max_dt', self.flavor)}\n"
+            f"    MIN({dt_col_name_da}) AS {sql_item_name('min_dt', self.flavor)},\n"
+            f"    MAX({dt_col_name_da}) AS {sql_item_name('max_dt', self.flavor)}\n"
             f"FROM {temp_table_names['new' if not upsert else 'update']}\n"
             f"WHERE {dt_col_name} IS NOT NULL"
         ],
@@ -2121,9 +2150,9 @@ def sync_pipe_inplace(
     } if not primary_key or self.flavor == 'oracle' else {primary_key: new_cols.get(primary_key)}
 
     null_replace_new_cols_str = (
-        ', '.join([
-            f"COALESCE({temp_table_names['new']}.{sql_item_name(col, self.flavor, None)}, "
-            + get_null_replacement(get_col_typ(col, new_cols), self.flavor)
+        '\n    ' + ',\n    '.join([
+            f"COALESCE({temp_table_aliases['new']}.{sql_item_name(col, self.flavor)}, "
+            + get_null_replacement(get_col_typ(col, new_cols_types), self.flavor)
             + ") AS "
             + sql_item_name(col, self.flavor, None)
             for col, typ in new_cols.items()
@@ -2131,29 +2160,30 @@ def sync_pipe_inplace(
     )
 
     select_delta_query = (
-        "SELECT\n"
-        + null_replace_new_cols_str + "\n"
-        + f"\nFROM {temp_table_names['new']}\n"
-        + f"LEFT OUTER JOIN {temp_table_names['backtrack']}\nON\n"
-        + '\nAND\n'.join([
+        "SELECT"
+        + null_replace_new_cols_str
+        + f"\nFROM {temp_table_names['new']}{table_alias_as} {temp_table_aliases['new']}\n"
+        + f"LEFT OUTER JOIN {temp_table_names['backtrack']}{table_alias_as} {temp_table_aliases['backtrack']}"
+        + "\n    ON\n    "
+        + '\n    AND\n    '.join([
             (
-                f"COALESCE({temp_table_names['new']}."
+                f"    COALESCE({temp_table_aliases['new']}."
                 + sql_item_name(c, self.flavor, None)
                 + ", "
-                + get_null_replacement(get_col_typ(c, new_cols), self.flavor)
-                + ") "
-                + ' = '
-                + f"COALESCE({temp_table_names['backtrack']}."
+                + get_null_replacement(get_col_typ(c, new_cols_types), self.flavor)
+                + ")"
+                + '\n        =\n    '
+                + f"    COALESCE({temp_table_aliases['backtrack']}."
                 + sql_item_name(c, self.flavor, None)
                 + ", "
-                + get_null_replacement(backtrack_cols_types[c], self.flavor)
+                + get_null_replacement(get_col_typ(c, backtrack_cols_types), self.flavor)
                 + ") "
             ) for c in common_cols
         ])
-        + "\nWHERE\n"
-        + '\nAND\n'.join([
+        + "\nWHERE\n    "
+        + '\n    AND\n    '.join([
             (
-                f"{temp_table_names['backtrack']}." + sql_item_name(c, self.flavor, None) + ' IS NULL'
+                f"{temp_table_aliases['backtrack']}." + sql_item_name(c, self.flavor) + ' IS NULL'
             ) for c in common_cols
         ])
     )
@@ -2196,37 +2226,33 @@ def sync_pipe_inplace(
     ])
 
     select_joined_query = (
-        "SELECT "
-        + (', '.join([
+        "SELECT\n    "
+        + (',\n    '.join([
             (
-                f"{temp_table_names['delta']}." + sql_item_name(c, self.flavor, None)
+                f"{temp_table_aliases['delta']}." + sql_item_name(c, self.flavor, None)
                 + " AS " + sql_item_name(c + '_delta', self.flavor, None)
             ) for c in delta_cols
         ]))
-        + ", "
-        + (', '.join([
+        + ",\n    "
+        + (',\n    '.join([
             (
-                f"{temp_table_names['backtrack']}." + sql_item_name(c, self.flavor, None)
+                f"{temp_table_aliases['backtrack']}." + sql_item_name(c, self.flavor, None)
                 + " AS " + sql_item_name(c + '_backtrack', self.flavor, None)
             ) for c in backtrack_cols_types
         ]))
-        + f"\nFROM {temp_table_names['delta']}\n"
-        + f"LEFT OUTER JOIN {temp_table_names['backtrack']}\nON\n"
-        + '\nAND\n'.join([
+        + f"\nFROM {temp_table_names['delta']}{table_alias_as} {temp_table_aliases['delta']}\n"
+        + f"LEFT OUTER JOIN {temp_table_names['backtrack']}{table_alias_as}"
+        + f" {temp_table_aliases['backtrack']}"
+        + "\n    ON\n    "
+        + '\n    AND\n    '.join([
             (
-                f"COALESCE({temp_table_names['delta']}." + sql_item_name(c, self.flavor, None)
+                f"    COALESCE({temp_table_aliases['delta']}." + sql_item_name(c, self.flavor)
                 + ", "
-                + get_null_replacement(
-                    get_col_typ(c, on_cols),
-                    self.flavor
-                ) + ")"
-                + ' = '
-                + f"COALESCE({temp_table_names['backtrack']}." + sql_item_name(c, self.flavor, None)
+                + get_null_replacement(get_col_typ(c, new_cols_types), self.flavor) + ")"
+                + '\n        =\n    '
+                + f"    COALESCE({temp_table_aliases['backtrack']}." + sql_item_name(c, self.flavor)
                 + ", "
-                + get_null_replacement(
-                    get_col_typ(c, on_cols),
-                    self.flavor
-                ) + ")"
+                + get_null_replacement(get_col_typ(c, new_cols_types), self.flavor) + ")"
             ) for c, typ in on_cols.items()
         ])
     )
@@ -2247,19 +2273,19 @@ def sync_pipe_inplace(
         return create_joined_success, create_joined_msg
 
     select_unseen_query = (
-        "SELECT "
-        + (', '.join([
+        "SELECT\n    "
+        + (',\n    '.join([
             (
-                "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor, None)
-                + " != " + get_null_replacement(get_col_typ(c, delta_cols), self.flavor)
+                "CASE\n        WHEN " + sql_item_name(c + '_delta', self.flavor, None)
+                + " != " + get_null_replacement(get_col_typ(c, delta_cols_types), self.flavor)
                 + " THEN " + sql_item_name(c + '_delta', self.flavor, None)
-                + "\n    ELSE NULL\nEND "
+                + "\n        ELSE NULL\n    END"
                 + " AS " + sql_item_name(c, self.flavor, None)
             ) for c, typ in delta_cols.items()
         ]))
-        + f"\nFROM {temp_table_names['joined']}\n"
-        + "WHERE "
-        + '\nAND\n'.join([
+        + f"\nFROM {temp_table_names['joined']}{table_alias_as} {temp_table_aliases['joined']}\n"
+        + "WHERE\n    "
+        + '\n    AND\n    '.join([
             (
                 sql_item_name(c + '_backtrack', self.flavor, None) + ' IS NULL'
             ) for c in delta_cols
@@ -2282,19 +2308,19 @@ def sync_pipe_inplace(
         return create_unseen_success, create_unseen_msg
 
     select_update_query = (
-        "SELECT "
-        + (', '.join([
+        "SELECT\n    "
+        + (',\n    '.join([
             (
-                "CASE\n    WHEN " + sql_item_name(c + '_delta', self.flavor, None)
-                + " != " + get_null_replacement(get_col_typ(c, delta_cols), self.flavor)
+                "CASE\n        WHEN " + sql_item_name(c + '_delta', self.flavor, None)
+                + " != " + get_null_replacement(get_col_typ(c, delta_cols_types), self.flavor)
                 + " THEN " + sql_item_name(c + '_delta', self.flavor, None)
-                + "\n    ELSE NULL\nEND "
+                + "\n        ELSE NULL\n    END"
                 + " AS " + sql_item_name(c, self.flavor, None)
             ) for c, typ in delta_cols.items()
         ]))
-        + f"\nFROM {temp_table_names['joined']}\n"
-        + "WHERE "
-        + '\nOR\n'.join([
+        + f"\nFROM {temp_table_names['joined']}{table_alias_as} {temp_table_aliases['joined']}\n"
+        + "WHERE\n    "
+        + '\n    OR\n    '.join([
             (
                 sql_item_name(c + '_backtrack', self.flavor, None) + ' IS NOT NULL'
             ) for c in delta_cols
@@ -2366,9 +2392,9 @@ def sync_pipe_inplace(
     session.commit()
 
     msg = (
-        f"Inserted {unseen_count}, updated {update_count} rows."
+        f"Inserted {unseen_count:,}, updated {update_count:,} rows."
         if not upsert
-        else f"Upserted {update_count} row" + ('s' if update_count != 1 else '') + "."
+        else f"Upserted {update_count:,} row" + ('s' if update_count != 1 else '') + "."
     )
     _ = clean_up_temp_tables(ready_to_drop=True)
 
@@ -2540,6 +2566,7 @@ def get_pipe_rowcount(
     """
     from meerschaum.utils.sql import dateadd_str, sql_item_name, wrap_query_with_cte
     from meerschaum.connectors.sql._fetch import get_pipe_query
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     if remote:
         msg = f"'fetch:definition' must be an attribute of {pipe} to get a remote rowcount."
         if 'fetch' not in pipe.parameters:
@@ -2551,18 +2578,21 @@ def get_pipe_rowcount(
 
     _pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
 
-    if not pipe.columns.get('datetime', None):
-        _dt = pipe.guess_datetime()
-        dt = sql_item_name(_dt, self.flavor, None) if _dt else None
+    dt_col = pipe.columns.get('datetime', None)
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime') if dt_col else None
+    dt_db_type = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
+    if not dt_col:
+        dt_col = pipe.guess_datetime()
+        dt_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
         is_guess = True
     else:
-        _dt = pipe.get_columns('datetime')
-        dt = sql_item_name(_dt, self.flavor, None)
+        dt_col = pipe.get_columns('datetime')
+        dt_name = sql_item_name(dt_col, self.flavor, None)
         is_guess = False
 
     if begin is not None or end is not None:
         if is_guess:
-            if _dt is None:
+            if dt_col is None:
                 warn(
                     f"No datetime could be determined for {pipe}."
                     + "\n    Ignoring begin and end...",
@@ -2572,13 +2602,13 @@ def get_pipe_rowcount(
             else:
                 warn(
                     f"A datetime wasn't specified for {pipe}.\n"
-                    + f"    Using column \"{_dt}\" for datetime bounds...",
+                    + f"    Using column \"{dt_col}\" for datetime bounds...",
                     stack=False,
                 )
 
 
     _datetime_name = sql_item_name(
-        _dt,
+        dt_col,
         (
             pipe.instance_connector.flavor
             if not remote
@@ -2598,8 +2628,8 @@ def get_pipe_rowcount(
         )
         for col in set(
             (
-                [_dt]
-                if _dt
+                [dt_col]
+                if dt_col
                 else []
             )
             + (
@@ -2623,13 +2653,13 @@ def get_pipe_rowcount(
         query += "\nWHERE"
     if begin is not None:
         query += f"""
-        {dt} >= {dateadd_str(self.flavor, datepart='minute', number=0, begin=begin)}
+        {dt_name} >= {dateadd_str(self.flavor, datepart='minute', number=0, begin=begin, db_type=dt_db_type)}
         """
     if end is not None and begin is not None:
         query += "AND"
     if end is not None:
         query += f"""
-        {dt} < {dateadd_str(self.flavor, datepart='minute', number=0, begin=end)}
+        {dt_name} <  {dateadd_str(self.flavor, datepart='minute', number=0, begin=end, db_type=dt_db_type)}
         """
     if params is not None:
         from meerschaum.utils.sql import build_where
@@ -2715,31 +2745,35 @@ def clear_pipe(
         return True, f"{pipe} does not exist, so nothing was cleared."
 
     from meerschaum.utils.sql import sql_item_name, build_where, dateadd_str
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
 
+    dt_col = pipe.columns.get('datetime', None)
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime') if dt_col else None
+    dt_db_type = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
     if not pipe.columns.get('datetime', None):
-        _dt = pipe.guess_datetime()
-        dt_name = sql_item_name(_dt, self.flavor, None) if _dt else None
+        dt_col = pipe.guess_datetime()
+        dt_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
         is_guess = True
     else:
-        _dt = pipe.get_columns('datetime')
-        dt_name = sql_item_name(_dt, self.flavor, None)
+        dt_col = pipe.get_columns('datetime')
+        dt_name = sql_item_name(dt_col, self.flavor, None)
         is_guess = False
 
     if begin is not None or end is not None:
         if is_guess:
-            if _dt is None:
+            if dt_col is None:
                 warn(
                     f"No datetime could be determined for {pipe}."
                     + "\n    Ignoring datetime bounds...",
-                    stack = False,
+                    stack=False,
                 )
                 begin, end = None, None
             else:
                 warn(
                     f"A datetime wasn't specified for {pipe}.\n"
-                    + f"    Using column \"{_dt}\" for datetime bounds...",
-                    stack = False,
+                    + f"    Using column \"{dt_col}\" for datetime bounds...",
+                    stack=False,
                 )
 
     valid_params = {}
@@ -2750,10 +2784,10 @@ def clear_pipe(
         f"DELETE FROM {pipe_name}\nWHERE 1 = 1\n"
         + ('  AND ' + build_where(valid_params, self, with_where=False) if valid_params else '')
         + (
-            f'  AND {dt_name} >= ' + dateadd_str(self.flavor, 'day', 0, begin)
+            f'  AND {dt_name} >= ' + dateadd_str(self.flavor, 'day', 0, begin, db_type=dt_db_type)
             if begin is not None else ''
         ) + (
-            f'  AND {dt_name} < ' + dateadd_str(self.flavor, 'day', 0, end)
+            f'  AND {dt_name} < ' + dateadd_str(self.flavor, 'day', 0, end, db_type=dt_db_type)
             if end is not None else ''
         )
     )
@@ -3400,7 +3434,6 @@ def deduplicate_pipe(
 
     ### TODO: Handle deleting duplicates without a datetime axis.
     dt_col = pipe.columns.get('datetime', None)
-    dt_col_name = sql_item_name(dt_col, self.flavor, None)
     cols_types = pipe.get_columns_types(debug=debug)
     existing_cols = pipe.get_columns_types(debug=debug)
 
@@ -3417,7 +3450,6 @@ def deduplicate_pipe(
     ]
     indices_names = [sql_item_name(index_col, self.flavor, None) for index_col in indices]
     existing_cols_names = [sql_item_name(col, self.flavor, None) for col in existing_cols]
-    duplicates_cte_name = sql_item_name('dups', self.flavor, None)
     duplicate_row_number_name = sql_item_name('dup_row_num', self.flavor, None)
     previous_row_number_name = sql_item_name('prev_row_num', self.flavor, None)
 
@@ -3450,7 +3482,7 @@ def deduplicate_pipe(
             and
             int(self.db_version.split('.')[0]) < 8
         )
-    except Exception as e:
+    except Exception:
         is_old_mysql = False
 
     src_query = f"""
@@ -3557,7 +3589,7 @@ def deduplicate_pipe(
         (
             f"Successfully deduplicated table {pipe_table_name}"
             + (
-                f"\nfrom {old_rowcount} to {new_rowcount} rows"
+                f"\nfrom {old_rowcount:,} to {new_rowcount:,} rows"
                 if old_rowcount != new_rowcount
                 else ''
             )

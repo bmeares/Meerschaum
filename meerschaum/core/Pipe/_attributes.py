@@ -310,7 +310,7 @@ def enforce(self, _enforce: bool) -> None:
     """
     Set the `enforce` parameter for the pipe.
     """
-    self.parameters['_enforce'] = _enforce
+    self.parameters['enforce'] = _enforce
 
 
 def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]:

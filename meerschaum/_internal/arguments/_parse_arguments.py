@@ -240,6 +240,8 @@ def parse_synonyms(
         args_dict['instance'] = args_dict['mrsm_instance']
     if args_dict.get('skip_check_existing', None):
         args_dict['check_existing'] = False
+    if args_dict.get('skip_enforce_dtypes', None):
+        args_dict['enforce_dtypes'] = False
     if args_dict.get('venv', None) in ('None', '[None]'):
         args_dict['venv'] = None
     chunk_minutes = args_dict.get('chunk_minutes', None)

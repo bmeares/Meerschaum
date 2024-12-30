@@ -57,18 +57,7 @@ def colored_fallback(*args, **kw):
     return ' '.join(args)
 
 def translate_rich_to_termcolor(*colors) -> tuple:
-    """Translate between rich and more_termcolor terminology.
-    This is probably prone to breaking.
-
-    Parameters
-    ----------
-    *colors :
-        
-
-    Returns
-    -------
-
-    """
+    """Translate between rich and more_termcolor terminology."""
     _colors = []
     for c in colors:
         _c_list = []
@@ -131,7 +120,7 @@ def _init():
     try:
         colorama.init(autoreset=False)
         success = True
-    except Exception as e:
+    except Exception:
         import traceback
         traceback.print_exc()
         _attrs['ANSI'], _attrs['UNICODE'], _attrs['CHARSET'] = False, False, 'ascii'
@@ -219,7 +208,7 @@ def get_console():
     rich_console = attempt_import('rich.console')
     try:
         console = rich_console.Console(force_terminal=True, color_system='truecolor')
-    except Exception as e:
+    except Exception:
         console = None
     return console
 
@@ -307,7 +296,6 @@ def format_success_tuple(
     calm: bool, default False
         If `True`, use the default emoji and color scheme.
     """
-    from meerschaum.config.static import STATIC_CONFIG
     _init()
     try:
         status = 'success' if tup[0] else 'failure'
@@ -381,12 +369,9 @@ def print_options(
         If `True`, print the option's number in the list (1 index).
 
     """
-    import os
     from meerschaum.utils.packages import import_rich
-    from meerschaum.utils.formatting import make_header, highlight_pipes
-    from meerschaum.actions import actions as _actions
-    from meerschaum.utils.misc import get_cols_lines, string_width, iterate_chunks
-
+    from meerschaum.utils.formatting import highlight_pipes
+    from meerschaum.utils.misc import get_cols_lines, string_width
 
     if options is None:
         options = {}
@@ -429,15 +414,10 @@ def print_options(
                 continue
             break
 
-    from meerschaum.utils.formatting import pprint, get_console
     from meerschaum.utils.packages import attempt_import
-    rich_columns = attempt_import('rich.columns')
-    rich_panel = attempt_import('rich.panel')
     rich_table = attempt_import('rich.table')
     Text = attempt_import('rich.text').Text
     box = attempt_import('rich.box')
-    Panel = rich_panel.Panel
-    Columns = rich_columns.Columns
     Table = rich_table.Table
 
     if _header is not None:

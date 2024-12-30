@@ -406,6 +406,71 @@ def test_ignore_datetime_conversion(flavor: str):
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
+def test_mixed_offset_datetimes_sql(flavor: str):
+    """
+    Test that syncing handles tables with existing mixed offset datetimes.
+    """
+    from meerschaum.utils.dtypes.sql import TIMEZONE_NAIVE_FLAVORS
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+    if flavor in TIMEZONE_NAIVE_FLAVORS:
+        return
+
+    target = 'test_mixed_datetimes_sql'
+    pipe = mrsm.Pipe('test', 'mixed_datetimes', 'sql', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'mixed_datetimes', 'sql',
+        instance=conn,
+        target=target,
+        columns={'datetime': 'dt', 'primary': 'dt'},
+    )
+
+    dateutil_parser, pd = mrsm.attempt_import('dateutil.parser', 'pandas')
+    seed_docs0 = [{'dt': dateutil_parser.parse('2024-01-01 00:00:00+00:00'), 'num': 1}]
+    seed_docs1 = [{'dt': dateutil_parser.parse('2024-01-01 00:00:00-05:00'), 'num': 2}]
+    seed_df0 = pd.DataFrame(seed_docs0)
+    seed_df1 = pd.DataFrame(seed_docs1)
+    conn.to_sql(seed_df0, target, if_exists='replace', debug=debug)
+    conn.to_sql(seed_df1, target, if_exists='append', debug=debug)
+
+    read_df = conn.read(target, dtype={'dt': 'datetime64[ns, UTC]'}, debug=debug)
+    if len(set(read_df['dt'])) == 1:
+        return
+
+    df = pipe.get_data(begin='2024-01-01', end='2024-01-01 00:01:00', debug=debug)
+    assert len(df) == 1
+
+    df = pipe.get_data(end='2024-01-01 00:01:00', debug=debug)
+    assert len(df) == 1
+
+    inplace_pipe = mrsm.Pipe(conn, 'test_mixed_offset_datetimes', 'inplace', instance=conn)
+    inplace_pipe.delete()
+    inplace_pipe = mrsm.Pipe(
+        conn, 'test_mixed_offset_datetimes', 'inplace',
+        instance=conn,
+        columns=pipe.columns,
+        parameters={
+            'sql': f"SELECT *\nFROM {target}",
+        },
+    )
+
+    success, msg = inplace_pipe.sync(debug=debug)
+    assert success, msg
+
+    seed_docs2 = [{'dt': dateutil_parser.parse('2024-02-01 00:00:00-05:00'), 'num': 3}]
+    seed_df2 = pd.DataFrame(seed_docs2)
+    conn.to_sql(seed_df2, target, if_exists='append', debug=debug)
+
+    success, msg = inplace_pipe.sync(begin='2024-02-01 00:01:00', end='2024-02-01 05:01:00', debug=debug)
+    assert success, msg
+
+    assert inplace_pipe.get_rowcount(debug=debug) == pipe.get_rowcount(debug=debug)
+    return pipe, inplace_pipe
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_no_indices_inferred_datetime_to_text(flavor: str):
     """
     Verify that changing dtypes are handled.
@@ -925,25 +990,21 @@ def test_enforce_false(flavor: str):
         columns={
             'datetime': 'dt',
         },
-        dtypes={
-            'num': 'decimal',
-        },
     )
     docs = [
-        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': Decimal('1.21')},
+        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': 1},
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
 
     df = pipe.get_data(['num'], debug=debug)
-    assert df['num'][0] == Decimal('1.21')
+    assert df['num'][0] == 1
     
     new_docs = [
-        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': Decimal('2.34567')},
+        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': 2},
     ]
     success, msg = pipe.sync(new_docs, debug=debug)
     assert success, msg
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
-    assert df['dt'][0].tzinfo is not None
-    assert df['num'][0] == Decimal('2.34567')
+    assert df['num'][0] == 2

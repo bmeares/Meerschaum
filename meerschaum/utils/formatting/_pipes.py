@@ -482,9 +482,9 @@ def print_pipes_results(
 
 
 def extract_stats_from_message(
-        message: str,
-        stat_keys: Optional[List[str]] = None,
-    ) -> Dict[str, int]:
+    message: str,
+    stat_keys: Optional[List[str]] = None,
+) -> Dict[str, int]:
     """
     Given a sync message, return the insert, update, upsert stats from within.
 
@@ -511,9 +511,9 @@ def extract_stats_from_message(
 
 
 def extract_stats_from_line(
-        line: str,
-        stat_keys: List[str],
-    ) -> Dict[str, int]:
+    line: str,
+    stat_keys: List[str],
+) -> Dict[str, int]:
     """
     Return the insert, update, upsert stats from a single line.
     """
@@ -523,6 +523,9 @@ def extract_stats_from_line(
         search_key = stat_key.lower()
         if search_key not in line.lower():
             continue
+
+        ### the count may be formatted with commas
+        line = line.replace(',', '')
 
         ### stat_text starts with the digits we want.
         try:

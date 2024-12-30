@@ -162,7 +162,8 @@ def verify(
     )
 
     info(
-        f"Verifying {self}:\n    Syncing {len(chunk_bounds)} chunk" + ('s' if len(chunk_bounds) != 1 else '')
+        f"Verifying {self}:\n    Syncing {len(chunk_bounds)} chunk"
+        + ('s' if len(chunk_bounds) != 1 else '')
         + f" ({'un' if not bounded else ''}bounded)"
         + f" of size '{interval_str(chunk_interval)}'"
         + f" between '{begin_to_print}' and '{end_to_print}'."
@@ -194,6 +195,9 @@ def verify(
             **kwargs
         )
         chunk_msg = chunk_msg.strip()
+        if ' - ' not in chunk_msg:
+            chunk_label = f"{chunk_begin} - {chunk_end}"
+            chunk_msg = f'{chunk_label}\n{chunk_msg}'
         mrsm.pprint((chunk_success, chunk_msg))
         return chunk_begin_and_end, (chunk_success, chunk_msg)
 
@@ -323,16 +327,16 @@ def get_chunks_success_message(
     header = (header + "\n") if header else ""
     stats_msg = items_str(
         (
-            ([f'inserted {num_inserted}'] if num_inserted else [])
-            + ([f'updated {num_updated}'] if num_updated else [])
-            + ([f'upserted {num_upserted}'] if num_upserted else [])
+            ([f'inserted {num_inserted:,}'] if num_inserted else [])
+            + ([f'updated {num_updated:,}'] if num_updated else [])
+            + ([f'upserted {num_upserted:,}'] if num_upserted else [])
         ) or ['synced 0'],
         quotes=False,
         and_=False,
     )
 
     success_msg = (
-        f"Successfully synced {len(chunk_success_tuples)} chunk"
+        f"Successfully synced {len(chunk_success_tuples):,} chunk"
         + ('s' if len(chunk_success_tuples) != 1 else '')
         + '\n(' + stats_msg
         + ' rows in total).'
