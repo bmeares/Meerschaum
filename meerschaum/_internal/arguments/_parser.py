@@ -87,7 +87,7 @@ def parse_datetime(dt_str: str) -> Union[datetime, int, str]:
                 dt = round_time(dt, round_delta)
         else:
             dt = dateutil_parser.parse(dt_str)
-    except Exception as e:
+    except Exception:
         dt = None
     if dt is None:
         from meerschaum.utils.warnings import error
@@ -121,7 +121,7 @@ def parse_help(sysargs: Union[List[str], Dict[str, Any]]) -> None:
     """Parse the `--help` flag to determine which help message to print."""
     from meerschaum._internal.arguments._parse_arguments import parse_arguments, parse_line
     from meerschaum.actions import actions, get_subactions
-    import importlib, inspect, textwrap
+    import textwrap
     from copy import deepcopy
     if isinstance(sysargs, list):
         args = parse_arguments(sysargs)
@@ -140,14 +140,14 @@ def parse_help(sysargs: Union[List[str], Dict[str, Any]]) -> None:
     if len(args['action']) > 1:
         try:
             subaction = get_subactions(args['action'][0])[args['action'][1]]
-        except Exception as e:
+        except Exception:
             subaction = None
         if subaction is not None:
             return print(textwrap.dedent(subaction.__doc__))
 
     try:
         doc = actions[args['action'][0]].__doc__
-    except Exception as e:
+    except Exception:
         doc = None
     if doc is None:
         doc = "No help available for '" + f"{args['action'][0]}" + "'."
@@ -309,7 +309,7 @@ groups['sync'].add_argument(
 )
 groups['sync'].add_argument(
     '--chunksize', type=int, help=(
-        "Specify the database chunksize. Defaults to 10,000."
+        "Specify the database chunksize. Defaults to 100,000."
     ),
 )
 groups['sync'].add_argument(
@@ -336,18 +336,24 @@ groups['sync'].add_argument(
 )
 groups['sync'].add_argument(
     '--bounded', '--bound', action="store_true",
-    help = (
+    help=(
         "When verifying, do not sync outside "
-        + "the existing oldest and newest datetime bounds."
+        "the existing oldest and newest datetime bounds."
     )
 )
 groups['sync'].add_argument(
     '--skip-check-existing', '--allow-duplicates', action='store_true',
-    help = (
-        "Skip checking for duplicate rows when syncing. " +
-        "This drastically improves performance when all rows to be synced are unique. " +
-        "For example, this setting is highly recommended for use with IoT devices."
+    help=(
+        "Skip checking for duplicate rows when syncing. "
+        "This improves performance when all rows to be synced are unique. "
     )
+)
+groups['sync'].add_argument(
+    '--skip-enforce-dtypes', action='store_true',
+    help=(
+        "Skip enforcing incoming data to a pipe's dtypes. "
+        "This improves performance when all rows are expected to already be of the correct type."
+    ),
 )
 groups['sync'].add_argument(
     '--cache', action='store_true',

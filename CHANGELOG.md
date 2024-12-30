@@ -4,6 +4,47 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.7.3
+
+- **Allow for dynamic targets in SQL queries.**  
+  Include a pipe definition in double curly braces (à la Jinja) to substitute a pipe's target into a templated query.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe('demo', 'template', target='foo', instance='sql:local')
+  _ = pipe.register()
+
+  downstream_pipe = mrsm.Pipe(
+      'sql:local', 'template',
+      instance='sql:local',
+      parameters={
+          'sql': "SELECT *\nFROM {{Pipe('demo', 'template', instance='sql:local')}}"
+      },
+  )
+
+  conn = mrsm.get_connector('sql:local')
+  print(conn.get_pipe_metadef(downstream_pipe))
+  # WITH "definition" AS (
+  #     SELECT *
+  #     FROM "foo"
+  # )
+  # SELECT *
+  # FROM "definition"
+  ```
+
+- **Add `--skip-enforce-dtypes`.**  
+  To override a pipe's `enforce` parameter, pass `--skip-enforce-dtypes` to a sync.
+
+- **Skip enforcing custom dtypes when `enforce=False`.**  
+  To avoid confusion, special Meerschaum data types (`numeric`, `json`, etc.) are not coerced into objects when `enforce=False`.
+
+- **Fix timezone-aware casts.**  
+  A bug has been fixed where it was possible to mix timezone-aware and -naive casts in a single query. This patch ensures that this no longer occurs.
+
+- **Explicitly cast timezone-aware datetimes as UTC in SQL syncs.**  
+  By default, timezone-aware columns are now cast as time zone UTC in SQL. This may be skipped by setting `enforce` to `False`.
+
 ### v2.7.0 – v2.7.2
 
 - **Introduce the `bytes` data type.**  

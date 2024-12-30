@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import timedelta, datetime
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Any, Union, SuccessTuple, Iterator, TYPE_CHECKING
+from meerschaum.utils.typing import Any, Union, SuccessTuple, Iterator, TYPE_CHECKING
 from meerschaum.config import get_config
 from meerschaum.utils.warnings import warn
 
@@ -56,8 +56,7 @@ def fetch(
         warn(f"No `fetch()` function defined for connector '{self.connector}'")
         return None
 
-    from meerschaum.connectors import custom_types, get_connector_plugin
-    from meerschaum.utils.debug import dprint, _checkpoint
+    from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import filter_arguments
 
     _chunk_hook = kw.pop('chunk_hook', None)

@@ -498,7 +498,7 @@ def _edit_jobs(
         num_edited += 1
 
     msg = (
-        "Successfully edit job"
+        "Successfully edited job"
         + ('s' if len(jobs) != 1 else '')
         + ' '
         + items_str(list(jobs.keys()))

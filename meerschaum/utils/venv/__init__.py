@@ -67,7 +67,6 @@ def activate_venv(
             return True
     import sys
     import os
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     if venv is not None:
         init_venv(venv=venv, debug=debug)
     with LOCKS['active_venvs']:
@@ -379,22 +378,47 @@ def init_venv(
     import os
     import pathlib
     import shutil
+    import time
 
     from meerschaum.config.static import STATIC_CONFIG
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH, VENVS_CACHE_RESOURCES_PATH
+    from meerschaum.config._paths import (
+        VIRTENV_RESOURCES_PATH,
+        VENVS_CACHE_RESOURCES_PATH,
+    )
     from meerschaum.utils.packages import is_uv_enabled
 
     venv_path = VIRTENV_RESOURCES_PATH / venv
     vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
     docker_home_venv_path = pathlib.Path('/home/meerschaum/venvs/mrsm')
-
+    lock_path = VENVS_CACHE_RESOURCES_PATH / (venv + '.lock')
     work_dir_env_var = STATIC_CONFIG['environment']['work_dir']
+
+    def update_lock(active: bool):
+        try:
+            if active:
+                lock_path.unlink()
+            else:
+                lock_path.touch()
+        except Exception:
+            pass
+
+    def wait_for_lock():
+        max_lock_seconds = 1.0
+        step_sleep_seconds = 0.1
+        init_venv_check_start = time.perf_counter()
+        while (time.perf_counter() - init_venv_check_start < max_lock_seconds):
+            if not lock_path.exists():
+                continue
+            time.sleep(step_sleep_seconds)
+        update_lock(False)
+
     if (
         not force
         and venv == 'mrsm'
         and os.environ.get(work_dir_env_var, None) is not None
         and docker_home_venv_path.exists()
     ):
+        wait_for_lock()
         shutil.move(docker_home_venv_path, venv_path)
         if verify:
             verify_venv(venv, debug=debug)
@@ -422,6 +446,9 @@ def init_venv(
         except FileExistsError:
             pass
 
+    wait_for_lock()
+    update_lock(True)
+
     if uv is not None:
         _venv_success = run_python_package(
             'uv',
@@ -437,7 +464,9 @@ def init_venv(
             _venv_success = run_python_package(
                 'venv',
                 [venv_path.as_posix()] + (
-                    ['--symlinks'] if platform.system() != 'Windows' else []
+                    ['--symlinks']
+                    if platform.system() != 'Windows'
+                    else []
                 ),
                 venv=None, debug=debug
             ) == 0
@@ -447,8 +476,14 @@ def init_venv(
             _venv = None
     if not _venv_success:
         virtualenv = attempt_import(
-            'virtualenv', venv=None, lazy=False, install=(not tried_virtualenv), warn=False,
-            check_update=False, color=False, debug=debug,
+            'virtualenv',
+            venv=None,
+            lazy=False,
+            install=(not tried_virtualenv),
+            warn=False,
+            check_update=False,
+            color=False,
+            debug=debug,
         )
         if virtualenv is None:
             print(
@@ -457,6 +492,7 @@ def init_venv(
             )
             if rename_vtp and temp_vtp.exists():
                 temp_vtp.rename(vtp)
+            update_lock(False)
             return False
 
         tried_virtualenv = True
@@ -495,6 +531,7 @@ def init_venv(
             traceback.print_exc()
             if rename_vtp and temp_vtp.exists():
                 temp_vtp.rename(vtp)
+            update_lock(False)
             return False
     if verify:
         verify_venv(venv, debug=debug)
@@ -503,6 +540,7 @@ def init_venv(
     if rename_vtp and temp_vtp.exists():
         temp_vtp.rename(vtp)
 
+    update_lock(False)
     return True
 
 
