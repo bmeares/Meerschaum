@@ -36,6 +36,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add `--skip-enforce-dtypes`.**  
   To override a pipe's `enforce` parameter, pass `--skip-enforce-dtypes` to a sync.
 
+- **Add bulk inserts for MSSQL.**  
+  To disable this behavior, set `system:connectors:sql:bulk_insert:mssql` to `false`. Bulk inserts for PostgreSQL-like flavors may now be disabled as well.
+
 - **Skip enforcing custom dtypes when `enforce=False`.**  
   To avoid confusion, special Meerschaum data types (`numeric`, `json`, etc.) are not coerced into objects when `enforce=False`.
 

@@ -413,7 +413,7 @@ def init_venv(
         max_lock_seconds = 1.0
         step_sleep_seconds = 0.1
         init_venv_check_start = time.perf_counter()
-        while (time.perf_counter() - init_venv_check_start < max_lock_seconds):
+        while ((time.perf_counter() - init_venv_check_start) < max_lock_seconds):
             if not lock_path.exists():
                 break
 
