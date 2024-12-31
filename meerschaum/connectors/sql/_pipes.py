@@ -3064,7 +3064,12 @@ def get_alter_columns_queries(
         return []
     if pipe.static:
         return
-    from meerschaum.utils.sql import sql_item_name, DROP_IF_EXISTS_FLAVORS, get_table_cols_types
+    from meerschaum.utils.sql import (
+        sql_item_name,
+        get_table_cols_types,
+        DROP_IF_EXISTS_FLAVORS,
+        SINGLE_ALTER_TABLE_FLAVORS,
+    )
     from meerschaum.utils.dataframe import get_numeric_cols
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import (
@@ -3308,14 +3313,19 @@ def get_alter_columns_queries(
             else 'TYPE '
         )
         column_str = 'COLUMN' if self.flavor != 'oracle' else ''
-        query += (
+        query_suffix = (
             f"\n{alter_col_prefix} {column_str} "
             + sql_item_name(col, self.flavor, None)
             + " " + type_prefix + typ + ","
         )
+        if self.flavor not in SINGLE_ALTER_TABLE_FLAVORS:
+            query += query_suffix
+        else:
+            queries.append(query + query_suffix[:-1])
 
-    query = query[:-1]
-    queries.append(query)
+    if self.flavor not in SINGLE_ALTER_TABLE_FLAVORS:
+        queries.append(query[:-1])
+
     if self.flavor != 'duckdb':
         return queries
 

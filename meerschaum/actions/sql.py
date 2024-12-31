@@ -21,7 +21,7 @@ def sql(
     nopretty: bool = False,
     debug: bool = False,
     **kw: Any
-):
+) -> SuccessTuple:
     """Execute a SQL query or launch an interactive CLI. All positional arguments are optional.
 
     Usage:
@@ -125,10 +125,9 @@ def sql(
     if result is False:
         return (False, f"Failed to execute query:\n\n{query}")
     
-    from meerschaum.utils.packages import attempt_import, import_pandas
+    from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.formatting import print_tuple, pprint
-    sqlalchemy_engine_result = attempt_import('sqlalchemy.engine.result')
-    pd = import_pandas()
+    _ = attempt_import('sqlalchemy.engine.result')
     if 'sqlalchemy' in str(type(result)):
         if not nopretty:
             print_tuple((True, f"Successfully executed query:\n\n{query}"))
@@ -145,3 +144,14 @@ def sql(
             )
 
     return (True, "Success")
+
+
+def _complete_sql(
+    action: Optional[List[str]] = None, **kw: Any
+) -> List[str]:
+    from meerschaum.utils.misc import get_connector_labels
+    _text = action[0] if action else ""
+    return [
+        label.split('sql:', maxsplit=1)[-1]
+        for label in get_connector_labels('sql', search_term=_text, ignore_exact_match=True)
+    ]

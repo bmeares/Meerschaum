@@ -68,6 +68,12 @@ default_system_config = {
             'pandas': 'pandas',
         },
         'sql': {
+            'bulk_insert': {
+                'postgresql': True,
+                'citus': True,
+                'timescaledb': True,
+                'mssql': True,
+            },
             'instance': {
                 'stale_temporary_tables_minutes': 1440,
             },

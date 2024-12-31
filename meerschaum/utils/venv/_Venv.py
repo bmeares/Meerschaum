@@ -62,8 +62,13 @@ class Venv:
         If a `meerschaum.plugins.Plugin` was provided, its dependent virtual environments
         will also be activated.
         """
-        from meerschaum.utils.venv import active_venvs
+        from meerschaum.utils.venv import active_venvs, init_venv
         self._kwargs['previously_active_venvs'] = copy.deepcopy(active_venvs)
+        try:
+            return self._activate(debug=(debug or self._debug), **self._kwargs)
+        except OSError as e:
+            if not init_venv(self._venv, force=True):
+                raise e
         return self._activate(debug=(debug or self._debug), **self._kwargs)
 
 

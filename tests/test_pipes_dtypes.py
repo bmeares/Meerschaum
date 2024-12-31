@@ -142,7 +142,7 @@ def test_force_json_dtype(flavor: str):
     success, msg = pipe.sync([
         {'id': 1, 'a': json.dumps(['b', 'c'])},
         {'id': 2, 'a': json.dumps({'b': 1})},
-    ])
+    ], debug=debug)
     assert success, msg
     pprint(pipe.get_columns_types())
     df = pipe.get_data(debug=debug)
@@ -157,7 +157,6 @@ def test_infer_numeric_dtype(flavor: str):
     Ensure that `Decimal` objects are persisted as `numeric`.
     """
     from meerschaum.utils.formatting import pprint
-    from meerschaum.utils.misc import generate_password
     from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS
     scale, precision = NUMERIC_PRECISION_FLAVORS.get(
         flavor, NUMERIC_PRECISION_FLAVORS['mssql']
@@ -244,7 +243,6 @@ def test_infer_numeric_from_mixed_types(flavor: str):
     Ensure that new pipes with mixed int and floats as enforced as NUMERIC. 
     """
     from meerschaum.utils.formatting import pprint
-    from meerschaum.utils.misc import generate_password
     conn = conns[flavor]
     pipe = Pipe('test', 'infer_numeric', 'mixed', instance=conn)
     _ = pipe.delete(debug=debug)

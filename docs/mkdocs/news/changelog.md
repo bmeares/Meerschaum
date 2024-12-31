@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.7.3 – v2.7.4
+### v2.7.3 – v2.7.5
 
 - **Allow for dynamic targets in SQL queries.**  
   Include a pipe definition in double curly braces (à la Jinja) to substitute a pipe's target into a templated query.
@@ -35,6 +35,12 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Add `--skip-enforce-dtypes`.**  
   To override a pipe's `enforce` parameter, pass `--skip-enforce-dtypes` to a sync.
+
+- **Add bulk inserts for MSSQL.**  
+  To disable this behavior, set `system:connectors:sql:bulk_insert:mssql` to `false`. Bulk inserts for PostgreSQL-like flavors may now be disabled as well.
+
+- **Fix altering multiple column types for MSSQL.**  
+  When a table has multiple columns to be altered, each column will have its own `ALTER TABLE` query.
 
 - **Skip enforcing custom dtypes when `enforce=False`.**  
   To avoid confusion, special Meerschaum data types (`numeric`, `json`, etc.) are not coerced into objects when `enforce=False`.

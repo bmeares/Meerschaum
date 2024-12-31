@@ -831,7 +831,6 @@ def pip_install(
 
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    from meerschaum.config import get_config
     from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
     if args is None:
@@ -966,6 +965,10 @@ def pip_install(
 
         if '--target' not in _args and '-t' not in _args and not (not use_uv_pip and _uninstall):
             if venv is not None:
+                vtp = venv_target_path(venv, allow_nonexistent=True, debug=debug)
+                if not vtp.exists():
+                    if not init_venv(venv, force=True):
+                        vtp.mkdir(parents=True, exist_ok=True)
                 _args += ['--target', venv_target_path(venv, debug=debug)]
         elif (
             '--target' not in _args
