@@ -261,7 +261,10 @@ class Daemon:
         -------
         Nothing — this will exit the parent process.
         """
-        import platform, sys, os, traceback
+        import platform
+        import sys
+        import os
+        import traceback
         from meerschaum.utils.warnings import warn
         from meerschaum.config import get_config
         daemon = attempt_import('daemon')
@@ -1085,7 +1088,8 @@ class Daemon:
 
     def write_pickle(self) -> SuccessTuple:
         """Write the pickle file for the daemon."""
-        import pickle, traceback
+        import pickle
+        import traceback
         try:
             self.path.mkdir(parents=True, exist_ok=True)
             with open(self.pickle_path, 'wb+') as pickle_file:
