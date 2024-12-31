@@ -61,6 +61,7 @@ flavor_configs = {
         'engine': 'mssql+pyodbc',
         'create_engine': {
             'fast_executemany': True,
+            'use_insertmanyvalues': False,
             'isolation_level': 'AUTOCOMMIT',
             'use_setinputsizes': False,
             'pool_pre_ping': True,

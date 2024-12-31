@@ -142,7 +142,7 @@ def test_force_json_dtype(flavor: str):
     success, msg = pipe.sync([
         {'id': 1, 'a': json.dumps(['b', 'c'])},
         {'id': 2, 'a': json.dumps({'b': 1})},
-    ])
+    ], debug=debug)
     assert success, msg
     pprint(pipe.get_columns_types())
     df = pipe.get_data(debug=debug)

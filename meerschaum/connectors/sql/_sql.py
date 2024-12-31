@@ -6,8 +6,10 @@ This module contains SQLConnector functions for executing SQL queries.
 """
 
 from __future__ import annotations
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import (
-    Union, Mapping, List, Dict, SuccessTuple, Optional, Any, Iterable, Callable,
+    Union, List, Dict, SuccessTuple, Optional, Any, Iterable, Callable,
     Tuple, Hashable,
 )
 
@@ -15,7 +17,7 @@ from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn
 
 ### database flavors that can use bulk insert
-_bulk_flavors = {'postgresql', 'timescaledb', 'citus'}
+_bulk_flavors = {'postgresql', 'timescaledb', 'citus', 'mssql'}
 ### flavors that do not support chunks
 _disallow_chunks_flavors = ['duckdb']
 _max_chunks_flavors = {'sqlite': 1000}
@@ -779,6 +781,7 @@ def to_sql(
     from meerschaum.utils.warnings import error, warn
     import warnings
     import functools
+
     if name is None:
         error(f"Name must not be `None` to insert data into {self}.")
 
@@ -805,6 +808,7 @@ def to_sql(
         quantize_decimal,
         coerce_timezone,
         encode_bytes_for_bytea,
+        serialize_bytes,
     )
     from meerschaum.utils.dtypes.sql import (
         NUMERIC_PRECISION_FLAVORS,
@@ -821,24 +825,36 @@ def to_sql(
     bytes_cols = get_bytes_cols(df)
     numeric_cols = get_numeric_cols(df)
 
-    stats = {'target': name,}
+    enable_bulk_insert = mrsm.get_config(
+        'system', 'connectors', 'sql', 'bulk_insert'
+    ).get(self.flavor, False)
+    stats = {'target': name}
     ### resort to defaults if None
     copied = False
-    use_psql_copy = False
+    use_bulk_insert = False
     if method == "":
-        if self.flavor in _bulk_flavors:
-            method = functools.partial(psql_insert_copy, schema=self.schema)
-            use_psql_copy = True
+        if enable_bulk_insert:
+            method = (
+                functools.partial(mssql_insert_json, debug=debug)
+                if self.flavor == 'mssql'
+                else functools.partial(psql_insert_copy, debug=debug)
+            )
+            use_bulk_insert = True
         else:
             ### Should resolve to 'multi' or `None`.
             method = flavor_configs.get(self.flavor, {}).get('to_sql', {}).get('method', 'multi')
 
-    if bytes_cols and (use_psql_copy or self.flavor == 'oracle'):
+    if bytes_cols and (use_bulk_insert or self.flavor == 'oracle'):
         if safe_copy and not copied:
             df = df.copy()
             copied = True
+        bytes_serializer = (
+            functools.partial(encode_bytes_for_bytea, with_prefix=(self.flavor != 'oracle'))
+            if self.flavor != 'mssql'
+            else serialize_bytes
+        )
         for col in bytes_cols:
-            df[col] = df[col].apply(encode_bytes_for_bytea, with_prefix=(self.flavor != 'oracle'))
+            df[col] = df[col].apply(bytes_serializer)
 
     if self.flavor in NUMERIC_AS_TEXT_FLAVORS:
         if safe_copy and not copied:
@@ -988,7 +1004,7 @@ def to_sql(
     stats['duration'] = end - start
 
     if debug:
-        print(f" done.", flush=True)
+        print(" done.", flush=True)
         dprint(msg)
 
     stats['success'] = success
@@ -1005,7 +1021,7 @@ def psql_insert_copy(
     conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
     keys: List[str],
     data_iter: Iterable[Any],
-    schema: Optional[str] = None,
+    debug: bool = False,
 ) -> None:
     """
     Execute SQL statement inserting data for PostgreSQL.
@@ -1022,18 +1038,15 @@ def psql_insert_copy(
     data_iter: Iterable[Any]
         Iterable that iterates the values to be inserted
 
-    schema: Optional[str], default None
-        Optionally specify the schema of the table to be inserted into.
-
     Returns
     -------
     None
     """
     import csv
-    from io import StringIO
     import json
 
     from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.warnings import dprint
 
     ### NOTE: PostgreSQL doesn't support NUL chars in text, so they're removed from strings.
     data_iter = (
@@ -1057,12 +1070,84 @@ def psql_insert_copy(
     table_name = sql_item_name(table.name, 'postgresql', table.schema)
     columns = ', '.join(f'"{k}"' for k in keys)
     sql = f"COPY {table_name} ({columns}) FROM STDIN WITH CSV NULL '\\N'"
+    if debug:
+        dprint(sql)
 
     dbapi_conn = conn.connection
     with dbapi_conn.cursor() as cur:
         with cur.copy(sql) as copy:
             writer = csv.writer(copy)
             writer.writerows(data_iter)
+
+
+def mssql_insert_json(
+    table: pandas.io.sql.SQLTable,
+    conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection],
+    keys: List[str],
+    data_iter: Iterable[Any],
+    cols_types: Optional[Dict[str, str]] = None,
+    debug: bool = False,
+):
+    """
+    Execute SQL statement inserting data via OPENJSON.
+
+    Adapted from this snippet:
+    https://gist.github.com/gordthompson/1fb0f1c3f5edbf6192e596de8350f205
+
+    Parameters
+    ----------
+    table: pandas.io.sql.SQLTable
+    
+    conn: Union[sqlalchemy.engine.Engine, sqlalchemy.engine.Connection]
+    
+    keys: List[str]
+        Column names
+    
+    data_iter: Iterable[Any]
+        Iterable that iterates the values to be inserted
+
+    cols_types: Optional[Dict[str, str]], default None
+        If provided, use these as the columns and types for the table.
+
+    Returns
+    -------
+    None
+    """
+    import json
+    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type, get_db_type_from_pd_type
+    from meerschaum.utils.warnings import dprint
+    table_name = sql_item_name(table.name, 'mssql', table.schema)
+    if not cols_types:
+        pd_types = {
+            str(column.name): get_pd_type_from_db_type(str(column.type))
+            for column in table.table.columns
+        }
+        cols_types = {
+            col: get_db_type_from_pd_type(typ, 'mssql')
+            for col, typ in pd_types.items()
+        }
+    columns = ",\n    ".join([f"[{k}]" for k in keys])
+    json_data = [dict(zip(keys, row)) for row in data_iter]
+    with_clause = ",\n    ".join(
+        [
+            f"[{col_name}] {col_type} '$.\"{col_name}\"'"
+            for col_name, col_type in cols_types.items()
+        ]
+    )
+    placeholder = "?" if conn.dialect.paramstyle == "qmark" else "%s"
+    sql = (
+        f"INSERT INTO {table_name} (\n    {columns}\n)\n"
+        f"SELECT\n    {columns}\n"
+        f"FROM OPENJSON({placeholder})\n"
+        "WITH (\n"
+        f"    {with_clause}\n"
+        ");"
+    )
+    if debug:
+        dprint(sql)
+
+    conn.exec_driver_sql(sql, (json.dumps(json_data, default=str),))
 
 
 def format_sql_query_for_dask(query: str) -> 'sqlalchemy.sql.selectable.Select':
