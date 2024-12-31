@@ -26,46 +26,52 @@ flavor_clis = {
     'duckdb'      : 'gadwall',
 }
 cli_deps = {
-    'pgcli': ['pgspecial', 'pendulum'],
+    'pgcli': ['pgspecial', 'pendulum', 'cli_helpers'],
     'mycli': ['cryptography'],
+    'mssql': ['cli_helpers'],
 }
 
 
 def cli(
-        self,
-        debug: bool = False,
-    ) -> SuccessTuple:
+    self,
+    debug: bool = False,
+) -> SuccessTuple:
     """
     Launch a subprocess for an interactive CLI.
     """
+    from meerschaum.utils.warnings import dprint
     from meerschaum.utils.venv import venv_exec
     env = copy.deepcopy(dict(os.environ))
-    env[f'MRSM_SQL_{self.label.upper()}'] = json.dumps(self.meta)
+    env_key = f"MRSM_SQL_{self.label.upper()}"
+    env_val = json.dumps(self.meta)
+    env[env_key] = env_val
     cli_code = (
         "import sys\n"
         "import meerschaum as mrsm\n"
+        "import os\n"
         f"conn = mrsm.get_connector('sql:{self.label}')\n"
         "success, msg = conn._cli_exit()\n"
         "mrsm.pprint((success, msg))\n"
         "if not success:\n"
         "    raise Exception(msg)"
     )
+    if debug:
+        dprint(cli_code)
     try:
-        _ = venv_exec(cli_code, venv=None, debug=debug, capture_output=False)
+        _ = venv_exec(cli_code, venv=None, env=env, debug=debug, capture_output=False)
     except Exception as e:
         return False, f"[{self}] Failed to start CLI:\n{e}"
     return True, "Success"
 
 
 def _cli_exit(
-        self,
-        debug: bool = False
-    ) -> SuccessTuple:
+    self,
+    debug: bool = False
+) -> SuccessTuple:
     """Launch an interactive CLI for the SQLConnector's flavor."""
-    from meerschaum.utils.packages import venv_exec, attempt_import
+    import  os
+    from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import error
-    import sys, subprocess, os
 
     if self.flavor not in flavor_clis:
         return False, f"No CLI available for flavor '{self.flavor}'."
