@@ -410,7 +410,7 @@ def init_venv(
             pass
 
     def wait_for_lock():
-        max_lock_seconds = 1.0
+        max_lock_seconds = 2.0
         step_sleep_seconds = 0.1
         init_venv_check_start = time.perf_counter()
         while ((time.perf_counter() - init_venv_check_start) < max_lock_seconds):
@@ -450,6 +450,9 @@ def init_venv(
     temp_vtp = VENVS_CACHE_RESOURCES_PATH / str(venv)
     rename_vtp = vtp.exists() and not temp_vtp.exists()
 
+    wait_for_lock()
+    update_lock(True)
+
     if rename_vtp:
         if debug:
             print(f"Moving '{vtp}' to '{temp_vtp}'...")
@@ -463,9 +466,6 @@ def init_venv(
         except Exception as e:
             if debug:
                 print(f"Failed to remove '{venv_path}' ({e}). Continuing...")
-
-    wait_for_lock()
-    update_lock(True)
 
     if uv is not None:
         _venv_success = run_python_package(

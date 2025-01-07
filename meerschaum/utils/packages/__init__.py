@@ -337,14 +337,14 @@ def get_install_no_version(install_name: str) -> str:
 
 import_versions = {}
 def determine_version(
-        path: pathlib.Path,
-        import_name: Optional[str] = None,
-        venv: Optional[str] = 'mrsm',
-        search_for_metadata: bool = True,
-        split: bool = True,
-        warn: bool = False,
-        debug: bool = False,
-    ) -> Union[str, None]:
+    path: pathlib.Path,
+    import_name: Optional[str] = None,
+    venv: Optional[str] = 'mrsm',
+    search_for_metadata: bool = True,
+    split: bool = True,
+    warn: bool = False,
+    debug: bool = False,
+) -> Union[str, None]:
     """
     Determine a module's `__version__` string from its filepath.
     
@@ -381,11 +381,8 @@ def determine_version(
     with _locks['import_versions']:
         if venv not in import_versions:
             import_versions[venv] = {}
-    import importlib.metadata
-    import re, os
+    import os
     old_cwd = os.getcwd()
-    if debug:
-        from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn as warn_function
     if import_name is None:
         import_name = path.parent.stem if path.stem == '__init__' else path.stem
@@ -395,7 +392,10 @@ def determine_version(
     _version = None
     module_parent_dir = (
         path.parent.parent if path.stem == '__init__' else path.parent
-    ) if path is not None else venv_target_path(venv, debug=debug)
+    ) if path is not None else venv_target_path(venv, allow_nonexistent=True, debug=debug)
+
+    if not module_parent_dir.exists():
+        return None
 
     installed_dir_name = _import_to_dir_name(import_name)
     clean_installed_dir_name = installed_dir_name.lower().replace('-', '_')
@@ -403,7 +403,11 @@ def determine_version(
     ### First, check if a dist-info directory exists.
     _found_versions = []
     if search_for_metadata:
-        for filename in os.listdir(module_parent_dir):
+        try:
+            filenames = os.listdir(module_parent_dir)
+        except FileNotFoundError:
+            filenames = []
+        for filename in filenames:
             if not filename.endswith('.dist-info'):
                 continue
             filename_lower = filename.lower()
@@ -430,7 +434,7 @@ def determine_version(
         try:
             os.chdir(module_parent_dir)
             _version = importlib_metadata.metadata(import_name)['Version']
-        except Exception as e:
+        except Exception:
             _version = None
         finally:
             os.chdir(old_cwd)
