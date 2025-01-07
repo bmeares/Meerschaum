@@ -1017,7 +1017,8 @@ class Daemon:
 
     def read_pickle(self) -> Daemon:
         """Read a Daemon's pickle file and return the `Daemon`."""
-        import pickle, traceback
+        import pickle
+        import traceback
         if not self.pickle_path.exists():
             error(f"Pickle file does not exist for daemon '{self.daemon_id}'.")
 
@@ -1052,6 +1053,9 @@ class Daemon:
 
         if self._properties is None:
             self._properties = {}
+
+        if self._properties.get('result', None) is None:
+            _ = self._properties.pop('result', None)
 
         if _file_properties is not None:
             self._properties = apply_patch_to_config(

@@ -20,11 +20,12 @@ def get_mrsm_version(self, **kw) -> Optional[str]:
             use_token=False,
             **kw
         ).json()
-    except Exception as e:
+    except Exception:
         return None
     if isinstance(j, dict) and 'detail' in j:
         return None
     return j
+
 
 def get_chaining_status(self, **kw) -> Optional[bool]:
     """
@@ -39,7 +40,7 @@ def get_chaining_status(self, **kw) -> Optional[bool]:
         )
         if not response:
             return None
-    except Exception as e:
+    except Exception:
         return None
 
     return response.json()

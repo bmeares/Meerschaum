@@ -69,6 +69,7 @@ class SQLConnector(Connector):
         get_pipe_schema,
         create_pipe_table_from_df,
         get_pipe_columns_indices,
+        get_temporary_target,
     )
     from ._plugins import (
         register_plugin,

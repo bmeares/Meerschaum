@@ -37,7 +37,7 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     filtered_sysargs = [arg for arg in sysargs if arg not in ('-d', '--daemon')]
     try:
         label = shlex.join(filtered_sysargs) if sysargs else None
-    except Exception as e:
+    except Exception:
         label = ' '.join(filtered_sysargs) if sysargs else None
 
     name = _args.get('name', None)
@@ -45,7 +45,7 @@ def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
     if name:
         try:
             daemon = Daemon(daemon_id=name)
-        except Exception as e:
+        except Exception:
             daemon = None
 
     if daemon is not None:

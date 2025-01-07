@@ -7,7 +7,9 @@ Functions for interacting with the user.
 """
 
 from __future__ import annotations
+
 import os
+import meerschaum as mrsm
 from meerschaum.utils.typing import Any, Union, Optional, Tuple, List
 
 
@@ -63,9 +65,8 @@ def prompt(
 
     """
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.formatting import colored, ANSI, CHARSET, highlight_pipes, fill_ansi
+    from meerschaum.utils.formatting import ANSI, CHARSET, highlight_pipes, fill_ansi
     from meerschaum.config import get_config
-    from meerschaum.config.static import _static_config
     from meerschaum.utils.misc import filter_keywords
     from meerschaum.utils.daemon import running_in_daemon
     noask = check_noask(noask)
@@ -175,8 +176,6 @@ def yes_no(
     ```
     """
     from meerschaum.utils.warnings import error, warn
-    from meerschaum.utils.formatting import ANSI, UNICODE
-    from meerschaum.utils.packages import attempt_import
 
     default = options[0] if yes else default
     noask = yes or check_noask(noask)
@@ -195,7 +194,7 @@ def yes_no(
             success = False
         
         if not success:
-            error(f"Error getting response. Aborting...", stack=False)
+            error("Error getting response. Aborting...", stack=False)
         if answer == "":
             answer = default
 
@@ -205,19 +204,20 @@ def yes_no(
     
     return answer.lower() == options[0].lower()
 
+
 def choose(
-        question: str,
-        choices: List[Union[str, Tuple[str, str]]],
-        default: Union[str, List[str], None] = None,
-        numeric: bool = True,
-        multiple: bool = False,
-        as_indices: bool = False,
-        delimiter: str = ',',
-        icon: bool = True,
-        warn: bool = True,
-        noask: bool = False,
-        **kw
-    ) -> Union[str, Tuple[str], None]:
+    question: str,
+    choices: List[Union[str, Tuple[str, str]]],
+    default: Union[str, List[str], None] = None,
+    numeric: bool = True,
+    multiple: bool = False,
+    as_indices: bool = False,
+    delimiter: str = ',',
+    icon: bool = True,
+    warn: bool = True,
+    noask: bool = False,
+    **kw
+) -> Union[str, Tuple[str], None]:
     """
     Present a list of options and return the user's choice.
 
@@ -418,8 +418,8 @@ def choose(
         valid = (len(answers) > 1 or not (len(answers) == 1 and answers[0] is None))
         for a in answers:
             if (
-                not a in {_original for _new, _original in altered_choices.items()}
-                and not a in _choices
+                a not in {_original for _new, _original in altered_choices.items()}
+                and a not in _choices
                 and a != default
                 and not noask
             ):
@@ -428,21 +428,22 @@ def choose(
         if valid:
             break
         if warn:
-            _warn(f"Please pick a valid choice.", stack=False)
+            _warn("Please pick a valid choice.", stack=False)
 
     if not multiple:
         if not numeric:
             return answer
         try:
             _answer = choices[int(answer) - 1]
-            if as_indices and isinstance(choice, tuple):
+            if as_indices and isinstance(_answer, tuple):
                 return _answer[0]
             return _answer
-        except Exception as e:
+        except Exception:
             _warn(f"Could not cast answer '{answer}' to an integer.", stacklevel=3)
 
     if not numeric:
         return answers
+
     _answers = []
     for a in answers:
         try:
@@ -451,17 +452,17 @@ def choose(
             if isinstance(_answer_to_return, tuple) and as_indices:
                 _answer_to_return = _answer_to_return[0]
             _answers.append(_answer_to_return)
-        except Exception as e:
+        except Exception:
             _warn(f"Could not cast answer '{a}' to an integer.", stacklevel=3)
     return _answers
 
 
 def get_password(
-        username: Optional[str] = None,
-        minimum_length: Optional[int] = None,
-        confirm: bool = True,
-        **kw: Any
-    ) -> str:
+    username: Optional[str] = None,
+    minimum_length: Optional[int] = None,
+    confirm: bool = True,
+    **kw: Any
+) -> str:
     """
     Prompt the user for a password.
 
@@ -493,15 +494,15 @@ def get_password(
     from meerschaum.utils.warnings import warn
     while True:
         password = prompt(
-            f"Password" + (f" for user '{username}':" if username is not None else ":"),
-            is_password = True,
+            "Password" + (f" for user '{username}':" if username is not None else ":"),
+            is_password=True,
             **kw
         )
         if minimum_length is not None and len(password) < minimum_length:
             warn(
                 "Password is too short. " +
                 f"Please enter a password that is at least {minimum_length} characters.",
-                stack = False
+                stack=False
             )
             continue
 
@@ -509,12 +510,12 @@ def get_password(
             return password
 
         _password = prompt(
-            f"Confirm password" + (f" for user '{username}':" if username is not None else ":"),
-            is_password = True,
+            "Confirm password" + (f" for user '{username}':" if username is not None else ":"),
+            is_password=True,
             **kw
         )
         if password != _password:
-            warn(f"Passwords do not match! Please try again.", stack=False)
+            warn("Passwords do not match! Please try again.", stack=False)
             continue
         else:
             return password
@@ -550,13 +551,13 @@ def get_email(username: Optional[str] = None, allow_omit: bool = True, **kw: Any
     from meerschaum.utils.misc import is_valid_email
     while True:
         email = prompt(
-            f"Email" + (f" for user '{username}'" if username is not None else "") +
+            "Email" + (f" for user '{username}'" if username is not None else "") +
             (" (empty to omit):" if allow_omit else ": "),
             **kw
         )
         if (allow_omit and email == '') or is_valid_email(email):
             return email
-        warn(f"Invalid email! Please try again.", stack=False)
+        warn("Invalid email! Please try again.", stack=False)
 
 
 def check_noask(noask: bool = False) -> bool:
@@ -571,3 +572,20 @@ def check_noask(noask: bool = False) -> bool:
         os.environ.get(NOASK, 'false').lower()
         in ('1', 'true')
     )
+
+
+def get_connectors_completer(*types: str):
+    """
+    Return a prompt-toolkit Completer object to pass into `prompt()`.
+    """
+    from meerschaum.utils.misc import get_connector_labels
+    prompt_toolkit_completion = mrsm.attempt_import('prompt_toolkit.completion', lazy=False)
+    Completer = prompt_toolkit_completion.Completer
+    Completion = prompt_toolkit_completion.Completion
+
+    class ConnectorCompleter(Completer):
+        def get_completions(self, document, complete_event):
+            for label in get_connector_labels(*types):
+                yield Completion(label, start_position=(-1 * len(document.text)))
+
+    return ConnectorCompleter()

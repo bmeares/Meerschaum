@@ -130,12 +130,15 @@ def _ask_with_rowcounts(
                     )
 
 
-    pipes_rowcounts = {p: p.get_rowcount(begin=begin, end=end, debug=debug) for p in pipes} 
+    pipes_rowcounts = {
+        pipe: pipe.get_rowcount(begin=begin, end=end, debug=debug)
+        for pipe in pipes
+    }
     print_options(
-        [str(p) + f'\n{rc}\n' for p, rc in pipes_rowcounts.items()],
+        [str(pipe) + f'\n{rowcount:,}\n' for pipe, rowcount in pipes_rowcounts.items()],
         header='Number of Rows to be Deleted'
     )
-    total_num_rows = sum([rc for p, rc in pipes_rowcounts.items()])
+    total_num_rows = sum([rowcount for rowcount in pipes_rowcounts.values()])
     question = (
         f"Are you sure you want to delete {total_num_rows:,} rows across {len(pipes)} pipe"
         + ('s' if len(pipes) != 1 else '')

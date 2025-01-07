@@ -275,12 +275,14 @@ def _sync_pipes(
     import time
     import os
     import contextlib
+    from datetime import timedelta
 
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting._shell import progress
     from meerschaum.utils.formatting._shell import clear_screen
     from meerschaum.utils.formatting import print_pipes_results
     from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.misc import interval_str
 
     noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)
     noninteractive = str(noninteractive_val).lower() in ('1', 'true', 'yes')
@@ -321,7 +323,7 @@ def _sync_pipes(
                     for pipe, (_success, _msg) in results_dict.items()
                     if not _success
                 ]
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             warn(
@@ -351,9 +353,9 @@ def _sync_pipes(
         success_msg = (
             "Successfully spawned threads for pipes:"
             if unblock
-            else f"Successfully synced pipes:"
+            else "Successfully synced pipes:"
         )
-        fail_msg = f"Failed to sync pipes:"
+        fail_msg = "Failed to sync pipes:"
         if results_dict:
             print_pipes_results(
                 results_dict,
@@ -362,8 +364,10 @@ def _sync_pipes(
                 nopretty = nopretty,
             )
 
+        lap_duration_text = interval_str(timedelta(seconds=(lap_end - lap_begin)))
+
         msg = (
-            f"It took {round(lap_end - lap_begin, 2)} seconds to sync " +
+            f"It took {lap_duration_text} to sync " +
             f"{len(success_pipes) + len(failure_pipes)} pipe" +
                 ("s" if (len(success_pipes) + len(failure_pipes)) != 1 else "") + "\n" +
             f"    ({len(success_pipes)} succeeded, {len(failure_pipes)} failed)."
@@ -385,26 +389,26 @@ def _sync_pipes(
 
 
 def _wrap_pipe(
-        pipe,
-        unblock: bool = False,
-        force: bool = False,
-        debug: bool = False,
-        min_seconds: int = 1,
-        workers = None,
-        verify: bool = False,
-        deduplicate: bool = False,
-        bounded: Optional[bool] = None,
-        chunk_interval: Union[timedelta, int, None] = None,
-        **kw
-    ):
+    pipe,
+    unblock: bool = False,
+    force: bool = False,
+    debug: bool = False,
+    min_seconds: int = 1,
+    workers = None,
+    verify: bool = False,
+    deduplicate: bool = False,
+    bounded: Optional[bool] = None,
+    chunk_interval: Union[timedelta, int, None] = None,
+    **kw
+):
     """
     Wrapper function for handling exceptions.
     """
     import time
     import traceback
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timezone
     import meerschaum as mrsm
-    from meerschaum.utils.typing import is_success_tuple, SuccessTuple
+    from meerschaum.utils.typing import is_success_tuple
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.venv import Venv
     from meerschaum.plugins import _pre_sync_hooks, _post_sync_hooks

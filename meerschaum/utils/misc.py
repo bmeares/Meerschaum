@@ -90,20 +90,21 @@ def add_method_to_class(
 
 
 def generate_password(length: int = 12) -> str:
-    """Generate a secure password of given length.
+    """
+    Generate a secure password of given length.
 
     Parameters
     ----------
-    length : int, default 12
+    length: int, default 12
         The length of the password.
 
     Returns
     -------
     A random password string.
-
     """
-    import secrets, string
-    return ''.join((secrets.choice(string.ascii_letters) for i in range(length)))
+    import secrets
+    import string
+    return ''.join((secrets.choice(string.ascii_letters + string.digits) for i in range(length)))
 
 def is_int(s : str) -> bool:
     """
@@ -121,7 +122,7 @@ def is_int(s : str) -> bool:
     """
     try:
         float(s)
-    except Exception as e:
+    except Exception:
         return False
     
     return float(s).is_integer()
