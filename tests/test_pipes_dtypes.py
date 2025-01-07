@@ -465,7 +465,6 @@ def test_mixed_offset_datetimes_sql(flavor: str):
     assert success, msg
 
     assert inplace_pipe.get_rowcount(debug=debug) == pipe.get_rowcount(debug=debug)
-    return pipe, inplace_pipe
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
