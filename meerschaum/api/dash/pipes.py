@@ -12,7 +12,6 @@ import shlex
 from textwrap import dedent
 from urllib.parse import urlencode
 
-from dash.dependencies import Input, Output, State
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
@@ -76,7 +75,7 @@ def keys_from_state(
         try:
             #  params = string_to_dict(state['params-textarea.value'])
             params = string_to_dict(state['search-parameters-editor.value'])
-        except Exception as e:
+        except Exception:
             params = None
     else:
         params = None
@@ -506,7 +505,7 @@ def accordion_items_from_pipe(
 
         stats_rows = []
         if rowcount is not None:
-            stats_rows.append(html.Tr([html.Td("Row-count"), html.Td(f"{rowcount}")]))
+            stats_rows.append(html.Tr([html.Td("Row Count"), html.Td(f"{rowcount:,}")]))
         if interval is not None:
             stats_rows.append(
                 html.Tr([html.Td("Timespan"), html.Td(humanfriendly.format_timespan(interval))])

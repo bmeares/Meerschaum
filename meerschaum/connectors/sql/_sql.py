@@ -778,6 +778,7 @@ def to_sql(
     import time
     import json
     from decimal import Decimal
+    from datetime import timedelta
     from meerschaum.utils.warnings import error, warn
     import warnings
     import functools
@@ -816,6 +817,7 @@ def to_sql(
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
         get_db_type_from_pd_type,
     )
+    from meerschaum.utils.misc import interval_str
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
     sqlalchemy = attempt_import('sqlalchemy', debug=debug)
@@ -998,7 +1000,13 @@ def to_sql(
 
     end = time.perf_counter()
     if success:
-        msg = f"It took {round(end - start, 2)} seconds to sync {len(df)} rows to {name}."
+        num_rows = len(df)
+        msg = (
+            f"It took {interval_str(timedelta(seconds=(end - start)))} "
+            + f"to sync {num_rows:,} row"
+            + ('s' if num_rows != 1 else '')
+            + f" to {name}."
+        )
     stats['start'] = start
     stats['end'] = end
     stats['duration'] = end - start

@@ -742,8 +742,7 @@ class Shell(cmd.Cmd):
         """
         from meerschaum import get_connector
         from meerschaum.connectors.parse import parse_instance_keys
-        from meerschaum.utils.warnings import warn, info
-        from meerschaum.utils.misc import remove_ansi
+        from meerschaum.utils.warnings import info
 
         if action is None:
             action = []
@@ -829,7 +828,7 @@ class Shell(cmd.Cmd):
         """
         from meerschaum import get_connector
         from meerschaum.connectors.parse import parse_repo_keys
-        from meerschaum.utils.warnings import warn, info
+        from meerschaum.utils.warnings import info
 
         if action is None:
             action = []
@@ -878,7 +877,6 @@ class Shell(cmd.Cmd):
         
         Note that executors are API instances.
         """
-        from meerschaum import get_connector
         from meerschaum.connectors.parse import parse_executor_keys
         from meerschaum.utils.warnings import warn, info
         from meerschaum.jobs import get_executor_keys_from_context
@@ -894,7 +892,7 @@ class Shell(cmd.Cmd):
             executor_keys = get_executor_keys_from_context()
 
         if executor_keys == 'systemd' and get_executor_keys_from_context() != 'systemd':
-            warn(f"Cannot execute via `systemd`, falling back to `local`...", stack=False)
+            warn("Cannot execute via `systemd`, falling back to `local`...", stack=False)
             executor_keys = 'local'
         
         conn = parse_executor_keys(executor_keys, debug=debug)
@@ -935,7 +933,7 @@ class Shell(cmd.Cmd):
         if args['action'][0] not in shell_attrs['_actions']:
             try:
                 print(textwrap.dedent(getattr(self, f"do_{args['action'][0]}").__doc__))
-            except Exception as e:
+            except Exception:
                 print(f"No help on '{args['action'][0]}'.")
             return ""
         parse_help(args)
