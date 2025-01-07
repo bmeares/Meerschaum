@@ -11,7 +11,7 @@ valkey>=6.0.0
 numpy>=1.18.5
 pandas[parquet]>=2.0.1
 pyarrow>=16.1.0
-dask[complete]>=2024.5.1
+dask[complete]>=2024.12.1
 partd>=1.4.2
 pytz
 joblib>=0.17.0
