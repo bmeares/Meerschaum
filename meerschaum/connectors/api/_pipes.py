@@ -9,8 +9,7 @@ Register or fetch Pipes from the API
 from __future__ import annotations
 import time
 import json
-from io import StringIO
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import meerschaum as mrsm
 from meerschaum.utils.debug import dprint
@@ -178,11 +177,11 @@ def sync_pipe(
     """Sync a DataFrame into a Pipe."""
     from decimal import Decimal
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import json_serialize_datetime, items_str
+    from meerschaum.utils.misc import json_serialize_datetime, items_str, interval_str
     from meerschaum.config import get_config
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dataframe import get_numeric_cols, to_json, get_bytes_cols
-    begin = time.time()
+    from meerschaum.utils.dataframe import get_numeric_cols, to_json
+    begin = time.perf_counter()
     more_itertools = attempt_import('more_itertools')
     if df is None:
         msg = f"DataFrame is `None`. Cannot sync {pipe}."
@@ -304,9 +303,10 @@ def sync_pipe(
         num_success_chunks += 1
 
     success_tuple = True, (
-        f"It took {round(time.time() - begin, 2)} seconds to sync {rowcount} row"
+        f"It took {interval_str(timedelta(seconds=(time.perf_counter() - begin)))} "
+        + "to sync {rowcount:,} row"
         + ('s' if rowcount != 1 else '')
-        + f" across {num_success_chunks} chunk" + ('s' if num_success_chunks != 1 else '') +
+        + f" across {num_success_chunks:,} chunk" + ('s' if num_success_chunks != 1 else '') +
         f" to {pipe}."
     )
     return success_tuple
@@ -549,10 +549,9 @@ def create_metadata(
     if debug:
         dprint("Create metadata response: {response.text}")
     try:
-        metadata_response = json.loads(response.text)
+        _ = json.loads(response.text)
     except Exception as e:
         warn(f"Failed to create metadata on {self}:\n{e}")
-        metadata_response = False
     return False
 
 

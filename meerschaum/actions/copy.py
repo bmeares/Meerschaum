@@ -7,7 +7,7 @@ Functions for copying elements.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple, List
+from meerschaum.utils.typing import Any, SuccessTuple, Optional, List
 
 def copy(
     action: Optional[List[str]] = None,
@@ -69,44 +69,53 @@ def _copy_pipes(
     Copy pipes' attributes and make new pipes.
     """
     from meerschaum import get_pipes, Pipe
-    from meerschaum.utils.prompt import prompt, yes_no
+    from meerschaum.utils.prompt import prompt, yes_no, get_connectors_completer
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.formatting._shell import clear_screen
     pipes = get_pipes(as_list=True, **kw)
     successes = 0
-    for p in pipes:
-        ck = prompt(f"Connector keys for copy of {p}:", default=p.connector_keys)
-        mk = prompt(f"Metric key for copy of {p}:", default=p.metric_key)
-        lk = prompt(f"Location key for copy of {p} ('None' to omit):", default=str(p.location_key))
+    for pipe in pipes:
+        ck = prompt(
+            f"Connector keys for copy of {pipe}:",
+            default=pipe.connector_keys,
+            completer=get_connectors_completer(),
+        )
+        mk = prompt(f"Metric key for copy of {pipe}:", default=pipe.metric_key)
+        lk = prompt(
+            f"Location key for copy of {pipe} ('None' to omit):",
+            default=str(pipe.location_key),
+        )
         if lk in ('', 'None', '[None]'):
             lk = None
-        _new_pipe = Pipe(
-            ck, mk, lk,
-            parameters=p.parameters.copy(),
-        )
+
         instance_keys = prompt(
-            f"Meerschaum instance to store the new {_new_pipe}:",
-            default=p.instance_keys
+            f"Meerschaum instance for copy of {pipe}:",
+            default=pipe.instance_keys
         )
-        _new_pipe.instance_keys = instance_keys
-        if _new_pipe.get_id(debug=debug) is not None:
-            warn(f"New {_new_pipe} already exists. Skipping...", stack=False)
+        new_pipe = Pipe(
+            ck, mk, lk,
+            instance=instance_keys,
+            parameters=pipe.parameters.copy(),
+        )
+
+        if new_pipe.get_id(debug=debug) is not None:
+            warn(f"{new_pipe} already exists. Skipping...", stack=False)
             continue
-        _register_success_tuple = _new_pipe.register(debug=debug)
+        _register_success_tuple = new_pipe.register(debug=debug)
         if not _register_success_tuple[0]:
-            warn(f"Failed to register new {_new_pipe}.", stack=False)
+            warn(f"Failed to register new {new_pipe}.", stack=False)
             continue
 
         clear_screen(debug=debug)
         successes += 1
         print_tuple(
-            (True, f"Successfully copied attributes of {p} " + f" into {_new_pipe}.")
+            (True, f"Successfully copied attributes of {pipe} " + f" into {new_pipe}.")
         )
         if (
             force or yes_no(
                 (
-                    f"Do you want to copy data from {p} into {_new_pipe}?\n\n"
+                    f"Do you want to copy data from {pipe} into {new_pipe}?\n\n"
                     + "If you specified `--begin`, `--end` or `--params`, data will be filtered."
                 ),
                     noask=noask,
@@ -114,8 +123,8 @@ def _copy_pipes(
                     default='n',
                 )
         ):
-            _new_pipe.sync(
-                p.get_data(
+            new_pipe.sync(
+                pipe.get_data(
                     debug=debug,
                     as_iterator=True,
                     **kw
@@ -142,17 +151,14 @@ def _copy_connectors(
 ) -> SuccessTuple:
     """
     Create a new connector from an existing one.
-
     """
-    import os, pathlib
     from meerschaum.utils.prompt import yes_no, prompt
     from meerschaum.connectors.parse import parse_connector_keys
     from meerschaum.config import _config, get_config
-    from meerschaum.config._edit import write_config
-    from meerschaum.utils.warnings import info, warn
+    from meerschaum.utils.warnings import info
     from meerschaum.utils.formatting import pprint
     from meerschaum.actions import get_action
-    cf = _config()
+    _ = _config()
     if action is None:
         action = []
     if connector_keys is None:
@@ -170,7 +176,7 @@ def _copy_connectors(
 
     try:
         conn = parse_connector_keys(ck)
-    except Exception as e:
+    except Exception:
         return False, f"Unable to parse connector '{ck}'."
 
     if len(_keys) == 2:

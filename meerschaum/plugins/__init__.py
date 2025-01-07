@@ -126,8 +126,8 @@ def pre_sync_hook(
 
 
 def post_sync_hook(
-        function: Callable[[Any], Any],
-    ) -> Callable[[Any], Any]:
+    function: Callable[[Any], Any],
+) -> Callable[[Any], Any]:
     """
     Register a function as a sync hook to be executed upon completion of a sync.
     
@@ -143,10 +143,14 @@ def post_sync_hook(
     Examples
     --------
     >>> from meerschaum.plugins import post_sync_hook
+    >>> from meerschaum.utils.misc import interval_str
+    >>> from datetime import timedelta
     >>>
     >>> @post_sync_hook
     ... def log_sync(pipe, success_tuple, duration=None, **kwargs):
-    ...     print(f"It took {round(duration, 2)} seconds to sync {pipe}.")
+    ...     duration_delta = timedelta(seconds=duration)
+    ...     duration_text = interval_str(duration_delta)
+    ...     print(f"It took {duration_text} to sync {pipe}.")
     >>>
     """
     with _locks['_post_sync_hooks']:

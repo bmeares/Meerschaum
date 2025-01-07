@@ -7,13 +7,15 @@ Implement the prompt_toolkit Completer base class.
 """
 
 from __future__ import annotations
-from prompt_toolkit.completion import Completer, Completion
-from meerschaum.utils.typing import Optional
-from meerschaum.actions import get_shell, get_completer, get_main_action_name, get_action
+from meerschaum.actions import get_shell, get_main_action_name, get_action
 from meerschaum._internal.arguments import parse_line
 
 from meerschaum.utils.packages import attempt_import, ensure_readline
-prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, install=True)
+
+prompt_toolkit_completion = attempt_import('prompt_toolkit.completion', lazy=False, install=True)
+Completer = prompt_toolkit_completion.Completer
+Completion = prompt_toolkit_completion.Completion
+
 
 class ShellCompleter(Completer):
     """
@@ -30,7 +32,6 @@ class ShellCompleter(Completer):
         yielded = []
         ensure_readline()
         parts = document.text.split('-')
-        ends_with_space = parts[0].endswith(' ')
         last_action_line = parts[0].split('+')[-1]
         part_0_subbed_spaces = last_action_line.replace(' ', '_')
         parsed_text = (part_0_subbed_spaces + '-'.join(parts[1:]))

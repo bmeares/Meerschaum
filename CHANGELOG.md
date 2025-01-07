@@ -4,6 +4,23 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.7.6
+
+- **Make temporary table names configurable.**  
+  The values for temporary SQL tables may be set in `MRSM{system:connectors:sql:instance:temporary_target}`. The new default prefix is `'_'`, and the new default transaction length is 4. The values have been re-ordered to target, transaction ID, then label.
+
+- **Add connector completions to `copy pipes`.**  
+  When copying pipes, the connector keys prompt will offer auto-complete suggestions.
+
+- **Fix stale job results.**  
+  When polling for job results, the job result is dropped from in-memory cache to avoid overwriting the on-disk result.
+
+- **Format row counts and seconds into human-friendly text.**  
+  Row counts and sync durations are now formatted into human-friendly representations.
+
+- **Add digits to `generate_password()`.**  
+  Random strings from `meerschaum.utils.misc.generate_password()` may now contain digits.
+
 ### v2.7.3 – v2.7.5
 
 - **Allow for dynamic targets in SQL queries.**  

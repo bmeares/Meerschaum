@@ -1505,7 +1505,6 @@ def sync_pipe(
         UPDATE_QUERIES,
         get_reset_autoincrement_queries,
     )
-    from meerschaum.utils.misc import generate_password
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     from meerschaum import Pipe
@@ -1720,9 +1719,7 @@ def sync_pipe(
                 warn(f"Could not reset auto-incrementing primary key for {pipe}.", stack=False)
 
     if update_df is not None and len(update_df) > 0:
-        transact_id = generate_password(3)
-        temp_prefix = '##' if self.flavor != 'oracle' else '_'
-        temp_target = temp_prefix + transact_id + '_' + pipe.target
+        temp_target = self.get_temporary_target(pipe.target, label='update')
         self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
@@ -1743,7 +1740,7 @@ def sync_pipe(
             static=True,
             autoincrement=False,
             parameters={
-                'schema': (self.internal_schema if self.flavor != 'mssql' else None),
+                'schema': self.internal_schema,
                 'hypertable': False,
             },
         )
@@ -1910,15 +1907,18 @@ def sync_pipe_inplace(
     )
     from meerschaum.utils.misc import generate_password
 
-    transact_id = generate_password(3)
-    def get_temp_table_name(label: str) -> str:
-        temp_prefix = '##' if self.flavor != 'oracle' else '_'
-        return temp_prefix + transact_id + '_' + label + '_' + pipe.target
+    transaction_id_length = (
+        mrsm.get_config(
+            'system', 'connectors', 'sql', 'instance', 'temporary_target', 'transaction_id_length'
+        )
+    )
+    transact_id = generate_password(transaction_id_length)
 
     internal_schema = self.internal_schema
+    target = pipe.target
     temp_table_roots = ['backtrack', 'new', 'delta', 'joined', 'unseen', 'update']
     temp_tables = {
-        table_root: get_temp_table_name(table_root)
+        table_root: self.get_temporary_target(target, transact_id=transact_id, label=table_root)
         for table_root in temp_table_roots
     }
     temp_table_names = {
@@ -3626,3 +3626,30 @@ def get_pipe_schema(self, pipe: mrsm.Pipe) -> Union[str, None]:
     A schema string or `None` if nothing is configured.
     """
     return pipe.parameters.get('schema', self.schema)
+
+
+@staticmethod
+def get_temporary_target(
+    target: str,
+    transact_id: Optional[str, None] = None,
+    label: Optional[str] = None,
+    separator: Optional[str] = None,
+) -> str:
+    """
+    Return a unique(ish) temporary target for a pipe.
+    """
+    from meerschaum.utils.misc import generate_password
+    temp_target_cf = (
+        mrsm.get_config('system', 'connectors', 'sql', 'instance', 'temporary_target') or {}
+    )
+    transaction_id_len = temp_target_cf.get('transaction_id_length', 3)
+    transact_id = transact_id or generate_password(transaction_id_len)
+    temp_prefix = temp_target_cf.get('prefix', '_')
+    separator = separator or temp_target_cf.get('separator', '_')
+    return (
+        temp_prefix
+        + target
+        + separator
+        + transact_id
+        + ((separator + label) if label else '')
+    )

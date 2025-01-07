@@ -76,6 +76,11 @@ default_system_config = {
             },
             'instance': {
                 'stale_temporary_tables_minutes': 1440,
+                'temporary_target': {
+                    'prefix': '_',
+                    'transaction_id_length': 4,
+                    'separator': '_',
+                },
             },
             'chunksize': 100_000,
             'poolclass': 'sqlalchemy.pool.QueuePool',

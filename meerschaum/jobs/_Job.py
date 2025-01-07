@@ -313,6 +313,7 @@ class Job:
         if not cleanup_success:
             return cleanup_success, cleanup_msg
 
+        _ = self.daemon._properties.pop('result', None)
         return cleanup_success, f"Deleted {self}."
 
     def is_running(self) -> bool:
