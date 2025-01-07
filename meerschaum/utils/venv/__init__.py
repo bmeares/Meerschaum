@@ -455,6 +455,15 @@ def init_venv(
             print(f"Moving '{vtp}' to '{temp_vtp}'...")
         shutil.move(vtp, temp_vtp)
 
+    if venv_path.exists():
+        if debug:
+            print(f"Removing '{venv_path}'...")
+        try:
+            shutil.rmtree(venv_path)
+        except Exception as e:
+            if debug:
+                print(f"Failed to remove '{venv_path}' ({e}). Continuing...")
+
     wait_for_lock()
     update_lock(True)
 

@@ -698,7 +698,7 @@ def need_update(
             (not semver.Version.parse(version).match(required_version))
             if required_version else False
         )
-    except AttributeError as e:
+    except AttributeError:
         pip_install(_import_to_install_name('semver'), venv='mrsm', debug=debug)
         semver = manually_import_module('semver', venv='mrsm', debug=debug)
         return (
@@ -724,10 +724,10 @@ def need_update(
 
 
 def get_pip(
-        venv: Optional[str] = 'mrsm',
-        color: bool = True,
-        debug: bool = False,
-    ) -> bool:
+    venv: Optional[str] = 'mrsm',
+    color: bool = True,
+    debug: bool = False,
+) -> bool:
     """
     Download and run the get-pip.py script.
 
@@ -747,7 +747,8 @@ def get_pip(
     A bool indicating success.
 
     """
-    import sys, subprocess
+    import sys
+    import subprocess
     from meerschaum.utils.misc import wget
     from meerschaum.config._paths import CACHE_RESOURCES_PATH
     from meerschaum.config.static import STATIC_CONFIG
@@ -755,7 +756,7 @@ def get_pip(
     dest = CACHE_RESOURCES_PATH / 'get-pip.py'
     try:
         wget(url, dest, color=False, debug=debug)
-    except Exception as e:
+    except Exception:
         print(f"Failed to fetch pip from '{url}'. Please install pip and restart Meerschaum.") 
         sys.exit(1)
     if venv is not None:
@@ -776,6 +777,7 @@ def pip_install(
     _uninstall: bool = False,
     _from_completely_uninstall: bool = False,
     _install_uv_pip: bool = True,
+    _use_uv_pip: bool = True,
     color: bool = True,
     silent: bool = False,
     debug: bool = False,
@@ -835,10 +837,7 @@ def pip_install(
     from meerschaum.utils.warnings import warn
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
-    if color:
-        ANSI, UNICODE = True, True
-    else:
-        ANSI, UNICODE = False, False
+    ANSI = True if color else False
     if check_wheel:
         have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
 
@@ -877,7 +876,8 @@ def pip_install(
             )
 
     use_uv_pip = (
-        venv_contains_package('uv', venv=None, debug=debug)
+        _use_uv_pip
+        and venv_contains_package('uv', venv=None, debug=debug)
         and uv_bin is not None
         and venv is not None
         and is_uv_enabled()
