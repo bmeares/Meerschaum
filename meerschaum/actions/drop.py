@@ -114,12 +114,12 @@ def _drop_indices(
     if len(pipes) == 0:
         return False, "No pipes to drop."
 
-    question = "Are you sure you want to drop these indices?\n\n"
+    question = "Are you sure you want to drop these indices?\n"
     for pipe in pipes:
         indices = pipe.get_indices()
         if not indices:
             continue
-        question += f"{pipe}\n"
+        question += f"\n{pipe}\n"
         for ix_key, index_name in indices.items():
             question += f"    - {index_name}\n"
 

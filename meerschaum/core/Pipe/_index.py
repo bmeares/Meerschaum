@@ -10,14 +10,14 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, List
 
 
-def index(
+def create_indices(
     self,
     columns: Optional[List[str]] = None,
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
     """
-    Call the Pipe's instance connector's `index_pipe()` method.
+    Call the Pipe's instance connector's `create_pipe_indices()` method.
 
     Parameters
     ----------
@@ -44,8 +44,13 @@ def index(
             warn(cache_msg)
 
     with Venv(get_connector_plugin(self.instance_connector)):
-        if hasattr(self.instance_connector, 'index_pipe'):
-            result = self.instance_connector.index_pipe(self, columns=columns, debug=debug, **kw)
+        if hasattr(self.instance_connector, 'create_pipe_indices'):
+            result = self.instance_connector.create_pipe_indices(
+                self,
+                columns=columns,
+                debug=debug,
+                **kw
+            )
         else:
             result = (
                 False,

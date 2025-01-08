@@ -10,6 +10,7 @@ from __future__ import annotations
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Dict
 
+
 def register(
     action: Optional[List[str]] = None,
     **kw: Any
@@ -70,10 +71,9 @@ def _register_pipes(
         `connector_keys` and `metric_keys`.
         If `location_keys` is empty, assume [`None`].
     """
-    from meerschaum import get_pipes, get_connector
+    from meerschaum import get_pipes
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn, info
-    from meerschaum.utils.misc import items_str
+    from meerschaum.utils.warnings import warn
     from meerschaum.config._patch import apply_patch_to_config
 
     if connector_keys is None:
@@ -164,10 +164,8 @@ def _register_plugins(
     from meerschaum.utils.debug import dprint
     from meerschaum.plugins import reload_plugins, get_plugins_names
     from meerschaum.connectors.parse import parse_repo_keys
-    from meerschaum.config import get_config
-    from meerschaum.utils.warnings import warn, error, info
+    from meerschaum.utils.warnings import warn, info
     from meerschaum.core import Plugin
-    from meerschaum import get_connector
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.prompt import prompt, yes_no
 
@@ -179,7 +177,7 @@ def _register_plugins(
     repo_connector = parse_repo_keys(repository)
     if repo_connector.__dict__.get('type', None) != 'api':
         return False, (
-            f"Can only upload plugins to the Meerschaum API." +
+            "Can only upload plugins to the Meerschaum API." +
             f"Connector '{repo_connector}' is of type " +
             f"'{repo_connector.get('type', type(repo_connector))}'."
         )
@@ -283,13 +281,11 @@ def _register_users(
     """
     from meerschaum.config import get_config
     from meerschaum.config.static import STATIC_CONFIG
-    from meerschaum import get_connector
     from meerschaum.connectors.parse import parse_instance_keys
-    from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import warn, error, info
+    from meerschaum.utils.warnings import warn, info
     from meerschaum.core import User
     from meerschaum.utils.formatting import print_tuple
-    from meerschaum.utils.prompt import prompt, get_password, get_email
+    from meerschaum.utils.prompt import get_password, get_email
     if mrsm_instance is None:
         mrsm_instance = get_config('meerschaum', 'instance')
     instance_connector = parse_instance_keys(mrsm_instance)
@@ -325,7 +321,7 @@ def _register_users(
                 minimum_length = STATIC_CONFIG['users']['min_password_length']
             )
             email = get_email(username, allow_omit=True)
-        except Exception as e:
+        except Exception:
             return False, (
                 "Aborted registering users " +
                 ', '.join(

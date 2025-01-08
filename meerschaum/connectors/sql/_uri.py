@@ -13,14 +13,14 @@ from meerschaum.utils.packages import attempt_import
 
 @classmethod
 def from_uri(
-        cls,
-        uri: str,
-        label: Optional[str] = None,
-        as_dict: bool = False,
-    ) -> Union[
-        'meerschaum.connectors.SQLConnector',
-        Dict[str, Union[str, int]],
-    ]:
+    cls,
+    uri: str,
+    label: Optional[str] = None,
+    as_dict: bool = False,
+) -> Union[
+    'meerschaum.connectors.SQLConnector',
+    Dict[str, Union[str, int]],
+]:
     """
     Create a new SQLConnector from a URI string.
 
@@ -97,7 +97,7 @@ def parse_uri(uri: str) -> Dict[str, Any]:
     >>> 
     """
     from urllib.parse import parse_qs, urlparse
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     parser = sqlalchemy.engine.url.make_url
     params = parser(uri).translate_connect_args()
     params['flavor'] = uri.split(':')[0].split('+')[0]

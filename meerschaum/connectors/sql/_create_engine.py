@@ -186,7 +186,7 @@ def create_engine(
     """Create a sqlalchemy engine by building the engine string."""
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import error, warn
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     import urllib
     import copy
     ### Install and patch required drivers.

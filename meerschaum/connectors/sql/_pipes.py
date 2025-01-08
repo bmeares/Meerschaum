@@ -55,7 +55,7 @@ def register_pipe(
         parameters = {}
 
     import json
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     values = {
         'connector_keys' : pipe.connector_keys,
         'metric_key'     : pipe.metric_key,
@@ -118,7 +118,7 @@ def edit_pipe(
     pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
     import json
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     values = {
         'parameters': (
@@ -176,7 +176,10 @@ def fetch_pipes_keys(
     from meerschaum.config.static import STATIC_CONFIG
     import json
     from copy import deepcopy
-    sqlalchemy, sqlalchemy_sql_functions = attempt_import('sqlalchemy', 'sqlalchemy.sql.functions')
+    sqlalchemy, sqlalchemy_sql_functions = attempt_import(
+        'sqlalchemy',
+        'sqlalchemy.sql.functions', lazy=False,
+    )
     coalesce = sqlalchemy_sql_functions.coalesce
 
     if connector_keys is None:
@@ -246,7 +249,7 @@ def fetch_pipes_keys(
 
     q = sqlalchemy.select(*select_cols).where(sqlalchemy.and_(True, *_where))
     for c, vals in cols.items():
-        if not isinstance(vals, (list, tuple)) or not vals or not c in pipes_tbl.c:
+        if not isinstance(vals, (list, tuple)) or not vals or c not in pipes_tbl.c:
             continue
         _in_vals, _ex_vals = separate_negation_values(vals)
         q = q.where(coalesce(pipes_tbl.c[c], 'None').in_(_in_vals)) if _in_vals else q
@@ -306,7 +309,7 @@ def fetch_pipes_keys(
     return [(row[0], row[1], row[2]) for row in rows]
 
 
-def index_pipe(
+def create_pipe_indices(
     self,
     pipe: mrsm.Pipe,
     columns: Optional[List[str]] = None,
@@ -951,7 +954,7 @@ def delete_pipe(
     Delete a Pipe's registration.
     """
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     if not pipe.id:
         return False, f"{pipe} is not registered."

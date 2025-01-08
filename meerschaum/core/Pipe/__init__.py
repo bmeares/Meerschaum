@@ -143,7 +143,7 @@ class Pipe:
     )
     from ._delete import delete
     from ._drop import drop, drop_indices
-    from ._index import index
+    from ._index import create_indices
     from ._clear import clear
     from ._deduplicate import deduplicate
     from ._bootstrap import bootstrap

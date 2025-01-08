@@ -488,7 +488,7 @@ def get_columns_indices(
 
     self.__dict__['_columns_indices'] = _columns_indices
     self.__dict__['_columns_indices_timestamp'] = now
-    return _columns_indices or {}
+    return {k: v for k, v in _columns_indices.items() if k and v} or {}
 
 
 def get_id(self, **kw: Any) -> Union[int, None]:

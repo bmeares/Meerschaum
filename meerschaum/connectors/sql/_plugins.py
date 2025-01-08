@@ -21,9 +21,8 @@ def register_plugin(
     **kw: Any
 ) -> SuccessTuple:
     """Register a new plugin to the plugins table."""
-    from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     from meerschaum.utils.sql import json_flavors
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
@@ -85,7 +84,7 @@ def get_plugin_id(
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     query = (
         sqlalchemy
@@ -95,8 +94,9 @@ def get_plugin_id(
     
     try:
         return int(self.value(query, debug=debug))
-    except Exception as e:
+    except Exception:
         return None
+
 
 def get_plugin_version(
     self,
@@ -110,7 +110,7 @@ def get_plugin_version(
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     query = sqlalchemy.select(plugins_tbl.c.version).where(plugins_tbl.c.plugin_name == plugin.name)
     return self.value(query, debug=debug)
 
@@ -126,7 +126,7 @@ def get_plugin_user_id(
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     query = (
         sqlalchemy
@@ -136,7 +136,7 @@ def get_plugin_user_id(
 
     try:
         return int(self.value(query, debug=debug))
-    except Exception as e:
+    except Exception:
         return None
 
 def get_plugin_username(
@@ -152,7 +152,7 @@ def get_plugin_username(
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
     users = get_tables(mrsm_instance=self, debug=debug)['users']
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     query = (
         sqlalchemy.select(users.c.username)
@@ -177,7 +177,7 @@ def get_plugin_attributes(
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     query = (
         sqlalchemy
@@ -219,7 +219,7 @@ def get_plugins(
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     query = sqlalchemy.select(plugins_tbl.c.plugin_name)
     if user_id is not None:
@@ -246,19 +246,14 @@ def delete_plugin(
     **kw: Any
 ) -> SuccessTuple:
     """Delete a plugin from the plugins table."""
-    from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     from meerschaum.connectors.sql.tables import get_tables
     plugins_tbl = get_tables(mrsm_instance=self, debug=debug)['plugins']
 
     plugin_id = self.get_plugin_id(plugin, debug=debug)
     if plugin_id is None:
         return True, f"Plugin '{plugin}' was not registered."
-
-    bind_variables = {
-        'plugin_id' : plugin_id,
-    }
 
     query = sqlalchemy.delete(plugins_tbl).where(plugins_tbl.c.plugin_id == plugin_id)
     result = self.exec(query, debug=debug)

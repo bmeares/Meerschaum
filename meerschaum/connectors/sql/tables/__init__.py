@@ -17,10 +17,10 @@ _sequence_flavors = {'duckdb', 'oracle'}
 _skip_index_names_flavors = {'mssql',}
 
 def get_tables(
-        mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
-        create: bool = True,
-        debug: Optional[bool] = None
-    ) -> Union[Dict[str, 'sqlalchemy.Table'], bool]:
+    mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
+    create: bool = True,
+    debug: Optional[bool] = None
+) -> Union[Dict[str, 'sqlalchemy.Table'], bool]:
     """
     Create tables on the database and return the `sqlalchemy` tables.
 
@@ -51,7 +51,7 @@ def get_tables(
     sqlalchemy, sqlalchemy_dialects_postgresql = attempt_import(
         'sqlalchemy',
         'sqlalchemy.dialects.postgresql',
-        lazy = False
+        lazy=False,
     )
     if not sqlalchemy:
         error(f"Failed to import sqlalchemy. Is sqlalchemy installed?")
@@ -205,13 +205,12 @@ def get_tables(
 
 
 def create_tables(
-        conn: 'meerschaum.connectors.SQLConnector',
-        tables: Optional[Dict[str, 'sqlalchemy.Table']] = None,
-    ) -> bool:
+    conn: 'meerschaum.connectors.SQLConnector',
+    tables: Optional[Dict[str, 'sqlalchemy.Table']] = None,
+) -> bool:
     """
     Create the tables on the database.
     """
-    from meerschaum.utils.sql import get_rename_table_queries, table_exists
     _tables = tables if tables is not None else get_tables(conn)
 
     try:
@@ -225,10 +224,10 @@ def create_tables(
 
 
 def create_schemas(
-        conn: 'meerschaum.connectors.SQLConnector',
-        schemas: List[str],
-        debug: bool = False,
-    ) -> bool:
+    conn: 'meerschaum.connectors.SQLConnector',
+    schemas: List[str],
+    debug: bool = False,
+) -> bool:
     """
     Create the internal Meerschaum schema on the database.
     """
@@ -238,7 +237,7 @@ def create_schemas(
     if conn.flavor in NO_SCHEMA_FLAVORS:
         return True
 
-    sqlalchemy_schema = attempt_import('sqlalchemy.schema')
+    _ = attempt_import('sqlalchemy.schema', lazy=False)
     successes = {}
     skip_if_not_exists = conn.flavor in SKIP_IF_EXISTS_FLAVORS
     if_not_exists_str = ("IF NOT EXISTS " if not skip_if_not_exists else "")

@@ -1151,7 +1151,7 @@ def test_create_drop_indices(flavor):
     cols_indices = pipe.get_columns_indices(debug=debug) 
     assert len(cols_indices) <= len(og_cols_indices)
 
-    success, msg = pipe.index(debug=debug)
+    success, msg = pipe.create_indices(debug=debug)
     assert success, msg
 
     cols_indices = pipe.get_columns_indices(debug=debug) 

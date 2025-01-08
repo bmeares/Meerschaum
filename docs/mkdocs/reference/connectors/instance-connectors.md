@@ -491,9 +491,9 @@ You may use the built-in method [`pipe.filter_existing()`](https://docs.meerscha
 
 For situations where the source and instance connectors are the same, the method `#!python sync_pipe_inplace()` allows you to bypass loading DataFrames into RAM and instead handle the syncs remotely. See the [`#!python SQLConnector.sync_pipe_inplace()`](https://docs.meerschaum.io/connectors/sql/SQLConnector.html#meerschaum.connectors.sql.SQLConnector.SQLConnector.sync_pipe_inplace) method for reference.
 
-### `#!python index_pipe()` (optional)
+### `#!python create_pipe_indices()` (optional)
 
-If syncing to your instance connector involves indexing a pipe's target table, you may find it useful to implement the methods `index_pipe()`. See the method [`#!python SQLConnector.index_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.index_pipe) for reference.
+If syncing to your instance connector involves indexing a pipe's target table, you may find it useful to implement the method `create_pipe_indices()`. See the method [`#!python SQLConnector.create_pipe_indices()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.create_pipe_indices) for reference.
 
 
 ## `#!python clear_pipe()`

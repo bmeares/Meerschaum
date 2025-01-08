@@ -536,7 +536,7 @@ def get_db_type_from_pd_type(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_ALIAS_DTYPES
     from meerschaum.utils.misc import parse_arguments_str
-    sqlalchemy_types = attempt_import('sqlalchemy.types')
+    sqlalchemy_types = attempt_import('sqlalchemy.types', lazy=False)
 
     types_registry = (
         PD_TO_DB_DTYPES_FLAVORS

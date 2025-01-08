@@ -19,10 +19,9 @@ def register_user(
     **kw: Any
 ) -> SuccessTuple:
     """Register a new user."""
-    from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import json_flavors
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     valid_tuple = valid_username(user.username)
     if not valid_tuple[0]:
@@ -103,9 +102,8 @@ def edit_user(
 ) -> SuccessTuple:
     """Update an existing user's metadata."""
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     from meerschaum.connectors.sql.tables import get_tables
-    from meerschaum.utils.sql import json_flavors
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
 
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
@@ -158,7 +156,7 @@ def get_user_id(
     """If a user is registered, return the `user_id`."""
     ### ensure users table exists
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
 
@@ -183,7 +181,7 @@ def get_user_attributes(
     ### ensure users table exists
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
 
@@ -199,14 +197,14 @@ def get_user_attributes(
         try:
             result = dict(result)
             _parsed = True
-        except Exception as e:
+        except Exception:
             _parsed = False
         if not _parsed:
             try:
                 import json
                 result = json.loads(result)
                 _parsed = True
-            except Exception as e:
+            except Exception:
                 _parsed = False
         if not _parsed:
             warn(f"Received unexpected type for attributes: {result}")
@@ -223,7 +221,7 @@ def delete_user(
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
     plugins = get_tables(mrsm_instance=self, debug=debug)['plugins']
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
 
@@ -256,7 +254,7 @@ def get_users(
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     query = sqlalchemy.select(users_tbl.c.username)
 
@@ -277,7 +275,7 @@ def get_user_password_hash(
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     if user.user_id is not None:
         user_id = user.user_id
@@ -308,7 +306,7 @@ def get_user_type(
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
 

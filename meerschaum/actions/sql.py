@@ -127,7 +127,7 @@ def sql(
     
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.formatting import print_tuple, pprint
-    _ = attempt_import('sqlalchemy.engine.result')
+    _ = attempt_import('sqlalchemy.engine.result', lazy=False)
     if 'sqlalchemy' in str(type(result)):
         if not nopretty:
             print_tuple((True, f"Successfully executed query:\n\n{query}"))

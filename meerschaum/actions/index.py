@@ -36,7 +36,7 @@ def _index_pipes(
     Create pipes' indices.
     """
     from meerschaum import get_pipes
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, info
 
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
@@ -47,7 +47,8 @@ def _index_pipes(
     msg = ""
 
     for pipe in pipes:
-        index_success, index_msg = pipe.index(debug=debug)
+        info(f"Creating indices for {pipe}...")
+        index_success, index_msg = pipe.create_indices(debug=debug)
         success_dict[pipe] = index_msg
         if index_success:
             successes += 1

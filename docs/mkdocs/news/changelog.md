@@ -7,7 +7,7 @@ This is the current release cycle, so stay tuned for future releases!
 ### v2.7.7
 
 - **Add actions `drop indices` and `index pipes`.**  
-  You may now drop and create indices on pipes with the actions `drop indices` and `index pipes` or the pipe methods `drop_indices()` and `index()`:
+  You may now drop and create indices on pipes with the actions `drop indices` and `index pipes` or the pipe methods `drop_indices()` and `create_indices()`:
 
   ```python
   import meerschaum as mrsm
@@ -21,7 +21,7 @@ This is the current release cycle, so stay tuned for future releases!
   print(pipe.get_columns_indices())
   # {}
 
-  pipe.index()
+  pipe.create_indices()
   print(pipe.get_columns_indices())
   # {'id': [{'name': 'IX_demo_drop_indices_id', 'type': 'INDEX'}]}
   ```

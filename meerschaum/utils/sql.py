@@ -1066,7 +1066,7 @@ def table_exists(
     -------
     A `bool` indicating whether or not the table exists on the database.
     """
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     schema = schema or connector.schema
     insp = sqlalchemy.inspect(connector.engine)
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
@@ -1119,7 +1119,7 @@ def get_sqlalchemy_table(
     if refresh:
         connector.metadata.clear()
     tables = get_tables(mrsm_instance=connector, debug=debug, create=False)
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
     table_kwargs = {
         'autoload_with': connector.engine,
@@ -1189,7 +1189,7 @@ def get_table_cols_types(
     """
     import textwrap
     from meerschaum.connectors import SQLConnector
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     flavor = flavor or getattr(connectable, 'flavor', None)
     if not flavor:
         raise ValueError("Please provide a database flavor.")
@@ -1341,7 +1341,7 @@ def get_table_cols_indices(
     import textwrap
     from collections import defaultdict
     from meerschaum.connectors import SQLConnector
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     flavor = flavor or getattr(connectable, 'flavor', None)
     if not flavor:
         raise ValueError("Please provide a database flavor.")
@@ -2367,7 +2367,7 @@ def session_execute(
     A `SuccessTuple` indicating the queries were successfully executed.
     If `with_results`, return the `SuccessTuple` and a list of results.
     """
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     if not isinstance(queries, list):
         queries = [queries]
     successes, msgs, results = [], [], []
