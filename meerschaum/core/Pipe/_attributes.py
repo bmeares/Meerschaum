@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import timezone
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Tuple, Dict, SuccessTuple, Any, Union, Optional, List
+from meerschaum.utils.typing import Tuple, Dict, Any, Union, Optional, List
 from meerschaum.utils.warnings import warn
 
 
@@ -311,6 +311,25 @@ def enforce(self, _enforce: bool) -> None:
     Set the `enforce` parameter for the pipe.
     """
     self.parameters['enforce'] = _enforce
+
+
+@property
+def null_indices(self) -> bool:
+    """
+    Return the `null_indices` parameter for the pipe.
+    """
+    if 'null_indices' not in self.parameters:
+        self.parameters['null_indices'] = True
+
+    return self.parameters['null_indices']
+
+
+@null_indices.setter
+def null_indices(self, _null_indices: bool) -> None:
+    """
+    Set the `null_indices` parameter for the pipe.
+    """
+    self.parameters['null_indices'] = _null_indices
 
 
 def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]:
@@ -711,42 +730,17 @@ def guess_datetime(self) -> Union[str, None]:
 
 def get_indices(self) -> Dict[str, str]:
     """
-    Return a dictionary mapping index keys to their names on the database.
+    Return a dictionary mapping index keys to their names in the database.
 
     Returns
     -------
-    A dictionary of index keys to column names.
+    A dictionary of index keys to index names.
     """
-    _parameters = self.parameters
-    _index_template = _parameters.get('index_template', "IX_{target}_{column_names}")
-    _indices = self.indices
-    _target = self.target
-    _column_names = {
-        ix: (
-            '_'.join(cols)
-            if isinstance(cols, (list, tuple))
-            else str(cols)
-        )
-        for ix, cols in _indices.items()
-        if cols
-    }
-    _index_names = {
-        ix: _index_template.format(
-            target=_target,
-            column_names=column_names,
-            connector_keys=self.connector_keys,
-            metric_key=self.connector_key,
-            location_key=self.location_key,
-        )
-        for ix, column_names in _column_names.items()
-    }
-    ### NOTE: Skip any duplicate indices.
-    seen_index_names = {}
-    for ix, index_name in _index_names.items():
-        if index_name in seen_index_names:
-            continue
-        seen_index_names[index_name] = ix
-    return {
-        ix: index_name
-        for index_name, ix in seen_index_names.items()
-    }
+    from meerschaum.connectors import get_connector_plugin
+    with mrsm.Venv(get_connector_plugin(self.instance_connector)):
+        if hasattr(self.instance_connector, 'get_pipe_index_names'):
+            result = self.instance_connector.get_pipe_index_names(self)
+        else:
+            result = {}
+    
+    return result

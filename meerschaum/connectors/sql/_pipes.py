@@ -306,9 +306,28 @@ def fetch_pipes_keys(
     return [(row[0], row[1], row[2]) for row in rows]
 
 
+def index_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    columns: Optional[List[str]] = None,
+    debug: bool = False,
+) -> SuccessTuple:
+    """
+    Create a pipe's indices.
+    """
+    success = self.create_indices(pipe, columns=columns, debug=debug)
+    msg = (
+        "Success"
+        if success
+        else f"Failed to create indices for {pipe}."
+    )
+    return success, msg
+
+
 def create_indices(
     self,
     pipe: mrsm.Pipe,
+    columns: Optional[List[str]] = None,
     indices: Optional[List[str]] = None,
     debug: bool = False
 ) -> bool:
@@ -318,29 +337,51 @@ def create_indices(
     from meerschaum.utils.debug import dprint
     if debug:
         dprint(f"Creating indices for {pipe}...")
+
     if not pipe.indices:
         warn(f"{pipe} has no index columns; skipping index creation.", stack=False)
         return True
 
+    cols_to_include = set((columns or []) + (indices or [])) or None
+
     _ = pipe.__dict__.pop('_columns_indices', None)
     ix_queries = {
-        ix: queries
-        for ix, queries in self.get_create_index_queries(pipe, debug=debug).items()
-        if indices is None or ix in indices
+        col: queries
+        for col, queries in self.get_create_index_queries(pipe, debug=debug).items()
+        if cols_to_include is None or col in cols_to_include
     }
     success = True
-    for ix, queries in ix_queries.items():
+    for col, queries in ix_queries.items():
         ix_success = all(self.exec_queries(queries, debug=debug, silent=False))
         success = success and ix_success
         if not ix_success:
-            warn(f"Failed to create index on column: {ix}")
+            warn(f"Failed to create index on column: {col}")
 
     return success
+
+
+def drop_pipe_indices(
+    self,
+    pipe: mrsm.Pipe,
+    columns: Optional[List[str]] = None,
+    debug: bool = False,
+) -> SuccessTuple:
+    """
+    Drop a pipe's indices.
+    """
+    success = self.drop_indices(pipe, columns=columns, debug=debug)
+    msg = (
+        "Success"
+        if success
+        else f"Failed to drop indices for {pipe}."
+    )
+    return success, msg
 
 
 def drop_indices(
     self,
     pipe: mrsm.Pipe,
+    columns: Optional[List[str]] = None,
     indices: Optional[List[str]] = None,
     debug: bool = False
 ) -> bool:
@@ -350,23 +391,80 @@ def drop_indices(
     from meerschaum.utils.debug import dprint
     if debug:
         dprint(f"Dropping indices for {pipe}...")
-    if not pipe.columns:
-        warn(f"Unable to drop indices for {pipe} without columns.", stack=False)
+
+    if not pipe.indices:
+        warn(f"No indices to drop for {pipe}.", stack=False)
         return False
+
+    cols_to_include = set((columns or []) + (indices or [])) or None
+
     ix_queries = {
-        ix: queries
-        for ix, queries in self.get_drop_index_queries(pipe, debug=debug).items()
-        if indices is None or ix in indices
+        col: queries
+        for col, queries in self.get_drop_index_queries(pipe, debug=debug).items()
+        if cols_to_include is None or col in cols_to_include
     }
     success = True
-    for ix, queries in ix_queries.items():
-        ix_success = all(self.exec_queries(queries, debug=debug, silent=True))
+    for col, queries in ix_queries.items():
+        ix_success = all(self.exec_queries(queries, debug=debug, silent=(not debug)))
         if not ix_success:
             success = False
             if debug:
-                dprint(f"Failed to drop index on column: {ix}")
+                dprint(f"Failed to drop index on column: {col}")
     return success
 
+
+def get_pipe_index_names(self, pipe: mrsm.Pipe) -> Dict[str, str]:
+    """
+    Return a dictionary mapping index keys to their names on the database.
+
+    Returns
+    -------
+    A dictionary of index keys to column names.
+    """
+    from meerschaum.utils.sql import DEFAULT_SCHEMA_FLAVORS
+    _parameters = pipe.parameters
+    _index_template = _parameters.get('index_template', "IX_{schema_str}{target}_{column_names}")
+    _schema = self.get_pipe_schema(pipe)
+    if _schema is None:
+        _schema = (
+            DEFAULT_SCHEMA_FLAVORS.get(self.flavor, None)
+            if self.flavor != 'mssql'
+            else None
+        )
+    schema_str = '' if _schema is None else f'{_schema}_'
+    schema_str = ''
+    _indices = pipe.indices
+    _target = pipe.target
+    _column_names = {
+        ix: (
+            '_'.join(cols)
+            if isinstance(cols, (list, tuple))
+            else str(cols)
+        )
+        for ix, cols in _indices.items()
+        if cols
+    }
+    _index_names = {
+        ix: _index_template.format(
+            target=_target,
+            column_names=column_names,
+            connector_keys=pipe.connector_keys,
+            metric_key=pipe.metric_key,
+            location_key=pipe.location_key,
+            schema_str=schema_str,
+        )
+        for ix, column_names in _column_names.items()
+    }
+    ### NOTE: Skip any duplicate indices.
+    seen_index_names = {}
+    for ix, index_name in _index_names.items():
+        if index_name in seen_index_names:
+            continue
+        seen_index_names[index_name] = ix
+    return {
+        ix: index_name
+        for index_name, ix in seen_index_names.items()
+    }
 
 def get_create_index_queries(
     self,
@@ -407,7 +505,11 @@ def get_create_index_queries(
 
     upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in UPDATE_QUERIES
     static = pipe.parameters.get('static', False)
+    null_indices = pipe.parameters.get('null_indices', True)
     index_names = pipe.get_indices()
+    unique_index_name_unquoted = index_names.get('unique', None) or f'IX_{pipe.target}_unique'
+    if upsert:
+        _ = index_names.pop('unique', None)
     indices = pipe.indices
     existing_cols_types = pipe.get_columns_types(debug=debug)
     existing_cols_pd_types = {
@@ -420,11 +522,11 @@ def get_create_index_queries(
     existing_clustered_primary_keys = []
     for col, col_indices in existing_cols_indices.items():
         for col_ix_doc in col_indices:
-            existing_ix_names.add(col_ix_doc.get('name', None))
+            existing_ix_names.add(col_ix_doc.get('name', '').lower())
             if col_ix_doc.get('type', None) == 'PRIMARY KEY':
-                existing_primary_keys.append(col)
+                existing_primary_keys.append(col.lower())
                 if col_ix_doc.get('clustered', True):
-                    existing_clustered_primary_keys.append(col)
+                    existing_clustered_primary_keys.append(col.lower())
 
     _datetime = pipe.get_columns('datetime', error=False)
     _datetime_name = (
@@ -471,6 +573,19 @@ def get_create_index_queries(
         if not existing_clustered_primary_keys and _datetime is not None
         else "NONCLUSTERED"
     )
+    include_columns_str = "\n    ,".join(
+        [
+            sql_item_name(col, flavor=self.flavor) for col in existing_cols_types
+            if col != _datetime
+        ]
+    ).rstrip(',')
+    include_clause = (
+        (
+            f"\nINCLUDE (\n    {include_columns_str}\n)"
+        )
+        if datetime_clustered == 'NONCLUSTERED'
+        else ''
+    )
 
     _id_index_name = (
         sql_item_name(index_names['id'], self.flavor, None)
@@ -516,7 +631,7 @@ def get_create_index_queries(
             if self.flavor == 'mssql':
                 dt_query = (
                     f"CREATE {datetime_clustered} INDEX {_datetime_index_name} "
-                    f"ON {_pipe_name} ({_datetime_name})"
+                    f"\nON {_pipe_name} ({_datetime_name}){include_clause}"
                 )
             else:
                 dt_query = (
@@ -530,7 +645,7 @@ def get_create_index_queries(
     primary_queries = []
     if (
         primary_key is not None
-        and primary_key not in existing_primary_keys
+        and primary_key.lower() not in existing_primary_keys
         and not static
     ):
         if autoincrement and primary_key not in existing_cols_pd_types:
@@ -659,7 +774,10 @@ def get_create_index_queries(
     other_index_names = {
         ix_key: ix_unquoted
         for ix_key, ix_unquoted in index_names.items()
-        if ix_key not in ('datetime', 'id', 'primary') and ix_unquoted not in existing_ix_names
+        if (
+            ix_key not in ('datetime', 'id', 'primary')
+            and ix_unquoted.lower() not in existing_ix_names
+        )
     }
     for ix_key, ix_unquoted in other_index_names.items():
         ix_name = sql_item_name(ix_unquoted, self.flavor, None)
@@ -684,24 +802,29 @@ def get_create_index_queries(
     coalesce_indices_cols_str = ', '.join(
         [
             (
-                "COALESCE("
-                + sql_item_name(ix, self.flavor)
-                + ", "
-                + get_null_replacement(existing_cols_types[ix], self.flavor)
-                + ") "
-            ) if ix_key != 'datetime' else (sql_item_name(ix, self.flavor))
+                (
+                    "COALESCE("
+                    + sql_item_name(ix, self.flavor)
+                    + ", "
+                    + get_null_replacement(existing_cols_types[ix], self.flavor)
+                    + ") "
+                )
+                if ix_key != 'datetime' and null_indices
+                else sql_item_name(ix, self.flavor)
+            )
             for ix_key, ix in pipe.columns.items()
             if ix and ix in existing_cols_types
         ]
     )
-    unique_index_name = sql_item_name(pipe.target + '_unique_index', self.flavor)
-    constraint_name = sql_item_name(pipe.target + '_constraint', self.flavor)
+    unique_index_name = sql_item_name(unique_index_name_unquoted, self.flavor)
+    constraint_name_unquoted = unique_index_name_unquoted.replace('IX_', 'UQ_')
+    constraint_name = sql_item_name(constraint_name_unquoted, self.flavor)
     add_constraint_query = (
         f"ALTER TABLE {_pipe_name} ADD CONSTRAINT {constraint_name} UNIQUE ({indices_cols_str})"
     )
     unique_index_cols_str = (
         indices_cols_str
-        if self.flavor not in COALESCE_UNIQUE_INDEX_FLAVORS
+        if self.flavor not in COALESCE_UNIQUE_INDEX_FLAVORS or not null_indices
         else coalesce_indices_cols_str
     )
     create_unique_index_query = (
@@ -737,21 +860,33 @@ def get_drop_index_queries(
         return {}
     if not pipe.exists(debug=debug):
         return {}
+
+    from collections import defaultdict
     from meerschaum.utils.sql import (
         sql_item_name,
         table_exists,
         hypertable_queries,
         DROP_IF_EXISTS_FLAVORS,
     )
-    drop_queries = {}
+    drop_queries = defaultdict(lambda: [])
     schema = self.get_pipe_schema(pipe)
-    schema_prefix = (schema + '_') if schema else ''
+    index_schema = schema if self.flavor != 'mssql' else None
     indices = {
-        col: schema_prefix + ix
-        for col, ix in pipe.get_indices().items()
+        ix_key: ix
+        for ix_key, ix in pipe.get_indices().items()
     }
-    pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
+    cols_indices = pipe.get_columns_indices(debug=debug)
+    existing_indices = set()
+    clustered_ix = None
+    for col, ix_metas in cols_indices.items():
+        for ix_meta in ix_metas:
+            ix_name = ix_meta.get('name', None)
+            if ix_meta.get('clustered', False):
+                clustered_ix = ix_name
+            existing_indices.add(ix_name.lower())
+    pipe_name = sql_item_name(pipe.target, self.flavor, schema)
     pipe_name_no_schema = sql_item_name(pipe.target, self.flavor, None)
+    upsert = pipe.upsert
 
     if self.flavor not in hypertable_queries:
         is_hypertable = False
@@ -759,7 +894,7 @@ def get_drop_index_queries(
         is_hypertable_query = hypertable_queries[self.flavor].format(table_name=pipe_name)
         is_hypertable = self.value(is_hypertable_query, silent=True, debug=debug) is not None
 
-    if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
+    if_exists_str = "IF EXISTS " if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     if is_hypertable:
         nuke_queries = []
         temp_table = '_' + pipe.target + '_temp_migration'
@@ -769,21 +904,41 @@ def get_drop_index_queries(
             nuke_queries.append(f"DROP TABLE {if_exists_str} {temp_table_name}")
         nuke_queries += [
             f"SELECT * INTO {temp_table_name} FROM {pipe_name}",
-            f"DROP TABLE {if_exists_str} {pipe_name}",
+            f"DROP TABLE {if_exists_str}{pipe_name}",
             f"ALTER TABLE {temp_table_name} RENAME TO {pipe_name_no_schema}",
         ]
         nuke_ix_keys = ('datetime', 'id')
         nuked = False
         for ix_key in nuke_ix_keys:
             if ix_key in indices and not nuked:
-                drop_queries[ix_key] = nuke_queries
+                drop_queries[ix_key].extend(nuke_queries)
                 nuked = True
 
-    drop_queries.update({
-        ix_key: ["DROP INDEX " + sql_item_name(ix_unquoted, self.flavor, None)]
-        for ix_key, ix_unquoted in indices.items()
-        if ix_key not in drop_queries
-    })
+    for ix_key, ix_unquoted in indices.items():
+        if ix_key in drop_queries:
+            continue
+        if ix_unquoted.lower() not in existing_indices:
+            continue
+
+        if ix_key == 'unique' and upsert and self.flavor != 'sqlite':
+            constraint_name_unquoted = ix_unquoted.replace('IX_', 'UQ_')
+            constraint_name = sql_item_name(constraint_name_unquoted, self.flavor)
+            drop_queries[ix_key].append(
+                f"ALTER TABLE {pipe_name}\n"
+                f"DROP CONSTRAINT {constraint_name}"
+            )
+
+        query = (
+            f"DROP INDEX {if_exists_str}"
+            + sql_item_name(ix_unquoted, self.flavor, index_schema)
+        )
+        if self.flavor == 'mssql':
+            query += f"\nON {pipe_name}"
+            if ix_unquoted == clustered_ix:
+                query += "\nWITH (ONLINE = ON, MAXDOP = 4)"
+        drop_queries[ix_key].append(query)
+
+
     return drop_queries
 
 
@@ -1777,6 +1932,7 @@ def sync_pipe(
             patch_schema=self.internal_schema,
             datetime_col=(dt_col if dt_col in update_df.columns else None),
             identity_insert=(autoincrement and primary_key in update_df.columns),
+            null_indices=pipe.null_indices,
             debug=debug,
         )
         update_results = self.exec_queries(
@@ -2077,13 +2233,19 @@ def sync_pipe_inplace(
         _ = clean_up_temp_tables()
         return True, f"Inserted {new_count}, updated 0 rows."
 
-    dt_col_name_da = dateadd_str(flavor=self.flavor, begin=dt_col_name, db_type=dt_db_type)
+    min_dt_col_name_da = dateadd_str(
+        flavor=self.flavor, begin=f"MIN({dt_col_name})", db_type=dt_db_type,
+    )
+    max_dt_col_name_da = dateadd_str(
+        flavor=self.flavor, begin=f"MAX({dt_col_name})", db_type=dt_db_type,
+    )
+
     (new_dt_bounds_success, new_dt_bounds_msg), new_dt_bounds_results = session_execute(
         session,
         [
             "SELECT\n"
-            f"    MIN({dt_col_name_da}) AS {sql_item_name('min_dt', self.flavor)},\n"
-            f"    MAX({dt_col_name_da}) AS {sql_item_name('max_dt', self.flavor)}\n"
+            f"    {min_dt_col_name_da} AS {sql_item_name('min_dt', self.flavor)},\n"
+            f"    {max_dt_col_name_da} AS {sql_item_name('max_dt', self.flavor)}\n"
             f"FROM {temp_table_names['new' if not upsert else 'update']}\n"
             f"WHERE {dt_col_name} IS NOT NULL"
         ],
@@ -2350,6 +2512,7 @@ def sync_pipe_inplace(
             patch_schema=internal_schema,
             datetime_col=pipe.columns.get('datetime', None),
             flavor=self.flavor,
+            null_indices=pipe.null_indices,
             debug=debug,
         )
         if on_cols else []
@@ -2643,7 +2806,7 @@ def get_pipe_rowcount(
         _cols_names = ['*']
 
     src = (
-        f"SELECT {', '.join(_cols_names)} FROM {_pipe_name}"
+        f"SELECT {', '.join(_cols_names)}\nFROM {_pipe_name}"
         if not remote
         else get_pipe_query(pipe)
     )
@@ -2652,15 +2815,17 @@ def get_pipe_rowcount(
     if begin is not None or end is not None:
         query += "\nWHERE"
     if begin is not None:
-        query += f"""
-        {dt_name} >= {dateadd_str(self.flavor, datepart='minute', number=0, begin=begin, db_type=dt_db_type)}
-        """
+        query += (
+            f"\n    {dt_name} >= "
+            + dateadd_str(self.flavor, datepart='minute', number=0, begin=begin, db_type=dt_db_type)
+        )
     if end is not None and begin is not None:
-        query += "AND"
+        query += "\n    AND"
     if end is not None:
-        query += f"""
-        {dt_name} <  {dateadd_str(self.flavor, datepart='minute', number=0, begin=end, db_type=dt_db_type)}
-        """
+        query += (
+            f"\n    {dt_name} <  "
+            + dateadd_str(self.flavor, datepart='minute', number=0, begin=end, db_type=dt_db_type)
+        )
     if params is not None:
         from meerschaum.utils.sql import build_where
         existing_cols = pipe.get_columns_types(debug=debug)
@@ -2782,13 +2947,21 @@ def clear_pipe(
         valid_params = {k: v for k, v in params.items() if k in existing_cols}
     clear_query = (
         f"DELETE FROM {pipe_name}\nWHERE 1 = 1\n"
-        + ('  AND ' + build_where(valid_params, self, with_where=False) if valid_params else '')
+        + ('\n    AND ' + build_where(valid_params, self, with_where=False) if valid_params else '')
         + (
-            f'  AND {dt_name} >= ' + dateadd_str(self.flavor, 'day', 0, begin, db_type=dt_db_type)
-            if begin is not None else ''
+            (
+                f'\n    AND {dt_name} >= '
+                + dateadd_str(self.flavor, 'day', 0, begin, db_type=dt_db_type)
+            )
+            if begin is not None
+            else ''
         ) + (
-            f'  AND {dt_name} < ' + dateadd_str(self.flavor, 'day', 0, end, db_type=dt_db_type)
-            if end is not None else ''
+            (
+                f'\n    AND {dt_name} <  '
+                + dateadd_str(self.flavor, 'day', 0, end, db_type=dt_db_type)
+            )
+            if end is not None
+            else ''
         )
     )
     success = self.exec(clear_query, silent=True, debug=debug) is not None

@@ -59,8 +59,8 @@ To use your custom connector type as an instance connector, implement the follow
         self,
         pipe: mrsm.Pipe,
         backtrack_minutes: int = 0,
-        begin: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
+        begin: datetime | int | None = None,
+        params: dict[str, Any] | None = None,
         debug: bool = False,
         **kwargs: Any
     ) -> 'pd.DataFrame':
@@ -77,11 +77,11 @@ To use your custom connector type as an instance connector, implement the follow
             The number of minutes leading up to `begin` from which to search.
             If `begin` is an integer, then subtract this value from `begin`.
 
-        begin: Union[datetime, int, None], default None
+        begin: datetime | int | None, default None
             The point from which to begin backtracking.
             If `None`, then use the pipe's sync time (most recent datetime value).
 
-        params: Optional[Dict[str, Any]], default None
+        params: dict[str, Any] | None, default None
             Additional filter parameters.
 
         Returns
@@ -119,9 +119,9 @@ The attributes row of a pipe includes the pipe's keys (immutable) and parameters
 
 - `connector_keys` (`str`)
 - `metric_key` (`str`)
-- `location_key` (`Union[str, None]`)  
+- `location_key` (`str | None`)  
   You may store `"None"` in place of `None`.
-- `parameters` (`Dict[str, Any]`)  
+- `parameters` (`dict[str, Any]`)  
   You can access the in-memory parameters with `#!python pipe._attributes.get('parameters', {})`.
 
 ??? example "`#!python def register_pipe():`"
@@ -309,10 +309,10 @@ The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/mis
     ```python
     def fetch_pipes_keys(
         self,
-        connector_keys: Optional[List[str]] = None,
-        metric_keys: Optional[List[str]] = None,
-        location_keys: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None,
+        connector_keys: list[str] | None = None,
+        metric_keys: list[str] | None = None,
+        location_keys: list[str] | None = None,
+        tags: list[str] | None = None,
         debug: bool = False,
         **kwargs: Any
     ) -> List[Tuple[str, str, str]]:
@@ -321,16 +321,16 @@ The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/mis
 
         Parameters
         ----------
-        connector_keys: Optional[List[str]], default None
+        connector_keys: list[str] | None, default None
             The keys passed via `-c`.
 
-        metric_keys: Optional[List[str]], default None
+        metric_keys: list[str] | None, default None
             The keys passed via `-m`.
 
-        location_keys: Optional[List[str]], default None
+        location_keys: list[str] | None, default None
             The keys passed via `-l`.
 
-        tags: Optional[List[str]], default None
+        tags: List[str] | None, default None
             Tags passed via `--tags` which are stored under `parameters:tags`.
 
         Returns
@@ -435,13 +435,14 @@ Drop the pipe's target table.
         -------
         A `SuccessTuple` indicating success.
         """
-        if not pipe.exists(debug=debug):
-            return True, "Success"
-
         ### TODO write a query to drop `table_name`.
         table_name = pipe.target
         return True, "Success"
     ```
+
+### `#!python drop_pipe_indices()` (optional)
+
+If syncing to your instance connector involves indexing a pipe's target table, you may find it useful to implement the method `drop_pipe_indices()` (for the action `drop indices`). See the [`#!python SQLConnector.drop_pipe_indices()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.drop_pipe_indices) method for reference.
 
 ## `#!python sync_pipe()`
 
@@ -490,6 +491,11 @@ You may use the built-in method [`pipe.filter_existing()`](https://docs.meerscha
 
 For situations where the source and instance connectors are the same, the method `#!python sync_pipe_inplace()` allows you to bypass loading DataFrames into RAM and instead handle the syncs remotely. See the [`#!python SQLConnector.sync_pipe_inplace()`](https://docs.meerschaum.io/connectors/sql/SQLConnector.html#meerschaum.connectors.sql.SQLConnector.SQLConnector.sync_pipe_inplace) method for reference.
 
+### `#!python index_pipe()` (optional)
+
+If syncing to your instance connector involves indexing a pipe's target table, you may find it useful to implement the methods `index_pipe()`. See the method [`#!python SQLConnector.index_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.index_pipe) for reference.
+
+
 ## `#!python clear_pipe()`
 
 Delete a pipe's data within a bounded or unbounded interval without dropping the table:
@@ -499,9 +505,9 @@ Delete a pipe's data within a bounded or unbounded interval without dropping the
     def clear_pipe(
         self,
         pipe: mrsm.Pipe,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
+        begin: datetime | int | None = None,
+        end: datetime | int | None = None,
+        params: dict[str, Any] | None = None,
         debug: bool = False,
     ) -> mrsm.SuccessTuple:
         """
@@ -512,13 +518,13 @@ Delete a pipe's data within a bounded or unbounded interval without dropping the
         pipe: mrsm.Pipe
             The pipe whose rows to clear.
 
-        begin: Union[datetime, int, None], default None
+        begin: datetime | int | None, default None
             If provided, remove rows >= `begin`.
 
-        end: Union[datetime, int, None], default None
+        end: datetime | int | None, default None
             If provided, remove rows < `end`.
            
-        params: Optional[Dict[str, Any]], default None
+        params: dict[str, Any] | None, default None
             If provided, only remove rows which match the `params` filter.
 
         Returns
@@ -533,6 +539,7 @@ Delete a pipe's data within a bounded or unbounded interval without dropping the
 ### `#!python deduplicate_pipe()` (optional)
 
 Like `sync_pipe_inplace()`, you may choose to implement `deduplicate_pipe()` for a performance boost. Otherwise, the default implementation relies upon `get_pipe_data()`, `clear_pipe()`, and `get_pipe_rowcount()`. See the [`#!python SQLConnector.deduplicate_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.deduplicate_pipe) method for reference.
+
 ## `#!python get_pipe_data()`
 
 Return the target table's data according to the filters.
@@ -549,11 +556,11 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
     def get_pipe_data(
         self,
         pipe: mrsm.Pipe,
-        select_columns: Optional[List[str]] = None,
-        omit_columns: Optional[List[str]] = None,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
+        select_columns: list[str] | None = None,
+        omit_columns: list[str] | None = None,
+        begin: datetime | int | None = None,
+        end: datetime | int | None = None,
+        params: dict[str, Any] | None = None,
         debug: bool = False,
         **kwargs: Any
     ) -> Union['pd.DataFrame', None]:
@@ -565,20 +572,20 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
         pipe: mrsm.Pipe
             The pipe with the target table from which to read.
 
-        select_columns: Optional[List[str]], default None
+        select_columns: list[str] | None, default None
             If provided, only select these given columns.
             Otherwise select all available columns (i.e. `SELECT *`).
 
-        omit_columns: Optional[List[str]], default None
+        omit_columns: list[str] | None, default None
             If provided, remove these columns from the selection.
 
-        begin: Union[datetime, int, None], default None
+        begin: datetime | int | None, default None
             The earliest `datetime` value to search from (inclusive).
 
-        end: Union[datetime, int, None], default None
+        end: datetime | int | None, default None
             The lastest `datetime` value to search from (exclusive).
 
-        params: Optional[Dict[str, str]], default None
+        params: dict[str | str] | None, default None
             Additional filters to apply to the query.
 
         Returns
@@ -618,11 +625,11 @@ Return the largest (or smallest) value in target table, according to the `params
     def get_sync_time(
         self,
         pipe: mrsm.Pipe,
-        params: Optional[Dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
         newest: bool = True,
         debug: bool = False,
         **kwargs: Any
-    ) -> Union[datetime, int, None]:
+    ) -> datetime | int | None:
         """
         Return the most recent value for the `datetime` axis.
 
@@ -631,7 +638,7 @@ Return the largest (or smallest) value in target table, according to the `params
         pipe: mrsm.Pipe
             The pipe whose collection contains documents.
 
-        params: Optional[Dict[str, Any]], default None
+        params: dict[str, Any] | None, default None
             Filter certain parameters when determining the sync time.
 
         newest: bool, default True
@@ -662,7 +669,7 @@ You may take advantage of automatic dtype enforcement by implementing this metho
         pipe: mrsm.Pipe,
         debug: bool = False,
         **kwargs: Any
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """
         Return the data types for the columns in the target table for data type enforcement.
 
@@ -690,14 +697,14 @@ You may take advantage of automatic dtype enforcement by implementing this metho
 
 ### `#!python get_pipe_columns_indices()` (optional)
 
-You may choose to implement `get_pipe_columns_indices()`, which returns a dictionary mapping columns to a list of related indices.
+You may choose to implement `get_pipe_columns_indices()`, which returns a dictionary mapping columns to a list of related indices. Additionally, implement the method [`#!python SQLConnector.get_pipe_index_names()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.get_pipe_index_names) to return new indices to be created.
 
 ??? example
 
 ```python
 def get_pipe_columns_indices(
     debug: bool = False,
-) -> Dict[str, List[Dict[str, str]]]:
+) -> dict[str, list[dict[str, str]]]:
     """
     Return a dictionary mapping columns to metadata about related indices.
 
@@ -728,9 +735,9 @@ Return the number of rows in the pipe's target table within the `begin`, `end`, 
     def get_pipe_rowcount(
         self,
         pipe: mrsm.Pipe,
-        begin: Union[datetime, int, None] = None,
-        end: Union[datetime, int, None] = None,
-        params: Optional[Dict[str, Any]] = None,
+        begin: datetime | int | None = None,
+        end: datetime | int | None = None,
+        params: dict[str, Any] | None = None,
         debug: bool = False,
         **kwargs: Any
     ) -> int:
@@ -742,13 +749,13 @@ Return the number of rows in the pipe's target table within the `begin`, `end`, 
         pipe: mrsm.Pipe
             The pipe whose table should be counted.
 
-        begin: Union[datetime, int, None], default None
+        begin: datetime | int | None, default None
             If provided, only count rows >= `begin`.
 
-        end: Union[datetime, int, None], default None
+        end: datetime | int | None, default None
             If provided, only count rows < `end`.
 
-        params: Optional[Dict[str, Any]]
+        params: dict[str, Any] | None
             If provided, only count rows that match the `params` filter.
 
         Returns

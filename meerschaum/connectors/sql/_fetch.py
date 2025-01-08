@@ -148,7 +148,6 @@ def get_pipe_metadef(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.sql import sql_item_name, dateadd_str, build_where
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
-    from meerschaum.utils.misc import is_int
     from meerschaum.config import get_config
 
     dt_col = pipe.columns.get('datetime', None)
@@ -191,7 +190,7 @@ def get_pipe_metadef(
         else begin
     )
 
-    if begin and end and begin >= end:
+    if begin not in (None, '') and end is not None and begin >= end:
         begin = None
 
     if dt_name:
@@ -203,7 +202,7 @@ def get_pipe_metadef(
                 begin=begin,
                 db_type=db_dt_typ,
             )
-            if begin
+            if begin not in ('', None)
             else None
         )
         end_da = (
@@ -214,7 +213,7 @@ def get_pipe_metadef(
                 begin=end,
                 db_type=db_dt_typ,
             )
-            if end
+            if end is not None
             else None
         )
 
@@ -228,11 +227,7 @@ def get_pipe_metadef(
 
     has_where = 'where' in meta_def.lower()[meta_def.lower().rfind('definition'):]
     if dt_name and (begin_da or end_da):
-        definition_dt_name = (
-            dateadd_str(self.flavor, 'minute', 0, f"{definition_name}.{dt_name}", db_type=db_dt_typ)
-            if not is_int((begin_da or end_da))
-            else f"{definition_name}.{dt_name}"
-        )
+        definition_dt_name = f"{definition_name}.{dt_name}"
         meta_def += "\n" + ("AND" if has_where else "WHERE") + " "
         has_where = True
         if begin_da:

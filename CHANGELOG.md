@@ -4,6 +4,43 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.7.7
+
+- **Add actions `drop indices` and `index pipes`.**  
+  You may now drop and create indices on pipes with the actions `drop indices` and `index pipes` or the pipe methods `drop_indices()` and `index()`:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe('demo', 'drop_indices', columns=['id'], instance='sql:local')
+  pipe.sync([{'id': 1}])
+  print(pipe.get_columns_indices())
+  # {'id': [{'name': 'IX_demo_drop_indices_id', 'type': 'INDEX'}]}
+
+  pipe.drop_indices()
+  print(pipe.get_columns_indices())
+  # {}
+
+  pipe.index()
+  print(pipe.get_columns_indices())
+  # {'id': [{'name': 'IX_demo_drop_indices_id', 'type': 'INDEX'}]}
+  ```
+
+- **Remove `CAST()` to datetime with selecting from a pipe's definition.**  
+  For some databases, casting to the same dtype causes the query optimizer to ignore the datetime index.
+
+- **Add `INCLUDE` clause to datetime index for MSSQL.**  
+  This is to coax the query optimizer into using the datetime axis.
+
+- **Remove redundant unique index.**  
+  The two competing unique indices have been combined into a single index (for the key `unique`). The unique constraint (when `upsert` is true) shares the name but has the prefix `UQ_` in place of `IX_`.
+
+- **Add pipe parameter `null_indices`.**  
+  Set the pipe parameter `null_indices` to `False` for a performance improvement in situations where null index values are not expected.
+
+- **Apply backtrack minutes when fetching integer datetimes.**  
+  Backtrack minutes are now applied to pipes with integer datetimes axes.
+
 ### v2.7.6
 
 - **Make temporary table names configurable.**  

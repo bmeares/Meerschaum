@@ -1109,3 +1109,103 @@ def test_static_schema(flavor: str):
     assert 'bar' not in cols_types
     assert cols_types['val'].upper() in ('DOUBLE', 'DOUBLE PRECISION', 'FLOAT', 'REAL')
     assert pipe.get_rowcount() == 1
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_create_drop_indices(flavor):
+    """
+    Verify that pipes are able to drop and rebuild indices.
+    """
+    conn = conns[flavor]
+    if conn.type not in ('sql', 'api'):
+        return
+    pipe = mrsm.Pipe('test', 'indices', 'drop', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'indices', 'drop',
+        instance=conn,
+        columns={'primary': 'Id', 'datetime': 'dt'},
+        indices={'unnecessary_id': 'AnotherId'},
+        upsert=True,
+    )
+    docs = [
+        {'Id': 1, 'dt': '2025-01-01', 'val': 1.1},
+        {'Id': 2, 'dt': '2025-01-02', 'val': 1.2},
+    ]
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore')
+        success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    cols_indices = pipe.get_columns_indices(debug=debug) 
+    assert len(cols_indices) > 1
+
+    og_cols_indices = cols_indices
+
+    success, msg = pipe.drop_indices(debug=debug)
+    assert success, msg
+
+    pipe.indices = {}
+    pipe.edit()
+
+    cols_indices = pipe.get_columns_indices(debug=debug) 
+    assert len(cols_indices) <= len(og_cols_indices)
+
+    success, msg = pipe.index(debug=debug)
+    assert success, msg
+
+    cols_indices = pipe.get_columns_indices(debug=debug) 
+    assert len(cols_indices) == len(og_cols_indices)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_no_null_indices(flavor):
+    """
+    Test that setting `null_indices` to `False` syncs as expected.
+    """
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+    pipe = mrsm.Pipe('test', 'null_indices', 'false', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'null_indices', 'false',
+        instance=conn,
+        columns={
+            'datetime': 'dt',
+            'id': 'id',
+        },
+        null_indices=False,
+    )
+    docs = [
+        {'dt': '2025-01-01', 'id': 1, 'val': 1.1},
+        {'dt': '2025-01-01', 'id': 2, 'val': 2.2},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    inplace_pipe = mrsm.Pipe(conn, 'null_indices', 'false', instance=conn)
+    inplace_pipe.delete()
+    inplace_pipe = mrsm.Pipe(
+        conn, 'null_indices', 'false',
+        instance=conn,
+        columns=pipe.columns,
+        null_indices=False,
+        upsert=False,
+        parameters={
+            'sql': "SELECT * FROM {{" + str(pipe) + "}}",
+        },
+    )
+    success, msg = inplace_pipe.sync(debug=debug)
+
+    new_docs = [
+        {'dt': '2025-01-02', 'id': 3, 'val': 3.3},
+        {'dt': '2025-01-02', 'id': 4, 'val': 4.4},
+    ]
+    success, msg = pipe.sync(new_docs, debug=debug)
+    assert success, msg
+
+    success, msg = inplace_pipe.verify(debug=debug)
+    assert success, msg
+
+    assert inplace_pipe.get_rowcount() == len(docs + new_docs)
