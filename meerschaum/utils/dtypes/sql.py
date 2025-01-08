@@ -559,7 +559,7 @@ def get_db_type_from_pd_type(
         found_db_type = True
 
     if not found_db_type:
-        warn(f"Unknown Pandas data type '{pd_type}'. Falling back to 'TEXT'.")
+        warn(f"Unknown Pandas data type '{pd_type}'. Falling back to 'TEXT'.", stacklevel=3)
         return (
             'TEXT'
             if not as_sqlalchemy

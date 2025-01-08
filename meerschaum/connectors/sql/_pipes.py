@@ -561,7 +561,7 @@ def get_create_index_queries(
         )
     )
     primary_key_db_type = (
-        get_db_type_from_pd_type(pipe.dtypes.get(primary_key, 'int'), self.flavor)
+        get_db_type_from_pd_type(pipe.dtypes.get(primary_key, 'int') or 'int', self.flavor)
         if primary_key
         else None
     )
@@ -1526,7 +1526,7 @@ def create_pipe_table_from_df(
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     primary_key = pipe.columns.get('primary', None)
     primary_key_typ = (
-        pipe.dtypes.get(primary_key, str(df.dtypes.get(primary_key)))
+        pipe.dtypes.get(primary_key, str(df.dtypes.get(primary_key, 'int')))
         if primary_key
         else None
     )
@@ -3175,7 +3175,9 @@ def get_add_columns_queries(
         col: get_db_type_from_pd_type(
             df_cols_types[col],
             self.flavor
-        ) for col in new_cols
+        )
+        for col in new_cols
+        if col and df_cols_types.get(col, None)
     }
 
     alter_table_query = "ALTER TABLE " + sql_item_name(
@@ -3567,6 +3569,7 @@ def get_to_sql_dtype(
     return {
         col: get_db_type_from_pd_type(typ, self.flavor, as_sqlalchemy=True)
         for col, typ in df_dtypes.items()
+        if col and typ
     }
 
 

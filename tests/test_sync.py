@@ -922,6 +922,7 @@ def test_autoincrement_primary_key(flavor: str):
         parameters={
             'autoincrement': True,
         },
+        dtypes={'id': 'int'},
     )
     success, msg = pipe.sync([
         {'color': 'red'},
@@ -1125,7 +1126,6 @@ def test_create_drop_indices(flavor):
         'test', 'indices', 'drop',
         instance=conn,
         columns={'primary': 'Id', 'datetime': 'dt'},
-        indices={'unnecessary_id': 'AnotherId'},
         upsert=True,
     )
     docs = [

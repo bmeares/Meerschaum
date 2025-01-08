@@ -2011,7 +2011,12 @@ def _get_create_table_query_from_dtypes(
         autoincrement = False
 
     cols_types = (
-        [(primary_key, get_db_type_from_pd_type(dtypes.get(primary_key, 'int'), flavor=flavor))]
+        [
+            (
+                primary_key,
+                get_db_type_from_pd_type(dtypes.get(primary_key, 'int') or 'int', flavor=flavor)
+            )
+        ]
         if primary_key
         else []
     ) + [
