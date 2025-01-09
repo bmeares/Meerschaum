@@ -7,36 +7,34 @@ Routes for managing users
 """
 
 from __future__ import annotations
+
 from meerschaum.utils.typing import (
-    Optional, Union, SuccessTuple, Any, Mapping, Sequence, Dict, List
+    Union, SuccessTuple, Any, Dict, List
 )
 
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api import (
-    fastapi, app, endpoints, get_api_connector, pipes, get_pipe,
-    manager, debug, check_allow_chaining, DISALLOW_CHAINING_MESSAGE,
+    fastapi, app, endpoints, get_api_connector, manager,
+    debug, check_allow_chaining, DISALLOW_CHAINING_MESSAGE,
     no_auth, private,
 )
 from meerschaum.utils.misc import string_to_dict
 from meerschaum.config import get_config
-from meerschaum.api.tables import get_tables
-from starlette.responses import Response, JSONResponse
 from meerschaum.core import User
-import os, pathlib, datetime
 
-import meerschaum.core
-sqlalchemy = attempt_import('sqlalchemy')
+sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 users_endpoint = endpoints['users']
 
 import fastapi
 from fastapi import HTTPException, Form
 
+
 @app.get(users_endpoint + "/me", tags=['Users'])
 def read_current_user(
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> Dict[str, Union[str, int]]:
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> Dict[str, Union[str, int]]:
     """
     Get information about the currently logged-in user.
     """
@@ -58,12 +56,13 @@ def read_current_user(
         ),
     }
 
+
 @app.get(users_endpoint, tags=['Users'])
 def get_users(
-        curr_user = (
-            fastapi.Depends(manager) if private else None
-        ),
-    ) -> List[str]:
+    curr_user = (
+        fastapi.Depends(manager) if private else None
+    ),
+) -> List[str]:
     """
     Get a list of the registered users.
     """
@@ -72,15 +71,15 @@ def get_users(
 
 @app.post(users_endpoint + "/register", tags=['Users'])
 def register_user(
-        username: str = Form(None),
-        password: str = Form(None),
-        attributes: str = Form(None),
-        type: str = Form(None),
-        email: str = Form(None),
-        curr_user = (
-            fastapi.Depends(manager) if private else None
-        ),
-    ) -> SuccessTuple:
+    username: str = Form(None),
+    password: str = Form(None),
+    attributes: str = Form(None),
+    type: str = Form(None),
+    email: str = Form(None),
+    curr_user = (
+        fastapi.Depends(manager) if private else None
+    ),
+) -> SuccessTuple:
     """
     Register a new user.
     """
@@ -90,7 +89,7 @@ def register_user(
     if attributes is not None:
         try:
             attributes = string_to_dict(attributes)
-        except Exception as e:
+        except Exception:
             return False, f"Invalid dictionary string received for attributes."
 
     allow_users = get_config('system', 'api', 'permissions', 'registration', 'users')
@@ -114,22 +113,22 @@ def register_user(
 
 @app.post(users_endpoint + "/edit", tags=['Users'])
 def edit_user(
-        username: str = Form(None),
-        password: str = Form(None),
-        type: str = Form(None),
-        email: str = Form(None),
-        attributes: str = Form(None),
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> SuccessTuple:
+    username: str = Form(None),
+    password: str = Form(None),
+    type: str = Form(None),
+    email: str = Form(None),
+    attributes: str = Form(None),
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> SuccessTuple:
     """
     Edit an existing user.
     """
     if attributes is not None:
         try:
             attributes = string_to_dict(attributes)
-        except Exception as e:
+        except Exception:
             return False, f"Invalid dictionary string received for attributes."
 
     user = User(username, password, email=email, attributes=attributes)
@@ -144,11 +143,11 @@ def edit_user(
 
 @app.get(users_endpoint + "/{username}/id", tags=['Users'])
 def get_user_id(
-        username : str,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> Union[int, None]:
+    username : str,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> Union[int, None]:
     """
     Get a user's ID.
     """
@@ -157,23 +156,24 @@ def get_user_id(
 
 @app.get(users_endpoint + "/{username}/attributes", tags=['Users'])
 def get_user_attributes(
-        username : str,
-        curr_user = (
-            fastapi.Depends(manager) if private else None
-        ),
-    ) -> Union[Dict[str, Any], None]:
+    username : str,
+    curr_user = (
+        fastapi.Depends(manager) if private else None
+    ),
+) -> Union[Dict[str, Any], None]:
     """
     Get a user's attributes.
     """
     return get_api_connector().get_user_attributes(User(username), debug=debug)
 
+
 @app.delete(users_endpoint + "/{username}", tags=['Users'])
 def delete_user(
-        username: str,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> SuccessTuple:
+    username: str,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> SuccessTuple:
     """
     Delete a user.
     """
@@ -193,11 +193,11 @@ def delete_user(
 
 @app.get(users_endpoint + '/{username}/password_hash', tags=['Users'])
 def get_user_password_hash(
-        username: str,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> str:
+    username: str,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> str:
     """
     If configured to allow chaining, return a user's password_hash.
     """
@@ -205,13 +205,14 @@ def get_user_password_hash(
         raise HTTPException(status_code=403, detail=DISALLOW_CHAINING_MESSAGE)
     return get_api_connector().get_user_password_hash(User(username), debug=debug)
 
+
 @app.get(users_endpoint + '/{username}/type', tags=['Users'])
 def get_user_type(
-        username : str,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> str:
+    username : str,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> str:
     """
     If configured to allow chaining, return a user's type.
     """

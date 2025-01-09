@@ -757,3 +757,23 @@ def get_pipe_columns_indices(
         warn(response.text)
         return None
     return j
+
+
+def get_pipe_index_names(self, pipe: mrsm.Pipe, debug: bool = False) -> Dict[str, str]:
+    """
+    Return the templated index names.
+    """
+    r_url = pipe_r_url(pipe) + '/indices/names'
+    response = self.get(
+        r_url,
+        debug=debug
+    )
+    j = response.json()
+    if isinstance(j, dict) and 'detail' in j and len(j.keys()) == 1:
+        warn(j['detail'])
+        return None
+    if not isinstance(j, dict):
+        warn(response.text)
+        return None
+    return j
+

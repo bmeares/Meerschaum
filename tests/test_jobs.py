@@ -24,7 +24,7 @@ def test_create_job():
 
     success, msg = job.stop()
     assert success, msg
-    time.sleep(0.1)
+    time.sleep(1.0)
 
     success, msg = job.result
     assert success, msg

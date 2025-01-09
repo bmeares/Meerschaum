@@ -25,7 +25,7 @@ def _log_temporary_tables_creation(
     """
     from meerschaum.utils.misc import items_str
     from meerschaum.connectors.sql.tables import get_tables
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     temp_tables_table = get_tables(
         mrsm_instance=self,
         create=create,
@@ -86,7 +86,7 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
     """
     from meerschaum.utils.misc import items_str
     from meerschaum.connectors.sql.tables import get_tables
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     temp_tables_table = get_tables(
         mrsm_instance=self,
         create=False,
@@ -150,7 +150,7 @@ def _drop_old_temporary_tables(
     """
     from meerschaum.config import get_config
     from meerschaum.connectors.sql.tables import get_tables
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     temp_tables_table = get_tables(mrsm_instance=self, create=False, debug=debug)['temp_tables']
     last_check = getattr(self, '_stale_temporary_tables_check_timestamp', 0)
     now_ts = time.perf_counter()

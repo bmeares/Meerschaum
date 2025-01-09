@@ -536,7 +536,7 @@ def get_db_type_from_pd_type(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_ALIAS_DTYPES
     from meerschaum.utils.misc import parse_arguments_str
-    sqlalchemy_types = attempt_import('sqlalchemy.types')
+    sqlalchemy_types = attempt_import('sqlalchemy.types', lazy=False)
 
     types_registry = (
         PD_TO_DB_DTYPES_FLAVORS
@@ -559,7 +559,7 @@ def get_db_type_from_pd_type(
         found_db_type = True
 
     if not found_db_type:
-        warn(f"Unknown Pandas data type '{pd_type}'. Falling back to 'TEXT'.")
+        warn(f"Unknown Pandas data type '{pd_type}'. Falling back to 'TEXT'.", stacklevel=3)
         return (
             'TEXT'
             if not as_sqlalchemy
