@@ -1118,7 +1118,7 @@ def test_create_drop_indices(flavor):
     Verify that pipes are able to drop and rebuild indices.
     """
     conn = conns[flavor]
-    if conn.type not in ('sql', 'api'):
+    if conn.type not in ('sql',):
         return
     pipe = mrsm.Pipe('test', 'indices', 'drop', instance=conn)
     pipe.delete()

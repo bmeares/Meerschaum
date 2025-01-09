@@ -869,7 +869,7 @@ def get_drop_index_queries(
         sql_item_name,
         table_exists,
         hypertable_queries,
-        DROP_IF_EXISTS_FLAVORS,
+        DROP_INDEX_IF_EXISTS_FLAVORS,
     )
     drop_queries = defaultdict(lambda: [])
     schema = self.get_pipe_schema(pipe)
@@ -897,7 +897,7 @@ def get_drop_index_queries(
         is_hypertable_query = hypertable_queries[self.flavor].format(table_name=pipe_name)
         is_hypertable = self.value(is_hypertable_query, silent=True, debug=debug) is not None
 
-    if_exists_str = "IF EXISTS " if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
+    if_exists_str = "IF EXISTS " if self.flavor in DROP_INDEX_IF_EXISTS_FLAVORS else ""
     if is_hypertable:
         nuke_queries = []
         temp_table = '_' + pipe.target + '_temp_migration'
@@ -923,16 +923,26 @@ def get_drop_index_queries(
         if ix_unquoted.lower() not in existing_indices:
             continue
 
-        if ix_key == 'unique' and upsert and self.flavor != 'sqlite':
+        if ix_key == 'unique' and upsert and self.flavor not in ('sqlite',):
             constraint_name_unquoted = ix_unquoted.replace('IX_', 'UQ_')
             constraint_name = sql_item_name(constraint_name_unquoted, self.flavor)
+            constraint_or_index = (
+                "CONSTRAINT"
+                if self.flavor not in ('mysql', 'mariadb')
+                else 'INDEX'
+            )
             drop_queries[ix_key].append(
                 f"ALTER TABLE {pipe_name}\n"
-                f"DROP CONSTRAINT {constraint_name}"
+                f"DROP {constraint_or_index} {constraint_name}"
             )
 
         query = (
-            f"DROP INDEX {if_exists_str}"
+            (
+                f"ALTER TABLE {pipe_name}\n"
+                if self.flavor in ('mysql', 'mariadb')
+                else ''
+            )
+            + f"DROP INDEX {if_exists_str}"
             + sql_item_name(ix_unquoted, self.flavor, index_schema)
         )
         if self.flavor == 'mssql':
