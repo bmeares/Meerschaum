@@ -923,7 +923,7 @@ def get_drop_index_queries(
         if ix_unquoted.lower() not in existing_indices:
             continue
 
-        if ix_key == 'unique' and upsert and self.flavor not in ('sqlite',):
+        if ix_key == 'unique' and upsert and self.flavor not in ('sqlite',) and not is_hypertable:
             constraint_name_unquoted = ix_unquoted.replace('IX_', 'UQ_')
             constraint_name = sql_item_name(constraint_name_unquoted, self.flavor)
             constraint_or_index = (

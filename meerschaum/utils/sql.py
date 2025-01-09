@@ -44,7 +44,7 @@ DROP_IF_EXISTS_FLAVORS = {
     'timescaledb', 'postgresql', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite',
 }
 DROP_INDEX_IF_EXISTS_FLAVORS = {
-    'mssql', 'timescaledb', 'postgresql', 'oracle', 'sqlite', 'citus',
+    'mssql', 'timescaledb', 'postgresql', 'sqlite', 'citus',
 }
 SKIP_AUTO_INCREMENT_FLAVORS = {'citus', 'duckdb'}
 COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'citus'}
