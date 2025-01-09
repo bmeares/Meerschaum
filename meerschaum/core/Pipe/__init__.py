@@ -107,6 +107,7 @@ class Pipe:
         static,
         tzinfo,
         enforce,
+        null_indices,
         get_columns,
         get_columns_types,
         get_columns_indices,
@@ -141,7 +142,8 @@ class Pipe:
         get_bound_time,
     )
     from ._delete import delete
-    from ._drop import drop
+    from ._drop import drop, drop_indices
+    from ._index import create_indices
     from ._clear import clear
     from ._deduplicate import deduplicate
     from ._bootstrap import bootstrap
@@ -165,6 +167,7 @@ class Pipe:
         autoincrement: Optional[bool] = None,
         static: Optional[bool] = None,
         enforce: Optional[bool] = None,
+        null_indices: Optional[bool] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
         debug: bool = False,
@@ -223,9 +226,13 @@ class Pipe:
         static: Optional[bool], default None
             If `True`, set `static` in the parameters.
 
-        enforce: Optionanl[bool], default None
+        enforce: Optional[bool], default None
             If `False`, skip data type enforcement.
             Default behavior is `True`.
+
+        null_indices: Optional[bool], default None
+            Set to `False` if there will be no null values in the index columns.
+            Defaults to `True`.
 
         temporary: bool, default False
             If `True`, prevent instance tables (pipes, users, plugins) from being created.
@@ -329,6 +336,9 @@ class Pipe:
 
         if isinstance(enforce, bool):
             self._attributes['parameters']['enforce'] = enforce
+
+        if isinstance(null_indices, bool):
+            self._attributes['parameters']['null_indices'] = null_indices
 
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,

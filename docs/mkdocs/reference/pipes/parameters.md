@@ -120,6 +120,10 @@ parameters:
     FROM weather
 ```
 
+## `null_indices`
+
+Toggle whether a pipe will allow null indices (default `True`). Set this to `False` for a performance improvement in situations where null index values are not expected.
+
 ## `tags`
 
 A list of a pipe's [tags](/reference/pipes/tags/), e.g.:

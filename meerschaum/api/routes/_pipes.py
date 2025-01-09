@@ -688,3 +688,21 @@ def get_pipe_columns_indices(
     Return a dictionary of column names and related indices.
     """
     return get_pipe(connector_keys, metric_key, location_key).get_columns_indices()
+
+
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/indices/names',
+    tags=['Pipes']
+)
+def get_pipe_index_names(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    curr_user=(
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> Dict[str, List[Dict[str, str]]]:
+    """
+    Return a dictionary of index keys and index names.
+    """
+    return get_pipe(connector_keys, metric_key, location_key).get_indices()

@@ -70,6 +70,9 @@ class SQLConnector(Connector):
         create_pipe_table_from_df,
         get_pipe_columns_indices,
         get_temporary_target,
+        create_pipe_indices,
+        drop_pipe_indices,
+        get_pipe_index_names,
     )
     from ._plugins import (
         register_plugin,
@@ -222,7 +225,7 @@ class SQLConnector(Connector):
                 return None
 
             from meerschaum.utils.packages import attempt_import
-            sqlalchemy_orm = attempt_import('sqlalchemy.orm')
+            sqlalchemy_orm = attempt_import('sqlalchemy.orm', lazy=False)
             session_factory = sqlalchemy_orm.sessionmaker(self.engine)
             self._Session = sqlalchemy_orm.scoped_session(session_factory)
 
@@ -290,7 +293,7 @@ class SQLConnector(Connector):
         Return the metadata bound to this configured schema.
         """
         from meerschaum.utils.packages import attempt_import
-        sqlalchemy = attempt_import('sqlalchemy')
+        sqlalchemy = attempt_import('sqlalchemy', lazy=False)
         if '_metadata' not in self.__dict__:
             self._metadata = sqlalchemy.MetaData(schema=self.schema)
         return self._metadata
@@ -368,7 +371,7 @@ class SQLConnector(Connector):
             self.__dict__['schema'] = None
             return None
 
-        sqlalchemy = mrsm.attempt_import('sqlalchemy')
+        sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
         _schema = sqlalchemy.inspect(self.engine).default_schema_name
         self.__dict__['schema'] = _schema
         return _schema

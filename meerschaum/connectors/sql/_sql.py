@@ -154,7 +154,7 @@ def read(
             dtype[col] = 'datetime64[ns]'
 
     pool = get_pool(workers=workers)
-    sqlalchemy = attempt_import("sqlalchemy")
+    sqlalchemy = attempt_import("sqlalchemy", lazy=False)
     default_chunksize = self._sys_config.get('chunksize', None)
     chunksize = chunksize if chunksize != -1 else default_chunksize
     if chunksize is None and as_iterator:
@@ -443,7 +443,6 @@ def value(
 
     """
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
     if self.flavor == 'duckdb':
         use_pandas = True
     if use_pandas:
@@ -454,9 +453,6 @@ def value(
 
     _close = kw.get('close', True)
     _commit = kw.get('commit', (self.flavor != 'mssql'))
-
-    #  _close = True
-    #  _commit = True
 
     try:
         result, connection = self.exec(
@@ -556,7 +552,7 @@ def exec(
         )
 
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import("sqlalchemy")
+    sqlalchemy = attempt_import("sqlalchemy", lazy=False)
     if debug:
         dprint(f"[{self}] Executing query:\n{query}")
 
@@ -659,7 +655,7 @@ def exec_queries(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy, sqlalchemy_orm = attempt_import('sqlalchemy', 'sqlalchemy.orm')
+    sqlalchemy, sqlalchemy_orm = attempt_import('sqlalchemy', 'sqlalchemy.orm', lazy=False)
     session = sqlalchemy_orm.Session(self.engine)
 
     result = None
@@ -820,7 +816,7 @@ def to_sql(
     from meerschaum.utils.misc import interval_str
     from meerschaum.connectors.sql._create_engine import flavor_configs
     from meerschaum.utils.packages import attempt_import, import_pandas
-    sqlalchemy = attempt_import('sqlalchemy', debug=debug)
+    sqlalchemy = attempt_import('sqlalchemy', debug=debug, lazy=False)
     pd = import_pandas()
     is_dask = 'dask' in df.__module__
 

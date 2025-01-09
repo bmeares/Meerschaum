@@ -29,7 +29,7 @@ from meerschaum.core import Plugin
 starlette_responses = attempt_import('starlette.responses', warn=False)
 FileResponse = starlette_responses.FileResponse
 
-sqlalchemy = attempt_import('sqlalchemy')
+sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 plugins_endpoint = endpoints['plugins']
 
 @app.post(plugins_endpoint + '/{name}', tags=['Plugins'])

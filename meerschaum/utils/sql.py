@@ -43,6 +43,9 @@ SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
 DROP_IF_EXISTS_FLAVORS = {
     'timescaledb', 'postgresql', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite',
 }
+DROP_INDEX_IF_EXISTS_FLAVORS = {
+    'mssql', 'timescaledb', 'postgresql', 'sqlite', 'citus',
+}
 SKIP_AUTO_INCREMENT_FLAVORS = {'citus', 'duckdb'}
 COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'citus'}
 UPDATE_QUERIES = {
@@ -376,7 +379,7 @@ columns_indices_queries = {
         WHERE
             t.name IN ('{table}', '{table_trunc}')
             AND s.name = '{schema}'
-            AND i.type IN (1, 2)  -- 1 = CLUSTERED, 2 = NONCLUSTERED
+            AND i.type IN (1, 2)
     """,
     'oracle': """
         SELECT
@@ -590,7 +593,14 @@ def dateadd_str(
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type, get_pd_type_from_db_type
     dateutil_parser = attempt_import('dateutil.parser')
     if 'int' in str(type(begin)).lower():
-        return str(begin)
+        num_str = str(begin)
+        if number is not None and number != 0:
+            num_str += (
+                f' + {number}'
+                if number > 0
+                else f" - {number * -1}"
+            )
+        return num_str
     if not begin:
         return ''
 
@@ -797,7 +807,7 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
     """
     truncated_item = truncate_item_name(str(item), flavor)
     if flavor == 'oracle':
-        truncated_item = pg_capital(truncated_item)
+        truncated_item = pg_capital(truncated_item, quote_capitals=True)
         ### NOTE: System-reserved words must be quoted.
         if truncated_item.lower() in (
             'float', 'varchar', 'nvarchar', 'clob',
@@ -824,14 +834,17 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
     return schema_prefix + wrappers[0] + truncated_item + wrappers[1]
 
 
-def pg_capital(s: str) -> str:
+def pg_capital(s: str, quote_capitals: bool = True) -> str:
     """
     If string contains a capital letter, wrap it in double quotes.
     
     Parameters
     ----------
-    s: str :
-    The string to be escaped.
+    s: str
+        The string to be escaped.
+
+    quote_capitals: bool, default True
+        If `False`, do not quote strings with contain only a mix of capital and lower-case letters.
 
     Returns
     -------
@@ -845,16 +858,24 @@ def pg_capital(s: str) -> str:
     'my_table'
 
     """
-    if '"' in s:
+    if s.startswith('"') and s.endswith('"'):
         return s
+
+    s = s.replace('"', '')
+
     needs_quotes = s.startswith('_')
-    for c in str(s):
-        if ord(c) < ord('a') or ord(c) > ord('z'):
-            if not c.isdigit() and c != '_':
+    if not needs_quotes:
+        for c in s:
+            if c == '_':
+                continue
+
+            if not c.isalnum() or (quote_capitals and c.isupper()):
                 needs_quotes = True
                 break
+
     if needs_quotes:
         return '"' + s + '"'
+
     return s
 
 
@@ -1048,7 +1069,7 @@ def table_exists(
     -------
     A `bool` indicating whether or not the table exists on the database.
     """
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     schema = schema or connector.schema
     insp = sqlalchemy.inspect(connector.engine)
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
@@ -1101,7 +1122,7 @@ def get_sqlalchemy_table(
     if refresh:
         connector.metadata.clear()
     tables = get_tables(mrsm_instance=connector, debug=debug, create=False)
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
     table_kwargs = {
         'autoload_with': connector.engine,
@@ -1171,7 +1192,7 @@ def get_table_cols_types(
     """
     import textwrap
     from meerschaum.connectors import SQLConnector
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     flavor = flavor or getattr(connectable, 'flavor', None)
     if not flavor:
         raise ValueError("Please provide a database flavor.")
@@ -1323,7 +1344,7 @@ def get_table_cols_indices(
     import textwrap
     from collections import defaultdict
     from meerschaum.connectors import SQLConnector
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     flavor = flavor or getattr(connectable, 'flavor', None)
     if not flavor:
         raise ValueError("Please provide a database flavor.")
@@ -1448,6 +1469,7 @@ def get_update_queries(
     schema: Optional[str] = None,
     patch_schema: Optional[str] = None,
     identity_insert: bool = False,
+    null_indices: bool = True,
     debug: bool = False,
 ) -> List[str]:
     """
@@ -1488,6 +1510,9 @@ def get_update_queries(
     identity_insert: bool, default False
         If `True`, include `SET IDENTITY_INSERT` queries before and after the update queries.
         Only applies for MSSQL upserts.
+
+    null_indices: bool, default True
+        If `False`, do not coalesce index columns before joining.
 
     debug: bool, default False
         Verbosity toggle.
@@ -1579,11 +1604,17 @@ def get_update_queries(
 
     coalesce_join_cols_str = ', '.join(
         [
-            'COALESCE('
-            + sql_item_name(c_name, flavor)
-            + ', '
-            + get_null_replacement(c_type, flavor)
-            + ')'
+            (
+                (
+                    'COALESCE('
+                    + sql_item_name(c_name, flavor)
+                    + ', '
+                    + get_null_replacement(c_type, flavor)
+                    + ')'
+                )
+                if null_indices
+                else sql_item_name(c_name, flavor)
+            )
             for c_name, c_type in join_cols_types
         ]
     )
@@ -1633,19 +1664,29 @@ def get_update_queries(
     def and_subquery(l_prefix: str, r_prefix: str):
         return '\n            AND\n                '.join([
             (
-                "COALESCE("
-                + l_prefix
-                + sql_item_name(c_name, flavor, None)
-                + ", "
-                + get_null_replacement(c_type, flavor)
-                + ")"
-                + '\n                =\n                '
-                + "COALESCE("
-                + r_prefix
-                + sql_item_name(c_name, flavor, None)
-                + ", "
-                + get_null_replacement(c_type, flavor)
-                + ")"
+                (
+                    "COALESCE("
+                    + l_prefix
+                    + sql_item_name(c_name, flavor, None)
+                    + ", "
+                    + get_null_replacement(c_type, flavor)
+                    + ")"
+                    + '\n                =\n                '
+                    + "COALESCE("
+                    + r_prefix
+                    + sql_item_name(c_name, flavor, None)
+                    + ", "
+                    + get_null_replacement(c_type, flavor)
+                    + ")"
+                )
+                if null_indices
+                else (
+                    l_prefix
+                    + sql_item_name(c_name, flavor, None)
+                    + ' = '
+                    + r_prefix
+                    + sql_item_name(c_name, flavor, None)
+                )
             ) for c_name, c_type in join_cols_types
         ])
 
@@ -1973,7 +2014,12 @@ def _get_create_table_query_from_dtypes(
         autoincrement = False
 
     cols_types = (
-        [(primary_key, get_db_type_from_pd_type(dtypes.get(primary_key, 'int'), flavor=flavor))]
+        [
+            (
+                primary_key,
+                get_db_type_from_pd_type(dtypes.get(primary_key, 'int') or 'int', flavor=flavor)
+            )
+        ]
         if primary_key
         else []
     ) + [
@@ -2329,7 +2375,7 @@ def session_execute(
     A `SuccessTuple` indicating the queries were successfully executed.
     If `with_results`, return the `SuccessTuple` and a list of results.
     """
-    sqlalchemy = mrsm.attempt_import('sqlalchemy')
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     if not isinstance(queries, list):
         queries = [queries]
     successes, msgs, results = [], [], []
