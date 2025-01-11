@@ -122,8 +122,14 @@ def are_dtypes_equal(
         return False
 
     ### Sometimes pandas dtype objects are passed.
-    ldtype = str(ldtype)
-    rdtype = str(rdtype)
+    ldtype = str(ldtype).split('[', maxsplit=1)[0]
+    rdtype = str(rdtype).split('[', maxsplit=1)[0]
+
+    if ldtype in MRSM_ALIAS_DTYPES:
+        ldtype = MRSM_ALIAS_DTYPES[ldtype]
+
+    if rdtype in MRSM_ALIAS_DTYPES:
+        rdtype = MRSM_ALIAS_DTYPES[rdtype]
 
     json_dtypes = ('json', 'object')
     if ldtype in json_dtypes and rdtype in json_dtypes:
@@ -141,10 +147,7 @@ def are_dtypes_equal(
     if ldtype in bytes_dtypes and rdtype in bytes_dtypes:
         return True
 
-    ldtype_clean = ldtype.split('[', maxsplit=1)[0]
-    rdtype_clean = rdtype.split('[', maxsplit=1)[0]
-
-    if ldtype_clean.lower() == rdtype_clean.lower():
+    if ldtype.lower() == rdtype.lower():
         return True
 
     datetime_dtypes = ('datetime', 'timestamp')
@@ -157,19 +160,19 @@ def are_dtypes_equal(
         return True
 
     string_dtypes = ('str', 'string', 'object')
-    if ldtype_clean in string_dtypes and rdtype_clean in string_dtypes:
+    if ldtype in string_dtypes and rdtype in string_dtypes:
         return True
 
     int_dtypes = ('int', 'int64', 'int32', 'int16', 'int8')
-    if ldtype_clean.lower() in int_dtypes and rdtype_clean.lower() in int_dtypes:
+    if ldtype.lower() in int_dtypes and rdtype.lower() in int_dtypes:
         return True
 
     float_dtypes = ('float', 'float64', 'float32', 'float16', 'float128', 'double')
-    if ldtype_clean.lower() in float_dtypes and rdtype_clean.lower() in float_dtypes:
+    if ldtype.lower() in float_dtypes and rdtype.lower() in float_dtypes:
         return True
 
     bool_dtypes = ('bool', 'boolean')
-    if ldtype_clean in bool_dtypes and rdtype_clean in bool_dtypes:
+    if ldtype in bool_dtypes and rdtype in bool_dtypes:
         return True
 
     return False
