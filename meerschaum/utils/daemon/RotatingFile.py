@@ -13,11 +13,10 @@ import pathlib
 import traceback
 import sys
 import atexit
-from datetime import datetime, timezone, timedelta
-from typing import List, Union, Optional, Tuple
+from datetime import datetime, timezone
+from typing import List, Optional, Tuple
 from meerschaum.config import get_config
 from meerschaum.utils.warnings import warn
-from meerschaum.utils.misc import round_time
 from meerschaum.utils.daemon.FileDescriptorInterceptor import FileDescriptorInterceptor
 from meerschaum.utils.threading import Thread
 import meerschaum as mrsm
@@ -517,6 +516,7 @@ class RotatingFile(io.IOBase):
                 else 0
             )
 
+            subfile_lines = []
             if (
                 subfile_index in self.subfile_objects
                 and

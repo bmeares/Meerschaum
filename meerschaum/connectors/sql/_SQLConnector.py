@@ -195,7 +195,8 @@ class SQLConnector(Connector):
         self._debug = debug
         ### Store the PID and thread at initialization
         ### so we can dispose of the Pool in child processes or threads.
-        import os, threading
+        import os
+        import threading
         self._pid = os.getpid()
         self._thread_ident = threading.current_thread().ident
         self._sessions = {}

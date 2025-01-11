@@ -7,21 +7,22 @@ Pretty printing wrapper
 """
 
 def pprint(
-        *args,
-        detect_password: bool = True,
-        nopretty: bool = False,
-        **kw
-    ) -> None:
+    *args,
+    detect_password: bool = True,
+    nopretty: bool = False,
+    **kw
+) -> None:
     """Pretty print an object according to the configured ANSI and UNICODE settings.
     If detect_password is True (default), search and replace passwords with '*' characters.
     Does not mutate objects.
     """
+    import copy
+    import json
     from meerschaum.utils.packages import attempt_import, import_rich
-    from meerschaum.utils.formatting import ANSI, UNICODE, get_console, print_tuple
+    from meerschaum.utils.formatting import ANSI, get_console, print_tuple
     from meerschaum.utils.warnings import error
     from meerschaum.utils.misc import replace_password, dict_from_od, filter_keywords
     from collections import OrderedDict
-    import copy, json
 
     if (
         len(args) == 1
@@ -52,7 +53,7 @@ def pprint(
         pprintpp = attempt_import('pprintpp', warn=False)
         try:
             _pprint = pprintpp.pprint
-        except Exception as e:
+        except Exception :
             import pprint as _pprint_module
             _pprint = _pprint_module.pprint
 
@@ -62,7 +63,7 @@ def pprint(
 
     try:
         args_copy = copy.deepcopy(args)
-    except Exception as e:
+    except Exception:
         args_copy = args
         modify = False
     _args = []
@@ -85,12 +86,12 @@ def pprint(
                 try:
                     c = json.dumps(c)
                     is_json = True
-                except Exception as e:
+                except Exception:
                     is_json = False
                 if not is_json:
                     try:
                         c = str(c)
-                    except Exception as e:
+                    except Exception:
                         pass
             _args.append(c)
 

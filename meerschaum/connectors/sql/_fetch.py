@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Union, Callable, Any, List, Dict
+from meerschaum.utils.typing import Optional, Union, Any, List, Dict
 
 
 def fetch(
@@ -20,7 +20,6 @@ def fetch(
     begin: Union[datetime, int, str, None] = '',
     end: Union[datetime, int, str, None] = None,
     check_existing: bool = True,
-    chunk_hook: Optional[Callable[['pd.DataFrame'], Any]] = None,
     chunksize: Optional[int] = -1,
     workers: Optional[int] = None,
     debug: bool = False,
@@ -53,15 +52,12 @@ def fetch(
     check_existing: bool, defult True
         If `False`, use a backtrack interval of 0 minutes.
 
-    chunk_hook: Callable[[pd.DataFrame], Any], default None
-        A function to pass to `SQLConnector.read()` that accepts a Pandas DataFrame.
-
     chunksize: Optional[int], default -1
-        How many rows to load into memory at once (when `chunk_hook` is provided).
+        How many rows to load into memory at once.
         Otherwise the entire result set is loaded into memory.
 
     workers: Optional[int], default None
-        How many threads to use when consuming the generator (when `chunk_hook is provided).
+        How many threads to use when consuming the generator.
         Defaults to the number of cores.
 
     debug: bool, default False
@@ -69,8 +65,7 @@ def fetch(
 
     Returns
     -------
-    A pandas DataFrame or `None`.
-    If `chunk_hook` is not None, return a list of the hook function's results.
+    A pandas DataFrame generator.
     """
     meta_def = self.get_pipe_metadef(
         pipe,
@@ -80,33 +75,13 @@ def fetch(
         debug=debug,
         **kw
     )
-    as_hook_results = chunk_hook is not None
     chunks = self.read(
         meta_def,
-        chunk_hook=chunk_hook,
-        as_hook_results=as_hook_results,
         chunksize=chunksize,
         workers=workers,
+        as_iterator=True,
         debug=debug,
     )
-    ### if sqlite, parse for datetimes
-    if not as_hook_results and self.flavor == 'sqlite':
-        from meerschaum.utils.dataframe import parse_df_datetimes
-        from meerschaum.utils.dtypes import are_dtypes_equal
-        ignore_cols = [
-            col
-            for col, dtype in pipe.dtypes.items()
-            if not are_dtypes_equal(str(dtype), 'datetime')
-        ]
-        return (
-            parse_df_datetimes(
-                chunk,
-                ignore_cols=ignore_cols,
-                strip_timezone=(pipe.tzinfo is None),
-                debug=debug,
-            )
-            for chunk in chunks
-        )
     return chunks
 
 

@@ -1125,7 +1125,7 @@ def get_pipe_data(
     numeric_columns = [
         col
         for col, typ in pipe.dtypes.items()
-        if typ == 'numeric' and col in dtypes
+        if typ.startswith('numeric') and col in dtypes
     ]
     uuid_columns = [
         col
@@ -1887,7 +1887,10 @@ def sync_pipe(
                 warn(f"Could not reset auto-incrementing primary key for {pipe}.", stack=False)
 
     if update_df is not None and len(update_df) > 0:
-        temp_target = self.get_temporary_target(pipe.target, label='update')
+        temp_target = self.get_temporary_target(
+            pipe.target,
+            label=('update' if not upsert else 'upsert'),
+        )
         self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
@@ -3274,7 +3277,7 @@ def get_alter_columns_queries(
         else [
             col
             for col, typ in df.items()
-            if typ == 'numeric'
+            if typ.startswith('numeric')
         ]
     )
     df_cols_types = (
@@ -3354,7 +3357,7 @@ def get_alter_columns_queries(
                 + f"{edit_msg}"
             )
     else:
-        numeric_cols.extend([col for col, typ in pipe.dtypes.items() if typ == 'numeric'])
+        numeric_cols.extend([col for col, typ in pipe.dtypes.items() if typ.startswith('numeric')])
 
     numeric_type = get_db_type_from_pd_type('numeric', self.flavor, as_sqlalchemy=False)
     text_type = get_db_type_from_pd_type('str', self.flavor, as_sqlalchemy=False)

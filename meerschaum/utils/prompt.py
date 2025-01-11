@@ -585,7 +585,7 @@ def get_connectors_completer(*types: str):
 
     class ConnectorCompleter(Completer):
         def get_completions(self, document, complete_event):
-            for label in get_connector_labels(*types):
+            for label in get_connector_labels(*types, search_term=document.text):
                 yield Completion(label, start_position=(-1 * len(document.text)))
 
     return ConnectorCompleter()

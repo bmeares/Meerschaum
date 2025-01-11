@@ -8,15 +8,16 @@ Utility functions for working with data types.
 
 import traceback
 import uuid
-from datetime import timezone
-from decimal import Decimal, Context, InvalidOperation
+from datetime import timezone, datetime
+from decimal import Decimal, Context, InvalidOperation, ROUND_HALF_UP
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Dict, Union, Any
+from meerschaum.utils.typing import Dict, Union, Any, Optional
 from meerschaum.utils.warnings import warn
 
 MRSM_ALIAS_DTYPES: Dict[str, str] = {
     'decimal': 'numeric',
+    'Decimal': 'numeric',
     'number': 'numeric',
     'jsonl': 'json',
     'JSON': 'json',
@@ -55,6 +56,9 @@ def to_pandas_dtype(dtype: str) -> str:
     alias_dtype = MRSM_ALIAS_DTYPES.get(dtype, None)
     if alias_dtype is not None:
         return MRSM_PD_DTYPES[alias_dtype]
+
+    if dtype.startswith('numeric'):
+        return MRSM_PD_DTYPES['numeric']
 
     ### NOTE: Kind of a hack, but if the first word of the given dtype is in all caps,
     ### treat it as a SQL db type.
@@ -195,18 +199,45 @@ def is_dtype_numeric(dtype: str) -> bool:
     return False
 
 
-def attempt_cast_to_numeric(value: Any) -> Any:
+def attempt_cast_to_numeric(
+    value: Any,
+    quantize: bool = False,
+    precision: Optional[int] = None,
+    scale: Optional[int] = None,
+)-> Any:
     """
     Given a value, attempt to coerce it into a numeric (Decimal).
+
+    Parameters
+    ----------
+    value: Any
+        The value to be cast to a Decimal.
+
+    quantize: bool, default False
+        If `True`, quantize the decimal to the specified precision and scale.
+
+    precision: Optional[int], default None
+        If `quantize` is `True`, use this precision.
+
+    scale: Optional[int], default None
+        If `quantize` is `True`, use this scale.
+
+    Returns
+    -------
+    A `Decimal` if possible, or `value`.
     """
     if isinstance(value, Decimal):
+        if quantize and precision and scale:
+            return quantize_decimal(value, precision, scale)
         return value
     try:
-        return (
-            Decimal(str(value))
-            if not value_is_null(value)
-            else Decimal('NaN')
-        )
+        if value_is_null(value):
+            return Decimal('NaN')
+
+        dec = Decimal(str(value))
+        if not quantize or not precision or not scale:
+            return dec
+        return quantize_decimal(dec, precision, scale)
     except Exception:
         return value
 
@@ -257,7 +288,7 @@ def none_if_null(value: Any) -> Any:
     return (None if value_is_null(value) else value)
 
 
-def quantize_decimal(x: Decimal, scale: int, precision: int) -> Decimal:
+def quantize_decimal(x: Decimal, precision: int, scale: int) -> Decimal:
     """
     Quantize a given `Decimal` to a known scale and precision.
 
@@ -266,21 +297,60 @@ def quantize_decimal(x: Decimal, scale: int, precision: int) -> Decimal:
     x: Decimal
         The `Decimal` to be quantized.
 
-    scale: int
+    precision: int
         The total number of significant digits.
 
-    precision: int
+    scale: int
         The number of significant digits after the decimal point.
 
     Returns
     -------
     A `Decimal` quantized to the specified scale and precision.
     """
-    precision_decimal = Decimal((('1' * scale) + '.' + ('1' * precision)))
+    precision_decimal = Decimal(('1' * (precision - scale)) + '.' + ('1' * scale))
     try:
-        return x.quantize(precision_decimal, context=Context(prec=scale))
+        return x.quantize(precision_decimal, context=Context(prec=precision), rounding=ROUND_HALF_UP)
     except InvalidOperation:
+        pass
+
+    raise ValueError(f"Cannot quantize value '{x}' to {precision=}, {scale=}.")
+
+
+def serialize_decimal(
+    x: Any,
+    quantize: bool = False,
+    precision: Optional[int] = None,
+    scale: Optional[int] = None,
+) -> Any:
+    """
+    Return a quantized string of an input decimal.
+
+    Parameters
+    ----------
+    x: Any
+        The potential decimal to be serialized.
+
+    quantize: bool, default False
+        If `True`, quantize the incoming Decimal to the specified scale and precision
+        before serialization.
+
+    precision: Optional[int], default None
+        The precision of the decimal to be quantized.
+
+    scale: Optional[int], default None
+        The scale of the decimal to be quantized.
+
+    Returns
+    -------
+    A string of the input decimal or the input if not a Decimal.
+    """
+    if not isinstance(x, Decimal):
         return x
+
+    if quantize and scale and precision:
+        x = quantize_decimal(x, precision, scale)
+
+    return f"{x:f}"
 
 
 def coerce_timezone(
@@ -434,3 +504,50 @@ def encode_bytes_for_bytea(data: bytes, with_prefix: bool = True) -> str | None:
     if not isinstance(data, bytes) and value_is_null(data):
         return data
     return ('\\x' if with_prefix else '') + binascii.hexlify(data).decode('utf-8')
+
+
+def serialize_datetime(dt: datetime) -> Union[str, None]:
+    """
+    Serialize a datetime object into JSON (ISO format string).
+
+    Examples
+    --------
+    >>> import json
+    >>> from datetime import datetime
+    >>> json.dumps({'a': datetime(2022, 1, 1)}, default=json_serialize_datetime)
+    '{"a": "2022-01-01T00:00:00Z"}'
+
+    """
+    if not isinstance(dt, datetime):
+        return None
+    tz_suffix = 'Z' if dt.tzinfo is None else ''
+    return dt.isoformat() + tz_suffix
+
+
+def json_serialize_value(x: Any, default_to_str: bool = True) -> str:
+    """
+    Serialize the given value to a JSON value. Accounts for datetimes, bytes, decimals, etc.
+
+    Parameters
+    ----------
+    x: Any
+        The value to serialize.
+
+    default_to_str: bool, default True
+        If `True`, return a string of `x` if x is not a designated type.
+        Otherwise return x.
+
+    Returns
+    -------
+    A serialized version of x, or x.
+    """
+    if hasattr(x, 'tzinfo'):
+        return serialize_datetime(x)
+
+    if isinstance(x, bytes):
+        return serialize_bytes(x)
+
+    if isinstance(x, Decimal):
+        return serialize_decimal(x)
+
+    return str(x) if default_to_str else x

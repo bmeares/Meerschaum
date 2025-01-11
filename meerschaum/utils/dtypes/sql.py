@@ -7,7 +7,7 @@ Utility functions for working with SQL data types.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Dict, Union, Tuple
+from meerschaum.utils.typing import Dict, Union, Tuple, Optional
 
 NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'mariadb': (38, 20),
@@ -170,7 +170,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
         'mssql': 'DATETIME2',
-        'oracle': 'TIMESTAMP',
+        'oracle': 'TIMESTAMP(9)',
         'sqlite': 'DATETIME',
         'duckdb': 'TIMESTAMP',
         'citus': 'TIMESTAMP',
@@ -183,7 +183,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
         'mssql': 'DATETIMEOFFSET',
-        'oracle': 'TIMESTAMP',
+        'oracle': 'TIMESTAMP(9)',
         'sqlite': 'TIMESTAMP',
         'duckdb': 'TIMESTAMPTZ',
         'citus': 'TIMESTAMPTZ',
@@ -196,7 +196,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
         'mssql': 'DATETIMEOFFSET',
-        'oracle': 'TIMESTAMP',
+        'oracle': 'TIMESTAMP(9)',
         'sqlite': 'TIMESTAMP',
         'duckdb': 'TIMESTAMPTZ',
         'citus': 'TIMESTAMPTZ',
@@ -544,17 +544,24 @@ def get_db_type_from_pd_type(
         else PD_TO_SQLALCHEMY_DTYPES_FLAVORS
     )
 
+    precision, scale = None, None
+    og_pd_type = pd_type
     if pd_type in MRSM_ALIAS_DTYPES:
         pd_type = MRSM_ALIAS_DTYPES[pd_type]
 
     ### Check whether we are able to match this type (e.g. pyarrow support).
     found_db_type = False
-    if pd_type not in types_registry:
+    if pd_type not in types_registry and not pd_type.startswith('numeric['):
         for mapped_pd_type in types_registry:
             if are_dtypes_equal(mapped_pd_type, pd_type):
                 pd_type = mapped_pd_type
                 found_db_type = True
                 break
+    elif pd_type.startswith('numeric['):
+        og_pd_type = pd_type
+        pd_type = 'numeric'
+        precision, scale = get_numeric_precision_scale(flavor, og_pd_type)
+        found_db_type = True
     else:
         found_db_type = True
 
@@ -587,6 +594,9 @@ def get_db_type_from_pd_type(
         warn(f"Unknown flavor '{flavor}'. Falling back to '{default_flavor_type}' (default).")
     db_type = flavor_types.get(flavor, default_flavor_type)
     if not as_sqlalchemy:
+        if precision is not None and scale is not None:
+            db_type_bare = db_type.split('(', maxsplit=1)[0]
+            return f"{db_type_bare}({precision},{scale})"
         return db_type
 
     if db_type.startswith('sqlalchemy.dialects'):
@@ -603,9 +613,8 @@ def get_db_type_from_pd_type(
         return cls(*cls_args, **cls_kwargs)
 
     if 'numeric' in db_type.lower():
-        if flavor not in NUMERIC_PRECISION_FLAVORS:
+        if precision is None or scale is None:
             return sqlalchemy_types.Numeric
-        precision, scale = NUMERIC_PRECISION_FLAVORS[flavor]
         return sqlalchemy_types.Numeric(precision, scale)
 
     cls_args, cls_kwargs = None, None
@@ -619,3 +628,37 @@ def get_db_type_from_pd_type(
     if cls_args is None:
         return cls
     return cls(*cls_args, **cls_kwargs)
+
+
+def get_numeric_precision_scale(
+    flavor: str,
+    dtype: Optional[str] = None,
+) -> Union[Tuple[int, int], Tuple[None, None]]:
+    """
+    Return the precision and scale to use for a numeric column for a given database flavor.
+
+    Parameters
+    ----------
+    flavor: str
+        The database flavor for which to return the precision and scale.
+    
+    dtype: Optional[str], default None
+        If provided, return the precision and scale provided in the dtype (if applicable).
+
+    Returns
+    -------
+    A tuple of ints or a tuple of Nones.
+    """
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    if dtype and are_dtypes_equal(dtype, 'numeric'):
+        if '[' in dtype and ',' in dtype:
+            try:
+                parts = dtype.split('[', maxsplit=1)[-1].rstrip(']').split(',', maxsplit=1)
+                return int(parts[0].strip()), int(parts[1].strip())
+            except Exception:
+                pass
+
+    if flavor not in NUMERIC_PRECISION_FLAVORS:
+        return None, None
+
+    return NUMERIC_PRECISION_FLAVORS[flavor]
