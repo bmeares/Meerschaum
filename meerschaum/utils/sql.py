@@ -252,7 +252,7 @@ columns_types_queries = {
             TABLE_SCHEMA `schema`,
             TABLE_NAME `table`,
             COLUMN_NAME `column`,
-            DATA_TYPE `type`
+            DATA_TYPE `type`,
             NUMERIC_PRECISION `numeric_precision`,
             NUMERIC_SCALE `numeric_scale`
         FROM INFORMATION_SCHEMA.COLUMNS
