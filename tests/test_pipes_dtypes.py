@@ -1041,8 +1041,6 @@ def test_mixed_int_float_coersion(flavor):
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
 
-    return pipe
-
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_explicit_precision_scale_numeric_sql(flavor):
@@ -1068,4 +1066,3 @@ def test_explicit_precision_scale_numeric_sql(flavor):
     success, msg = pipe.sync(docs, debug=debug)
     df = pipe.get_data()
     assert str(df['val'][0]) == '123.46'
-    return pipe
