@@ -826,7 +826,11 @@ def to_sql(
     numeric_cols_dtypes = {
         col: typ
         for col, typ in kw.get('dtype', {}).items()
-        if are_dtypes_equal(get_pd_type_from_db_type(str(typ)), 'numeric')
+        if (
+            col in df.columns
+            and 'numeric' in str(typ).lower()
+        )
+        
     }
     numeric_cols.extend([col for col in numeric_cols_dtypes if col not in numeric_cols])
 
@@ -1129,7 +1133,7 @@ def mssql_insert_json(
     """
     import json
     from meerschaum.utils.sql import sql_item_name
-    from meerschaum.utils.dtypes import json_serialize_value, are_dtypes_equal
+    from meerschaum.utils.dtypes import json_serialize_value
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type, get_db_type_from_pd_type
     from meerschaum.utils.warnings import dprint
     table_name = sql_item_name(table.name, 'mssql', table.schema)
@@ -1141,7 +1145,7 @@ def mssql_insert_json(
         numeric_cols_types = {
             col: table.table.columns[col].type
             for col, typ in pd_types.items()
-            if are_dtypes_equal(typ, 'numeric')
+            if typ.startswith('numeric') and col in keys
         }
         pd_types.update({
             col: f'numeric[{typ.precision},{typ.scale}]'
