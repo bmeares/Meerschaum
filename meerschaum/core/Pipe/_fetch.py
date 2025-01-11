@@ -84,6 +84,7 @@ def fetch(
             begin=_determine_begin(
                 self,
                 begin,
+                end,
                 check_existing=check_existing,
                 debug=debug,
             ),
@@ -136,6 +137,7 @@ def get_backtrack_interval(
 def _determine_begin(
     pipe: mrsm.Pipe,
     begin: Union[datetime, int, str, None] = '',
+    end: Union[datetime, int, None] = None,
     check_existing: bool = True,
     debug: bool = False,
 ) -> Union[datetime, int, None]:
@@ -157,6 +159,8 @@ def _determine_begin(
     """
     if begin != '':
         return begin
+    if end is not None:
+        return None
     sync_time = pipe.get_sync_time(debug=debug)
     if sync_time is None:
         return sync_time

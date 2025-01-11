@@ -199,7 +199,9 @@ columns_types_queries = {
             table_schema AS schema,
             table_name AS table,
             column_name AS column,
-            data_type AS type
+            data_type AS type,
+            numeric_precision,
+            numeric_scale
         FROM information_schema.columns
         WHERE table_name IN ('{table}', '{table_trunc}')
     """,
@@ -222,7 +224,9 @@ columns_types_queries = {
             TABLE_SCHEMA AS [schema],
             TABLE_NAME AS [table],
             COLUMN_NAME AS [column],
-            DATA_TYPE AS [type]
+            DATA_TYPE AS [type],
+            NUMERIC_PRECISION AS [numeric_precision],
+            NUMERIC_SCALE AS [numeric_scale]
         FROM {db_prefix}INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_NAME IN (
             '{table}',
@@ -236,7 +240,9 @@ columns_types_queries = {
             TABLE_SCHEMA `schema`,
             TABLE_NAME `table`,
             COLUMN_NAME `column`,
-            DATA_TYPE `type`
+            DATA_TYPE `type`,
+            NUMERIC_PRECISION `numeric_precision`,
+            NUMERIC_SCALE `numeric_scale`
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
     """,
@@ -246,7 +252,9 @@ columns_types_queries = {
             TABLE_SCHEMA `schema`,
             TABLE_NAME `table`,
             COLUMN_NAME `column`,
-            DATA_TYPE `type`
+            DATA_TYPE `type`,
+            NUMERIC_PRECISION `numeric_precision`,
+            NUMERIC_SCALE `numeric_scale`
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_NAME IN ('{table}', '{table_trunc}')
     """,
@@ -256,7 +264,9 @@ columns_types_queries = {
             NULL AS "schema",
             TABLE_NAME AS "table",
             COLUMN_NAME AS "column",
-            DATA_TYPE AS "type"
+            DATA_TYPE AS "type",
+            DATA_PRECISION AS "numeric_precision",
+            DATA_SCALE AS "numeric_scale"
         FROM all_tab_columns
         WHERE TABLE_NAME IN (
             '{table}',
@@ -1230,7 +1240,7 @@ def get_table_cols_types(
         )).lstrip().rstrip()
     )
 
-    cols = ['database', 'schema', 'table', 'column', 'type']
+    cols = ['database', 'schema', 'table', 'column', 'type', 'numeric_precision', 'numeric_scale']
     result_cols_ix = dict(enumerate(cols))
 
     debug_kwargs = {'debug': debug} if isinstance(connectable, SQLConnector) else {}
@@ -1286,7 +1296,15 @@ def get_table_cols_types(
                         else doc['column']
                     )
                 )
-            ): doc['type'].upper()
+            ): doc['type'].upper() + (
+                f'({precision},{scale})'
+                if (
+                    (precision := doc.get('numeric_precision', None))
+                     and
+                    (scale := doc.get('numeric_scale', None))
+                )
+                else ''
+            )
             for doc in cols_types_docs_filtered
         }
     except Exception as e:
@@ -2289,7 +2307,7 @@ def wrap_query_with_cte(
             .replace('--MRSM_SUBQUERY--', f"(\n{sub_query}\n) AS {cte_name_quoted}")
         )
 
-    if 'with ' in sub_query.lower():
+    if sub_query.lstrip().lower().startswith('with '):
         final_select_ix = sub_query.lower().rfind('select')
         return (
             sub_query[:final_select_ix].rstrip() + ',\n'

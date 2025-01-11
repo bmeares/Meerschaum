@@ -292,7 +292,6 @@ def sync(
                     message = '\n'.join([_message for _, _message in df])
                     return success, message
 
-            ### TODO: Depreciate async?
             if df is True:
                 p._exists = None
                 return True, f"{p} is being synced in parallel."
@@ -331,8 +330,7 @@ def sync(
                 return (
                     _chunk_success,
                     (
-                        '\n'
-                        + self._get_chunk_label(_chunk, dt_col)
+                        self._get_chunk_label(_chunk, dt_col)
                         + '\n'
                         + _chunk_msg
                     )
@@ -341,17 +339,25 @@ def sync(
             results = sorted(
                 [(chunk_success, chunk_msg)] + (
                     list(pool.imap(_process_chunk, df))
-                    if not df_is_chunk_generator(chunk)
-                    else [
+                    if (
+                        not df_is_chunk_generator(chunk)  # Handle nested generators.
+                        and kw.get('workers', 1) != 1
+                    )
+                    else list(
                         _process_chunk(_child_chunks)
                         for _child_chunks in df
-                    ]
+                    )
                 )
             )
             chunk_messages = [chunk_msg for _, chunk_msg in results]
             success_bools = [chunk_success for chunk_success, _ in results]
             success = all(success_bools)
-            msg = '\n'.join(chunk_messages)
+            msg = (
+                f'Synced {len(chunk_messages)} chunk'
+                + ('s' if len(chunk_messages) != 1 else '')
+                + f' to {p}:\n\n'
+                + '\n\n'.join(chunk_messages).lstrip().rstrip()
+            ).lstrip().rstrip()
 
             ### If some chunks succeeded, retry the failures.
             retry_success = True
@@ -432,7 +438,7 @@ def sync(
 
     if blocking:
         self._exists = None
-        return _sync(self, df = df)
+        return _sync(self, df=df)
 
     from meerschaum.utils.threading import Thread
     def default_callback(result_tuple: SuccessTuple):
@@ -821,6 +827,7 @@ def filter_existing(
                 for col, typ in self_dtypes.items()
             },
             safe_copy=safe_copy,
+            coerce_mixed_numerics=(not self.static),
             debug=debug
         ),
         on_cols_dtypes,
@@ -962,7 +969,7 @@ def _persist_new_numeric_columns(self, df, debug: bool = False) -> SuccessTuple:
     """
     from meerschaum.utils.dataframe import get_numeric_cols
     numeric_cols = get_numeric_cols(df)
-    existing_numeric_cols = [col for col, typ in self.dtypes.items() if typ == 'numeric']
+    existing_numeric_cols = [col for col, typ in self.dtypes.items() if typ.startswith('numeric')]
     new_numeric_cols = [col for col in numeric_cols if col not in existing_numeric_cols]
     if not new_numeric_cols:
         return True, "Success"

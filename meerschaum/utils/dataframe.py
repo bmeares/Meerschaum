@@ -85,6 +85,7 @@ def filter_unseen_df(
     safe_copy: bool = True,
     dtypes: Optional[Dict[str, Any]] = None,
     include_unchanged_columns: bool = False,
+    coerce_mixed_numerics: bool = True,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -107,6 +108,10 @@ def filter_unseen_df(
 
     include_unchanged_columns: bool, default False
         If `True`, include columns which haven't changed on rows which have changed.
+
+    coerce_mixed_numerics: bool, default True
+        If `True`, cast mixed integer and float columns between the old and new dataframes into
+        numeric values (`decimal.Decimal`).
 
     debug: bool, default False
         Verbosity toggle.
@@ -138,7 +143,6 @@ def filter_unseen_df(
     import json
     import functools
     import traceback
-    from decimal import Decimal
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import import_pandas, attempt_import
     from meerschaum.utils.dtypes import (
@@ -148,7 +152,9 @@ def filter_unseen_df(
         attempt_cast_to_uuid,
         attempt_cast_to_bytes,
         coerce_timezone,
+        serialize_decimal,
     )
+    from meerschaum.utils.dtypes.sql import get_numeric_precision_scale
     pd = import_pandas(debug=debug)
     is_dask = 'dask' in new_df.__module__
     if is_dask:
@@ -211,6 +217,12 @@ def filter_unseen_df(
         if col not in dtypes:
             dtypes[col] = typ
 
+    numeric_cols_precisions_scales = {
+        col: get_numeric_precision_scale(None, typ)
+        for col, typ in dtypes.items()
+        if col and typ and typ.startswith('numeric')
+    }
+
     dt_dtypes = {
         col: typ
         for col, typ in dtypes.items()
@@ -259,6 +271,8 @@ def filter_unseen_df(
             old_is_numeric = col in old_numeric_cols
 
             if (
+                coerce_mixed_numerics
+                and
                 (new_is_float or new_is_int or new_is_numeric)
                 and
                 (old_is_float or old_is_int or old_is_numeric)
@@ -300,13 +314,9 @@ def filter_unseen_df(
     new_numeric_cols = get_numeric_cols(new_df)
     numeric_cols = set(new_numeric_cols + old_numeric_cols)
     for numeric_col in old_numeric_cols:
-        old_df[numeric_col] = old_df[numeric_col].apply(
-            lambda x: f'{x:f}' if isinstance(x, Decimal) else x
-        )
+        old_df[numeric_col] = old_df[numeric_col].apply(serialize_decimal)
     for numeric_col in new_numeric_cols:
-        new_df[numeric_col] = new_df[numeric_col].apply(
-            lambda x: f'{x:f}' if isinstance(x, Decimal) else x
-        )
+        new_df[numeric_col] = new_df[numeric_col].apply(serialize_decimal)
 
     old_dt_cols = [
         col
@@ -361,7 +371,14 @@ def filter_unseen_df(
         if numeric_col not in delta_df.columns:
             continue
         try:
-            delta_df[numeric_col] = delta_df[numeric_col].apply(attempt_cast_to_numeric)
+            delta_df[numeric_col] = delta_df[numeric_col].apply(
+                functools.partial(
+                    attempt_cast_to_numeric,
+                    quantize=True,
+                    precision=numeric_cols_precisions_scales.get(numeric_col, (None, None)[0]),
+                    scale=numeric_cols_precisions_scales.get(numeric_col, (None, None)[1]),
+                )
+            )
         except Exception:
             warn(f"Unable to parse numeric column '{numeric_col}':\n{traceback.format_exc()}")
 
@@ -882,6 +899,7 @@ def enforce_dtypes(
     The Pandas DataFrame with the types enforced.
     """
     import json
+    import functools
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.dtypes import (
@@ -893,6 +911,7 @@ def enforce_dtypes(
         attempt_cast_to_bytes,
         coerce_timezone as _coerce_timezone,
     )
+    from meerschaum.utils.dtypes.sql import get_numeric_precision_scale
     pandas = mrsm.attempt_import('pandas')
     is_dask = 'dask' in df.__module__
     if safe_copy:
@@ -914,7 +933,7 @@ def enforce_dtypes(
     numeric_cols = [
         col
         for col, typ in dtypes.items()
-        if typ == 'numeric'
+        if typ.startswith('numeric')
     ]
     uuid_cols = [
         col
@@ -961,9 +980,17 @@ def enforce_dtypes(
         if debug:
             dprint(f"Checking for numerics: {numeric_cols}")
         for col in numeric_cols:
+            precision, scale = get_numeric_precision_scale(None, dtypes.get(col, ''))
             if col in df.columns:
                 try:
-                    df[col] = df[col].apply(attempt_cast_to_numeric)
+                    df[col] = df[col].apply(
+                        functools.partial(
+                            attempt_cast_to_numeric,
+                            quantize=True,
+                            precision=precision,
+                            scale=scale,
+                        )
+                    )
                 except Exception as e:
                     if debug:
                         dprint(f"Unable to parse column '{col}' as NUMERIC:\n{e}")
@@ -1040,7 +1067,7 @@ def enforce_dtypes(
         previous_typ = common_dtypes[col]
         mixed_numeric_types = (is_dtype_numeric(typ) and is_dtype_numeric(previous_typ))
         explicitly_float = are_dtypes_equal(dtypes.get(col, 'object'), 'float')
-        explicitly_numeric = dtypes.get(col, 'numeric') == 'numeric'
+        explicitly_numeric = dtypes.get(col, 'numeric').startswith('numeric')
         cast_to_numeric = (
             explicitly_numeric
             or col in df_numeric_cols
@@ -1574,16 +1601,19 @@ def to_json(
     A JSON string.
     """
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dtypes import serialize_bytes
+    from meerschaum.utils.dtypes import serialize_bytes, serialize_decimal
     pd = import_pandas()
     uuid_cols = get_uuid_cols(df)
     bytes_cols = get_bytes_cols(df)
+    numeric_cols = get_numeric_cols(df)
     if safe_copy and bool(uuid_cols or bytes_cols):
         df = df.copy()
     for col in uuid_cols:
         df[col] = df[col].astype(str)
     for col in bytes_cols:
         df[col] = df[col].apply(serialize_bytes)
+    for col in numeric_cols:
+        df[col] = df[col].apply(serialize_decimal)
     return df.infer_objects(copy=False).fillna(pd.NA).to_json(
         date_format=date_format,
         date_unit=date_unit,
