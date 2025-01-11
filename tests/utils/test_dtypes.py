@@ -28,6 +28,8 @@ pd = import_pandas(debug=DEBUG)
         ('datetime', 'object', False),
         ('uuid', 'object', True),
         ('bytes', 'object', True),
+        ('numeric', 'decimal', True),
+        ('decimal[28,10]', 'numeric[28,10]', True),
     ]
 )
 def test_are_dtypes_equal(ldtype: str, rdtype: str, are_equal: bool):

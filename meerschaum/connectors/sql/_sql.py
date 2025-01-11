@@ -126,7 +126,7 @@ def read(
         return []
     from meerschaum.utils.sql import sql_item_name, truncate_item_name
     from meerschaum.utils.dtypes import are_dtypes_equal, coerce_timezone
-    from meerschaum.utils.dtypes.sql import NUMERIC_PRECISION_FLAVORS, TIMEZONE_NAIVE_FLAVORS
+    from meerschaum.utils.dtypes.sql import TIMEZONE_NAIVE_FLAVORS
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.pool import get_pool
     from meerschaum.utils.dataframe import chunksize_to_npartitions, get_numeric_cols
@@ -802,16 +802,17 @@ def to_sql(
     )
     from meerschaum.utils.dtypes import (
         are_dtypes_equal,
-        quantize_decimal,
         coerce_timezone,
         encode_bytes_for_bytea,
         serialize_bytes,
+        serialize_decimal,
+        json_serialize_value,
     )
     from meerschaum.utils.dtypes.sql import (
-        NUMERIC_PRECISION_FLAVORS,
-        NUMERIC_AS_TEXT_FLAVORS,
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
         get_db_type_from_pd_type,
+        get_pd_type_from_db_type,
+        get_numeric_precision_scale,
     )
     from meerschaum.utils.misc import interval_str
     from meerschaum.connectors.sql._create_engine import flavor_configs
@@ -822,6 +823,16 @@ def to_sql(
 
     bytes_cols = get_bytes_cols(df)
     numeric_cols = get_numeric_cols(df)
+    numeric_cols_dtypes = {
+        col: typ
+        for col, typ in kw.get('dtype', {}).items()
+        if (
+            col in df.columns
+            and 'numeric' in str(typ).lower()
+        )
+        
+    }
+    numeric_cols.extend([col for col in numeric_cols_dtypes if col not in numeric_cols])
 
     enable_bulk_insert = mrsm.get_config(
         'system', 'connectors', 'sql', 'bulk_insert'
@@ -854,12 +865,24 @@ def to_sql(
         for col in bytes_cols:
             df[col] = df[col].apply(bytes_serializer)
 
-    if self.flavor in NUMERIC_AS_TEXT_FLAVORS:
-        if safe_copy and not copied:
-            df = df.copy()
-            copied = True
-        for col in numeric_cols:
-            df[col] = df[col].astype(str)
+    ### Check for numeric columns.
+    for col in numeric_cols:
+        typ = numeric_cols_dtypes.get(col, None)
+
+        precision, scale = (
+            (typ.precision, typ.scale)
+            if hasattr(typ, 'precision')
+            else get_numeric_precision_scale(self.flavor)
+        )
+
+        df[col] = df[col].apply(
+            functools.partial(
+                serialize_decimal,
+                quantize=True,
+                precision=precision,
+                scale=scale,
+            )
+        )
 
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
 
@@ -889,7 +912,7 @@ def to_sql(
     if name != truncated_name:
         warn(
             f"Table '{name}' is too long for '{self.flavor}',"
-            + f" will instead create the table '{truncated_name}'."
+            f" will instead create the table '{truncated_name}'."
         )
 
     ### filter out non-pandas args
@@ -957,24 +980,11 @@ def to_sql(
     ### Check for JSON columns.
     if self.flavor not in json_flavors:
         json_cols = get_json_cols(df)
-        if json_cols:
-            for col in json_cols:
-                df[col] = df[col].apply(
-                    (
-                        lambda x: json.dumps(x, default=str, sort_keys=True)
-                        if not isinstance(x, Hashable)
-                        else x
-                    )
-                )
-
-    ### Check for numeric columns.
-    numeric_scale, numeric_precision = NUMERIC_PRECISION_FLAVORS.get(self.flavor, (None, None))
-    if numeric_precision is not None and numeric_scale is not None:
-        for col in numeric_cols:
+        for col in json_cols:
             df[col] = df[col].apply(
-                lambda x: (
-                    quantize_decimal(x, numeric_scale, numeric_precision)
-                    if isinstance(x, Decimal)
+                (
+                    lambda x: json.dumps(x, default=json_serialize_value, sort_keys=True)
+                    if not isinstance(x, Hashable)
                     else x
                 )
             )
@@ -1051,16 +1061,20 @@ def psql_insert_copy(
 
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.warnings import dprint
+    from meerschaum.utils.dtypes import json_serialize_value
 
     ### NOTE: PostgreSQL doesn't support NUL chars in text, so they're removed from strings.
     data_iter = (
         (
             (
                 (
-                    json.dumps(item).replace('\0', '').replace('\\u0000', '')
+                    json.dumps(
+                        item,
+                        default=json_serialize_value,
+                    ).replace('\0', '').replace('\\u0000', '')
                     if isinstance(item, (dict, list))
                     else (
-                        item
+                        json_serialize_value(item, default_to_str=False)
                         if not isinstance(item, str)
                         else item.replace('\0', '').replace('\\u0000', '')
                     )
@@ -1119,6 +1133,7 @@ def mssql_insert_json(
     """
     import json
     from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.dtypes import json_serialize_value
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type, get_db_type_from_pd_type
     from meerschaum.utils.warnings import dprint
     table_name = sql_item_name(table.name, 'mssql', table.schema)
@@ -1127,6 +1142,15 @@ def mssql_insert_json(
             str(column.name): get_pd_type_from_db_type(str(column.type))
             for column in table.table.columns
         }
+        numeric_cols_types = {
+            col: table.table.columns[col].type
+            for col, typ in pd_types.items()
+            if typ.startswith('numeric') and col in keys
+        }
+        pd_types.update({
+            col: f'numeric[{typ.precision},{typ.scale}]'
+            for col, typ in numeric_cols_types.items()
+        })
         cols_types = {
             col: get_db_type_from_pd_type(typ, 'mssql')
             for col, typ in pd_types.items()
@@ -1151,7 +1175,8 @@ def mssql_insert_json(
     if debug:
         dprint(sql)
 
-    conn.exec_driver_sql(sql, (json.dumps(json_data, default=str),))
+    serialized_data = json.dumps(json_data, default=json_serialize_value)
+    conn.exec_driver_sql(sql, (serialized_data,))
 
 
 def format_sql_query_for_dask(query: str) -> 'sqlalchemy.sql.selectable.Select':

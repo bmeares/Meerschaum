@@ -4,6 +4,59 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.7.8
+
+- **Add support for user-supplied precision and scale for `numeric` columns.**  
+  You may now manually specify a numeric column's precision and scale:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'numeric', 'precision_scale',
+      instance='sql:local',
+      dtypes={'val': 'numeric[5,2]'},
+  )
+  pipe.sync([{'val': '123.456'}])
+  print(pipe.get_data())
+  #       val
+  # 0  123.46
+  ```
+
+- **Serialize `numeric` columns to exact values during bulk inserts.**  
+  Decimal values are serialized when inserting into `NUMERIC` columns during bulk inserts.
+
+- **Return a generator when fetching with `SQLConnector`.**  
+  To alleviate memory pressure, skip loading the entire dataframe when fetching.
+
+- **Add `json_serialize_value()` to handle custom dtypes.**  
+  When serializing documents, pass `json_serialize_value` as the default handler:
+
+  ```python
+  import json
+  from decimal import Decimal
+  from datetime import datetime, timezone
+  from meerschaum.utils.dtypes import json_serialize_value
+
+  print(json.dumps(
+      {
+          'bytes': b'hello, world!',
+          'decimal': Decimal('1.000000001'),
+          'datetime': datetime(2025, 1, 1, tzinfo=timezone.utc),
+      },
+      default=json_serialize_value,
+      indent=4,
+  ))
+  # {
+  #     "bytes": "aGVsbG8sIHdvcmxkIQ==",
+  #     "decimal": "1.000000001",
+  #     "datetime": "2025-01-01T00:00:00+00:00"
+  # }
+  ```
+
+- **Fix an issue with the `WITH` keyword in pipe definitions for MSSQL.**  
+  Previously, pipes with used with keyword `WITH` but not as a CTE (e.g. to specify an index) were incorrectly parsed.
+
 ### v2.7.7
 
 - **Add actions `drop indices` and `index pipes`.**  
@@ -187,6 +240,9 @@ This is the current release cycle, so stay tuned for future releases!
 
   df = pipe.get_data()
   print(df)
+  #    Id Amount
+  # 0   1   1.11
+  # 1   2   2.22
   ```
 
 - **Create the `datetime` axis as a clustered index for MSSQL, even when a `primary` index is specififed.**  

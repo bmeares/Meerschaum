@@ -195,7 +195,8 @@ class SQLConnector(Connector):
         self._debug = debug
         ### Store the PID and thread at initialization
         ### so we can dispose of the Pool in child processes or threads.
-        import os, threading
+        import os
+        import threading
         self._pid = os.getpid()
         self._thread_ident = threading.current_thread().ident
         self._sessions = {}
@@ -286,7 +287,6 @@ class SQLConnector(Connector):
             return ':memory:' not in self.URI
         return True
 
-
     @property
     def metadata(self):
         """
@@ -298,7 +298,6 @@ class SQLConnector(Connector):
             self._metadata = sqlalchemy.MetaData(schema=self.schema)
         return self._metadata
 
-
     @property
     def instance_schema(self):
         """
@@ -306,14 +305,12 @@ class SQLConnector(Connector):
         """
         return self.schema
 
-
     @property
     def internal_schema(self):
         """
         Return the schema name for internal tables. 
         """
         from meerschaum.config.static import STATIC_CONFIG
-        from meerschaum.utils.packages import attempt_import
         from meerschaum.utils.sql import NO_SCHEMA_FLAVORS
         schema_name = self.__dict__.get('internal_schema', None) or (
             STATIC_CONFIG['sql']['internal_schema']
@@ -324,7 +321,6 @@ class SQLConnector(Connector):
         if '_internal_schema' not in self.__dict__:
             self._internal_schema = schema_name
         return self._internal_schema
-
 
     @property
     def db(self) -> Optional[databases.Database]:
@@ -342,7 +338,6 @@ class SQLConnector(Connector):
                 self._db = None
         return self._db
 
-
     @property
     def db_version(self) -> Union[str, None]:
         """
@@ -355,7 +350,6 @@ class SQLConnector(Connector):
         from meerschaum.utils.sql import get_db_version
         self._db_version = get_db_version(self)
         return self._db_version
-
 
     @property
     def schema(self) -> Union[str, None]:
@@ -375,7 +369,6 @@ class SQLConnector(Connector):
         _schema = sqlalchemy.inspect(self.engine).default_schema_name
         self.__dict__['schema'] = _schema
         return _schema
-
 
     def __getstate__(self):
         return self.__dict__

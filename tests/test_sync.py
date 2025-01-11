@@ -637,11 +637,11 @@ def test_sync_inplace_no_datetime(flavor: str):
     success, msg = source_pipe.sync(docs)
     assert success, msg
 
-    success, msg = dest_pipe.sync(debug=debug)
+    success, msg = dest_pipe.sync(debug=debug, chunksize=1)
     assert success, msg
     assert dest_pipe.get_rowcount(debug=debug) == len(docs)
 
-    success, msg = dest_pipe.sync(debug=debug)
+    success, msg = dest_pipe.sync(debug=debug, chunksize=1)
     assert success, msg
     assert dest_pipe.get_rowcount(debug=debug) == len(docs)
 
@@ -655,7 +655,7 @@ def test_sync_inplace_no_datetime(flavor: str):
     success, msg = source_pipe.sync(new_docs)
     assert success, msg
 
-    success, msg = dest_pipe.sync(debug=debug)
+    success, msg = dest_pipe.sync(debug=debug, chunksize=1)
     assert success, msg
     assert dest_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
 
@@ -670,7 +670,7 @@ def test_sync_inplace_no_datetime(flavor: str):
     assert success, msg
     assert source_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
 
-    success, msg = dest_pipe.verify(debug=debug)
+    success, msg = dest_pipe.verify(debug=debug, chunksize=1)
     assert success, msg
     assert dest_pipe.get_rowcount(debug=debug) == len(docs) + len(new_docs)
 
@@ -1209,3 +1209,59 @@ def test_no_null_indices(flavor):
     assert success, msg
 
     assert inplace_pipe.get_rowcount() == len(docs + new_docs)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_sql_small_chunksize(flavor):
+    """
+    Test that syncing a small chunksize produces the expected results.
+    """
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+
+    pipe = mrsm.Pipe('test', 'sync_sql_chunksize', 'small', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'sync_sql_chunksize', 'small',
+        instance=conn,
+        columns=['id'],
+    )
+    docs = [
+        {'id': 1, 'foo': 'abc'},
+        {'id': 2, 'foo': 'def'},
+        {'id': 3, 'foo': 'ghi'},
+        {'id': 4, 'foo': 'jkl'},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    downstream_instance_conn = (
+        conn
+        if flavor != 'sqlite'
+        else mrsm.get_connector(
+            'sql:test_sql_small_chunksize',
+            database=conn.database + '.test_sql_small_chunksize',
+            flavor='sqlite',
+        )
+    )
+
+    downstream_pipe = mrsm.Pipe(conn, 'test', 'small_chunksize', instance=downstream_instance_conn)
+    downstream_pipe.delete()
+    downstream_pipe = mrsm.Pipe(
+        conn, 'test', 'small_chunksize',
+        instance=downstream_instance_conn,
+        columns=pipe.columns,
+        parameters={
+            'fetch': {
+                'definition': "SELECT * FROM {{" + str(pipe) + "}}",
+            },
+        }
+    )
+
+    chunksize = 1
+    success, msg = downstream_pipe.sync(chunksize=chunksize, debug=debug, _inplace=False)
+    assert success, msg
+
+    mrsm.pprint((success, msg))
+    assert msg.lower().count('inserted') == int(len(docs) / chunksize)

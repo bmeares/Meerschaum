@@ -774,9 +774,16 @@ class Daemon:
         if '_process' not in self.__dict__ or self.__dict__['_process'].pid != int(pid):
             try:
                 self._process = psutil.Process(int(pid))
+                process_exists = True
             except Exception:
-                if self.pid_path.exists():
-                    self.pid_path.unlink()
+                process_exists = False
+            if not process_exists:
+                _ = self.__dict__.pop('_process', None)
+                try:
+                    if self.pid_path.exists():
+                        self.pid_path.unlink()
+                except Exception:
+                    pass
                 return None
         return self._process
 

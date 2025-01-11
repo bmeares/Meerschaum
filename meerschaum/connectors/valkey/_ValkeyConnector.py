@@ -239,7 +239,7 @@ class ValkeyConnector(Connector):
         -------
         The current index counter value (how many docs have been pushed).
         """
-        from meerschaum.utils.misc import json_serialize_datetime
+        from meerschaum.utils.dtypes import json_serialize_value
         table_name = self.quote_table(table)
         datetime_column_key = self.get_datetime_column_key(table)
         remote_datetime_column = self.get(datetime_column_key)
@@ -269,7 +269,7 @@ class ValkeyConnector(Connector):
             ) if datetime_column else None
             doc_str = json.dumps(
                 doc,
-                default=(lambda x: json_serialize_datetime(x) if hasattr(x, 'tzinfo') else str(x)),
+                default=json_serialize_value,
                 separators=(',', ':'),
                 sort_keys=True,
             )

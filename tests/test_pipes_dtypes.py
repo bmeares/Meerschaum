@@ -1005,3 +1005,64 @@ def test_enforce_false(flavor: str):
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
     assert df['num'][0] == 2
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_mixed_int_float_coersion(flavor):
+    """
+    Test that mixing INT and FLOAT is gracefully handled.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'mixed', 'float_int', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'mixed', 'float_int', instance=conn,
+        columns=['id'],
+        dtypes={
+            'i': 'int',
+        },
+        static=False,
+        enforce=True,
+        upsert=True,
+    )
+
+    np = mrsm.attempt_import('numpy')
+    docs = [
+        {'id': 1, 'i': np.nan},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    pipe.delete()
+
+    docs = [
+        {'id': 1, 'i': 0.0000000001},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_explicit_precision_scale_numeric_sql(flavor):
+    """
+    Test that specifying precision and scale for SQL pipes truncates.
+    """
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return conn
+
+    pipe = mrsm.Pipe('test', 'explicit', 'precision_scale', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'explicit', 'precision_scale',
+        instance=conn,
+        columns={'primary': 'id', 'datetime': 'dt'},
+        dtypes={'val': 'numeric[5,2]'},
+    )
+
+    docs = [
+        {'id': 1, 'val': '123.456', 'dt': '2025-01-01'},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    df = pipe.get_data()
+    assert str(df['val'][0]) == '123.46'

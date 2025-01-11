@@ -957,24 +957,6 @@ def get_connector_labels(
     return sorted(possibilities)
 
 
-def json_serialize_datetime(dt: datetime) -> Union[str, None]:
-    """
-    Serialize a datetime object into JSON (ISO format string).
-
-    Examples
-    --------
-    >>> import json
-    >>> from datetime import datetime
-    >>> json.dumps({'a': datetime(2022, 1, 1)}, default=json_serialize_datetime)
-    '{"a": "2022-01-01T00:00:00Z"}'
-
-    """
-    if not isinstance(dt, datetime):
-        return None
-    tz_suffix = 'Z' if dt.tzinfo is None else ''
-    return dt.isoformat() + tz_suffix
-
-
 def wget(
     url: str,
     dest: Optional[Union[str, 'pathlib.Path']] = None,
@@ -1703,6 +1685,22 @@ def _get_subaction_names(*args, **kwargs) -> Any:
     """
     from meerschaum.actions import _get_subaction_names as real_function
     return real_function(*args, **kwargs)
+
+
+def json_serialize_datetime(dt: datetime) -> Union[str, None]:
+    """
+    Serialize a datetime object into JSON (ISO format string).
+
+    Examples
+    --------
+    >>> import json
+    >>> from datetime import datetime
+    >>> json.dumps({'a': datetime(2022, 1, 1)}, default=json_serialize_datetime)
+    '{"a": "2022-01-01T00:00:00Z"}'
+
+    """
+    from meerschaum.utils.dtypes import serialize_datetime
+    return serialize_datetime(dt)
 
 
 _current_module = sys.modules[__name__]
