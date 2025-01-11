@@ -264,7 +264,7 @@ columns_types_queries = {
             NULL AS "schema",
             TABLE_NAME AS "table",
             COLUMN_NAME AS "column",
-            DATA_TYPE AS "type,
+            DATA_TYPE AS "type",
             DATA_PRECISION AS "numeric_precision",
             DATA_SCALE AS "numeric_scale"
         FROM all_tab_columns
