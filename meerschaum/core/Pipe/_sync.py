@@ -339,11 +339,14 @@ def sync(
             results = sorted(
                 [(chunk_success, chunk_msg)] + (
                     list(pool.imap(_process_chunk, df))
-                    if not df_is_chunk_generator(chunk)
-                    else [
+                    if (
+                        not df_is_chunk_generator(chunk)  # Handle nested generators.
+                        and kw.get('workers', 1) != 1
+                    )
+                    else list(
                         _process_chunk(_child_chunks)
                         for _child_chunks in df
-                    ]
+                    )
                 )
             )
             chunk_messages = [chunk_msg for _, chunk_msg in results]

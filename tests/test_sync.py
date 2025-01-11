@@ -1228,22 +1228,29 @@ def test_sync_sql_small_chunksize(flavor):
         columns=['id'],
     )
     docs = [
-        {'id': 1, 'foo': 'bar'},
-        {'id': 2, 'foo': 'bar'},
-        {'id': 3, 'foo': 'bar'},
-        {'id': 4, 'foo': 'bar'},
+        {'id': 1, 'foo': 'abc'},
+        {'id': 2, 'foo': 'def'},
+        {'id': 3, 'foo': 'ghi'},
+        {'id': 4, 'foo': 'jkl'},
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
 
+    downstream_instance_conn = (
+        conn
+        if flavor != 'sqlite'
+        else mrsm.get_connector(
+            'sql:test_sql_small_chunksize',
+            database=conn.database + '.test_sql_small_chunksize',
+            flavor='sqlite',
+        )
+    )
 
-    conn_copy = mrsm.get_connector('sql', conn.label + '_small_chunksize', uri=conn.URI)
-    downstream_pipe = mrsm.Pipe(conn_copy, 'test', 'small_chunksize', instance=conn)
+    downstream_pipe = mrsm.Pipe(conn, 'test', 'small_chunksize', instance=downstream_instance_conn)
     downstream_pipe.delete()
-
     downstream_pipe = mrsm.Pipe(
-        conn_copy, 'test', 'small_chunksize',
-        instance=conn,
+        conn, 'test', 'small_chunksize',
+        instance=downstream_instance_conn,
         columns=pipe.columns,
         parameters={
             'fetch': {
@@ -1252,8 +1259,9 @@ def test_sync_sql_small_chunksize(flavor):
         }
     )
 
-    success, msg = downstream_pipe.sync(chunksize=1, debug=debug)
+    chunksize = 1
+    success, msg = downstream_pipe.sync(chunksize=chunksize, debug=debug, _inplace=False)
     assert success, msg
 
     mrsm.pprint((success, msg))
-    assert msg.lower().count('inserted') == len(docs)
+    assert msg.lower().count('inserted') == int(len(docs) / chunksize)
