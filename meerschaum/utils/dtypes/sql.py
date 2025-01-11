@@ -470,7 +470,7 @@ AUTO_INCREMENT_COLUMN_FLAVORS: Dict[str, str] = {
 }
 
 
-def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = False) -> str:
+def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = True) -> str:
     """
     Parse a database type to a pandas data type.
 
@@ -486,12 +486,17 @@ def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = False) ->
     -------
     The equivalent datatype for a pandas DataFrame.
     """
+    from meerschaum.utils.dtypes import are_dtypes_equal
     def parse_custom(_pd_type: str, _db_type: str) -> str:
         if 'json' in _db_type.lower():
             return 'json'
+        if are_dtypes_equal(_pd_type, 'numeric') and _pd_type != 'object':
+            precision, scale = get_numeric_precision_scale(None, dtype=_db_type.upper())
+            if precision and scale:
+                return f"numeric[{precision},{scale}]"
         return _pd_type
 
-    pd_type = DB_TO_PD_DTYPES.get(db_type.upper(), None)
+    pd_type = DB_TO_PD_DTYPES.get(db_type.upper().split('(', maxsplit=1)[0].strip(), None)
     if pd_type is not None:
         return (
             parse_custom(pd_type, db_type)
@@ -644,21 +649,22 @@ def get_numeric_precision_scale(
     
     dtype: Optional[str], default None
         If provided, return the precision and scale provided in the dtype (if applicable).
+        If all caps, treat this as a DB type.
 
     Returns
     -------
     A tuple of ints or a tuple of Nones.
     """
-    from meerschaum.utils.dtypes import are_dtypes_equal
-    if dtype and are_dtypes_equal(dtype, 'numeric'):
-        if '[' in dtype and ',' in dtype:
-            try:
-                parts = dtype.split('[', maxsplit=1)[-1].rstrip(']').split(',', maxsplit=1)
-                return int(parts[0].strip()), int(parts[1].strip())
-            except Exception:
-                pass
-
-    if flavor not in NUMERIC_PRECISION_FLAVORS:
+    if not dtype:
         return None, None
 
-    return NUMERIC_PRECISION_FLAVORS[flavor]
+    lbracket = '[' if '[' in dtype else '('
+    rbracket = ']' if lbracket == '[' else ')'
+    if lbracket in dtype and dtype.count(',') == 1 and dtype.endswith(rbracket):
+        try:
+            parts = dtype.split(lbracket, maxsplit=1)[-1].rstrip(rbracket).split(',', maxsplit=1)
+            return int(parts[0].strip()), int(parts[1].strip())
+        except Exception:
+            pass
+
+    return NUMERIC_PRECISION_FLAVORS.get(flavor, (None, None))

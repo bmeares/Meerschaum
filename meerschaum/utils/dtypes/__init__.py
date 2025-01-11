@@ -350,6 +350,9 @@ def serialize_decimal(
     if not isinstance(x, Decimal):
         return x
 
+    if value_is_null(x):
+        return None
+
     if quantize and scale and precision:
         x = quantize_decimal(x, precision, scale)
 
@@ -544,6 +547,9 @@ def json_serialize_value(x: Any, default_to_str: bool = True) -> str:
     -------
     A serialized version of x, or x.
     """
+    if isinstance(x, (mrsm.Pipe, mrsm.connectors.Connector)):
+        return x.meta
+
     if hasattr(x, 'tzinfo'):
         return serialize_datetime(x)
 
@@ -552,5 +558,8 @@ def json_serialize_value(x: Any, default_to_str: bool = True) -> str:
 
     if isinstance(x, Decimal):
         return serialize_decimal(x)
+
+    if value_is_null(x):
+        return None
 
     return str(x) if default_to_str else x

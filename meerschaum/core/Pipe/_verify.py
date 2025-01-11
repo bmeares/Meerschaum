@@ -190,7 +190,7 @@ def verify(
             begin=chunk_begin,
             end=chunk_end,
             params=params,
-            workers=workers,
+            workers=1,
             debug=debug,
             **kwargs
         )

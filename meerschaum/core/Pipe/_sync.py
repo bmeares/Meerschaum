@@ -327,14 +327,14 @@ def sync(
                     _chunk_success, _chunk_msg = False, str(e)
                 if not _chunk_success:
                     failed_chunks.append(_chunk)
-                return (
-                    _chunk_success,
-                    (
-                        self._get_chunk_label(_chunk, dt_col)
-                        + '\n'
-                        + _chunk_msg
-                    )
+                _chunk_msg = (
+                    self._get_chunk_label(_chunk, dt_col)
+                    + '\n'
+                    + _chunk_msg
                 )
+
+                mrsm.pprint((_chunk_success, _chunk_msg), calm=True)
+                return _chunk_success, _chunk_msg
 
             results = sorted(
                 [(chunk_success, chunk_msg)] + (

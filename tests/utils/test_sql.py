@@ -6,13 +6,15 @@
 Test SQL utility functions.
 """
 
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 import pytest
 from meerschaum.utils.sql import (
     build_where,
     get_pd_type,
 )
+from meerschaum.utils.dtypes.sql import get_numeric_precision_scale
 import meerschaum as mrsm
+
 
 @pytest.mark.parametrize(
     'params,expected_subqueries',
@@ -94,15 +96,18 @@ def test_build_where(params: Dict[str, Any], expected_subqueries: List[str]):
         ('REAL', 'float64[pyarrow]'),
         ('TIMESTAMPTZ', 'datetime64[ns, UTC]'),
         ('TIMESTAMP WITH TIMEZONE', 'datetime64[ns, UTC]'),
+        ('TIMESTAMP WITHOUT TIMEZONE', 'datetime64[ns]'),
         ('CLOB', 'string[pyarrow]'),
         ('NUMERIC', 'numeric'),
-        ('NUMERIC(12, 10)', 'numeric'),
+        ('NUMERIC(12, 10)', 'numeric[12,10]'),
         ('DECIMAL', 'numeric'),
         ('NUMBER', 'numeric'),
         ('INT', 'int64[pyarrow]'),
         ('BIGINT', 'int64[pyarrow]'),
         ('VARCHAR', 'string[pyarrow]'),
         ('CHAR', 'string[pyarrow]'),
+        ('BYTEA', 'bytes'),
+        ('VARBINARY', 'bytes'),
         ('not a type', 'object'),
     ]
 )
@@ -112,3 +117,25 @@ def test_get_pd_type(db_type: str, pd_type: str):
     """
     from meerschaum.utils.dtypes import are_dtypes_equal
     assert are_dtypes_equal(get_pd_type(db_type), pd_type)
+
+
+@pytest.mark.parametrize(
+    'flavor,dtype,expected_precision_and_scale',
+    [
+        (None, 'numeric[28,10]', (28, 10)),
+        (None, 'numeric', (None, None)),
+        ('postgresql', 'numeric', (None, None)),
+        ('mssql', 'numeric', (28, 10)),
+        ('timescaledb', 'numeric[28,10]', (28, 10)),
+        ('not_a_flavor', 'numeric', (None, None)),
+        (None, 'DECIMAL(5, 2)', (5, 2)),
+    ]
+)
+def test_get_numeric_precision_scale(flavor: str, dtype: str, expected_precision_and_scale: Tuple[Any, Any]):
+    """
+    Test that dtypes may be parsed into precision and scale.
+    """
+    expected_precision, expected_scale = expected_precision_and_scale
+    precision, scale = get_numeric_precision_scale(flavor, dtype=dtype)
+    assert precision == expected_precision
+    assert scale == expected_scale
