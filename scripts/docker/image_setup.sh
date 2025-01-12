@@ -253,6 +253,7 @@ run -b '\''/home/'$MRSM_USER'/.tmux/plugins/tpm/tpm'\''
 
   sudo -u $MRSM_USER git clone https://github.com/tmux-plugins/tpm /home/$MRSM_USER/.tmux/plugins/tpm
   sudo -u $MRSM_USER /home/$MRSM_USER/.tmux/plugins/tpm/bin/install_plugins
+  sudo -u $MRSM_USER /home/$MRSM_USER/.tmux/plugins/tpm/tpm
 fi
 
 ### Remove apt lists, sudo, and cache.
