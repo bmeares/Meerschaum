@@ -9,7 +9,3 @@ services:
     volumes:
       - "./:/app"
       - "./scripts/docker:/scripts"
-      - "dev_root:/meerschaum"
-
-volumes:
-  dev_root:

@@ -410,15 +410,19 @@ def init_venv(
             pass
 
     def wait_for_lock():
-        max_lock_seconds = 2.0
+        max_lock_seconds = 30.0
+        sleep_message_seconds = 5.0
         step_sleep_seconds = 0.1
         init_venv_check_start = time.perf_counter()
+        last_print = init_venv_check_start
         while ((time.perf_counter() - init_venv_check_start) < max_lock_seconds):
             if not lock_path.exists():
                 break
 
-            if debug:
-                print(f"Lock exists for '{venv}', sleeping...")
+            now = time.perf_counter()
+            if debug or (now - last_print) > sleep_message_seconds:
+                print(f"Lock exists for venv '{venv}', sleeping...")
+                last_print = now
             time.sleep(step_sleep_seconds)
         update_lock(False)
 
@@ -448,7 +452,8 @@ def init_venv(
 
     _venv_success = False
     temp_vtp = VENVS_CACHE_RESOURCES_PATH / str(venv)
-    rename_vtp = vtp.exists() and not temp_vtp.exists()
+    ### NOTE: Disable site-packages movement for now.
+    rename_vtp = False and vtp.exists() and not temp_vtp.exists()
 
     wait_for_lock()
     update_lock(True)
@@ -458,19 +463,10 @@ def init_venv(
             print(f"Moving '{vtp}' to '{temp_vtp}'...")
         shutil.move(vtp, temp_vtp)
 
-    if venv_path.exists():
-        if debug:
-            print(f"Removing '{venv_path}'...")
-        try:
-            shutil.rmtree(venv_path)
-        except Exception as e:
-            if debug:
-                print(f"Failed to remove '{venv_path}' ({e}). Continuing...")
-
     if uv is not None:
         _venv_success = run_python_package(
             'uv',
-            ['venv', venv_path.as_posix(), '-q'],
+            ['venv', venv_path.as_posix(), '-q', '--no-project', '--allow-existing', '--seed'],
             venv=None,
             env=_get_pip_os_env(),
             debug=debug,

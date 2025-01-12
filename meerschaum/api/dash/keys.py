@@ -105,59 +105,58 @@ action_dropdown_row = html.Div(
                 dbc.Col(
                     html.Div(
                         dcc.Dropdown(
-                            id = 'flags-dropdown',
-                            multi = True,
-                            placeholder = 'Boolean flags',
-                            options = ['--yes'],
-                            value = ['--yes'],
+                            id='flags-dropdown',
+                            multi=True,
+                            placeholder='Boolean flags',
+                            options=[],
+                            value=[],
                         ),
-                        id = 'flags-dropdown-div',
-                        className = 'dbc_dark input-text',
+                        id='flags-dropdown-div',
+                        className='dbc_dark input-text',
                     ),
-                    width = widths['flags'],
+                    width=widths['flags'],
                 ),
             ],
         ),
         html.Br(),
         html.Div(id='input-flags-div'),
         dbc.Row(
-            children = [
+            children=[
                 dbc.Col(
-                    children = [
+                    children=[
                         html.Div(
-                            children = [
+                            children=[
                                 dbc.Button(
                                     'Additional parameters',
-                                    id = 'show-arguments-collapse-button',
-                                    color = 'link',
-                                    size = 'md',
-                                    outline = True,
-                                    style = {'display': 'none'},
+                                    id='show-arguments-collapse-button',
+                                    color='link',
+                                    size='md',
+                                    outline=True,
+                                    style={'display': 'none'},
                                 ),
-                                #  html.Br(),
                                 dbc.Collapse(
-                                    children = [
+                                    children=[
                                         dbc.Button(
                                             'Clear',
-                                            id = 'clear-begin-end-datepicker-button',
-                                            color = 'link',
-                                            size = 'sm',
+                                            id='clear-begin-end-datepicker-button',
+                                            color='link',
+                                            size='sm',
                                         ),
                                         dcc.DatePickerRange(
-                                            id = 'begin-end-datepicker',
+                                            id='begin-end-datepicker',
                                         ),
                                     ],
-                                    id = 'arguments-collapse',
+                                    id='arguments-collapse',
                                 ),
                             ], ### end of div children
                         ),
                     ], ### end of col children
-                    width = widths['arguments'],
+                    width=widths['arguments'],
                 ),
             ], ### end of row children
         ),
     ], ### end of parent div children
-    id = 'action-div',
+    id='action-div',
 )
 
 
@@ -167,49 +166,49 @@ dropdown_keys_row = dbc.Row(
             html.Div(
                 [
                     dcc.Dropdown(
-                        id = 'connector-keys-dropdown',
-                        options = [],
-                        placeholder = placeholders['ck'],
-                        multi = True,
+                        id='connector-keys-dropdown',
+                        options=[],
+                        placeholder=placeholders['ck'],
+                        multi=True,
                     ),
                 ],
-                className = 'dbc_dark',
+                className='dbc_dark',
             ),
-            lg = 4,
-            md = 12,
-            sm = 12,
+            lg=4,
+            md=12,
+            sm=12,
         ),
         dbc.Col(
             html.Div(
                 [
                     dcc.Dropdown(
-                        id = 'metric-keys-dropdown',
-                        options = [],
-                        placeholder = placeholders['mk'],
-                        multi = True,
+                        id='metric-keys-dropdown',
+                        options=[],
+                        placeholder=placeholders['mk'],
+                        multi=True,
                     ),
                 ],
-                className = 'dbc_dark'
+                className='dbc_dark'
             ),
-            lg = 4,
-            md = 12,
-            sm = 12,
+            lg=4,
+            md=12,
+            sm=12,
         ),
         dbc.Col(
             html.Div(
                 [
                     dcc.Dropdown(
-                        id = 'location-keys-dropdown',
-                        options = [],
-                        placeholder = placeholders['lk'],
-                        multi = True,
+                        id='location-keys-dropdown',
+                        options=[],
+                        placeholder=placeholders['lk'],
+                        multi=True,
                     ),
                 ],
-                className = 'dbc_dark'
+                className='dbc_dark'
             ),
-            lg = 4,
-            md = 12,
-            sm = 12,
+            lg=4,
+            md=12,
+            sm=12,
         ),
     ] ### end of filters row children
 )
@@ -217,10 +216,9 @@ dropdown_tab_content = html.Div([
     dbc.Card(
         dbc.CardBody(
             [
-                #  html.P('Pipe Keys'),
                 dropdown_keys_row,
             ], ### end of card children
-            className = 'card-text',
+            className='card-text',
         )
     ),
     html.Br(),
@@ -229,7 +227,7 @@ dropdown_tab_content = html.Div([
             [
                 action_dropdown_row,
             ],
-            className = 'card-text',
+            className='card-text',
         ),
     ),
 ])
@@ -242,75 +240,66 @@ text_tab_content = dbc.Card(
                     dbc.Col(html.Div(className='dbc_dark', children=[
                         dbc.InputGroup(
                             [
-                                #  dbc.InputGroupAddon(
                                     dbc.Button(
                                         'Clear',
-                                        id = 'clear-connector-keys-input-button',
-                                        color = 'link',
-                                        size = 'sm',
+                                        id='clear-connector-keys-input-button',
+                                        color='link',
+                                        size='sm',
                                     ),
-                                    #  addon_type = 'prepend',
-                                #  ),
                                 dbc.Input(
-                                    id = 'connector-keys-input',
-                                    placeholder = placeholders['ck'],
-                                    type = 'text',
-                                    value = '',
-                                    list = 'connector-keys-list',
-                                    className = 'dbc_dark'
+                                    id='connector-keys-input',
+                                    placeholder=placeholders['ck'],
+                                    type='text',
+                                    value='',
+                                    list='connector-keys-list',
+                                    className='dbc_dark'
                                 ),
                             ],
-                            size = input_group_sizes['ck'],
+                            size=input_group_sizes['ck'],
                         )]),
-                        width = 4,
+                        width=4,
                     ),
                     dbc.Col(
                         dbc.InputGroup(
                             [
-                                #  dbc.InputGroupAddon(
                                     dbc.Button(
                                         'Clear',
-                                        id = 'clear-metric-keys-input-button',
-                                        color = 'link',
-                                        size = 'sm',
+                                        id='clear-metric-keys-input-button',
+                                        color='link',
+                                        size='sm',
                                     ),
-                                    #  addon_type = 'prepend',
-                                #  ),
                                 dbc.Input(
-                                    id = 'metric-keys-input',
-                                    placeholder = placeholders['mk'],
-                                    type = 'text',
-                                    value = '',
-                                    list = 'metric-keys-list',
+                                    id='metric-keys-input',
+                                    placeholder=placeholders['mk'],
+                                    type='text',
+                                    value='',
+                                    list='metric-keys-list',
                                 ),
                             ],
-                            size = input_group_sizes['mk'],
+                            size=input_group_sizes['mk'],
                         ),
-                        width = 4,
+                        width=4,
                     ),
                     dbc.Col(
                         dbc.InputGroup(
                             [
-                                #  dbc.InputGroupAddon(
                                     dbc.Button(
                                         'Clear',
-                                        id = 'clear-location-keys-input-button',
-                                        color = 'link',
-                                        size = 'sm',
+                                        id='clear-location-keys-input-button',
+                                        color='link',
+                                        size='sm',
                                     ),
-                                    #  addon_type = 'prepend',
-                                #  ),
                                 dbc.Input(
-                                    id = 'location-keys-input',
-                                    placeholder = placeholders['lk'],
-                                    type = 'text',
-                                    value = '',
-                                    list = 'location-keys-list',
+                                    id='location-keys-input',
+                                    placeholder=placeholders['lk'],
+                                    type='text',
+                                    value='',
+                                    list='location-keys-list',
                                 ),
                             ],
-                            size = input_group_sizes['lk'],
+                            size=input_group_sizes['lk'],
                         ),
-                        width = 4,
+                        width=4,
                     ),
                 ]
             ),
@@ -319,23 +308,9 @@ text_tab_content = dbc.Card(
                 dbc.Col(
                     dbc.InputGroup(
                         [
-                            #  dbc.InputGroupAddon(
-                                #  dbc.Button(
-                                    #  'Clear',
-                                    #  id = 'clear-params-textarea-button',
-                                    #  color = 'link',
-                                    #  size = 'sm',
-                                #  ),
-                                #  addon_type = 'prepend',
-                            #  ),
                             search_parameters_editor,
-                            #  dbc.Textarea(
-                                #  id = 'params-textarea',
-                                #  placeholder = placeholders['params'],
-                                #  value = '',
-                            #  )
                         ],
-                        size = input_group_sizes['params'],
+                        size=input_group_sizes['params'],
                     )
                 )
             ),
@@ -348,4 +323,3 @@ keys_lists_content = html.Div([
     html.Datalist(id='metric-keys-list'),
     html.Datalist(id='location-keys-list'),
 ], hidden=True)
-
