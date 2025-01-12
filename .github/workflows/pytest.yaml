@@ -35,4 +35,5 @@ jobs:
         if: always()
         with:
           name: api-log
-          path: test_root/logs/
+          path: test_root/
+
