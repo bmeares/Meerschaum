@@ -410,15 +410,19 @@ def init_venv(
             pass
 
     def wait_for_lock():
-        max_lock_seconds = 2.0
+        max_lock_seconds = 30.0
+        sleep_message_seconds = 5.0
         step_sleep_seconds = 0.1
         init_venv_check_start = time.perf_counter()
+        last_print = init_venv_check_start
         while ((time.perf_counter() - init_venv_check_start) < max_lock_seconds):
             if not lock_path.exists():
                 break
 
-            if debug:
-                print(f"Lock exists for '{venv}', sleeping...")
+            now = time.perf_counter()
+            if debug or (now - last_print) > sleep_message_seconds:
+                print(f"Lock exists for venv '{venv}', sleeping...")
+                last_print = now
             time.sleep(step_sleep_seconds)
         update_lock(False)
 
