@@ -14,7 +14,7 @@ def is_webterm_running(
     host: str,
     port: int,
     protocol: str = 'http',
-    session_id: str = 'deadbeef-abba-babe-cafe-decafc0ffee5',
+    session_id: str = 'mrsm',
 ) -> int:
     """
     Determine whether the webterm service is running on a given host and port.
