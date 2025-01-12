@@ -23,6 +23,7 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
     libffi-dev \
     python3-dev \
     git \
+    tmux \
     || exit 1
 
   sudo -u $MRSM_USER python -m pip install \
@@ -46,7 +47,6 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
       pkg-config \
       libgtk-3-dev \
       gir1.2-webkit2-4.0 \
-      tmux \
       htop \
       || exit 1
   fi
@@ -120,7 +120,7 @@ PROMPT_COMMAND="PostCommand"
 chown $MRSM_USER:$MRSM_USER /home/$MRSM_USER/.bashrc
 
 
-if [ "$MRSM_DEP_GROUP" == "full" ]; then
+if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
   sudo -u $MRSM_USER echo '
 # if session exists, auto attach
 new-session -n $HOST
