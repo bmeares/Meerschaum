@@ -452,7 +452,8 @@ def init_venv(
 
     _venv_success = False
     temp_vtp = VENVS_CACHE_RESOURCES_PATH / str(venv)
-    rename_vtp = vtp.exists() and not temp_vtp.exists()
+    ### NOTE: Disable site-packages movement for now.
+    rename_vtp = False and vtp.exists() and not temp_vtp.exists()
 
     wait_for_lock()
     update_lock(True)
@@ -462,19 +463,10 @@ def init_venv(
             print(f"Moving '{vtp}' to '{temp_vtp}'...")
         shutil.move(vtp, temp_vtp)
 
-    if venv_path.exists():
-        if debug:
-            print(f"Removing '{venv_path}'...")
-        try:
-            shutil.rmtree(venv_path)
-        except Exception as e:
-            if debug:
-                print(f"Failed to remove '{venv_path}' ({e}). Continuing...")
-
     if uv is not None:
         _venv_success = run_python_package(
             'uv',
-            ['venv', venv_path.as_posix(), '-q'],
+            ['venv', venv_path.as_posix(), '-q', '--no-project', '--allow-existing', '--seed'],
             venv=None,
             env=_get_pip_os_env(),
             debug=debug,
