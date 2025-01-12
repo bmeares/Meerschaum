@@ -7,8 +7,7 @@ PARENT="$(dirname "$DIR")"
 
 export dockerhub_user="bmeares"
 export latest_alias="api"
-# export tags=( "api" "minimal" "full" )
-export tags=( "api" )
+export tags=( "api" "minimal" "full" )
 
 export base_name="meerschaum"
 export image="$dockerhub_user/$base_name"
