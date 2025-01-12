@@ -330,7 +330,7 @@ class Daemon:
                     result = self.target(*self.target_args, **self.target_kw)
                     self.properties['result'] = result
                 except (BrokenPipeError, KeyboardInterrupt, SystemExit):
-                    pass
+                    result = False, traceback.format_exc()
                 except Exception as e:
                     warn(
                         f"Exception in daemon target function: {traceback.format_exc()}",

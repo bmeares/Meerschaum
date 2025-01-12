@@ -35,5 +35,9 @@ jobs:
         if: always()
         with:
           name: api-log
-          path: test_root/
-
+          path: test_root/logs/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-log
+          path: test_root/daemon_errors.log
