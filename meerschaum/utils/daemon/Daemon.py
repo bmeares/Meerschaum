@@ -330,12 +330,12 @@ class Daemon:
                     result = self.target(*self.target_args, **self.target_kw)
                     self.properties['result'] = result
                 except (BrokenPipeError, KeyboardInterrupt, SystemExit):
-                    pass
+                    result = False, traceback.format_exc()
                 except Exception as e:
                     warn(
                         f"Exception in daemon target function: {traceback.format_exc()}",
                     )
-                    result = e
+                    result = False, str(e)
                 finally:
                     _results[self.daemon_id] = result
 
@@ -345,8 +345,11 @@ class Daemon:
                         self.cleanup()
 
                     self._log_refresh_timer.cancel()
-                    if self.pid is None and self.pid_path.exists():
-                        self.pid_path.unlink()
+                    try:
+                        if self.pid is None and self.pid_path.exists():
+                            self.pid_path.unlink()
+                    except Exception:
+                        pass
 
                     if is_success_tuple(result):
                         try:
@@ -904,8 +907,8 @@ class Daemon:
         """
         Return the file handler for the stdin file.
         """
-        if '_stdin_file' in self.__dict__:
-            return self._stdin_file
+        if (stdin_file := self.__dict__.get('_stdin_file', None)):
+            return stdin_file
 
         self._stdin_file = StdinFile(
             self.stdin_file_path,
@@ -1020,7 +1023,7 @@ class Daemon:
         except Exception:
             properties = {}
         
-        return properties
+        return properties or {}
 
     def read_pickle(self) -> Daemon:
         """Read a Daemon's pickle file and return the `Daemon`."""
@@ -1050,7 +1053,7 @@ class Daemon:
         Return the contents of the properties JSON file.
         """
         try:
-            _file_properties = self.read_properties()
+            _file_properties = self.read_properties() or {}
         except Exception:
             traceback.print_exc()
             _file_properties = {}
@@ -1061,7 +1064,10 @@ class Daemon:
         if self._properties is None:
             self._properties = {}
 
-        if self._properties.get('result', None) is None:
+        if (
+            self._properties.get('result', None) is None
+            and _file_properties.get('result', None) is not None
+        ):
             _ = self._properties.pop('result', None)
 
         if _file_properties is not None:

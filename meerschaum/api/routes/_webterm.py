@@ -10,7 +10,7 @@ import asyncio
 from meerschaum.utils.typing import Optional
 from meerschaum.api import app, endpoints
 from meerschaum.utils.packages import attempt_import
-from meerschaum.api.dash.sessions import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated, get_username_from_session
 fastapi, fastapi_responses = attempt_import('fastapi', 'fastapi.responses')
 import starlette
 
@@ -27,12 +27,12 @@ PlainTextResponse = fastapi_responses.PlainTextResponse
 @app.get(endpoints['webterm'], tags=["Webterm"])
 async def get_webterm(
     request: Request,
-    s: Optional[str] = None,
+    session_id: str,
 ) -> HTMLResponse:
     """
     Get the main HTML template for the Webterm.
     """
-    if not is_session_authenticated(s):
+    if not is_session_authenticated(session_id):
         return HTMLResponse(
             """
             <html>
@@ -69,35 +69,39 @@ async def get_webterm(
             status_code = 401,
         )
 
+    username = get_username_from_session(session_id)
     async with httpx.AsyncClient() as client:
-        response = await client.get("http://localhost:8765/")
+        webterm_url = f"http://localhost:8765/webterm/{username or session_id}"
+        response = await client.get(webterm_url)
         text = response.text
         if request.url.scheme == 'https':
             text = text.replace('ws://', 'wss://')
+        text = text.replace(f'_websocket/{username}', f'_websocket/{session_id}')
         return HTMLResponse(
-            content = text,
-            status_code = response.status_code,
-            headers = request.headers,
+            content=text,
+            status_code=response.status_code,
+            headers=request.headers,
         )
 
 
 @app.websocket(endpoints['webterm_websocket'])
-async def webterm_websocket(websocket: WebSocket):
+async def webterm_websocket(websocket: WebSocket, session_id: str):
     """
     Connect to the Webterm's websocket.
     """
     try:
         await websocket.accept()
-        session_doc = await websocket.receive_json()
     except starlette.websockets.WebSocketDisconnect:
         return
-    session_id = (session_doc or {}).get('session-id', 'no-auth')
 
     if not is_session_authenticated(session_id):
         await websocket.close()
         return
 
-    async with websockets.connect("ws://localhost:8765/websocket") as ws:
+    username = get_username_from_session(session_id)
+
+    ws_url = f"ws://localhost:8765/_websocket/{username or session_id}"
+    async with websockets.connect(ws_url) as ws:
         async def forward_messages():
             try:
                 while True:

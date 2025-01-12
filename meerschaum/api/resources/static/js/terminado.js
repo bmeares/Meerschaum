@@ -15,9 +15,7 @@ function make_terminal(element, size, ws_url) {
   term.attachCustomKeyEventHandler(copyPasteKeyEventHandler);
   term.open(element);
 
-  sessionStore = localStorage.getItem("session-store");
   ws.onopen = function (event) {
-    ws.send(sessionStore);
     ws.send(
       JSON.stringify([
         "set_size",

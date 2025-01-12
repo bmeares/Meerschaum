@@ -1219,6 +1219,22 @@ def is_systemd_available() -> bool:
         has_systemctl = False
     return has_systemctl
 
+
+def is_tmux_available() -> bool:
+    """
+    Check if `tmux` is installed.
+    """
+    import subprocess
+    try:
+        has_tmux = subprocess.call(
+            ['tmux', '-V'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT
+        ) == 0
+    except Exception as e:
+        has_tmux = False
+    return has_tmux
+
 def get_last_n_lines(file_name: str, N: int):
     """
     https://thispointer.com/python-get-last-n-lines-of-a-text-file-like-tail-command/

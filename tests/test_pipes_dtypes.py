@@ -1049,7 +1049,7 @@ def test_explicit_precision_scale_numeric_sql(flavor):
     """
     conn = conns[flavor]
     if conn.type != 'sql':
-        return conn
+        return
 
     pipe = mrsm.Pipe('test', 'explicit', 'precision_scale', instance=conn)
     pipe.delete()

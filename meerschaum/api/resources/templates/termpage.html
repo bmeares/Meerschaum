@@ -84,6 +84,15 @@ window.addEventListener(
         flags_str += " " + fl + " " + fl_val;
     }
 
+    let line = "";
+    if (action_str === "__TMUX_NEW_WINDOW") {
+      line = "\x02:";
+      window.terminal.socket.send(JSON.stringify(["stdin", line]));
+      line = "new-window python3 -m meerschaum\r";
+      window.terminal.socket.send(JSON.stringify(["stdin", line]));
+      return;
+    }
+
     line = (
       "\x03"
       + action_str
@@ -98,6 +107,26 @@ window.addEventListener(
   false,
 );
 
+let reconnectTimeout;
+
+function cleanUpWebSocket(socket) {
+    if (!socket) { return; }
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onerror = null;
+      socket.onclose = null;
+
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+          socket.close(1000, "Reconnecting");
+      }
+
+      if (reconnectTimeout) {
+          clearTimeout(reconnectTimeout);
+          reconnectTimeout = null;
+      }
+
+      socket = null;
+}
 
 window.onload = function() {
     var termRowHeight = 0.0 + 0.95*document.getElementById("dummy-screen").offsetHeight / 25;
@@ -115,15 +144,29 @@ window.onload = function() {
 
     xterm_div = document.getElementById("xterm-div");
     size = calculate_size(window);
-    var terminal = make_terminal(xterm_div, size, ws_url);
-    window.terminal = terminal;
+
+    function init_webterm() {
+      old_terminal = window.terminal;
+      if (old_terminal){
+        xterm_div.innerHTML = "";
+        cleanUpWebSocket(old_terminal.socket);
+      }
+      window.terminal = make_terminal(xterm_div, size, ws_url);
+      window.terminal.socket.onclose = function (event) {
+        if (!event.wasClean && event.code !== 1005) {
+          reconnectTimeout = setTimeout(init_webterm, 1000);
+        }
+      }
+    }
+
+    init_webterm();
 
     window.onresize = function() {
       var geom = calculate_size(window);
       rows = geom.rows;
       cols = geom.cols;
-      terminal.term.resize(cols, rows);
-      terminal.socket.send(
+      window.terminal.term.resize(cols, rows);
+      window.terminal.socket.send(
           JSON.stringify(
               ["set_size", rows, cols, xterm_div.innerHeight, xterm_div.innerWidth]
           )

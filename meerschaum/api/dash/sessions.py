@@ -97,6 +97,7 @@ def delete_session(session_id: str):
     """
     Delete a session if it's been set.
     """
+    ### TODO: Delete webterm sessions.
     if debug:
         dprint(f"Deleting {session_id=}")
     conn = get_cache_connector()

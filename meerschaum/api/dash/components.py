@@ -23,7 +23,7 @@ dex = attempt_import('dash_extensions', lazy=False, check_update=CHECK_UPDATE)
 dash_ace = attempt_import('dash_ace', lazy=False, check_update=CHECK_UPDATE)
 _load_builtin_custom_connectors()
 
-go_button = dbc.Button('Execute', id='go-button', color='primary', style={'width': '100%'})
+go_button = dbc.Button('Exec', id='go-button', color='primary', style={'width': '100%'})
 test_button = dbc.Button('Test', id='test-button', color='danger', style={'display': 'none'})
 get_items_menu = dbc.DropdownMenu(
     label='More', id='get-items-menu', children=[
@@ -50,19 +50,26 @@ show_jobs_button = dbc.Button(
     style={'width': '100%'},
 )
 cancel_button = dbc.Button(
-    'Terminal',
+    'Term',
     id='cancel-button',
     color='dark',
     style={'width': '100%', 'background-color': 'black', 'display': 'none'},
 )
+show_webterm_button = dbc.Button(
+    'Term',
+    id='show-webterm-button',
+    color='dark',
+    style={'width': '100%', 'background-color': 'black'},
+)
 bottom_buttons_content = dbc.Card(
     dbc.CardBody(
         dbc.Row([
-            dbc.Col(go_button, lg=3, md=4, sm=12),
-            dbc.Col(show_pipes_button, lg=3, md=4, sm=12),
-            dbc.Col(show_jobs_button, lg=3, md=4, sm=12),
+            dbc.Col(go_button, xl=2, lg=3, md=3, sm=12),
+            dbc.Col(show_pipes_button, xl=2, lg=3, md=3, sm=12),
+            dbc.Col(show_jobs_button, xl=2, lg=3, md=3, sm=12),
+            dbc.Col(show_webterm_button, xl=2, lg=3, md=3, sm=12),
             dbc.Col(lg=True, md=False, sm=False),
-            dbc.Col(get_items_menu, lg=2, md=12, sm=12),
+            dbc.Col(get_items_menu, xl=2, lg=12, md=12, sm=12),
         ])
     )
 )

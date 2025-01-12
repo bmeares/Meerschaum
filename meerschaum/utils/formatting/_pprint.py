@@ -35,7 +35,7 @@ def pprint(
         and
         isinstance(args[0][1], str)
     ):
-        return print_tuple(args[0])
+        return print_tuple(args[0], **filter_keywords(print_tuple, **kw))
 
     modify = True
     rich_pprint = None

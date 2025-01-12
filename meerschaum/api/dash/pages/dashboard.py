@@ -65,16 +65,16 @@ layout = html.Div(
                                 children = [
                                     dbc.Tab(
                                         dropdown_tab_content,
-                                        label = 'Filter',
-                                        id = 'pipes-filter-dropdown-tab',
-                                        tab_id = 'dropdown',
+                                        label='Filters',
+                                        id='pipes-filter-dropdown-tab',
+                                        tab_id='dropdown',
                                     ),
                                     dbc.Tab(
                                         text_tab_content,
-                                        label = 'Text',
-                                        id = 'pipes-filter-input-tab',
-                                        tab_id = 'input',
-                                        tab_style = {"display": "none"},
+                                        label='Text',
+                                        id='pipes-filter-input-tab',
+                                        tab_id='input',
+                                        tab_style={"display": "none"},
                                     ),
                                 ]
                             ),
@@ -83,12 +83,12 @@ layout = html.Div(
                             test_button,
                             html.Div(id='ws-div'),
                         ],
-                        id = 'content-col-left',
-                        md = 12,
-                        lg = 6,
+                        id='content-col-left',
+                        md=12,
+                        lg=6,
                     ),
                     dbc.Col(
-                        children = [
+                        children=[
                             dbc.Col([
                                     html.Div(id='success-alert-div'),
                                     html.Div(id='instance-alert-div')
@@ -97,20 +97,20 @@ layout = html.Div(
                             ),
                             html.Div(id='webterm-div'),
                             html.Div(
-                                id = 'content-div-right',
-                                children = [console_div],
+                                id='content-div-right',
+                                children=[console_div],
                             ),
                             html.Div(id='terminal'),
                         ],
-                        md = 12,
-                        lg = 6,
-                        id = 'content-col-right',
+                        md=12,
+                        lg=6,
+                        id='content-col-right',
                     ),
                 ],
                 style = {'max-width': '100%', 'padding': '15px'},
             ), ### end of Row
             className = 'container-fluid',
         ), ### end of Div
-        html.P('', id='line-buffer', style = {'display': 'none'}),
+        html.P('', id='line-buffer', style={'display': 'none'}),
     ],
 )

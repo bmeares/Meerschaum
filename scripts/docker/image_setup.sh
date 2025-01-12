@@ -23,6 +23,7 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
     libffi-dev \
     python3-dev \
     git \
+    tmux \
     || exit 1
 
   sudo -u $MRSM_USER python -m pip install \
@@ -32,7 +33,7 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
   if [ "$MRSM_DEP_GROUP" == "full" ]; then
 
     ### Install MSSQL ODBC driver.
-    apt-get install -y gpg alien || exit 1
+    apt-get install -y gpg || exit 1
     curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
     curl https://packages.microsoft.com/config/debian/12/prod.list | tee /etc/apt/sources.list.d/mssql-release.list
     apt-get update
@@ -46,21 +47,10 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
       pkg-config \
       libgtk-3-dev \
       gir1.2-webkit2-4.0 \
+      htop \
       || exit 1
   fi
 
-fi
-
-
-### Remove apt lists, sudo, and cache.
-apt-get clean && \
-  apt-get purge -s sudo && \
-  rm -rf /var/lib/apt/lists/*
-
-
-### Also remove python3-dev and dependencies to get the image size down.
-if [ "$MRSM_DEP_GROUP" == "api" ]; then
-  apt-get purge -y $(apt-get -s purge python3-dev | grep '^ ' | tr -d '*')
 fi
 
 sudo -u $MRSM_USER echo '
@@ -128,3 +118,149 @@ function PostCommand() {
 PROMPT_COMMAND="PostCommand"
 ' > /home/$MRSM_USER/.bashrc
 chown $MRSM_USER:$MRSM_USER /home/$MRSM_USER/.bashrc
+
+
+if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
+  sudo -u $MRSM_USER echo '
+# if session exists, auto attach
+new-session -n $HOST
+
+# split panes using | and - AND use current dir
+bind | split-window -h -c "#{pane_current_path}"
+bind - split-window -v -c "#{pane_current_path}"
+unbind '\''"'\''
+unbind %
+bind -n M-Left select-pane -L
+bind -n M-Right select-pane -R
+bind -n M-Up select-pane -U
+bind -n M-Down select-pane -D
+# Enable mouse mode (tmux 2.1 and above)
+set -g mouse on
+
+# enable TrueColor
+set -g default-terminal "screen-256color"
+# tell Tmux that outside terminal supports true color
+set -ga terminal-overrides ",xterm-256color*:Tc"
+
+
+#### COLOUR (Solarized 256)
+#
+## default statusbar colors
+# set-option -g status-bg colour235 #base02
+# set-option -g status-fg colour136 #yellow
+set-option -g status-style default,bg=colour235,fg=colour136
+
+# default window title colors
+set-window-option -g window-status-style bg=default,fg=colour244
+# set-window-option -g window-status-fg colour244 #base0
+# set-window-option -g window-status-bg default
+#set-window-option -g window-status-attr dim
+
+# active window title colors
+set-window-option -g window-status-current-style fg=colour166,bg=default
+# set-window-option -g window-status-current-fg colour166 #orange
+# set-window-option -g window-status-current-bg default
+#set-window-option -g window-status-current-attr bright
+
+# pane border
+# set-option -g pane-border-fg colour235 #base02
+# set-option -g pane-active-border-fg colour240 #base01
+# set-option -g pane-border fg=colour235
+set-option -g pane-active-border-style fg=colour240
+
+# message text
+set-option -g message-style fg=colour166,bg=colour235 #base02
+# set-option -g message-bg colour235 #base02
+# set-option -g message-fg colour166 #orange
+
+# pane number display
+set-option -g display-panes-active-colour colour33 #blue
+set-option -g display-panes-colour colour166 #orange
+
+# clock
+# set -g status-right '\''#[fg=green]|#[fg=white]%d/%m %H:%M:%S'\''
+# set-window-option -g clock-mode-colour colour64 #green
+
+# bell
+set-window-option -g window-status-bell-style fg=colour235,bg=colour160 #base02, red
+
+# set status bar to top
+set -g status-position top
+
+# set C-a as C-b for remote servers
+# set -g prefix C-b
+# bind-key -n C-a send-prefix
+
+if-shell '\''test -n "$SSH_CLIENT"'\'' \
+   '\''set -g status-position bottom'\''
+
+   # '\''source-file ~/.tmux.remote.conf'\''
+
+
+bind -T root F12  \
+  set prefix None \;\
+  set key-table off \;\
+  if -F '\''#{pane_in_mode}'\'' '\''send-keys -X cancel'\'' \;\
+  refresh-client -S \;\
+
+  # set status-style "fg=$color_status_text,bg=$color_window_off_status_bg" \;\
+  # set window-status-current-format "#[fg=$color_window_off_status_bg,bg=$color_window_off_status_current_bg]$separator_powerline_right#[default] #I:#W# #[fg=$color_window_off_status_current_bg,bg=$color_window_off_status_bg]$separator_powerline_right#[default]" \;\
+
+  # set window-status-current-style "fg=$color_dark,bold,bg=$color_window_off_status_current_bg" \;\
+
+bind -T off F12 \
+  set -u prefix \;\
+  set -u key-table \;\
+  set -u status-style \;\
+  set -u window-status-current-style \;\
+  set -u window-status-current-format \;\
+  refresh-client -S
+
+wg_is_keys_off="#[fg=$color_light,bg=$color_window_off_indicator]#([ $(tmux show-option -qv key-table) = '\''off'\'' ] && echo '\''OFF'\'')#[default]"
+
+set -g @sysstat_mem_view_tmpl '\''#{mem.used}/#{mem.total}'\''
+set -g status-right "$wg_is_keys_off #{sysstat_cpu} | #{sysstat_mem} | %-I:%M "
+# set -g status-right '\''#[fg=green]|#[fg=white]%d/%m %H:%M:%S'\''
+
+# open new window in current directory
+bind c new-window -c "#{pane_current_path}"
+
+# plugins path
+set-environment -g TMUX_PLUGIN_MANAGER_PATH '\''~/.tmux/plugins/'\''
+# List of plugins
+set -g @plugin '\''tmux-plugins/tpm'\''
+set -g @plugin '\''tmux-plugins/tmux-sensible'\''
+set -g @plugin '\''samoshkin/tmux-plugin-sysstat'\''
+
+# Other examples:
+# set -g @plugin '\''github_username/plugin_name'\''
+# set -g @plugin '\''git@github.com/user/plugin'\''
+# set -g @plugin '\''git@bitbucket.com/user/plugin'\''
+
+set -s escape-time 0
+set -as terminal-overrides '\'',*:indn@'\''
+
+bind j resize-pane -D 20
+bind k resize-pane -U 20
+bind l resize-pane -R 20
+bind h resize-pane -L 20
+
+set-option -g default-command "python3 -m meerschaum"
+
+# Initialize TMUX plugin manager (keep this line at the very bottom of tmux.conf)
+run -b '\''~/.tmux/plugins/tpm/tpm'\''
+' > /home/$MRSM_USER/.tmux.conf
+
+  sudo -u $MRSM_USER git clone https://github.com/tmux-plugins/tpm /home/$MRSM_USER/.tmux/plugins/tpm
+  sudo -u $MRSM_USER /home/$MRSM_USER/.tmux/plugins/tpm/bin/install_plugins
+fi
+
+### Remove apt lists, sudo, and cache.
+apt-get clean && \
+  apt-get purge -s sudo && \
+  rm -rf /var/lib/apt/lists/*
+
+### Also remove python3-dev and dependencies to get the image size down.
+if [ "$MRSM_DEP_GROUP" == "api" ]; then
+  apt-get purge -y $(apt-get -s purge python3-dev | grep '^ ' | tr -d '*')
+fi
