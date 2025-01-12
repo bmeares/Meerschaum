@@ -66,7 +66,7 @@ alias la="ls -A --color=auto"
 alias l="ls -CF --color=auto"
 
 function cd {
-	builtin cd "$@" && ls
+	builtin cd "$@" && ls -CF --color=auto
 }
 
 c(){
@@ -248,7 +248,7 @@ bind h resize-pane -L 20
 set-option -g default-command "python3 -m meerschaum"
 
 # Initialize TMUX plugin manager (keep this line at the very bottom of tmux.conf)
-run -b '\''~/.tmux/plugins/tpm/tpm'\''
+run -b '\''/home/'$MRSM_USER'/.tmux/plugins/tpm/tpm'\''
 ' > /home/$MRSM_USER/.tmux.conf
 
   sudo -u $MRSM_USER git clone https://github.com/tmux-plugins/tpm /home/$MRSM_USER/.tmux/plugins/tpm
