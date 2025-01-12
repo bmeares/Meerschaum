@@ -20,12 +20,13 @@ def test_create_job():
     success, msg = job.start()
     assert success, msg
 
-    time.sleep(2.0)
+    time.sleep(4.0)
 
     success, msg = job.stop()
     assert success, msg
     time.sleep(1.0)
 
+    success, msg = job.result
     success, msg = job.result
     assert success, msg
 
