@@ -314,6 +314,11 @@ def _start_gui(
     """
     Start the Meerschaum GUI application.
     """
+    import json
+    import time
+    import uuid
+    import platform
+
     from meerschaum.utils.venv import venv_exec
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import warn
@@ -321,17 +326,14 @@ def _start_gui(
     from meerschaum.utils.networking import find_open_ports
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum._internal.term.tools import is_webterm_running
-    import platform
     webview, requests = attempt_import('webview', 'requests')
-    import json
-    import time
 
     success, msg = True, "Success"
     host = '127.0.0.1'
     if port is None:
         port = 8765
 
-    if not is_webterm_running(host, port):
+    if not is_webterm_running(host, port, session_id='mrsm'):
         port = next(find_open_ports(port, 9000))
 
     api_kw = {
@@ -350,7 +352,7 @@ def _start_gui(
     )
     if debug:
         print(start_tornado_code)
-    base_url = 'http://' + api_kw['host'] + ':' + str(api_kw['port'])
+    base_url = 'http://' + api_kw['host'] + ':' + str(api_kw['port']) + '/webterm/mrsm'
 
     process = venv_exec(
         start_tornado_code, as_proc=True, debug=debug, capture_output=(not debug)
@@ -375,7 +377,7 @@ def _start_gui(
     try:
         webview.create_window(
             'Meerschaum Shell', 
-            f'http://127.0.0.1:{port}',
+            f'http://127.0.0.1:{port}/webterm/mrsm',
             height=650,
             width=1000
         )
@@ -415,8 +417,13 @@ def _start_webterm(
         - `-i`, '--instance'
             The default instance to use for the Webterm shell.
     """
+    import uuid
     from meerschaum._internal.term import get_webterm_app_and_manager, tornado_ioloop
-    from meerschaum._internal.term.tools import is_webterm_running
+    from meerschaum._internal.term.tools import (
+        is_webterm_running,
+        get_mrsm_tmux_sessions,
+        kill_tmux_session,
+    )
     from meerschaum.utils.networking import find_open_ports
     from meerschaum.utils.warnings import info
 
@@ -426,19 +433,23 @@ def _start_webterm(
         port = 8765
     if sysargs is None:
         sysargs = ['start', 'webterm']
+    session_id = 'mrsm'
     tornado_app, term_manager = get_webterm_app_and_manager(instance_keys=mrsm_instance)
 
-    if is_webterm_running(host, port):
+    if is_webterm_running(host, port, session_id=session_id):
         if force:
             port = next(find_open_ports(port + 1, 9000))
         else:
             return False, (
-                f"The webterm is already running at http://{host}:{port}\n\n"
+                f"The webterm is already running at http://{host}:{port}/webterm/{session_id}\n\n"
                 + "    Include `-f` to start another server on a new port\n"
                 + "    or specify a different port with `-p`."
             )
     if not nopretty:
-        info(f"Starting the webterm at http://{host}:{port} ...\n    Press CTRL+C to quit.")
+        info(
+            f"Starting the webterm at http://{host}:{port}/webterm/{session_id} ..."
+            "\n    Press CTRL+C to quit."
+        )
     tornado_app.listen(port, host)
     loop = tornado_ioloop.IOLoop.instance()
     try:
@@ -450,6 +461,10 @@ def _start_webterm(
     finally:
         term_manager.shutdown()
         loop.close()
+
+    sessions = get_mrsm_tmux_sessions()
+    for session in sessions:
+        kill_tmux_session(session)
 
     return True, "Success"
 

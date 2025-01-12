@@ -127,6 +127,12 @@ default_system_config = {
         },
         'protocol': default_meerschaum_config['connectors']['api']['default']['protocol'],
     },
+    'webterm': {
+        'tmux': {
+            'enabled': True,
+            'session_suffix': '_mrsm',
+        },
+    },
     'experimental': {
         'fetch': False,
         'cache': True,

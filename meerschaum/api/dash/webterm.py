@@ -14,10 +14,12 @@ from meerschaum.utils.typing import WebState, Tuple, Any
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum._internal.term.tools import is_webterm_running
 from meerschaum.utils.threading import Thread, RLock
+from meerschaum.utils.misc import is_tmux_available
 dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 
 MAX_WEBTERM_ATTEMPTS: int = 10
+TMUX_IS_AVAILABLE: bool = is_tmux_available()
 
 _locks = {'webterm_thread': RLock()}
 
@@ -32,7 +34,7 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
         return (
             html.Div(
                 html.Pre(msg, id='console-pre'),
-                id = "console-div",
+                id="console-div",
             ),
             [alert_from_success_tuple((
                 False,
@@ -41,12 +43,21 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
         )
 
     for i in range(MAX_WEBTERM_ATTEMPTS):
-        if is_webterm_running('localhost', 8765):
+        if is_webterm_running('localhost', 8765, session_id=(username or session_id)):
             return (
-                html.Iframe(
-                    src = f"/webterm?s={session_id}",
-                    id = "webterm-iframe",
-                ),
+                [
+                    html.Div(
+                        [
+                            dbc.Button('Refresh', color='black', id='webterm-refresh-button'),
+                            dbc.Button('New Tab', color='black', id='webterm-new-tab-button'),
+                        ],
+                        id='webterm-controls-div',
+                    ),
+                    html.Iframe(
+                        src=f"/webterm/{session_id}",
+                        id="webterm-iframe",
+                    ),
+                ],
                 []
             )
         time.sleep(1)

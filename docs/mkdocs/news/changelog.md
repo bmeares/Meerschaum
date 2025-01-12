@@ -4,7 +4,25 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.7.8 – v2.7.9
+### v2.7.9
+
+- **Add persistent Webterm sessions.**  
+  On the Web Console, the Webterm will attach to a persistent terminal for the current session's user.
+
+- **Reconnect Webterms after client disconnect.**  
+  If a Webterm socket connection is broken, the client logic will attempt to reconnect and attach to the `tmux` session.
+
+- **Add `tmux` sessions to Webterms.**  
+  Webterm sessions now connect to `tmux` sessions (tied to the user accounts).
+  Set `system:webterm:tmux:enabled` to `false` to disable `tmux` sessions.
+  
+- **Limit concurrent connections during `verify pipes`.**  
+  To keep from exhausting the SQL connection pool, limit the number of concurrent intra-chunk connections.
+
+- **Return the precision and scale from a table's columns and types.**  
+  Reading a table's columns and types with `meerschaum.utils.sql.get_table_columns_types()` now returns the precision and scale for `NUMERIC` (`DECIMAL`) columns.
+
+### v2.7.8
 
 - **Add support for user-supplied precision and scale for `numeric` columns.**  
   You may now manually specify a numeric column's precision and scale:
@@ -56,9 +74,6 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fix an issue with the `WITH` keyword in pipe definitions for MSSQL.**  
   Previously, pipes with used with keyword `WITH` but not as a CTE (e.g. to specify an index) were incorrectly parsed.
-
-- **Limit concurrent connections during `verify pipes`.**  
-  To keep from exhausting the SQL connection pool, limit the number of concurrent intra-chunk connections.
 
 ### v2.7.7
 

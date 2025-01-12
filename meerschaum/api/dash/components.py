@@ -55,12 +55,19 @@ cancel_button = dbc.Button(
     color='dark',
     style={'width': '100%', 'background-color': 'black', 'display': 'none'},
 )
+show_webterm_button = dbc.Button(
+    'Terminal',
+    id='show-webterm-button',
+    color='dark',
+    style={'width': '100%', 'background-color': 'black'},
+)
 bottom_buttons_content = dbc.Card(
     dbc.CardBody(
         dbc.Row([
-            dbc.Col(go_button, lg=3, md=4, sm=12),
-            dbc.Col(show_pipes_button, lg=3, md=4, sm=12),
-            dbc.Col(show_jobs_button, lg=3, md=4, sm=12),
+            dbc.Col(go_button, lg=2, md=3, sm=12),
+            dbc.Col(show_pipes_button, lg=2, md=3, sm=12),
+            dbc.Col(show_jobs_button, lg=2, md=3, sm=12),
+            dbc.Col(show_webterm_button, lg=2, md=3, sm=12),
             dbc.Col(lg=True, md=False, sm=False),
             dbc.Col(get_items_menu, lg=2, md=12, sm=12),
         ])

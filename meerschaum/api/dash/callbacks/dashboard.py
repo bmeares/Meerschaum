@@ -190,6 +190,7 @@ def update_page_layout_div(
     Input('go-button', 'n_clicks'),
     Input('get-pipes-button', 'n_clicks'),
     Input('get-jobs-button', 'n_clicks'),
+    Input('show-webterm-button', 'n_clicks'),
     Input('get-plugins-button', 'n_clicks'),
     Input('get-users-button', 'n_clicks'),
     Input('get-graphs-button', 'n_clicks'),
@@ -229,7 +230,7 @@ def update_content(*args):
     ### NOTE: functions MUST return a list of content and a list of alerts
     triggers = {
         'go-button': lambda x: ([], []),
-        'cancel-button': lambda x: ([], []),
+        'show-webterm-button': lambda x: ([], []),
         'get-pipes-button': get_pipes_cards,
         'get-jobs-button': get_jobs_cards,
         'get-plugins-button': get_plugins_cards,
@@ -251,7 +252,12 @@ def update_content(*args):
     webterm_style = {
         'display': (
             'none'
-            if trigger not in ('instance-select', 'cancel-button', 'go-button')
+            if trigger not in (
+                'instance-select',
+                'cancel-button',
+                'go-button',
+                'show-webterm-button',
+            )
             else 'block'
         )
     }
@@ -650,6 +656,41 @@ dash_app.clientside_callback(
     State('mrsm-location', 'href'),
 )
 
+dash_app.clientside_callback(
+    """
+    function(n_clicks, url){
+        if (!n_clicks) { return dash_clientside.no_update; }
+        iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return dash_clientside.no_update; }
+
+        iframe.contentWindow.postMessage(
+            {
+                action: "__TMUX_NEW_WINDOW"
+            },
+            url
+        );
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('mrsm-location', 'href'),
+    Input('webterm-new-tab-button', 'n_clicks'),
+    State('mrsm-location', 'href'),
+)
+
+dash_app.clientside_callback(
+    """
+    function(n_clicks, url){
+        if (!n_clicks) { return dash_clientside.no_update; }
+        iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return dash_clientside.no_update; }
+        iframe.src = iframe.src;
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('mrsm-location', 'href'),
+    Input('webterm-refresh-button', 'n_clicks'),
+    State('mrsm-location', 'href'),
+)
 
 @dash_app.callback(
     Output(component_id='connector-keys-input', component_property='value'),
