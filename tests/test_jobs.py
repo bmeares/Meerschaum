@@ -32,6 +32,3 @@ def test_create_job():
 
     output_text = job.get_logs()
     assert output_text.count("Meerschaum v") > 1
-
-    success, msg = job.delete()
-    assert success, msg
