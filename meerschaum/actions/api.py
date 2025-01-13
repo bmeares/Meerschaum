@@ -140,16 +140,28 @@ def _api_start(
         If provided, serve over HTTPS with this certfile.
         Requires `--keyfile`.
     """
+    import json
+    import sys
+    import shutil
+    import pathlib
+    from copy import deepcopy
+
     from meerschaum.utils.packages import (
-        attempt_import, venv_contains_package, pip_install, run_python_package
+        attempt_import,
+        venv_contains_package,
+        pip_install,
+        run_python_package,
     )
     from meerschaum.utils.misc import is_int, filter_keywords
+    from meerschaum.utils.dtypes import json_serialize_value
     from meerschaum.utils.formatting import pprint, ANSI, _init
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import error, warn
     from meerschaum.config import get_config, _config
     from meerschaum.config._paths import (
-        API_UVICORN_RESOURCES_PATH, API_UVICORN_CONFIG_PATH, CACHE_RESOURCES_PATH,
+        API_UVICORN_RESOURCES_PATH,
+        API_UVICORN_CONFIG_PATH,
+        CACHE_RESOURCES_PATH,
         PACKAGE_ROOT_PATH,
     )
     from meerschaum.config._patch import apply_patch_to_config
@@ -157,8 +169,6 @@ def _api_start(
     from meerschaum.config.static import STATIC_CONFIG, SERVER_ID
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool
-    import shutil
-    from copy import deepcopy
 
     if action is None:
         action = []
@@ -256,7 +266,6 @@ def _api_start(
     custom_keys = ['mrsm_instance', 'no_dash', 'no_auth', 'private', 'debug', 'production']
 
     ### write config to a temporary file to communicate with uvicorn threads
-    import json, sys
     try:
         if uvicorn_config_path.exists():
             os.remove(uvicorn_config_path)
@@ -275,12 +284,25 @@ def _api_start(
     MRSM_RUNTIME = STATIC_CONFIG['environment']['runtime']
     MRSM_PATCH = STATIC_CONFIG['environment']['patch']
     MRSM_ROOT_DIR = STATIC_CONFIG['environment']['root']
-    env_dict = {
+    env_dict = {}
+    env_dict.update({
         MRSM_SERVER_ID: SERVER_ID,
         MRSM_RUNTIME: 'api',
         MRSM_CONFIG: json.loads(os.environ.get(MRSM_CONFIG, '{}')),
         'FORWARDED_ALLOW_IPS': forwarded_allow_ips,
-    }
+        'TERM': os.environ.get('TERM', 'screen-256color'),
+        'SHELL': os.environ.get('SHELL', '/bin/bash'),
+        'LANG': os.environ.get('LANG', 'C.UTF-8'),
+        'HOME': os.environ.get('HOME', pathlib.Path.home().as_posix()),
+        'PATH': os.environ.get(
+            'PATH',
+            (
+                '/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin:'
+                f'{pathlib.Path.home().as_posix().rstrip("/")}/.local/bin'
+            )
+        ),
+        'HOSTNAME': os.environ.get('HOSTNAME', 'api'),
+    })
     for env_var in get_env_vars():
         if env_var in env_dict:
             continue
@@ -294,10 +316,10 @@ def _api_start(
     env_text = ''
     for key, val in env_dict.items():
         value = str(
-            json.dumps(val)
+            json.dumps(val, default=json_serialize_value)
             if isinstance(val, (dict))
             else val
-        ).replace('\\', '\\\\')
+        ).replace('\\', '\\\\').replace("'", "'\\''")
         env_text += f"{key}='{value}'\n"
     with open(uvicorn_env_path, 'w+', encoding='utf-8') as f:
         if debug:
@@ -329,7 +351,11 @@ def _api_start(
         for key, val in env_dict.items():
             gunicorn_args += [
                 '--env', key + "="
-                + (json.dumps(val) if isinstance(val, (dict, list)) else val)
+                + (
+                    json.dumps(val, default=json_serialize_value)
+                    if isinstance(val, (dict, list))
+                    else val
+                )
             ]
         if workers is not None:
             gunicorn_args += ['--workers', str(workers)]

@@ -32,7 +32,7 @@ class TermPageHandler(tornado_web.RequestHandler):
         return self.render(
             "termpage.html",
             static=self.static_url,
-            ws_url_path=f"/_websocket/{term_name}",
+            ws_url_path=f"/websocket/{term_name}",
         )
 
 

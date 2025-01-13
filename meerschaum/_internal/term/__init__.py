@@ -51,7 +51,7 @@ def get_webterm_app_and_manager(
     term_manager = terminado.NamedTermManager(shell_command=commands)
     handlers = [
         (
-            r"/_websocket/(.+)/?",
+            r"/websocket/(.+)/?",
             CustomTermSocket,
             {'term_manager': term_manager}
         ),
