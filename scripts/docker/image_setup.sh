@@ -250,10 +250,10 @@ set-option -g default-command "python3 -m meerschaum"
 # Initialize TMUX plugin manager (keep this line at the very bottom of tmux.conf)
 run -b '\''/home/'$MRSM_USER'/.tmux/plugins/tpm/tpm'\''
 ' > /home/$MRSM_USER/.tmux.conf
+  chown $MRSM_USER:$MRSM_USER /home/$MRSM_USER/.tmux.conf
 
   sudo -u $MRSM_USER git clone https://github.com/tmux-plugins/tpm /home/$MRSM_USER/.tmux/plugins/tpm
   sudo -u $MRSM_USER /home/$MRSM_USER/.tmux/plugins/tpm/bin/install_plugins
-  sudo -u $MRSM_USER /home/$MRSM_USER/.tmux/plugins/tpm/tpm
 fi
 
 ### Remove apt lists, sudo, and cache.

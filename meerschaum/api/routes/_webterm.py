@@ -76,7 +76,7 @@ async def get_webterm(
         text = response.text
         if request.url.scheme == 'https':
             text = text.replace('ws://', 'wss://')
-        text = text.replace(f'_websocket/{username}', f'_websocket/{session_id}')
+        text = text.replace(f'websocket/{username}', f'websocket/{session_id}')
         return HTMLResponse(
             content=text,
             status_code=response.status_code,
@@ -100,7 +100,7 @@ async def webterm_websocket(websocket: WebSocket, session_id: str):
 
     username = get_username_from_session(session_id)
 
-    ws_url = f"ws://localhost:8765/_websocket/{username or session_id}"
+    ws_url = f"ws://localhost:8765/websocket/{username or session_id}"
     async with websockets.connect(ws_url) as ws:
         async def forward_messages():
             try:

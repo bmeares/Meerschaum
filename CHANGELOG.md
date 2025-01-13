@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.7.9
+### v2.7.9 – v2.7.10
 
 - **Add persistent Webterm sessions.**  
   On the Web Console, the Webterm will attach to a persistent terminal for the current session's user.

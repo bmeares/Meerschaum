@@ -33,7 +33,7 @@ STATIC_CONFIG: Dict[str, Any] = {
             'websocket': '/ws',
             'dash': '/dash',
             'webterm': r'/webterm/{session_id}',
-            'webterm_websocket': r'/_websocket/{session_id}',
+            'webterm_websocket': r'/websocket/{session_id}',
             'info': '/info',
             'healthcheck': '/healthcheck',
         },
