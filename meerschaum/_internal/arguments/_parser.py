@@ -363,6 +363,11 @@ groups['sync'].add_argument(
     help="When verifying, skip chunks with rowcounts greater than the remote's."
 )
 groups['sync'].add_argument(
+    '--check-rowcounts-only', action='store_true', help=(
+        "Only compare row-counts when verifying pipes."
+    ),
+)
+groups['sync'].add_argument(
     '--cache', action='store_true',
     help=(
         "When syncing or viewing a pipe's data, sync to a local database for later analysis."

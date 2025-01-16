@@ -7,6 +7,8 @@ Functions for interacting with the Webterm via the dashboard.
 """
 
 import time
+
+import meerschaum as mrsm
 from meerschaum.api import CHECK_UPDATE, get_api_connector
 from meerschaum.api.dash.sessions import is_session_authenticated, get_username_from_session
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div
@@ -19,7 +21,9 @@ dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHEC
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 
 MAX_WEBTERM_ATTEMPTS: int = 10
-TMUX_IS_AVAILABLE: bool = is_tmux_available()
+TMUX_IS_ENABLED: bool = (
+    is_tmux_available() and mrsm.get_config('system', 'webterm', 'tmux', 'enabled')
+)
 
 _locks = {'webterm_thread': RLock()}
 
@@ -48,10 +52,25 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
                 [
                     html.Div(
                         [
-                            dbc.Button('Refresh', color='black', id='webterm-refresh-button'),
-                            dbc.Button('New Tab', color='black', id='webterm-new-tab-button'),
-                        ],
+                            dbc.Button(
+                                'Refresh',
+                                color='black',
+                                id='webterm-refresh-button',
+                            ),
+                            dbc.Button(
+                                'Full View',
+                                color='black',
+                                id='webterm-fullscreen-button',
+                            ),
+                        ] + [
+                            dbc.Button(
+                                'New Tab',
+                                color='black',
+                                id='webterm-new-tab-button',
+                            ),
+                        ] if TMUX_IS_ENABLED else [],
                         id='webterm-controls-div',
+                        style={'text-align': 'right'},
                     ),
                     html.Iframe(
                         src=f"/webterm/{session_id}",

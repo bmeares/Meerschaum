@@ -53,13 +53,25 @@ This is the current release cycle, so stay tuned for future releases!
   ```
 
 - **Add `--skip-chunks-with-greater-rowcounts` to `verify pipes`.**  
-  The flags `--skip-chunks-with-greater-rowcounts` will compare a chunk's rowcount with the rowcount of the remote table and skip if the chunk is greater than or equal to the remote count. This is only applicable for connectors which implement `remote=True` support for `get_sync_time()`.
+  The flag `--skip-chunks-with-greater-rowcounts` will compare a chunk's rowcount with the rowcount of the remote table and skip if the chunk is greater than or equal to the remote count. This is only applicable for connectors which implement `remote=True` support for `get_sync_time()`.
+
+- **Add `verify rowcounts`.**  
+  The action `verify rowcounts` (same as passing `--check-rowcounts-only` to `verify pipes`) will compare row-counts for a pipe's chunks against remote rowcounts. This is only applicable for connectors which implement `get_pipe_rowcount()` with support for `remote=True`.
 
 - **Add `remote` to `pipe.get_sync_time()`.**  
   For pipes which support it (i.e. the `SQLConnector`), the option `remote` is intended to return the sync time of a pipe's fetch definition, like the option `remote` in `Pipe.get_rowcount()`.
 
 - **Fix memory leak for retrying failed chunks.**  
   Failed chunks were kept in memory and retried later. In resource-intensive syncs with large chunks and high failures, this would result in large objects not being freed and hogging memory. This situation has been fixed.
+
+- **Use the current instance for new tabs in the Webterm.**  
+  Clicking "New Tab" will open a new `tmux` window using the currently selected instance on the Web Console.
+
+- **Add negation to job actions.**  
+  Prefix a job name with an underscore to select all other jobs. This is useful for filtering out noise for `show logs`.
+
+- **Add `Pipe.parent.**  
+  As a quality-of-life improvement, the attribute `Pipe.parent` will return the first member of `Pipe.parents` (if available).
 
 ### v2.7.9 – v2.7.10
 

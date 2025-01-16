@@ -590,7 +590,7 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
 
 
 @property
-def parents(self) -> List[meerschaum.Pipe]:
+def parents(self) -> List[mrsm.Pipe]:
     """
     Return a list of `meerschaum.Pipe` objects to be designated as parents.
     """
@@ -617,7 +617,18 @@ def parents(self) -> List[meerschaum.Pipe]:
 
 
 @property
-def children(self) -> List[meerschaum.Pipe]:
+def parent(self) -> Union[mrsm.Pipe, None]:
+    """
+    Return the first pipe in `self.parents` or `None`.
+    """
+    parents = self.parents
+    if not parents:
+        return None
+    return parents[0]
+
+
+@property
+def children(self) -> List[mrsm.Pipe]:
     """
     Return a list of `meerschaum.Pipe` objects to be designated as children.
     """

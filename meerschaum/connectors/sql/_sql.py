@@ -822,6 +822,7 @@ def to_sql(
 
     bytes_cols = get_bytes_cols(df)
     numeric_cols = get_numeric_cols(df)
+    ### NOTE: This excludes non-numeric serialized Decimals (e.g. SQLite).
     numeric_cols_dtypes = {
         col: typ
         for col, typ in kw.get('dtype', {}).items()
@@ -886,7 +887,11 @@ def to_sql(
             df[col] = df[col].apply(bytes_serializer)
 
     ### Check for numeric columns.
-    for col, (precision, scale) in numeric_cols_precisions_scales.items():
+    for col in numeric_cols:
+        precision, scale = numeric_cols_precisions_scales.get(
+            col,
+            get_numeric_precision_scale(self.flavor)
+        )
         df[col] = df[col].apply(
             functools.partial(
                 serialize_decimal,

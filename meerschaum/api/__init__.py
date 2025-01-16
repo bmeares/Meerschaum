@@ -6,15 +6,12 @@
 Meerschaum API backend. Start an API instance with `start api`.
 """
 from __future__ import annotations
+
 import os
-from meerschaum.utils.typing import Dict, Any, Optional
+from collections import defaultdict
 
-from meerschaum import __version__ as version
-__version__ = version
-__doc__ = """
-The Meerschaum Web API lets you access and control your data over the Internet.
-"""
-
+import meerschaum as mrsm
+from meerschaum.utils.typing import Dict, Any, Optional, PipesDict
 from meerschaum.config import get_config
 from meerschaum.config.static import STATIC_CONFIG, SERVER_ID
 from meerschaum.utils.packages import attempt_import
@@ -23,8 +20,14 @@ from meerschaum.config._paths import API_UVICORN_CONFIG_PATH, API_UVICORN_RESOUR
 from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn, dprint
 from meerschaum.utils.threading import RLock
+from meerschaum.utils.misc import is_pipe_registered
 
-_locks = {'pipes': RLock(), 'connector': RLock(), 'uvicorn_config': RLock()}
+from meerschaum import __version__ as version
+__version__ = version
+__doc__ = """The Meerschaum Web API lets you manage your pipes over the Internet."""
+
+
+_locks = defaultdict(lambda: RLock())
 
 ### Skip verifying packages in the docker image.
 CHECK_UPDATE = os.environ.get(STATIC_CONFIG['environment']['runtime'], None) != 'docker'
@@ -58,6 +61,7 @@ uv = attempt_import('uv', lazy=False, check_update=CHECK_UPDATE)
     venv=None,
 )
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
+from meerschaum.api._exceptions import APIPermissionError
 uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
 
 uvicorn_config = None
@@ -78,13 +82,11 @@ def get_uvicorn_config() -> Dict[str, Any]:
                 with open(uvicorn_config_path, 'r', encoding='utf-8') as f:
                     uvicorn_config = json.load(f)
                 _uvicorn_config = uvicorn_config
-            except Exception as e:
+            except Exception:
                 _uvicorn_config = sys_config.get('uvicorn', None)
 
             if _uvicorn_config is None:
                 _uvicorn_config = {}
-
-            ### Default: main SQL connector
             if 'mrsm_instance' not in _uvicorn_config:
                 _uvicorn_config['mrsm_instance'] = get_config('meerschaum', 'api_instance')
     return _uvicorn_config
@@ -97,19 +99,43 @@ production = get_uvicorn_config().get('production', False)
 _include_dash = (not no_dash)
 
 connector = None
+default_instance_keys = None
+_instance_connectors = defaultdict(lambda: None)
 def get_api_connector(instance_keys: Optional[str] = None):
-    """Create the instance connector."""
-    global connector
-    with _locks['connector']:
-        if connector is None:
-            if instance_keys is None:
-                instance_keys = get_uvicorn_config().get('mrsm_instance', None)
+    """Create the instance connectors."""
+    global default_instance_keys
+    if instance_keys is None:
+        if default_instance_keys is None:
+            default_instance_keys = get_uvicorn_config().get('mrsm_instance', None)
+        instance_keys = default_instance_keys
 
+    allow_multiple_instances = permissions_config.get(
+        'instances', {}
+    ).get('allow_multiple_instances', False)
+    if not allow_multiple_instances and instance_keys != default_instance_keys:
+        raise APIPermissionError(
+            "This API instance does not allow for accessing additional instances."
+        )
+
+    allowed_instance_keys = permissions_config.get(
+        'instance', {}
+    ).get(
+        'allowed_instance_keys',
+        ['*']
+    )
+    if allowed_instance_keys != ['*'] and instance_keys not in allowed_instance_keys:
+        raise APIPermissionError(
+            f"Instance keys '{instance_keys}' not in list of allowed instances."
+        )
+
+    with _locks[f'instance-{instance_keys}']:
+        connector = _instance_connectors[instance_keys]
+        if connector is None:
             from meerschaum.connectors.parse import parse_instance_keys
             connector = parse_instance_keys(instance_keys, debug=debug)
-    if debug:
-        dprint(f"API instance connector: {connector}")
+            _instance_connectors[instance_keys] = connector
     return connector
+
 
 cache_connector = None
 def get_cache_connector(connector_keys: Optional[str] = None):
@@ -146,28 +172,35 @@ def get_cache_connector(connector_keys: Optional[str] = None):
     return cache_connector
 
 
-_pipes = None
-def pipes(refresh=False):
+_instance_pipes = defaultdict(lambda: None)
+def pipes(instance_keys: Optional[str] = None, refresh: bool = False) -> PipesDict:
     """
-    Manage the global pipes dictionary.
+    Manage the global pipes dictionaries.
     """
-    global _pipes
-    with _locks['pipes']:
-        if _pipes is None or refresh:
-            _pipes = _get_pipes(mrsm_instance=get_api_connector())
-    return _pipes
+    instance_keys = str(get_api_connector(instance_keys))
+    with _locks['pipes-' + instance_keys]:
+        pipes = _instance_pipes[instance_keys]
+        if pipes is None or refresh:
+            pipes = _get_pipes(mrsm_instance=instance_keys)
+            _instance_pipes[instance_keys] = pipes
+    return pipes
 
 
-def get_pipe(connector_keys, metric_key, location_key, refresh=False):
+def get_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: Optional[str],
+    instance_keys: Optional[str] = None,
+    refresh: bool = False
+) -> mrsm.Pipe:
     """Index the pipes dictionary or create a new Pipe object."""
-    from meerschaum.utils.misc import is_pipe_registered
-    from meerschaum import Pipe
     if location_key in ('[None]', 'None', 'null'):
         location_key = None
-    p = Pipe(connector_keys, metric_key, location_key, mrsm_instance=get_api_connector())
-    if is_pipe_registered(p, pipes()):
-        return pipes(refresh=refresh)[connector_keys][metric_key][location_key]
-    return p
+    instance_keys = str(get_api_connector(instance_keys))
+    pipe = mrsm.Pipe(connector_keys, metric_key, location_key, mrsm_instance=instance_keys)
+    if is_pipe_registered(pipe, pipes(instance_keys)):
+        return pipes(instance_keys, refresh=refresh)[connector_keys][metric_key][location_key]
+    return pipe
 
 
 app = fastapi.FastAPI(
@@ -182,6 +215,8 @@ app = fastapi.FastAPI(
         'name': 'Apache 2.0',
         'url': 'https://www.apache.org/licenses/LICENSE-2.0.html',
     },
+    docs_url=(None if production else endpoints['docs']),
+    redoc_url=(None if production else endpoints['redoc']),
     open_api_tags=[
         {
             'name': 'Pipes',
@@ -252,7 +287,6 @@ if _include_dash:
     import meerschaum.api.dash
 
 ### Execute the API plugins functions.
-import meerschaum as mrsm
 for module_name, functions_list in _api_plugins.items():
     plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
     plugin = mrsm.Plugin(plugin_name) if plugin_name else None

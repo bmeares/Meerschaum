@@ -280,6 +280,38 @@ def update_content(*args):
     return content, alerts, webterm, webterm_style
 
 
+
+#  @dash_app.callback(
+    #  Output('content-div-left', 'style'),
+    #  Input('webterm-fullscreen-button', 'n_clicks'),
+    #  State('content-div-left', 'style'),
+#  )
+#  def webterm_fullscreen_button_click(
+    #  n_clicks: Optional[int] = None,
+    #  existing_content_left_style: Optional[Dict[str, Any]] = None,
+#  ):
+    #  """
+    #  Toggle visibility for the the lefthand controls div if "Full-screen" is clicked.
+    #  """
+    #  print(f"{existing_content_left_style=}")
+    #  print(f"{n_clicks=}")
+    #  if not n_clicks:
+        #  raise PreventUpdate
+
+
+    #  return {
+        #  **existing_content_left_style,
+        #  **{
+            #  'display': (
+                #  'block'
+                #  if (existing_content_left_style or {}).get('display', None) == 'none'
+                #  else 'none'
+            #  )
+        #  }
+    #  }
+
+
+
 dash_app.clientside_callback(
     """
     function(
@@ -665,7 +697,8 @@ dash_app.clientside_callback(
 
         iframe.contentWindow.postMessage(
             {
-                action: "__TMUX_NEW_WINDOW"
+                action: "__TMUX_NEW_WINDOW",
+                instance: window.instance
             },
             url
         );
@@ -690,6 +723,34 @@ dash_app.clientside_callback(
     Output('mrsm-location', 'href'),
     Input('webterm-refresh-button', 'n_clicks'),
     State('mrsm-location', 'href'),
+)
+
+dash_app.clientside_callback(
+    """
+    function(n_clicks){
+        console.log('fullscreen');
+        if (!n_clicks) { return dash_clientside.no_update; }
+        iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return dash_clientside.no_update; }
+        const leftCol = document.getElementById('content-col-left');
+        const rightCol = document.getElementById('content-col-right');
+        const button = document.getElementById('webterm-fullscreen-button');
+
+        if (leftCol.style.display === 'none') {
+            leftCol.style.display = '';
+            rightCol.className = 'col-6';
+            button.innerHTML = "Full View";
+        } else {
+            leftCol.style.display = 'none';
+            rightCol.className = 'col-12';
+            button.innerHTML = "Side-by-side View";
+        }
+
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('webterm-fullscreen-button', 'n_clicks'),
+    Input('webterm-fullscreen-button', 'n_clicks'),
 )
 
 @dash_app.callback(

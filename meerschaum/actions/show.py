@@ -581,10 +581,10 @@ def _show_jobs(
             from meerschaum.utils.warnings import info
             info('No running or stopped jobs.')
             print(
-                f"    You can start a background job with `-d` or `--daemon`,\n" +
-                "    or run the command `start job` before action commands.\n\n" +
-                "    Examples:\n" +
-                "      - start api -d\n" +
+                "    You can start a background job with `-d` or `--daemon`,\n"
+                "    or run the command `start job` before action commands.\n\n"
+                "    Examples:\n"
+                "      - start api -d\n"
                 "      - start job sync pipes --loop"
             )
         return True, "No jobs to show."
@@ -610,7 +610,7 @@ def _show_logs(
         `show logs --nopretty`
         `show logs myjob myotherjob`
     """
-    import os, pathlib, random, asyncio
+    import asyncio
     from functools import partial
     from datetime import datetime, timezone
     from meerschaum.utils.packages import attempt_import, import_rich
@@ -676,7 +676,7 @@ def _show_logs(
         try:
             line_timestamp = datetime.strptime(date_prefix_str, timestamp_format)
             previous_line_timestamp = line_timestamp
-        except Exception as e:
+        except Exception:
             line_timestamp = None
         if line_timestamp:
             line = line[(len(now_str) + 3):]

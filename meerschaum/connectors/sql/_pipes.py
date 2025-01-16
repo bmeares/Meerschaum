@@ -1838,7 +1838,7 @@ def sync_pipe(
         and primary_key in unseen_df.columns
         and autoincrement
     )
-    stats = {'success': True, 'msg': 'Success'}
+    stats = {'success': True, 'msg': ''}
     if len(unseen_df) > 0:
         with self.engine.connect() as connection:
             with connection.begin():
@@ -1969,12 +1969,16 @@ def sync_pipe(
         if not update_success:
             warn(f"Failed to apply update to {pipe}.")
         stats['success'] = stats['success'] and update_success
-        stats['msg'] = (stats.get('msg', '') + f'\nFailed to apply update to {pipe}.').lstrip()
+        stats['msg'] = (
+            (stats.get('msg', '') + f'\nFailed to apply update to {pipe}.').lstrip()
+            if not update_success
+            else stats.get('msg', '')
+        )
 
     stop = time.perf_counter()
     success = stats['success']
     if not success:
-        return success, stats['msg']
+        return success, stats['msg'] or str(stats)
 
     unseen_count = len(unseen_df.index) if unseen_df is not None else 0
     update_count = len(update_df.index) if update_df is not None else 0

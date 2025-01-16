@@ -24,8 +24,8 @@ a {
 }
 #webterm-iframe {
   width: 102%;
-  height: 85vh !important;
-  max-height: 85vh;
+  height: 83vh !important;
+  max-height: 83vh;
 }
 .codeblock {
   background-color: var(--bs-secondary) !important;

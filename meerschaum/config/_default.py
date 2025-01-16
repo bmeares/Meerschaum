@@ -124,6 +124,10 @@ default_system_config = {
                 'insecure_parent_instance': False,
                 'child_apis': False,
             },
+            'instances': {
+                'allow_multiple_instances': True,
+                'allowed_instance_keys': ['*']
+            },
         },
         'protocol': default_meerschaum_config['connectors']['api']['default']['protocol'],
     },

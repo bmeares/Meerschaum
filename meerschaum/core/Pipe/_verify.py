@@ -24,6 +24,7 @@ def verify(
     workers: Optional[int] = None,
     batchsize: Optional[int] = None,
     skip_chunks_with_greater_rowcounts: bool = False,
+    check_rowcounts_only: bool = False,
     debug: bool = False,
     **kwargs: Any
 ) -> SuccessTuple:
@@ -63,6 +64,9 @@ def verify(
         If `True`, compare the rowcounts for a chunk and skip syncing if the pipe's
         chunk rowcount equals or exceeds the remote's rowcount.
 
+    check_rowcounts_only: bool, default False
+        If `True`, only compare rowcounts and print chunks which are out-of-sync.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -77,6 +81,7 @@ def verify(
     from meerschaum.utils.formatting import make_header
     from meerschaum.utils.misc import interval_str
     workers = self.get_num_workers(workers)
+    check_rowcounts = skip_chunks_with_greater_rowcounts or check_rowcounts_only
 
     ### Skip configured bounding in parameters
     ### if `bounded` is explicitly `False`.
@@ -88,7 +93,7 @@ def verify(
     if bounded is None:
         bounded = bound_time is not None
 
-    if begin is None:
+    if bounded and begin is None:
         begin = (
             bound_time
             if bound_time is not None
@@ -97,7 +102,7 @@ def verify(
         if begin is None:
             remote_oldest_sync_time = self.get_sync_time(newest=False, remote=True, debug=debug)
             begin = remote_oldest_sync_time
-    if end is None:
+    if bounded and end is None:
         end = self.get_sync_time(newest=True, debug=debug)
         if end is None:
             remote_newest_sync_time = self.get_sync_time(newest=True, remote=True, debug=debug)
@@ -110,7 +115,7 @@ def verify(
             )
 
     begin, end = self.parse_date_bounds(begin, end)
-    cannot_determine_bounds = begin is None and end is None
+    cannot_determine_bounds = bounded and begin is None and end is None
 
     if cannot_determine_bounds:
         warn(f"Cannot determine sync bounds for {self}. Syncing instead...", stack=False)
@@ -202,9 +207,9 @@ def verify(
             return chunk_begin_and_end, bounds_success_tuples[chunk_begin_and_end]
 
         chunk_begin, chunk_end = chunk_begin_and_end
-        chunk_is_up_to_date = False
+        do_sync = True
         chunk_success, chunk_msg = False, "Did not sync chunk."
-        if skip_chunks_with_greater_rowcounts:
+        if check_rowcounts:
             existing_rowcount = self.get_rowcount(begin=chunk_begin, end=chunk_end, debug=debug)
             remote_rowcount = self.get_rowcount(
                 begin=chunk_begin,
@@ -212,15 +217,25 @@ def verify(
                 remote=True,
                 debug=debug,
             )
+            checked_rows_str = (
+                f"checked {existing_rowcount} row"
+                + ("s" if existing_rowcount != 1 else '')
+                + f" vs {remote_rowcount} remote"
+            )
             if (
                 existing_rowcount is not None
                 and remote_rowcount is not None
                 and existing_rowcount >= remote_rowcount
             ):
-                chunk_is_up_to_date = True
+                do_sync = False
                 chunk_success, chunk_msg = True, (
                     "Row-count is up-to-date "
-                    f"({existing_rowcount:,} existing vs {remote_rowcount:,} remote)."
+                    f"({checked_rows_str})."
+                )
+            elif check_rowcounts_only:
+                do_sync = False
+                chunk_success, chunk_msg = True, (
+                    f"Row-counts are out-of-sync ({checked_rows_str})."
                 )
 
         chunk_success, chunk_msg = self.sync(
@@ -230,7 +245,7 @@ def verify(
             workers=_workers,
             debug=debug,
             **kwargs
-        ) if not chunk_is_up_to_date else (chunk_success, chunk_msg)
+        ) if do_sync else (chunk_success, chunk_msg)
         chunk_msg = chunk_msg.strip()
         if ' - ' not in chunk_msg:
             chunk_label = f"{chunk_begin} - {chunk_end}"
@@ -279,6 +294,7 @@ def verify(
             msg = get_chunks_success_message(
                 batch_bounds_success_tuples,
                 header=batch_message_header,
+                check_rowcounts_only=check_rowcounts_only,
             )
             if deduplicate:
                 deduplicate_success, deduplicate_msg = self.deduplicate(
@@ -321,8 +337,11 @@ def verify(
 
         if all(retry_bounds_success_bools.values()):
             chunks_message = (
-                get_chunks_success_message(batch_bounds_success_tuples, header=batch_message_header)
-                + f"\nRetried {len(batch_chunk_bounds_to_resync)} chunk" + (
+                get_chunks_success_message(
+                    batch_bounds_success_tuples,
+                    header=batch_message_header,
+                    check_rowcounts_only=check_rowcounts_only,
+                ) + f"\nRetried {len(batch_chunk_bounds_to_resync)} chunk" + (
                     's'
                     if len(batch_chunk_bounds_to_resync) != 1
                     else ''
@@ -343,6 +362,7 @@ def verify(
         batch_chunks_message = get_chunks_success_message(
             batch_bounds_success_tuples,
             header=batch_message_header,
+            check_rowcounts_only=check_rowcounts_only,
         )
         if deduplicate:
             deduplicate_success, deduplicate_msg = self.deduplicate(
@@ -360,7 +380,7 @@ def verify(
     for batch_i, batch in enumerate(batches):
         batch_begin = batch[0][0]
         batch_end = batch[-1][-1]
-        batch_counter_str = f"({(batch_i + 1):,} / {num_batches:,})"
+        batch_counter_str = f"({(batch_i + 1):,}/{num_batches:,})"
         batch_label = f"batch {batch_counter_str}:\n{batch_begin} - {batch_end}"
         retry_failed_batch = True
         try:
@@ -394,6 +414,7 @@ def verify(
     chunks_message = get_chunks_success_message(
         bounds_success_tuples,
         header=message_header,
+        check_rowcounts_only=check_rowcounts_only,
     )
     return True, chunks_message
 
@@ -402,6 +423,7 @@ def verify(
 def get_chunks_success_message(
     chunk_success_tuples: Dict[Tuple[Any, Any], SuccessTuple],
     header: str = '',
+    check_rowcounts_only: bool = False,
 ) -> str:
     """
     Sum together all of the inserts and updates from the chunks.
@@ -430,10 +452,19 @@ def get_chunks_success_message(
     inserts = [stat['inserted'] for stat in chunk_stats]
     updates = [stat['updated'] for stat in chunk_stats]
     upserts = [stat['upserted'] for stat in chunk_stats]
+    checks = [stat['checked'] for stat in chunk_stats]
+    out_of_sync_bounds_messages = {
+        bounds: message
+        for bounds, (success, message) in chunk_success_tuples.items()
+        if 'out-of-sync' in message
+    } if check_rowcounts_only else {}
+
     num_inserted = sum(inserts)
     num_updated = sum(updates)
     num_upserted = sum(upserts)
+    num_checked = sum(checks)
     num_fails = len(fail_chunk_bounds_tuples)
+    num_out_of_sync = len(out_of_sync_bounds_messages)
 
     header = (header + "\n") if header else ""
     stats_msg = items_str(
@@ -441,17 +472,33 @@ def get_chunks_success_message(
             ([f'inserted {num_inserted:,}'] if num_inserted else [])
             + ([f'updated {num_updated:,}'] if num_updated else [])
             + ([f'upserted {num_upserted:,}'] if num_upserted else [])
+            + ([f'checked {num_checked:,}'] if num_checked else [])
         ) or ['synced 0'],
         quotes=False,
         and_=False,
     )
 
     success_msg = (
-        f"Successfully synced {len(chunk_success_tuples):,} chunk"
+        "Successfully "
+        + ('synced' if not check_rowcounts_only else 'checked')
+        + f" {len(chunk_success_tuples):,} chunk"
         + ('s' if len(chunk_success_tuples) != 1 else '')
         + '\n(' + stats_msg
         + ' rows in total).'
     )
+    if check_rowcounts_only:
+        success_msg += (
+            f"\n\nFound {num_out_of_sync} chunk"
+            + ('s' if num_out_of_sync != 1 else '')
+            + ' to be out-of-sync'
+            + ('.' if num_out_of_sync == 0 else ':\n\n  ')
+            + '\n  '.join(
+                [
+                    f'{lbound} - {rbound}'
+                    for lbound, rbound in out_of_sync_bounds_messages
+                ]
+            )
+        )
     fail_msg = (
         ''
         if num_fails == 0

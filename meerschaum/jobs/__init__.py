@@ -150,6 +150,13 @@ def get_filtered_jobs(
         }
 
     jobs_to_return = {}
+    filter_list_without_underscores = [name for name in filter_list if not name.startswith('_')]
+    filter_list_with_underscores = [name for name in filter_list if name.startswith('_')]
+    if (
+        filter_list_without_underscores and not filter_list_with_underscores
+        or filter_list_with_underscores and not filter_list_without_underscores
+    ):
+        pass
     for name in filter_list:
         job = jobs.get(name, None)
         if job is None:
@@ -160,6 +167,14 @@ def get_filtered_jobs(
                 )
             continue
         jobs_to_return[name] = job
+
+    if not jobs_to_return and filter_list_with_underscores:
+        names_to_exclude = [name.lstrip('_') for name in filter_list_with_underscores]
+        return {
+            name: job
+            for name, job in jobs.items()
+            if name not in names_to_exclude
+        }
 
     return jobs_to_return
 

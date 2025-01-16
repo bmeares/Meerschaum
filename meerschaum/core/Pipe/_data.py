@@ -544,11 +544,33 @@ def get_rowcount(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
+    from meerschaum.utils.misc import filter_keywords
 
     begin, end = self.parse_date_bounds(begin, end)
     connector = self.instance_connector if not remote else self.connector
     try:
         with Venv(get_connector_plugin(connector)):
+            if not hasattr(connector, 'get_pipe_rowcount'):
+                warn(
+                    f"Connectors of type '{connector.type}' "
+                    "do not implement `get_pipe_rowcount()`.",
+                    stack=False,
+                )
+                return 0
+            kwargs = filter_keywords(
+                connector.get_pipe_rowcount,
+                begin=begin,
+                end=end,
+                params=params,
+                remote=remote,
+                debug=debug,
+            )
+            if remote and 'remote' not in kwargs:
+                warn(
+                    f"Connectors of type '{connector.type}' do not support remote rowcounts.",
+                    stack=False,
+                )
+                return 0
             rowcount = connector.get_pipe_rowcount(
                 self,
                 begin=begin,

@@ -118,6 +118,7 @@ class Pipe:
         id,
         get_val_column,
         parents,
+        parent,
         children,
         target,
         _target_legacy,

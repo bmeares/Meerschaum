@@ -3,19 +3,19 @@
 # vim:fenc=utf-8
 
 """
-Register new Pipes
+Pydantic model for a pipe's keys.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Any, Dict, Optional
 
-from meerschaum.utils.packages import attempt_import
-pydantic = attempt_import('pydantic', warn=False)
+import meerschaum as mrsm
+from meerschaum.utils.typing import Optional
+
+pydantic = mrsm.attempt_import('pydantic', warn=False, lazy=False)
+
 
 class MetaPipe(pydantic.BaseModel):
-    connector_keys: str ### e.g. sql:main
+    connector_keys: str
     metric_key: str
     location_key: Optional[str] = None
-    instance: Optional[str] = None
-
-
+    instance_keys: Optional[str] = None

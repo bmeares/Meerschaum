@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import io
 import json
-from decimal import Decimal
-import datetime
+from datetime import datetime, timedelta
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Any, Optional, Dict, Union, List
@@ -27,20 +26,15 @@ from meerschaum.api import (
     manager,
     debug,
     no_auth,
-    private,
 )
-from meerschaum import Pipe
-from meerschaum.api.models import MetaPipe
-from meerschaum.utils.packages import attempt_import, import_pandas
-from meerschaum.utils.dataframe import get_numeric_cols, to_json, parse_df_datetimes
-from meerschaum.utils.dtypes import are_dtypes_equal
+from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.dataframe import to_json
 from meerschaum.utils.misc import (
     is_pipe_registered,
-    round_time,
     is_int,
     replace_pipes_in_dict,
 )
-import meerschaum.core.User
+from meerschaum.connectors.sql.tables import get_tables
 
 fastapi_responses = attempt_import('fastapi.responses', lazy=False)
 StreamingResponse = fastapi_responses.StreamingResponse
@@ -54,7 +48,8 @@ def register_pipe(
     connector_keys: str,
     metric_key: str,
     location_key: str,
-    parameters: dict,
+    instance_keys: Optional[str] = None,
+    parameters: Optional[Dict[str, Any]] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -62,25 +57,24 @@ def register_pipe(
     """
     Register a new pipe.
     """
-    from meerschaum.config import get_config
-    allow_pipes = get_config('system', 'api', 'permissions', 'registration', 'pipes', patch=True)
+    allow_pipes = mrsm.get_config('system', 'api', 'permissions', 'registration', 'pipes')
     if not allow_pipes:
         return False, (
-            "The administrator for this server has not allowed pipe registration.\n\n" +
-            "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config system` and search for 'permissions'." +
+            "The administrator for this server has not allowed pipe registration.\n\n"
+            "Please contact the system administrator, or if you are running this server, "
+            "open the configuration file with `edit config system` and search for 'permissions'."
             " Under the keys `api:permissions:registration`, " +
             "you can toggle various registration types."
         )
-    pipe_object = get_pipe(connector_keys, metric_key, location_key)
-    if is_pipe_registered(pipe_object, pipes(refresh=True)):
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if is_pipe_registered(pipe, pipes(instance_keys, refresh=True)):
         raise fastapi.HTTPException(
-            status_code=409, detail=f"{pipe_object} already registered."
+            status_code=409, detail=f"{pipe} already registered."
         )
-    pipe_object.parameters = parameters
-    results = get_api_connector().register_pipe(pipe_object, debug=debug)
-    pipes(refresh=True)
-
+    if parameters:
+        pipe.parameters = parameters
+    results = get_api_connector(instance_keys).register_pipe(pipe, debug=debug)
+    pipes(instance_keys, refresh=True)
     return results
 
 
@@ -89,6 +83,7 @@ def delete_pipe(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -96,52 +91,50 @@ def delete_pipe(
     """
     Delete a Pipe (without dropping its table).
     """
-    from meerschaum.config import get_config
-    allow_actions = get_config('system', 'api', 'permissions', 'actions', 'non_admin')
+    allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
     if not allow_actions:
         return False, (
-            "The administrator for this server has not allowed actions.\n\n" +
-            "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config system` and search for 'permissions'." +
-            " Under the keys `api:permissions:actions`, " +
+            "The administrator for this server has not allowed actions.\n\n"
+            "Please contact the system administrator, or if you are running this server, "
+            "open the configuration file with `edit config system` and search for 'permissions'."
+            " Under the keys `api:permissions:actions`, "
             "you can toggle non-admin actions."
         )
-    pipe = get_pipe(connector_keys, metric_key, location_key)
-    if not is_pipe_registered(pipe, pipes(refresh=True)):
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if not is_pipe_registered(pipe, pipes(instance_keys, refresh=True)):
         raise fastapi.HTTPException(
             status_code=409, detail=f"{pipe} is not registered."
         )
-    results = get_api_connector().delete_pipe(pipe, debug=debug)
-    pipes(refresh=True)
-
+    results = get_api_connector(instance_keys).delete_pipe(pipe, debug=debug)
+    pipes(instance_keys, refresh=True)
     return results
 
 
 @app.delete(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/drop', tags=['Pipes'])
 def drop_pipe(
-        connector_keys: str,
-        metric_key: str,
-        location_key: str,
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ):
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+):
     """
-    Dropping a pipes' table (without deleting its registration).
+    Drop a pipes' underlying target table.
     """
-    from meerschaum.config import get_config
-    allow_actions = get_config('system', 'api', 'permissions', 'actions', 'non_admin')
+    allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
     if not allow_actions:
         return False, (
-            "The administrator for this server has not allowed actions.\n\n" +
-            "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config system` and search for 'permissions'." +
+            "The administrator for this server has not allowed actions.\n\n"
+            "Please contact the system administrator, or if you are running this server, "
+            "open the configuration file with `edit config system` and search for 'permissions'."
             " Under the keys `api:permissions:actions`, " +
             "you can toggle non-admin actions."
         )
-    pipe_object = get_pipe(connector_keys, metric_key, location_key)
-    results = get_api_connector().drop_pipe(pipe_object, debug=debug)
-    pipes(refresh=True)
+    pipe_object = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    results = get_api_connector(instance_keys=instance_keys).drop_pipe(pipe_object, debug=debug)
+    pipes(instance_keys, refresh=True)
     return results
 
 
@@ -152,33 +145,32 @@ def edit_pipe(
     metric_key: str,
     location_key: str,
     parameters: dict,
+    instance_keys: Optional[str] = None,
     patch: bool = False,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
 ):
     """
-    Edit an existing pipe.
+    Edit an existing pipe's parameters.
     """
-    from meerschaum.config import get_config
-    allow_pipes = get_config('system', 'api', 'permissions', 'actions', 'non_admin')
-    if not allow_pipes:
+    allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
+    if not allow_actions:
         return False, (
-            "The administrator for this server has not allowed actions.\n\n" +
-            "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config system` and search for 'permissions'." +
-            " Under the keys `api:permissions:actions`, " +
+            "The administrator for this server has not allowed actions.\n\n"
+            "Please contact the system administrator, or if you are running this server, "
+            "open the configuration file with `edit config system` and search for 'permissions'."
+            " Under the keys `api:permissions:actions`, "
             "you can toggle non-admin actions."
         )
-    pipe_object = get_pipe(connector_keys, metric_key, location_key)
-    if not is_pipe_registered(pipe_object, pipes(refresh=True)):
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if not is_pipe_registered(pipe, pipes(instance_keys, refresh=True)):
         raise fastapi.HTTPException(
-            status_code=409, detail=f"{pipe_object} is not registered."
+            status_code=409, detail=f"{pipe} is not registered."
         )
-    pipe_object.parameters = parameters
-    results = get_api_connector().edit_pipe(pipe_object, patch=patch, debug=debug)
-    pipes(refresh=True)
-
+    pipe.parameters = parameters
+    results = get_api_connector(instance_keys).edit_pipe(pipe, patch=patch, debug=debug)
+    pipes(instance_keys, refresh=True)
     return results
 
 
@@ -187,6 +179,7 @@ async def fetch_pipes_keys(
     connector_keys: str = "[]",
     metric_keys: str = "[]",
     location_keys: str = "[]",
+    instance_keys: Optional[str] = None,
     tags: str = "[]",
     params: str = "{}",
     curr_user = (
@@ -194,14 +187,15 @@ async def fetch_pipes_keys(
     ),
 ):
     """
-    Get a list of tuples of all registered Pipes' keys.
+    Get a list of tuples of all registered pipes' keys.
     """
-    keys = get_api_connector().fetch_pipes_keys(
-        connector_keys = json.loads(connector_keys),
-        metric_keys = json.loads(metric_keys),
-        location_keys = json.loads(location_keys),
-        tags = json.loads(tags),
-        params = json.loads(params),
+    keys = get_api_connector(instance_keys).fetch_pipes_keys(
+        connector_keys=json.loads(connector_keys),
+        metric_keys=json.loads(metric_keys),
+        location_keys=json.loads(location_keys),
+        mrsm_instance=instance_keys,
+        tags=json.loads(tags),
+        params=json.loads(params),
     )
     return keys
 
@@ -211,6 +205,7 @@ async def get_pipes(
     connector_keys: str = "",
     metric_keys: str = "",
     location_keys: str = "",
+    instance_keys: Optional[str] = None,
     curr_user=(
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -219,18 +214,20 @@ async def get_pipes(
     """
     Get all registered Pipes with metadata, excluding parameters.
     """
-    kw = {'debug' : debug, 'mrsm_instance' : get_api_connector()}
+    kw = {'debug': debug, 'mrsm_instance': get_api_connector(instance_keys)}
     if connector_keys != "":
         kw['connector_keys'] = connector_keys
     if metric_keys != "":
         kw['metric_keys'] = metric_keys
     if location_keys != "":
         kw['location_keys'] = location_keys
-    return replace_pipes_in_dict(_get_pipes(**kw), str)
+    return replace_pipes_in_dict(_get_pipes(**kw), lambda p: p.attributes)
+
 
 @app.get(pipes_endpoint + '/{connector_keys}', tags=['Pipes'])
 async def get_pipes_by_connector(
     connector_keys: str,
+    instance_keys: Optional[str] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -238,40 +235,39 @@ async def get_pipes_by_connector(
     """
     Get all registered Pipes by connector_keys with metadata, excluding parameters.
     """
-    from meerschaum.utils.misc import replace_pipes_in_dict
-    if connector_keys not in pipes():
+    if connector_keys not in pipes(instance_keys):
         raise fastapi.HTTPException(
-            status_code=404, detail=f"connector_keys '{connector_keys}' not found."
+            status_code=404, detail=f"Connector '{connector_keys}' not found."
         )
-    return replace_pipes_in_dict(pipes()[connector_keys], str)
+    return replace_pipes_in_dict(pipes(instance_keys)[connector_keys], lambda p: p.attributes)
+
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}', tags=['Pipes'])
 async def get_pipes_by_connector_and_metric(
     connector_keys: str,
     metric_key: str,
-    parent: bool = False,
+    instance_keys: Optional[str] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
 ):
     """
     Get all registered Pipes by connector_keys and metric_key with metadata, excluding parameters.
-
-    Parameters
-    ----------
-    parent: bool, default False
-        Return the parent Pipe (`location_key` is `None`)
     """
-    from meerschaum.utils.misc import replace_pipes_in_dict
-    if connector_keys not in pipes():
+    if connector_keys not in pipes(instance_keys):
         raise fastapi.HTTPException(
-            status_code=404, detail=f"connector_keys '{connector_keys}' not found."
+            status_code=404,
+            detail=f"Connector '{connector_keys}' not found.",
         )
-    if metric_key not in pipes()[connector_keys]:
-        raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
-    if parent:
-        return pipes()[connector_keys][metric_key][None]
-    return replace_pipes_in_dict(pipes()[connector_keys][metric_key], str)
+    if metric_key not in pipes(instance_keys)[connector_keys]:
+        raise fastapi.HTTPException(
+            status_code=404,
+            detail=f"Metric '{metric_key}' not found.",
+        )
+    return replace_pipes_in_dict(
+        pipes(instance_keys)[connector_keys][metric_key],
+        lambda p: p.attributes
+    )
 
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}', tags=['Pipes'])
@@ -279,6 +275,7 @@ async def get_pipes_by_connector_and_metric_and_location(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -286,20 +283,22 @@ async def get_pipes_by_connector_and_metric_and_location(
     """
     Get a specific Pipe with metadata, excluding parameters.
     """
-    if connector_keys not in pipes():
+    if connector_keys not in pipes(instance_keys):
         raise fastapi.HTTPException(
-            status_code=404, detail=f"connector_keys '{connector_keys}' not found."
+            status_code=404,
+            detail=f"Connector '{connector_keys}' not found.",
         )
-    if metric_key not in pipes()[connector_keys]:
-        raise fastapi.HTTPException(status_code=404, detail=f"metric_key '{metric_key}' not found.")
+    if metric_key not in pipes(instance_keys)[connector_keys]:
+        raise fastapi.HTTPException(status_code=404, detail=f"Metric '{metric_key}' not found.")
     if location_key in ('[None]', 'None', 'null'):
         location_key = None
-    if location_key not in pipes()[connector_keys][metric_key]:
+    if location_key not in pipes(instance_keys)[connector_keys][metric_key]:
         raise fastapi.HTTPException(
-            status_code=404, detail=f"location_key '{location_key}' not found."
+            status_code=404,
+            detail=f"location_key '{location_key}' not found."
         )
 
-    return str(pipes()[connector_keys][metric_key][location_key])
+    return str(pipes(instance_keys)[connector_keys][metric_key][location_key])
 
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time', tags=['Pipes'])
@@ -309,6 +308,7 @@ def get_sync_time(
     location_key: str,
     params: Optional[Dict[str, Any]] = None,
     newest: bool = True,
+    remote: bool = False,
     round_down: bool = True,
     debug: bool = False,
     curr_user = (
@@ -317,7 +317,7 @@ def get_sync_time(
 ) -> Union[str, int, None]:
     """
     Get a Pipe's latest datetime value.
-    See `meerschaum.Pipe.get_sync_time`.
+    See [`meerschaum.Pipe.get_sync_time`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_sync_time).
     """
     if location_key == '[None]':
         location_key = None
@@ -328,7 +328,7 @@ def get_sync_time(
         debug = debug,
         round_down = round_down,
     )
-    if isinstance(sync_time, datetime.datetime):
+    if isinstance(sync_time, datetime):
         sync_time = sync_time.isoformat()
     return sync_time
 
@@ -351,26 +351,26 @@ def sync_pipe(
 ) -> List[Union[bool, str]]:
     """
     Add data to an existing Pipe.
-    See `meerschaum.Pipe.sync`.
+    See [`meerschaum.Pipe.sync`](https://docs.meerschaum.io/meerschaum.html#Pipe.sync).
     """
     if data is None:
         data = {}
-    p = get_pipe(connector_keys, metric_key, location_key)
-    if p.target in ('users', 'plugins', 'pipes'):
+    pipe = get_pipe(connector_keys, metric_key, location_key)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes'):
         raise fastapi.HTTPException(
             status_code=409,
-            detail=f"Cannot sync data to protected table '{p.target}'.",
+            detail=f"Cannot sync data to protected table '{pipe.target}'.",
         )
 
-    if not p.columns and columns is not None:
-        p.columns = json.loads(columns)
-    if not p.columns and not is_pipe_registered(p, pipes(refresh=True)):
+    if not pipe.columns and columns is not None:
+        pipe.columns = json.loads(columns)
+    if not pipe.columns and not is_pipe_registered(pipe, pipes(refresh=True)):
         raise fastapi.HTTPException(
             status_code=409,
             detail="Pipe must be registered with index columns specified."
         )
 
-    result = list(p.sync(
+    result = list(pipe.sync(
         data,
         debug=debug,
         check_existing=check_existing,
@@ -386,6 +386,7 @@ def get_pipe_data(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     select_columns: Optional[str] = None,
     omit_columns: Optional[str] = None,
     begin: Union[str, int, None] = None,
@@ -447,8 +448,8 @@ def get_pipe_data(
             detail="Omitted columns must be a JSON-encoded list.",
         )
 
-    pipe = get_pipe(connector_keys, metric_key, location_key)
-    if not is_pipe_registered(pipe, pipes(refresh=True)):
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if not is_pipe_registered(pipe, pipes(instance_keys, refresh=True)):
         raise fastapi.HTTPException(
             status_code=409,
             detail="Pipe must be registered with the datetime column specified."
@@ -474,12 +475,6 @@ def get_pipe_data(
             detail="Could not fetch data with the given parameters.",
         )
 
-    ### NaN cannot be JSON-serialized.
-    df = df.fillna(pd.NA)
-    numeric_cols = get_numeric_cols(df)
-    for col in numeric_cols:
-        df[col] = df[col].apply(lambda x: f'{x:f}' if isinstance(x, Decimal) else x)
-
     json_content = to_json(df)
     return fastapi.Response(
         json_content,
@@ -492,6 +487,7 @@ def get_pipe_csv(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     begin: Union[str, int, None] = None,
     end: Union[str, int, None] = None,
     params: Optional[str] = None,
@@ -504,12 +500,14 @@ def get_pipe_csv(
     """
     if begin is not None:
         begin = (
-            int(begin) if is_int(begin)
+            int(begin)
+            if is_int(begin)
             else dateutil_parser.parse(begin)
         )
     if end is not None:
         end = (
-            int(end) if is_int(end)
+            int(end)
+            if is_int(end)
             else dateutil_parser.parse(end)
         )
 
@@ -520,7 +518,7 @@ def get_pipe_csv(
         import json
         try:
             _params = json.loads(params)
-        except Exception as e:
+        except Exception:
             _params = None
 
     if not isinstance(_params, dict):
@@ -529,27 +527,33 @@ def get_pipe_csv(
             detail="Params must be a valid JSON-encoded dictionary.",
         )
 
-    p = get_pipe(connector_keys, metric_key, location_key)
-    if not is_pipe_registered(p, pipes(refresh=True)):
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if not is_pipe_registered(pipe, pipes(instance_keys, refresh=True)):
         raise fastapi.HTTPException(
-            status_code = 409,
-            detail = "Pipe must be registered with the datetime column specified."
+            status_code=409,
+            detail="Pipe must be registered with the datetime column specified."
         )
 
-    dt_col = p.columns.get('datetime', None)
+    dt_col = pipe.columns.get('datetime', None)
     if dt_col:
         if begin is None:
-            begin = p.get_sync_time(round_down=False, newest=False)
+            begin = pipe.get_sync_time(round_down=False, newest=False)
         if end is None:
-            end = p.get_sync_time(round_down=False, newest=True)
+            end = pipe.get_sync_time(round_down=False, newest=True)
+            if end is not None:
+                end += (
+                    1
+                    if is_int(str(end))
+                    else timedelta(minutes=1)
+                )
 
     bounds_text = (
         ('-' + str(begin) + '-' + str(end))
         if begin is not None and end is not None
         else ''
     )
-    filename = p.target + bounds_text + '.csv'
-    df = p.get_data(begin=begin, end=end, params=_params, debug=debug)
+    filename = pipe.target + bounds_text + '.csv'
+    df = pipe.get_data(begin=begin, end=end, params=_params, debug=debug)
     stream = io.StringIO()
     df.to_csv(stream, index=False)
     response = StreamingResponse(iter([stream.getvalue()]), media_type='text/csv')
@@ -562,6 +566,7 @@ def get_pipe_id(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -569,7 +574,7 @@ def get_pipe_id(
     """
     Get a Pipe's ID.
     """
-    pipe_id = get_pipe(connector_keys, metric_key, location_key).id
+    pipe_id = get_pipe(connector_keys, metric_key, location_key, instance_keys).get_id(debug=debug)
     if pipe_id is None:
         raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
     return pipe_id
@@ -577,18 +582,25 @@ def get_pipe_id(
 
 @app.get(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes',
-    tags = ['Pipes']
+    tags=['Pipes']
 )
 def get_pipe_attributes(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     curr_user=(
         fastapi.Depends(manager) if not no_auth else None
     ),
 ) -> Dict[str, Any]:
     """Get a Pipe's attributes."""
-    return get_pipe(connector_keys, metric_key, location_key, refresh=True).attributes
+    return get_pipe(
+        connector_keys,
+        metric_key,
+        location_key,
+        instance_keys,
+        refresh=True,
+    ).attributes
 
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists', tags=['Pipes'])
@@ -596,24 +608,28 @@ def get_pipe_exists(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
 ) -> bool:
     """Determine whether a Pipe exists."""
-    return get_pipe(connector_keys, metric_key, location_key).exists()
+    return get_pipe(connector_keys, metric_key, location_key, instance_keys).exists(debug=debug)
 
 
 @app.post(endpoints['metadata'], tags=['Pipes'])
 def create_metadata(
+    instance_keys: Optional[str] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
 ) -> bool:
-    """Create Pipe metadata tables"""
-    from meerschaum.connectors.sql.tables import get_tables
+    """Create pipe instance metadata tables."""
+    conn = get_api_connector(instance_keys)
+    if conn.type not in ('sql', 'api'):
+        return False
     try:
-        tables = get_tables(mrsm_instance=get_api_connector(), debug=debug)
+        _ = get_tables(mrsm_instance=conn, debug=debug)
     except Exception as e:
         raise fastapi.HTTPException(status_code=500, detail=str(e))
     return True
@@ -624,24 +640,44 @@ def get_pipe_rowcount(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     begin: Union[str, int, None] = None,
     end: Union[str, int, None] = None,
     params: Optional[Dict[str, Any]] = None,
+    remote: bool = False,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
 ) -> int:
     """
     Return a pipe's rowcount.
+
+    Parameters
+    ----------
+    begin: Union[str, int, None], default None
+        If provided, only count rows newer than or equal to `begin`.
+        
+    end: Union[str, int, None], defaut None
+        If provided, only count rows older than `end`.
+
+    params: Optional[Dict[str, Any]], default None
+        If provided, only count rows which match the provided `params` dictionary.
+
+    remote: bool, default False
+        If `True`, return the rowcount for the fetch definition instead of the target table.
+
+    Returns
+    -------
     """
     if is_int(begin):
         begin = int(begin)
     if is_int(end):
         end = int(end)
-    return get_pipe(connector_keys, metric_key, location_key).get_rowcount(
+    return get_pipe(connector_keys, metric_key, location_key, instance_keys).get_rowcount(
         begin=begin,
         end=end,
         params=params,
+        remote=remote,
         debug=debug,
     )
 
@@ -654,22 +690,24 @@ def get_pipe_columns_types(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     curr_user=(
         fastapi.Depends(manager) if not no_auth else None
     ),
 ) -> Dict[str, str]:
     """
     Return a dictionary of column names and types.
+    See [`Pipe.dtypes`](https://meerschaum.io/reference/pipes/parameters/#dtypes) for supported types.
 
-    ```
+    ```json
     {
         "dt": "datetime",
         "id": "int",
-        "val": "float",
+        "val": "float"
     }
     ```
     """
-    return get_pipe(connector_keys, metric_key, location_key).dtypes
+    return get_pipe(connector_keys, metric_key, location_key, instance_keys).dtypes
 
 
 @app.get(
@@ -680,6 +718,7 @@ def get_pipe_columns_indices(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     curr_user=(
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -687,7 +726,12 @@ def get_pipe_columns_indices(
     """
     Return a dictionary of column names and related indices.
     """
-    return get_pipe(connector_keys, metric_key, location_key).get_columns_indices()
+    return get_pipe(
+        connector_keys,
+        metric_key,
+        location_key,
+        instance_keys,
+    ).get_columns_indices(debug=debug)
 
 
 @app.get(
@@ -698,6 +742,7 @@ def get_pipe_index_names(
     connector_keys: str,
     metric_key: str,
     location_key: str,
+    instance_keys: Optional[str] = None,
     curr_user=(
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -705,4 +750,9 @@ def get_pipe_index_names(
     """
     Return a dictionary of index keys and index names.
     """
-    return get_pipe(connector_keys, metric_key, location_key).get_indices()
+    return get_pipe(
+        connector_keys,
+        metric_key,
+        location_key,
+        instance_keys,
+    ).get_indices(debug=debug)

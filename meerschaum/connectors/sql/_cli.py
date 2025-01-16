@@ -109,13 +109,21 @@ def _cli_exit(
     ### and because `main.cli()` is not defined.
     launch_cli = f"cli_main.cli(['{cli_arg_str}'])"
     if self.flavor == 'mssql':
+        attrs = self.parse_uri(self.URI)
+        host = attrs.get('host', None)
+        port = attrs.get('port', None)
+        database = attrs.get('database', None)
+        username = attrs.get('username', None)
+        password = attrs.get('password', None)
+        if not host or not port or not database:
+            raise ValueError(f"Cannot determine attributes for '{self}'.")
         launch_cli = (
             "mssqlclioptionsparser, mssql_cli = attempt_import("
             + "'mssqlcli.mssqlclioptionsparser', 'mssqlcli.mssql_cli', lazy=False)\n"
             + "ms_parser = mssqlclioptionsparser.create_parser()\n"
-            + f"ms_options = ms_parser.parse_args(['--server', 'tcp:{self.host},{self.port}', "
-            + f"'--database', '{self.database}', "
-            + f"'--username', '{self.username}', '--password', '{self.password}'])\n"
+            + f"ms_options = ms_parser.parse_args(['--server', 'tcp:{host},{port}', "
+            + f"'--database', '{database}', "
+            + f"'--username', '{username}', '--password', '{password}'])\n"
             + "ms_object = mssql_cli.MssqlCli(ms_options)\n"
             + "try:\n"
             + "    ms_object.connect_to_database()\n"

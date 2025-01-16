@@ -36,6 +36,8 @@ STATIC_CONFIG: Dict[str, Any] = {
             'webterm_websocket': r'/websocket/{session_id}',
             'info': '/info',
             'healthcheck': '/healthcheck',
+            'docs': '/docs',
+            'redoc': '/redoc',
         },
         'oauth': {
             'token_expires_minutes': 720,
