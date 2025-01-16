@@ -193,7 +193,6 @@ async def fetch_pipes_keys(
         connector_keys=json.loads(connector_keys),
         metric_keys=json.loads(metric_keys),
         location_keys=json.loads(location_keys),
-        mrsm_instance=instance_keys,
         tags=json.loads(tags),
         params=json.loads(params),
     )
