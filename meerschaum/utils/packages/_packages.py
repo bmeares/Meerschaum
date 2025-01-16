@@ -150,7 +150,7 @@ packages['sql'].update(packages['core'])
 packages['dash'] = {
     'flask_compress'                 : 'Flask-Compress>=1.10.1',
     'dash'                           : 'dash>=2.6.2',
-    'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.2.1',
+    'dash_bootstrap_components'      : 'dash-bootstrap-components<1.7.0',
     'dash_ace'                       : 'dash-ace>=0.2.1',
     'dash_extensions'                : 'dash-extensions>=1.0.4',
     'dash_daq'                       : 'dash-daq>=0.5.0',
