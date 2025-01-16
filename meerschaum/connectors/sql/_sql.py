@@ -773,7 +773,6 @@ def to_sql(
     """
     import time
     import json
-    from decimal import Decimal
     from datetime import timedelta
     from meerschaum.utils.warnings import error, warn
     import warnings
@@ -833,6 +832,27 @@ def to_sql(
         
     }
     numeric_cols.extend([col for col in numeric_cols_dtypes if col not in numeric_cols])
+    numeric_cols_precisions_scales = {
+        col: (
+            (typ.precision, typ.scale)
+            if hasattr(typ, 'precision')
+            else get_numeric_precision_scale(self.flavor)
+        )
+        for col, typ in numeric_cols_dtypes.items()
+    }
+    cols_pd_types = {
+        col: get_pd_type_from_db_type(str(typ))
+        for col, typ in kw.get('dtype', {}).items()
+    }
+    cols_pd_types.update({
+        col: f'numeric[{precision},{scale}]'
+        for col, (precision, scale) in numeric_cols_precisions_scales.items()
+        if precision and scale
+    })
+    cols_db_types = {
+        col: get_db_type_from_pd_type(typ, flavor=self.flavor)
+        for col, typ in cols_pd_types.items()
+    }
 
     enable_bulk_insert = mrsm.get_config(
         'system', 'connectors', 'sql', 'bulk_insert'
@@ -844,7 +864,7 @@ def to_sql(
     if method == "":
         if enable_bulk_insert:
             method = (
-                functools.partial(mssql_insert_json, debug=debug)
+                functools.partial(mssql_insert_json, cols_types=cols_db_types, debug=debug)
                 if self.flavor == 'mssql'
                 else functools.partial(psql_insert_copy, debug=debug)
             )
@@ -866,15 +886,7 @@ def to_sql(
             df[col] = df[col].apply(bytes_serializer)
 
     ### Check for numeric columns.
-    for col in numeric_cols:
-        typ = numeric_cols_dtypes.get(col, None)
-
-        precision, scale = (
-            (typ.precision, typ.scale)
-            if hasattr(typ, 'precision')
-            else get_numeric_precision_scale(self.flavor)
-        )
-
+    for col, (precision, scale) in numeric_cols_precisions_scales.items():
         df[col] = df[col].apply(
             functools.partial(
                 serialize_decimal,

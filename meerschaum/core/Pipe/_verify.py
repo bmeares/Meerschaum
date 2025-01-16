@@ -22,6 +22,8 @@ def verify(
     bounded: Optional[bool] = None,
     deduplicate: bool = False,
     workers: Optional[int] = None,
+    batchsize: Optional[int] = None,
+    skip_chunks_with_greater_rowcounts: bool = False,
     debug: bool = False,
     **kwargs: Any
 ) -> SuccessTuple:
@@ -53,6 +55,14 @@ def verify(
         If provided, limit the verification to this many threads.
         Use a value of `1` to sync chunks in series.
 
+    batchsize: Optional[int], default None
+        If provided, sync this many chunks in parallel.
+        Defaults to `Pipe.get_num_workers()`.
+
+    skip_chunks_with_greater_rowcounts: bool, default False
+        If `True`, compare the rowcounts for a chunk and skip syncing if the pipe's
+        chunk rowcount equals or exceeds the remote's rowcount.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -64,6 +74,7 @@ def verify(
     A SuccessTuple indicating whether the pipe was successfully resynced.
     """
     from meerschaum.utils.pool import get_pool
+    from meerschaum.utils.formatting import make_header
     from meerschaum.utils.misc import interval_str
     workers = self.get_num_workers(workers)
 
@@ -77,27 +88,32 @@ def verify(
     if bounded is None:
         bounded = bound_time is not None
 
-    if bounded and begin is None:
+    if begin is None:
         begin = (
             bound_time
             if bound_time is not None
             else self.get_sync_time(newest=False, debug=debug)
         )
-    if bounded and end is None:
+        if begin is None:
+            remote_oldest_sync_time = self.get_sync_time(newest=False, remote=True, debug=debug)
+            begin = remote_oldest_sync_time
+    if end is None:
         end = self.get_sync_time(newest=True, debug=debug)
+        if end is None:
+            remote_newest_sync_time = self.get_sync_time(newest=True, remote=True, debug=debug)
+            end = remote_newest_sync_time
+        if end is not None:
+            end += (
+                timedelta(minutes=1)
+                if hasattr(end, 'tzinfo')
+                else 1
+            )
 
     begin, end = self.parse_date_bounds(begin, end)
-
-    if bounded and end is not None:
-        end += (
-            timedelta(minutes=1)
-            if isinstance(end, datetime)
-            else 1
-        )
-
-    cannot_determine_bounds = not self.exists(debug=debug)
+    cannot_determine_bounds = begin is None and end is None
 
     if cannot_determine_bounds:
+        warn(f"Cannot determine sync bounds for {self}. Syncing instead...", stack=False)
         sync_success, sync_msg = self.sync(
             begin=begin,
             end=end,
@@ -160,16 +176,15 @@ def verify(
             else chunk_bounds[-1][0]
         )
     )
+    message_header = f"{begin_to_print} - {end_to_print}"
 
     info(
         f"Verifying {self}:\n    Syncing {len(chunk_bounds)} chunk"
         + ('s' if len(chunk_bounds) != 1 else '')
         + f" ({'un' if not bounded else ''}bounded)"
         + f" of size '{interval_str(chunk_interval)}'"
-        + f" between '{begin_to_print}' and '{end_to_print}'."
+        + f" between '{begin_to_print}' and '{end_to_print}'.\n"
     )
-
-    pool = get_pool(workers=workers)
 
     ### Dictionary of the form bounds -> success_tuple, e.g.:
     ### {
@@ -180,48 +195,155 @@ def verify(
         chunk_begin_and_end: Tuple[
             Union[int, datetime],
             Union[int, datetime]
-        ]
+        ],
+        _workers: Optional[int] = 1,
     ):
         if chunk_begin_and_end in bounds_success_tuples:
             return chunk_begin_and_end, bounds_success_tuples[chunk_begin_and_end]
 
         chunk_begin, chunk_end = chunk_begin_and_end
+        chunk_is_up_to_date = False
+        chunk_success, chunk_msg = False, "Did not sync chunk."
+        if skip_chunks_with_greater_rowcounts:
+            existing_rowcount = self.get_rowcount(begin=chunk_begin, end=chunk_end, debug=debug)
+            remote_rowcount = self.get_rowcount(
+                begin=chunk_begin,
+                end=chunk_end,
+                remote=True,
+                debug=debug,
+            )
+            if (
+                existing_rowcount is not None
+                and remote_rowcount is not None
+                and existing_rowcount >= remote_rowcount
+            ):
+                chunk_is_up_to_date = True
+                chunk_success, chunk_msg = True, (
+                    "Row-count is up-to-date "
+                    f"({existing_rowcount:,} existing vs {remote_rowcount:,} remote)."
+                )
+
         chunk_success, chunk_msg = self.sync(
             begin=chunk_begin,
             end=chunk_end,
             params=params,
-            workers=1,
+            workers=_workers,
             debug=debug,
             **kwargs
-        )
+        ) if not chunk_is_up_to_date else (chunk_success, chunk_msg)
         chunk_msg = chunk_msg.strip()
         if ' - ' not in chunk_msg:
             chunk_label = f"{chunk_begin} - {chunk_end}"
-            chunk_msg = f'{chunk_label}\n{chunk_msg}'
+            chunk_msg = f'Verified chunk for {self}:\n{chunk_label}\n{chunk_msg}'
         mrsm.pprint((chunk_success, chunk_msg))
         return chunk_begin_and_end, (chunk_success, chunk_msg)
 
     ### If we have more than one chunk, attempt to sync the first one and return if its fails.
     if len(chunk_bounds) > 1:
         first_chunk_bounds = chunk_bounds[0]
+        first_label = f"{first_chunk_bounds[0]} - {first_chunk_bounds[1]}"
+        info(f"Verifying first chunk for {self}:\n    {first_label}")
         (
             (first_begin, first_end),
             (first_success, first_msg)
-        ) = process_chunk_bounds(first_chunk_bounds)
+        ) = process_chunk_bounds(first_chunk_bounds, _workers=workers)
         if not first_success:
             return (
                 first_success,
-                f"\n{first_begin} - {first_end}\n"
+                f"\n{first_label}\n"
                 + f"Failed to sync first chunk:\n{first_msg}"
             )
         bounds_success_tuples[first_chunk_bounds] = (first_success, first_msg)
+        info(f"Completed first chunk for {self}:\n    {first_label}\n")
 
-    bounds_success_tuples.update(dict(pool.map(process_chunk_bounds, chunk_bounds)))
-    bounds_success_bools = {bounds: tup[0] for bounds, tup in bounds_success_tuples.items()}
+    pool = get_pool(workers=workers)
+    batches = self.get_chunk_bounds_batches(chunk_bounds, batchsize=batchsize, workers=workers)
 
-    message_header = f"{begin_to_print} - {end_to_print}"
-    if all(bounds_success_bools.values()):
-        msg = get_chunks_success_message(bounds_success_tuples, header=message_header)
+    def process_batch(
+        batch_chunk_bounds: Tuple[
+            Tuple[Union[datetime, int, None], Union[datetime, int, None]],
+            ...
+        ]
+    ):
+        _batch_begin = batch_chunk_bounds[0][0]
+        _batch_end = batch_chunk_bounds[-1][-1]
+        batch_message_header = f"{_batch_begin} - {_batch_end}"
+        batch_bounds_success_tuples = dict(pool.map(process_chunk_bounds, batch_chunk_bounds))
+        bounds_success_tuples.update(batch_bounds_success_tuples)
+        batch_bounds_success_bools = {
+            bounds: tup[0]
+            for bounds, tup in batch_bounds_success_tuples.items()
+        }
+
+        if all(batch_bounds_success_bools.values()):
+            msg = get_chunks_success_message(
+                batch_bounds_success_tuples,
+                header=batch_message_header,
+            )
+            if deduplicate:
+                deduplicate_success, deduplicate_msg = self.deduplicate(
+                    begin=_batch_begin,
+                    end=_batch_end,
+                    params=params,
+                    workers=workers,
+                    debug=debug,
+                    **kwargs
+                )
+                return deduplicate_success, msg + '\n\n' + deduplicate_msg
+            return True, msg
+
+        batch_chunk_bounds_to_resync = [
+            bounds
+            for bounds, success in zip(batch_chunk_bounds, batch_bounds_success_bools)
+            if not success
+        ]
+        batch_bounds_to_print = [
+            f"{bounds[0]} - {bounds[1]}"
+            for bounds in batch_chunk_bounds_to_resync
+        ]
+        if batch_bounds_to_print:
+            warn(
+                "Will resync the following failed chunks:\n    "
+                + '\n    '.join(batch_bounds_to_print),
+                stack=False,
+            )
+
+        retry_bounds_success_tuples = dict(pool.map(
+            process_chunk_bounds,
+            batch_chunk_bounds_to_resync
+        ))
+        batch_bounds_success_tuples.update(retry_bounds_success_tuples)
+        bounds_success_tuples.update(retry_bounds_success_tuples)
+        retry_bounds_success_bools = {
+            bounds: tup[0]
+            for bounds, tup in retry_bounds_success_tuples.items()
+        }
+
+        if all(retry_bounds_success_bools.values()):
+            chunks_message = (
+                get_chunks_success_message(batch_bounds_success_tuples, header=batch_message_header)
+                + f"\nRetried {len(batch_chunk_bounds_to_resync)} chunk" + (
+                    's'
+                    if len(batch_chunk_bounds_to_resync) != 1
+                    else ''
+                ) + "."
+            )
+            if deduplicate:
+                deduplicate_success, deduplicate_msg = self.deduplicate(
+                    begin=_batch_begin,
+                    end=_batch_end,
+                    params=params,
+                    workers=workers,
+                    debug=debug,
+                    **kwargs
+                )
+                return deduplicate_success, chunks_message + '\n\n' + deduplicate_msg
+            return True, chunks_message
+
+        batch_chunks_message = get_chunks_success_message(
+            batch_bounds_success_tuples,
+            header=batch_message_header,
+        )
         if deduplicate:
             deduplicate_success, deduplicate_msg = self.deduplicate(
                 begin=begin,
@@ -231,61 +353,50 @@ def verify(
                 debug=debug,
                 **kwargs
             )
-            return deduplicate_success, msg + '\n\n' + deduplicate_msg
-        return True, msg
+            return deduplicate_success, batch_chunks_message + '\n\n' + deduplicate_msg
+        return False, batch_chunks_message
 
-    chunk_bounds_to_resync = [
-        bounds
-        for bounds, success in zip(chunk_bounds, bounds_success_bools)
-        if not success
-    ]
-    bounds_to_print = [
-        f"{bounds[0]} - {bounds[1]}"
-        for bounds in chunk_bounds_to_resync
-    ]
-    if bounds_to_print:
-        warn(
-            f"Will resync the following failed chunks:\n    "
-            + '\n    '.join(bounds_to_print),
-            stack=False,
+    num_batches = len(batches)
+    for batch_i, batch in enumerate(batches):
+        batch_begin = batch[0][0]
+        batch_end = batch[-1][-1]
+        batch_counter_str = f"({(batch_i + 1):,} / {num_batches:,})"
+        batch_label = f"batch {batch_counter_str}:\n{batch_begin} - {batch_end}"
+        retry_failed_batch = True
+        try:
+            for_self = 'for ' + str(self)
+            info(f"Verifying {batch_label.replace(':\n', ' ' + for_self + '...\n    ')}\n")
+            batch_success, batch_msg = process_batch(batch)
+        except (KeyboardInterrupt, Exception) as e:
+            batch_success = False
+            batch_msg = str(e)
+            retry_failed_batch = False
+
+        batch_msg_to_print = (
+            f"{make_header('Completed batch ' + batch_counter_str + ' ' + for_self + ':')}\n{batch_msg}"
         )
+        mrsm.pprint((batch_success, batch_msg_to_print))
 
-    retry_bounds_success_tuples = dict(pool.map(process_chunk_bounds, chunk_bounds_to_resync))
-    bounds_success_tuples.update(retry_bounds_success_tuples)
-    retry_bounds_success_bools = {
-        bounds: tup[0]
-        for bounds, tup in retry_bounds_success_tuples.items()
-    }
-
-    if all(retry_bounds_success_bools.values()):
-        message = (
-            get_chunks_success_message(bounds_success_tuples, header=message_header)
-            + f"\nRetried {len(chunk_bounds_to_resync)} chunks."
-        )
-        if deduplicate:
-            deduplicate_success, deduplicate_msg = self.deduplicate(
-                begin=begin,
-                end=end,
-                params=params,
-                workers=workers,
-                debug=debug,
-                **kwargs
+        if not batch_success and retry_failed_batch:
+            info(f"Retrying batch {batch_counter_str}...")
+            retry_batch_success, retry_batch_msg = process_batch(batch)
+            retry_batch_msg_to_print = (
+                f"Retried {make_header('batch ' + batch_label)}\n{retry_batch_msg}"
             )
-            return deduplicate_success, message + '\n\n' + deduplicate_msg
-        return True, message
+            mrsm.pprint((retry_batch_success, retry_batch_msg_to_print))
 
-    message = get_chunks_success_message(bounds_success_tuples, header=message_header)
-    if deduplicate:
-        deduplicate_success, deduplicate_msg = self.deduplicate(
-            begin=begin,
-            end=end,
-            params=params,
-            workers=workers,
-            debug=debug,
-            **kwargs
-        )
-        return deduplicate_success, message + '\n\n' + deduplicate_msg
-    return False, message
+            batch_success = retry_batch_success
+            batch_msg = retry_batch_msg
+
+        if not batch_success:
+            return False, f"Failed to verify {batch_label}:\n\n{batch_msg}"
+
+    chunks_message = get_chunks_success_message(
+        bounds_success_tuples,
+        header=message_header,
+    )
+    return True, chunks_message
+
 
 
 def get_chunks_success_message(
@@ -345,7 +456,7 @@ def get_chunks_success_message(
         ''
         if num_fails == 0
         else (
-            f"\n\nFailed to sync {num_fails} chunk"
+            f"\n\nFailed to sync {num_fails:,} chunk"
             + ('s' if num_fails != 1 else '') + ":\n"
             + '\n'.join([
                 f"{fail_begin} - {fail_end}\n{msg}\n"

@@ -7,6 +7,8 @@ Utility functions for working with DataFrames.
 """
 
 from __future__ import annotations
+
+import pathlib
 from datetime import datetime, timezone
 from collections import defaultdict
 
@@ -1620,3 +1622,9 @@ def to_json(
         orient=orient,
         **kwargs
     )
+
+
+def write_dataframe_cache(df) -> pathlib.Path:
+    """
+    Cache a Pandas DataFrame to a file on disk
+    """

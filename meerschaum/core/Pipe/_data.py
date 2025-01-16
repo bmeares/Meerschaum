@@ -651,12 +651,19 @@ def get_chunk_bounds(
     A list of chunk bounds (datetimes or integers).
     If unbounded, the first and last chunks will include `None`.
     """
+    from datetime import timedelta
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.misc import interval_str
     include_less_than_begin = not bounded and begin is None
     include_greater_than_end = not bounded and end is None
     if begin is None:
         begin = self.get_sync_time(newest=False, debug=debug)
     if end is None:
         end = self.get_sync_time(newest=True, debug=debug)
+        if end is not None and hasattr(end, 'tzinfo'):
+            end += timedelta(minutes=1)
+        elif are_dtypes_equal(str(type(end)), 'int'):
+            end += 1
     if begin is None and end is None:
         return [(None, None)]
 
@@ -670,10 +677,17 @@ def get_chunk_bounds(
     ### Run `verify pipes --workers 1` to sync chunks in series.
     chunk_bounds = []
     begin_cursor = begin
+    num_chunks = 0
+    max_chunks = 1_000_000
     while begin_cursor < end:
         end_cursor = begin_cursor + chunk_interval
         chunk_bounds.append((begin_cursor, end_cursor))
         begin_cursor = end_cursor
+        num_chunks += 1
+        if num_chunks >= max_chunks:
+            raise ValueError(
+                f"Too many chunks of size '{interval_str(chunk_interval)}' between '{begin}' and '{end}'."
+            )
 
     ### The chunk interval might be too large.
     if not chunk_bounds and end >= begin:
@@ -693,6 +707,55 @@ def get_chunk_bounds(
         chunk_bounds = chunk_bounds + [(end, None)]
 
     return chunk_bounds
+
+
+def get_chunk_bounds_batches(
+    self,
+    chunk_bounds: List[Tuple[Union[datetime, int, None], Union[datetime, int, None]]],
+    batchsize: Optional[int] = None,
+    workers: Optional[int] = None,
+    debug: bool = False,
+) -> List[
+    Tuple[
+        Tuple[
+            Union[datetime, int, None],
+            Union[datetime, int, None],
+        ], ...
+    ]
+]:
+    """
+    Return a list of tuples of chunk bounds of size `batchsize`.
+
+    Parameters
+    ----------
+    chunk_bounds: List[Tuple[Union[datetime, int, None], Union[datetime, int, None]]]
+        A list of chunk_bounds (see `Pipe.get_chunk_bounds()`).
+
+    batchsize: Optional[int], default None
+        How many chunks to include in a batch. Defaults to `Pipe.get_num_workers()`.
+
+    workers: Optional[int], default None
+        If `batchsize` is `None`, use this as the desired number of workers.
+        Passed to `Pipe.get_num_workers()`.
+
+    Returns
+    -------
+    A list of tuples of chunk bound tuples.
+    """
+    from meerschaum.utils.misc import iterate_chunks
+    
+    if batchsize is None:
+        batchsize = self.get_num_workers(workers=workers)
+
+    return [
+        tuple(
+            _batch_chunk_bounds
+            for _batch_chunk_bounds in batch
+            if _batch_chunk_bounds is not None
+        )
+        for batch in iterate_chunks(chunk_bounds, batchsize)
+        if batch
+    ]
 
 
 def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[

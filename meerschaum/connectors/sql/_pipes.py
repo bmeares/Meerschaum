@@ -7,6 +7,7 @@ Interact with Pipes metadata via SQLConnector.
 """
 from __future__ import annotations
 from datetime import datetime, date, timedelta
+
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Union, Any, SuccessTuple, Tuple, Dict, Optional, List
@@ -1949,6 +1950,7 @@ def sync_pipe(
             datetime_col=(dt_col if dt_col in update_df.columns else None),
             identity_insert=(autoincrement and primary_key in update_df.columns),
             null_indices=pipe.null_indices,
+            cast_columns=pipe.enforce,
             debug=debug,
         )
         update_results = self.exec_queries(
@@ -2529,6 +2531,7 @@ def sync_pipe_inplace(
             datetime_col=pipe.columns.get('datetime', None),
             flavor=self.flavor,
             null_indices=pipe.null_indices,
+            cast_columns=pipe.enforce,
             debug=debug,
         )
         if on_cols else []
@@ -2585,6 +2588,7 @@ def get_sync_time(
     pipe: 'mrsm.Pipe',
     params: Optional[Dict[str, Any]] = None,
     newest: bool = True,
+    remote: bool = False,
     debug: bool = False,
 ) -> Union[datetime, int, None]:
     """Get a Pipe's most recent datetime value.
@@ -2602,50 +2606,76 @@ def get_sync_time(
         If `True`, get the most recent datetime (honoring `params`).
         If `False`, get the oldest datetime (ASC instead of DESC).
 
+    remote: bool, default False
+        If `True`, return the sync time for the remote fetch definition.
+
     Returns
     -------
     A `datetime` object (or `int` if using an integer axis) if the pipe exists, otherwise `None`.
     """
-    from meerschaum.utils.sql import sql_item_name, build_where
-    table = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
+    from meerschaum.utils.sql import sql_item_name, build_where, wrap_query_with_cte
+    src_name = sql_item_name('src', self.flavor)
+    table_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
 
     dt_col = pipe.columns.get('datetime', None)
     if dt_col is None:
         return None
     dt_col_name = sql_item_name(dt_col, self.flavor, None)
 
+    if remote and pipe.connector.type != 'sql':
+        warn(f"Cannot get the remote sync time for {pipe}.")
+        return None
+
     ASC_or_DESC = "DESC" if newest else "ASC"
     existing_cols = pipe.get_columns_types(debug=debug)
     valid_params = {}
     if params is not None:
         valid_params = {k: v for k, v in params.items() if k in existing_cols}
+    flavor = self.flavor if not remote else pipe.connector.flavor
 
     ### If no bounds are provided for the datetime column,
     ### add IS NOT NULL to the WHERE clause.
     if dt_col not in valid_params:
         valid_params[dt_col] = '_None'
     where = "" if not valid_params else build_where(valid_params, self)
-    q = f"SELECT {dt_col_name}\nFROM {table}{where}\nORDER BY {dt_col_name} {ASC_or_DESC}\nLIMIT 1"
+    src_query = (
+        f"SELECT {dt_col_name}\nFROM {table_name}{where}"
+        if not remote
+        else self.get_pipe_metadef(pipe, params=params, begin=None, end=None)
+    )
+
+    base_query = (
+        f"SELECT {dt_col_name}\n"
+        f"FROM {src_name}{where}\n"
+        f"ORDER BY {dt_col_name} {ASC_or_DESC}\n"
+        f"LIMIT 1"
+    )
     if self.flavor == 'mssql':
-        q = f"SELECT TOP 1 {dt_col_name}\nFROM {table}{where}\nORDER BY {dt_col_name} {ASC_or_DESC}"
+        base_query = (
+            f"SELECT TOP 1 {dt_col_name}\n"
+            f"FROM {src_name}{where}\n"
+            f"ORDER BY {dt_col_name} {ASC_or_DESC}"
+        )
     elif self.flavor == 'oracle':
-        q = (
+        base_query = (
             "SELECT * FROM (\n"
-            + f"    SELECT {dt_col_name}\nFROM {table}{where}\n    "
-            + f"ORDER BY {dt_col_name} {ASC_or_DESC}\n"
-            + ") WHERE ROWNUM = 1"
+            f"    SELECT {dt_col_name}\n"
+            f"    FROM {src_name}{where}\n"
+            f"    ORDER BY {dt_col_name} {ASC_or_DESC}\n"
+            ") WHERE ROWNUM = 1"
         )
 
+    query = wrap_query_with_cte(src_query, base_query, flavor)
+
     try:
-        db_time = self.value(q, silent=True, debug=debug)
+        db_time = self.value(query, silent=True, debug=debug)
 
         ### No datetime could be found.
         if db_time is None:
             return None
         ### sqlite returns str.
         if isinstance(db_time, str):
-            from meerschaum.utils.packages import attempt_import
-            dateutil_parser = attempt_import('dateutil.parser')
+            dateutil_parser = mrsm.attempt_import('dateutil.parser')
             st = dateutil_parser.parse(db_time)
         ### Do nothing if a datetime object is returned.
         elif isinstance(db_time, datetime):
@@ -2743,7 +2773,7 @@ def get_pipe_rowcount(
     An `int` for the number of rows if the `pipe` exists, otherwise `None`.
 
     """
-    from meerschaum.utils.sql import dateadd_str, sql_item_name, wrap_query_with_cte
+    from meerschaum.utils.sql import dateadd_str, sql_item_name, wrap_query_with_cte, build_where
     from meerschaum.connectors.sql._fetch import get_pipe_query
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     if remote:
@@ -2755,18 +2785,20 @@ def get_pipe_rowcount(
             error(msg)
             return None
 
-    _pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
 
+    flavor = self.flavor if not remote else pipe.connector.flavor
+    conn = self if not remote else pipe.connector
+    _pipe_name = sql_item_name(pipe.target, flavor, self.get_pipe_schema(pipe))
     dt_col = pipe.columns.get('datetime', None)
     dt_typ = pipe.dtypes.get(dt_col, 'datetime') if dt_col else None
-    dt_db_type = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
+    dt_db_type = get_db_type_from_pd_type(dt_typ, flavor) if dt_typ else None
     if not dt_col:
         dt_col = pipe.guess_datetime()
-        dt_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
+        dt_name = sql_item_name(dt_col, flavor, None) if dt_col else None
         is_guess = True
     else:
         dt_col = pipe.get_columns('datetime')
-        dt_name = sql_item_name(dt_col, self.flavor, None)
+        dt_name = sql_item_name(dt_col, flavor, None)
         is_guess = False
 
     if begin is not None or end is not None:
@@ -2786,32 +2818,15 @@ def get_pipe_rowcount(
                 )
 
 
-    _datetime_name = sql_item_name(
-        dt_col,
-        (
-            pipe.instance_connector.flavor
-            if not remote
-            else pipe.connector.flavor
-        ),
-        None,
-    )
+    _datetime_name = sql_item_name(dt_col, flavor)
     _cols_names = [
-        sql_item_name(
-            col,
-            (
-                pipe.instance_connector.flavor
-                if not remote
-                else pipe.connector.flavor
-            ),
-            None,
-        )
+        sql_item_name(col, flavor)
         for col in set(
             (
                 [dt_col]
                 if dt_col
                 else []
-            )
-            + (
+            ) + (
                 []
                 if params is None
                 else list(params.keys())
@@ -2826,34 +2841,33 @@ def get_pipe_rowcount(
         if not remote
         else get_pipe_query(pipe)
     )
-    parent_query = f"SELECT COUNT(*)\nFROM {sql_item_name('src', self.flavor)}"
-    query = wrap_query_with_cte(src, parent_query, self.flavor)
+    parent_query = f"SELECT COUNT(*)\nFROM {sql_item_name('src', flavor)}"
+    query = wrap_query_with_cte(src, parent_query, flavor)
     if begin is not None or end is not None:
         query += "\nWHERE"
     if begin is not None:
         query += (
             f"\n    {dt_name} >= "
-            + dateadd_str(self.flavor, datepart='minute', number=0, begin=begin, db_type=dt_db_type)
+            + dateadd_str(flavor, datepart='minute', number=0, begin=begin, db_type=dt_db_type)
         )
     if end is not None and begin is not None:
         query += "\n    AND"
     if end is not None:
         query += (
             f"\n    {dt_name} <  "
-            + dateadd_str(self.flavor, datepart='minute', number=0, begin=end, db_type=dt_db_type)
+            + dateadd_str(flavor, datepart='minute', number=0, begin=end, db_type=dt_db_type)
         )
     if params is not None:
-        from meerschaum.utils.sql import build_where
         existing_cols = pipe.get_columns_types(debug=debug)
         valid_params = {k: v for k, v in params.items() if k in existing_cols}
         if valid_params:
-            query += build_where(valid_params, self).replace('WHERE', (
+            query += build_where(valid_params, conn).replace('WHERE', (
                 'AND' if (begin is not None or end is not None)
                     else 'WHERE'
                 )
             )
 
-    result = self.value(query, debug=debug, silent=True)
+    result = conn.value(query, debug=debug, silent=True)
     try:
         return int(result)
     except Exception:

@@ -442,7 +442,7 @@ def _show_rowcounts(
 
     msgs = []
     for p, rc in rc_dict.items():
-        msgs.append(f'{p}\n{rc}\n')
+        msgs.append(f'{p}\n{rc:,}\n')
 
     header = "Remote row-counts:" if remote else "Pipe row-counts:"
 

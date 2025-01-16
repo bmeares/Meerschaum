@@ -4,6 +4,63 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.7.11
+
+- **Add batches to `Pipe.verify()`.**  
+  Verification syncs now run in sequential batches so that they may be interrupted and resumed. See `Pipe.get_chunk_bounds_batches()` for more information:
+
+  ```python
+  from datetime import timedelta
+  import meerschaum as mrsm
+  
+  pipe = mrsm.Pipe('demo', 'get_chunk_bounds', instance='sql:local')
+  bounds = pipe.get_chunk_bounds(
+      chunk_interval=timedelta(hours=10),
+      begin='2025-01-10',
+      end='2025-01-15',
+      bounded=True,
+  )
+  batches = pipe.get_chunk_bounds_batches(bounds, workers=4)
+  mrsm.pprint(
+      [
+          tuple(
+              (str(bounds[0]), str(bounds[1]))
+              for bounds in batch
+          )
+          for batch in batches
+      ]
+  ) 
+  # [
+  #     (
+  #         ('2025-01-10 00:00:00+00:00', '2025-01-10 10:00:00+00:00'),
+  #         ('2025-01-10 10:00:00+00:00', '2025-01-10 20:00:00+00:00'),
+  #         ('2025-01-10 20:00:00+00:00', '2025-01-11 06:00:00+00:00'),
+  #         ('2025-01-11 06:00:00+00:00', '2025-01-11 16:00:00+00:00')
+  #     ),
+  #     (
+  #         ('2025-01-11 16:00:00+00:00', '2025-01-12 02:00:00+00:00'),
+  #         ('2025-01-12 02:00:00+00:00', '2025-01-12 12:00:00+00:00'),
+  #         ('2025-01-12 12:00:00+00:00', '2025-01-12 22:00:00+00:00'),
+  #         ('2025-01-12 22:00:00+00:00', '2025-01-13 08:00:00+00:00')
+  #     ),
+  #     (
+  #         ('2025-01-13 08:00:00+00:00', '2025-01-13 18:00:00+00:00'),
+  #         ('2025-01-13 18:00:00+00:00', '2025-01-14 04:00:00+00:00'),
+  #         ('2025-01-14 04:00:00+00:00', '2025-01-14 14:00:00+00:00'),
+  #         ('2025-01-14 14:00:00+00:00', '2025-01-15 00:00:00+00:00')
+  #     )
+  # ]
+  ```
+
+- **Add `--skip-chunks-with-greater-rowcounts` to `verify pipes`.**  
+  The flags `--skip-chunks-with-greater-rowcounts` will compare a chunk's rowcount with the rowcount of the remote table and skip if the chunk is greater than or equal to the remote count. This is only applicable for connectors which implement `remote=True` support for `get_sync_time()`.
+
+- **Add `remote` to `pipe.get_sync_time()`.**  
+  For pipes which support it (i.e. the `SQLConnector`), the option `remote` is intended to return the sync time of a pipe's fetch definition, like the option `remote` in `Pipe.get_rowcount()`.
+
+- **Fix memory leak for retrying failed chunks.**  
+  Failed chunks were kept in memory and retried later. In resource-intensive syncs with large chunks and high failures, this would result in large objects not being freed and hogging memory. This situation has been fixed.
+
 ### v2.7.9 – v2.7.10
 
 - **Add persistent Webterm sessions.**  
