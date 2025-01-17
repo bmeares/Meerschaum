@@ -386,7 +386,8 @@ def verify(
         retry_failed_batch = True
         try:
             for_self = 'for ' + str(self)
-            info(f"Verifying {batch_label.replace(':\n', ' ' + for_self + '...\n    ')}\n")
+            batch_label_str = batch_label.replace(':\n', ' ' + for_self + '...\n    ')
+            info(f"Verifying {batch_label_str}\n")
             batch_success, batch_msg = process_batch(batch)
         except (KeyboardInterrupt, Exception) as e:
             batch_success = False

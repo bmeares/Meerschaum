@@ -67,7 +67,10 @@ def _verify_packages(
     for import_name, install_name in all_packages.items():
         _where_list = (
             venv_packages if venv_contains_package(
-                import_name, split=False, venv=venv, debug=debug
+                import_name,
+                split=False,
+                venv=venv,
+                debug=debug,
             ) else (
                 base_packages if is_installed(import_name, venv=None)
                 else miss_packages
