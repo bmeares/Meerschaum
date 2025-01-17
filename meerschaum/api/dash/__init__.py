@@ -7,10 +7,12 @@ Build the Dash app to be hooked into FastAPI.
 """
 
 from __future__ import annotations
-import uuid
 
 from meerschaum.utils.packages import (
-    attempt_import, import_dcc, import_html, _monkey_patch_get_distribution
+    attempt_import,
+    import_dcc,
+    import_html,
+    _monkey_patch_get_distribution,
 )
 flask_compress = attempt_import('flask_compress', lazy=False)
 _monkey_patch_get_distribution('flask-compress', flask_compress.__version__)

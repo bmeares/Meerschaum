@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.7.11
+### v2.8.0
 
 - **Add batches to `Pipe.verify()`.**  
   Verification syncs now run in sequential batches so that they may be interrupted and resumed. See `Pipe.get_chunk_bounds_batches()` for more information:
@@ -61,17 +61,36 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add `remote` to `pipe.get_sync_time()`.**  
   For pipes which support it (i.e. the `SQLConnector`), the option `remote` is intended to return the sync time of a pipe's fetch definition, like the option `remote` in `Pipe.get_rowcount()`.
 
+- **Allow for the Web API to serve pipes from multiple instances.**  
+  You can disable this behavior by setting `system:api:permissions:instances:allow_multiple_instances` to `false`. You may also explicitly allow which instances may be accessed by the WebAPI by setting the list `system:api:permissions:instances:allowed_instance_keys` (defaults to `["*"]`).
+
 - **Fix memory leak for retrying failed chunks.**  
   Failed chunks were kept in memory and retried later. In resource-intensive syncs with large chunks and high failures, this would result in large objects not being freed and hogging memory. This situation has been fixed.
-
-- **Use the current instance for new tabs in the Webterm.**  
-  Clicking "New Tab" will open a new `tmux` window using the currently selected instance on the Web Console.
 
 - **Add negation to job actions.**  
   Prefix a job name with an underscore to select all other jobs. This is useful for filtering out noise for `show logs`.
 
 - **Add `Pipe.parent.**  
   As a quality-of-life improvement, the attribute `Pipe.parent` will return the first member of `Pipe.parents` (if available).
+
+- **Deduplicating SQL pipes happen in the internal schema.**  
+  Calling `Pipe.deduplicate()` for pipes on a SQL database now creates temporary tables in the internal schema and logs them for cleanup.
+
+- **Use the current instance for new tabs in the Webterm.**  
+  Clicking "New Tab" will open a new `tmux` window using the currently selected instance on the Web Console.
+
+- **Other webterm quality-of-life improvements.**  
+  Added a size toggle button to allow for the webterm to take the entire page. 
+
+- **Additional refactoring work.**  
+  The API endpoints code has been cleaned up.
+
+- **Added system configurations.**  
+  New options have been added to the `system` configuration, such as `max_response_row_limit`, `allow_multiple_instances`, `allowed_instance_keys`.
+
+## 2.7.x Releases
+
+The 2.7 series greatly improved indexing, numerics support, added the `bytes` type, and allowed for bypassing dtype enforcement (`Pipe.enforce`) as well as introducing persistent Webterm sessions.
 
 ### v2.7.9 – v2.7.10
 

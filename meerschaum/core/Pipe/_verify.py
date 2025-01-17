@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, Dict
 from meerschaum.utils.warnings import warn, info
+from meerschaum.config.static import STATIC_CONFIG
 
 
 def verify(
@@ -594,9 +595,15 @@ def get_bound_time(self, debug: bool = False) -> Union[datetime, int, None]:
 
     bound_time = sync_time - bound_interval
     oldest_sync_time = self.get_sync_time(newest=False, debug=debug)
+    max_bound_time_days = STATIC_CONFIG['pipes']['max_bound_time_days']
+
+    extreme_sync_times_delta = (
+        hasattr(oldest_sync_time, 'tzinfo')
+        and (sync_time - oldest_sync_time) >= timedelta(days=max_bound_time_days)
+    )
 
     return (
         bound_time
-        if bound_time > oldest_sync_time
+        if bound_time > oldest_sync_time or extreme_sync_times_delta
         else None
     )

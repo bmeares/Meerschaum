@@ -111,6 +111,12 @@ default_system_config = {
             'connector': 'valkey:main',
             'session_expires_minutes': 43200,
         },
+        'data': {
+            'max_response_row_limit': 100_000,
+        },
+        'endpoints': {
+            'docs_in_production': True,
+        },
         'permissions':       {
             'registration': {
                 'users': True,

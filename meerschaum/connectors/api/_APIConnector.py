@@ -169,12 +169,12 @@ class APIConnector(Connector):
     @property
     def session(self):
         if self._session is None:
-            certifi = attempt_import('certifi', lazy=False)
+            _ = attempt_import('certifi', lazy=False)
             requests = attempt_import('requests', lazy=False)
             if requests:
                 self._session = requests.Session()
             if self._session is None:
-                error(f"Failed to import requests. Is requests installed?")
+                error("Failed to import requests. Is requests installed?")
         return self._session
 
     @property
@@ -191,6 +191,7 @@ class APIConnector(Connector):
 
         if self._token is None or expired:
             success, msg = self.login()
-            if not success:
+            if not success and not self.__dict__.get('_emitted_warning'):
                 warn(msg, stack=False)
+                self._emitted_warning = True
         return self._token

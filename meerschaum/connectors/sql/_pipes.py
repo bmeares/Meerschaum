@@ -3652,7 +3652,6 @@ def deduplicate_pipe(
     if not pipe.exists(debug=debug):
         return False, f"Table {pipe_table_name} does not exist."
 
-    ### TODO: Handle deleting duplicates without a datetime axis.
     dt_col = pipe.columns.get('datetime', None)
     cols_types = pipe.get_columns_types(debug=debug)
     existing_cols = pipe.get_columns_types(debug=debug)
@@ -3756,9 +3755,8 @@ def deduplicate_pipe(
 
     session_id = generate_password(3)
 
-    dedup_table = '-' + session_id + f'_dedup_{pipe.target}'
-    temp_old_table = '-' + session_id + f"_old_{pipe.target}"
-
+    dedup_table = self.get_temporary_target(pipe.target, transact_id=session_id, label='dedup')
+    temp_old_table = self.get_temporary_target(pipe.target, transact_id=session_id, label='old')
     temp_old_table_name = sql_item_name(temp_old_table, self.flavor, self.get_pipe_schema(pipe))
 
     create_temporary_table_query = get_create_table_query(
@@ -3771,16 +3769,21 @@ def deduplicate_pipe(
     if_exists_str = "IF EXISTS" if self.flavor in DROP_IF_EXISTS_FLAVORS else ""
     alter_queries = flatten_list([
         get_rename_table_queries(
-            pipe.target, temp_old_table, self.flavor, schema=self.get_pipe_schema(pipe)
+            pipe.target,
+            temp_old_table,
+            self.flavor,
+            schema=self.internal_schema,
         ),
         get_rename_table_queries(
-            dedup_table, pipe.target, self.flavor, schema=self.get_pipe_schema(pipe)
+            dedup_table,
+            pipe.target,
+            self.flavor,
+            schema=self.internal_schema,
         ),
-        f"""
-        DROP TABLE {if_exists_str} {temp_old_table_name}
-        """,
+        f"DROP TABLE {if_exists_str} {temp_old_table_name}",
     ])
 
+    self._log_temporary_tables_creation(temp_old_table, create=(not pipe.temporary), debug=debug)
     create_temporary_result = self.execute(create_temporary_table_query, debug=debug)
     if create_temporary_result is None:
         return False, f"Failed to deduplicate table {pipe_table_name}."
@@ -3812,8 +3815,7 @@ def deduplicate_pipe(
                 f"\nfrom {old_rowcount:,} to {new_rowcount:,} rows"
                 if old_rowcount != new_rowcount
                 else ''
-            )
-            + '.'
+            ) + '.'
         )
         if success
         else f"Failed to execute query:\n{fail_query}"

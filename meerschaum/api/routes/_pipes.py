@@ -42,6 +42,8 @@ dateutil_parser = attempt_import('dateutil.parser', lazy=False)
 pipes_endpoint = endpoints['pipes']
 pd = attempt_import('pandas', lazy=False)
 
+MAX_RESPONSE_ROW_LIMIT: int = mrsm.get_config('system', 'api', 'data', 'max_response_row_limit')
+
 
 @app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/register', tags=['Pipes'])
 def register_pipe(
@@ -391,12 +393,14 @@ def get_pipe_data(
     begin: Union[str, int, None] = None,
     end: Union[str, int, None] = None,
     params: Optional[str] = None,
+    limit: int = MAX_RESPONSE_ROW_LIMIT,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
 ) -> str:
     """
     Get a pipe's data, applying any filtering.
+    See [`Pipe.get_data()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_data).
 
     Note that `select_columns`, `omit_columns`, and `params` are JSON-encoded strings.
     """
@@ -404,6 +408,14 @@ def get_pipe_data(
         begin = int(begin)
     if is_int(end):
         end = int(end)
+    if limit > MAX_RESPONSE_ROW_LIMIT:
+        raise fastapi.HTTPException(
+            status_code=413,
+            detail=(
+                f"Requested limit {limit} exceeds the maximum response size of "
+                f"{MAX_RESPONSE_ROW_LIMIT} rows."
+            )
+        )
 
     _params = {}
     if params == 'null':
@@ -466,6 +478,7 @@ def get_pipe_data(
         begin=begin,
         end=end,
         params=_params,
+        limit=min(limit, MAX_RESPONSE_ROW_LIMIT),
         debug=debug,
     )
     if df is None:
@@ -495,7 +508,7 @@ def get_pipe_csv(
     ),
 ) -> str:
     """
-    Get a Pipe's data as a CSV file. Optionally set query boundaries.
+    Get a pipe's data as a CSV file. Optionally set query boundaries.
     """
     if begin is not None:
         begin = (
@@ -571,7 +584,7 @@ def get_pipe_id(
     ),
 ) -> Union[int, str]:
     """
-    Get a Pipe's ID.
+    Get a pipe's ID.
     """
     pipe_id = get_pipe(connector_keys, metric_key, location_key, instance_keys).get_id(debug=debug)
     if pipe_id is None:
@@ -592,7 +605,7 @@ def get_pipe_attributes(
         fastapi.Depends(manager) if not no_auth else None
     ),
 ) -> Dict[str, Any]:
-    """Get a Pipe's attributes."""
+    """Get a pipe's attributes."""
     return get_pipe(
         connector_keys,
         metric_key,
@@ -612,7 +625,7 @@ def get_pipe_exists(
         fastapi.Depends(manager) if not no_auth else None
     ),
 ) -> bool:
-    """Determine whether a Pipe exists."""
+    """Determine whether a pipe's target table exists."""
     return get_pipe(connector_keys, metric_key, location_key, instance_keys).exists(debug=debug)
 
 
@@ -650,6 +663,7 @@ def get_pipe_rowcount(
 ) -> int:
     """
     Return a pipe's rowcount.
+    See [`Pipe.get_rowcount()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_rowcount).
 
     Parameters
     ----------
@@ -667,6 +681,7 @@ def get_pipe_rowcount(
 
     Returns
     -------
+    The rowcount for a pipe's target table or fetch definition (if applicable).
     """
     if is_int(begin):
         begin = int(begin)
@@ -724,6 +739,36 @@ def get_pipe_columns_indices(
 ) -> Dict[str, List[Dict[str, str]]]:
     """
     Return a dictionary of column names and related indices.
+    See [`Pipe.get_columns_indices()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_columns_indices).
+
+    ```json
+    {
+        "datetime": [
+            {
+                "name": "plugin_stress_test_0_datetime_idx",
+                "type": "INDEX"
+            },
+            {
+                "name": "IX_plugin_stress_test_0_id_datetime",
+                "type": "INDEX"
+            },
+            {
+                "name": "UQ_plugin_stress_test_0_id_datetime",
+                "type": "INDEX"
+            }
+        ],
+        "id": [
+            {
+                "name": "IX_plugin_stress_test_0_id",
+                "type": "INDEX"
+            },
+            {
+                "name": "UQ_plugin_stress_test_0_id_datetime",
+                "type": "INDEX"
+            }
+        ]
+    }
+    ```
     """
     return get_pipe(
         connector_keys,
@@ -748,6 +793,8 @@ def get_pipe_index_names(
 ) -> Dict[str, List[Dict[str, str]]]:
     """
     Return a dictionary of index keys and index names.
+
+    See [`Pipe.get_indices()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_indices).
     """
     return get_pipe(
         connector_keys,

@@ -3,17 +3,20 @@
 # vim:fenc=utf-8
 
 """
-Import all routes from other modules in package
+Import the routes submodules to register them to the FastAPI app.
 """
 
-from meerschaum.api.routes._login import *
-from meerschaum.api.routes._actions import *
-from meerschaum.api.routes._jobs import *
-from meerschaum.api.routes._connectors import *
-from meerschaum.api.routes._index import *
-from meerschaum.api.routes._misc import *
-from meerschaum.api.routes._pipes import *
-from meerschaum.api.routes._plugins import *
-from meerschaum.api.routes._users import *
-from meerschaum.api.routes._version import *
-from meerschaum.api.routes._webterm import *
+import meerschaum.api.routes._login
+import meerschaum.api.routes._actions
+import meerschaum.api.routes._jobs
+import meerschaum.api.routes._connectors
+import meerschaum.api.routes._index
+import meerschaum.api.routes._misc
+import meerschaum.api.routes._pipes
+import meerschaum.api.routes._plugins
+import meerschaum.api.routes._users
+import meerschaum.api.routes._version
+
+from meerschaum.api import _include_dash
+if _include_dash:
+    import meerschaum.api.routes._webterm

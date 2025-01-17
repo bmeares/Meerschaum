@@ -97,6 +97,7 @@ no_auth = get_uvicorn_config().get('no_auth', False)
 private = get_uvicorn_config().get('private', False)
 production = get_uvicorn_config().get('production', False)
 _include_dash = (not no_dash)
+docs_enabled = not production or sys_config.get('endpoints', {}).get('docs_in_production', True)
 
 connector = None
 default_instance_keys = None
@@ -215,8 +216,9 @@ app = fastapi.FastAPI(
         'name': 'Apache 2.0',
         'url': 'https://www.apache.org/licenses/LICENSE-2.0.html',
     },
-    docs_url=(None if production else endpoints['docs']),
-    redoc_url=(None if production else endpoints['redoc']),
+    docs_url=(None if not docs_enabled else endpoints['docs']),
+    redoc_url=(None if not docs_enabled else endpoints['redoc']),
+    openapi_url=endpoints['openapi'],
     open_api_tags=[
         {
             'name': 'Pipes',
@@ -228,7 +230,7 @@ app = fastapi.FastAPI(
         },
         {
             'name': 'Connectors',
-            'description': 'Get information about the registered connectors.'
+            'description': 'Get information about the registered connectors.',
         },
         {
             'name': 'Users',
@@ -244,8 +246,8 @@ app = fastapi.FastAPI(
         },
         {
             'name': 'Version',
-            'description': 'Version information.'
-        }
+            'description': 'Version information.',
+        },
     ],
 )
 
@@ -263,7 +265,7 @@ app = fastapi.FastAPI(
 HTMLResponse = fastapi_responses.HTMLResponse
 Request = fastapi.Request
 
-from meerschaum.config._paths import API_RESOURCES_PATH, API_STATIC_PATH, API_TEMPLATES_PATH
+from meerschaum.config.paths import API_RESOURCES_PATH, API_STATIC_PATH, API_TEMPLATES_PATH
 app.mount('/static', fastapi_staticfiles.StaticFiles(directory=str(API_STATIC_PATH)), name='static')
 
 _custom_kwargs = {'mrsm_instance'}
