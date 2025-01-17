@@ -25,7 +25,7 @@ class PostInstallCommand(install):
         from meerschaum.actions import actions
         try:
             actions['verify'](['packages'], debug=False)
-        except Exception as e:
+        except Exception:
             pass
 
 extras = {}
