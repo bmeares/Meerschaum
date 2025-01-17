@@ -280,38 +280,6 @@ def update_content(*args):
     return content, alerts, webterm, webterm_style
 
 
-
-#  @dash_app.callback(
-    #  Output('content-div-left', 'style'),
-    #  Input('webterm-fullscreen-button', 'n_clicks'),
-    #  State('content-div-left', 'style'),
-#  )
-#  def webterm_fullscreen_button_click(
-    #  n_clicks: Optional[int] = None,
-    #  existing_content_left_style: Optional[Dict[str, Any]] = None,
-#  ):
-    #  """
-    #  Toggle visibility for the the lefthand controls div if "Full-screen" is clicked.
-    #  """
-    #  print(f"{existing_content_left_style=}")
-    #  print(f"{n_clicks=}")
-    #  if not n_clicks:
-        #  raise PreventUpdate
-
-
-    #  return {
-        #  **existing_content_left_style,
-        #  **{
-            #  'display': (
-                #  'block'
-                #  if (existing_content_left_style or {}).get('display', None) == 'none'
-                #  else 'none'
-            #  )
-        #  }
-    #  }
-
-
-
 dash_app.clientside_callback(
     """
     function(

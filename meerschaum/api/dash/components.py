@@ -13,7 +13,7 @@ from meerschaum.utils.typing import SuccessTuple, List
 from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.misc import remove_ansi
 from meerschaum._internal.shell.Shell import get_shell_intro
-from meerschaum.api import endpoints, CHECK_UPDATE
+from meerschaum.api import endpoints, CHECK_UPDATE, docs_enabled
 from meerschaum.connectors import instance_types, _load_builtin_custom_connectors
 from meerschaum.utils.misc import get_connector_labels
 from meerschaum.config import __doc__ as doc
@@ -127,7 +127,7 @@ navbar = dbc.Navbar(
                     align='center',
                     className='g-0 navbar-logo-row',
                 ),
-                href='/docs',
+                href=('/docs' if docs_enabled else '#'),
                 style={"textDecoration": "none"},
             ),
             dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
