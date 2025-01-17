@@ -105,8 +105,9 @@ def generate_password(length: int = 12) -> str:
     import secrets
     import string
     return ''.join((secrets.choice(string.ascii_letters + string.digits) for i in range(length)))
+ 
 
-def is_int(s : str) -> bool:
+def is_int(s: str) -> bool:
     """
     Check if string is an int.
 
@@ -129,8 +130,8 @@ def is_int(s : str) -> bool:
 
 
 def string_to_dict(
-        params_string: str
-    ) -> Dict[str, Any]:
+    params_string: str
+) -> Dict[str, Any]:
     """
     Parse a string into a dictionary.
     
@@ -1166,6 +1167,8 @@ def interval_str(delta: Union[timedelta, int]) -> str:
     A formatted string, fit for human eyes.
     """
     from meerschaum.utils.packages import attempt_import
+    if is_int(delta):
+        return str(delta)
     humanfriendly = attempt_import('humanfriendly')
     delta_seconds = (
         delta.total_seconds()
@@ -1182,7 +1185,7 @@ def is_docker_available() -> bool:
         has_docker = subprocess.call(
             ['docker', 'ps'], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
         ) == 0
-    except Exception as e:
+    except Exception:
         has_docker = False
     return has_docker
 
@@ -1201,7 +1204,7 @@ def is_bcp_available() -> bool:
         has_bcp = subprocess.call(
             ['bcp', '-v'], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
         ) == 0
-    except Exception as e:
+    except Exception:
         has_bcp = False
     return has_bcp
 
@@ -1231,7 +1234,7 @@ def is_tmux_available() -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT
         ) == 0
-    except Exception as e:
+    except Exception:
         has_tmux = False
     return has_tmux
 
@@ -1519,7 +1522,8 @@ def is_symlink(path: pathlib.Path) -> bool:
     """
     if path.is_symlink():
         return True
-    import platform, os
+    import platform
+    import os
     if platform.system() != 'Windows':
         return False
     try:

@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Default route
+Redirect the index path to `/dash` if applicable.
 """
 
 import starlette.responses
@@ -12,16 +12,25 @@ from meerschaum.api import (
     endpoints,
     HTMLResponse,
     Request,
-    version,
+    docs_enabled,
     _include_dash,
 )
-from meerschaum.utils.packages import attempt_import
 RedirectResponse = starlette.responses.RedirectResponse
 
+INDEX_REDIRECT_URL: str = (
+    endpoints['dash']
+    if _include_dash
+    else (
+        endpoints['docs']
+        if docs_enabled
+        else endpoints['openapi']
+    )
+)
+
+
 @app.get(endpoints['index'], response_class=HTMLResponse)
-def index(request : Request):
+def index(request: Request):
     """
-    Meerschaum WebAPI index page.
+    Meerschaum Web API index page.
     """
-    _url = endpoints['dash'] if _include_dash else '/docs'
-    return RedirectResponse(url=_url)
+    return RedirectResponse(url=INDEX_REDIRECT_URL)

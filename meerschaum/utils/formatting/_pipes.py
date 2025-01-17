@@ -501,7 +501,7 @@ def extract_stats_from_message(
     -------
     A dictionary mapping the stat keys to the total number of rows affected.
     """
-    stat_keys = stat_keys or ['inserted', 'updated', 'upserted']
+    stat_keys = stat_keys or ['inserted', 'updated', 'upserted', 'checked']
     lines_stats = [extract_stats_from_line(line, stat_keys) for line in message.split('\n')]
     message_stats = {
         stat_key: sum(stats.get(stat_key, 0) for stats in lines_stats)

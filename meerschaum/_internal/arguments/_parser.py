@@ -302,14 +302,17 @@ groups['sync'].add_argument(
     help="Run the action asynchronously, if possible. Alias for --unblock",
 )
 groups['sync'].add_argument(
-    '--begin', type=parse_datetime, help="Specify a begin datetime for syncing or displaying data."
+    '--begin', type=parse_datetime, help="The begin datetime when syncing, fetching data."
 )
 groups['sync'].add_argument(
-    '--end', type=parse_datetime, help="Specify an end datetime for syncing or displaying data."
+    '--end', type=parse_datetime, help="The end datetime when syncing, fetching data."
 )
 groups['sync'].add_argument(
-    '--chunksize', type=int, help=(
-        "Specify the database chunksize. Defaults to 100,000."
+    '--chunksize', type=int, help="How many rows per chunk. Defaults to 100,000."
+)
+groups['sync'].add_argument(
+    '--batchsize', type=int, help=(
+        "How many chunks to process in parallel. Defaults to number of CPUs."
     ),
 )
 groups['sync'].add_argument(
@@ -356,8 +359,17 @@ groups['sync'].add_argument(
     ),
 )
 groups['sync'].add_argument(
+    '--skip-chunks-with-greater-rowcounts', action='store_true',
+    help="When verifying, skip chunks with rowcounts greater than the remote's."
+)
+groups['sync'].add_argument(
+    '--check-rowcounts-only', action='store_true', help=(
+        "Only compare row-counts when verifying pipes."
+    ),
+)
+groups['sync'].add_argument(
     '--cache', action='store_true',
-    help = (
+    help=(
         "When syncing or viewing a pipe's data, sync to a local database for later analysis."
     )
 )

@@ -48,7 +48,7 @@ def _index_pipes(
 
     for pipe in pipes:
         info(f"Creating indices for {pipe}...")
-        index_success, index_msg = pipe.create_indices(debug=debug)
+        index_success, index_msg = pipe.create_indices(columns=(action or None), debug=debug)
         success_dict[pipe] = index_msg
         if index_success:
             successes += 1

@@ -665,7 +665,8 @@ dash_app.clientside_callback(
 
         iframe.contentWindow.postMessage(
             {
-                action: "__TMUX_NEW_WINDOW"
+                action: "__TMUX_NEW_WINDOW",
+                instance: window.instance
             },
             url
         );
@@ -690,6 +691,34 @@ dash_app.clientside_callback(
     Output('mrsm-location', 'href'),
     Input('webterm-refresh-button', 'n_clicks'),
     State('mrsm-location', 'href'),
+)
+
+dash_app.clientside_callback(
+    """
+    function(n_clicks){
+        console.log('fullscreen');
+        if (!n_clicks) { return dash_clientside.no_update; }
+        iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return dash_clientside.no_update; }
+        const leftCol = document.getElementById('content-col-left');
+        const rightCol = document.getElementById('content-col-right');
+        const button = document.getElementById('webterm-fullscreen-button');
+
+        if (leftCol.style.display === 'none') {
+            leftCol.style.display = '';
+            rightCol.className = 'col-6';
+            button.innerHTML = "Full View";
+        } else {
+            leftCol.style.display = 'none';
+            rightCol.className = 'col-12';
+            button.innerHTML = "Side-by-side View";
+        }
+
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('webterm-fullscreen-button', 'n_clicks'),
+    Input('webterm-fullscreen-button', 'n_clicks'),
 )
 
 @dash_app.callback(

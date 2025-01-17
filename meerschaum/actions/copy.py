@@ -70,6 +70,7 @@ def _copy_pipes(
     Copy pipes' attributes and make new pipes.
     """
     from meerschaum import get_pipes, Pipe
+    from meerschaum.connectors import instance_types
     from meerschaum.utils.prompt import prompt, yes_no, get_connectors_completer
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.formatting import print_tuple
@@ -92,7 +93,8 @@ def _copy_pipes(
 
         instance_keys = prompt(
             f"Meerschaum instance for copy of {pipe}:",
-            default=pipe.instance_keys
+            default=pipe.instance_keys,
+            completer=get_connectors_completer(*instance_types),
         )
         new_pipe = Pipe(
             ck, mk, lk,

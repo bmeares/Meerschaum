@@ -7,6 +7,8 @@ Utility functions for working with DataFrames.
 """
 
 from __future__ import annotations
+
+import pathlib
 from datetime import datetime, timezone
 from collections import defaultdict
 

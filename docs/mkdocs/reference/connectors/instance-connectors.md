@@ -738,6 +738,7 @@ Return the number of rows in the pipe's target table within the `begin`, `end`, 
         begin: datetime | int | None = None,
         end: datetime | int | None = None,
         params: dict[str, Any] | None = None,
+        remote: bool = False,
         debug: bool = False,
         **kwargs: Any
     ) -> int:
@@ -756,7 +757,11 @@ Return the number of rows in the pipe's target table within the `begin`, `end`, 
             If provided, only count rows < `end`.
 
         params: dict[str, Any] | None
-            If provided, only count rows that match the `params` filter.
+            If provided, only count rows othat match the `params` filter.
+
+        remote: bool, default False
+            If `True`, return the rowcount for the pipe's fetch definition.
+            In this case, `self` refers to `Pipe.connector`, not `Pipe.instance_connector`.
 
         Returns
         -------

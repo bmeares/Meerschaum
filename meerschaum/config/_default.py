@@ -111,6 +111,12 @@ default_system_config = {
             'connector': 'valkey:main',
             'session_expires_minutes': 43200,
         },
+        'data': {
+            'max_response_row_limit': 100_000,
+        },
+        'endpoints': {
+            'docs_in_production': True,
+        },
         'permissions':       {
             'registration': {
                 'users': True,
@@ -123,6 +129,10 @@ default_system_config = {
             'chaining': {
                 'insecure_parent_instance': False,
                 'child_apis': False,
+            },
+            'instances': {
+                'allow_multiple_instances': True,
+                'allowed_instance_keys': ['*']
             },
         },
         'protocol': default_meerschaum_config['connectors']['api']['default']['protocol'],

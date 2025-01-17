@@ -248,16 +248,15 @@ def delete(self, r_url: str, **kwargs: Any) -> 'requests.Response':
 
 
 def wget(
-        self,
-        r_url: str,
-        dest: Optional[Union[str, pathlib.Path]] = None,
-        headers: Optional[Dict[str, Any]] = None,
-        use_token: bool = True,
-        debug: bool = False,
-        **kw: Any
-    ) -> pathlib.Path:
-    """Mimic wget with requests.
-    """
+    self,
+    r_url: str,
+    dest: Optional[Union[str, pathlib.Path]] = None,
+    headers: Optional[Dict[str, Any]] = None,
+    use_token: bool = True,
+    debug: bool = False,
+    **kw: Any
+) -> pathlib.Path:
+    """Mimic wget with requests."""
     from meerschaum.utils.misc import wget
     if headers is None:
         headers = {}

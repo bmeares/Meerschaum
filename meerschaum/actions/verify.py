@@ -7,7 +7,9 @@ Verify the states of pipes, pacakages, and more.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple, List
+
+from meerschaum.utils.typing import Any, SuccessTuple, Optional, List
+
 
 def verify(
     action: Optional[List[str]] = None,
@@ -22,6 +24,7 @@ def verify(
         'packages': _verify_packages,
         'venvs': _verify_venvs,
         'plugins': _verify_plugins,
+        'rowcounts': _verify_rowcounts,
     }
     return choose_subaction(action, options, **kwargs)
 
@@ -32,6 +35,16 @@ def _verify_pipes(**kwargs) -> SuccessTuple:
     """
     from meerschaum.actions.sync import _sync_pipes
     kwargs['verify'] = True
+    return _sync_pipes(**kwargs)
+
+
+def _verify_rowcounts(**kwargs) -> SuccessTuple:
+    """
+    Verify the contents of pipes, syncing across their entire datetime intervals.
+    """
+    from meerschaum.actions.sync import _sync_pipes
+    kwargs['verify'] = True
+    kwargs['check_rowcounts_only'] = True
     return _sync_pipes(**kwargs)
 
 

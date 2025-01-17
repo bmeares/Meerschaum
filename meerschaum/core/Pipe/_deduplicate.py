@@ -110,13 +110,12 @@ def deduplicate(
         )
     if bounded and end is None:
         end = self.get_sync_time(newest=True, debug=debug)
-
-    if bounded and end is not None:
-        end += (
-            timedelta(minutes=1)
-            if isinstance(end, datetime)
-            else 1
-        )
+        if end is not None:
+            end += (
+                timedelta(minutes=1)
+                if hasattr(end, 'tzinfo')
+                else 1
+            )
 
     chunk_bounds = self.get_chunk_bounds(
         bounded=bounded,
@@ -129,7 +128,6 @@ def deduplicate(
     indices = [col for col in self.columns.values() if col]
     if not indices:
         return False, "Cannot deduplicate without index columns."
-    dt_col = self.columns.get('datetime', None)
 
     def process_chunk_bounds(bounds) -> Tuple[
         Tuple[

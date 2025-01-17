@@ -920,7 +920,7 @@ def truncate_item_name(item: str, flavor: str) -> str:
 
 def build_where(
     params: Dict[str, Any],
-    connector: Optional[meerschaum.connectors.sql.SQLConnector] = None,
+    connector: Optional[mrsm.connectors.sql.SQLConnector] = None,
     with_where: bool = True,
 ) -> str:
     """
@@ -1488,6 +1488,7 @@ def get_update_queries(
     patch_schema: Optional[str] = None,
     identity_insert: bool = False,
     null_indices: bool = True,
+    cast_columns: bool = True,
     debug: bool = False,
 ) -> List[str]:
     """
@@ -1531,6 +1532,9 @@ def get_update_queries(
 
     null_indices: bool, default True
         If `False`, do not coalesce index columns before joining.
+
+    cast_columns: bool, default True
+        If `False`, do not cast update columns to the target table types.
 
     debug: bool, default False
         Verbosity toggle.
@@ -1652,7 +1656,7 @@ def get_update_queries(
         cast_func_cols = {
             c_name: (
                 ('', '', '')
-                if (
+                if not cast_columns or (
                     flavor == 'oracle'
                     and are_dtypes_equal(get_pd_type_from_db_type(c_type), 'bytes')
                 )
