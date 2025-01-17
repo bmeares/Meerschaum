@@ -70,7 +70,7 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add negation to job actions.**  
   Prefix a job name with an underscore to select all other jobs. This is useful for filtering out noise for `show logs`.
 
-- **Add `Pipe.parent.**  
+- **Add `Pipe.parent`.**  
   As a quality-of-life improvement, the attribute `Pipe.parent` will return the first member of `Pipe.parents` (if available).
 
 - **Use the current instance for new tabs in the Webterm.**  
