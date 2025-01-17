@@ -73,9 +73,6 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add `Pipe.parent.**  
   As a quality-of-life improvement, the attribute `Pipe.parent` will return the first member of `Pipe.parents` (if available).
 
-- **Deduplicating SQL pipes happen in the internal schema.**  
-  Calling `Pipe.deduplicate()` for pipes on a SQL database now creates temporary tables in the internal schema and logs them for cleanup.
-
 - **Use the current instance for new tabs in the Webterm.**  
   Clicking "New Tab" will open a new `tmux` window using the currently selected instance on the Web Console.
 

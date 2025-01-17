@@ -3772,13 +3772,13 @@ def deduplicate_pipe(
             pipe.target,
             temp_old_table,
             self.flavor,
-            schema=self.internal_schema,
+            schema=self.get_pipe_schema(pipe),
         ),
         get_rename_table_queries(
             dedup_table,
             pipe.target,
             self.flavor,
-            schema=self.internal_schema,
+            schema=self.get_pipe_schema(pipe),
         ),
         f"DROP TABLE {if_exists_str} {temp_old_table_name}",
     ])
