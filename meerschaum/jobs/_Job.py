@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from meerschaum.jobs._Executor import Executor
 
 BANNED_CHARS: List[str] = [
-    ',', ';', "'", '"', '.', '$', '#', '=', '*', '&', '!', '`', '~',
+    ',', ';', "'", '"', '$', '#', '=', '*', '&', '!', '`', '~',
 ]
 RESTART_FLAGS: List[str] = [
     '-s',
