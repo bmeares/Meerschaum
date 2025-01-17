@@ -1622,9 +1622,3 @@ def to_json(
         orient=orient,
         **kwargs
     )
-
-
-def write_dataframe_cache(df) -> pathlib.Path:
-    """
-    Cache a Pandas DataFrame to a file on disk
-    """
