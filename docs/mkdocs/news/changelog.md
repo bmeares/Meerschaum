@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.8.0 – v2.8.1
+### v2.8.0 – v2.8.2
 
 - **Add batches to `Pipe.verify()`.**  
   Verification syncs now run in sequential batches so that they may be interrupted and resumed. See `Pipe.get_chunk_bounds_batches()` for more information:
