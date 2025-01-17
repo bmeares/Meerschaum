@@ -7,41 +7,47 @@ Routes for managing plugins
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, List, SuccessTuple, Union, Any, Dict
+import json
+import shutil
+import pathlib
+import os
+
+from meerschaum.utils.typing import Optional, List, SuccessTuple, Any, Dict
 
 from meerschaum.api import (
     fastapi,
     app,
     endpoints,
     get_api_connector,
-    pipes,
-    get_pipe,
     manager,
     debug,
-    private, no_auth,
+    private,
+    no_auth,
+    default_instance_keys,
 )
-import fastapi
 from meerschaum.api.tables import get_tables
-from fastapi import FastAPI, File, UploadFile
+from fastapi import File, UploadFile
 from meerschaum.utils.packages import attempt_import
-import meerschaum.core
 from meerschaum.core import Plugin
-starlette_responses = attempt_import('starlette.responses', warn=False)
+starlette_responses = attempt_import('starlette.responses', warn=False, lazy=False)
 FileResponse = starlette_responses.FileResponse
 
 sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 plugins_endpoint = endpoints['plugins']
 
+PLUGINS_INSTANCE_KEYS = default_instance_keys
+
+
 @app.post(plugins_endpoint + '/{name}', tags=['Plugins'])
 def register_plugin(
-        name: str,
-        version: str = None,
-        attributes: str = None,
-        archive: UploadFile = File(...),
-        curr_user = (
-            fastapi.Depends(manager) if not no_auth else None
-        ),
-    ) -> SuccessTuple:
+    name: str,
+    version: str = None,
+    attributes: str = None,
+    archive: UploadFile = File(...),
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+) -> SuccessTuple:
     """
     Register a plugin and save its archive file.
 
@@ -78,7 +84,6 @@ def register_plugin(
             "you can toggle various registration types."
         )
 
-    import json, shutil, pathlib, os
     get_tables()
     if attributes is None:
         attributes = json.dumps({})
@@ -86,7 +91,7 @@ def register_plugin(
     if isinstance(attributes, str) and attributes[0] == '{':
         try:
             attributes = json.loads(attributes)
-        except Exception as e:
+        except Exception:
             pass
 
     plugin = Plugin(name, version=version, attributes=attributes)
@@ -97,13 +102,15 @@ def register_plugin(
         )
 
     if curr_user is not None:
-        plugin_user_id = get_api_connector().get_plugin_user_id(plugin)
-        curr_user_id = get_api_connector().get_user_id(curr_user) if curr_user is not None else -1
+        plugin_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_plugin_user_id(plugin)
+        curr_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_user_id(curr_user) if curr_user is not None else -1
         if plugin_user_id is not None and plugin_user_id != curr_user_id:
             return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'."
         plugin.user_id = curr_user_id
 
-    success, msg = get_api_connector().register_plugin(plugin, make_archive=False, debug=debug)
+    success, msg = get_api_connector(
+        PLUGINS_INSTANCE_KEYS
+    ).register_plugin(plugin, make_archive=False, debug=debug)
 
     if success:
         archive_path = plugin.archive_path
@@ -117,11 +124,11 @@ def register_plugin(
 
 @app.get(plugins_endpoint + '/{name}', tags=['Plugins'])
 def get_plugin(
-        name: str,
-        curr_user = (
-            fastapi.Depends(manager) if private else None
-        ),
-    ) -> Any:
+    name: str,
+    curr_user = (
+        fastapi.Depends(manager) if private else None
+    ),
+) -> Any:
     """
     Download a plugin's archive file.
     """
@@ -133,24 +140,25 @@ def get_plugin(
 
 @app.get(plugins_endpoint + '/{name}/attributes', tags=['Plugins'])
 def get_plugin_attributes(
-        name: str,
-        curr_user = (
-            fastapi.Depends(manager) if private else None
-        ),
-    ) -> Dict[str, Any]:
+    name: str,
+    curr_user = (
+        fastapi.Depends(manager) if private else None
+    ),
+) -> Dict[str, Any]:
     """
     Get a plugin's attributes.
     """
-    return get_api_connector().get_plugin_attributes(Plugin(name))
+    return get_api_connector(PLUGINS_INSTANCE_KEYS).get_plugin_attributes(Plugin(name))
+
 
 @app.get(plugins_endpoint, tags=['Plugins'])
 def get_plugins(
-        user_id : Optional[int] = None,
-        search_term : Optional[str] = None,
-        curr_user = (
-            fastapi.Depends(manager) if private else None
-        ),
-    ) -> List[str]:
+    user_id: Optional[int] = None,
+    search_term: Optional[str] = None,
+    curr_user = (
+        fastapi.Depends(manager) if private else None
+    ),
+) -> List[str]:
     """
     Get a list of plugins.
 
@@ -166,26 +174,29 @@ def get_plugins(
     -------
     A list of strings.
     """
-    return get_api_connector().get_plugins(user_id=user_id, search_term=search_term)
+    return get_api_connector(
+        PLUGINS_INSTANCE_KEYS
+    ).get_plugins(user_id=user_id, search_term=search_term)
+
 
 @app.delete(plugins_endpoint + '/{name}', tags=['Plugins'])
 def delete_plugin(
-        name : str,
-        curr_user = (
-            fastapi.Depends(manager) if private else None
-        ),
-    ) -> SuccessTuple:
+    name: str,
+    curr_user = (
+        fastapi.Depends(manager) if private else None
+    ),
+) -> SuccessTuple:
     """
     Delete a plugin and its archive file from the repository.
     """
     get_tables()
     plugin = Plugin(name)
-    plugin_user_id = get_api_connector().get_plugin_user_id(plugin)
+    plugin_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_plugin_user_id(plugin)
     if plugin_user_id is None:
         return False, f"Plugin '{plugin}' is not registered."
 
     if curr_user is not None:
-        curr_user_id = get_api_connector().get_user_id(curr_user)
+        curr_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_user_id(curr_user)
         if plugin_user_id != curr_user_id:
             return False, f"User '{curr_user.username}' cannot delete plugin '{plugin}'."
     else:
@@ -196,7 +207,7 @@ def delete_plugin(
     if not _remove_success[0]:
         return _remove_success
 
-    _delete_success = get_api_connector().delete_plugin(plugin, debug=debug)
+    _delete_success = get_api_connector(PLUGINS_INSTANCE_KEYS).delete_plugin(plugin, debug=debug)
     if not _delete_success[0]:
         return _delete_success
 

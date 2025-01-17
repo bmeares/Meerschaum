@@ -88,7 +88,11 @@ window.addEventListener(
     if (action_str === "__TMUX_NEW_WINDOW") {
       line = "\x02:";
       window.terminal.socket.send(JSON.stringify(["stdin", line]));
-      line = "new-window python3 -m meerschaum\r";
+      line = "new-window python3 -m meerschaum";
+      if (instance.length > 0) {
+          line += " -i " + instance;
+      }
+      line += "\r"
       window.terminal.socket.send(JSON.stringify(["stdin", line]));
       return;
     }

@@ -9,7 +9,7 @@ Manager users' metadata via the User class
 from typing import Optional
 
 import meerschaum as mrsm
-from meerschaum.core.User._User import User, hash_password, verify_password
+from meerschaum.core.User._User import User
 
 
 def is_user_allowed_to_execute(
@@ -19,8 +19,6 @@ def is_user_allowed_to_execute(
     """
     Return a `SuccessTuple` indicating whether a given user is allowed to execute actions.
     """
-    print(f"{debug=}")
-    print(f"{user=}")
     if user is None:
         return True, "Success"
 
@@ -29,9 +27,7 @@ def is_user_allowed_to_execute(
     if user_type == 'admin':
         return True, "Success"
 
-    from meerschaum.config import get_config
-
-    allow_non_admin = get_config('system', 'api', 'permissions', 'actions', 'non_admin')
+    allow_non_admin = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
     if not allow_non_admin:
         return False, "The administrator for this server has not allowed users to perform actions."
 

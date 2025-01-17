@@ -319,16 +319,42 @@ def sync(
             if debug:
                 dprint("Successfully synced the first chunk, attemping the rest...")
 
-            failed_chunks = []
             def _process_chunk(_chunk):
-                try:
-                    _chunk_success, _chunk_msg = _sync(p, _chunk)
-                except Exception as e:
-                    _chunk_success, _chunk_msg = False, str(e)
-                if not _chunk_success:
-                    failed_chunks.append(_chunk)
+                _chunk_attempts = 0
+                _max_chunk_attempts = 3
+                while _chunk_attempts < _max_chunk_attempts:
+                    try:
+                        _chunk_success, _chunk_msg = _sync(p, _chunk)
+                    except Exception as e:
+                        _chunk_success, _chunk_msg = False, str(e)
+                    if _chunk_success:
+                        break
+                    _chunk_attempts += 1
+                    _sleep_seconds = _chunk_attempts ** 2
+                    warn(
+                        (
+                            f"Failed to sync chunk to {self} "
+                            + f"(attempt {_chunk_attempts} / {_max_chunk_attempts}).\n"
+                            + f"Sleeping for {_sleep_seconds} second"
+                            + ('s' if _sleep_seconds != 1 else '')
+                            + ":\n{_chunk_msg}"
+                        ),
+                        stack=False,
+                    )
+                    time.sleep(_sleep_seconds)
+
+                num_rows_str = (
+                    f"{num_rows:,} rows"
+                    if (num_rows := len(_chunk)) != 1
+                    else f"{num_rows} row"
+                )
                 _chunk_msg = (
-                    self._get_chunk_label(_chunk, dt_col)
+                    (
+                        "Synced"
+                        if _chunk_success
+                        else "Failed to sync"
+                    ) + f" a chunk ({num_rows_str}) to {p}:\n"
+                    + self._get_chunk_label(_chunk, dt_col)
                     + '\n'
                     + _chunk_msg
                 )
@@ -351,27 +377,16 @@ def sync(
             )
             chunk_messages = [chunk_msg for _, chunk_msg in results]
             success_bools = [chunk_success for chunk_success, _ in results]
+            num_successes = len([chunk_success for chunk_success, _ in results if chunk_success])
+            num_failures = len([chunk_success for chunk_success, _ in results if not chunk_success])
             success = all(success_bools)
             msg = (
-                f'Synced {len(chunk_messages)} chunk'
+                'Synced '
+                + f'{len(chunk_messages):,} chunk'
                 + ('s' if len(chunk_messages) != 1 else '')
-                + f' to {p}:\n\n'
+                + f' to {p}\n({num_successes} succeeded, {num_failures} failed):\n\n'
                 + '\n\n'.join(chunk_messages).lstrip().rstrip()
             ).lstrip().rstrip()
-
-            ### If some chunks succeeded, retry the failures.
-            retry_success = True
-            if not success and any(success_bools):
-                if debug:
-                    dprint("Retrying failed chunks...")
-                chunks_to_retry = [c for c in failed_chunks]
-                failed_chunks = []
-                for chunk in chunks_to_retry:
-                    chunk_success, chunk_msg = _process_chunk(chunk)
-                    msg += f"\n\nRetried chunk:\n{chunk_msg}\n"
-                    retry_success = retry_success and chunk_success
-
-            success = success and retry_success
             return success, msg
 
         ### Cast to a dataframe and ensure datatypes are what we expect.
@@ -474,6 +489,7 @@ def get_sync_time(
     params: Optional[Dict[str, Any]] = None,
     newest: bool = True,
     apply_backtrack_interval: bool = False,
+    remote: bool = False,
     round_down: bool = False,
     debug: bool = False
 ) -> Union['datetime', int, None]:
@@ -493,6 +509,10 @@ def get_sync_time(
     apply_backtrack_interval: bool, default False
         If `True`, subtract the backtrack interval from the sync time.
 
+    remote: bool, default False
+        If `True` and the instance connector supports it, return the sync time
+        for the remote table definition.
+
     round_down: bool, default False
         If `True`, round down the datetime value to the nearest minute.
 
@@ -506,17 +526,30 @@ def get_sync_time(
     """
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import round_time
+    from meerschaum.utils.misc import round_time, filter_keywords
+    from meerschaum.utils.warnings import warn
 
     if not self.columns.get('datetime', None):
         return None
 
-    with Venv(get_connector_plugin(self.instance_connector)):
-        sync_time = self.instance_connector.get_sync_time(
+    connector = self.instance_connector if not remote else self.connector
+    with Venv(get_connector_plugin(connector)):
+        if not hasattr(connector, 'get_sync_time'):
+            warn(
+                f"Connectors of type '{connector.type}' "
+                "do not implement `get_sync_time().",
+                stack=False,
+            )
+            return None
+        sync_time = connector.get_sync_time(
             self,
-            params=params,
-            newest=newest,
-            debug=debug,
+            **filter_keywords(
+                connector.get_sync_time,
+                params=params,
+                newest=newest,
+                remote=remote,
+                debug=debug,
+            )
         )
 
     if round_down and isinstance(sync_time, datetime):

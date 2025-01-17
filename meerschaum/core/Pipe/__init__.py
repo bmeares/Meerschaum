@@ -92,6 +92,7 @@ class Pipe:
         _get_data_as_iterator,
         get_chunk_interval,
         get_chunk_bounds,
+        get_chunk_bounds_batches,
         parse_date_bounds,
     )
     from ._register import register
@@ -117,6 +118,7 @@ class Pipe:
         id,
         get_val_column,
         parents,
+        parent,
         children,
         target,
         _target_legacy,

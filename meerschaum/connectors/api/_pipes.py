@@ -581,6 +581,7 @@ def get_pipe_rowcount(
         If provided, bound the count by these parameters.
 
     remote: bool, default False
+        If `True`, return the rowcount for the fetch definition.
 
     Returns
     -------

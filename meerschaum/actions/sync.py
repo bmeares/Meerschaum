@@ -49,6 +49,7 @@ def _pipes_lap(
     deduplicate: bool = False,
     bounded: Optional[bool] = None,
     chunk_interval: Union[timedelta, int, None] = None,
+    check_rowcounts_only: bool = False,
     mrsm_instance: Optional[str] = None,
     timeout_seconds: Optional[int] = None,
     nopretty: bool = False,
@@ -93,6 +94,7 @@ def _pipes_lap(
         'deduplicate': deduplicate,
         'bounded': bounded,
         'chunk_interval': chunk_interval,
+        'check_rowcounts_only': check_rowcounts_only,
     })
     locks = {'remaining_count': Lock(), 'results_dict': Lock(), 'pipes_threads': Lock(),}
     pipes = get_pipes(
@@ -254,6 +256,7 @@ def _sync_pipes(
     deduplicate: bool = False,
     bounded: Optional[bool] = None,
     chunk_interval: Union[timedelta, int, None] = None,
+    check_rowcounts_only: bool = False,
     shell: bool = False,
     nopretty: bool = False,
     debug: bool = False,
@@ -308,6 +311,7 @@ def _sync_pipes(
                     deduplicate=deduplicate,
                     bounded=bounded,
                     chunk_interval=chunk_interval,
+                    check_rowcounts_only=check_rowcounts_only,
                     unblock=unblock,
                     debug=debug,
                     nopretty=nopretty,
@@ -447,7 +451,7 @@ def _wrap_pipe(
                 sync_hook_result = sync_hook(pipe, **filter_keywords(sync_hook, **sync_kwargs))
                 if is_success_tuple(sync_hook_result):
                     return sync_hook_result
-            except Exception as e:
+            except Exception:
                 msg = (
                     f"Failed to execute sync hook '{sync_hook.__name__}' "
                     + f"from plugin '{plugin}':\n{traceback.format_exc()}"

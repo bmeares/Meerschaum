@@ -186,7 +186,7 @@ def _drop_old_temporary_tables(
     ]
     if docs:
         queries = [sqlalchemy.insert(temp_tables_table).values(**doc) for doc in docs]
-        results = [self.exec(query, silent=True, debug=debug) for query in queries]
+        _ = [self.exec(query, silent=True, debug=debug) for query in queries]
         _in_memory_temp_tables.update(
             {
                 table: True

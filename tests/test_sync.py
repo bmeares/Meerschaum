@@ -1225,7 +1225,8 @@ def test_sync_sql_small_chunksize(flavor):
     pipe = mrsm.Pipe(
         'test', 'sync_sql_chunksize', 'small',
         instance=conn,
-        columns=['id'],
+        columns={'primary': 'id', 'datetime': 'id'},
+        dtypes={'id': 'int'},
     )
     docs = [
         {'id': 1, 'foo': 'abc'},
@@ -1252,6 +1253,7 @@ def test_sync_sql_small_chunksize(flavor):
         conn, 'test', 'small_chunksize',
         instance=downstream_instance_conn,
         columns=pipe.columns,
+        dtypes=pipe.dtypes,
         parameters={
             'fetch': {
                 'definition': "SELECT * FROM {{" + str(pipe) + "}}",

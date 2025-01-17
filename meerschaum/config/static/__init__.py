@@ -7,7 +7,6 @@ Insert non-user-editable configuration files here.
 """
 
 import os
-import uuid
 from typing import Dict, Any
 from meerschaum.utils.misc import generate_password
 
@@ -36,6 +35,9 @@ STATIC_CONFIG: Dict[str, Any] = {
             'webterm_websocket': r'/websocket/{session_id}',
             'info': '/info',
             'healthcheck': '/healthcheck',
+            'docs': '/docs',
+            'redoc': '/redoc',
+            'openapi': '/openapi.json',
         },
         'oauth': {
             'token_expires_minutes': 720,
@@ -149,6 +151,7 @@ STATIC_CONFIG: Dict[str, Any] = {
         },
         'exists_timeout_seconds': 5.0,
         'static_schema_cache_seconds': 60.0,
+        'max_bound_time_days': 36525,
     },
     'jobs': {
         'check_restart_seconds': 1.0,
