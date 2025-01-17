@@ -1260,7 +1260,6 @@ def test_sync_sql_small_chunksize(flavor):
             },
         }
     )
-    return downstream_pipe
 
     chunksize = 1
     success, msg = downstream_pipe.sync(chunksize=chunksize, debug=debug, _inplace=False)
