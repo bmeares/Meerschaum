@@ -48,6 +48,7 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
       libgtk-3-dev \
       gir1.2-webkit2-4.0 \
       htop \
+      openssl \
       || exit 1
   fi
 

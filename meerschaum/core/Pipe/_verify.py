@@ -219,9 +219,9 @@ def verify(
                 debug=debug,
             )
             checked_rows_str = (
-                f"checked {existing_rowcount} row"
+                f"checked {existing_rowcount:,} row"
                 + ("s" if existing_rowcount != 1 else '')
-                + f" vs {remote_rowcount} remote"
+                + f" vs {remote_rowcount:,} remote"
             )
             if (
                 existing_rowcount is not None
@@ -239,6 +239,7 @@ def verify(
                     f"Row-counts are out-of-sync ({checked_rows_str})."
                 )
 
+        while num_syncs < MAX_CHUNKS_SYNCS
         chunk_success, chunk_msg = self.sync(
             begin=chunk_begin,
             end=chunk_end,
@@ -252,6 +253,7 @@ def verify(
             chunk_label = f"{chunk_begin} - {chunk_end}"
             chunk_msg = f'Verified chunk for {self}:\n{chunk_label}\n{chunk_msg}'
         mrsm.pprint((chunk_success, chunk_msg))
+
         return chunk_begin_and_end, (chunk_success, chunk_msg)
 
     ### If we have more than one chunk, attempt to sync the first one and return if its fails.
