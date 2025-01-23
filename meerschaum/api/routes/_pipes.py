@@ -311,7 +311,7 @@ def get_sync_time(
     newest: bool = True,
     remote: bool = False,
     round_down: bool = True,
-    debug: bool = False,
+    instance_keys: Optional[str] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -322,12 +322,11 @@ def get_sync_time(
     """
     if location_key == '[None]':
         location_key = None
-    pipe = get_pipe(connector_keys, metric_key, location_key)
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
     sync_time = pipe.get_sync_time(
-        params = params,
-        newest = newest,
-        debug = debug,
-        round_down = round_down,
+        params=params,
+        newest=newest,
+        round_down=round_down,
     )
     if isinstance(sync_time, datetime):
         sync_time = sync_time.isoformat()
@@ -339,7 +338,8 @@ def sync_pipe(
     connector_keys: str,
     metric_key: str,
     location_key: str,
-    data: dict = None,
+    data: Union[Dict[str, List[Any]], List[Dict[str, Any]]],
+    instance_keys: Optional[str] = None,
     check_existing: bool = True,
     blocking: bool = True,
     force: bool = False,
@@ -354,9 +354,9 @@ def sync_pipe(
     Add data to an existing Pipe.
     See [`meerschaum.Pipe.sync`](https://docs.meerschaum.io/meerschaum.html#Pipe.sync).
     """
-    if data is None:
-        data = {}
-    pipe = get_pipe(connector_keys, metric_key, location_key)
+    if not data:
+        return [True, "No data to sync."]
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
     if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes'):
         raise fastapi.HTTPException(
             status_code=409,
@@ -365,21 +365,16 @@ def sync_pipe(
 
     if not pipe.columns and columns is not None:
         pipe.columns = json.loads(columns)
-    if not pipe.columns and not is_pipe_registered(pipe, pipes(refresh=True)):
-        raise fastapi.HTTPException(
-            status_code=409,
-            detail="Pipe must be registered with index columns specified."
-        )
 
-    result = list(pipe.sync(
+    success, msg = pipe.sync(
         data,
         debug=debug,
         check_existing=check_existing,
         blocking=blocking,
         force=force,
         workers=workers,
-    ))
-    return result
+    )
+    return list((success, msg))
 
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data', tags=['Pipes'])
@@ -543,7 +538,7 @@ def get_pipe_csv(
     if not is_pipe_registered(pipe, pipes(instance_keys, refresh=True)):
         raise fastapi.HTTPException(
             status_code=409,
-            detail="Pipe must be registered with the datetime column specified."
+            detail="Pipe must be registered."
         )
 
     dt_col = pipe.columns.get('datetime', None)
