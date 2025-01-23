@@ -21,6 +21,7 @@ from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn, dprint
 from meerschaum.utils.threading import RLock
 from meerschaum.utils.misc import is_pipe_registered
+from meerschaum.connectors.parse import parse_instance_keys
 
 from meerschaum import __version__ as version
 __version__ = version
@@ -99,7 +100,6 @@ production = get_uvicorn_config().get('production', False)
 _include_dash = (not no_dash)
 docs_enabled = not production or sys_config.get('endpoints', {}).get('docs_in_production', True)
 
-connector = None
 default_instance_keys = None
 _instance_connectors = defaultdict(lambda: None)
 def get_api_connector(instance_keys: Optional[str] = None):
@@ -130,12 +130,19 @@ def get_api_connector(instance_keys: Optional[str] = None):
         )
 
     with _locks[f'instance-{instance_keys}']:
-        connector = _instance_connectors[instance_keys]
-        if connector is None:
-            from meerschaum.connectors.parse import parse_instance_keys
-            connector = parse_instance_keys(instance_keys, debug=debug)
-            _instance_connectors[instance_keys] = connector
-    return connector
+        if _instance_connectors[instance_keys] is None:
+            try:
+                is_valid_connector = True
+                _instance_connectors[instance_keys] = parse_instance_keys(instance_keys, debug=debug)
+            except Exception:
+                is_valid_connector = False
+
+            if not is_valid_connector:
+                raise fastapi.HTTPException(
+                    status_code=422,
+                    detail="Invalid instance keys.",
+                )
+    return _instance_connectors[instance_keys]
 
 
 cache_connector = None
@@ -164,7 +171,6 @@ def get_cache_connector(connector_keys: Optional[str] = None):
         return None
 
     if cache_connector is None:
-        from meerschaum.connectors.parse import parse_instance_keys
         cache_connector = parse_instance_keys(connector_keys)
 
     if debug:

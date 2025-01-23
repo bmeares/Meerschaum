@@ -7,6 +7,7 @@ Verify the contents of a pipe by resyncing its interval.
 """
 
 from datetime import datetime, timedelta
+import time
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, Dict
@@ -183,6 +184,7 @@ def verify(
         )
     )
     message_header = f"{begin_to_print} - {end_to_print}"
+    max_chunks_syncs = mrsm.get_config('pipes', 'verify', 'max_chunks_syncs')
 
     info(
         f"Verifying {self}:\n    Syncing {len(chunk_bounds)} chunk"
@@ -219,9 +221,9 @@ def verify(
                 debug=debug,
             )
             checked_rows_str = (
-                f"checked {existing_rowcount} row"
+                f"checked {existing_rowcount:,} row"
                 + ("s" if existing_rowcount != 1 else '')
-                + f" vs {remote_rowcount} remote"
+                + f" vs {remote_rowcount:,} remote"
             )
             if (
                 existing_rowcount is not None
@@ -239,19 +241,26 @@ def verify(
                     f"Row-counts are out-of-sync ({checked_rows_str})."
                 )
 
-        chunk_success, chunk_msg = self.sync(
-            begin=chunk_begin,
-            end=chunk_end,
-            params=params,
-            workers=_workers,
-            debug=debug,
-            **kwargs
-        ) if do_sync else (chunk_success, chunk_msg)
+        num_syncs = 0
+        while num_syncs < max_chunks_syncs:
+            chunk_success, chunk_msg = self.sync(
+                begin=chunk_begin,
+                end=chunk_end,
+                params=params,
+                workers=_workers,
+                debug=debug,
+                **kwargs
+            ) if do_sync else (chunk_success, chunk_msg)
+            if chunk_success:
+                break
+            num_syncs += 1
+            time.sleep(num_syncs**2)
         chunk_msg = chunk_msg.strip()
         if ' - ' not in chunk_msg:
             chunk_label = f"{chunk_begin} - {chunk_end}"
             chunk_msg = f'Verified chunk for {self}:\n{chunk_label}\n{chunk_msg}'
         mrsm.pprint((chunk_success, chunk_msg))
+
         return chunk_begin_and_end, (chunk_success, chunk_msg)
 
     ### If we have more than one chunk, attempt to sync the first one and return if its fails.

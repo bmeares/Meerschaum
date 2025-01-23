@@ -173,6 +173,9 @@ default_pipes_config = {
     'sync': {
         'filter_params_index_limit': 250,
     },
+    'verify': {
+        'max_chunks_syncs': 3,
+    },
 }
 default_plugins_config = {}
 default_experimental_config = {
