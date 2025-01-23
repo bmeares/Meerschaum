@@ -222,7 +222,7 @@ def filter_unseen_df(
     numeric_cols_precisions_scales = {
         col: get_numeric_precision_scale(None, typ)
         for col, typ in dtypes.items()
-        if col and typ and typ.startswith('numeric')
+        if col and str(typ).lower().startswith('numeric')
     }
 
     dt_dtypes = {
