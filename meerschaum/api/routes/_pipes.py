@@ -338,7 +338,7 @@ def sync_pipe(
     connector_keys: str,
     metric_key: str,
     location_key: str,
-    data: Union[Dict[str, List[Any]], List[Dict[str, Any]], Dict[str, Dict[str, Any]]],
+    data: Union[List[Dict[Any, Any]], Dict[Any, Any]],
     instance_keys: Optional[str] = None,
     check_existing: bool = True,
     blocking: bool = True,
