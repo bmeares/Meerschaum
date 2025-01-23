@@ -4,6 +4,13 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.8.3
+
+- **Increase username limit to 60 characters.**
+- **Add chunk retries to `Pipe.verify()`.**
+- **Add instance keys to remaining pipes endpoints.**
+- **Misc bugfixes.**
+
 ### v2.8.0 – v2.8.2
 
 - **Add batches to `Pipe.verify()`.**  

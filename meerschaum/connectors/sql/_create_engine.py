@@ -256,8 +256,11 @@ def create_engine(
         ) if not _uri else _uri
 
         ### Sometimes the timescaledb:// flavor can slip in.
-        if _uri and self.flavor in ('timescaledb',) and self.flavor in _uri:
-            engine_str = engine_str.replace(f'{self.flavor}', 'postgresql', 1)
+        if _uri and self.flavor in _uri:
+            if self.flavor == 'timescaledb':
+                engine_str = engine_str.replace(f'{self.flavor}', 'postgresql', 1)
+            elif _uri.startswith('postgresql://'):
+                engine_str = engine_str.replace('postgresql://', 'postgresql+psycopg2://')
 
     if debug:
         dprint(
@@ -303,7 +306,7 @@ def create_engine(
             echo         = debug,
             **_create_engine_args
         )
-    except Exception as e:
+    except Exception:
         warn(f"Failed to create connector '{self}':\n{traceback.format_exc()}", stack=False)
         engine = None
 

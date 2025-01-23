@@ -137,7 +137,7 @@ STATIC_CONFIG: Dict[str, Any] = {
             'pbkdf2_sha256__default_rounds': 1_000_000,
         },
         'min_username_length': 1,
-        'max_username_length': 26,
+        'max_username_length': 60,
         'min_password_length': 5,
     },
     'plugins': {

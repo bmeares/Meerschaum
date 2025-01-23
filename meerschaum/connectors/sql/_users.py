@@ -43,7 +43,9 @@ def register_user(
         'password_hash': user.password_hash,
         'user_type': user.type,
         'attributes': (
-            json.dumps(user.attributes) if self.flavor not in json_flavors else user.attributes
+            json.dumps(user.attributes)
+            if self.flavor not in json_flavors
+            else user.attributes
         ),
     }
     if old_id is not None:
@@ -109,7 +111,7 @@ def edit_user(
     user_id = user.user_id if user.user_id is not None else self.get_user_id(user, debug=debug)
     if user_id is None:
         return False, (
-            f"User '{user.username}' does not exist. " +
+            f"User '{user.username}' does not exist. "
             f"Register user '{user.username}' before editing."
         )
     user.user_id = user_id

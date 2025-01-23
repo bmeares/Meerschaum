@@ -100,7 +100,13 @@ def _cli_exit(
     ### yet defined (e.g. 'sql:local').
     cli_arg_str = self.DATABASE_URL
     if self.flavor in ('sqlite', 'duckdb'):
-        cli_arg_str = str(self.database)
+        cli_arg_str = (
+            str(self.database)
+            if 'database' in self.__dict__
+            else self.parse_uri(self.URI).get('database', None)
+        )
+        if not cli_arg_str:
+            raise ValueError(f"Cannot determine database from connector '{self}'.")
     if cli_arg_str.startswith('postgresql+psycopg://'):
         cli_arg_str = cli_arg_str.replace('postgresql+psycopg://', 'postgresql://')
 
