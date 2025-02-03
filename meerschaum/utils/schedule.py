@@ -95,7 +95,7 @@ def schedule_function(
     A `SuccessTuple` upon exit.
     """
     import asyncio
-    from meerschaum.utils.misc import filter_keywords, round_time
+    from meerschaum.utils.misc import filter_keywords
 
     global _scheduler
     kw['debug'] = debug
@@ -103,7 +103,7 @@ def schedule_function(
 
     _ = mrsm.attempt_import('attrs', lazy=False)
     apscheduler = mrsm.attempt_import('apscheduler', lazy=False)
-    now = round_time(datetime.now(timezone.utc), timedelta(minutes=1))
+    now = datetime.now(timezone.utc)
     trigger = parse_schedule(schedule, now=now)
     _scheduler = apscheduler.AsyncScheduler(identity='mrsm-scheduler')
     try:
@@ -296,7 +296,7 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
     starting_parts = schedule.split(STARTING_KEYWORD)
     starting_str = ('now' if len(starting_parts) == 1 else starting_parts[-1]).strip()
-    now = now or round_time(datetime.now(timezone.utc), timedelta(minutes=1))
+    now = now or datetime.now(timezone.utc)
     try:
         if starting_str == 'now':
             starting_ts = now

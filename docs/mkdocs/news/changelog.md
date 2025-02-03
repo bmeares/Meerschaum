@@ -36,6 +36,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add `--skip-hooks`.**  
   The flag `--skip-hooks` prevents any sync hooks from firing when syncing pipes.
 
+- **Remove datetime rounding from `parse_schedule()`.**  
+  Scheduled actions now behave as expected ― the current timestamp is no longer rounded to the nearest minute, which was causing issues with the `starting in` delay feature.
+
 - **Fix `allowed_instance_keys` enforcement.**
 
 ### v2.8.3

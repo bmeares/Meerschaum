@@ -611,7 +611,9 @@ def _start_pipeline(
     do_n_times = (
         int(action[0].lstrip('x'))
         if action and is_int(action[0].lstrip('x'))
-        else 1
+        else (
+            1 if not loop else -1
+        )
     )
 
     params = params or {}
@@ -678,7 +680,6 @@ def _start_pipeline(
         warn("Cancelled pipeline.", stack=False)
         if proc is not None:
             _stop_process(proc)
-        success = False
         if msg == default_msg:
             msg = "Pipeline was cancelled."
 
