@@ -29,7 +29,7 @@ server {
         proxy_pass http://localhost:8000;
     }
 
-    location ~* /(ws|websocket)(/|$)
+    location ~* /(ws|websocket)(/|$) {
         proxy_pass http://localhost:8000$request_uri;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -67,7 +67,7 @@ server {
         proxy_pass http://localhost:8000;
     }
     
-    location ~* /(ws|websocket)$ {
+    location ~* /(ws|websocket)(/|$) {
         proxy_pass http://localhost:8000$request_uri;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;

@@ -58,7 +58,7 @@ packages: Dict[str, Dict[str, str]] = {
     '_internal'                      : {
         'apscheduler'                : (
                                        f"{_MRSM_PACKAGE_ARCHIVES_PREFIX}"
-                                       "APScheduler-4.0.0a5.post75+mrsm-py3-none-any.whl>=4.0.0a5"
+                                       "APScheduler-4.0.0a5.post87+mrsm-py3-none-any.whl>=4.0.0a5"
         ),
         'dataclass_wizard'           : 'dataclass-wizard>=0.28.0',
     },

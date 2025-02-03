@@ -169,7 +169,7 @@ Note that a pipe's attributes must be JSON-serializable, so objects like MongoDB
         pipe: mrsm.Pipe,
         debug: bool = False,
         **kwargs: Any
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Return the pipe's document from the internal `pipes` collection.
 
@@ -701,30 +701,30 @@ You may choose to implement `get_pipe_columns_indices()`, which returns a dictio
 
 ??? example
 
-```python
-def get_pipe_columns_indices(
-    debug: bool = False,
-) -> dict[str, list[dict[str, str]]]:
-    """
-    Return a dictionary mapping columns to metadata about related indices.
+    ```python
+    def get_pipe_columns_indices(
+        debug: bool = False,
+    ) -> dict[str, list[dict[str, str]]]:
+        """
+        Return a dictionary mapping columns to metadata about related indices.
 
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe whose target table has related indices.
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table has related indices.
 
-    Returns
-    -------
-    A list of dictionaries with the keys "type" and "name".
+        Returns
+        -------
+        A list of dictionaries with the keys "type" and "name".
 
-    Examples
-    --------
-    >>> pipe = mrsm.Pipe('demo', 'shirts', columns={'primary': 'id'}, indices={'size_color': ['color', 'size']})
-    >>> pipe.sync([{'color': 'red', 'size': 'M'}])
-    >>> pipe.get_columns_indices()
-    {'id': [{'name': 'demo_shirts_pkey', 'type': 'PRIMARY KEY'}], 'color': [{'name': 'IX_demo_shirts_color_size', 'type': 'INDEX'}], 'size': [{'name': 'IX_demo_shirts_color_size', 'type': 'INDEX'}]}
-    """
-```
+        Examples
+        --------
+        >>> pipe = mrsm.Pipe('demo', 'shirts', columns={'primary': 'id'}, indices={'size_color': ['color', 'size']})
+        >>> pipe.sync([{'color': 'red', 'size': 'M'}])
+        >>> pipe.get_columns_indices()
+        {'id': [{'name': 'demo_shirts_pkey', 'type': 'PRIMARY KEY'}], 'color': [{'name': 'IX_demo_shirts_color_size', 'type': 'INDEX'}], 'size': [{'name': 'IX_demo_shirts_color_size', 'type': 'INDEX'}]}
+        """
+    ```
 
 ## `#!python get_pipe_rowcount()`
 
