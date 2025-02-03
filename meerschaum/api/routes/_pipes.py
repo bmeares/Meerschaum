@@ -272,7 +272,7 @@ async def get_pipes_by_connector_and_metric(
 
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}', tags=['Pipes'])
-async def get_pipes_by_connector_and_metric_and_location(
+async def get_pipe_by_connector_and_metric_and_location(
     connector_keys: str,
     metric_key: str,
     location_key: str,
@@ -299,7 +299,7 @@ async def get_pipes_by_connector_and_metric_and_location(
             detail=f"location_key '{location_key}' not found."
         )
 
-    return str(pipes(instance_keys)[connector_keys][metric_key][location_key])
+    return pipes(instance_keys)[connector_keys][metric_key][location_key].attributes
 
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time', tags=['Pipes'])
@@ -522,7 +522,6 @@ def get_pipe_csv(
     if params == 'null':
         params = None
     if params is not None:
-        import json
         try:
             _params = json.loads(params)
         except Exception:

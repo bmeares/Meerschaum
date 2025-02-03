@@ -86,7 +86,7 @@ def _drop_pipes(
         pprint(success_dict)
 
     msg = (
-        f"Finished dropping {len(pipes)} pipes"
+        f"Finished dropping {len(pipes)} pipe"
         + ('s' if len(pipes) != 1 else '')
         + f"\n    ({successes} succeeded, {fails} failed)."
     )

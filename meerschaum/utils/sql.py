@@ -1548,7 +1548,7 @@ def get_update_queries(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import DB_FLAVORS_CAST_DTYPES, get_pd_type_from_db_type
-    flavor = flavor or (connectable.flavor if isinstance(connectable, SQLConnector) else None)
+    flavor = flavor or getattr(connectable, 'flavor', None)
     if not flavor:
         raise ValueError("Provide a flavor if using a SQLAlchemy session.")
     if (

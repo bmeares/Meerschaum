@@ -568,9 +568,9 @@ def _start_pipeline(
     Examples
     --------
 
-    `sync pipes -i sql:local + sync pipes -i sql:main :: -s 'daily'`
+    `sync pipes -i sql:local + sync pipes -i sql:main : -s 'daily'`
 
-    `show version + show arguments :: --loop`
+    `show version + show arguments : --loop`
 
     """
     import json
@@ -580,10 +580,11 @@ def _start_pipeline(
     from meerschaum.utils.warnings import info, warn
     from meerschaum.utils.misc import is_int
     from meerschaum.utils.venv import venv_exec
-    from meerschaum.utils.process import poll_process
+    from meerschaum.utils.process import poll_process, _stop_process
     fence_begin, fence_end = '<MRSM_RESULT>', '</MRSM_RESULT>'
 
-    success, msg = False, "Did not run pipeline."
+    default_msg = "Did not pipeline."
+    success, msg = False, default_msg
     def write_line(line):
         nonlocal success, msg
         decoded = line.decode('utf-8')
@@ -610,7 +611,9 @@ def _start_pipeline(
     do_n_times = (
         int(action[0].lstrip('x'))
         if action and is_int(action[0].lstrip('x'))
-        else 1
+        else (
+            1 if not loop else -1
+        )
     )
 
     params = params or {}
@@ -623,8 +626,9 @@ def _start_pipeline(
     if min_seconds is None:
         min_seconds = 1.0
 
+    proc = None
     def do_entry() -> None:
-        nonlocal success, msg
+        nonlocal success, msg, proc
         if timeout_seconds is None:
             success, msg = entry(sub_args_line, _patch_args=patch_args)
             return
@@ -674,6 +678,10 @@ def _start_pipeline(
         run_loop()
     except KeyboardInterrupt:
         warn("Cancelled pipeline.", stack=False)
+        if proc is not None:
+            _stop_process(proc)
+        if msg == default_msg:
+            msg = "Pipeline was cancelled."
 
     if do_n_times != 1:
         info(f"Ran pipeline {ran_n_times} time" + ('s' if ran_n_times != 1 else '') + '.')

@@ -368,6 +368,11 @@ groups['sync'].add_argument(
     ),
 )
 groups['sync'].add_argument(
+    '--skip-hooks', action='store_true', help=(
+        "Skip calling the sync hooks."
+    )
+)
+groups['sync'].add_argument(
     '--cache', action='store_true',
     help=(
         "When syncing or viewing a pipe's data, sync to a local database for later analysis."
