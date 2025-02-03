@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
+from fnmatch import fnmatch
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Any, Optional, PipesDict
@@ -119,14 +120,19 @@ def get_api_connector(instance_keys: Optional[str] = None):
         )
 
     allowed_instance_keys = permissions_config.get(
-        'instance', {}
+        'instances', {}
     ).get(
         'allowed_instance_keys',
         ['*']
     )
-    if allowed_instance_keys != ['*'] and instance_keys not in allowed_instance_keys:
+    found_match: bool = False
+    for allowed_keys_pattern in allowed_instance_keys:
+        if fnmatch(instance_keys, allowed_keys_pattern):
+            found_match = True
+            break
+    if not found_match:
         raise APIPermissionError(
-            f"Instance keys '{instance_keys}' not in list of allowed instances."
+            f"Instance keys '{instance_keys}' does not match the allowed instances patterns."
         )
 
     with _locks[f'instance-{instance_keys}']:

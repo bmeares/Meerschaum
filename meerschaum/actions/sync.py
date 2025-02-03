@@ -50,6 +50,7 @@ def _pipes_lap(
     bounded: Optional[bool] = None,
     chunk_interval: Union[timedelta, int, None] = None,
     check_rowcounts_only: bool = False,
+    skip_hooks: bool = False,
     mrsm_instance: Optional[str] = None,
     timeout_seconds: Optional[int] = None,
     nopretty: bool = False,
@@ -95,6 +96,7 @@ def _pipes_lap(
         'bounded': bounded,
         'chunk_interval': chunk_interval,
         'check_rowcounts_only': check_rowcounts_only,
+        'skip_hooks': skip_hooks,
     })
     locks = {'remaining_count': Lock(), 'results_dict': Lock(), 'pipes_threads': Lock(),}
     pipes = get_pipes(
@@ -257,6 +259,7 @@ def _sync_pipes(
     bounded: Optional[bool] = None,
     chunk_interval: Union[timedelta, int, None] = None,
     check_rowcounts_only: bool = False,
+    skip_hooks: bool = False,
     shell: bool = False,
     nopretty: bool = False,
     debug: bool = False,
@@ -289,6 +292,8 @@ def _sync_pipes(
 
     noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)
     noninteractive = str(noninteractive_val).lower() in ('1', 'true', 'yes')
+    if check_rowcounts_only:
+        skip_hooks = True
 
     run = True
     msg = ""
@@ -312,6 +317,7 @@ def _sync_pipes(
                     bounded=bounded,
                     chunk_interval=chunk_interval,
                     check_rowcounts_only=check_rowcounts_only,
+                    skip_hooks=skip_hooks,
                     unblock=unblock,
                     debug=debug,
                     nopretty=nopretty,
@@ -403,6 +409,7 @@ def _wrap_pipe(
     deduplicate: bool = False,
     bounded: Optional[bool] = None,
     chunk_interval: Union[timedelta, int, None] = None,
+    skip_hooks: bool = False,
     **kw
 ):
     """
@@ -462,6 +469,8 @@ def _wrap_pipe(
 
     pre_hook_results, post_hook_results = [], []
     def apply_hooks(is_pre_sync: bool):
+        if skip_hooks:
+            return
         _sync_hooks = (_pre_sync_hooks if is_pre_sync else _post_sync_hooks)
         _hook_results = (pre_hook_results if is_pre_sync else post_hook_results)
         for module_name, sync_hooks in _sync_hooks.items():

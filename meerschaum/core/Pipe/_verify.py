@@ -119,7 +119,7 @@ def verify(
     begin, end = self.parse_date_bounds(begin, end)
     cannot_determine_bounds = bounded and begin is None and end is None
 
-    if cannot_determine_bounds:
+    if cannot_determine_bounds and not check_rowcounts_only:
         warn(f"Cannot determine sync bounds for {self}. Syncing instead...", stack=False)
         sync_success, sync_msg = self.sync(
             begin=begin,
@@ -187,7 +187,9 @@ def verify(
     max_chunks_syncs = mrsm.get_config('pipes', 'verify', 'max_chunks_syncs')
 
     info(
-        f"Verifying {self}:\n    Syncing {len(chunk_bounds)} chunk"
+        f"Verifying {self}:\n    "
+        + ("Syncing" if not check_rowcounts_only else "Checking")
+        + f" {len(chunk_bounds)} chunk"
         + ('s' if len(chunk_bounds) != 1 else '')
         + f" ({'un' if not bounded else ''}bounded)"
         + f" of size '{interval_str(chunk_interval)}'"
@@ -293,6 +295,17 @@ def verify(
         _batch_begin = batch_chunk_bounds[0][0]
         _batch_end = batch_chunk_bounds[-1][-1]
         batch_message_header = f"{_batch_begin} - {_batch_end}"
+
+        if check_rowcounts_only:
+            info(f"Checking row-counts for batch bounds:\n    {batch_message_header}")
+            _, (batch_init_success, batch_init_msg) = process_chunk_bounds(
+                (_batch_begin, _batch_end)
+            )
+            mrsm.pprint((batch_init_success, batch_init_msg))
+            if batch_init_success and 'up-to-date' in batch_init_msg:
+                info("Entire batch is up-to-date.")
+                return batch_init_success, batch_init_msg
+
         batch_bounds_success_tuples = dict(pool.map(process_chunk_bounds, batch_chunk_bounds))
         bounds_success_tuples.update(batch_bounds_success_tuples)
         batch_bounds_success_bools = {
@@ -404,7 +417,7 @@ def verify(
             retry_failed_batch = False
 
         batch_msg_to_print = (
-            f"{make_header('Completed batch ' + batch_counter_str + ' ' + for_self + ':')}\n{batch_msg}"
+            f"{make_header('Completed batch ' + batch_counter_str + ':')}\n{batch_msg}"
         )
         mrsm.pprint((batch_success, batch_msg_to_print))
 
@@ -480,11 +493,13 @@ def get_chunks_success_message(
     header = (header + "\n") if header else ""
     stats_msg = items_str(
         (
-            ([f'inserted {num_inserted:,}'] if num_inserted else [])
-            + ([f'updated {num_updated:,}'] if num_updated else [])
-            + ([f'upserted {num_upserted:,}'] if num_upserted else [])
-            + ([f'checked {num_checked:,}'] if num_checked else [])
-        ) or ['synced 0'],
+            (
+                ([f'inserted {num_inserted:,}'] if num_inserted else [])
+                + ([f'updated {num_updated:,}'] if num_updated else [])
+                + ([f'upserted {num_upserted:,}'] if num_upserted else [])
+                + ([f'checked {num_checked:,}'] if num_checked else [])
+            ) or ['synced 0']
+        ),
         quotes=False,
         and_=False,
     )

@@ -184,7 +184,7 @@ class SQLConnector(Connector):
         ### ensure flavor and label are set accordingly
         if 'flavor' not in self.__dict__:
             if flavor is None and 'uri' not in self.__dict__:
-                raise Exception(
+                raise ValueError(
                     f"    Missing flavor. Provide flavor as a key for '{self}'."
                 )
             self.flavor = flavor or self.parse_uri(self.__dict__['uri']).get('flavor', None)

@@ -154,7 +154,7 @@ class SystemdExecutor(Executor):
             STATIC_CONFIG['environment']['systemd_delete_job']: (
                 '1'
                 if job.delete_after_completion
-                else '0',
+                else '0'
             ),
         })
 

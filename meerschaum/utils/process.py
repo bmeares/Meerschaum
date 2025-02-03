@@ -9,15 +9,25 @@ See `meerschaum.utils.pool` for multiprocessing and
 """
 
 from __future__ import annotations
-import os, signal, subprocess, sys, platform, traceback
+
+import os
+import signal
+import subprocess
+import sys
+import platform
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import Union, Optional, Any, Callable, Dict, Tuple
 from meerschaum.config.static import STATIC_CONFIG
 
 _child_processes = []
 def signal_handler(sig, frame):
     for child in _child_processes:
-        child.send_signal(sig)
-        child.wait()
+        try:
+            child.send_signal(sig)
+            child.wait()
+        except Exception:
+            pass
 
 def run_process(
     *args,
@@ -223,3 +233,17 @@ def poll_process(
         watchdog_thread.cancel()
 
     return proc.poll()
+
+
+def _stop_process(
+    proc: subprocess.Popen,
+    timeout_seconds: int = 8,
+):
+    """
+    Stop a `subproccess.Popen` object.
+    """
+    proc.terminate()
+    try:
+        proc.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()

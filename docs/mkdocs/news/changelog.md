@@ -4,6 +4,40 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.8.4
+
+- **Allow for pattern matching in `allowed_instance_keys`.**  
+  You may now generalize the instances exposed by the API by using Unix-style patterns in the list `system:api:permissions:instances:allowed_instance_keys`:
+
+  ```json
+  {
+    "api": {
+      "permissions": {
+        "instances": {
+          "allowed_instance_keys": [
+            "valkey:*",
+            "*_dev"
+          ]
+        }
+      }
+    }
+  }
+  ```
+
+- **Return pipe attributes for the route `/pipes/{connector}/{metric}/{location}`.**  
+  The API routes `/pipes/{connector}/{metric}/{location}` and `/pipes/{connector}/{metric}/{location}/attributes` both return pipe attributes.
+
+- **Check entire batches for `verify rowcounts`.**  
+  The command `verify rowcounts` will now check batch boundaries before checking row-counts for individual chunks. This should moderately increase performance.
+
+- **Kill orphaned child processes when the parent job is killed.**  
+  Jobs created with pipeline arguments should now kill associated child processes.
+
+- **Add `--skip-hooks`.**  
+  The flag `--skip-hooks` prevents any sync hooks from firing when syncing pipes.
+
+- **Fix `allowed_instance_keys` enforcement.**
+
 ### v2.8.3
 
 - **Increase username limit to 60 characters.**

@@ -595,7 +595,7 @@ def venv_exec(
     as_proc: bool = False,
     capture_output: bool = True,
     debug: bool = False,
-) -> Union[bool, Tuple[int, bytes, bytes]]:
+) -> Union[bool, Tuple[int, bytes, bytes], 'subprocess.Popen']:
     """
     Execute Python code in a subprocess via a virtual environment's interpeter.
     Return `True` if the code successfully executes, `False` on failure.
@@ -630,6 +630,8 @@ def venv_exec(
     import subprocess
     import platform
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.process import _child_processes
+
     executable = venv_executable(venv=venv)
     cmd_list = [executable, '-c', code]
     if env is None:
@@ -656,6 +658,7 @@ def venv_exec(
         **group_kwargs
     )
     if as_proc:
+        _child_processes.append(process)
         return process
     stdout, stderr = process.communicate()
     exit_code = process.returncode
