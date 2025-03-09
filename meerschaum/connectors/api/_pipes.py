@@ -31,6 +31,14 @@ def pipe_r_url(
     )
 
 
+def get_pipe_instance_keys(self, pipe: mrsm.Pipe) -> Union[str, None]:
+    """
+    Return the configured instance keys for a pipe if set,
+    else fall back to the default `instance_keys` for this `APIConnector`.
+    """
+    return pipe.parameters.get('instance_keys', self.instance_keys)
+
+
 def register_pipe(
     self,
     pipe: mrsm.Pipe,
@@ -40,13 +48,12 @@ def register_pipe(
     Returns a tuple of (success_bool, response_dict).
     """
     from meerschaum.utils.debug import dprint
-    ### NOTE: if `parameters` is supplied in the Pipe constructor,
-    ###       then `pipe.parameters` will exist and not be fetched from the database.
     r_url = pipe_r_url(pipe)
     response = self.post(
         r_url + '/register',
-        json = pipe.parameters,
-        debug = debug,
+        json=pipe._attributes.get('parameters', {}),
+        params={'instance_keys': self.get_pipe_instance_keys(pipe)},
+        debug=debug,
     )
     if debug:
         dprint(response.text)
@@ -79,9 +86,9 @@ def edit_pipe(
     r_url = pipe_r_url(pipe)
     response = self.patch(
         r_url + '/edit',
-        params = {'patch': patch,},
-        json = pipe.parameters,
-        debug = debug,
+        params={'patch': patch, 'instance_keys': self.get_pipe_instance_keys(pipe)},
+        json=pipe.parameters,
+        debug=debug,
     )
     if debug:
         dprint(response.text)
@@ -149,12 +156,13 @@ def fetch_pipes_keys(
     try:
         j = self.get(
             r_url,
-            params = {
+            params={
                 'connector_keys': json.dumps(connector_keys),
                 'metric_keys': json.dumps(metric_keys),
                 'location_keys': json.dumps(location_keys),
                 'tags': json.dumps(tags),
                 'params': json.dumps(params),
+                'instance_keys': self.instance_keys,
             },
             debug=debug
         ).json()
@@ -250,8 +258,10 @@ def sync_pipe(
         chunks = (df[i] for i in more_itertools.chunked(df, _chunksize))
 
     ### Send columns in case the user has defined them locally.
+    request_params = kw.copy()
     if pipe.columns:
-        kw['columns'] = json.dumps(pipe.columns)
+        request_params['columns'] = json.dumps(pipe.columns)
+    request_params['instance_keys'] = self.get_pipe_instance_keys(pipe)
     r_url = pipe_r_url(pipe) + '/data'
 
     rowcount = 0
@@ -268,10 +278,9 @@ def sync_pipe(
         try:
             response = self.post(
                 r_url,
-                ### handles check_existing
-                params = kw,
-                data = json_str,
-                debug = debug
+                params=request_params,
+                data=json_str,
+                debug=debug,
             )
         except Exception as e:
             msg = f"Failed to post a chunk to {pipe}:\n{e}"
@@ -323,7 +332,8 @@ def delete_pipe(
     r_url = pipe_r_url(pipe)
     response = self.delete(
         r_url + '/delete',
-        debug = debug,
+        params={'instance_keys': self.get_pipe_instance_keys(pipe)},
+        debug=debug,
     )
     if debug:
         dprint(response.text)
@@ -361,7 +371,9 @@ def get_pipe_data(
                     'omit_columns': json.dumps(omit_columns),
                     'begin': begin,
                     'end': end,
-                    'params': json.dumps(params, default=str)
+                    'params': json.dumps(params, default=str),
+                    'instance': self.get_pipe_instance_keys(pipe),
+                    'as_chunks': as_chunks,
                 },
                 debug=debug
             )

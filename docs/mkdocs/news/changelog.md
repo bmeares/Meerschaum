@@ -1,8 +1,20 @@
 # 🪵 Changelog
 
-## 2.7.x Releases
+## 2.9.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v2.9.0
+
+- **Add the dtype `geometry`.**  
+  The new data type `geometry` will serialize geometry data as well-known-binary (WKB) data and create the appropriate column types in PostGIS and MSSQL.
+
+- **Add the property `instance_keys` to `api` connectors.**  
+  The optional property `instance_keys` determines the value of `instance_keys` to be sent alongside pipe requests.
+
+## 2.8.x Releases
+
+The 2.8 series introduced batches to `verify pipes` as well as more granular control over exposed instances via the API.
 
 ### v2.8.4
 

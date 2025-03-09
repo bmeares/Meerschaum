@@ -27,6 +27,7 @@ from meerschaum.api import (
     debug,
     no_auth,
 )
+from meerschaum.api._chunks import generate_chunk_token
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.dataframe import to_json
 from meerschaum.utils.misc import (
@@ -389,6 +390,9 @@ def get_pipe_data(
     end: Union[str, int, None] = None,
     params: Optional[str] = None,
     limit: int = MAX_RESPONSE_ROW_LIMIT,
+    order: bool = 'asc', 
+    as_chunks: bool = False,
+    chunk_interval: Optional[int] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -398,6 +402,15 @@ def get_pipe_data(
     See [`Pipe.get_data()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_data).
 
     Note that `select_columns`, `omit_columns`, and `params` are JSON-encoded strings.
+
+    Parameters
+    ----------
+    instance_keys: Optional[str], default None
+        The connector key to the instance on which the pipe is registered.
+        Defaults to the configured value for `meerschaum:api_instance`.
+
+    as_chunks: bool, default False
+        If `True`, return a chunk token to be consumed by the `/chunks` endpoint.
     """
     if is_int(begin):
         begin = int(begin)
@@ -461,7 +474,7 @@ def get_pipe_data(
             detail="Pipe must be registered with the datetime column specified."
         )
 
-    if pipe.target in ('users', 'plugins', 'pipes'):
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes'):
         raise fastapi.HTTPException(
             status_code=409,
             detail=f"Cannot retrieve data from protected table '{pipe.target}'.",
@@ -474,6 +487,8 @@ def get_pipe_data(
         end=end,
         params=_params,
         limit=min(limit, MAX_RESPONSE_ROW_LIMIT),
+        order=order,
+        as_chunks=as_chunks,
         debug=debug,
     )
     if df is None:
@@ -482,11 +497,32 @@ def get_pipe_data(
             detail="Could not fetch data with the given parameters.",
         )
 
+    if as_chunks:
+        chunk_token = generate_chunk_token(df)
+        return {
+            'chunk_token': chunk_token,
+        }
+
     json_content = to_json(df)
     return fastapi.Response(
         json_content,
         media_type='application/json',
     )
+
+
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/chunk/{chunk_token}',
+    tags=['Pipes'],
+)
+def get_pipe_chunk(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    chunk_token: str
+) -> Dict[str, Any]:
+    """
+    Consume a chunk token, returning the dataframe.
+    """
 
 
 @app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/csv', tags=['Pipes'])

@@ -95,7 +95,7 @@ def make_request(
     return self.session.request(
         method.upper(),
         request_url,
-        headers = headers,
+        headers=headers,
         **kwargs
     )
 
