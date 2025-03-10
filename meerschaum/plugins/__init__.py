@@ -166,10 +166,11 @@ def post_sync_hook(
 
 _plugin_endpoints_to_pages = {}
 def web_page(
-        page: Union[str, None, Callable[[Any], Any]] = None,
-        login_required: bool = True,
-        **kwargs
-    ) -> Any:
+    page: Union[str, None, Callable[[Any], Any]] = None,
+    login_required: bool = True,
+    skip_navbar: bool = False,
+    **kwargs
+) -> Any:
     """
     Quickly add pages to the dash application.
 
@@ -200,6 +201,7 @@ def web_page(
         _plugin_endpoints_to_pages[page_str] = {
             'function': _func,
             'login_required': login_required,
+            'skip_navbar': skip_navbar,
         }
         return wrapper
 

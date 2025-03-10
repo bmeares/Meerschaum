@@ -92,9 +92,9 @@ search_parameters_editor = dash_ace.DashAceEditor(
     style={'height': 100},
 )
 
-sidebar = dbc.Offcanvas(
-    children=[],
-    title='Pages',
+pages_offcanvas = dbc.Offcanvas(
+    title='',
+    id='pages-offcanvas',
 )
 
 download_dataframe = dcc.Download(id='download-dataframe-csv')
@@ -110,26 +110,33 @@ instance_select = dbc.Select(
     class_name='dbc_dark custom-select custom-select-sm',
 )
 
+logo_row = dbc.Row(
+    [
+        dbc.Col(
+            html.Img(
+                src=endpoints['dash'] + "/assets/logo_48x48.png",
+                title=doc,
+                id="logo-img",
+                style={'cursor': 'pointer'},
+            ),
+        ),
+    ],
+    align='center',
+    className='g-0 navbar-logo-row',
+)
+
+pages_navbar = html.Div(
+    [
+        pages_offcanvas,
+        dbc.Navbar(dbc.Container(logo_row), dark=True, color='dark'),
+    ],
+    id='pages-navbar-div',
+)
 
 navbar = dbc.Navbar(
     dbc.Container(
         [
-            html.A(
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            html.Img(
-                                src=endpoints['dash'] + "/assets/logo_48x48.png",
-                                title=doc,
-                            ),
-                        ),
-                    ],
-                    align='center',
-                    className='g-0 navbar-logo-row',
-                ),
-                href=('/docs' if docs_enabled else '#'),
-                style={"textDecoration": "none"},
-            ),
+            logo_row,
             dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
             dbc.Collapse(
                 dbc.Row(
@@ -142,6 +149,7 @@ navbar = dbc.Navbar(
                                 style={'margin-left': '30px'},
                                 id='sign-out-button',
                             ),
+                            className="ms-auto",
                         ),
                     ],
                     className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",

@@ -23,7 +23,7 @@ a {
   padding: 0.5em;
 }
 #webterm-iframe {
-  width: 102%;
+  width: 100%;
   height: 83vh !important;
   max-height: 83vh;
 }

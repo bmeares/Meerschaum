@@ -27,9 +27,10 @@ from meerschaum.api import (
     debug,
     no_auth,
 )
-from meerschaum.api._chunks import generate_chunk_token
+from meerschaum.api._chunks import generate_chunks_cursor_token
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.dataframe import to_json
+from meerschaum.utils.dtypes import are_dtypes_equal, json_serialize_value
 from meerschaum.utils.misc import (
     is_pipe_registered,
     is_int,
@@ -39,14 +40,16 @@ from meerschaum.connectors.sql.tables import get_tables
 
 fastapi_responses = attempt_import('fastapi.responses', lazy=False)
 StreamingResponse = fastapi_responses.StreamingResponse
-dateutil_parser = attempt_import('dateutil.parser', lazy=False)
 pipes_endpoint = endpoints['pipes']
 pd = attempt_import('pandas', lazy=False)
 
 MAX_RESPONSE_ROW_LIMIT: int = mrsm.get_config('system', 'api', 'data', 'max_response_row_limit')
 
 
-@app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/register', tags=['Pipes'])
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/register',
+    tags=['Pipes: Attributes'],
+)
 def register_pipe(
     connector_keys: str,
     metric_key: str,
@@ -81,68 +84,10 @@ def register_pipe(
     return results
 
 
-@app.delete(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/delete', tags=['Pipes'])
-def delete_pipe(
-    connector_keys: str,
-    metric_key: str,
-    location_key: str,
-    instance_keys: Optional[str] = None,
-    curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
-    ),
-):
-    """
-    Delete a Pipe (without dropping its table).
-    """
-    allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
-    if not allow_actions:
-        return False, (
-            "The administrator for this server has not allowed actions.\n\n"
-            "Please contact the system administrator, or if you are running this server, "
-            "open the configuration file with `edit config system` and search for 'permissions'."
-            " Under the keys `api:permissions:actions`, "
-            "you can toggle non-admin actions."
-        )
-    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
-    if not is_pipe_registered(pipe, pipes(instance_keys, refresh=True)):
-        raise fastapi.HTTPException(
-            status_code=409, detail=f"{pipe} is not registered."
-        )
-    results = get_api_connector(instance_keys).delete_pipe(pipe, debug=debug)
-    pipes(instance_keys, refresh=True)
-    return results
-
-
-@app.delete(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/drop', tags=['Pipes'])
-def drop_pipe(
-    connector_keys: str,
-    metric_key: str,
-    location_key: str,
-    instance_keys: Optional[str] = None,
-    curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
-    ),
-):
-    """
-    Drop a pipes' underlying target table.
-    """
-    allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
-    if not allow_actions:
-        return False, (
-            "The administrator for this server has not allowed actions.\n\n"
-            "Please contact the system administrator, or if you are running this server, "
-            "open the configuration file with `edit config system` and search for 'permissions'."
-            " Under the keys `api:permissions:actions`, " +
-            "you can toggle non-admin actions."
-        )
-    pipe_object = get_pipe(connector_keys, metric_key, location_key, instance_keys)
-    results = get_api_connector(instance_keys=instance_keys).drop_pipe(pipe_object, debug=debug)
-    pipes(instance_keys, refresh=True)
-    return results
-
-
-
-@app.patch(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/edit', tags=['Pipes'])
+@app.patch(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/edit',
+    tags=['Pipes: Attributes'],
+)
 def edit_pipe(
     connector_keys: str,
     metric_key: str,
@@ -177,7 +122,42 @@ def edit_pipe(
     return results
 
 
-@app.get(pipes_endpoint + '/keys', tags=['Pipes'])
+@app.delete(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/delete',
+    tags=['Pipes: Attributes'],
+)
+def delete_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+):
+    """
+    Delete a Pipe (without dropping its table).
+    """
+    allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
+    if not allow_actions:
+        return False, (
+            "The administrator for this server has not allowed actions.\n\n"
+            "Please contact the system administrator, or if you are running this server, "
+            "open the configuration file with `edit config system` and search for 'permissions'."
+            " Under the keys `api:permissions:actions`, "
+            "you can toggle non-admin actions."
+        )
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if not is_pipe_registered(pipe, pipes(instance_keys, refresh=True)):
+        raise fastapi.HTTPException(
+            status_code=409, detail=f"{pipe} is not registered."
+        )
+    results = get_api_connector(instance_keys).delete_pipe(pipe, debug=debug)
+    pipes(instance_keys, refresh=True)
+    return results
+
+
+@app.get(pipes_endpoint + '/keys', tags=['Pipes: Attributes'])
 async def fetch_pipes_keys(
     connector_keys: str = "[]",
     metric_keys: str = "[]",
@@ -202,7 +182,7 @@ async def fetch_pipes_keys(
     return keys
 
 
-@app.get(pipes_endpoint, tags=['Pipes'])
+@app.get(pipes_endpoint, tags=['Pipes: Attributes'])
 async def get_pipes(
     connector_keys: str = "",
     metric_keys: str = "",
@@ -226,7 +206,7 @@ async def get_pipes(
     return replace_pipes_in_dict(_get_pipes(**kw), lambda p: p.attributes)
 
 
-@app.get(pipes_endpoint + '/{connector_keys}', tags=['Pipes'])
+@app.get(pipes_endpoint + '/{connector_keys}', tags=['Pipes: Attributes'])
 async def get_pipes_by_connector(
     connector_keys: str,
     instance_keys: Optional[str] = None,
@@ -244,7 +224,7 @@ async def get_pipes_by_connector(
     return replace_pipes_in_dict(pipes(instance_keys)[connector_keys], lambda p: p.attributes)
 
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}', tags=['Pipes'])
+@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}', tags=['Pipes: Attributes'])
 async def get_pipes_by_connector_and_metric(
     connector_keys: str,
     metric_key: str,
@@ -272,7 +252,10 @@ async def get_pipes_by_connector_and_metric(
     )
 
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}', tags=['Pipes'])
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}',
+    tags=['Pipes: Attributes'],
+)
 async def get_pipe_by_connector_and_metric_and_location(
     connector_keys: str,
     metric_key: str,
@@ -303,7 +286,10 @@ async def get_pipe_by_connector_and_metric_and_location(
     return pipes(instance_keys)[connector_keys][metric_key][location_key].attributes
 
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time', tags=['Pipes'])
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/sync_time',
+    tags=['Pipes: Data'],
+)
 def get_sync_time(
     connector_keys: str,
     metric_key: str,
@@ -334,7 +320,10 @@ def get_sync_time(
     return sync_time
 
 
-@app.post(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data', tags=['Pipes'])
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data',
+    tags=['Pipes: Data'],
+)
 def sync_pipe(
     connector_keys: str,
     metric_key: str,
@@ -378,7 +367,10 @@ def sync_pipe(
     return list((success, msg))
 
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data', tags=['Pipes'])
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data',
+    tags=['Pipes: Data'],
+)
 def get_pipe_data(
     connector_keys: str,
     metric_key: str,
@@ -390,7 +382,7 @@ def get_pipe_data(
     end: Union[str, int, None] = None,
     params: Optional[str] = None,
     limit: int = MAX_RESPONSE_ROW_LIMIT,
-    order: bool = 'asc', 
+    order: str = 'asc', 
     as_chunks: bool = False,
     chunk_interval: Optional[int] = None,
     curr_user = (
@@ -412,10 +404,6 @@ def get_pipe_data(
     as_chunks: bool, default False
         If `True`, return a chunk token to be consumed by the `/chunks` endpoint.
     """
-    if is_int(begin):
-        begin = int(begin)
-    if is_int(end):
-        end = int(end)
     if limit > MAX_RESPONSE_ROW_LIMIT:
         raise fastapi.HTTPException(
             status_code=413,
@@ -468,6 +456,7 @@ def get_pipe_data(
         )
 
     pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    begin, end = pipe.parse_date_bounds(begin, end)
     if not is_pipe_registered(pipe, pipes(instance_keys, refresh=True)):
         raise fastapi.HTTPException(
             status_code=409,
@@ -480,6 +469,25 @@ def get_pipe_data(
             detail=f"Cannot retrieve data from protected table '{pipe.target}'.",
         )
 
+    if as_chunks:
+        chunks_cursor_token = generate_chunks_cursor_token(
+            pipe,
+            select_columns=_select_columns,
+            omit_columns=_omit_columns,
+            begin=begin,
+            end=end,
+            params=_params,
+            limit=limit,
+            order=order,
+            debug=debug,
+        )
+        return fastapi.Response(
+            json.dumps({
+                'chunks_cursor': chunks_cursor,
+            }),
+            media_type='application/json',
+        )
+
     df = pipe.get_data(
         select_columns=_select_columns,
         omit_columns=_omit_columns,
@@ -488,7 +496,6 @@ def get_pipe_data(
         params=_params,
         limit=min(limit, MAX_RESPONSE_ROW_LIMIT),
         order=order,
-        as_chunks=as_chunks,
         debug=debug,
     )
     if df is None:
@@ -496,12 +503,6 @@ def get_pipe_data(
             status_code=400,
             detail="Could not fetch data with the given parameters.",
         )
-
-    if as_chunks:
-        chunk_token = generate_chunk_token(df)
-        return {
-            'chunk_token': chunk_token,
-        }
 
     json_content = to_json(df)
     return fastapi.Response(
@@ -511,8 +512,51 @@ def get_pipe_data(
 
 
 @app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/chunk_bounds',
+    tags=['Pipes: Data'],
+)
+def get_pipe_chunk_bounds(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    begin: Union[str, int, None] = None,
+    end: Union[str, int, None] = None,
+    bounded: bool = True,
+    chunk_interval_minutes: Union[int, None] = None,
+) -> List[List[Union[str, int, None]]]:
+    """
+    Return a list of request boundaries between `begin` and `end` (or the pipe's sync times).
+    Optionally specify the interval between chunk bounds
+    (defaults to the pipe's configured chunk interval).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    begin, end = pipe.parse_date_bounds(begin, end)
+    dt_col = pipe.columns.get('datetime', None)
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime')
+    chunk_interval = None if chunk_interval_minutes is None else (
+        chunk_interval_minutes
+        if are_dtypes_equal(dt_typ, 'int')
+        else timedelta(minutes=chunk_interval_minutes)
+    )
+
+    chunk_bounds = pipe.get_chunk_bounds(
+        begin=begin,
+        end=end,
+        bounded=bounded,
+        chunk_interval=chunk_interval,
+        debug=debug,
+    )
+
+    return fastapi.Response(
+        json.dumps(chunk_bounds, default=json_serialize_value),
+        media_type='application/json',
+    )
+
+
+@app.get(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/chunk/{chunk_token}',
-    tags=['Pipes'],
+    tags=['Pipes: Data'],
 )
 def get_pipe_chunk(
     connector_keys: str,
@@ -525,7 +569,42 @@ def get_pipe_chunk(
     """
 
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/csv', tags=['Pipes'])
+@app.delete(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/drop',
+    tags=['Pipes: Data'],
+)
+def drop_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+):
+    """
+    Drop a pipes' underlying target table.
+    """
+    allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
+    if not allow_actions:
+        return False, (
+            "The administrator for this server has not allowed actions.\n\n"
+            "Please contact the system administrator, or if you are running this server, "
+            "open the configuration file with `edit config system` and search for 'permissions'."
+            " Under the keys `api:permissions:actions`, " +
+            "you can toggle non-admin actions."
+        )
+    pipe_object = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    results = get_api_connector(instance_keys=instance_keys).drop_pipe(pipe_object, debug=debug)
+    pipes(instance_keys, refresh=True)
+    return results
+
+
+
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/csv',
+    tags=['Pipes: Data'],
+)
 def get_pipe_csv(
     connector_keys: str,
     metric_key: str,
@@ -541,18 +620,6 @@ def get_pipe_csv(
     """
     Get a pipe's data as a CSV file. Optionally set query boundaries.
     """
-    if begin is not None:
-        begin = (
-            int(begin)
-            if is_int(begin)
-            else dateutil_parser.parse(begin)
-        )
-    if end is not None:
-        end = (
-            int(end)
-            if is_int(end)
-            else dateutil_parser.parse(end)
-        )
 
     _params = {}
     if params == 'null':
@@ -576,6 +643,7 @@ def get_pipe_csv(
             detail="Pipe must be registered."
         )
 
+    begin, end = pipe.parse_date_bounds(begin, end)
     dt_col = pipe.columns.get('datetime', None)
     if dt_col:
         if begin is None:
@@ -603,7 +671,10 @@ def get_pipe_csv(
     return response
 
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/id', tags=['Pipes'])
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/id',
+    tags=['Pipes: Attributes'],
+)
 def get_pipe_id(
     connector_keys: str,
     metric_key: str,
@@ -624,7 +695,7 @@ def get_pipe_id(
 
 @app.get(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/attributes',
-    tags=['Pipes']
+    tags=['Pipes: Attributes'],
 )
 def get_pipe_attributes(
     connector_keys: str,
@@ -645,7 +716,10 @@ def get_pipe_attributes(
     ).attributes
 
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists', tags=['Pipes'])
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/exists',
+    tags=['Pipes: Data'],
+)
 def get_pipe_exists(
     connector_keys: str,
     metric_key: str,
@@ -659,7 +733,7 @@ def get_pipe_exists(
     return get_pipe(connector_keys, metric_key, location_key, instance_keys).exists(debug=debug)
 
 
-@app.post(endpoints['metadata'], tags=['Pipes'])
+@app.post(endpoints['metadata'], tags=['Misc'])
 def create_metadata(
     instance_keys: Optional[str] = None,
     curr_user = (
@@ -677,7 +751,10 @@ def create_metadata(
     return True
 
 
-@app.get(pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/rowcount', tags=['Pipes'])
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/rowcount',
+    tags=['Pipes: Data'],
+)
 def get_pipe_rowcount(
     connector_keys: str,
     metric_key: str,
@@ -728,7 +805,7 @@ def get_pipe_rowcount(
 
 @app.get(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/columns/types',
-    tags=['Pipes']
+    tags=['Pipes: Data'],
 )
 def get_pipe_columns_types(
     connector_keys: str,
@@ -756,7 +833,7 @@ def get_pipe_columns_types(
 
 @app.get(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/columns/indices',
-    tags=['Pipes']
+    tags=['Pipes: Data'],
 )
 def get_pipe_columns_indices(
     connector_keys: str,
@@ -810,7 +887,7 @@ def get_pipe_columns_indices(
 
 @app.get(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/indices/names',
-    tags=['Pipes']
+    tags=['Pipes: Data']
 )
 def get_pipe_index_names(
     connector_keys: str,
@@ -820,7 +897,7 @@ def get_pipe_index_names(
     curr_user=(
         fastapi.Depends(manager) if not no_auth else None
     ),
-) -> Dict[str, List[Dict[str, str]]]:
+) -> Dict[str, Union[str, Dict[str, str], List[Dict[str, str]]]]:
     """
     Return a dictionary of index keys and index names.
 
@@ -831,4 +908,4 @@ def get_pipe_index_names(
         metric_key,
         location_key,
         instance_keys,
-    ).get_indices(debug=debug)
+    ).get_indices()

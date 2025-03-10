@@ -66,10 +66,7 @@ def clear_screen(debug: bool = False) -> bool:
             get_console().clear()
             print("", end="", flush=True)
             return True
-        clear_string = (
-            '\033c' if platform.system() != 'Windows'
-            else '\033[2J'
-        )
+        clear_string = '\033[2J'
         reset_string = '\033[0m'
         print(clear_string + reset_string, end="")
         print("", end="", flush=True)

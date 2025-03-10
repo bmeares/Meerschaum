@@ -1,8 +1,41 @@
 # 🪵 Changelog
 
-## 2.7.x Releases
+## 2.9.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v2.9.0
+
+- **Add the dtype `geometry`.**  
+  The new data type `geometry` will serialize geometry data as well-known-binary (WKB) data and create the appropriate column types in PostGIS and MSSQL.
+
+- **Add the property `instance_keys` to `api` connectors.**  
+  The optional property `instance_keys` determines the value of `instance_keys` to be sent alongside pipe requests.
+
+- **Add a pages sidebar to the Web Console.**  
+  Clicking the Meerschaum logo on the Web Console will show the pages navigation sidebar, allowing for future functionality to reside within separate pages. Note that custom pages added via `@web_page` are included as well.
+
+- **Insert the Web Console navbar into custom pages.**  
+  Custom pages added via `@web_page` will now include the simple navbar by default, to more tightly integrate custom pages into the Web Console. This behavior may be disabled by setting `skip_navbar=True` in `@web_page`:
+
+  ```python
+  # example.py
+
+  from meerschaum.plugins import web_page, dash_plugin
+
+  @dash_plugin
+  def init_app(dash_app):
+      import dash_bootstrap_components as dbc
+      import dash.html as html
+
+      @web_page('example-page', skip_navbar=True)
+      def example_page():
+          return dbc.Container(html.H1('Hello, world!'))
+  ```
+
+## 2.8.x Releases
+
+The 2.8 series introduced batches to `verify pipes` as well as more granular control over exposed instances via the API.
 
 ### v2.8.4
 

@@ -13,6 +13,7 @@ html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHEC
 import dash_bootstrap_components as dbc
 from meerschaum.core import Plugin
 from meerschaum.utils.typing import Optional
+from meerschaum.api.dash.components import pages_navbar
 
 search_box = dbc.Input(
     id = "search-plugins-input",
@@ -20,32 +21,35 @@ search_box = dbc.Input(
     type = "text",
 )
 
-layout = dbc.Container([
-    html.Div([
-        html.Br(),
-        html.Div(
-            dbc.Container([
-                html.H3('Plugins'),
-                html.P([
-                    (
-                        'Plugins extend the functionality of Meerschaum.'
-                        + ' To find out more, check out the '
-                    ),
-                    html.A(
-                        'plugins documentation',
-                        href = 'https://meerschaum.io/reference/plugins/',
-                        rel = "noreferrer noopener",
-                        target = "_blank",
-                    ),
-                    '.',
+layout = [
+    pages_navbar,
+    dbc.Container([
+        html.Div([
+            html.Br(),
+            html.Div(
+                dbc.Container([
+                    html.H3('Plugins'),
+                    html.P([
+                        (
+                            'Plugins extend the functionality of Meerschaum.'
+                            ' To find out more, check out the '
+                        ),
+                        html.A(
+                            'plugins documentation',
+                            href='https://meerschaum.io/reference/plugins/',
+                            rel="noreferrer noopener",
+                            target="_blank",
+                        ),
+                        '.',
+                    ]),
                 ]),
-            ]),
-            className = 'page-header',
-            style = {'background-color': 'var(--dark)', 'padding': '1em'},
-        ),
-        html.Br(),
-        search_box,
-        html.Br(),
-        html.Div([], id='plugins-cards-div'),
+                className='page-header',
+                style={'background-color': 'var(--dark)', 'padding': '1em'},
+            ),
+            html.Br(),
+            search_box,
+            html.Br(),
+            html.Div([], id='plugins-cards-div'),
+        ])
     ])
-])
+]
