@@ -153,6 +153,7 @@ def filter_unseen_df(
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
         attempt_cast_to_bytes,
+        attempt_cast_to_geometry,
         coerce_timezone,
         serialize_decimal,
     )
@@ -350,6 +351,10 @@ def filter_unseen_df(
     new_bytes_cols = get_bytes_cols(new_df)
     bytes_cols = set(new_bytes_cols + old_bytes_cols)
 
+    old_geometry_cols = get_geometry_cols(old_df)
+    new_geometry_cols = get_geometry_cols(new_df)
+    geometry_cols = set(new_geometry_cols + old_geometry_cols)
+
     joined_df = merge(
         new_df.infer_objects(copy=False).fillna(NA),
         old_df.infer_objects(copy=False).fillna(NA),
@@ -397,6 +402,14 @@ def filter_unseen_df(
             continue
         try:
             delta_df[bytes_col] = delta_df[bytes_col].apply(attempt_cast_to_bytes)
+        except Exception:
+            warn(f"Unable to parse bytes column '{bytes_col}':\n{traceback.format_exc()}")
+
+    for geometry_col in geometry_cols:
+        if geometry_col not in delta_df.columns:
+            continue
+        try:
+            delta_df[geometry_col] = delta_df[geometry_col].apply(attempt_cast_to_geometry)
         except Exception:
             warn(f"Unable to parse bytes column '{bytes_col}':\n{traceback.format_exc()}")
 
@@ -858,6 +871,44 @@ def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
     ]
 
 
+def get_geometry_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the columns which contain shapely objects from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain bytes strings.
+
+    Returns
+    -------
+    A list of columns to treat as `geometry`.
+    """
+    if df is None:
+        return []
+
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+
+    if len(df) == 0:
+        return []
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+    }
+    return [
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and
+            'shapely' in str(type(df.loc[ix][col], bytes))
+        )
+    ]
+
+
 def enforce_dtypes(
     df: 'pd.DataFrame',
     dtypes: Dict[str, str],
@@ -911,6 +962,7 @@ def enforce_dtypes(
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
         attempt_cast_to_bytes,
+        attempt_cast_to_geometry,
         coerce_timezone as _coerce_timezone,
     )
     from meerschaum.utils.dtypes.sql import get_numeric_precision_scale
@@ -936,6 +988,11 @@ def enforce_dtypes(
         col
         for col, typ in dtypes.items()
         if typ.startswith('numeric')
+    ]
+    geometry_cols = [
+        col
+        for col, typ in dtypes.items()
+        if typ.startswith('geometry')
     ]
     uuid_cols = [
         col
@@ -1018,6 +1075,16 @@ def enforce_dtypes(
                 except Exception as e:
                     if debug:
                         dprint(f"Unable to parse column '{col}' as bytes:\n{e}")
+
+    if geometry_cols:
+        if debug:
+            dprint(f"Checking for geometry: {geometry_cols}")
+        for col in geometry_cols:
+            try:
+                df[col] = df[col].apply(attempt_cast_to_geometry)
+            except Exception as e:
+                if debug:
+                    dprint(f"Unable to parse column '{col}' as geometry:\n{e}")
 
     if datetime_cols and coerce_timezone:
         if debug:
@@ -1603,12 +1670,17 @@ def to_json(
     A JSON string.
     """
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dtypes import serialize_bytes, serialize_decimal
+    from meerschaum.utils.dtypes import (
+        serialize_bytes,
+        serialize_decimal,
+        serialize_geometry,
+    )
     pd = import_pandas()
     uuid_cols = get_uuid_cols(df)
     bytes_cols = get_bytes_cols(df)
     numeric_cols = get_numeric_cols(df)
-    if safe_copy and bool(uuid_cols or bytes_cols):
+    geometry_cols = get_geometry_cols(df)
+    if safe_copy and bool(uuid_cols or bytes_cols or geometry_cols or numeric_cols):
         df = df.copy()
     for col in uuid_cols:
         df[col] = df[col].astype(str)
@@ -1616,6 +1688,8 @@ def to_json(
         df[col] = df[col].apply(serialize_bytes)
     for col in numeric_cols:
         df[col] = df[col].apply(serialize_decimal)
+    for col in geometry_cols:
+        df[col] = df[col].apply(serialize_geometry)
     return df.infer_objects(copy=False).fillna(pd.NA).to_json(
         date_format=date_format,
         date_unit=date_unit,

@@ -27,10 +27,13 @@ MRSM_ALIAS_DTYPES: Dict[str, str] = {
     'bytea': 'bytes',
     'guid': 'uuid',
     'UUID': 'uuid',
+    'geography': 'geometry',
+    'geom': 'geometry',
 }
 MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
     'numeric': 'object',
+    'geometry': 'object',
     'uuid': 'object',
     'datetime': 'datetime64[ns, UTC]',
     'bool': 'bool[pyarrow]',
@@ -279,6 +282,56 @@ def attempt_cast_to_bytes(value: Any) -> Any:
         )
     except Exception:
         return value
+
+
+def attempt_cast_to_geometry(value: Any) -> Any:
+    """
+    Given a value, attempt to coerce it into a `shapely` (`geometry`) object.
+    """
+    shapely = mrsm.attempt_import('shapely', lazy=False)
+    if 'shapely' in str(type(value)):
+        return value
+
+    value_is_wkt = geometry_is_wkt(value)
+    if value_is_wkt is None:
+        return value
+
+    try:
+        return (
+            shapely.wkt.loads(value)
+            if value_is_wkt
+            else shapely.wkb.loads(value)
+        )
+    except Exception:
+        return value
+
+
+def geometry_is_wkt(value: Union[str, bytes]) -> Union[bool, None]:
+    """
+    Determine whether an input value should be treated as WKT or WKB geometry data.
+
+    Parameters
+    ----------
+    value: Union[str, bytes]
+        The input data to be parsed into geometry data.
+
+    Returns
+    -------
+    A `bool` (`True` if `value` is WKT and `False` if it should be treated as WKB).
+    Return `None` if `value` should be parsed as neither.
+    """
+    import re
+    if isinstance(value, bytes):
+        return False
+    
+    wkt_pattern = r'^\s*(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\s*\(.*\)\s*$'
+    if re.match(wkt_pattern, value, re.IGNORECASE):
+        return True
+    
+    if all(c in '0123456789ABCDEFabcdef' for c in value) and len(value) % 2 == 0:
+        return False
+    
+    return None
 
 
 def value_is_null(value: Any) -> bool:

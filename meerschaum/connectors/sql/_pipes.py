@@ -1052,6 +1052,7 @@ def get_pipe_data(
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
         attempt_cast_to_bytes,
+        attempt_cast_to_geometry,
         are_dtypes_equal,
     )
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
@@ -1138,6 +1139,11 @@ def get_pipe_data(
         for col, typ in pipe.dtypes.items()
         if typ == 'bytes' and col in dtypes
     ]
+    geometry_columns = [
+        col
+        for col, typ in pipe.dtypes.items()
+        if typ.startswith('geometry') and col in dtypes
+    ]
 
     kw['coerce_float'] = kw.get('coerce_float', (len(numeric_columns) == 0))
 
@@ -1161,6 +1167,11 @@ def get_pipe_data(
         if col not in df.columns:
             continue
         df[col] = df[col].apply(attempt_cast_to_bytes)
+
+    for col in geometry_columns:
+        if col not in df.columns:
+            continue
+        df[col] = df[col].apply(attempt_cast_to_geometry)
 
     if self.flavor == 'sqlite':
         ignore_dt_cols = [

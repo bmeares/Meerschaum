@@ -644,6 +644,11 @@ def get_db_type_from_pd_type(
                 pd_type = mapped_pd_type
                 found_db_type = True
                 break
+    elif pd_type.startswith('geometry['):
+        og_pd_type = pd_type
+        pd_type = 'geometry'
+        ### TODO: Implement parsing for geometry[type, srid] syntax
+        geometry_type, geometry_srid = get_geometry_type_srid(flavor, og_pd_type)
     elif pd_type.startswith('numeric['):
         og_pd_type = pd_type
         pd_type = 'numeric'
@@ -699,7 +704,7 @@ def get_db_type_from_pd_type(
             return cls
         return cls(*cls_args, **cls_kwargs)
 
-    if db_type == 'geoalchemy2.Geometry':
+    if 'geometry' in db_type.lower():
         geoalchemy2 = attempt_import('geoalchemy2', lazy=False)
         return geoalchemy2.Geometry
 

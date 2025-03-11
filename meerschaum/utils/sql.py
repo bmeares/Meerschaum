@@ -1819,6 +1819,8 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     """
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import DB_FLAVORS_CAST_DTYPES
+    if 'geometry' in typ.lower():
+        return '010100000000008058346FCDC100008058346FCDC1'
     if 'int' in typ.lower() or typ.lower() in ('numeric', 'number'):
         return '-987654321'
     if 'bool' in typ.lower() or typ.lower() == 'bit':
