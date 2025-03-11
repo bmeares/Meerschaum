@@ -26,7 +26,7 @@ conns = {
         username='test',
         password='test1234',
         database='testdb',
-        port=5439,
+        port=5449,
         host='localhost',
         schema='public',
     ),

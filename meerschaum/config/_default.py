@@ -70,6 +70,7 @@ default_system_config = {
         'sql': {
             'bulk_insert': {
                 'postgresql': True,
+                'postgis': True,
                 'citus': True,
                 'timescaledb': True,
                 'mssql': True,

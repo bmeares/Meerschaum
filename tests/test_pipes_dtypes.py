@@ -1066,3 +1066,32 @@ def test_explicit_precision_scale_numeric_sql(flavor):
     success, msg = pipe.sync(docs, debug=debug)
     df = pipe.get_data()
     assert str(df['val'][0]) == '123.46'
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_geometry_dtype(flavor):
+    """
+    Test syncing the `geometry` dtype.
+    """
+    conn = conns[flavor]
+    shapely = mrsm.attempt_import('shapely')
+    pipe = mrsm.Pipe(
+        'test', 'geometry',
+        instance=conn,
+    )
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'geometry',
+        instance=conn,
+        columns={'primary': 'id'},
+        dtypes={'id': 'int', 'geom': 'geometry'},
+    )
+
+    geom, geom_str = (shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]]), '01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F00000000000000400102000000020000000000000000001040000000000000104000000000000014400000000000001840'),
+    docs = [
+        {'id': 1, 'geom': geom},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data()
+    assert df['geom'][0] == geom

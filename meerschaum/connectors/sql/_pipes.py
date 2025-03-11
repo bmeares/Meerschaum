@@ -731,7 +731,7 @@ def get_create_index_queries(
                         ) + f"{primary_key_name})"
                     ),
                 ])
-            elif self.flavor in ('citus', 'postgresql', 'duckdb'):
+            elif self.flavor in ('citus', 'postgresql', 'duckdb', 'postgis'):
                 primary_queries.extend([
                     (
                         f"ALTER TABLE {_pipe_name}\n"
@@ -1511,7 +1511,7 @@ def get_pipe_attributes(
             if isinstance(parameters, str) and parameters[0] == '{':
                 parameters = json.loads(parameters)
             attributes['parameters'] = parameters
-        except Exception as e:
+        except Exception:
             attributes['parameters'] = {}
 
     return attributes

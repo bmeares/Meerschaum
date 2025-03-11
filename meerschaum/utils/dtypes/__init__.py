@@ -147,6 +147,10 @@ def are_dtypes_equal(
     if ldtype in bytes_dtypes and rdtype in bytes_dtypes:
         return True
 
+    geometry_dtypes = ('geometry', 'object')
+    if ldtype in geometry_dtypes and rdtype in geometry_dtypes:
+        return True
+
     if ldtype.lower() == rdtype.lower():
         return True
 
@@ -458,6 +462,24 @@ def serialize_bytes(data: bytes) -> str:
     return base64.b64encode(data).decode('utf-8')
 
 
+def serialize_geometry(geom) -> str:
+    """
+    Serialize geometry data as a hex-encoded well-known-binary string. 
+    """
+    if hasattr(geom, 'wkb_hex'):
+        return geom.wkb_hex
+
+    return str(geom)
+
+
+def deserialize_geometry(geom_wkb: Union[str, bytes]):
+    """
+    Deserialize a WKB string into a shapely geometry object.
+    """
+    shapely = mrsm.attempt_import(lazy=False)
+    return shapely.wkb.loads(geom_wkb)
+
+
 def deserialize_bytes_string(data: str | None, force_hex: bool = False) -> bytes | None:
     """
     Given a serialized ASCII string of bytes data, return the original bytes.
@@ -558,6 +580,9 @@ def json_serialize_value(x: Any, default_to_str: bool = True) -> str:
 
     if isinstance(x, Decimal):
         return serialize_decimal(x)
+
+    if 'shapely' in str(type(x)):
+        return serialize_geometry(x)
 
     if value_is_null(x):
         return None

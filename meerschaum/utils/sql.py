@@ -41,13 +41,13 @@ version_queries = {
 }
 SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
 DROP_IF_EXISTS_FLAVORS = {
-    'timescaledb', 'postgresql', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite',
+    'timescaledb', 'postgresql', 'postgis', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite',
 }
 DROP_INDEX_IF_EXISTS_FLAVORS = {
-    'mssql', 'timescaledb', 'postgresql', 'sqlite', 'citus',
+    'mssql', 'timescaledb', 'postgresql', 'postgis', 'sqlite', 'citus',
 }
 SKIP_AUTO_INCREMENT_FLAVORS = {'citus', 'duckdb'}
-COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'citus'}
+COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'postgis', 'citus'}
 UPDATE_QUERIES = {
     'default': """
         UPDATE {target_table_name} AS f
@@ -68,6 +68,12 @@ UPDATE_QUERIES = {
         ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
     """,
     'postgresql-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+    'postgis-upsert': """
         INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
@@ -482,6 +488,7 @@ table_wrappers = {
     'citus'      : ('"', '"'),
     'duckdb'     : ('"', '"'),
     'postgresql' : ('"', '"'),
+    'postgis'    : ('"', '"'),
     'sqlite'     : ('"', '"'),
     'mysql'      : ('`', '`'),
     'mariadb'    : ('`', '`'),
@@ -494,6 +501,7 @@ max_name_lens = {
     'mssql'      : 128,
     'oracle'     : 30,
     'postgresql' : 64,
+    'postgis'    : 64,
     'timescaledb': 64,
     'citus'      : 64,
     'cockroachdb': 64,
@@ -501,10 +509,11 @@ max_name_lens = {
     'mysql'      : 64,
     'mariadb'    : 64,
 }
-json_flavors = {'postgresql', 'timescaledb', 'citus', 'cockroachdb'}
+json_flavors = {'postgresql', 'postgis', 'timescaledb', 'citus', 'cockroachdb'}
 NO_SCHEMA_FLAVORS = {'oracle', 'sqlite', 'mysql', 'mariadb', 'duckdb'}
 DEFAULT_SCHEMA_FLAVORS = {
     'postgresql': 'public',
+    'postgis': 'public',
     'timescaledb': 'public',
     'citus': 'public',
     'cockroachdb': 'public',
@@ -549,6 +558,7 @@ def dateadd_str(
         Currently supported flavors:
 
         - `'postgresql'`
+        - `'postgis'`
         - `'timescaledb'`
         - `'citus'`
         - `'cockroachdb'`
@@ -653,7 +663,7 @@ def dateadd_str(
     )
 
     da = ""
-    if flavor in ('postgresql', 'timescaledb', 'cockroachdb', 'citus'):
+    if flavor in ('postgresql', 'postgis', 'timescaledb', 'cockroachdb', 'citus'):
         begin = (
             f"CAST({begin} AS {db_type})" if begin != 'now'
             else f"CAST(NOW() AT TIME ZONE 'utc' AS {db_type})"

@@ -18,6 +18,7 @@ from meerschaum.utils.dtypes import are_dtypes_equal, json_serialize_value
 DEBUG: bool = True
 pd = import_pandas(debug=DEBUG)
 np = mrsm.attempt_import('numpy')
+shapely = mrsm.attempt_import('shapely')
 
 
 @pytest.mark.parametrize(
@@ -58,6 +59,7 @@ def test_are_dtypes_equal(ldtype: str, rdtype: str, are_equal: bool):
         (pd.NA, None),
         (Decimal('NaN'), None),
         (UUID('eb5ba760-5b84-433e-965f-a1ede8b0e9a6'), 'eb5ba760-5b84-433e-965f-a1ede8b0e9a6'),
+        (shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]]), '01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F00000000000000400102000000020000000000000000001040000000000000104000000000000014400000000000001840'),
         (
             mrsm.Pipe('test', 'serialize', instance='sql:local'),
             {

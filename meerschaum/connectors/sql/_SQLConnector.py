@@ -151,6 +151,9 @@ class SQLConnector(Connector):
             if uri.startswith('timescaledb://'):
                 uri = uri.replace('timescaledb://', 'postgresql+psycopg://', 1)
                 flavor = 'timescaledb'
+            if uri.startswith('postgis://'):
+                uri = uri.replace('postgis://', 'postgresql+psycopg://', 1)
+                flavor = 'postgis'
             kw['uri'] = uri
             from_uri_params = self.from_uri(kw['uri'], as_dict=True)
             label = label or from_uri_params.get('label', None)
