@@ -12,7 +12,7 @@ from datetime import timezone, datetime
 from decimal import Decimal, Context, InvalidOperation, ROUND_HALF_UP
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Dict, Union, Any, Optional
+from meerschaum.utils.typing import Dict, Union, Any, Optional, Tuple
 from meerschaum.utils.warnings import warn
 
 MRSM_ALIAS_DTYPES: Dict[str, str] = {
@@ -27,13 +27,13 @@ MRSM_ALIAS_DTYPES: Dict[str, str] = {
     'bytea': 'bytes',
     'guid': 'uuid',
     'UUID': 'uuid',
-    'geography': 'geometry',
     'geom': 'geometry',
 }
 MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
     'numeric': 'object',
     'geometry': 'object',
+    'geography': 'object',
     'uuid': 'object',
     'datetime': 'datetime64[ns, UTC]',
     'bool': 'bool[pyarrow]',
@@ -62,6 +62,12 @@ def to_pandas_dtype(dtype: str) -> str:
 
     if dtype.startswith('numeric'):
         return MRSM_PD_DTYPES['numeric']
+
+    if dtype.startswith('geometry'):
+        return MRSM_PD_DTYPES['geometry']
+
+    if dtype.startswith('geography'):
+        return MRSM_PD_DTYPES['geography']
 
     ### NOTE: Kind of a hack, but if the first word of the given dtype is in all caps,
     ### treat it as a SQL db type.
@@ -150,7 +156,7 @@ def are_dtypes_equal(
     if ldtype in bytes_dtypes and rdtype in bytes_dtypes:
         return True
 
-    geometry_dtypes = ('geometry', 'object')
+    geometry_dtypes = ('geometry', 'object', 'geography')
     if ldtype in geometry_dtypes and rdtype in geometry_dtypes:
         return True
 
@@ -641,3 +647,87 @@ def json_serialize_value(x: Any, default_to_str: bool = True) -> str:
         return None
 
     return str(x) if default_to_str else x
+
+
+def get_geometry_type_srid(
+    dtype: str = 'geometry',
+    default_type: str = 'geometry',
+    default_srid: int = 4326,
+) -> Union[Tuple[str, int], Tuple[str, None]]:
+    """
+    Given the specified geometry `dtype`, return a tuple in the form (type, SRID).
+
+    Parameters
+    ----------
+    dtype: Optional[str], default None
+        Optionally provide a specific `geometry` syntax (e.g. `geometry[MultiLineString, 4326]`).
+        You may specify a supported `shapely` geometry type and an SRID in the dtype modifier:
+
+        - `Point`
+        - `LineString`
+        - `LinearRing`
+        - `Polygon`
+        - `MultiPoint`
+        - `MultiLineString`
+        - `MultiPolygon`
+        - `GeometryCollection`
+
+    Returns
+    -------
+    A tuple in the form (type, SRID).
+    Defaults to `(default_type, default_srid)`.
+
+    Examples
+    --------
+    >>> from meerschaum.utils.dtypes import get_geometry_type_srid
+    >>> get_geometry_type_srid()
+    ('geometry', 4326)
+    >>> get_geometry_type_srid('geometry[]')
+    ('geometry', 4326)
+    >>> get_geometry_type_srid('geometry[Point, 0]')
+    ('Point', 0)
+    >>> get_geometry_type_srid('geometry[0, Point]')
+    ('Point', 0)
+    >>> get_geometry_type_srid('geometry[0]')
+    ('geometry', 0)
+    >>> get_geometry_type_srid('geometry[MULTILINESTRING, 4326]')
+    ('MultiLineString', 4326)
+    >>> get_geometry_type_srid('geography')
+    ('geometry', 4326)
+    >>> get_geometry_type_srid('geography[POINT]')
+    ('Point', 4376)
+    """
+    from meerschaum.utils.misc import is_int
+    bare_dtype = dtype.split('[', maxsplit=1)[0]
+    modifier = dtype.split(bare_dtype, maxsplit=1)[-1].lstrip('[').rstrip(']')
+    if not modifier:
+        return default_type, default_srid
+
+    shapely_geometry_base = mrsm.attempt_import('shapely.geometry.base')
+    geometry_types = {
+        typ.lower(): typ
+        for typ in shapely_geometry_base.GEOMETRY_TYPES
+    }
+
+    parts = [part.lower().replace('srid=', '').replace('type=', '').strip() for part in modifier.split(',')]
+    parts_casted = [
+        (
+            int(part)
+            if is_int(part)
+            else part
+        ) for part in parts]
+
+    srid = default_srid
+    geometry_type = default_type
+
+    for part in parts_casted:
+        if isinstance(part, int):
+            srid = part
+            break
+
+    for part in parts:
+        if part.lower() in geometry_types:
+            geometry_type = geometry_types.get(part)
+            break
+
+    return geometry_type, srid

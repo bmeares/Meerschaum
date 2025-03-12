@@ -350,6 +350,20 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'cockroachdb': 'TEXT',
         'default': 'TEXT',
     },
+    'geography': {
+        'timescaledb': 'TEXT',
+        'postgresql': 'TEXT',
+        'postgis': 'GEOGRAPHY',
+        'mariadb': 'TEXT',
+        'mysql': 'TEXT',
+        'mssql': 'GEOGRAPHY',
+        'oracle': 'NVARCHAR2(2000)',
+        'sqlite': 'TEXT',
+        'duckdb': 'TEXT',
+        'citus': 'TEXT',
+        'cockroachdb': 'TEXT',
+        'default': 'TEXT',
+    },
 }
 PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'int': {
@@ -526,7 +540,21 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'postgis': 'geoalchemy2.Geometry',
         'mariadb': 'UnicodeText',
         'mysql': 'UnicodeText',
-        'mssql': 'UnicodeText',
+        'mssql': 'geoalchemy2.Geometry',
+        'oracle': 'UnicodeText',
+        'sqlite': 'UnicodeText',
+        'duckdb': 'UnicodeText',
+        'citus': 'UnicodeText',
+        'cockroachdb': 'UnicodeText',
+        'default': 'UnicodeText',
+    },
+    'geography': {
+        'timescaledb': 'UnicodeText',
+        'postgresql': 'UnicodeText',
+        'postgis': 'geoalchemy2.Geography',
+        'mariadb': 'UnicodeText',
+        'mysql': 'UnicodeText',
+        'mssql': 'geoalchemy2.Geography',
         'oracle': 'UnicodeText',
         'sqlite': 'UnicodeText',
         'duckdb': 'UnicodeText',
@@ -621,7 +649,7 @@ def get_db_type_from_pd_type(
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_ALIAS_DTYPES
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_ALIAS_DTYPES, get_geometry_type_srid
     from meerschaum.utils.misc import parse_arguments_str
     sqlalchemy_types = attempt_import('sqlalchemy.types', lazy=False)
 
@@ -632,23 +660,30 @@ def get_db_type_from_pd_type(
     )
 
     precision, scale = None, None
+    geometry_type, geometry_srid = None, None
     og_pd_type = pd_type
     if pd_type in MRSM_ALIAS_DTYPES:
         pd_type = MRSM_ALIAS_DTYPES[pd_type]
 
     ### Check whether we are able to match this type (e.g. pyarrow support).
     found_db_type = False
-    if pd_type not in types_registry and not pd_type.startswith('numeric['):
+    if (
+        pd_type not in types_registry
+        and not any(
+            pd_type.startswith(f'{typ}[')
+            for typ in ('numeric', 'geometry', 'geography')
+        )
+    ):
         for mapped_pd_type in types_registry:
             if are_dtypes_equal(mapped_pd_type, pd_type):
                 pd_type = mapped_pd_type
                 found_db_type = True
                 break
-    elif pd_type.startswith('geometry['):
+    elif (pd_type.startswith('geometry[') or pd_type.startswith('geography[')):
         og_pd_type = pd_type
-        pd_type = 'geometry'
-        ### TODO: Implement parsing for geometry[type, srid] syntax
-        geometry_type, geometry_srid = get_geometry_type_srid(flavor, og_pd_type)
+        pd_type = 'geometry' if 'geometry' in pd_type else 'geography'
+        geometry_type, geometry_srid = get_geometry_type_srid(og_pd_type)
+        found_db_type = True
     elif pd_type.startswith('numeric['):
         og_pd_type = pd_type
         pd_type = 'numeric'
@@ -689,6 +724,11 @@ def get_db_type_from_pd_type(
         if precision is not None and scale is not None:
             db_type_bare = db_type.split('(', maxsplit=1)[0]
             return f"{db_type_bare}({precision},{scale})"
+        if geometry_type is not None and geometry_srid is not None:
+            if 'geometry' not in db_type.lower() and 'geography' not in db_type.lower():
+                return db_type
+            db_type_bare = db_type.split('(', maxsplit=1)[0]
+            return f"{db_type_bare}({geometry_type.upper()}, {geometry_srid})"
         return db_type
 
     if db_type.startswith('sqlalchemy.dialects'):
@@ -704,9 +744,16 @@ def get_db_type_from_pd_type(
             return cls
         return cls(*cls_args, **cls_kwargs)
 
-    if 'geometry' in db_type.lower():
+    if 'geometry' in db_type.lower() or 'geography' in db_type.lower():
         geoalchemy2 = attempt_import('geoalchemy2', lazy=False)
-        return geoalchemy2.Geometry
+        geometry_class = (
+            geoalchemy2.Geometry
+            if 'geometry' in db_type.lower()
+            else geoalchemy2.Geography
+        )
+        if geometry_type is None or geometry_srid is None:
+            return geometry_class
+        return geometry_class(geometry_type=geometry_type, srid=geometry_srid)
 
     if 'numeric' in db_type.lower():
         if precision is None or scale is None:

@@ -6,6 +6,7 @@
 Test functions from `meerschaum.utils.misc`.
 """
 
+from typing import Tuple, Union
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -14,7 +15,7 @@ import pytest
 
 import meerschaum as mrsm
 from meerschaum.utils.packages import import_pandas
-from meerschaum.utils.dtypes import are_dtypes_equal, json_serialize_value
+from meerschaum.utils.dtypes import are_dtypes_equal, json_serialize_value, get_geometry_type_srid
 DEBUG: bool = True
 pd = import_pandas(debug=DEBUG)
 np = mrsm.attempt_import('numpy')
@@ -86,3 +87,37 @@ def test_json_serialize_value(value, expected_serialized_value):
     """
     serialized_value = json_serialize_value(value)
     assert serialized_value == expected_serialized_value
+
+@pytest.mark.parametrize(
+    'kwargs,expected_type_srid',
+    [
+        ({}, ('geometry', 4326)),
+        ({'dtype': 'geometry'}, ('geometry', 4326)),
+        ({'dtype': 'geometry[4326]'}, ('geometry', 4326)),
+        ({'dtype': 'geometry[0]'}, ('geometry', 0)),
+        ({'dtype': 'geometry', 'default_type': 'Point'}, ('Point', 4326)),
+        ({'dtype': 'geometry', 'default_srid': 0}, ('geometry', 0)),
+        ({'dtype': 'geometry', 'default_type': 'MultiLineString', 'default_srid': 0}, ('MultiLineString', 0)),
+        ({'dtype': 'geometry[POLYGON, 4326]'}, ('Polygon', 4326)),
+        ({'dtype': 'geometry[4326, POLYGON]'}, ('Polygon', 4326)),
+        ({'dtype': 'geometry[SRID=4326, POLYGON]'}, ('Polygon', 4326)),
+        ({'dtype': 'geometry[GeometryCollection,srid=0]'}, ('GeometryCollection', 0)),
+        ({'dtype': 'geometry[type=LineString,srid=2000]'}, ('LineString', 2000)),
+        ({'dtype': 'geometry[type=UNKNOWN,srid=2000]'}, ('geometry', 2000)),
+        ({'dtype': 'geography[POINT]'}, ('Point', 4326)),
+        ({'dtype': 'geography[4326]'}, ('geometry', 4326)),
+        ({'dtype': 'geography[GEOMETRY, 4326]'}, ('geometry', 4326)),
+    ]
+)
+def test_parse_geometry_type_srid(
+    kwargs: Tuple[Union[str, int], ...],
+    expected_type_srid: Tuple[str, int],
+):
+    """
+    Testing parsing custom `geometry` syntax.
+    """
+    geometry_type, srid = get_geometry_type_srid(**kwargs)
+    expected_type, expected_srid = expected_type_srid
+
+    assert geometry_type == expected_type
+    assert srid == expected_srid

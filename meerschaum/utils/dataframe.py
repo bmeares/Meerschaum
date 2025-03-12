@@ -904,7 +904,7 @@ def get_geometry_cols(df: 'pd.DataFrame') -> List[str]:
         if (
             ix is not None
             and
-            'shapely' in str(type(df.loc[ix][col], bytes))
+            'shapely' in str(type(df.loc[ix][col]))
         )
     ]
 
@@ -992,7 +992,7 @@ def enforce_dtypes(
     geometry_cols = [
         col
         for col, typ in dtypes.items()
-        if typ.startswith('geometry')
+        if typ.startswith('geometry') or typ.startswith('geography')
     ]
     uuid_cols = [
         col
@@ -1076,22 +1076,30 @@ def enforce_dtypes(
                     if debug:
                         dprint(f"Unable to parse column '{col}' as bytes:\n{e}")
 
-    if geometry_cols:
-        if debug:
-            dprint(f"Checking for geometry: {geometry_cols}")
-        for col in geometry_cols:
-            try:
-                df[col] = df[col].apply(attempt_cast_to_geometry)
-            except Exception as e:
-                if debug:
-                    dprint(f"Unable to parse column '{col}' as geometry:\n{e}")
-
     if datetime_cols and coerce_timezone:
         if debug:
             dprint(f"Checking for datetime conversion: {datetime_cols}")
         for col in datetime_cols:
             if col in df.columns:
                 df[col] = _coerce_timezone(df[col], strip_utc=strip_timezone)
+
+    if geometry_cols:
+        geopandas = mrsm.attempt_import('geopandas')
+        if debug:
+            dprint(f"Checking for geometry: {geometry_cols}")
+        parsed_geom_cols = []
+        for col in geometry_cols:
+            try:
+                df[col] = df[col].apply(attempt_cast_to_geometry)
+                parsed_geom_cols.append(col)
+            except Exception as e:
+                if debug:
+                    dprint(f"Unable to parse column '{col}' as geometry:\n{e}")
+
+        if parsed_geom_cols:
+            if debug:
+                dprint(f"Converting to GeoDataFrame (geometry column: '{parsed_geom_cols[0]}')...")
+            df = geopandas.GeoDataFrame(df, geometry=parsed_geom_cols[0])
 
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):
@@ -1669,6 +1677,7 @@ def to_json(
     -------
     A JSON string.
     """
+    import warnings
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dtypes import (
         serialize_bytes,
@@ -1688,8 +1697,10 @@ def to_json(
         df[col] = df[col].apply(serialize_bytes)
     for col in numeric_cols:
         df[col] = df[col].apply(serialize_decimal)
-    for col in geometry_cols:
-        df[col] = df[col].apply(serialize_geometry)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for col in geometry_cols:
+            df[col] = df[col].apply(serialize_geometry)
     return df.infer_objects(copy=False).fillna(pd.NA).to_json(
         date_format=date_format,
         date_unit=date_unit,

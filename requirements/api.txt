@@ -11,12 +11,14 @@ valkey>=6.0.0
 numpy>=1.18.5
 pandas[parquet]>=2.0.1
 geopandas>=1.0.1
+shapely>=2.0.7
 pyarrow>=16.1.0
 dask[complete]>=2024.12.1
 partd>=1.4.2
 pytz
 joblib>=0.17.0
 SQLAlchemy>=2.0.5
+GeoAlchemy2>=0.17.1
 databases>=0.4.0
 aiosqlite>=0.16.0
 asyncpg>=0.21.0
