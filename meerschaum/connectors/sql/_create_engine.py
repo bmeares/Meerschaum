@@ -7,6 +7,7 @@ This module contains the logic that builds the sqlalchemy engine string.
 """
 
 import traceback
+import meerschaum as mrsm
 from meerschaum.utils.debug import dprint
 
 ### determine driver and requirements from flavor
@@ -209,8 +210,7 @@ def create_engine(
             warn=False,
         )
         if self.flavor == 'mssql':
-            pyodbc = attempt_import('pyodbc', debug=debug, lazy=False, warn=False)
-            pyodbc.pooling = False
+            _init_mssql_sqlalchemy()
     if self.flavor in require_patching_flavors:
         from meerschaum.utils.packages import determine_version, _monkey_patch_get_distribution
         import pathlib
@@ -324,3 +324,39 @@ def create_engine(
     if include_uri:
         return engine, engine_str
     return engine
+
+
+def _init_mssql_sqlalchemy():
+    """
+    When first instantiating a SQLAlchemy connection to MSSQL,
+    monkey-patch `pyodbc` handling in SQLAlchemy.
+    """
+    pyodbc, sqlalchemy_dialects_mssql_pyodbc = mrsm.attempt_import(
+        'pyodbc',
+        'sqlalchemy.dialects.mssql.pyodbc',
+        lazy=False,
+        warn=False,
+    )
+    pyodbc.pooling = False
+
+    MSDialect_pyodbc = sqlalchemy_dialects_mssql_pyodbc.MSDialect_pyodbc
+
+    def _handle_geometry(val):
+        from binascii import hexlify
+        hex_str = f"0x{hexlify(val).decode().upper()}"
+        return hex_str
+
+    def custom_on_connect(self):
+        super_ = super(MSDialect_pyodbc, self).on_connect()
+
+        def _on_connect(conn):
+            if super_ is not None:
+                super_(conn)
+
+            self._setup_timestampoffset_type(conn)
+            conn.add_output_converter(-151, _handle_geometry)
+
+        return _on_connect
+
+    ### TODO: Parse proprietary MSSQL geometry bytes into WKB.
+    #  MSDialect_pyodbc.on_connect = custom_on_connect

@@ -925,7 +925,12 @@ def to_sql(
         geometry_type, srid = geometry_cols_types_srids.get(col, get_geometry_type_srid())
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            df[col] = df[col].apply(serialize_geometry)
+            df[col] = df[col].apply(
+                functools.partial(
+                    serialize_geometry,
+                    as_wkt=(self.flavor == 'mssql')
+                )
+            )
 
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
 

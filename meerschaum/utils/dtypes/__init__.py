@@ -521,12 +521,25 @@ def serialize_bytes(data: bytes) -> str:
     return base64.b64encode(data).decode('utf-8')
 
 
-def serialize_geometry(geom) -> str:
+def serialize_geometry(geom: Any, as_wkt: bool = False) -> str:
     """
     Serialize geometry data as a hex-encoded well-known-binary string. 
+
+    Parameters
+    ----------
+    geom: Any
+        The potential geometry data to be serialized.
+
+    as_wkt, bool, default False
+        If `True`, serialize geometry data as well-known text (WKT)
+        instead of well-known binary (WKB).
+
+    Returns
+    -------
+    A string containing the geometry data.
     """
     if hasattr(geom, 'wkb_hex'):
-        return geom.wkb_hex
+        return geom.wkb_hex if not as_wkt else geom.wkt
 
     return str(geom)
 
