@@ -1100,6 +1100,10 @@ def enforce_dtypes(
             if debug:
                 dprint(f"Converting to GeoDataFrame (geometry column: '{parsed_geom_cols[0]}')...")
             df = geopandas.GeoDataFrame(df, geometry=parsed_geom_cols[0])
+            try:
+                df.rename_geometry(parsed_geom_cols[0], inplace=True)
+            except ValueError:
+                pass
 
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):

@@ -294,7 +294,7 @@ def attempt_cast_to_geometry(value: Any) -> Any:
     """
     Given a value, attempt to coerce it into a `shapely` (`geometry`) object.
     """
-    shapely = mrsm.attempt_import('shapely', lazy=False)
+    shapely_wkt, shapely_wkb = mrsm.attempt_import('shapely.wkt', 'shapely.wkb', lazy=False)
     if 'shapely' in str(type(value)):
         return value
 
@@ -304,9 +304,9 @@ def attempt_cast_to_geometry(value: Any) -> Any:
 
     try:
         return (
-            shapely.wkt.loads(value)
+            shapely_wkt.loads(value)
             if value_is_wkt
-            else shapely.wkb.loads(value)
+            else shapely_wkb.loads(value)
         )
     except Exception:
         return value
