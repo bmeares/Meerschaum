@@ -50,6 +50,8 @@ class ValkeyConnector(Connector):
         get_sync_time,
         get_pipe_rowcount,
         fetch_pipes_keys,
+        get_document_key,
+        get_table_quoted_doc_key,
     )
     from ._fetch import (
         fetch,

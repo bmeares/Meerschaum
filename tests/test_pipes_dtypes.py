@@ -1091,8 +1091,14 @@ def test_geometry_dtype(flavor: str):
     docs = [
         {'id': 1, 'geom': geom},
     ]
+    new_docs = [
+        {'id': 1, 'geom': geom_str},
+    ]
+
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
+
+    return pipe, docs, new_docs
 
     df = pipe.get_data()
     assert df['geom'][0] == geom
@@ -1101,9 +1107,6 @@ def test_geometry_dtype(flavor: str):
     assert success, msg
     assert pipe.get_rowcount() == len(docs)
 
-    new_docs = [
-        {'id': 1, 'geom': geom_str},
-    ]
     success, msg = pipe.sync(new_docs, debug=debug)
     assert success, msg
     assert pipe.get_rowcount() == len(docs)

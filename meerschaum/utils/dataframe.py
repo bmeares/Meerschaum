@@ -1658,6 +1658,7 @@ def to_json(
     orient: str = 'records',
     date_format: str = 'iso',
     date_unit: str = 'us',
+    geometry_format: str = 'geojson',
     **kwargs: Any
 ) -> str:
     """
@@ -1676,6 +1677,10 @@ def to_json(
 
     date_unit: str, default 'us'
         The precision of the timestamps.
+
+    geometry_format: str, default 'geojson'
+        The serialization format for geometry data.
+        Accepted values are `geojson`, `wkb_hex`, and `wkt`.
 
     Returns
     -------

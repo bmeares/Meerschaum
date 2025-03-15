@@ -10,8 +10,9 @@ from datetime import datetime, timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, List, Tuple
-from meerschaum.utils.misc import json_serialize_datetime, string_to_dict
-from meerschaum.utils.warnings import warn
+from meerschaum.utils.misc import string_to_dict
+from meerschaum.utils.dtypes import json_serialize_value
+from meerschaum.utils.warnings import warn, dprint
 from meerschaum.config.static import STATIC_CONFIG
 
 PIPES_TABLE: str = 'mrsm_pipes'
@@ -46,25 +47,15 @@ def serialize_document(doc: Dict[str, Any]) -> str:
     -------
     A serialized string for the document.
     """
-    from meerschaum.utils.dtypes import serialize_bytes
     return json.dumps(
         doc,
-        default=(
-            lambda x: (
-                json_serialize_datetime(x)
-                if hasattr(x, 'tzinfo')
-                else (
-                    serialize_bytes(x)
-                    if isinstance(x, bytes)
-                    else str(x)
-                )
-            )
-        ),
+        default=json_serialize_value,
         separators=(',', ':'),
         sort_keys=True,
     )
 
 
+@staticmethod
 def get_document_key(
     doc: Dict[str, Any],
     indices: List[str],
@@ -96,20 +87,34 @@ def get_document_key(
             else str(int(coerce_timezone(val).replace(tzinfo=timezone.utc).timestamp()))
         )
         for key, val in doc.items()
-        if key in indices
-    } if indices else {}
-    indices_str = ((table_name + ':indices:') if table_name else '') + ','.join(
-        sorted(
-            [
-                f'{key}{COLON}{val}'
-                for key, val in index_vals.items()
-            ]
+        if ((key in indices) if indices else True)
+    }
+    indices_str = (
+        (
+            (
+                (
+                    table_name
+                    + ':'
+                    + ('indices:' if indices else '')
+                )
+            )
+            if table_name
+            else ''
+        ) + ','.join(
+            sorted(
+                [
+                    f'{key}{COLON}{val}'
+                    for key, val in index_vals.items()
+                ]
+            )
         )
-    ) if indices else serialize_document(doc)
+    )
     return indices_str
 
 
+@classmethod
 def get_table_quoted_doc_key(
+    cls,
     table_name: str,
     doc: Dict[str, Any],
     indices: List[str],
@@ -120,7 +125,7 @@ def get_table_quoted_doc_key(
     """
     return json.dumps(
         {
-            get_document_key(doc, indices, table_name): serialize_document(doc),
+            cls.get_document_key(doc, indices, table_name): serialize_document(doc),
             **(
                 {datetime_column: doc.get(datetime_column, 0)}
                 if datetime_column
@@ -129,7 +134,7 @@ def get_table_quoted_doc_key(
         },
         sort_keys=True,
         separators=(',', ':'),
-        default=(lambda x: json_serialize_datetime(x) if hasattr(x, 'tzinfo') else str(x)),
+        default=json_serialize_value,
     )
 
 
@@ -377,7 +382,7 @@ def delete_pipe(
         doc = docs[0]
         doc_str = json.dumps(
             doc,
-            default=(lambda x: json_serialize_datetime(x) if hasattr(x, 'tzinfo') else str(x)),
+            default=json_serialize_value,
             separators=(',', ':'),
             sort_keys=True,
         )
@@ -445,9 +450,13 @@ def get_pipe_data(
     ]
     try:
         docs_strings = [
-            self.get(get_document_key(
-                doc, indices, table_name
-            ))
+            self.get(
+                self.get_document_key(
+                    doc,
+                    indices,
+                    table_name,
+                )
+            )
             for doc in ix_docs
         ]
     except Exception as e:
@@ -535,7 +544,7 @@ def sync_pipe(
     def _serialize_indices_docs(_docs):
         return [
             {
-                'ix': get_document_key(doc, indices),
+                'ix': self.get_document_key(doc, indices),
                 **(
                     {
                         dt_col: doc.get(dt_col, 0)
@@ -594,7 +603,7 @@ def sync_pipe(
     unseen_docs = unseen_df.to_dict(orient='records') if unseen_df is not None else []
     unseen_indices_docs = _serialize_indices_docs(unseen_docs)
     unseen_ix_vals = {
-        get_document_key(doc, indices, table_name): serialize_document(doc)
+        self.get_document_key(doc, indices, table_name): serialize_document(doc)
         for doc in unseen_docs
     }
     for key, val in unseen_ix_vals.items():
@@ -615,7 +624,7 @@ def sync_pipe(
 
     update_docs = update_df.to_dict(orient='records') if update_df is not None else []
     update_ix_docs = {
-        get_document_key(doc, indices, table_name): doc
+        self.get_document_key(doc, indices, table_name): doc
         for doc in update_docs
     }
     existing_docs_data = {
@@ -633,7 +642,7 @@ def sync_pipe(
         if key not in existing_docs
     }
     new_ix_vals = {
-        get_document_key(doc, indices, table_name): serialize_document(doc)
+        self.get_document_key(doc, indices, table_name): serialize_document(doc)
         for doc in new_update_docs.values()
     }
     for key, val in new_ix_vals.items():
@@ -743,8 +752,8 @@ def clear_pipe(
     table_name = self.quote_table(pipe.target)
     indices = [col for col in pipe.columns.values() if col]
     for doc in docs:
-        set_doc_key = get_document_key(doc, indices)
-        table_doc_key = get_document_key(doc, indices, table_name)
+        set_doc_key = self.get_document_key(doc, indices)
+        table_doc_key = self.get_document_key(doc, indices, table_name)
         try:
             if dt_col:
                 self.client.zrem(table_name, set_doc_key)
@@ -826,13 +835,15 @@ def get_pipe_rowcount(
         return 0
 
     try:
-        if begin is None and end is None and params is None:
+        if begin is None and end is None and not params:
             return (
                 self.client.zcard(table_name)
                 if dt_col
-                else self.client.llen(table_name)
+                else self.client.scard(table_name)
             )
-    except Exception:
+    except Exception as e:
+        if debug:
+            dprint(f"Failed to get rowcount for {pipe}:\n{e}")
         return None
 
     df = pipe.get_data(begin=begin, end=end, params=params, debug=debug)

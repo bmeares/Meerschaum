@@ -7,6 +7,7 @@ Utility functions for working with data types.
 """
 
 import traceback
+import json
 import uuid
 from datetime import timezone, datetime
 from decimal import Decimal, Context, InvalidOperation, ROUND_HALF_UP
@@ -28,6 +29,7 @@ MRSM_ALIAS_DTYPES: Dict[str, str] = {
     'guid': 'uuid',
     'UUID': 'uuid',
     'geom': 'geometry',
+    'geog': 'geography',
 }
 MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
@@ -294,9 +296,17 @@ def attempt_cast_to_geometry(value: Any) -> Any:
     """
     Given a value, attempt to coerce it into a `shapely` (`geometry`) object.
     """
-    shapely_wkt, shapely_wkb = mrsm.attempt_import('shapely.wkt', 'shapely.wkb', lazy=False)
+    shapely, shapely_wkt, shapely_wkb = mrsm.attempt_import(
+        'shapely',
+        'shapely.wkt',
+        'shapely.wkb',
+        lazy=False,
+    )
     if 'shapely' in str(type(value)):
         return value
+
+    if isinstance(value, (dict, list)):
+        return shapely.from_geojson(json.dumps(value))
 
     value_is_wkt = geometry_is_wkt(value)
     if value_is_wkt is None:
@@ -521,7 +531,11 @@ def serialize_bytes(data: bytes) -> str:
     return base64.b64encode(data).decode('utf-8')
 
 
-def serialize_geometry(geom: Any, as_wkt: bool = False) -> str:
+def serialize_geometry(
+    geom: Any,
+    geometry_format: str = 'wkb_hex',
+    as_wkt: bool = False,
+) -> str:
     """
     Serialize geometry data as a hex-encoded well-known-binary string. 
 
@@ -530,16 +544,20 @@ def serialize_geometry(geom: Any, as_wkt: bool = False) -> str:
     geom: Any
         The potential geometry data to be serialized.
 
-    as_wkt, bool, default False
-        If `True`, serialize geometry data as well-known text (WKT)
-        instead of well-known binary (WKB).
+    geometry_format: str, default 'wkb_hex'
+        The serialization format for geometry data.
+        Accepted formats are `wkb_hex` (well-known binary hex string),
+        `wkt` (well-known text), and `geojson`.
 
     Returns
     -------
     A string containing the geometry data.
     """
+    if geometry_format == 'geojson':
+        geojson_str = shapely.to_geojson(geom)
+
     if hasattr(geom, 'wkb_hex'):
-        return geom.wkb_hex if not as_wkt else geom.wkt
+        return geom.wkb_hex if geometry_format == 'wkb_hex' else geom.wkt
 
     return str(geom)
 

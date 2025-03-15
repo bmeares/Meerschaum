@@ -74,8 +74,8 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'DOUBLE': 'float64[pyarrow]',
     'DECIMAL': 'numeric',
     'BIGINT': 'int64[pyarrow]',
-    'INT': 'int64[pyarrow]',
-    'INTEGER': 'int64[pyarrow]',
+    'INT': 'int32[pyarrow]',
+    'INTEGER': 'int32[pyarrow]',
     'NUMBER': 'numeric',
     'NUMERIC': 'numeric',
     'TIMESTAMP': 'datetime64[ns]',
@@ -126,6 +126,34 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
 ### Map pandas dtypes to flavor-specific dtypes.
 PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'int': {
+        'timescaledb': 'BIGINT',
+        'postgresql': 'BIGINT',
+        'postgis': 'BIGINT',
+        'mariadb': 'BIGINT',
+        'mysql': 'BIGINT',
+        'mssql': 'BIGINT',
+        'oracle': 'INT',
+        'sqlite': 'BIGINT',
+        'duckdb': 'BIGINT',
+        'citus': 'BIGINT',
+        'cockroachdb': 'BIGINT',
+        'default': 'INT',
+    },
+    'int32': {
+        'timescaledb': 'INT',
+        'postgresql': 'INT',
+        'postgis': 'INT',
+        'mariadb': 'INT',
+        'mysql': 'INT',
+        'mssql': 'INT',
+        'oracle': 'INT',
+        'sqlite': 'INT',
+        'duckdb': 'INT',
+        'citus': 'INT',
+        'cockroachdb': 'INT',
+        'default': 'INT',
+    },
+    'int64': {
         'timescaledb': 'BIGINT',
         'postgresql': 'BIGINT',
         'postgis': 'BIGINT',
@@ -380,6 +408,34 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'cockroachdb': 'BigInteger',
         'default': 'BigInteger',
     },
+    'int64': {
+        'timescaledb': 'BigInteger',
+        'postgresql': 'BigInteger',
+        'postgis': 'BigInteger',
+        'mariadb': 'BigInteger',
+        'mysql': 'BigInteger',
+        'mssql': 'BigInteger',
+        'oracle': 'BigInteger',
+        'sqlite': 'BigInteger',
+        'duckdb': 'BigInteger',
+        'citus': 'BigInteger',
+        'cockroachdb': 'BigInteger',
+        'default': 'BigInteger',
+    },
+    'int32': {
+        'timescaledb': 'Integer',
+        'postgresql': 'Integer',
+        'postgis': 'Integer',
+        'mariadb': 'Integer',
+        'mysql': 'Integer',
+        'mssql': 'Integer',
+        'oracle': 'Integer',
+        'sqlite': 'Integer',
+        'duckdb': 'Integer',
+        'citus': 'Integer',
+        'cockroachdb': 'Integer',
+        'default': 'Integer',
+    },
     'float': {
         'timescaledb': 'Float',
         'postgresql': 'Float',
@@ -596,7 +652,7 @@ def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = True) -> 
     -------
     The equivalent datatype for a pandas DataFrame.
     """
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, get_geometry_type_srid
     def parse_custom(_pd_type: str, _db_type: str) -> str:
         if 'json' in _db_type.lower():
             return 'json'
@@ -604,6 +660,13 @@ def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = True) -> 
             precision, scale = get_numeric_precision_scale(None, dtype=_db_type.upper())
             if precision and scale:
                 return f"numeric[{precision},{scale}]"
+        if are_dtypes_equal(_pd_type, 'geometry') and _pd_type != 'object':
+            geometry_type, srid = get_geometry_type_srid(_pd_type)
+            modifiers = [str(modifier) for modifier in (geometry_type, srid) if modifier]
+            typ = "geometry" if 'geography' not in _pd_type.lower() else 'geography'
+            if not modifiers:
+                return typ
+            return f"{typ}[{', '.join(modifiers)}]"
         return _pd_type
 
     pd_type = DB_TO_PD_DTYPES.get(db_type.upper().split('(', maxsplit=1)[0].strip(), None)

@@ -6,8 +6,27 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v2.9.0
 
-- **Add the dtype `geometry`.**  
-  The new data type `geometry` will serialize geometry data as well-known-binary (WKB) data and create the appropriate column types in PostGIS and MSSQL.
+- **Add the dtype `geometry` (and `geography`).**  
+  The new data type `geometry` adds support for syncing GIS data (e.g. WKB/WKT, GeoJSON, `shapely` objects, and `GeoDataFrames`).
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'demo', 'geometry',
+      instance='sql:local',
+      columns={
+          'primary': 'id',
+      },
+      dtypes={
+          'geom': 'geometry',
+          'id': 'int',
+      },
+  )
+
+  ```
+
+- **Add the SQLConnector flavor `postgis`.**  
+  The new flavor `postgis` (built atop the `postgresql` flavor) allows pipes to take natively support `GEOMETRY` (and `GEOGRAPHY`) types.
 
 - **Add the property `instance_keys` to `api` connectors.**  
   The optional property `instance_keys` determines the value of `instance_keys` to be sent alongside pipe requests.
@@ -32,6 +51,9 @@ This is the current release cycle, so stay tuned for future releases!
       def example_page():
           return dbc.Container(html.H1('Hello, world!'))
   ```
+
+- **Fix serialization of `valkey` pipes without indices.**  
+  Pipes synced without `columns` now correctly serialize documents' keys.
 
 ## 2.8.x Releases
 
