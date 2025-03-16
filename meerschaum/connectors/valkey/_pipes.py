@@ -82,7 +82,7 @@ def get_document_key(
     from meerschaum.utils.dtypes import coerce_timezone
     index_vals = {
         key: (
-            str(val)
+            str(val).replace(':', COLON)
             if not isinstance(val, datetime)
             else str(int(coerce_timezone(val).replace(tzinfo=timezone.utc).timestamp()))
         )
@@ -95,7 +95,7 @@ def get_document_key(
                 (
                     table_name
                     + ':'
-                    + ('indices:' if indices else '')
+                    + ('indices:' if True else '')
                 )
             )
             if table_name

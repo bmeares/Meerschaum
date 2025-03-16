@@ -383,6 +383,10 @@ def get_pipe_data(
     params: Optional[str] = None,
     limit: int = MAX_RESPONSE_ROW_LIMIT,
     order: str = 'asc', 
+    date_format: str = 'iso',
+    date_unit: str = 'us',
+    double_precision: int = 15,
+    geometry_format: str = 'wkb_hex',
     as_chunks: bool = False,
     chunk_interval: Optional[int] = None,
     curr_user = (
@@ -400,6 +404,21 @@ def get_pipe_data(
     instance_keys: Optional[str], default None
         The connector key to the instance on which the pipe is registered.
         Defaults to the configured value for `meerschaum:api_instance`.
+
+    date_format: str, default 'iso'
+        Serialzation format for datetime values.
+        Accepted values are `'iso`' (ISO8601) and `'epoch'` (epoch milliseconds).
+
+    date_unit: str, default 'us'
+        Timestamp precision for serialization. Accepted values are `'s'` (seconds),
+        `'ms'` (milliseconds), `'us'` (microseconds), and `'ns'`.
+
+    double_precision: int, default 15
+        The number of decimal places to use when encoding floating point values (maximum 15).
+
+    geometry_format: str, default 'wkb_hex'
+        The serialization format for geometry data.
+        Accepted values are `geojson`, `wkb_hex`, and `wkt`.
 
     as_chunks: bool, default False
         If `True`, return a chunk token to be consumed by the `/chunks` endpoint.
@@ -483,7 +502,7 @@ def get_pipe_data(
         )
         return fastapi.Response(
             json.dumps({
-                'chunks_cursor': chunks_cursor,
+                'chunks_cursor': chunks_cursor_token,
             }),
             media_type='application/json',
         )
@@ -504,7 +523,13 @@ def get_pipe_data(
             detail="Could not fetch data with the given parameters.",
         )
 
-    json_content = to_json(df)
+    json_content = to_json(
+        df,
+        date_format=date_format,
+        date_unit=date_unit,
+        geometry_format=geometry_format,
+        double_precision=double_precision,
+    )
     return fastapi.Response(
         json_content,
         media_type='application/json',

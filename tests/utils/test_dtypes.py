@@ -15,7 +15,12 @@ import pytest
 
 import meerschaum as mrsm
 from meerschaum.utils.packages import import_pandas
-from meerschaum.utils.dtypes import are_dtypes_equal, json_serialize_value, get_geometry_type_srid
+from meerschaum.utils.dtypes import (
+    are_dtypes_equal,
+    json_serialize_value,
+    get_geometry_type_srid,
+    attempt_cast_to_geometry,
+)
 DEBUG: bool = True
 pd = import_pandas(debug=DEBUG)
 np = mrsm.attempt_import('numpy')
@@ -121,3 +126,22 @@ def test_parse_geometry_type_srid(
 
     assert geometry_type == expected_type
     assert srid == expected_srid
+
+
+@pytest.mark.parametrize(
+    'input_data,expected_output',
+    [
+        ('POINT (-82.35004 34.84873)', shapely.Point(-82.35004, 34.84873)),
+        ('0101000000AE122C0E679654C02A91442FA36C4140', shapely.Point(-82.35004, 34.84873)),
+        ({'type': 'Point', 'coordinates': [-82.35004, 34.84873]}, shapely.Point(-82.35004, 34.84873)),
+        (None, None),
+        ({'invalid': 1}, {'invalid': 1}),
+        (shapely.Point(-82.35004, 34.84873), shapely.Point(-82.35004, 34.84873)),
+    ]
+)
+def test_parse_geometry_formats(input_data, expected_output):
+    """
+    Test that serialized geometry data are parsed into geometry objects.
+    """
+    output = attempt_cast_to_geometry(input_data)
+    assert output == expected_output

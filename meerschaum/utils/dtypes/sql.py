@@ -78,6 +78,8 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'INTEGER': 'int32[pyarrow]',
     'NUMBER': 'numeric',
     'NUMERIC': 'numeric',
+    'GEOMETRY': 'geometry',
+    'GEOMETRY(GEOMETRY)': 'geometry',
     'TIMESTAMP': 'datetime64[ns]',
     'TIMESTAMP WITHOUT TIMEZONE': 'datetime64[ns]',
     'TIMESTAMP WITH TIMEZONE': 'datetime64[ns, UTC]',
@@ -120,6 +122,8 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
         'BYTE': 'bytes',
         'LOB': 'bytes',
         'BINARY': 'bytes',
+        'GEOMETRY': 'geometry',
+        'GEOGRAPHY': 'geography',
     },
     'default': 'object',
 }
@@ -661,7 +665,7 @@ def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = True) -> 
             if precision and scale:
                 return f"numeric[{precision},{scale}]"
         if are_dtypes_equal(_pd_type, 'geometry') and _pd_type != 'object':
-            geometry_type, srid = get_geometry_type_srid(_pd_type)
+            geometry_type, srid = get_geometry_type_srid(_db_type.upper())
             modifiers = [str(modifier) for modifier in (geometry_type, srid) if modifier]
             typ = "geometry" if 'geography' not in _pd_type.lower() else 'geography'
             if not modifiers:

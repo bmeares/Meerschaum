@@ -1658,6 +1658,7 @@ def to_json(
     orient: str = 'records',
     date_format: str = 'iso',
     date_unit: str = 'us',
+    double_precision: int = 15,
     geometry_format: str = 'geojson',
     **kwargs: Any
 ) -> str:
@@ -1678,6 +1679,9 @@ def to_json(
     date_unit: str, default 'us'
         The precision of the timestamps.
 
+    double_precision: int, default 15
+        The number of decimal places to use when encoding floating point values (maximum 15).
+
     geometry_format: str, default 'geojson'
         The serialization format for geometry data.
         Accepted values are `geojson`, `wkb_hex`, and `wkt`.
@@ -1687,6 +1691,7 @@ def to_json(
     A JSON string.
     """
     import warnings
+    import functools
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dtypes import (
         serialize_bytes,
@@ -1709,10 +1714,16 @@ def to_json(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for col in geometry_cols:
-            df[col] = df[col].apply(serialize_geometry)
+            df[col] = df[col].apply(
+                functools.partial(
+                    serialize_geometry,
+                    geometry_format=geometry_format,
+                )
+            )
     return df.infer_objects(copy=False).fillna(pd.NA).to_json(
         date_format=date_format,
         date_unit=date_unit,
+        double_precision=double_precision,
         orient=orient,
         **kwargs
     )

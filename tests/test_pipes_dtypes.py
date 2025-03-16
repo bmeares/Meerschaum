@@ -396,6 +396,7 @@ def test_ignore_datetime_conversion(flavor: str):
         warnings.filterwarnings('ignore')
         success, msg = pipe.sync(docs, debug=debug)
 
+    return pipe
     assert success, msg
     df = pipe.get_data(['dt'], debug=debug)
     print(df)

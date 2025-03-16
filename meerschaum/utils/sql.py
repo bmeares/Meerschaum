@@ -528,7 +528,7 @@ NO_CTE_FLAVORS = {'mysql', 'mariadb'}
 NO_SELECT_INTO_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
 
 
-def clean(substring: str) -> str:
+def clean(substring: str) -> None:
     """
     Ensure a substring is clean enough to be inserted into a SQL query.
     Raises an exception when banned words are used.
@@ -932,6 +932,7 @@ def build_where(
     params: Dict[str, Any],
     connector: Optional[mrsm.connectors.sql.SQLConnector] = None,
     with_where: bool = True,
+    flavor: str = 'postgresql',
 ) -> str:
     """
     Build the `WHERE` clause based on the input criteria.
@@ -950,6 +951,9 @@ def build_where(
 
     with_where: bool, default True:
         If `True`, include the leading `'WHERE'` string.
+
+    flavor: str, default 'postgresql'
+        If `connector` is `None`, fall back to this flavor.
 
     Returns
     -------
@@ -979,13 +983,11 @@ def build_where(
             warn(f"Aborting build_where() due to possible SQL injection.")
             return ''
 
-    if connector is None:
-        from meerschaum import get_connector
-        connector = get_connector('sql')
+    query_flavor = getattr(connector, 'flavor', flavor) if connector is not None else flavor
     where = ""
     leading_and = "\n    AND "
     for key, value in params.items():
-        _key = sql_item_name(key, connector.flavor, None)
+        _key = sql_item_name(key, query_flavor, None)
         ### search across a list (i.e. IN syntax)
         if isinstance(value, Iterable) and not isinstance(value, (dict, str)):
             includes = [
@@ -1296,7 +1298,37 @@ def get_table_cols_types(
         if cols_types_docs and not cols_types_docs_filtered:
             cols_types_docs_filtered = cols_types_docs
 
-        return {
+        ### NOTE: Check for PostGIS GEOMETRY columns.
+        geometry_cols_types = {}
+        user_defined_cols = [
+            doc
+            for doc in cols_types_docs_filtered
+            if str(doc.get('type', None)).upper() == 'USER-DEFINED'
+        ]
+        if user_defined_cols:
+            geometry_cols_types_srids = get_postgis_geometry_columns(
+                connectable,
+                table,
+                schema=schema,
+                debug=debug,
+            )
+            geometry_cols_types.update({
+                col: (
+                    f"GEOMETRY({typ.upper()}, {srid})"
+                    if srid
+                    else (
+                        f"GEOMETRY"
+                        + (
+                            f'({typ.upper()})'
+                            if typ.upper() != 'GEOMETRY'
+                            else ''
+                        )
+                    )
+                )
+                for col, (typ, srid) in geometry_cols_types_srids.items()
+            })
+
+        cols_types = {
             (
                 doc['column']
                 if flavor != 'oracle' else (
@@ -1317,6 +1349,8 @@ def get_table_cols_types(
             )
             for doc in cols_types_docs_filtered
         }
+        cols_types.update(geometry_cols_types)
+        return cols_types
     except Exception as e:
         warn(f"Failed to fetch columns for table '{table}':\n{e}")
         return {}
@@ -2505,3 +2539,42 @@ def get_reset_autoincrement_queries(
         )
         for query in reset_queries
     ]
+
+
+def get_postgis_geometry_columns(
+    connectable: Union[
+        'mrsm.connectors.sql.SQLConnector',
+        'sqlalchemy.orm.session.Session',
+        'sqlalchemy.engine.base.Engine'
+    ],
+    table: str,
+    schema: Optional[str] = 'public',
+    debug: bool = False,
+) -> Dict[str, Tuple[str, int]]:
+    """
+    Return the 
+    """
+    from meerschaum.utils.dtypes import get_geometry_type_srid
+    default_type, default_srid = get_geometry_type_srid()
+    default_type = default_type.upper()
+
+    clean(table)
+    clean(str(schema))
+    schema = schema or 'public'
+    truncated_schema_name = truncate_item_name(schema, flavor='postgis')
+    truncated_table_name = truncate_item_name(table, flavor='postgis')
+    query = (
+        "SELECT \"f_geometry_column\" AS \"column\", \"type\", \"srid\"\n"
+        "FROM \"geometry_columns\"\n"
+        f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
+        f"    AND \"f_table_name\" = '{truncated_table_name}'"
+    )
+    debug_kwargs = {'debug': debug} if isinstance(connectable, mrsm.connectors.SQLConnector) else {}
+    result_rows = [
+        row
+        for row in connectable.execute(query, **debug_kwargs).fetchall()
+    ]
+    return {
+        row[0]: (row[1], row[2])
+        for row in result_rows
+    }

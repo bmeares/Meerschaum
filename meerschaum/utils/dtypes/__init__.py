@@ -306,7 +306,10 @@ def attempt_cast_to_geometry(value: Any) -> Any:
         return value
 
     if isinstance(value, (dict, list)):
-        return shapely.from_geojson(json.dumps(value))
+        try:
+            return shapely.from_geojson(json.dumps(value))
+        except Exception as e:
+            return value
 
     value_is_wkt = geometry_is_wkt(value)
     if value_is_wkt is None:
@@ -337,6 +340,9 @@ def geometry_is_wkt(value: Union[str, bytes]) -> Union[bool, None]:
     Return `None` if `value` should be parsed as neither.
     """
     import re
+    if not isinstance(value, (str, bytes)):
+        return None
+
     if isinstance(value, bytes):
         return False
     
@@ -535,7 +541,7 @@ def serialize_geometry(
     geom: Any,
     geometry_format: str = 'wkb_hex',
     as_wkt: bool = False,
-) -> str:
+) -> Union[str, Dict[str, Any]]:
     """
     Serialize geometry data as a hex-encoded well-known-binary string. 
 
@@ -553,8 +559,10 @@ def serialize_geometry(
     -------
     A string containing the geometry data.
     """
+    shapely = mrsm.attempt_import('shapely', lazy=False)
     if geometry_format == 'geojson':
         geojson_str = shapely.to_geojson(geom)
+        return json.loads(geojson_str)
 
     if hasattr(geom, 'wkb_hex'):
         return geom.wkb_hex if geometry_format == 'wkb_hex' else geom.wkt
@@ -729,6 +737,8 @@ def get_geometry_type_srid(
     ('Point', 4376)
     """
     from meerschaum.utils.misc import is_int
+    ### NOTE: PostGIS syntax must also be parsed.
+    dtype = dtype.replace('(', '[').replace(')', ']')
     bare_dtype = dtype.split('[', maxsplit=1)[0]
     modifier = dtype.split(bare_dtype, maxsplit=1)[-1].lstrip('[').rstrip(']')
     if not modifier:
