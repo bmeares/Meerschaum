@@ -1129,7 +1129,7 @@ def test_geography_dtype(flavor: str):
         'test', 'geography',
         instance=conn,
         columns={'primary': 'id'},
-        dtypes={'id': 'int', 'geog': 'geography'},
+        dtypes={'id': 'int', 'geog': 'geography[SRID=4326]'},
     )
 
     geog = shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]])

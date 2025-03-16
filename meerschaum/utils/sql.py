@@ -1306,27 +1306,14 @@ def get_table_cols_types(
             if str(doc.get('type', None)).upper() == 'USER-DEFINED'
         ]
         if user_defined_cols:
-            geometry_cols_types_srids = get_postgis_geometry_columns(
-                connectable,
-                table,
-                schema=schema,
-                debug=debug,
-            )
-            geometry_cols_types.update({
-                col: (
-                    f"GEOMETRY({typ.upper()}, {srid})"
-                    if srid
-                    else (
-                        f"GEOMETRY"
-                        + (
-                            f'({typ.upper()})'
-                            if typ.upper() != 'GEOMETRY'
-                            else ''
-                        )
-                    )
+            geometry_cols_types.update(
+                get_postgis_geo_columns_types(
+                    connectable,
+                    table,
+                    schema=schema,
+                    debug=debug,
                 )
-                for col, (typ, srid) in geometry_cols_types_srids.items()
-            })
+            )
 
         cols_types = {
             (
@@ -2541,7 +2528,7 @@ def get_reset_autoincrement_queries(
     ]
 
 
-def get_postgis_geometry_columns(
+def get_postgis_geo_columns_types(
     connectable: Union[
         'mrsm.connectors.sql.SQLConnector',
         'sqlalchemy.orm.session.Session',
@@ -2550,7 +2537,7 @@ def get_postgis_geometry_columns(
     table: str,
     schema: Optional[str] = 'public',
     debug: bool = False,
-) -> Dict[str, Tuple[str, int]]:
+) -> Dict[str, str]:
     """
     Return the 
     """
@@ -2564,17 +2551,39 @@ def get_postgis_geometry_columns(
     truncated_schema_name = truncate_item_name(schema, flavor='postgis')
     truncated_table_name = truncate_item_name(table, flavor='postgis')
     query = (
-        "SELECT \"f_geometry_column\" AS \"column\", \"type\", \"srid\"\n"
+        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", \"srid\"\n"
         "FROM \"geometry_columns\"\n"
         f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
-        f"    AND \"f_table_name\" = '{truncated_table_name}'"
+        f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
+        "UNION ALL\n"
+        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", \"srid\"\n"
+        "FROM \"geography_columns\"\n"
+        f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
+        f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
     )
     debug_kwargs = {'debug': debug} if isinstance(connectable, mrsm.connectors.SQLConnector) else {}
     result_rows = [
         row
         for row in connectable.execute(query, **debug_kwargs).fetchall()
     ]
-    return {
-        row[0]: (row[1], row[2])
+    cols_type_tuples = {
+        row[0]: (row[1], row[2], row[3])
         for row in result_rows
     }
+
+    geometry_cols_types = {
+        col: (
+            f"{func}({typ.upper()}, {srid})"
+            if srid
+            else (
+                func
+                + (
+                    f'({typ.upper()})'
+                    if typ.upper() not in ('GEOMETRY', 'GEOGRAPHY')
+                    else ''
+                )
+            )
+        )
+        for col, (func, typ, srid) in cols_type_tuples.items()
+    }
+    return geometry_cols_types
