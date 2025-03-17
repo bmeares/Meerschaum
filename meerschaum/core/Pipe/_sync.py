@@ -1104,19 +1104,46 @@ def _persist_new_geometry_columns(self, df, debug: bool = False) -> SuccessTuple
     Check for new `geometry` columns and update the parameters.
     """
     from meerschaum.utils.dataframe import get_geometry_cols
-    geometry_cols = get_geometry_cols(df)
+    geometry_cols_types_srids = get_geometry_cols(df, with_types_srids=True)
     existing_geometry_cols = [
         col
         for col, typ in self.dtypes.items()
         if typ.startswith('geometry') or typ.startswith('geography')
     ]
-    new_geometry_cols = [col for col in geometry_cols if col not in existing_geometry_cols]
+    new_geometry_cols = [
+        col
+        for col in geometry_cols_types_srids
+        if col not in existing_geometry_cols
+    ]
     if not new_geometry_cols:
         return True, "Success"
 
     self._attributes_sync_time = None
     dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'geometry' for col in new_geometry_cols})
+
+    new_cols_types = {}
+    for col, (geometry_type, srid) in geometry_cols_types_srids.items():
+        if col not in new_geometry_cols:
+            continue
+
+        new_dtype = "geometry"
+        modifier = ""
+        if not srid and geometry_type.lower() == 'geometry':
+            new_cols_types[col] = new_dtype
+            continue
+
+        modifier = "["
+        if geometry_type.lower() != 'geometry':
+            modifier += f"{geometry_type}"
+
+        if srid:
+            if modifier:
+                modifier += ", "
+            modifier += f"{srid}"
+        modifier += "]"
+        new_cols_types[col] = f"{new_dtype}{modifier}"
+
+    dtypes.update(new_cols_types)
     self.parameters['dtypes'] = dtypes
 
     if not self.temporary:

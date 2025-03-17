@@ -871,7 +871,10 @@ def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
     ]
 
 
-def get_geometry_cols(df: 'pd.DataFrame') -> List[str]:
+def get_geometry_cols(
+    df: 'pd.DataFrame',
+    with_types_srids: bool = False,
+) -> Union[List[str], Dict[str, Any]]:
     """
     Get the columns which contain shapely objects from a Pandas DataFrame.
 
@@ -880,9 +883,13 @@ def get_geometry_cols(df: 'pd.DataFrame') -> List[str]:
     df: pd.DataFrame
         The DataFrame which may contain bytes strings.
 
+    with_types_srids: bool, default False
+        If `True`, return a dictionary mapping columns to geometry types and SRIDs.
+
     Returns
     -------
     A list of columns to treat as `geometry`.
+    If `with_types_srids`, return a dictionary mapping columns to tuples in the form (type, SRID).
     """
     if df is None:
         return []
@@ -898,7 +905,7 @@ def get_geometry_cols(df: 'pd.DataFrame') -> List[str]:
         col: df[col].first_valid_index()
         for col in df.columns
     }
-    return [
+    geo_cols = [
         col
         for col, ix in cols_indices.items()
         if (
@@ -907,6 +914,31 @@ def get_geometry_cols(df: 'pd.DataFrame') -> List[str]:
             'shapely' in str(type(df.loc[ix][col]))
         )
     ]
+    if not with_types_srids:
+        return geo_cols
+
+    gpd = mrsm.attempt_import('geopandas', lazy=False)
+    geo_cols_types_srids = {}
+    for col in geo_cols:
+        try:
+            sample_geo_series = gpd.GeoSeries(df[col], crs=None)
+            geometry_types = {geom.geom_type for geom in sample_geo_series}
+            srid = (
+                (
+                    sample_geo_series.crs.sub_crs_list[0].to_epsg()
+                    if sample_geo_series.crs.is_compound
+                    else sample_geo_series.crs.to_epsg()
+                )
+                if sample_geo_series.crs
+                else 0
+            )
+            geometry_type = list(geometry_types)[0] if len(geometry_types) == 1 else 'geometry'
+        except Exception:
+            srid = 0
+            geometry_type = 'geometry'
+        geo_cols_types_srids[col] = (geometry_type, srid)
+
+    return geo_cols_types_srids
 
 
 def enforce_dtypes(
