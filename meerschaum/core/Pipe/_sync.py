@@ -158,6 +158,7 @@ def sync(
         'error_callback': error_callback,
         'sync_chunks': sync_chunks,
         'chunksize': chunksize,
+        'safe_copy': True,
     })
 
     ### NOTE: Invalidate `_exists` cache before and after syncing.
@@ -268,6 +269,7 @@ def sync(
                             **kw
                         )
                     )
+                    kw['safe_copy'] = False
             except Exception as e:
                 get_console().print_exception(
                     suppress=[
@@ -1137,7 +1139,7 @@ def _persist_new_geometry_columns(self, df, debug: bool = False) -> SuccessTuple
             modifier += f"{geometry_type}"
 
         if srid:
-            if modifier:
+            if modifier != '[':
                 modifier += ", "
             modifier += f"{srid}"
         modifier += "]"

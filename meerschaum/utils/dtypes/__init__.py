@@ -78,6 +78,7 @@ def to_pandas_dtype(dtype: str) -> str:
         return get_pd_type_from_db_type(dtype)
 
     from meerschaum.utils.packages import attempt_import
+    _ = attempt_import('pyarrow', lazy=False)
     pandas = attempt_import('pandas', lazy=False)
 
     try:

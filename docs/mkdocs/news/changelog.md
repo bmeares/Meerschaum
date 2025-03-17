@@ -25,6 +25,30 @@ This is the current release cycle, so stay tuned for future releases!
 
   ```
 
+  The `geometry` dtype syntax supports constraints for Geometry type and/or CRS (SRID):
+
+  ```yaml
+  dtypes:
+    id: int
+    geom: geometry[MultiLineString, 4326]
+  ```
+
+  Syncing a `GeoDataFrame` (without specifying an explicit dtype) will detect any CRS and geometry type:
+
+  ```python
+  import meerschaum as mrsm
+  import geopandas as gpd
+
+  path = 'path/to/shapefile.shp'
+  gdf = gpd.read_file(path)
+
+  pipe = mrsm.Pipe('demo', 'shapefile', instance='sql:local')
+  success, msg = pipe.sync(gdf)
+
+  print(pipe.dtypes['geometry'])
+  # geometry[Point, 6570] 
+  ```
+
 - **Add the SQLConnector flavor `postgis`.**  
   The new flavor `postgis` (built atop the `postgresql` flavor) allows pipes to take natively support `GEOMETRY` (and `GEOGRAPHY`) types.
 
@@ -52,8 +76,13 @@ This is the current release cycle, so stay tuned for future releases!
           return dbc.Container(html.H1('Hello, world!'))
   ```
 
+- **Create `INT` columns for dtypes `int32`, `SMALLINT` for `int16`.**  
+  The `SQLConnector` now maps the Pandas dtypes `int32` to `INT` and `int16` (and `int8`) to `SMALLINT` rather than defaulting to `BIGINT` for everything.
+
 - **Fix serialization of `valkey` pipes without indices.**  
   Pipes synced without `columns` now correctly serialize documents' keys.
+
+- **Skip venv locking on Windows.**
 
 ## 2.8.x Releases
 
