@@ -125,7 +125,6 @@ packages: Dict[str, Dict[str, str]] = {
         'jinja2'                     : 'jinja2==3.0.3',
     },
     'gui': {
-        'toga'                       : 'toga>=0.3.0-dev29',
         'webview'                    : 'pywebview>=3.6.3',
         'pycparser'                  : 'pycparser>=2.21.0',
     },

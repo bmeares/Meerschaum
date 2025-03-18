@@ -39,17 +39,9 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
     apt-get update
     ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev || exit 1
 
-    ### Install GUI libraries.
     apt-get install -y --no-install-recommends \
-      libglib2.0-dev \
-      libgirepository1.0-dev \
-      libcairo2-dev \
-      pkg-config \
-      libgtk-3-dev \
-      gir1.2-webkit2-4.0 \
       htop \
       openssl \
-      cmake \
       || exit 1
   fi
 
