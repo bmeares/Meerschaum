@@ -2587,3 +2587,37 @@ def get_postgis_geo_columns_types(
         for col, (func, typ, srid) in cols_type_tuples.items()
     }
     return geometry_cols_types
+
+
+def get_create_schema_if_not_exists_queries(
+    schema: str,
+    flavor: str,
+) -> List[str]:
+    """
+    Return the queries to create a schema if it does not yet exist.
+    For databases which do not support schemas, an empty list will be returned.
+    """
+    if not schema:
+        return []
+    
+    if flavor in NO_SCHEMA_FLAVORS:
+        return []
+
+    clean(schema)
+
+    if flavor == 'mssql':
+        return [
+            (
+                f"IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '{schema}')\n"
+                "BEGIN\n"
+                f"    EXEC('CREATE SCHEMA {sql_item_name(schema, flavor)}');\n"
+                "END;"
+            )
+        ]
+
+    if flavor == 'oracle':
+        return []
+
+    return [
+        f"CREATE SCHEMA IF NOT EXISTS {sql_item_name(schema, flavor)};"
+    ]

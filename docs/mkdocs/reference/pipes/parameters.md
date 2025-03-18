@@ -68,7 +68,7 @@ Below are the supported Meerschaum data types. See the [SQL dtypes source](https
 
 ## `enforce`
 
-The `enforce` parameter controls whether a pipe coerces incoming data to match the set data types (default `True`). For example, 
+The `enforce` parameter controls whether a pipe coerces incoming data to match the set data types (default `True`). If your workload is performance-sensitive, consider experimenting with `enforce=False` to skip the extra work required to ensure incoming data matches the configured dtypes.
 
 ## `fetch`
 

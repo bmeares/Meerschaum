@@ -33,7 +33,6 @@ __all__ = (
     'write_config',
     'set_config',
     'paths',
-    'parse',
 )
 __pdoc__ = {'static': False, 'resources': False, 'stack': False, }
 _locks = {'config': RLock()}

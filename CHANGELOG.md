@@ -96,7 +96,11 @@ This is the current release cycle, so stay tuned for future releases!
 - **Fix serialization of `valkey` pipes without indices.**  
   Pipes synced without `columns` now correctly serialize documents' keys.
 
+- **Add API endpoints for clearing pipes and chunk bounds.**  
+  The endpoints `/pipes/{connector_keys}/{metric_key}/{location_key}/clear` and `/pipes/{connector_keys}/{metric_key}/{location_key}/chunk_bounds` now allow API users to clear pipes (rather than using the legacy actions endpoint) and get the values from `pipe.get_chunk_bounds()`.
+
 - **Skip venv locking on Windows.**
+- **Shrink `full` Docker image size.**
 
 ## 2.8.x Releases
 
