@@ -158,6 +158,7 @@ def sync(
         'error_callback': error_callback,
         'sync_chunks': sync_chunks,
         'chunksize': chunksize,
+        'safe_copy': True,
     })
 
     ### NOTE: Invalidate `_exists` cache before and after syncing.
@@ -268,6 +269,7 @@ def sync(
                             **kw
                         )
                     )
+                    kw['safe_copy'] = False
             except Exception as e:
                 get_console().print_exception(
                     suppress=[
@@ -402,6 +404,7 @@ def sync(
         self._persist_new_numeric_columns(df, debug=debug)
         self._persist_new_uuid_columns(df, debug=debug)
         self._persist_new_bytes_columns(df, debug=debug)
+        self._persist_new_geometry_columns(df, debug=debug)
 
         if debug:
             dprint(
@@ -1009,7 +1012,7 @@ def _persist_new_numeric_columns(self, df, debug: bool = False) -> SuccessTuple:
 
     self._attributes_sync_time = None
     dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'numeric' for col in numeric_cols})
+    dtypes.update({col: 'numeric' for col in new_numeric_cols})
     self.parameters['dtypes'] = dtypes
     if not self.temporary:
         edit_success, edit_msg = self.edit(interactive=False, debug=debug)
@@ -1034,7 +1037,7 @@ def _persist_new_uuid_columns(self, df, debug: bool = False) -> SuccessTuple:
 
     self._attributes_sync_time = None
     dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'uuid' for col in uuid_cols})
+    dtypes.update({col: 'uuid' for col in new_uuid_cols})
     self.parameters['dtypes'] = dtypes
     if not self.temporary:
         edit_success, edit_msg = self.edit(interactive=False, debug=debug)
@@ -1059,7 +1062,7 @@ def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
 
     self._attributes_sync_time = None
     dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'json' for col in json_cols})
+    dtypes.update({col: 'json' for col in new_json_cols})
     self.parameters['dtypes'] = dtypes
 
     if not self.temporary:
@@ -1085,7 +1088,64 @@ def _persist_new_bytes_columns(self, df, debug: bool = False) -> SuccessTuple:
 
     self._attributes_sync_time = None
     dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'bytes' for col in bytes_cols})
+    dtypes.update({col: 'bytes' for col in new_bytes_cols})
+    self.parameters['dtypes'] = dtypes
+
+    if not self.temporary:
+        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
+        if not edit_success:
+            warn(f"Unable to update bytes dtypes for {self}:\n{edit_msg}")
+
+        return edit_success, edit_msg
+
+    return True, "Success"
+
+
+def _persist_new_geometry_columns(self, df, debug: bool = False) -> SuccessTuple:
+    """
+    Check for new `geometry` columns and update the parameters.
+    """
+    from meerschaum.utils.dataframe import get_geometry_cols
+    geometry_cols_types_srids = get_geometry_cols(df, with_types_srids=True)
+    existing_geometry_cols = [
+        col
+        for col, typ in self.dtypes.items()
+        if typ.startswith('geometry') or typ.startswith('geography')
+    ]
+    new_geometry_cols = [
+        col
+        for col in geometry_cols_types_srids
+        if col not in existing_geometry_cols
+    ]
+    if not new_geometry_cols:
+        return True, "Success"
+
+    self._attributes_sync_time = None
+    dtypes = self.parameters.get('dtypes', {})
+
+    new_cols_types = {}
+    for col, (geometry_type, srid) in geometry_cols_types_srids.items():
+        if col not in new_geometry_cols:
+            continue
+
+        new_dtype = "geometry"
+        modifier = ""
+        if not srid and geometry_type.lower() == 'geometry':
+            new_cols_types[col] = new_dtype
+            continue
+
+        modifier = "["
+        if geometry_type.lower() != 'geometry':
+            modifier += f"{geometry_type}"
+
+        if srid:
+            if modifier != '[':
+                modifier += ", "
+            modifier += f"{srid}"
+        modifier += "]"
+        new_cols_types[col] = f"{new_dtype}{modifier}"
+
+    dtypes.update(new_cols_types)
     self.parameters['dtypes'] = dtypes
 
     if not self.temporary:

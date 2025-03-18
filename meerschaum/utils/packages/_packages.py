@@ -88,6 +88,11 @@ packages: Dict[str, Dict[str, str]] = {
         'mssqlcli'                   : 'mssql-cli>=1.0.0',
         'gadwall'                    : 'gadwall>=0.2.0',
     },
+    'gis'                            : {
+        'pyproj'                     : 'pyproj>=3.7.1',
+        'geopandas'                  : 'geopandas>=1.0.1', 
+        'shapely'                    : 'shapely>=2.0.7',
+    },
     'stack': {
         'compose'                    : 'docker-compose>=1.29.2',
     },
@@ -120,7 +125,6 @@ packages: Dict[str, Dict[str, str]] = {
         'jinja2'                     : 'jinja2==3.0.3',
     },
     'gui': {
-        'toga'                       : 'toga>=0.3.0-dev29',
         'webview'                    : 'pywebview>=3.6.3',
         'pycparser'                  : 'pycparser>=2.21.0',
     },
@@ -141,12 +145,14 @@ packages['sql'] = {
     'pytz'                           : 'pytz',
     'joblib'                         : 'joblib>=0.17.0',
     'sqlalchemy'                     : 'SQLAlchemy>=2.0.5',
+    'geoalchemy'                     : 'GeoAlchemy2>=0.17.1',
     'databases'                      : 'databases>=0.4.0',
     'aiosqlite'                      : 'aiosqlite>=0.16.0',
     'asyncpg'                        : 'asyncpg>=0.21.0',
 }
 packages['sql'].update(packages['drivers'])
 packages['sql'].update(packages['core'])
+packages['sql'].update(packages['gis'])
 packages['dash'] = {
     'flask_compress'                 : 'Flask-Compress>=1.10.1',
     'dash'                           : 'dash>=2.6.2',

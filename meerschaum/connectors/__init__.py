@@ -34,6 +34,7 @@ __all__ = (
     "api",
     "sql",
     "valkey",
+    "parse",
 )
 
 ### store connectors partitioned by

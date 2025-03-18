@@ -17,7 +17,7 @@ from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn
 
 ### database flavors that can use bulk insert
-_bulk_flavors = {'postgresql', 'timescaledb', 'citus', 'mssql'}
+_bulk_flavors = {'postgresql', 'postgis', 'timescaledb', 'citus', 'mssql'}
 ### flavors that do not support chunks
 _disallow_chunks_flavors = ['duckdb']
 _max_chunks_flavors = {'sqlite': 1000}
@@ -798,6 +798,7 @@ def to_sql(
         get_numeric_cols,
         get_uuid_cols,
         get_bytes_cols,
+        get_geometry_cols,
     )
     from meerschaum.utils.dtypes import (
         are_dtypes_equal,
@@ -805,7 +806,9 @@ def to_sql(
         encode_bytes_for_bytea,
         serialize_bytes,
         serialize_decimal,
+        serialize_geometry,
         json_serialize_value,
+        get_geometry_type_srid,
     )
     from meerschaum.utils.dtypes.sql import (
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
@@ -822,6 +825,7 @@ def to_sql(
 
     bytes_cols = get_bytes_cols(df)
     numeric_cols = get_numeric_cols(df)
+    geometry_cols = get_geometry_cols(df)
     ### NOTE: This excludes non-numeric serialized Decimals (e.g. SQLite).
     numeric_cols_dtypes = {
         col: typ
@@ -830,7 +834,6 @@ def to_sql(
             col in df.columns
             and 'numeric' in str(typ).lower()
         )
-        
     }
     numeric_cols.extend([col for col in numeric_cols_dtypes if col not in numeric_cols])
     numeric_cols_precisions_scales = {
@@ -841,6 +844,22 @@ def to_sql(
         )
         for col, typ in numeric_cols_dtypes.items()
     }
+    geometry_cols_dtypes = {
+        col: typ
+        for col, typ in kw.get('dtype', {}).items()
+        if (
+            col in df.columns
+            and 'geometry' in str(typ).lower() or 'geography' in str(typ).lower()
+        )
+    }
+    geometry_cols.extend([col for col in geometry_cols_dtypes if col not in geometry_cols])
+    geometry_cols_types_srids = {
+        col: (typ.geometry_type, typ.srid)
+        if hasattr(typ, 'srid')
+        else get_geometry_type_srid()
+        for col, typ in geometry_cols_dtypes.items()
+    }
+
     cols_pd_types = {
         col: get_pd_type_from_db_type(str(typ))
         for col, typ in kw.get('dtype', {}).items()
@@ -856,8 +875,9 @@ def to_sql(
     }
 
     enable_bulk_insert = mrsm.get_config(
-        'system', 'connectors', 'sql', 'bulk_insert'
-    ).get(self.flavor, False)
+        'system', 'connectors', 'sql', 'bulk_insert', self.flavor,
+        warn=False,
+    ) or False
     stats = {'target': name}
     ### resort to defaults if None
     copied = False
@@ -900,6 +920,17 @@ def to_sql(
                 scale=scale,
             )
         )
+
+    for col in geometry_cols:
+        geometry_type, srid = geometry_cols_types_srids.get(col, get_geometry_type_srid())
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            df[col] = df[col].apply(
+                functools.partial(
+                    serialize_geometry,
+                    as_wkt=(self.flavor == 'mssql')
+                )
+            )
 
     stats['method'] = method.__name__ if hasattr(method, '__name__') else str(method)
 

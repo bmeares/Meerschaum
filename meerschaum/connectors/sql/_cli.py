@@ -15,6 +15,7 @@ from meerschaum.utils.typing import SuccessTuple
 
 flavor_clis = {
     'postgresql'  : 'pgcli',
+    'postgis'  : 'pgcli',
     'timescaledb' : 'pgcli',
     'cockroachdb' : 'pgcli',
     'citus'       : 'pgcli',

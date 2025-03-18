@@ -6,8 +6,10 @@
 Interact with Meerschaum APIs. May be chained together (see 'meerschaum:api_instance' in your config.yaml).
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
-from meerschaum.utils.typing import Optional, List
+from meerschaum.utils.typing import Optional, List, Union
 from meerschaum.connectors import Connector
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
@@ -43,6 +45,7 @@ class APIConnector(Connector):
     )
     from ._misc import get_mrsm_version, get_chaining_status
     from ._pipes import (
+        get_pipe_instance_keys,
         register_pipe,
         fetch_pipes_keys,
         edit_pipe,
@@ -143,6 +146,7 @@ class APIConnector(Connector):
         self._token = None
         self._expires = None
         self._session = None
+        self._instance_keys = self.__dict__.get('instance_keys', None)
 
 
     @property
@@ -195,3 +199,10 @@ class APIConnector(Connector):
                 warn(msg, stack=False)
                 self._emitted_warning = True
         return self._token
+
+    @property
+    def instance_keys(self) -> Union[str, None]:
+        """
+        Return the instance keys to be sent alongside pipe requests.
+        """
+        return self._instance_keys

@@ -53,19 +53,22 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
                     html.Div(
                         [
                             dbc.Button(
-                                'Refresh',
+                                "⟳",
                                 color='black',
+                                size='sm',
                                 id='webterm-refresh-button',
                             ),
                             dbc.Button(
-                                'Full View',
+                                '⛶',
                                 color='black',
+                                size='sm',
                                 id='webterm-fullscreen-button',
                             ),
                         ] + [
                             dbc.Button(
-                                'New Tab',
+                                html.B('+'),
                                 color='black',
+                                size='sm',
                                 id='webterm-new-tab-button',
                             ),
                         ] if TMUX_IS_ENABLED else [],

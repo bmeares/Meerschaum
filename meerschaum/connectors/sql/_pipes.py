@@ -731,7 +731,7 @@ def get_create_index_queries(
                         ) + f"{primary_key_name})"
                     ),
                 ])
-            elif self.flavor in ('citus', 'postgresql', 'duckdb'):
+            elif self.flavor in ('citus', 'postgresql', 'duckdb', 'postgis'):
                 primary_queries.extend([
                     (
                         f"ALTER TABLE {_pipe_name}\n"
@@ -1052,6 +1052,7 @@ def get_pipe_data(
         attempt_cast_to_numeric,
         attempt_cast_to_uuid,
         attempt_cast_to_bytes,
+        attempt_cast_to_geometry,
         are_dtypes_equal,
     )
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
@@ -1138,6 +1139,11 @@ def get_pipe_data(
         for col, typ in pipe.dtypes.items()
         if typ == 'bytes' and col in dtypes
     ]
+    geometry_columns = [
+        col
+        for col, typ in pipe.dtypes.items()
+        if typ.startswith('geometry') and col in dtypes
+    ]
 
     kw['coerce_float'] = kw.get('coerce_float', (len(numeric_columns) == 0))
 
@@ -1161,6 +1167,11 @@ def get_pipe_data(
         if col not in df.columns:
             continue
         df[col] = df[col].apply(attempt_cast_to_bytes)
+
+    for col in geometry_columns:
+        if col not in df.columns:
+            continue
+        df[col] = df[col].apply(attempt_cast_to_geometry)
 
     if self.flavor == 'sqlite':
         ignore_dt_cols = [
@@ -1511,7 +1522,7 @@ def get_pipe_attributes(
             if isinstance(parameters, str) and parameters[0] == '{':
                 parameters = json.loads(parameters)
             attributes['parameters'] = parameters
-        except Exception as e:
+        except Exception:
             attributes['parameters'] = {}
 
     return attributes
@@ -1533,7 +1544,11 @@ def create_pipe_table_from_df(
         get_datetime_cols,
         get_bytes_cols,
     )
-    from meerschaum.utils.sql import get_create_table_queries, sql_item_name
+    from meerschaum.utils.sql import (
+        get_create_table_queries,
+        sql_item_name,
+        get_create_schema_if_not_exists_queries,
+    )
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     primary_key = pipe.columns.get('primary', None)
     primary_key_typ = (
@@ -1590,15 +1605,21 @@ def create_pipe_table_from_df(
     if autoincrement:
         _ = new_dtypes.pop(primary_key, None)
 
+    schema = self.get_pipe_schema(pipe)
     create_table_queries = get_create_table_queries(
         new_dtypes,
         pipe.target,
         self.flavor,
-        schema=self.get_pipe_schema(pipe),
+        schema=schema,
         primary_key=primary_key,
         primary_key_db_type=primary_key_db_type,
         datetime_column=dt_col,
     )
+    if schema:
+        create_table_queries = (
+            get_create_schema_if_not_exists_queries(schema, self.flavor)
+            + create_table_queries
+        )
     success = all(
         self.exec_queries(create_table_queries, break_on_error=True, rollback=True, debug=debug)
     )
@@ -2074,6 +2095,7 @@ def sync_pipe_inplace(
         get_update_queries,
         get_null_replacement,
         get_create_table_queries,
+        get_create_schema_if_not_exists_queries,
         get_table_cols_types,
         session_execute,
         dateadd_str,
@@ -2153,18 +2175,28 @@ def sync_pipe_inplace(
             warn(drop_stale_msg)
         return drop_stale_success, drop_stale_msg
 
-    sqlalchemy, sqlalchemy_orm = mrsm.attempt_import('sqlalchemy', 'sqlalchemy.orm')
+    sqlalchemy, sqlalchemy_orm = mrsm.attempt_import(
+        'sqlalchemy',
+        'sqlalchemy.orm',
+    )
     if not pipe.exists(debug=debug):
+        schema = self.get_pipe_schema(pipe)
         create_pipe_queries = get_create_table_queries(
             metadef,
             pipe.target,
             self.flavor,
-            schema=self.get_pipe_schema(pipe),
+            schema=schema,
             primary_key=primary_key,
             primary_key_db_type=primary_key_db_type,
             autoincrement=autoincrement,
             datetime_column=dt_col,
         )
+        if schema:
+            create_pipe_queries = (
+                get_create_schema_if_not_exists_queries(schema, self.flavor)
+                + create_pipe_queries
+            )
+
         results = self.exec_queries(create_pipe_queries, debug=debug)
         if not all(results):
             _ = clean_up_temp_tables()

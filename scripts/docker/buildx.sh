@@ -18,14 +18,23 @@ mrsm_gid=$(id -g $USER)
 
 docker pull "$python_image"
 for tag in "${tags[@]}"; do
-  [ "$latest_alias" == "$tag" ] && tag_latest="-t $image:latest -t $image:$mrsm_version" || unset tag_latest
+
+  specific_tags=("$image:$mrsm_version-$tag")
+  if [[ "$mrsm_version" != *dev* && "$mrsm_version" != *rc* ]]; then
+    specific_tags+=("$image:$tag")
+    if [ "$latest_alias" == "$tag" ]; then
+      specific_tags+=("$image:latest" "$image:$mrsm_version")
+    fi
+  fi
+
+  echo "Building tags: ${specific_tags[@]}"
 
   docker buildx build --progress plain ${push:-} \
     --build-arg dep_group="$tag" \
     --build-arg mrsm_uid="$mrsm_uid" \
     --build-arg mrsm_gid="$mrsm_gid" \
     --platform "$platforms" \
-    -t "$image:$tag" -t "$image:$mrsm_version-$tag" ${tag_latest:-} \
+    $(printf -- "-t %s " "${specific_tags[@]}") \
     . || exit 1
 
 done

@@ -41,13 +41,13 @@ version_queries = {
 }
 SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
 DROP_IF_EXISTS_FLAVORS = {
-    'timescaledb', 'postgresql', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite',
+    'timescaledb', 'postgresql', 'postgis', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite',
 }
 DROP_INDEX_IF_EXISTS_FLAVORS = {
-    'mssql', 'timescaledb', 'postgresql', 'sqlite', 'citus',
+    'mssql', 'timescaledb', 'postgresql', 'postgis', 'sqlite', 'citus',
 }
 SKIP_AUTO_INCREMENT_FLAVORS = {'citus', 'duckdb'}
-COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'citus'}
+COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'postgis', 'citus'}
 UPDATE_QUERIES = {
     'default': """
         UPDATE {target_table_name} AS f
@@ -68,6 +68,12 @@ UPDATE_QUERIES = {
         ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
     """,
     'postgresql-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+    'postgis-upsert': """
         INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
@@ -482,6 +488,7 @@ table_wrappers = {
     'citus'      : ('"', '"'),
     'duckdb'     : ('"', '"'),
     'postgresql' : ('"', '"'),
+    'postgis'    : ('"', '"'),
     'sqlite'     : ('"', '"'),
     'mysql'      : ('`', '`'),
     'mariadb'    : ('`', '`'),
@@ -494,6 +501,7 @@ max_name_lens = {
     'mssql'      : 128,
     'oracle'     : 30,
     'postgresql' : 64,
+    'postgis'    : 64,
     'timescaledb': 64,
     'citus'      : 64,
     'cockroachdb': 64,
@@ -501,10 +509,11 @@ max_name_lens = {
     'mysql'      : 64,
     'mariadb'    : 64,
 }
-json_flavors = {'postgresql', 'timescaledb', 'citus', 'cockroachdb'}
+json_flavors = {'postgresql', 'postgis', 'timescaledb', 'citus', 'cockroachdb'}
 NO_SCHEMA_FLAVORS = {'oracle', 'sqlite', 'mysql', 'mariadb', 'duckdb'}
 DEFAULT_SCHEMA_FLAVORS = {
     'postgresql': 'public',
+    'postgis': 'public',
     'timescaledb': 'public',
     'citus': 'public',
     'cockroachdb': 'public',
@@ -519,7 +528,7 @@ NO_CTE_FLAVORS = {'mysql', 'mariadb'}
 NO_SELECT_INTO_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
 
 
-def clean(substring: str) -> str:
+def clean(substring: str) -> None:
     """
     Ensure a substring is clean enough to be inserted into a SQL query.
     Raises an exception when banned words are used.
@@ -549,6 +558,7 @@ def dateadd_str(
         Currently supported flavors:
 
         - `'postgresql'`
+        - `'postgis'`
         - `'timescaledb'`
         - `'citus'`
         - `'cockroachdb'`
@@ -653,7 +663,7 @@ def dateadd_str(
     )
 
     da = ""
-    if flavor in ('postgresql', 'timescaledb', 'cockroachdb', 'citus'):
+    if flavor in ('postgresql', 'postgis', 'timescaledb', 'cockroachdb', 'citus'):
         begin = (
             f"CAST({begin} AS {db_type})" if begin != 'now'
             else f"CAST(NOW() AT TIME ZONE 'utc' AS {db_type})"
@@ -922,6 +932,7 @@ def build_where(
     params: Dict[str, Any],
     connector: Optional[mrsm.connectors.sql.SQLConnector] = None,
     with_where: bool = True,
+    flavor: str = 'postgresql',
 ) -> str:
     """
     Build the `WHERE` clause based on the input criteria.
@@ -940,6 +951,9 @@ def build_where(
 
     with_where: bool, default True:
         If `True`, include the leading `'WHERE'` string.
+
+    flavor: str, default 'postgresql'
+        If `connector` is `None`, fall back to this flavor.
 
     Returns
     -------
@@ -969,13 +983,11 @@ def build_where(
             warn(f"Aborting build_where() due to possible SQL injection.")
             return ''
 
-    if connector is None:
-        from meerschaum import get_connector
-        connector = get_connector('sql')
+    query_flavor = getattr(connector, 'flavor', flavor) if connector is not None else flavor
     where = ""
     leading_and = "\n    AND "
     for key, value in params.items():
-        _key = sql_item_name(key, connector.flavor, None)
+        _key = sql_item_name(key, query_flavor, None)
         ### search across a list (i.e. IN syntax)
         if isinstance(value, Iterable) and not isinstance(value, (dict, str)):
             includes = [
@@ -1286,7 +1298,24 @@ def get_table_cols_types(
         if cols_types_docs and not cols_types_docs_filtered:
             cols_types_docs_filtered = cols_types_docs
 
-        return {
+        ### NOTE: Check for PostGIS GEOMETRY columns.
+        geometry_cols_types = {}
+        user_defined_cols = [
+            doc
+            for doc in cols_types_docs_filtered
+            if str(doc.get('type', None)).upper() == 'USER-DEFINED'
+        ]
+        if user_defined_cols:
+            geometry_cols_types.update(
+                get_postgis_geo_columns_types(
+                    connectable,
+                    table,
+                    schema=schema,
+                    debug=debug,
+                )
+            )
+
+        cols_types = {
             (
                 doc['column']
                 if flavor != 'oracle' else (
@@ -1307,6 +1336,8 @@ def get_table_cols_types(
             )
             for doc in cols_types_docs_filtered
         }
+        cols_types.update(geometry_cols_types)
+        return cols_types
     except Exception as e:
         warn(f"Failed to fetch columns for table '{table}':\n{e}")
         return {}
@@ -1809,6 +1840,8 @@ def get_null_replacement(typ: str, flavor: str) -> str:
     """
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import DB_FLAVORS_CAST_DTYPES
+    if 'geometry' in typ.lower():
+        return '010100000000008058346FCDC100008058346FCDC1'
     if 'int' in typ.lower() or typ.lower() in ('numeric', 'number'):
         return '-987654321'
     if 'bool' in typ.lower() or typ.lower() == 'bit':
@@ -2492,4 +2525,99 @@ def get_reset_autoincrement_queries(
             val_plus_1=(max_id + 1),
         )
         for query in reset_queries
+    ]
+
+
+def get_postgis_geo_columns_types(
+    connectable: Union[
+        'mrsm.connectors.sql.SQLConnector',
+        'sqlalchemy.orm.session.Session',
+        'sqlalchemy.engine.base.Engine'
+    ],
+    table: str,
+    schema: Optional[str] = 'public',
+    debug: bool = False,
+) -> Dict[str, str]:
+    """
+    Return the 
+    """
+    from meerschaum.utils.dtypes import get_geometry_type_srid
+    default_type, default_srid = get_geometry_type_srid()
+    default_type = default_type.upper()
+
+    clean(table)
+    clean(str(schema))
+    schema = schema or 'public'
+    truncated_schema_name = truncate_item_name(schema, flavor='postgis')
+    truncated_table_name = truncate_item_name(table, flavor='postgis')
+    query = (
+        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", \"srid\"\n"
+        "FROM \"geometry_columns\"\n"
+        f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
+        f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
+        "UNION ALL\n"
+        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", \"srid\"\n"
+        "FROM \"geography_columns\"\n"
+        f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
+        f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
+    )
+    debug_kwargs = {'debug': debug} if isinstance(connectable, mrsm.connectors.SQLConnector) else {}
+    result_rows = [
+        row
+        for row in connectable.execute(query, **debug_kwargs).fetchall()
+    ]
+    cols_type_tuples = {
+        row[0]: (row[1], row[2], row[3])
+        for row in result_rows
+    }
+
+    geometry_cols_types = {
+        col: (
+            f"{func}({typ.upper()}, {srid})"
+            if srid
+            else (
+                func
+                + (
+                    f'({typ.upper()})'
+                    if typ.upper() not in ('GEOMETRY', 'GEOGRAPHY')
+                    else ''
+                )
+            )
+        )
+        for col, (func, typ, srid) in cols_type_tuples.items()
+    }
+    return geometry_cols_types
+
+
+def get_create_schema_if_not_exists_queries(
+    schema: str,
+    flavor: str,
+) -> List[str]:
+    """
+    Return the queries to create a schema if it does not yet exist.
+    For databases which do not support schemas, an empty list will be returned.
+    """
+    if not schema:
+        return []
+    
+    if flavor in NO_SCHEMA_FLAVORS:
+        return []
+
+    clean(schema)
+
+    if flavor == 'mssql':
+        return [
+            (
+                f"IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '{schema}')\n"
+                "BEGIN\n"
+                f"    EXEC('CREATE SCHEMA {sql_item_name(schema, flavor)}');\n"
+                "END;"
+            )
+        ]
+
+    if flavor == 'oracle':
+        return []
+
+    return [
+        f"CREATE SCHEMA IF NOT EXISTS {sql_item_name(schema, flavor)};"
     ]

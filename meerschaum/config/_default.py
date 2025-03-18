@@ -70,6 +70,7 @@ default_system_config = {
         'sql': {
             'bulk_insert': {
                 'postgresql': True,
+                'postgis': True,
                 'citus': True,
                 'timescaledb': True,
                 'mssql': True,
@@ -113,6 +114,9 @@ default_system_config = {
         },
         'data': {
             'max_response_row_limit': 100_000,
+            'chunks': {
+                'ttl_seconds': 1800,
+            },
         },
         'endpoints': {
             'docs_in_production': True,

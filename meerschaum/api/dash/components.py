@@ -92,9 +92,9 @@ search_parameters_editor = dash_ace.DashAceEditor(
     style={'height': 100},
 )
 
-sidebar = dbc.Offcanvas(
-    children=[],
-    title='Pages',
+pages_offcanvas = dbc.Offcanvas(
+    title='',
+    id='pages-offcanvas',
 )
 
 download_dataframe = dcc.Download(id='download-dataframe-csv')
@@ -110,38 +110,71 @@ instance_select = dbc.Select(
     class_name='dbc_dark custom-select custom-select-sm',
 )
 
+sign_out_button = dbc.Button(
+    "Sign out",
+    color='link',
+    style={'margin-left': '30px'},
+    id='sign-out-button',
+)
+
+logo_row = dbc.Row(
+    [
+        dbc.Col(
+            html.Img(
+                src=endpoints['dash'] + "/assets/logo_48x48.png",
+                title=doc,
+                id="logo-img",
+                style={'cursor': 'pointer'},
+            ),
+        ),
+    ],
+    align='center',
+    className='g-0 navbar-logo-row',
+)
+
+pages_navbar = html.Div(
+    [
+        pages_offcanvas,
+        dbc.Navbar(
+            dbc.Container(
+                [
+                    logo_row,
+                    dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
+                    dbc.Collapse(
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    sign_out_button,
+                                    className="ms-auto",
+                                ),
+                            ],
+                            className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
+                        ),
+                        id='navbar-collapse',
+                        is_open=False,
+                        navbar=True,
+                    ),
+                ]
+            ),
+            dark=True,
+            color='dark'
+        ),
+    ],
+    id='pages-navbar-div',
+)
 
 navbar = dbc.Navbar(
     dbc.Container(
         [
-            html.A(
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            html.Img(
-                                src=endpoints['dash'] + "/assets/logo_48x48.png",
-                                title=doc,
-                            ),
-                        ),
-                    ],
-                    align='center',
-                    className='g-0 navbar-logo-row',
-                ),
-                href=('/docs' if docs_enabled else '#'),
-                style={"textDecoration": "none"},
-            ),
+            logo_row,
             dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
             dbc.Collapse(
                 dbc.Row(
                     [
                         dbc.Col(instance_select),
                         dbc.Col(
-                            dbc.Button(
-                                "Sign out",
-                                color='link',
-                                style={'margin-left': '30px'},
-                                id='sign-out-button',
-                            ),
+                            sign_out_button,
+                            className="ms-auto",
                         ),
                     ],
                     className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
@@ -199,3 +232,81 @@ def build_cards_grid(cards: List[dbc.Card], num_columns: int = 3) -> html.Div:
         rows.append(r)
         rows.append(html.Br())
     return html.Div(rows)
+
+
+def build_pages_offcanvas_children():
+    """
+    Return the contents of the pages offcanvas.
+    """
+    from meerschaum.api.dash.callbacks.dashboard import _pages
+    from meerschaum.api.dash.callbacks.custom import _plugin_endpoints_to_pages
+    pages_listgroup_items = []
+    custom_pages = []
+    for pages_dicts in _plugin_endpoints_to_pages.values():
+        for page_dict in pages_dicts.values():
+            custom_pages.append(page_dict['page_key'])
+
+    for page_key, page_href in _pages.items():
+        if page_key in custom_pages:
+            continue
+        pages_listgroup_items.append(
+            dbc.ListGroupItem(
+                dbc.Button(
+                    ' '.join([word.capitalize() for word in page_key.split(' ')]),
+                    style={
+                        'width': '100%',
+                        'text-align': 'left',
+                        'text-decoration': 'none',
+                        'padding-left': '0',
+                    },
+                    href=page_href,
+                    color='dark',
+                )
+            )
+        )
+
+    plugins_accordion_items = []
+    for page_group, pages_dicts in _plugin_endpoints_to_pages.items():
+        plugin_listgroup_items = [
+            dbc.ListGroupItem(
+                dbc.Button(
+                    ' '.join([word.capitalize() for word in page_dict['page_key'].split(' ')]),
+                    style={
+                        'width': '100%',
+                        'text-align': 'left',
+                        'text-decoration': 'none',
+                        'padding-left': '0',
+                    },
+                    href=page_href,
+                    color='dark',
+                )
+            )
+            for page_href, page_dict in pages_dicts.items()
+        ]
+        plugin_listgroup = dbc.ListGroup(plugin_listgroup_items, flush=True)
+        plugin_accordion_item = dbc.AccordionItem(
+            plugin_listgroup,
+            title=(
+                page_group.capitalize()
+                if page_group and not page_group[0].isupper()
+                else page_group
+            ),
+            class_name='pages-offcanvas-accordion',
+        )
+        plugins_accordion_items.append(plugin_accordion_item)
+    plugins_accordion = dbc.Accordion(
+        plugins_accordion_items,
+        start_collapsed=True,
+        flush=True,
+        always_open=True,
+    )
+    pages_listgroup_items.append(plugins_accordion)
+
+    pages_children = dbc.Card(
+        dbc.ListGroup(
+            pages_listgroup_items,
+            flush=True,
+        ),
+        outline=True,
+    )
+    return pages_children

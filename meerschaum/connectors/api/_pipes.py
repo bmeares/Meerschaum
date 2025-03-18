@@ -31,6 +31,14 @@ def pipe_r_url(
     )
 
 
+def get_pipe_instance_keys(self, pipe: mrsm.Pipe) -> Union[str, None]:
+    """
+    Return the configured instance keys for a pipe if set,
+    else fall back to the default `instance_keys` for this `APIConnector`.
+    """
+    return pipe.parameters.get('instance_keys', self.instance_keys)
+
+
 def register_pipe(
     self,
     pipe: mrsm.Pipe,
@@ -40,13 +48,12 @@ def register_pipe(
     Returns a tuple of (success_bool, response_dict).
     """
     from meerschaum.utils.debug import dprint
-    ### NOTE: if `parameters` is supplied in the Pipe constructor,
-    ###       then `pipe.parameters` will exist and not be fetched from the database.
     r_url = pipe_r_url(pipe)
     response = self.post(
         r_url + '/register',
-        json = pipe.parameters,
-        debug = debug,
+        json=pipe._attributes.get('parameters', {}),
+        params={'instance_keys': self.get_pipe_instance_keys(pipe)},
+        debug=debug,
     )
     if debug:
         dprint(response.text)
@@ -79,9 +86,9 @@ def edit_pipe(
     r_url = pipe_r_url(pipe)
     response = self.patch(
         r_url + '/edit',
-        params = {'patch': patch,},
-        json = pipe.parameters,
-        debug = debug,
+        params={'patch': patch, 'instance_keys': self.get_pipe_instance_keys(pipe)},
+        json=pipe.parameters,
+        debug=debug,
     )
     if debug:
         dprint(response.text)
@@ -149,12 +156,13 @@ def fetch_pipes_keys(
     try:
         j = self.get(
             r_url,
-            params = {
+            params={
                 'connector_keys': json.dumps(connector_keys),
                 'metric_keys': json.dumps(metric_keys),
                 'location_keys': json.dumps(location_keys),
                 'tags': json.dumps(tags),
                 'params': json.dumps(params),
+                'instance_keys': self.instance_keys,
             },
             debug=debug
         ).json()
@@ -250,8 +258,10 @@ def sync_pipe(
         chunks = (df[i] for i in more_itertools.chunked(df, _chunksize))
 
     ### Send columns in case the user has defined them locally.
+    request_params = kw.copy()
     if pipe.columns:
-        kw['columns'] = json.dumps(pipe.columns)
+        request_params['columns'] = json.dumps(pipe.columns)
+    request_params['instance_keys'] = self.get_pipe_instance_keys(pipe)
     r_url = pipe_r_url(pipe) + '/data'
 
     rowcount = 0
@@ -268,10 +278,9 @@ def sync_pipe(
         try:
             response = self.post(
                 r_url,
-                ### handles check_existing
-                params = kw,
-                data = json_str,
-                debug = debug
+                params=request_params,
+                data=json_str,
+                debug=debug,
             )
         except Exception as e:
             msg = f"Failed to post a chunk to {pipe}:\n{e}"
@@ -323,7 +332,8 @@ def delete_pipe(
     r_url = pipe_r_url(pipe)
     response = self.delete(
         r_url + '/delete',
-        debug = debug,
+        params={'instance_keys': self.get_pipe_instance_keys(pipe)},
+        debug=debug,
     )
     if debug:
         dprint(response.text)
@@ -361,7 +371,9 @@ def get_pipe_data(
                     'omit_columns': json.dumps(omit_columns),
                     'begin': begin,
                     'end': end,
-                    'params': json.dumps(params, default=str)
+                    'params': json.dumps(params, default=str),
+                    'instance': self.get_pipe_instance_keys(pipe),
+                    'as_chunks': as_chunks,
                 },
                 debug=debug
             )
@@ -402,19 +414,24 @@ def get_pipe_id(
     self,
     pipe: mrsm.Pipe,
     debug: bool = False,
-) -> int:
+) -> Union[int, str, None]:
     """Get a Pipe's ID from the API."""
     from meerschaum.utils.misc import is_int
     r_url = pipe_r_url(pipe)
     response = self.get(
         r_url + '/id',
-        debug = debug
+        params={
+            'instance': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug,
     )
     if debug:
         dprint(f"Got pipe ID: {response.text}")
     try:
         if is_int(response.text):
             return int(response.text)
+        if response.text and response.text[0] != '{':
+            return response.text
     except Exception as e:
         warn(f"Failed to get the ID for {pipe}:\n{e}")
     return None
@@ -438,7 +455,13 @@ def get_pipe_attributes(
     If the pipe does not exist, return an empty dictionary.
     """
     r_url = pipe_r_url(pipe)
-    response = self.get(r_url + '/attributes', debug=debug)
+    response = self.get(
+        r_url + '/attributes',
+        params={
+            'instance': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug
+    )
     try:
         return json.loads(response.text)
     except Exception as e:
@@ -477,9 +500,13 @@ def get_sync_time(
     r_url = pipe_r_url(pipe)
     response = self.get(
         r_url + '/sync_time',
-        json = params,
-        params = {'newest': newest, 'debug': debug},
-        debug = debug,
+        json=params,
+        params={
+            'instance': self.get_pipe_instance_keys(pipe),
+            'newest': newest,
+            'debug': debug,
+        },
+        debug=debug,
     )
     if not response:
         warn(f"Failed to get the sync time for {pipe}:\n" + response.text)
@@ -520,7 +547,13 @@ def pipe_exists(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     r_url = pipe_r_url(pipe)
-    response = self.get(r_url + '/exists', debug=debug)
+    response = self.get(
+        r_url + '/exists',
+        params={
+            'instance': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug,
+    )
     if not response:
         warn(f"Failed to check if {pipe} exists:\n{response.text}")
         return False
@@ -558,8 +591,8 @@ def create_metadata(
 def get_pipe_rowcount(
     self,
     pipe: mrsm.Pipe,
-    begin: Optional[datetime] = None,
-    end: Optional[datetime] = None,
+    begin: Union[str, datetime, int, None] = None,
+    end: Union[str, datetime, int, None] = None,
     params: Optional[Dict[str, Any]] = None,
     remote: bool = False,
     debug: bool = False,
@@ -571,10 +604,10 @@ def get_pipe_rowcount(
     pipe: 'meerschaum.Pipe':
         The pipe whose row count we are counting.
         
-    begin: Optional[datetime], default None
+    begin: Union[str, datetime, int, None], default None
         If provided, bound the count by this datetime.
 
-    end: Optional[datetime]
+    end: Union[str, datetime, int, None], default None
         If provided, bound the count by this datetime.
 
     params: Optional[Dict[str, Any]], default None
@@ -596,6 +629,7 @@ def get_pipe_rowcount(
             'begin': begin,
             'end': end,
             'remote': remote,
+            'instance': self.get_pipe_instance_keys(pipe),
         },
         debug = debug
     )
@@ -633,7 +667,10 @@ def drop_pipe(
     r_url = pipe_r_url(pipe)
     response = self.delete(
         r_url + '/drop',
-        debug = debug,
+        params={
+            'instance': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug,
     )
     if debug:
         dprint(response.text)
@@ -656,6 +693,9 @@ def drop_pipe(
 def clear_pipe(
     self,
     pipe: mrsm.Pipe,
+    begin: Union[str, datetime, int, None] = None,
+    end: Union[str, datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
     debug: bool = False,
     **kw
 ) -> SuccessTuple:
@@ -671,20 +711,33 @@ def clear_pipe(
     -------
     A success tuple.
     """
-    kw.pop('metric_keys', None)
-    kw.pop('connector_keys', None)
-    kw.pop('location_keys', None)
-    kw.pop('action', None)
-    kw.pop('force', None)
-    return self.do_action_legacy(
-        ['clear', 'pipes'],
-        connector_keys=pipe.connector_keys,
-        metric_keys=pipe.metric_key,
-        location_keys=pipe.location_key,
-        force=True,
+    r_url = pipe_r_url(pipe)
+    response = self.delete(
+        r_url + '/clear',
+        params={
+            'begin': begin,
+            'end': end,
+            'params': json.dumps(params),
+            'instance': self.get_pipe_instance_keys(pipe),
+        },
         debug=debug,
-        **kw
     )
+    if debug:
+        dprint(response.text)
+
+    try:
+        data = response.json()
+    except Exception as e:
+        return False, f"Failed to clear {pipe} with constraints {begin=}, {end=}, {params=}."
+
+    if isinstance(data, list):
+        response_tuple = data[0], data[1]
+    elif 'detail' in response.json():
+        response_tuple = response.__bool__(), data['detail']
+    else:
+        response_tuple = response.__bool__(), response.text
+
+    return response_tuple
 
 
 def get_pipe_columns_types(
@@ -716,7 +769,10 @@ def get_pipe_columns_types(
     r_url = pipe_r_url(pipe) + '/columns/types'
     response = self.get(
         r_url,
-        debug=debug
+        params={
+            'instance': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug,
     )
     j = response.json()
     if isinstance(j, dict) and 'detail' in j and len(j.keys()) == 1:
@@ -748,7 +804,10 @@ def get_pipe_columns_indices(
     r_url = pipe_r_url(pipe) + '/columns/indices'
     response = self.get(
         r_url,
-        debug=debug
+        params={
+            'instance': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug,
     )
     j = response.json()
     if isinstance(j, dict) and 'detail' in j and len(j.keys()) == 1:
@@ -767,14 +826,16 @@ def get_pipe_index_names(self, pipe: mrsm.Pipe, debug: bool = False) -> Dict[str
     r_url = pipe_r_url(pipe) + '/indices/names'
     response = self.get(
         r_url,
-        debug=debug
+        params={
+            'instance': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug,
     )
     j = response.json()
     if isinstance(j, dict) and 'detail' in j and len(j.keys()) == 1:
         warn(j['detail'])
-        return None
+        return {}
     if not isinstance(j, dict):
         warn(response.text)
-        return None
+        return {}
     return j
-

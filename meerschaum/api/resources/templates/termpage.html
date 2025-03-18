@@ -111,6 +111,10 @@ window.addEventListener(
   false,
 );
 
+document.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+});
+
 let reconnectTimeout;
 
 function cleanUpWebSocket(socket) {

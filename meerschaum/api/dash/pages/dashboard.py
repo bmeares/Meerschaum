@@ -37,6 +37,7 @@ from meerschaum.api.dash.components import (
     console_div,
     download_dataframe,
     navbar,
+    pages_offcanvas,
     download_logs,
     refresh_jobs_interval,
 )
@@ -47,22 +48,23 @@ from meerschaum.api.dash.keys import (
 )
 
 layout = html.Div(
-    id = 'main-div',
-    children = [
+    id='main-div',
+    children=[
         keys_lists_content,
         download_dataframe,
         download_logs,
         refresh_jobs_interval,
         navbar,
+        pages_offcanvas,
         html.Div(
             dbc.Row(
-                id = 'content-row',
-                children = [
+                id='content-row',
+                children=[
                     dbc.Col(
-                        children = [
+                        children=[
                             dbc.Tabs(
-                                id = 'pipes-filter-tabs',
-                                children = [
+                                id='pipes-filter-tabs',
+                                children=[
                                     dbc.Tab(
                                         dropdown_tab_content,
                                         label='Filters',
@@ -107,9 +109,9 @@ layout = html.Div(
                         id='content-col-right',
                     ),
                 ],
-                style = {'max-width': '100%', 'padding': '15px'},
+                style={'max-width': '100%', 'padding': '15px'},
             ), ### end of Row
-            className = 'container-fluid',
+            className='container-fluid',
         ), ### end of Div
         html.P('', id='line-buffer', style={'display': 'none'}),
     ],
