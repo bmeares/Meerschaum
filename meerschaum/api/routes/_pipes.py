@@ -608,7 +608,7 @@ def drop_pipe(
     ),
 ):
     """
-    Drop a pipes' underlying target table.
+    Drop a pipe's target table.
     """
     allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
     if not allow_actions:
@@ -624,6 +624,60 @@ def drop_pipe(
     pipes(instance_keys, refresh=True)
     return results
 
+
+@app.delete(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/clear',
+    tags=['Pipes: Data'],
+)
+def clear_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    begin: Union[str, int, None] = None,
+    end: Union[str, int, None] = None,
+    params: Optional[str] = None,
+    curr_user = (
+        fastapi.Depends(manager) if not no_auth else None
+    ),
+):
+    """
+    Delete rows from a pipe's target table.
+    """
+    _params = {}
+    if params == 'null':
+        params = None
+    if params is not None:
+        try:
+            _params = json.loads(params)
+        except Exception:
+            _params = None
+    if not isinstance(_params, dict):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail="Params must be a valid JSON-encoded dictionary.",
+        )
+
+    allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
+    if not allow_actions:
+        return False, (
+            "The administrator for this server has not allowed actions.\n\n"
+            "Please contact the system administrator, or if you are running this server, "
+            "open the configuration file with `edit config system` and search for 'permissions'."
+            " Under the keys `api:permissions:actions`, " +
+            "you can toggle non-admin actions."
+        )
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    begin, end = pipe.parse_date_bounds(begin, end)
+    results = get_api_connector(instance_keys=instance_keys).clear_pipe(
+        pipe,
+        begin=begin,
+        end=end,
+        params=_params,
+        debug=debug,
+    )
+    pipes(instance_keys, refresh=True)
+    return results
 
 
 @app.get(
