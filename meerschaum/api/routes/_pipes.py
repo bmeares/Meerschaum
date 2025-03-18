@@ -387,8 +387,6 @@ def get_pipe_data(
     date_unit: str = 'us',
     double_precision: int = 15,
     geometry_format: str = 'wkb_hex',
-    as_chunks: bool = False,
-    chunk_interval: Optional[int] = None,
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
@@ -414,14 +412,11 @@ def get_pipe_data(
         `'ms'` (milliseconds), `'us'` (microseconds), and `'ns'`.
 
     double_precision: int, default 15
-        The number of decimal places to use when encoding floating point values (maximum 15).
+        The number of decimal places to use when encoding floating point values (maximum `15`).
 
     geometry_format: str, default 'wkb_hex'
         The serialization format for geometry data.
         Accepted values are `geojson`, `wkb_hex`, and `wkt`.
-
-    as_chunks: bool, default False
-        If `True`, return a chunk token to be consumed by the `/chunks` endpoint.
     """
     if limit > MAX_RESPONSE_ROW_LIMIT:
         raise fastapi.HTTPException(
@@ -486,25 +481,6 @@ def get_pipe_data(
         raise fastapi.HTTPException(
             status_code=409,
             detail=f"Cannot retrieve data from protected table '{pipe.target}'.",
-        )
-
-    if as_chunks:
-        chunks_cursor_token = generate_chunks_cursor_token(
-            pipe,
-            select_columns=_select_columns,
-            omit_columns=_omit_columns,
-            begin=begin,
-            end=end,
-            params=_params,
-            limit=limit,
-            order=order,
-            debug=debug,
-        )
-        return fastapi.Response(
-            json.dumps({
-                'chunks_cursor': chunks_cursor_token,
-            }),
-            media_type='application/json',
         )
 
     df = pipe.get_data(
@@ -577,21 +553,6 @@ def get_pipe_chunk_bounds(
         json.dumps(chunk_bounds, default=json_serialize_value),
         media_type='application/json',
     )
-
-
-@app.get(
-    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/chunk/{chunk_token}',
-    tags=['Pipes: Data'],
-)
-def get_pipe_chunk(
-    connector_keys: str,
-    metric_key: str,
-    location_key: str,
-    chunk_token: str
-) -> Dict[str, Any]:
-    """
-    Consume a chunk token, returning the dataframe.
-    """
 
 
 @app.delete(
