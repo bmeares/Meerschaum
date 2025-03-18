@@ -2192,9 +2192,9 @@ def sync_pipe_inplace(
             datetime_column=dt_col,
         )
         if schema:
-            create_table_queries = (
+            create_pipe_queries = (
                 get_create_schema_if_not_exists_queries(schema, self.flavor)
-                + create_table_queries
+                + create_pipe_queries
             )
 
         results = self.exec_queries(create_pipe_queries, debug=debug)
