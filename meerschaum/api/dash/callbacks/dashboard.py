@@ -33,7 +33,10 @@ from meerschaum.api.dash.users import get_users_cards
 from meerschaum.api.dash.graphs import get_graphs_cards
 from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.components import (
-    alert_from_success_tuple, console_div, build_cards_grid,
+    alert_from_success_tuple,
+    console_div,
+    build_cards_grid,
+    build_pages_offcanvas_children,
 )
 from meerschaum.api.dash import pages
 from meerschaum.utils.typing import Dict
@@ -103,6 +106,10 @@ _paths = {
     'job'     : pages.job.layout,
 }
 _required_login = {''}
+_pages = {
+    'Web Console': '/dash/',
+    'Plugins': '/dash/plugins',
+}
 
 
 @dash_app.callback(
@@ -696,7 +703,6 @@ dash_app.clientside_callback(
 dash_app.clientside_callback(
     """
     function(n_clicks){
-        console.log('fullscreen');
         if (!n_clicks) { return dash_clientside.no_update; }
         iframe = document.getElementById('webterm-iframe');
         if (!iframe){ return dash_clientside.no_update; }
@@ -707,11 +713,11 @@ dash_app.clientside_callback(
         if (leftCol.style.display === 'none') {
             leftCol.style.display = '';
             rightCol.className = 'col-6';
-            button.innerHTML = "Full View";
+            button.innerHTML = "⛶";
         } else {
             leftCol.style.display = 'none';
             rightCol.className = 'col-12';
-            button.innerHTML = "Side-by-side View";
+            button.innerHTML = "🀲";
         }
 
         return dash_clientside.no_update;
@@ -1078,3 +1084,19 @@ def parameters_as_yaml_or_json_click(
     if as_yaml:
         return yaml.dump(pipe.parameters)
     return json.dumps(pipe.parameters, indent=4, separators=(',', ': '), sort_keys=True)
+
+
+@dash_app.callback(
+    Output('pages-offcanvas', 'is_open'),
+    Output('pages-offcanvas', 'children'),
+    Input('logo-img', 'n_clicks'),
+    State('pages-offcanvas', 'is_open'),
+)
+def toggle_pages_offcanvas(n_clicks: Optional[int], is_open: bool):
+    """
+    Toggle the pages sidebar.
+    """
+    pages_children = build_pages_offcanvas_children()
+    if n_clicks:
+        return not is_open, pages_children
+    return is_open, pages_children

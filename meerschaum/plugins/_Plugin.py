@@ -450,7 +450,7 @@ class Plugin:
                 success, msg = False, (
                     f"Failed to run post-install setup for plugin '{self}'." + '\n' +
                     f"Check `setup()` in '{self.__file__}' for more information " +
-                    f"(no error message provided)."
+                    "(no error message provided)."
                 )
             else:
                 success, msg = True, success_msg
@@ -458,7 +458,7 @@ class Plugin:
             success = True
             msg = (
                 f"Post-install for plugin '{self}' returned None. " +
-                f"Assuming plugin successfully installed."
+                "Assuming plugin successfully installed."
             )
             warn(msg)
         else:
@@ -469,7 +469,7 @@ class Plugin:
             )
 
         _ongoing_installations.remove(self.full_name)
-        module = self.module
+        _ = self.module
         return success, msg
 
 
@@ -716,13 +716,14 @@ class Plugin:
         return required
 
 
-    def get_required_plugins(self, debug: bool=False) -> List[meerschaum.plugins.Plugin]:
+    def get_required_plugins(self, debug: bool=False) -> List[mrsm.plugins.Plugin]:
         """
         Return a list of required Plugin objects.
         """
         from meerschaum.utils.warnings import warn
         from meerschaum.config import get_config
         from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum.connectors.parse import is_valid_connector_keys
         plugins = []
         _deps = self.get_dependencies(debug=debug)
         sep = STATIC_CONFIG['plugins']['repo_separator']
@@ -731,11 +732,13 @@ class Plugin:
             if _d.startswith('plugin:') and len(_d) > len('plugin:')
         ]
         default_repo_keys = get_config('meerschaum', 'default_repository')
+        skipped_repo_keys = set()
+
         for _plugin_name in plugin_names:
             if sep in _plugin_name:
                 try:
                     _plugin_name, _repo_keys = _plugin_name.split(sep)
-                except Exception as e:
+                except Exception:
                     _repo_keys = default_repo_keys
                     warn(
                         f"Invalid repo keys for required plugin '{_plugin_name}'.\n    "
@@ -744,7 +747,20 @@ class Plugin:
                     )
             else:
                 _repo_keys = default_repo_keys
+
+            if _repo_keys in skipped_repo_keys:
+                continue
+
+            if not is_valid_connector_keys(_repo_keys):
+                warn(
+                    f"Invalid connector '{_repo_keys}'.\n"
+                    f"    Skipping required plugins from repository '{_repo_keys}'",
+                    stack=False,
+                )
+                continue
+
             plugins.append(Plugin(_plugin_name, repo=_repo_keys))
+
         return plugins
 
 

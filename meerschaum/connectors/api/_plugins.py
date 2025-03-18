@@ -7,21 +7,25 @@ Manage plugins via the API connector
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Union, Any, Optional, SuccessTuple, Mapping, Sequence
+
+import meerschaum as mrsm
+from meerschaum.utils.typing import Union, Any, Optional, SuccessTuple, List, Dict
+
 
 def plugin_r_url(
-        plugin: Union[meerschaum.core.Plugin, str]
-    ) -> str:
+    plugin: Union[mrsm.core.Plugin, str],
+) -> str:
     """Generate a relative URL path from a Plugin."""
     from meerschaum.config.static import STATIC_CONFIG
     return f"{STATIC_CONFIG['api']['endpoints']['plugins']}/{plugin}"
 
+
 def register_plugin(
-        self,
-        plugin: meerschaum.core.Plugin,
-        make_archive: bool = True,
-        debug: bool = False,
-    ) -> SuccessTuple:
+    self,
+    plugin: mrsm.core.Plugin,
+    make_archive: bool = True,
+    debug: bool = False,
+) -> SuccessTuple:
     """Register a plugin and upload its archive."""
     import json
     archive_path = plugin.make_tar(debug=debug) if make_archive else plugin.archive_path
@@ -34,27 +38,30 @@ def register_plugin(
     r_url = plugin_r_url(plugin)
     try:
         response = self.post(r_url, files=files, params=metadata, debug=debug)
-    except Exception as e:
+    except Exception:
         return False, f"Failed to register plugin '{plugin}'."
     finally:
         file_pointer.close()
 
     try:
         success, msg = json.loads(response.text)
-    except Exception as e:
+    except Exception:
         return False, response.text
 
     return success, msg
 
+
 def install_plugin(
-        self,
-        name: str,
-        skip_deps: bool = False,
-        force: bool = False,
-        debug: bool = False
-    ) -> SuccessTuple:
+    self,
+    name: str,
+    skip_deps: bool = False,
+    force: bool = False,
+    debug: bool = False
+) -> SuccessTuple:
     """Download and attempt to install a plugin from the API."""
-    import os, pathlib, json
+    import os
+    import pathlib
+    import json
     from meerschaum.core import Plugin
     from meerschaum.config._paths import PLUGINS_TEMP_RESOURCES_PATH
     from meerschaum.utils.debug import dprint
@@ -75,41 +82,39 @@ def install_plugin(
                 success, msg = tuple(j)
             elif isinstance(j, dict) and 'detail' in j:
                 success, msg = False, fail_msg
-        except Exception as e:
+        except Exception:
             success, msg = False, fail_msg
         return success, msg
     plugin = Plugin(name, archive_path=archive_path, repo_connector=self)
     return plugin.install(skip_deps=skip_deps, force=force, debug=debug)
 
+
 def get_plugins(
-        self,
-        user_id : Optional[int] = None,
-        search_term : Optional[str] = None,
-        debug : bool = False
-    ) -> Sequence[str]:
+    self,
+    user_id: Optional[int] = None,
+    search_term: Optional[str] = None,
+    debug: bool = False
+) -> List[str]:
     """Return a list of registered plugin names.
 
     Parameters
     ----------
-    user_id :
+    user_id: Optional[int], default None
         If specified, return all plugins from a certain user.
-    user_id : Optional[int] :
-         (Default value = None)
-    search_term : Optional[str] :
-         (Default value = None)
-    debug : bool :
-         (Default value = False)
+
+    search_term: Optional[str], default None
+        If specified, return plugins beginning with this string.
 
     Returns
     -------
-
+    A list of plugin names.
     """
     import json
-    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.warnings import error
     from meerschaum.config.static import STATIC_CONFIG
     response = self.get(
         STATIC_CONFIG['api']['endpoints']['plugins'],
-        params = {'user_id' : user_id, 'search_term' : search_term},
+        params = {'user_id': user_id, 'search_term': search_term},
         use_token = True,
         debug = debug
     )
@@ -120,11 +125,12 @@ def get_plugins(
         error(response.text)
     return plugins
 
+
 def get_plugin_attributes(
-        self,
-        plugin: meerschaum.core.Plugin,
-        debug: bool = False
-    ) -> Mapping[str, Any]:
+    self,
+    plugin: mrsm.core.Plugin,
+    debug: bool = False
+) -> Dict[str, Any]:
     """
     Return a plugin's attributes.
     """
@@ -136,7 +142,7 @@ def get_plugin_attributes(
     if isinstance(attributes, str) and attributes and attributes[0] == '{':
         try:
             attributes = json.loads(attributes)
-        except Exception as e:
+        except Exception:
             pass
     if not isinstance(attributes, dict):
         error(response.text)
@@ -145,23 +151,23 @@ def get_plugin_attributes(
         return {}
     return attributes
 
+
 def delete_plugin(
-        self,
-        plugin: meerschaum.core.Plugin,
-        debug: bool = False
-    ) -> SuccessTuple:
+    self,
+    plugin: mrsm.core.Plugin,
+    debug: bool = False
+) -> SuccessTuple:
     """Delete a plugin from an API repository."""
     import json
     r_url = plugin_r_url(plugin)
     try:
         response = self.delete(r_url, debug=debug)
-    except Exception as e:
+    except Exception:
         return False, f"Failed to delete plugin '{plugin}'."
 
     try:
         success, msg = json.loads(response.text)
-    except Exception as e:
+    except Exception:
         return False, response.text
 
     return success, msg
-

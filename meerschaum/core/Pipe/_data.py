@@ -88,9 +88,8 @@ def get_data(
     limit: Optional[int], default None
         If provided, cap the dataframe to this many rows.
 
-    fresh: bool, default True
+    fresh: bool, default False
         If `True`, skip local cache and directly query the instance connector.
-        Defaults to `True`.
 
     debug: bool, default False
         Verbosity toggle.

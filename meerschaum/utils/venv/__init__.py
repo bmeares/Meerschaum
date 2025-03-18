@@ -86,7 +86,10 @@ def activate_venv(
         target = target_path.as_posix()
 
         if venv in active_venvs_order:
-            sys.path.remove(target)
+            try:
+                sys.path.remove(target)
+            except Exception:
+                pass
             try:
                 active_venvs_order.remove(venv)
             except Exception:
@@ -410,6 +413,8 @@ def init_venv(
             pass
 
     def wait_for_lock():
+        if platform.system() == 'Windows':
+            return
         max_lock_seconds = 30.0
         sleep_message_seconds = 5.0
         step_sleep_seconds = 0.1

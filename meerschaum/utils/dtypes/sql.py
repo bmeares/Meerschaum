@@ -74,10 +74,12 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'DOUBLE': 'float64[pyarrow]',
     'DECIMAL': 'numeric',
     'BIGINT': 'int64[pyarrow]',
-    'INT': 'int64[pyarrow]',
-    'INTEGER': 'int64[pyarrow]',
+    'INT': 'int32[pyarrow]',
+    'INTEGER': 'int32[pyarrow]',
     'NUMBER': 'numeric',
     'NUMERIC': 'numeric',
+    'GEOMETRY': 'geometry',
+    'GEOMETRY(GEOMETRY)': 'geometry',
     'TIMESTAMP': 'datetime64[ns]',
     'TIMESTAMP WITHOUT TIMEZONE': 'datetime64[ns]',
     'TIMESTAMP WITH TIMEZONE': 'datetime64[ns, UTC]',
@@ -120,6 +122,8 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
         'BYTE': 'bytes',
         'LOB': 'bytes',
         'BINARY': 'bytes',
+        'GEOMETRY': 'geometry',
+        'GEOGRAPHY': 'geography',
     },
     'default': 'object',
 }
@@ -128,6 +132,91 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'int': {
         'timescaledb': 'BIGINT',
         'postgresql': 'BIGINT',
+        'postgis': 'BIGINT',
+        'mariadb': 'BIGINT',
+        'mysql': 'BIGINT',
+        'mssql': 'BIGINT',
+        'oracle': 'INT',
+        'sqlite': 'BIGINT',
+        'duckdb': 'BIGINT',
+        'citus': 'BIGINT',
+        'cockroachdb': 'BIGINT',
+        'default': 'INT',
+    },
+    'uint': {
+        'timescaledb': 'BIGINT',
+        'postgresql': 'BIGINT',
+        'postgis': 'BIGINT',
+        'mariadb': 'BIGINT',
+        'mysql': 'BIGINT',
+        'mssql': 'BIGINT',
+        'oracle': 'INT',
+        'sqlite': 'BIGINT',
+        'duckdb': 'BIGINT',
+        'citus': 'BIGINT',
+        'cockroachdb': 'BIGINT',
+        'default': 'INT',
+    },
+    'int8': {
+        'timescaledb': 'SMALLINT',
+        'postgresql': 'SMALLINT',
+        'postgis': 'SMALLINT',
+        'mariadb': 'SMALLINT',
+        'mysql': 'SMALLINT',
+        'mssql': 'SMALLINT',
+        'oracle': 'INT',
+        'sqlite': 'INT',
+        'duckdb': 'SMALLINT',
+        'citus': 'SMALLINT',
+        'cockroachdb': 'SMALLINT',
+        'default': 'INT',
+    },
+    'uint8': {
+        'timescaledb': 'SMALLINT',
+        'postgresql': 'SMALLINT',
+        'postgis': 'SMALLINT',
+        'mariadb': 'SMALLINT',
+        'mysql': 'SMALLINT',
+        'mssql': 'SMALLINT',
+        'oracle': 'INT',
+        'sqlite': 'INT',
+        'duckdb': 'SMALLINT',
+        'citus': 'SMALLINT',
+        'cockroachdb': 'SMALLINT',
+        'default': 'INT',
+    },
+    'int16': {
+        'timescaledb': 'SMALLINT',
+        'postgresql': 'SMALLINT',
+        'postgis': 'SMALLINT',
+        'mariadb': 'SMALLINT',
+        'mysql': 'SMALLINT',
+        'mssql': 'SMALLINT',
+        'oracle': 'INT',
+        'sqlite': 'INT',
+        'duckdb': 'SMALLINT',
+        'citus': 'SMALLINT',
+        'cockroachdb': 'SMALLINT',
+        'default': 'INT',
+    },
+    'int32': {
+        'timescaledb': 'INT',
+        'postgresql': 'INT',
+        'postgis': 'INT',
+        'mariadb': 'INT',
+        'mysql': 'INT',
+        'mssql': 'INT',
+        'oracle': 'INT',
+        'sqlite': 'INT',
+        'duckdb': 'INT',
+        'citus': 'INT',
+        'cockroachdb': 'INT',
+        'default': 'INT',
+    },
+    'int64': {
+        'timescaledb': 'BIGINT',
+        'postgresql': 'BIGINT',
+        'postgis': 'BIGINT',
         'mariadb': 'BIGINT',
         'mysql': 'BIGINT',
         'mssql': 'BIGINT',
@@ -141,6 +230,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'float': {
         'timescaledb': 'DOUBLE PRECISION',
         'postgresql': 'DOUBLE PRECISION',
+        'postgis': 'DOUBLE PRECISION',
         'mariadb': 'DOUBLE PRECISION',
         'mysql': 'DOUBLE PRECISION',
         'mssql': 'FLOAT',
@@ -154,6 +244,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'double': {
         'timescaledb': 'DOUBLE PRECISION',
         'postgresql': 'DOUBLE PRECISION',
+        'postgis': 'DOUBLE PRECISION',
         'mariadb': 'DOUBLE PRECISION',
         'mysql': 'DOUBLE PRECISION',
         'mssql': 'FLOAT',
@@ -167,6 +258,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'datetime64[ns]': {
         'timescaledb': 'TIMESTAMP',
         'postgresql': 'TIMESTAMP',
+        'postgis': 'TIMESTAMP',
         'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
         'mssql': 'DATETIME2',
@@ -180,6 +272,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'datetime64[ns, UTC]': {
         'timescaledb': 'TIMESTAMPTZ',
         'postgresql': 'TIMESTAMPTZ',
+        'postgis': 'TIMESTAMPTZ',
         'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
         'mssql': 'DATETIMEOFFSET',
@@ -193,6 +286,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'datetime': {
         'timescaledb': 'TIMESTAMPTZ',
         'postgresql': 'TIMESTAMPTZ',
+        'postgis': 'TIMESTAMPTZ',
         'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
         'mssql': 'DATETIMEOFFSET',
@@ -206,6 +300,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'datetimetz': {
         'timescaledb': 'TIMESTAMPTZ',
         'postgresql': 'TIMESTAMPTZ',
+        'postgis': 'TIMESTAMPTZ',
         'mariadb': 'DATETIME',
         'mysql': 'DATETIME',
         'mssql': 'DATETIMEOFFSET',
@@ -219,6 +314,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'bool': {
         'timescaledb': 'BOOLEAN',
         'postgresql': 'BOOLEAN',
+        'postgis': 'BOOLEAN',
         'mariadb': 'BOOLEAN',
         'mysql': 'BOOLEAN',
         'mssql': 'BIT',
@@ -232,6 +328,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'object': {
         'timescaledb': 'TEXT',
         'postgresql': 'TEXT',
+        'postgis': 'TEXT',
         'mariadb': 'TEXT',
         'mysql': 'TEXT',
         'mssql': 'NVARCHAR(MAX)',
@@ -245,6 +342,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'string': {
         'timescaledb': 'TEXT',
         'postgresql': 'TEXT',
+        'postgis': 'TEXT',
         'mariadb': 'TEXT',
         'mysql': 'TEXT',
         'mssql': 'NVARCHAR(MAX)',
@@ -258,6 +356,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'unicode': {
         'timescaledb': 'TEXT',
         'postgresql': 'TEXT',
+        'postgis': 'TEXT',
         'mariadb': 'TEXT',
         'mysql': 'TEXT',
         'mssql': 'NVARCHAR(MAX)',
@@ -271,6 +370,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'json': {
         'timescaledb': 'JSONB',
         'postgresql': 'JSONB',
+        'postgis': 'JSONB',
         'mariadb': 'TEXT',
         'mysql': 'TEXT',
         'mssql': 'NVARCHAR(MAX)',
@@ -284,6 +384,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'numeric': {
         'timescaledb': 'NUMERIC',
         'postgresql': 'NUMERIC',
+        'postgis': 'NUMERIC',
         'mariadb': f'DECIMAL{NUMERIC_PRECISION_FLAVORS["mariadb"]}',
         'mysql': f'DECIMAL{NUMERIC_PRECISION_FLAVORS["mysql"]}',
         'mssql': f'NUMERIC{NUMERIC_PRECISION_FLAVORS["mssql"]}',
@@ -297,6 +398,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'uuid': {
         'timescaledb': 'UUID',
         'postgresql': 'UUID',
+        'postgis': 'UUID',
         'mariadb': 'CHAR(36)',
         'mysql': 'CHAR(36)',
         'mssql': 'UNIQUEIDENTIFIER',
@@ -311,6 +413,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'bytes': {
         'timescaledb': 'BYTEA',
         'postgresql': 'BYTEA',
+        'postgis': 'BYTEA',
         'mariadb': 'BLOB',
         'mysql': 'BLOB',
         'mssql': 'VARBINARY(MAX)',
@@ -321,11 +424,124 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'cockroachdb': 'BYTEA',
         'default': 'BLOB',
     },
+    'geometry': {
+        'timescaledb': 'TEXT',
+        'postgresql': 'TEXT',
+        'postgis': 'GEOMETRY',
+        'mariadb': 'TEXT',
+        'mysql': 'TEXT',
+        'mssql': 'NVARCHAR(MAX)',
+        'oracle': 'NVARCHAR2(2000)',
+        'sqlite': 'TEXT',
+        'duckdb': 'TEXT',
+        'citus': 'TEXT',
+        'cockroachdb': 'TEXT',
+        'default': 'TEXT',
+    },
+    'geography': {
+        'timescaledb': 'TEXT',
+        'postgresql': 'TEXT',
+        'postgis': 'GEOGRAPHY',
+        'mariadb': 'TEXT',
+        'mysql': 'TEXT',
+        'mssql': 'NVARCHAR(MAX)',
+        'oracle': 'NVARCHAR2(2000)',
+        'sqlite': 'TEXT',
+        'duckdb': 'TEXT',
+        'citus': 'TEXT',
+        'cockroachdb': 'TEXT',
+        'default': 'TEXT',
+    },
 }
 PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'int': {
         'timescaledb': 'BigInteger',
         'postgresql': 'BigInteger',
+        'postgis': 'BigInteger',
+        'mariadb': 'BigInteger',
+        'mysql': 'BigInteger',
+        'mssql': 'BigInteger',
+        'oracle': 'BigInteger',
+        'sqlite': 'BigInteger',
+        'duckdb': 'BigInteger',
+        'citus': 'BigInteger',
+        'cockroachdb': 'BigInteger',
+        'default': 'BigInteger',
+    },
+    'uint': {
+        'timescaledb': 'BigInteger',
+        'postgresql': 'BigInteger',
+        'postgis': 'BigInteger',
+        'mariadb': 'BigInteger',
+        'mysql': 'BigInteger',
+        'mssql': 'BigInteger',
+        'oracle': 'BigInteger',
+        'sqlite': 'BigInteger',
+        'duckdb': 'BigInteger',
+        'citus': 'BigInteger',
+        'cockroachdb': 'BigInteger',
+        'default': 'BigInteger',
+    },
+    'int8': {
+        'timescaledb': 'SmallInteger',
+        'postgresql': 'SmallInteger',
+        'postgis': 'SmallInteger',
+        'mariadb': 'SmallInteger',
+        'mysql': 'SmallInteger',
+        'mssql': 'SmallInteger',
+        'oracle': 'SmallInteger',
+        'sqlite': 'SmallInteger',
+        'duckdb': 'SmallInteger',
+        'citus': 'SmallInteger',
+        'cockroachdb': 'SmallInteger',
+        'default': 'SmallInteger',
+    },
+    'uint8': {
+        'timescaledb': 'SmallInteger',
+        'postgresql': 'SmallInteger',
+        'postgis': 'SmallInteger',
+        'mariadb': 'SmallInteger',
+        'mysql': 'SmallInteger',
+        'mssql': 'SmallInteger',
+        'oracle': 'SmallInteger',
+        'sqlite': 'SmallInteger',
+        'duckdb': 'SmallInteger',
+        'citus': 'SmallInteger',
+        'cockroachdb': 'SmallInteger',
+        'default': 'SmallInteger',
+    },
+    'int16': {
+        'timescaledb': 'SmallInteger',
+        'postgresql': 'SmallInteger',
+        'postgis': 'SmallInteger',
+        'mariadb': 'SmallInteger',
+        'mysql': 'SmallInteger',
+        'mssql': 'SmallInteger',
+        'oracle': 'SmallInteger',
+        'sqlite': 'SmallInteger',
+        'duckdb': 'SmallInteger',
+        'citus': 'SmallInteger',
+        'cockroachdb': 'SmallInteger',
+        'default': 'SmallInteger',
+    },
+    'int32': {
+        'timescaledb': 'Integer',
+        'postgresql': 'Integer',
+        'postgis': 'Integer',
+        'mariadb': 'Integer',
+        'mysql': 'Integer',
+        'mssql': 'Integer',
+        'oracle': 'Integer',
+        'sqlite': 'Integer',
+        'duckdb': 'Integer',
+        'citus': 'Integer',
+        'cockroachdb': 'Integer',
+        'default': 'Integer',
+    },
+    'int64': {
+        'timescaledb': 'BigInteger',
+        'postgresql': 'BigInteger',
+        'postgis': 'BigInteger',
         'mariadb': 'BigInteger',
         'mysql': 'BigInteger',
         'mssql': 'BigInteger',
@@ -339,6 +555,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'float': {
         'timescaledb': 'Float',
         'postgresql': 'Float',
+        'postgis': 'Float',
         'mariadb': 'Float',
         'mysql': 'Float',
         'mssql': 'Float',
@@ -352,6 +569,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'datetime': {
         'timescaledb': 'DateTime(timezone=True)',
         'postgresql': 'DateTime(timezone=True)',
+        'postgis': 'DateTime(timezone=True)',
         'mariadb': 'DateTime(timezone=True)',
         'mysql': 'DateTime(timezone=True)',
         'mssql': 'sqlalchemy.dialects.mssql.DATETIMEOFFSET',
@@ -365,6 +583,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'datetime64[ns]': {
         'timescaledb': 'DateTime',
         'postgresql': 'DateTime',
+        'postgis': 'DateTime',
         'mariadb': 'DateTime',
         'mysql': 'DateTime',
         'mssql': 'sqlalchemy.dialects.mssql.DATETIME2',
@@ -378,6 +597,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'datetime64[ns, UTC]': {
         'timescaledb': 'DateTime(timezone=True)',
         'postgresql': 'DateTime(timezone=True)',
+        'postgis': 'DateTime(timezone=True)',
         'mariadb': 'DateTime(timezone=True)',
         'mysql': 'DateTime(timezone=True)',
         'mssql': 'sqlalchemy.dialects.mssql.DATETIMEOFFSET',
@@ -391,6 +611,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'bool': {
         'timescaledb': 'Boolean',
         'postgresql': 'Boolean',
+        'postgis': 'Boolean',
         'mariadb': 'Integer',
         'mysql': 'Integer',
         'mssql': 'sqlalchemy.dialects.mssql.BIT',
@@ -404,6 +625,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'object': {
         'timescaledb': 'UnicodeText',
         'postgresql': 'UnicodeText',
+        'postgis': 'UnicodeText',
         'mariadb': 'UnicodeText',
         'mysql': 'UnicodeText',
         'mssql': 'UnicodeText',
@@ -417,6 +639,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'string': {
         'timescaledb': 'UnicodeText',
         'postgresql': 'UnicodeText',
+        'postgis': 'UnicodeText',
         'mariadb': 'UnicodeText',
         'mysql': 'UnicodeText',
         'mssql': 'UnicodeText',
@@ -430,6 +653,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'json': {
         'timescaledb': 'sqlalchemy.dialects.postgresql.JSONB',
         'postgresql': 'sqlalchemy.dialects.postgresql.JSONB',
+        'postgis': 'sqlalchemy.dialects.postgresql.JSONB',
         'mariadb': 'UnicodeText',
         'mysql': 'UnicodeText',
         'mssql': 'UnicodeText',
@@ -443,6 +667,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'numeric': {
         'timescaledb': 'Numeric',
         'postgresql': 'Numeric',
+        'postgis': 'Numeric',
         'mariadb': 'Numeric',
         'mysql': 'Numeric',
         'mssql': 'Numeric',
@@ -456,6 +681,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'uuid': {
         'timescaledb': 'Uuid',
         'postgresql': 'Uuid',
+        'postgis': 'Uuid',
         'mariadb': 'sqlalchemy.dialects.mysql.CHAR(36)',
         'mysql': 'sqlalchemy.dialects.mysql.CHAR(36)',
         'mssql': 'Uuid',
@@ -469,6 +695,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'bytes': {
         'timescaledb': 'LargeBinary',
         'postgresql': 'LargeBinary',
+        'postgis': 'LargeBinary',
         'mariadb': 'LargeBinary',
         'mysql': 'LargeBinary',
         'mssql': 'LargeBinary',
@@ -479,11 +706,40 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
         'cockroachdb': 'LargeBinary',
         'default': 'LargeBinary',
     },
+    'geometry': {
+        'timescaledb': 'UnicodeText',
+        'postgresql': 'UnicodeText',
+        'postgis': 'geoalchemy2.Geometry',
+        'mariadb': 'UnicodeText',
+        'mysql': 'UnicodeText',
+        'mssql': 'UnicodeText',
+        'oracle': 'UnicodeText',
+        'sqlite': 'UnicodeText',
+        'duckdb': 'UnicodeText',
+        'citus': 'UnicodeText',
+        'cockroachdb': 'UnicodeText',
+        'default': 'UnicodeText',
+    },
+    'geography': {
+        'timescaledb': 'UnicodeText',
+        'postgresql': 'UnicodeText',
+        'postgis': 'geoalchemy2.Geography',
+        'mariadb': 'UnicodeText',
+        'mysql': 'UnicodeText',
+        'mssql': 'UnicodeText',
+        'oracle': 'UnicodeText',
+        'sqlite': 'UnicodeText',
+        'duckdb': 'UnicodeText',
+        'citus': 'UnicodeText',
+        'cockroachdb': 'UnicodeText',
+        'default': 'UnicodeText',
+    },
 }
 
 AUTO_INCREMENT_COLUMN_FLAVORS: Dict[str, str] = {
     'timescaledb': 'GENERATED BY DEFAULT AS IDENTITY',
     'postgresql': 'GENERATED BY DEFAULT AS IDENTITY',
+    'postgis': 'GENERATED BY DEFAULT AS IDENTITY',
     'mariadb': 'AUTO_INCREMENT',
     'mysql': 'AUTO_INCREMENT',
     'mssql': 'IDENTITY(1,1)',
@@ -512,7 +768,7 @@ def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = True) -> 
     -------
     The equivalent datatype for a pandas DataFrame.
     """
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, get_geometry_type_srid
     def parse_custom(_pd_type: str, _db_type: str) -> str:
         if 'json' in _db_type.lower():
             return 'json'
@@ -520,6 +776,13 @@ def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = True) -> 
             precision, scale = get_numeric_precision_scale(None, dtype=_db_type.upper())
             if precision and scale:
                 return f"numeric[{precision},{scale}]"
+        if are_dtypes_equal(_pd_type, 'geometry') and _pd_type != 'object':
+            geometry_type, srid = get_geometry_type_srid(_db_type.upper())
+            modifiers = [str(modifier) for modifier in (geometry_type, srid) if modifier]
+            typ = "geometry" if 'geography' not in _pd_type.lower() else 'geography'
+            if not modifiers:
+                return typ
+            return f"{typ}[{', '.join(modifiers)}]"
         return _pd_type
 
     pd_type = DB_TO_PD_DTYPES.get(db_type.upper().split('(', maxsplit=1)[0].strip(), None)
@@ -565,7 +828,7 @@ def get_db_type_from_pd_type(
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_ALIAS_DTYPES
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_ALIAS_DTYPES, get_geometry_type_srid
     from meerschaum.utils.misc import parse_arguments_str
     sqlalchemy_types = attempt_import('sqlalchemy.types', lazy=False)
 
@@ -576,18 +839,30 @@ def get_db_type_from_pd_type(
     )
 
     precision, scale = None, None
+    geometry_type, geometry_srid = None, None
     og_pd_type = pd_type
     if pd_type in MRSM_ALIAS_DTYPES:
         pd_type = MRSM_ALIAS_DTYPES[pd_type]
 
     ### Check whether we are able to match this type (e.g. pyarrow support).
     found_db_type = False
-    if pd_type not in types_registry and not pd_type.startswith('numeric['):
+    if (
+        pd_type not in types_registry
+        and not any(
+            pd_type.startswith(f'{typ}[')
+            for typ in ('numeric', 'geometry', 'geography')
+        )
+    ):
         for mapped_pd_type in types_registry:
             if are_dtypes_equal(mapped_pd_type, pd_type):
                 pd_type = mapped_pd_type
                 found_db_type = True
                 break
+    elif (pd_type.startswith('geometry[') or pd_type.startswith('geography[')):
+        og_pd_type = pd_type
+        pd_type = 'geometry' if 'geometry' in pd_type else 'geography'
+        geometry_type, geometry_srid = get_geometry_type_srid(og_pd_type)
+        found_db_type = True
     elif pd_type.startswith('numeric['):
         og_pd_type = pd_type
         pd_type = 'numeric'
@@ -628,6 +903,11 @@ def get_db_type_from_pd_type(
         if precision is not None and scale is not None:
             db_type_bare = db_type.split('(', maxsplit=1)[0]
             return f"{db_type_bare}({precision},{scale})"
+        if geometry_type is not None and geometry_srid is not None:
+            if 'geometry' not in db_type.lower() and 'geography' not in db_type.lower():
+                return db_type
+            db_type_bare = db_type.split('(', maxsplit=1)[0]
+            return f"{db_type_bare}({geometry_type.upper()}, {geometry_srid})"
         return db_type
 
     if db_type.startswith('sqlalchemy.dialects'):
@@ -642,6 +922,17 @@ def get_db_type_from_pd_type(
         if cls_args is None:
             return cls
         return cls(*cls_args, **cls_kwargs)
+
+    if 'geometry' in db_type.lower() or 'geography' in db_type.lower():
+        geoalchemy2 = attempt_import('geoalchemy2', lazy=False)
+        geometry_class = (
+            geoalchemy2.Geometry
+            if 'geometry' in db_type.lower()
+            else geoalchemy2.Geography
+        )
+        if geometry_type is None or geometry_srid is None:
+            return geometry_class
+        return geometry_class(geometry_type=geometry_type, srid=geometry_srid)
 
     if 'numeric' in db_type.lower():
         if precision is None or scale is None:

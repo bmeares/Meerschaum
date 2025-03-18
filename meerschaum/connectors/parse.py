@@ -140,7 +140,6 @@ def is_valid_connector_keys(
     """
     try:
         success = parse_connector_keys(keys, construct=False) is not None
-    except Exception as e:
+    except Exception:
         success = False
     return success
-

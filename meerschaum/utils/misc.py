@@ -175,7 +175,7 @@ def string_to_dict(
     import ast
     params_dict = {}
     for param in params_string.split(","):
-        _keys = param.split(":")
+        _keys = param.split(":", maxsplit=1)
         keys = _keys[:-1]
         try:
             val = ast.literal_eval(_keys[-1])

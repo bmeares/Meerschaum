@@ -7,12 +7,13 @@ Utility functions for working with data types.
 """
 
 import traceback
+import json
 import uuid
 from datetime import timezone, datetime
 from decimal import Decimal, Context, InvalidOperation, ROUND_HALF_UP
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Dict, Union, Any, Optional
+from meerschaum.utils.typing import Dict, Union, Any, Optional, Tuple
 from meerschaum.utils.warnings import warn
 
 MRSM_ALIAS_DTYPES: Dict[str, str] = {
@@ -27,10 +28,14 @@ MRSM_ALIAS_DTYPES: Dict[str, str] = {
     'bytea': 'bytes',
     'guid': 'uuid',
     'UUID': 'uuid',
+    'geom': 'geometry',
+    'geog': 'geography',
 }
 MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
     'numeric': 'object',
+    'geometry': 'object',
+    'geography': 'object',
     'uuid': 'object',
     'datetime': 'datetime64[ns, UTC]',
     'bool': 'bool[pyarrow]',
@@ -60,6 +65,12 @@ def to_pandas_dtype(dtype: str) -> str:
     if dtype.startswith('numeric'):
         return MRSM_PD_DTYPES['numeric']
 
+    if dtype.startswith('geometry'):
+        return MRSM_PD_DTYPES['geometry']
+
+    if dtype.startswith('geography'):
+        return MRSM_PD_DTYPES['geography']
+
     ### NOTE: Kind of a hack, but if the first word of the given dtype is in all caps,
     ### treat it as a SQL db type.
     if dtype.split(' ')[0].isupper():
@@ -67,6 +78,7 @@ def to_pandas_dtype(dtype: str) -> str:
         return get_pd_type_from_db_type(dtype)
 
     from meerschaum.utils.packages import attempt_import
+    _ = attempt_import('pyarrow', lazy=False)
     pandas = attempt_import('pandas', lazy=False)
 
     try:
@@ -145,6 +157,10 @@ def are_dtypes_equal(
 
     bytes_dtypes = ('bytes', 'object')
     if ldtype in bytes_dtypes and rdtype in bytes_dtypes:
+        return True
+
+    geometry_dtypes = ('geometry', 'object', 'geography')
+    if ldtype in geometry_dtypes and rdtype in geometry_dtypes:
         return True
 
     if ldtype.lower() == rdtype.lower():
@@ -275,6 +291,70 @@ def attempt_cast_to_bytes(value: Any) -> Any:
         )
     except Exception:
         return value
+
+
+def attempt_cast_to_geometry(value: Any) -> Any:
+    """
+    Given a value, attempt to coerce it into a `shapely` (`geometry`) object.
+    """
+    shapely, shapely_wkt, shapely_wkb = mrsm.attempt_import(
+        'shapely',
+        'shapely.wkt',
+        'shapely.wkb',
+        lazy=False,
+    )
+    if 'shapely' in str(type(value)):
+        return value
+
+    if isinstance(value, (dict, list)):
+        try:
+            return shapely.from_geojson(json.dumps(value))
+        except Exception as e:
+            return value
+
+    value_is_wkt = geometry_is_wkt(value)
+    if value_is_wkt is None:
+        return value
+
+    try:
+        return (
+            shapely_wkt.loads(value)
+            if value_is_wkt
+            else shapely_wkb.loads(value)
+        )
+    except Exception:
+        return value
+
+
+def geometry_is_wkt(value: Union[str, bytes]) -> Union[bool, None]:
+    """
+    Determine whether an input value should be treated as WKT or WKB geometry data.
+
+    Parameters
+    ----------
+    value: Union[str, bytes]
+        The input data to be parsed into geometry data.
+
+    Returns
+    -------
+    A `bool` (`True` if `value` is WKT and `False` if it should be treated as WKB).
+    Return `None` if `value` should be parsed as neither.
+    """
+    import re
+    if not isinstance(value, (str, bytes)):
+        return None
+
+    if isinstance(value, bytes):
+        return False
+    
+    wkt_pattern = r'^\s*(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\s*\(.*\)\s*$'
+    if re.match(wkt_pattern, value, re.IGNORECASE):
+        return True
+    
+    if all(c in '0123456789ABCDEFabcdef' for c in value) and len(value) % 2 == 0:
+        return False
+    
+    return None
 
 
 def value_is_null(value: Any) -> bool:
@@ -458,6 +538,47 @@ def serialize_bytes(data: bytes) -> str:
     return base64.b64encode(data).decode('utf-8')
 
 
+def serialize_geometry(
+    geom: Any,
+    geometry_format: str = 'wkb_hex',
+    as_wkt: bool = False,
+) -> Union[str, Dict[str, Any]]:
+    """
+    Serialize geometry data as a hex-encoded well-known-binary string. 
+
+    Parameters
+    ----------
+    geom: Any
+        The potential geometry data to be serialized.
+
+    geometry_format: str, default 'wkb_hex'
+        The serialization format for geometry data.
+        Accepted formats are `wkb_hex` (well-known binary hex string),
+        `wkt` (well-known text), and `geojson`.
+
+    Returns
+    -------
+    A string containing the geometry data.
+    """
+    shapely = mrsm.attempt_import('shapely', lazy=False)
+    if geometry_format == 'geojson':
+        geojson_str = shapely.to_geojson(geom)
+        return json.loads(geojson_str)
+
+    if hasattr(geom, 'wkb_hex'):
+        return geom.wkb_hex if geometry_format == 'wkb_hex' else geom.wkt
+
+    return str(geom)
+
+
+def deserialize_geometry(geom_wkb: Union[str, bytes]):
+    """
+    Deserialize a WKB string into a shapely geometry object.
+    """
+    shapely = mrsm.attempt_import(lazy=False)
+    return shapely.wkb.loads(geom_wkb)
+
+
 def deserialize_bytes_string(data: str | None, force_hex: bool = False) -> bytes | None:
     """
     Given a serialized ASCII string of bytes data, return the original bytes.
@@ -559,7 +680,96 @@ def json_serialize_value(x: Any, default_to_str: bool = True) -> str:
     if isinstance(x, Decimal):
         return serialize_decimal(x)
 
+    if 'shapely' in str(type(x)):
+        return serialize_geometry(x)
+
     if value_is_null(x):
         return None
 
     return str(x) if default_to_str else x
+
+
+def get_geometry_type_srid(
+    dtype: str = 'geometry',
+    default_type: str = 'geometry',
+    default_srid: int = 4326,
+) -> Union[Tuple[str, int], Tuple[str, None]]:
+    """
+    Given the specified geometry `dtype`, return a tuple in the form (type, SRID).
+
+    Parameters
+    ----------
+    dtype: Optional[str], default None
+        Optionally provide a specific `geometry` syntax (e.g. `geometry[MultiLineString, 4326]`).
+        You may specify a supported `shapely` geometry type and an SRID in the dtype modifier:
+
+        - `Point`
+        - `LineString`
+        - `LinearRing`
+        - `Polygon`
+        - `MultiPoint`
+        - `MultiLineString`
+        - `MultiPolygon`
+        - `GeometryCollection`
+
+    Returns
+    -------
+    A tuple in the form (type, SRID).
+    Defaults to `(default_type, default_srid)`.
+
+    Examples
+    --------
+    >>> from meerschaum.utils.dtypes import get_geometry_type_srid
+    >>> get_geometry_type_srid()
+    ('geometry', 4326)
+    >>> get_geometry_type_srid('geometry[]')
+    ('geometry', 4326)
+    >>> get_geometry_type_srid('geometry[Point, 0]')
+    ('Point', 0)
+    >>> get_geometry_type_srid('geometry[0, Point]')
+    ('Point', 0)
+    >>> get_geometry_type_srid('geometry[0]')
+    ('geometry', 0)
+    >>> get_geometry_type_srid('geometry[MULTILINESTRING, 4326]')
+    ('MultiLineString', 4326)
+    >>> get_geometry_type_srid('geography')
+    ('geometry', 4326)
+    >>> get_geometry_type_srid('geography[POINT]')
+    ('Point', 4376)
+    """
+    from meerschaum.utils.misc import is_int
+    ### NOTE: PostGIS syntax must also be parsed.
+    dtype = dtype.replace('(', '[').replace(')', ']')
+    bare_dtype = dtype.split('[', maxsplit=1)[0]
+    modifier = dtype.split(bare_dtype, maxsplit=1)[-1].lstrip('[').rstrip(']')
+    if not modifier:
+        return default_type, default_srid
+
+    shapely_geometry_base = mrsm.attempt_import('shapely.geometry.base')
+    geometry_types = {
+        typ.lower(): typ
+        for typ in shapely_geometry_base.GEOMETRY_TYPES
+    }
+
+    parts = [part.lower().replace('srid=', '').replace('type=', '').strip() for part in modifier.split(',')]
+    parts_casted = [
+        (
+            int(part)
+            if is_int(part)
+            else part
+        ) for part in parts]
+
+    srid = default_srid
+    geometry_type = default_type
+
+    for part in parts_casted:
+        if isinstance(part, int):
+            srid = part
+            break
+
+    for part in parts:
+        if part.lower() in geometry_types:
+            geometry_type = geometry_types.get(part)
+            break
+
+    return geometry_type, srid

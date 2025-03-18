@@ -23,7 +23,7 @@ a {
   padding: 0.5em;
 }
 #webterm-iframe {
-  width: 102%;
+  width: 100%;
   height: 83vh !important;
   max-height: 83vh;
 }
@@ -72,4 +72,11 @@ a {
 }
 .input-text {
   font-family: Consolas, Menlo, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace, serif !important;
+}
+.pages-offcanvas-accordion button {
+  background-color: var(--bs-dark) !important;
+  color: white !important;
+}
+.pages-offcanvas-accordion div {
+  padding: 0 !important;
 }

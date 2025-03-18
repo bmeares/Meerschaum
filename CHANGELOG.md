@@ -1,8 +1,110 @@
 # 🪵 Changelog
 
-## 2.7.x Releases
+## 2.9.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v2.9.0
+
+- **Add the dtype `geometry` (and `geography`).**  
+  The new data type `geometry` adds support for syncing GIS data (e.g. WKB/WKT, GeoJSON, `shapely` objects, and `GeoDataFrames`).
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'demo', 'geometry',
+      instance='sql:local',
+      columns={
+          'primary': 'id',
+      },
+      dtypes={
+          'geom': 'geometry',
+          'id': 'int',
+      },
+  )
+
+  ```
+
+  The `geometry` dtype syntax supports constraints for Geometry type and/or CRS (SRID):
+
+  ```yaml
+  dtypes:
+    id: int
+    geom: geometry[MultiLineString, 4326]
+  ```
+
+  Syncing a `GeoDataFrame` (without specifying an explicit dtype) will detect any CRS and geometry type:
+
+  ```python
+  import meerschaum as mrsm
+  import geopandas as gpd
+
+  path = 'path/to/shapefile.shp'
+  gdf = gpd.read_file(path)
+
+  pipe = mrsm.Pipe('demo', 'shapefile', instance='sql:local')
+  success, msg = pipe.sync(gdf)
+
+  print(pipe.dtypes['geometry'])
+  # geometry[Point, 6570] 
+  ```
+
+- **Add the SQLConnector flavor `postgis`.**  
+  The new flavor `postgis` (built atop the `postgresql` flavor) allows pipes to take natively support `GEOMETRY` (and `GEOGRAPHY`) types.
+
+- **Add a pages sidebar to the Web Console.**  
+  Clicking the Meerschaum logo on the Web Console will show the pages navigation sidebar, allowing you to easily expand the web app. Custom pages added via `@web_page` are grouped by plugin. You can override this behavior with the `page_group` parameter:
+
+  ```python
+  from meerschaum.plugins import web_page, dash_plugin
+
+  @dash_plugin
+  def init_dash(dash_app):
+      import dash.html as html
+
+      @web_page('users', page_group='Settings', login_required=True)
+      def my_new_settings_page():
+          return dbc.Container([
+              html.P("A new page `/dash/users/` added to the Settings page group.")
+          ])
+  ```
+
+- **Add the property `instance_keys` to `api` connectors.**  
+  The optional property `instance_keys` determines the value of `instance_keys` to be sent alongside pipe requests.
+
+- **Insert the Web Console navbar into custom pages.**  
+  Custom pages added via `@web_page` will now include the simple navbar by default, to more tightly integrate custom pages into the Web Console. This behavior may be disabled by setting `skip_navbar=True` in `@web_page`:
+
+  ```python
+  # example.py
+
+  from meerschaum.plugins import web_page, dash_plugin
+
+  @dash_plugin
+  def init_app(dash_app):
+      import dash_bootstrap_components as dbc
+      import dash.html as html
+
+      @web_page('example-page', skip_navbar=True)
+      def example_page():
+          return dbc.Container(html.H1('Hello, world!'))
+  ```
+
+- **Create `INT` columns for dtypes `int32`, `SMALLINT` for `int16`.**  
+  The `SQLConnector` now maps the Pandas dtypes `int32` to `INT` and `int16` (and `int8`) to `SMALLINT` rather than defaulting to `BIGINT` for everything.
+
+- **Fix serialization of `valkey` pipes without indices.**  
+  Pipes synced without `columns` now correctly serialize documents' keys.
+
+- **Add API endpoints for clearing pipes and chunk bounds.**  
+  The endpoints `/pipes/{connector_keys}/{metric_key}/{location_key}/clear` and `/pipes/{connector_keys}/{metric_key}/{location_key}/chunk_bounds` now allow API users to clear pipes (rather than using the legacy actions endpoint) and get the values from `pipe.get_chunk_bounds()`.
+
+- **Skip venv locking on Windows.**
+- **Shrink `full` Docker image size.**
+
+## 2.8.x Releases
+
+The 2.8 series introduced batches to `verify pipes` as well as more granular control over exposed instances via the API.
 
 ### v2.8.4
 

@@ -7,6 +7,7 @@ This module contains the logic that builds the sqlalchemy engine string.
 """
 
 import traceback
+import meerschaum as mrsm
 from meerschaum.utils.debug import dprint
 
 ### determine driver and requirements from flavor
@@ -38,6 +39,16 @@ flavor_configs = {
         },
     },
     'postgresql': {
+        'engine': 'postgresql+psycopg',
+        'create_engine': default_create_engine_args,
+        'omit_create_engine': {'method',},
+        'to_sql': {},
+        'requirements': default_requirements,
+        'defaults': {
+            'port': 5432,
+        },
+    },
+    'postgis': {
         'engine': 'postgresql+psycopg',
         'create_engine': default_create_engine_args,
         'omit_create_engine': {'method',},
@@ -162,6 +173,7 @@ install_flavor_drivers = {
     'mariadb': ['pymysql'],
     'timescaledb': ['psycopg'],
     'postgresql': ['psycopg'],
+    'postgis': ['psycopg', 'geoalchemy'],
     'citus': ['psycopg'],
     'cockroachdb': ['psycopg', 'sqlalchemy_cockroachdb', 'sqlalchemy_cockroachdb.psycopg'],
     'mssql': ['pyodbc'],
@@ -198,8 +210,7 @@ def create_engine(
             warn=False,
         )
         if self.flavor == 'mssql':
-            pyodbc = attempt_import('pyodbc', debug=debug, lazy=False, warn=False)
-            pyodbc.pooling = False
+            _init_mssql_sqlalchemy()
     if self.flavor in require_patching_flavors:
         from meerschaum.utils.packages import determine_version, _monkey_patch_get_distribution
         import pathlib
@@ -257,8 +268,8 @@ def create_engine(
 
         ### Sometimes the timescaledb:// flavor can slip in.
         if _uri and self.flavor in _uri:
-            if self.flavor == 'timescaledb':
-                engine_str = engine_str.replace(f'{self.flavor}', 'postgresql', 1)
+            if self.flavor in ('timescaledb', 'postgis'):
+                engine_str = engine_str.replace(self.flavor, 'postgresql', 1)
             elif _uri.startswith('postgresql://'):
                 engine_str = engine_str.replace('postgresql://', 'postgresql+psycopg2://')
 
@@ -313,3 +324,39 @@ def create_engine(
     if include_uri:
         return engine, engine_str
     return engine
+
+
+def _init_mssql_sqlalchemy():
+    """
+    When first instantiating a SQLAlchemy connection to MSSQL,
+    monkey-patch `pyodbc` handling in SQLAlchemy.
+    """
+    pyodbc, sqlalchemy_dialects_mssql_pyodbc = mrsm.attempt_import(
+        'pyodbc',
+        'sqlalchemy.dialects.mssql.pyodbc',
+        lazy=False,
+        warn=False,
+    )
+    pyodbc.pooling = False
+
+    MSDialect_pyodbc = sqlalchemy_dialects_mssql_pyodbc.MSDialect_pyodbc
+
+    def _handle_geometry(val):
+        from binascii import hexlify
+        hex_str = f"0x{hexlify(val).decode().upper()}"
+        return hex_str
+
+    def custom_on_connect(self):
+        super_ = super(MSDialect_pyodbc, self).on_connect()
+
+        def _on_connect(conn):
+            if super_ is not None:
+                super_(conn)
+
+            self._setup_timestampoffset_type(conn)
+            conn.add_output_converter(-151, _handle_geometry)
+
+        return _on_connect
+
+    ### TODO: Parse proprietary MSSQL geometry bytes into WKB.
+    #  MSDialect_pyodbc.on_connect = custom_on_connect

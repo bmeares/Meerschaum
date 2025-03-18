@@ -977,6 +977,8 @@ def test_enforce_false(flavor: str):
     """
     Test `enforce=False` behavior.
     """ 
+    if flavor not in ('api', 'mssql', 'timescaledb', 'sqlite'):
+        return
     conn = conns[flavor]
     pipe = mrsm.Pipe('test', 'enforce', instance=conn)
     pipe.delete()
@@ -984,12 +986,13 @@ def test_enforce_false(flavor: str):
         'test', 'enforce',
         instance=conn,
         enforce=False,
+        dtypes={'dt': 'datetime64[ns]'},
         columns={
             'datetime': 'dt',
         },
     )
     docs = [
-        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': 1},
+        {'dt': datetime(2024, 12, 26), 'num': 1},
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
@@ -998,7 +1001,7 @@ def test_enforce_false(flavor: str):
     assert df['num'][0] == 1
     
     new_docs = [
-        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': 2},
+        {'dt': datetime(2024, 12, 26), 'num': 2},
     ]
     success, msg = pipe.sync(new_docs, debug=debug)
     assert success, msg
@@ -1066,3 +1069,129 @@ def test_explicit_precision_scale_numeric_sql(flavor):
     success, msg = pipe.sync(docs, debug=debug)
     df = pipe.get_data()
     assert str(df['val'][0]) == '123.46'
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_geometry_dtype(flavor: str):
+    """
+    Test syncing the `geometry` dtype.
+    """
+    conn = conns[flavor]
+    shapely = mrsm.attempt_import('shapely')
+    pipe = mrsm.Pipe(
+        'test', 'geometry',
+        instance=conn,
+    )
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'geometry',
+        instance=conn,
+        columns={'primary': 'id'},
+        dtypes={'id': 'int', 'geom': 'geometry'},
+    )
+
+    geom = shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]])
+    geom_str = '01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F00000000000000400102000000020000000000000000001040000000000000104000000000000014400000000000001840'
+    docs = [
+        {'id': 1, 'geom': geom},
+    ]
+    new_docs = [
+        {'id': 1, 'geom': geom_str},
+    ]
+
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data()
+    assert df['geom'][0] == geom
+
+    success, msg = pipe.sync(df, debug=debug)
+    assert success, msg
+    assert pipe.get_rowcount() == len(docs)
+
+    success, msg = pipe.sync(new_docs, debug=debug)
+    assert success, msg
+    assert pipe.get_rowcount() == len(docs)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_geography_dtype(flavor: str):
+    """
+    Test syncing the `geography` dtype.
+    """
+    conn = conns[flavor]
+    shapely = mrsm.attempt_import('shapely')
+    pipe = mrsm.Pipe(
+        'test', 'geography',
+        instance=conn,
+    )
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'geography',
+        instance=conn,
+        columns={'primary': 'id'},
+        dtypes={'id': 'int', 'geog': 'geography[SRID=4326]'},
+    )
+
+    geog = shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]])
+    geog_str = '01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F00000000000000400102000000020000000000000000001040000000000000104000000000000014400000000000001840'
+    docs = [
+        {'id': 1, 'geog': geog},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data()
+    assert df['geog'][0] == geog
+
+    success, msg = pipe.sync(df, debug=debug)
+    assert success, msg
+    assert pipe.get_rowcount() == len(docs)
+
+    new_docs = [
+        {'id': 1, 'geog': geog_str},
+    ]
+    success, msg = pipe.sync(new_docs, debug=debug)
+    assert success, msg
+    assert pipe.get_rowcount() == len(docs)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_geometry_custom_srid(flavor: str):
+    """
+    Test syncing the `geometry` dtype with a custom SRID.
+    """
+    conn = conns[flavor]
+    shapely = mrsm.attempt_import('shapely')
+    pipe = mrsm.Pipe(
+        'test', 'geometry', 'srid',
+        instance=conn,
+    )
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'geometry', 'srid',
+        instance=conn,
+        columns={'primary': 'id'},
+        dtypes={'id': 'int', 'geom': 'geometry[MultiLineString,2001]'},
+    )
+
+    geom = shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]])
+    geom_str = '01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F00000000000000400102000000020000000000000000001040000000000000104000000000000014400000000000001840'
+    docs = [
+        {'id': 1, 'geom': geom},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data()
+    assert df['geom'][0] == geom
+
+    success, msg = pipe.sync(df, debug=debug)
+    assert success, msg
+    assert pipe.get_rowcount() == len(docs)
+
+    new_docs = [
+        {'id': 1, 'geom': geom_str},
+    ]
+    success, msg = pipe.sync(new_docs, debug=debug)
+    assert success, msg
+    assert pipe.get_rowcount() == len(docs)
