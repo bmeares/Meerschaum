@@ -33,7 +33,10 @@ from meerschaum.api.dash.users import get_users_cards
 from meerschaum.api.dash.graphs import get_graphs_cards
 from meerschaum.api.dash.webterm import get_webterm
 from meerschaum.api.dash.components import (
-    alert_from_success_tuple, console_div, build_cards_grid,
+    alert_from_success_tuple,
+    console_div,
+    build_cards_grid,
+    build_pages_offcanvas_children,
 )
 from meerschaum.api.dash import pages
 from meerschaum.utils.typing import Dict
@@ -1093,26 +1096,7 @@ def toggle_pages_offcanvas(n_clicks: Optional[int], is_open: bool):
     """
     Toggle the pages sidebar.
     """
-    pages_children = dbc.Card(
-        dbc.ListGroup(
-            [
-                dbc.ListGroupItem(
-                    dbc.Button(
-                        html.P(
-                            ' '.join([word.capitalize() for word in page_key.split(' ')]),
-                            style={'text-decoration': 'none', 'fontSize': '18px'},
-                        ),
-                        style={'width': '100%', 'text-align': 'left'},
-                        href=page_href,
-                        color='dark',
-                    )
-                )
-                for page_key, page_href in _pages.items()
-            ],
-            flush=True,
-        ),
-        outline=True,
-    )
+    pages_children = build_pages_offcanvas_children()
     if n_clicks:
         return not is_open, pages_children
     return is_open, pages_children

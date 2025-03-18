@@ -49,6 +49,7 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
       gir1.2-webkit2-4.0 \
       htop \
       openssl \
+      cmake \
       || exit 1
   fi
 

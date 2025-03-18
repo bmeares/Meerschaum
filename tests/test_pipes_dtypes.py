@@ -396,7 +396,6 @@ def test_ignore_datetime_conversion(flavor: str):
         warnings.filterwarnings('ignore')
         success, msg = pipe.sync(docs, debug=debug)
 
-    return pipe
     assert success, msg
     df = pipe.get_data(['dt'], debug=debug)
     print(df)
@@ -990,7 +989,7 @@ def test_enforce_false(flavor: str):
         },
     )
     docs = [
-        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': 1},
+        {'dt': datetime(2024, 12, 26), 'num': 1},
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
@@ -999,7 +998,7 @@ def test_enforce_false(flavor: str):
     assert df['num'][0] == 1
     
     new_docs = [
-        {'dt': datetime(2024, 12, 26, tzinfo=timezone.utc), 'num': 2},
+        {'dt': datetime(2024, 12, 26), 'num': 2},
     ]
     success, msg = pipe.sync(new_docs, debug=debug)
     assert success, msg
@@ -1098,8 +1097,6 @@ def test_geometry_dtype(flavor: str):
 
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
-
-    return pipe, docs, new_docs
 
     df = pipe.get_data()
     assert df['geom'][0] == geom

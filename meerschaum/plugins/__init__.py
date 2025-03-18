@@ -91,8 +91,8 @@ def make_action(
 
 
 def pre_sync_hook(
-        function: Callable[[Any], Any],
-    ) -> Callable[[Any], Any]:
+    function: Callable[[Any], Any],
+) -> Callable[[Any], Any]:
     """
     Register a function as a sync hook to be executed right before sync.
     
@@ -169,6 +169,7 @@ def web_page(
     page: Union[str, None, Callable[[Any], Any]] = None,
     login_required: bool = True,
     skip_navbar: bool = False,
+    page_group: Optional[str] = None,
     **kwargs
 ) -> Any:
     """
@@ -188,7 +189,7 @@ def web_page(
     page_str = None
 
     def _decorator(_func: Callable[[Any], Any]) -> Callable[[Any], Any]:
-        nonlocal page_str
+        nonlocal page_str, page_group
 
         @functools.wraps(_func)
         def wrapper(*_args, **_kwargs):
@@ -198,10 +199,31 @@ def web_page(
             page_str = _func.__name__
 
         page_str = page_str.lstrip('/').rstrip('/').strip()
-        _plugin_endpoints_to_pages[page_str] = {
+        page_key = (
+            ' '.join(
+                [
+                    word.capitalize()
+                    for word in (
+                        page_str.replace('/dash', '').lstrip('/').rstrip('/').strip()
+                        .replace('-', ' ').replace('_', ' ').split(' ')
+                    )
+                ]
+            )
+        )
+ 
+        package_name = _func.__globals__['__name__']
+        plugin_name = (
+            package_name.split('.')[1]
+            if package_name.startswith('plugins.') else None
+        )
+        page_group = page_group or plugin_name
+        if page_group not in _plugin_endpoints_to_pages:
+            _plugin_endpoints_to_pages[page_group] = {}
+        _plugin_endpoints_to_pages[page_group][page_str] = {
             'function': _func,
             'login_required': login_required,
             'skip_navbar': skip_navbar,
+            'page_key': page_key,
         }
         return wrapper
 
