@@ -42,7 +42,6 @@ duckdb-engine>=0.13.0
 pyproj>=3.7.1
 geopandas>=1.0.1
 shapely>=2.0.7
-toga>=0.3.0-dev29
 pywebview>=3.6.3
 pycparser>=2.21.0
 numpy>=1.18.5
