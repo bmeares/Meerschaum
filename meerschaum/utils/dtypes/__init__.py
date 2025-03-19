@@ -745,19 +745,18 @@ def get_geometry_type_srid(
     if not modifier:
         return default_type, default_srid
 
-    shapely_geometry_base = mrsm.attempt_import('shapely.geometry.base')
-    geometry_types = {
-        typ.lower(): typ
-        for typ in shapely_geometry_base.GEOMETRY_TYPES
-    }
-
-    parts = [part.lower().replace('srid=', '').replace('type=', '').strip() for part in modifier.split(',')]
+    parts = [
+        part.split('=')[-1].strip()
+        for part in modifier.split(',')
+    ]
     parts_casted = [
         (
             int(part)
             if is_int(part)
             else part
-        ) for part in parts]
+        )
+        for part in parts
+    ]
 
     srid = default_srid
     geometry_type = default_type
@@ -767,9 +766,9 @@ def get_geometry_type_srid(
             srid = part
             break
 
-    for part in parts:
-        if part.lower() in geometry_types:
-            geometry_type = geometry_types.get(part)
+    for part in parts_casted:
+        if isinstance(part, str):
+            geometry_type = part
             break
 
     return geometry_type, srid
