@@ -499,6 +499,7 @@ def get_create_index_queries(
         get_rename_table_queries,
         COALESCE_UNIQUE_INDEX_FLAVORS,
     )
+    from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.dtypes.sql import (
         get_db_type_from_pd_type,
         get_pd_type_from_db_type,
@@ -793,8 +794,19 @@ def get_create_index_queries(
         cols_names = [sql_item_name(col, self.flavor, None) for col in cols if col]
         if not cols_names:
             continue
+
         cols_names_str = ", ".join(cols_names)
-        index_queries[ix_key] = [f"CREATE INDEX {ix_name} ON {_pipe_name} ({cols_names_str})"]
+        index_query_params_clause = f" ({cols_names_str})"
+        if self.flavor == 'postgis':
+            for col in cols:
+                col_typ = existing_cols_pd_types.get(cols[0], 'object')
+                if col_typ != 'object' and are_dtypes_equal(col_typ, 'geometry'):
+                    index_query_params_clause = f" USING GIST ({cols_names_str})"
+                    break
+
+        index_queries[ix_key] = [
+            f"CREATE INDEX {ix_name} ON {_pipe_name}{index_query_params_clause}"
+        ]
 
     indices_cols_str = ', '.join(
         list({

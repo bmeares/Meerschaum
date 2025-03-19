@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.9.0
+### v2.9.0 ― v2.9.1
 
 - **Add the dtype `geometry` (and `geography`).**  
   The new data type `geometry` adds support for syncing GIS data (e.g. WKB/WKT, GeoJSON, `shapely` objects, and `GeoDataFrames`).
