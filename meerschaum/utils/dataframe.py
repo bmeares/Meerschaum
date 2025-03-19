@@ -922,7 +922,12 @@ def get_geometry_cols(
     for col in geo_cols:
         try:
             sample_geo_series = gpd.GeoSeries(df[col], crs=None)
-            geometry_types = {geom.geom_type for geom in sample_geo_series}
+            geometry_types = {
+                geom.geom_type
+                for geom in sample_geo_series
+                if hasattr(geom, 'geom_type')
+            }
+            geometry_has_z = any(getattr(geom, 'has_z', False) for geom in sample_geo_series)
             srid = (
                 (
                     sample_geo_series.crs.sub_crs_list[0].to_epsg()
@@ -933,6 +938,8 @@ def get_geometry_cols(
                 else 0
             )
             geometry_type = list(geometry_types)[0] if len(geometry_types) == 1 else 'geometry'
+            if geometry_type != 'geometry' and geometry_has_z:
+                geometry_type = geometry_type + 'Z'
         except Exception:
             srid = 0
             geometry_type = 'geometry'
