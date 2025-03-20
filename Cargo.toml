@@ -1,0 +1,11 @@
+[package]
+name = "meerschaum"
+version = "3.0.0.dev1"
+edition = "2025"
+
+[lib]
+name = "meerschaum"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = "0.24.0"
