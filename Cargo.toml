@@ -1,7 +1,7 @@
 [package]
 name = "meerschaum"
-version = "3.0.0.dev1"
-edition = "2025"
+version = "3.0.0-alpha"
+edition = "2021"
 
 [lib]
 name = "meerschaum"
