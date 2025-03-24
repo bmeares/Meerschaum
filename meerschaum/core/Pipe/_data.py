@@ -679,12 +679,15 @@ def get_chunk_bounds(
     include_greater_than_end = not bounded and end is None
     if begin is None:
         begin = self.get_sync_time(newest=False, debug=debug)
+    consolidate_end_chunk = False
     if end is None:
         end = self.get_sync_time(newest=True, debug=debug)
         if end is not None and hasattr(end, 'tzinfo'):
             end += timedelta(minutes=1)
+            consolidate_end_chunk = True
         elif are_dtypes_equal(str(type(end)), 'int'):
             end += 1
+            consolidate_end_chunk = True
     if begin is None and end is None:
         return [(None, None)]
 
@@ -707,8 +710,14 @@ def get_chunk_bounds(
         num_chunks += 1
         if num_chunks >= max_chunks:
             raise ValueError(
-                f"Too many chunks of size '{interval_str(chunk_interval)}' between '{begin}' and '{end}'."
+                f"Too many chunks of size '{interval_str(chunk_interval)}' "
+                f"between '{begin}' and '{end}'."
             )
+
+    if num_chunks > 1 and consolidate_end_chunk:
+        last_bounds, second_last_bounds = chunk_bounds[-1], chunk_bounds[-2]
+        chunk_bounds = chunk_bounds[:-2]
+        chunk_bounds.append((second_last_bounds[0], last_bounds[1]))
 
     ### The chunk interval might be too large.
     if not chunk_bounds and end >= begin:

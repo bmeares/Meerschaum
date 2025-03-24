@@ -542,7 +542,7 @@ def serialize_geometry(
     geom: Any,
     geometry_format: str = 'wkb_hex',
     as_wkt: bool = False,
-) -> Union[str, Dict[str, Any]]:
+) -> Union[str, Dict[str, Any], None]:
     """
     Serialize geometry data as a hex-encoded well-known-binary string. 
 
@@ -560,6 +560,8 @@ def serialize_geometry(
     -------
     A string containing the geometry data.
     """
+    if value_is_null(geom):
+        return None
     shapely = mrsm.attempt_import('shapely', lazy=False)
     if geometry_format == 'geojson':
         geojson_str = shapely.to_geojson(geom)
@@ -579,7 +581,7 @@ def deserialize_geometry(geom_wkb: Union[str, bytes]):
     return shapely.wkb.loads(geom_wkb)
 
 
-def deserialize_bytes_string(data: str | None, force_hex: bool = False) -> bytes | None:
+def deserialize_bytes_string(data: Optional[str], force_hex: bool = False) -> Union[bytes, None]:
     """
     Given a serialized ASCII string of bytes data, return the original bytes.
     The input data may either be base64- or hex-encoded.

@@ -55,6 +55,8 @@ window.addEventListener(
         if (typeof lk === "string"){
             quote_str = lk.includes(" ") ? "'" : "";
             location_keys_str += " " + quote_str + lk + quote_str;
+        } else if (lk === null) {
+            location_keys_str += " None";
         }
     }
     if (location_keys_str === " -l"){

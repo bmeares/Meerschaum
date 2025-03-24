@@ -1355,6 +1355,39 @@ def truncate_string_sections(item: str, delimeter: str = '_', max_len: int = 128
     return delimeter.join([s for i, s in new_sections])
 
 
+def truncate_text_for_display(
+    text: str,
+    max_length: int = 50,
+    suffix: str = '…',
+) -> str:
+    """
+    Truncate a potentially long string for display purposes.
+
+    Parameters
+    ----------
+    text: str
+        The string to be truncated.
+
+    max_length: int, default 60
+        The maximum length of `text` before truncation.
+
+    suffix: str, default '…'
+        The string to append to the length of `text` to indicate truncation.
+
+    Returns
+    -------
+    A string of length `max_length` or less.
+    """
+    text_length = len(text)
+    if text_length <= max_length:
+        return text
+
+    suffix_length = len(suffix)
+
+    truncated_text = text[:max_length - suffix_length]
+    return truncated_text + suffix
+
+
 def separate_negation_values(
     vals: Union[List[str], Tuple[str]],
     negation_prefix: Optional[str] = None,

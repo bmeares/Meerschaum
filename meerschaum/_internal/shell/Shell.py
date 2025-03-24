@@ -10,6 +10,7 @@ import os
 from copy import deepcopy
 from itertools import chain
 import shlex
+import shutil
 
 from meerschaum.utils.typing import Union, SuccessTuple, Any, Callable, Optional, List, Dict
 from meerschaum.utils.packages import attempt_import
@@ -309,7 +310,7 @@ class Shell(cmd.Cmd):
         try:
             for c in hidden_commands:
                 self.hidden_commands.append(c)
-        except Exception as e:
+        except Exception:
             pass
 
         ### Finally, spawn the version update thread.
@@ -387,8 +388,9 @@ class Shell(cmd.Cmd):
         username: Optional[str] = None,
         executor_keys: Optional[str] = None,
     ):
-        from meerschaum.utils.formatting import ANSI, colored
+        from meerschaum.utils.formatting import ANSI, colored, UNICODE, get_console
         from meerschaum._internal.entry import _shell, get_shell
+        from meerschaum.utils.misc import truncate_text_for_display, remove_ansi
 
         cmd.__builtins__['input'] = input_with_sigint(
             _old_input,
@@ -414,7 +416,6 @@ class Shell(cmd.Cmd):
 
         if '{username}' in shell_attrs['_prompt']:
             if username is None:
-                from meerschaum.utils.misc import remove_ansi
                 from meerschaum.connectors.parse import parse_instance_keys
                 from meerschaum.connectors.sql import SQLConnector
                 try:
@@ -422,15 +423,19 @@ class Shell(cmd.Cmd):
                         remove_ansi(shell_attrs['instance_keys']),
                         construct=False,
                     )
-                    if 'username' not in conn_attrs:
-                        if 'uri' in conn_attrs:
+                    if conn_attrs and 'username' in conn_attrs:
+                        username = conn_attrs.get('username', '(no username)')
+                    elif conn_attrs and 'uri' in conn_attrs:
+                        try:
                             username = SQLConnector.parse_uri(conn_attrs['uri'])['username']
+                        except Exception:
+                            username = '(no username)'
                     else:
-                        username = conn_attrs['username']
+                        username = '(no username)'
                 except KeyError:
                     username = '(no username)'
-                except Exception as e:
-                    username = str(e)
+                except Exception:
+                    username = None
                 if username is None:
                    username = '(no username)'
             shell_attrs['username'] = (
@@ -463,12 +468,32 @@ class Shell(cmd.Cmd):
                     _c = colored(_c, **get_config('shell', 'ansi', 'prompt', 'rich'))
                 remainder_prompt[i] = _c
 
+        truncation_suffix = (
+            '…'
+            if UNICODE
+            else '...'
+        )
+        console = get_console()
+        truncation_kwargs = {
+            'suffix': truncation_suffix,
+            'max_length': int(console.size.width / 4),
+        }
+
         self.prompt = ''.join(remainder_prompt).replace(
-            '{username}', shell_attrs['username']
+            '{username}', truncate_text_for_display(
+                shell_attrs['username'],
+                **truncation_kwargs
+            )
         ).replace(
-            '{instance}', shell_attrs['instance']
+            '{instance}', truncate_text_for_display(
+                shell_attrs['instance'],
+                **truncation_kwargs
+            )
         ).replace(
-            '{executor_keys}', shell_attrs['executor_keys']
+            '{executor_keys}', truncate_text_for_display(
+                shell_attrs['executor_keys'],
+                **truncation_kwargs
+            )
         )
         shell_attrs['prompt'] = self.prompt
         ### flush stdout
@@ -1018,15 +1043,14 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     """
     Replace built-in `input()` with prompt_toolkit.prompt.
     """
-    from meerschaum.utils.formatting import CHARSET, ANSI, colored
+    from meerschaum.utils.formatting import CHARSET, ANSI, colored, UNICODE
     from meerschaum.connectors import is_connected, connectors
-    from meerschaum.utils.misc import remove_ansi
+    from meerschaum.utils.misc import remove_ansi, truncate_text_for_display
     from meerschaum.config import get_config
     import platform
     if shell is None:
         from meerschaum.actions import get_shell
         shell = get_shell()
-
     style = prompt_toolkit_styles.Style.from_dict({
         'bottom-toolbar': 'black',
     })
@@ -1039,46 +1063,71 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             return shell_attrs['_old_bottom_toolbar']
         size = os.get_terminal_size()
         num_cols, num_lines = size.columns, size.lines
-
+        truncation_suffix = (
+            '…'
+            if UNICODE
+            else '...'
+        )
+        truncation_kwargs = {
+            'suffix': truncation_suffix,
+            'max_length': int(num_cols / 4),
+        }
+        instance_text = truncate_text_for_display(
+            remove_ansi(shell_attrs['instance_keys']),
+            **truncation_kwargs
+        )
         instance_colored = (
             colored(
-                remove_ansi(shell_attrs['instance_keys']),
+                instance_text,
                 'on ' + get_config('shell', 'ansi', 'instance', 'rich', 'style')
             )
             if ANSI
-            else colored(shell_attrs['instance_keys'], 'on white')
+            else colored(instance_text, 'on white')
+        )
+        repo_text = truncate_text_for_display(
+            remove_ansi(shell_attrs['repo_keys']),
+            **truncation_kwargs
         )
         repo_colored = (
             colored(
-                remove_ansi(shell_attrs['repo_keys']),
+                repo_text,
                 'on ' + get_config('shell', 'ansi', 'repo', 'rich', 'style')
             )
             if ANSI
             else colored(shell_attrs['repo_keys'], 'on white')
         )
+        executor_text = truncate_text_for_display(
+            remove_ansi(shell_attrs['executor_keys']),
+            **truncation_kwargs
+        )
         executor_colored = (
             colored(
-                remove_ansi(shell_attrs['executor_keys']),
+                executor_text,
                 'on ' + get_config('shell', 'ansi', 'executor', 'rich', 'style')
             )
             if ANSI
-            else colored(remove_ansi(shell_attrs['executor_keys']), 'on white')
+            else colored(executor_text, 'on white')
         )
 
         try:
             typ, label = shell_attrs['instance_keys'].split(':', maxsplit=1)
             connected = typ in connectors and label in connectors[typ]
-        except Exception as e:
+        except Exception:
             connected = False
         last_connected = connected
-        connected_str = (('dis' if not connected else '') + 'connected')
+        connected_str = truncate_text_for_display(
+            ('dis' if not connected else '') + 'connected',
+            **truncation_kwargs
+        )
+        connected_icon = get_config(
+            'formatting', connected_str, CHARSET, 'icon', warn=False,
+        ) or ''
         connection_text = (
-            get_config(
-                'formatting', connected_str, CHARSET, 'icon'
-            ) + ' ' + (
-                colored(connected_str.capitalize(), 'on ' + get_config(
-                    'formatting', connected_str, 'ansi', 'rich', 'style'
-                ) + '  ') if ANSI else (colored(connected_str.capitalize(), 'on white') + ' ')
+            connected_icon + ' ' + (
+                colored(connected_str.capitalize(), 'on ' + (get_config(
+                    'formatting', connected_str, 'ansi', 'rich', 'style',
+                    warn=False,
+                ) or '') + '  ') if ANSI else (colored(connected_str.capitalize(), 'on white') + ' ')
             )
         )
 
@@ -1104,8 +1153,8 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
         _args = []
         for a in args:
             try:
-                _a = prompt_toolkit_formatted_text.ANSI(a)
-            except Exception as e:
+                _a = prompt_toolkit_formatted_text.ANSI(a) if isinstance(a, str) else str(a)
+            except Exception:
                 _a = a
             _args.append(_a)
         try:
