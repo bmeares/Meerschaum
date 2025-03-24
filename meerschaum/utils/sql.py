@@ -975,12 +975,12 @@ def build_where(
     negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
     try:
         params_json = json.dumps(params)
-    except Exception as e:
+    except Exception:
         params_json = str(params)
     bad_words = ['drop ', '--', ';']
     for word in bad_words:
         if word in params_json.lower():
-            warn(f"Aborting build_where() due to possible SQL injection.")
+            warn("Aborting build_where() due to possible SQL injection.")
             return ''
 
     query_flavor = getattr(connector, 'flavor', flavor) if connector is not None else flavor
@@ -2539,9 +2539,10 @@ def get_postgis_geo_columns_types(
     debug: bool = False,
 ) -> Dict[str, str]:
     """
-    Return the 
+    Return a dictionary mapping PostGIS geometry column names to geometry types.
     """
     from meerschaum.utils.dtypes import get_geometry_type_srid
+    sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     default_type, default_srid = get_geometry_type_srid()
     default_type = default_type.upper()
 
@@ -2550,7 +2551,7 @@ def get_postgis_geo_columns_types(
     schema = schema or 'public'
     truncated_schema_name = truncate_item_name(schema, flavor='postgis')
     truncated_table_name = truncate_item_name(table, flavor='postgis')
-    query = (
+    query = sqlalchemy.text(
         "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", \"srid\"\n"
         "FROM \"geometry_columns\"\n"
         f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
@@ -2601,6 +2602,9 @@ def get_create_schema_if_not_exists_queries(
         return []
     
     if flavor in NO_SCHEMA_FLAVORS:
+        return []
+
+    if schema == DEFAULT_SCHEMA_FLAVORS.get(flavor, None):
         return []
 
     clean(schema)

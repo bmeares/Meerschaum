@@ -491,6 +491,9 @@ def test_sync_inplace_upsert(flavor: str):
     Verify that in-place syncing works as expected.
     """
     from meerschaum.utils.sql import sql_item_name
+    shapely = mrsm.attempt_import('shapely')
+    geom = shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]])
+    geom2 = shapely.MultiLineString([[[1, 1], [2, 3]], [[5, 5], [6, 7]]])
     conn = conns[flavor]
     if conn.type != 'sql':
         return
@@ -500,7 +503,7 @@ def test_sync_inplace_upsert(flavor: str):
         'test', 'inplace', 'upsert',
         instance=conn,
         columns={'datetime': 'dt', 'id': 'id'},
-        indices={'all': ['dt', 'id']},
+        indices={'all': ['dt', 'id', 'geom'], 'geom': 'geom'},
         upsert=True,
     )
     dest_pipe = Pipe(str(conn), 'inplace', 'upsert', instance=conn)
@@ -531,11 +534,11 @@ def test_sync_inplace_upsert(flavor: str):
     )
 
     docs = [
-        {'dt': '2023-01-01 00:00:00', 'id': UUID('9f680a72-b5f7-4336-8f7c-30927ec21cb1')},
-        {'dt': '2023-01-01 00:01:00', 'id': UUID('335b0322-4b54-40aa-8019-07666cbefa52')},
-        {'dt': '2023-01-01 00:02:00', 'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'd': 7},
-        {'dt': '2023-01-01 00:03:00', 'id': UUID('7e194a2c-26b4-4632-af02-e0a8b2c6ce1e')},
-        {'dt': '2023-01-01 00:04:00', 'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e')},
+        {'dt': '2023-01-01 00:00:00', 'id': UUID('9f680a72-b5f7-4336-8f7c-30927ec21cb1'), 'geom': geom},
+        {'dt': '2023-01-01 00:01:00', 'id': UUID('335b0322-4b54-40aa-8019-07666cbefa52'), 'geom': geom},
+        {'dt': '2023-01-01 00:02:00', 'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'geom': geom, 'd': 7},
+        {'dt': '2023-01-01 00:03:00', 'id': UUID('7e194a2c-26b4-4632-af02-e0a8b2c6ce1e'), 'geom': geom},
+        {'dt': '2023-01-01 00:04:00', 'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e'), 'geom': geom},
     ]
     success, msg = source_pipe.sync(docs)
     assert success, msg
@@ -565,7 +568,7 @@ def test_sync_inplace_upsert(flavor: str):
     update_docs = [
         {'dt': '2023-01-01 00:00:00', 'id': UUID('9f680a72-b5f7-4336-8f7c-30927ec21cb1'), 'a': 1},
         {'dt': '2023-01-01 00:01:00', 'id': UUID('335b0322-4b54-40aa-8019-07666cbefa52'), 'a': 2},
-        {'dt': '2023-01-01 00:02:00', 'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'a': 3},
+        {'dt': '2023-01-01 00:02:00', 'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'a': 3, 'geom': geom2},
         {'dt': '2023-01-01 00:03:00', 'id': UUID('7e194a2c-26b4-4632-af02-e0a8b2c6ce1e'), 'a': 4},
         {'dt': '2023-01-01 00:04:00', 'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e'), 'a': 5},
     ]

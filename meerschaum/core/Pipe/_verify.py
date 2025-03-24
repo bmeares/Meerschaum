@@ -282,6 +282,7 @@ def verify(
             )
         bounds_success_tuples[first_chunk_bounds] = (first_success, first_msg)
         info(f"Completed first chunk for {self}:\n    {first_label}\n")
+        chunk_bounds = chunk_bounds[1:]
 
     pool = get_pool(workers=workers)
     batches = self.get_chunk_bounds_batches(chunk_bounds, batchsize=batchsize, workers=workers)
