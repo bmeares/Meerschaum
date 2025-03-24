@@ -4,6 +4,35 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.9.1
+
+- **Fix in-place syncs with `GEOMETRY` columns.**
+  The query to retrieve `GEOMETRY` data types for PostGIS has been fixed.
+  
+- **Consolidate 1-minute chunks in `Pipe.get_chunk_bounds()`.**  
+  The chunk bounds returned from `Pipe.get_chunk_bounds()` (without specifiying an `end`) now consolidate the 1-minute chunk into the last chunk:
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe('demo', 'chunk_bounds', columns={'datetime': 'dt'}, instance='sql:local')
+  pipe.sync([
+      {'dt': '2025-01-01'},
+      {'dt': '2025-01-02'},
+  ])
+  mrsm.pprint(pipe.get_chunk_bounds(bounded=True))
+  # [
+  #   (
+  #       datetime.datetime(2025, 1, 1, 0, 0, tzinfo=datetime.timezone.utc),
+  #       datetime.datetime(2025, 1, 2, 0, 1, tzinfo=datetime.timezone.utc)
+  #   )
+  # ] 
+  ```
+
+- **Remove unnecessary `CREATE SCHEMA IF EXISTS` checks.**
+- **Fix unsupported syntax for Python 3.8.**
+- **Truncate long connector keys in the Shell prompt.**
+- **Fix null location keys behavior for pipes cards.**
+
 ### v2.9.0 ― v2.9.1
 
 - **Add the dtype `geometry` (and `geography`).**  
