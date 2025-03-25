@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.9.2
+### v2.9.2 – v2.9.3
 
 - **Fix in-place syncs with `GEOMETRY` columns.**
   The query to retrieve `GEOMETRY` data types for PostGIS has been fixed.
@@ -32,6 +32,7 @@ This is the current release cycle, so stay tuned for future releases!
 - **Fix unsupported syntax for Python 3.8.**
 - **Truncate long connector keys in the Shell prompt.**
 - **Fix null location keys behavior for pipes cards.**
+- **Fix autoincrementing primary keys for custom schemas.**
 
 ### v2.9.0 ― v2.9.1
 
