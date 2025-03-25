@@ -460,7 +460,7 @@ columns_indices_queries = {
 }
 reset_autoincrement_queries: Dict[str, Union[str, List[str]]] = {
     'default': """
-        SELECT SETVAL(pg_get_serial_sequence('{table_name}', '{column_name}'), {val})
+        SELECT SETVAL(pg_get_serial_sequence('{table_name}', '{column}'), {val})
         FROM {table_name}
     """,
     'mssql': """
