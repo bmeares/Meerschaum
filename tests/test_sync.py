@@ -926,7 +926,6 @@ def test_autoincrement_primary_key(flavor: str):
         },
         parameters={
             'autoincrement': True,
-            'schema': 'test',
         },
         dtypes={id_col: 'int'},
     )
