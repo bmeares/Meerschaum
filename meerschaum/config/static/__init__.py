@@ -174,6 +174,7 @@ STATIC_CONFIG: Dict[str, Any] = {
         'author_email': 'bennett.meares@gmail.com',
         'maintainer_email': 'bennett.meares@gmail.com',
         'license': 'Apache Software License 2.0',
+        'license_files': ('LICENSE',),
     },
 }
 
