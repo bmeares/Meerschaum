@@ -1089,32 +1089,59 @@ class Daemon:
         """Write the properties dictionary to the properties JSON file
         (only if self.properties exists).
         """
+        from meerschaum.utils.misc import generate_password
         success, msg = (
             False,
             f"No properties to write for daemon '{self.daemon_id}'."
         )
-        if self.properties is not None:
+        backup_path = self.properties_path.parent / (generate_password(8) + '.json')
+        props = self.properties
+        if props is not None:
             try:
                 self.path.mkdir(parents=True, exist_ok=True)
+                if self.properties_path.exists():
+                    self.properties_path.rename(backup_path)
                 with open(self.properties_path, 'w+', encoding='utf-8') as properties_file:
-                    json.dump(self.properties, properties_file)
+                    json.dump(props, properties_file)
                 success, msg = True, 'Success'
             except Exception as e:
                 success, msg = False, str(e)
+
+        try:
+            if backup_path.exists():
+                if not success:
+                    backup_path.rename(self.properties_path)
+                else:
+                    backup_path.unlink()
+        except Exception as e:
+            success, msg = False, str(e)
+
         return success, msg
 
     def write_pickle(self) -> SuccessTuple:
         """Write the pickle file for the daemon."""
         import pickle
         import traceback
+        from meerschaum.utils.misc import generate_password
+        backup_path = self.pickle_path.parent / (generate_password(7) + '.pkl')
         try:
             self.path.mkdir(parents=True, exist_ok=True)
+            if self.pickle_path.exists():
+                self.pickle_path.rename(backup_path)
             with open(self.pickle_path, 'wb+') as pickle_file:
                 pickle.dump(self, pickle_file)
             success, msg = True, "Success"
         except Exception as e:
             success, msg = False, str(e)
             traceback.print_exception(type(e), e, e.__traceback__)
+        try:
+            if backup_path.exists():
+                if not success:
+                    backup_path.rename(self.pickle_path)
+                else:
+                    backup_path.unlink()
+        except Exception as e:
+            success, msg = False, str(e)
         return success, msg
 
 

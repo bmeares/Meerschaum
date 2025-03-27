@@ -503,7 +503,7 @@ def test_sync_inplace_upsert(flavor: str):
         'test', 'inplace', 'upsert',
         instance=conn,
         columns={'datetime': 'dt', 'id': 'id'},
-        indices={'all': ['dt', 'id', 'geom'], 'geom': 'geom'},
+        indices={'all': ['dt', 'id']},
         upsert=True,
     )
     dest_pipe = Pipe(str(conn), 'inplace', 'upsert', instance=conn)
@@ -916,16 +916,18 @@ def test_autoincrement_primary_key(flavor: str):
         return
     pipe = mrsm.Pipe('test_sync', 'primary_key', 'autoincrement', instance=conn)
     pipe.delete()
+    id_col = 'My ID'
     pipe = mrsm.Pipe(
         'test_sync', 'primary_key', 'autoincrement',
         instance=conn,
+        target="Test Sync Primary Key Autoincrement",
         columns={
-            'primary': 'id',
+            'primary': id_col,
         },
         parameters={
             'autoincrement': True,
         },
-        dtypes={'id': 'int'},
+        dtypes={id_col: 'int'},
     )
     success, msg = pipe.sync([
         {'color': 'red'},
@@ -933,19 +935,19 @@ def test_autoincrement_primary_key(flavor: str):
     ], debug=debug)
     assert success
 
-    df = pipe.get_data(['id'])
-    assert list(df['id']) == [1, 2]
+    df = pipe.get_data([id_col])
+    assert list(df[id_col]) == [1, 2]
 
-    success, msg = pipe.sync([{'id': 1, 'color': 'green'}], debug=debug)
+    success, msg = pipe.sync([{id_col: 1, 'color': 'green'}], debug=debug)
     assert success, msg
 
-    df = pipe.get_data(params={'id': 1})
+    df = pipe.get_data(params={id_col: 1})
     assert df['color'][0] == 'green'
 
-    success, msg = pipe.sync([{'id': 4, 'shirt_size': 'L'}, {'id': 5, 'shirt_size': 'M'}], debug=debug)
+    success, msg = pipe.sync([{id_col: 4, 'shirt_size': 'L'}, {id_col: 5, 'shirt_size': 'M'}], debug=debug)
     assert success
 
-    df = pipe.get_data(['shirt_size'], params={'id': [4, 5]}, debug=debug)
+    df = pipe.get_data(['shirt_size'], params={id_col: [4, 5]}, debug=debug)
     assert list(df['shirt_size']) == ['L', 'M']
 
     success, msg = pipe.sync([{'color': 'purple'}, {'shirt_size': 'S'}], debug=debug)
@@ -953,7 +955,7 @@ def test_autoincrement_primary_key(flavor: str):
 
     df = pipe.get_data()
     print(df)
-    df = pipe.get_data(['shirt_size'], params={'id': 7}, debug=debug)
+    df = pipe.get_data(['shirt_size'], params={id_col: 7}, debug=debug)
     assert df['shirt_size'][0] == 'S'
 
     assert pipe.get_rowcount(debug=debug) == 6
