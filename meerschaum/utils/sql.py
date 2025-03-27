@@ -460,11 +460,11 @@ columns_indices_queries = {
 }
 reset_autoincrement_queries: Dict[str, Union[str, List[str]]] = {
     'default': """
-        SELECT SETVAL(pg_get_serial_sequence('{table}', '{column}'), {val})
+        SELECT SETVAL(pg_get_serial_sequence('{table_name}', '{column}'), {val})
         FROM {table_name}
     """,
     'mssql': """
-        DBCC CHECKIDENT ('{table}', RESEED, {val})
+        DBCC CHECKIDENT ('{table_name}', RESEED, {val})
     """,
     'mysql': """
         ALTER TABLE {table_name} AUTO_INCREMENT = {val}
