@@ -448,7 +448,6 @@ def get_pipe_data(
             debug=debug,
         )
     ]
-    print(f"{ix_docs=}")
     try:
         docs_strings = [
             self.get(
