@@ -503,7 +503,7 @@ def test_sync_inplace_upsert(flavor: str):
         'test', 'inplace', 'upsert',
         instance=conn,
         columns={'datetime': 'dt', 'id': 'id'},
-        indices={'all': ['dt', 'id', 'geom'], 'geom': 'geom'},
+        indices={'all': ['dt', 'id']},
         upsert=True,
     )
     dest_pipe = Pipe(str(conn), 'inplace', 'upsert', instance=conn)
