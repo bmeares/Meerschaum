@@ -47,6 +47,7 @@ setup_kw_args = {
     'author_email'                  : setup_cf['author_email'],
     'maintainer_email'              : setup_cf['maintainer_email'],
     'license'                       : setup_cf['license'],
+    'license_files'                 : setup_cf['license_files'],
     'packages'                      : setuptools.find_packages(exclude=['*test*']),
     'install_requires'              : extras['required'],
     'extras_require'                : extras,
@@ -65,7 +66,6 @@ setup_kw_args = {
     'classifiers'                   : [
         "Development Status :: 5 - Production/Stable",
         "Intended Audience :: System Administrators",
-        "License :: OSI Approved :: Apache Software License",
         "Operating System :: POSIX :: Linux",
         "Operating System :: Microsoft :: Windows",
         "Operating System :: MacOS",
