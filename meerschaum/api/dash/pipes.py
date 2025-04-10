@@ -343,6 +343,7 @@ def accordion_items_from_pipe(
         items_titles['sql'] = '📃 SQL Query'
     items_titles.update({
         'recent-data': '🗃️ Recent Data',
+        'query-data': '🔍 Query Data',
         'sync-data': '📝 Sync Documents',
     })
 
@@ -668,6 +669,68 @@ def accordion_items_from_pipe(
         except Exception:
             table = html.P("Could not retrieve recent data.")
         items_bodies['recent-data'] = table
+
+    if 'query-data' in active_items:
+        query_editor = dash_ace.DashAceEditor(
+            value='{\n    \n}',
+            mode='norm',
+            tabSize=4,
+            theme='twilight',
+            id={'type': 'query-editor', 'index': json.dumps(pipe.meta)},
+            width='100%',
+            height='200px',
+            readOnly=False,
+            showGutter=True,
+            showPrintMargin=False,
+            highlightActiveLine=True,
+            wrapEnabled=True,
+            style={'min-height': '120px'},
+        )
+        query_data_button = dbc.Button(
+            "Query",
+            id={'type': 'query-data-button', 'index': json.dumps(pipe.meta)},
+        )
+
+        begin_end_input_group = dbc.InputGroup(
+            [
+                dbc.Input(
+                    id={'type': 'query-data-begin-input', 'index': json.dumps(pipe.meta)},
+                    placeholder="Begin",
+                ),
+                dbc.Input(
+                    id={'type': 'query-data-end-input', 'index': json.dumps(pipe.meta)},
+                    placeholder="End",
+                ),
+            ],
+            size="sm",
+        )
+
+        limit_input = dbc.Input(
+            type="number",
+            min=0,
+            max=100,
+            value=10,
+            step=1,
+            placeholder="Limit",
+            id={'type': 'limit-input', 'index': json.dumps(pipe.meta)},
+        )
+        query_result_div = html.Div(id={'type': 'query-result-div', 'index': json.dumps(pipe.meta)})
+
+        items_bodies['query-data'] = html.Div([
+            query_editor,
+            html.Br(),
+            dbc.Row(
+                [
+                    dbc.Col([query_data_button], lg=2, md=3, sm=4, xs=6, width=2),
+                    dbc.Col([begin_end_input_group], lg=3, md=3, sm=4, width=4),
+                    dbc.Col(html.Div([limit_input, dbc.FormText("Row Limit")]), lg=2, md=3, sm=4, xs=6, width=2),
+                ],
+                justify="between",
+            ),
+            dbc.Row([
+                dbc.Col([query_result_div], width=True),
+            ]),
+        ])
 
     if 'sync-data' in active_items:
         backtrack_df = pipe.get_backtrack_data(debug=debug, limit=1)

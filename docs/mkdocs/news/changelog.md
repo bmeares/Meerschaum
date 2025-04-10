@@ -4,7 +4,15 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.9.2 – v2.9.3
+### v2.9.5
+
+- **Add the `Query Data` dropdown to pipes' cards.**  
+  Similar to the `Recent Data` dropdown, you can now explore a pipe's data with the `Query Data` dropdown. This supports `begin`, `end`, `params`, and `limit` filtering.
+  
+- **Additional fixes for in-place syncs on PostGIS.**  
+  Geometry columns are now correctly coalesced for PostGIS.
+
+### v2.9.2 – v2.9.4
 
 - **Fix in-place syncs with `GEOMETRY` columns.**
   The query to retrieve `GEOMETRY` data types for PostGIS has been fixed.

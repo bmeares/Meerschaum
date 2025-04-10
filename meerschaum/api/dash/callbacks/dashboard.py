@@ -949,6 +949,37 @@ def sync_documents_click(n_clicks, sync_editor_text):
 
     return alert_from_success_tuple((success, msg))
 
+@dash_app.callback(
+    Output({'type': 'query-result-div', 'index': MATCH}, 'children'),
+    Input({'type': 'query-data-button', 'index': MATCH}, 'n_clicks'),
+    State({'type': 'query-editor', 'index': MATCH}, 'value'),
+    State({'type': 'limit-input', 'index': MATCH}, 'value'),
+    State({'type': 'query-data-begin-input', 'index': MATCH}, 'value'),
+    State({'type': 'query-data-end-input', 'index': MATCH}, 'value'),
+)
+def query_data_click(n_clicks, query_editor_text, limit_value, begin, end):
+    triggered = dash.callback_context.triggered
+    if triggered[0]['value'] is None:
+        raise PreventUpdate
+    pipe = pipe_from_ctx(triggered, 'n_clicks')
+    if pipe is None:
+        raise PreventUpdate
+
+    try:
+        params_query = json.loads(query_editor_text)
+    except Exception as e:
+        return alert_from_success_tuple((False, f"Invalid query:\n{e}"))
+
+    if limit_value is None:
+        limit_value = 100
+
+    df = pipe.get_data(params=params_query, debug=debug, begin=begin, end=end, limit=limit_value)
+    if df is None:
+        return [html.P("No data returned.")]
+    df = df.astype(str)
+    table = dbc.Table.from_dataframe(df, bordered=False, hover=True)
+    return table
+
 
 dash_app.clientside_callback(
     """

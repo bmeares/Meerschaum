@@ -620,7 +620,7 @@ def test_sync_inplace_no_datetime(flavor: str):
         str(conn), 'inplace', 'no-datetime',
         instance=conn,
         columns={'id': 'id'},
-        dtypes={'a': 'int', 'id': 'uuid'},
+        dtypes={'a': 'int', 'id': 'uuid', 'geom': 'geometry'},
         upsert=False,
         static=False,
         parameters={
@@ -630,12 +630,16 @@ def test_sync_inplace_no_datetime(flavor: str):
         },
     )
 
+    shapely = mrsm.attempt_import('shapely')
+    geom = shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]])
+    geom2 = shapely.MultiLineString([[[1, 1], [2, 3]], [[5, 5], [6, 7]]])
+
     docs = [
-        {'id': UUID('9f680a72-b5f7-4336-8f7c-30927ec21cb1')},
-        {'id': UUID('335b0322-4b54-40aa-8019-07666cbefa52')},
-        {'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'd': 7},
-        {'id': UUID('7e194a2c-26b4-4632-af02-e0a8b2c6ce1e')},
-        {'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e')},
+        {'id': UUID('9f680a72-b5f7-4336-8f7c-30927ec21cb1'), 'geom': geom},
+        {'id': UUID('335b0322-4b54-40aa-8019-07666cbefa52'), 'geom': geom},
+        {'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'd': 7, 'geom': geom},
+        {'id': UUID('7e194a2c-26b4-4632-af02-e0a8b2c6ce1e'), 'geom': geom},
+        {'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e'), 'geom': geom},
     ]
     success, msg = source_pipe.sync(docs)
     assert success, msg
@@ -653,7 +657,7 @@ def test_sync_inplace_no_datetime(flavor: str):
         {'id': UUID('8b7bf428-d0ed-40fa-951b-bb115a03eac5'), 'c': 8},
         {'id': UUID('36aed9b4-4c7a-4566-a321-d1774ef1015a'), 'c': 7},
         {'id': UUID('7a4ef6cc-37d8-4899-9ddb-07b4998d0b53'), 'c': 6},
-        {'id': UUID('59244211-fdb8-46f1-b14b-8631146758c0'), 'c': 5},
+        {'id': UUID('59244211-fdb8-46f1-b14b-8631146758c0'), 'c': 5,},
     ]
     success, msg = source_pipe.sync(new_docs)
     assert success, msg
@@ -665,7 +669,7 @@ def test_sync_inplace_no_datetime(flavor: str):
     update_docs = [
         {'id': UUID('9f680a72-b5f7-4336-8f7c-30927ec21cb1'), 'a': 1},
         {'id': UUID('335b0322-4b54-40aa-8019-07666cbefa52'), 'a': 2},
-        {'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'a': 3},
+        {'id': UUID('d7d42913-2dfe-47d6-b0e0-7f71e13e814e'), 'a': 3, 'geom': geom2},
         {'id': UUID('7e194a2c-26b4-4632-af02-e0a8b2c6ce1e'), 'a': 4},
         {'id': UUID('31e5fd08-fb81-47f4-8a1c-0c9dcf08ac5e'), 'a': 5},
     ]
@@ -681,6 +685,7 @@ def test_sync_inplace_no_datetime(flavor: str):
     assert len(df) == 1
     assert df['a'][0] == 3
     assert df['d'][0] == 7
+    assert df['geom'][0] == geom2
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
