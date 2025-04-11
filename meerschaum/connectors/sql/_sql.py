@@ -928,7 +928,7 @@ def to_sql(
             df[col] = df[col].apply(
                 functools.partial(
                     serialize_geometry,
-                    as_wkt=(self.flavor == 'mssql')
+                    geometry_format=('wkt' if self.flavor == 'mssql' else 'wkb_hex'),
                 )
             )
 

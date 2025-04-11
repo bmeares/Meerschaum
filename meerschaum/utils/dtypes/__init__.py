@@ -541,7 +541,6 @@ def serialize_bytes(data: bytes) -> str:
 def serialize_geometry(
     geom: Any,
     geometry_format: str = 'wkb_hex',
-    as_wkt: bool = False,
 ) -> Union[str, Dict[str, Any], None]:
     """
     Serialize geometry data as a hex-encoded well-known-binary string. 
@@ -588,7 +587,7 @@ def deserialize_bytes_string(data: Optional[str], force_hex: bool = False) -> Un
 
     Parameters
     ----------
-    data: str | None
+    data: Optional[str]
         The string to be deserialized into bytes.
         May be base64- or hex-encoded (prefixed with `'\\x'`).
 
@@ -625,7 +624,7 @@ def deserialize_base64(data: str) -> bytes:
     return base64.b64decode(data)
 
 
-def encode_bytes_for_bytea(data: bytes, with_prefix: bool = True) -> str | None:
+def encode_bytes_for_bytea(data: bytes, with_prefix: bool = True) -> Union[str, None]:
     """
     Return the given bytes as a hex string for PostgreSQL's `BYTEA` type.
     """
