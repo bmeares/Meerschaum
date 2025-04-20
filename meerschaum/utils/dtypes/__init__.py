@@ -309,7 +309,7 @@ def attempt_cast_to_geometry(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         try:
             return shapely.from_geojson(json.dumps(value))
-        except Exception as e:
+        except Exception:
             return value
 
     value_is_wkt = geometry_is_wkt(value)
@@ -541,6 +541,7 @@ def serialize_bytes(data: bytes) -> str:
 def serialize_geometry(
     geom: Any,
     geometry_format: str = 'wkb_hex',
+    srid: Optional[int] = None,
 ) -> Union[str, Dict[str, Any], None]:
     """
     Serialize geometry data as a hex-encoded well-known-binary string. 
@@ -555,19 +556,30 @@ def serialize_geometry(
         Accepted formats are `wkb_hex` (well-known binary hex string),
         `wkt` (well-known text), and `geojson`.
 
+    srid: Optional[int], default None
+        If provided, use this as the source CRS when serializing to GeoJSON.
+
     Returns
     -------
     A string containing the geometry data.
     """
     if value_is_null(geom):
         return None
-    shapely = mrsm.attempt_import('shapely', lazy=False)
+    shapely, shapely_ops, pyproj = mrsm.attempt_import(
+        'shapely', 'shapely.ops', 'pyproj',
+        lazy=False,
+    )
     if geometry_format == 'geojson':
+        if srid:
+            transformer = pyproj.Transformer.from_crs(f"EPSG:{srid}", "EPSG:4326", always_xy=True)
+            geom = shapely_ops.transform(transformer.transform, geom)
         geojson_str = shapely.to_geojson(geom)
         return json.loads(geojson_str)
 
     if hasattr(geom, 'wkb_hex'):
-        return geom.wkb_hex if geometry_format == 'wkb_hex' else geom.wkt
+        if geometry_format == "wkb_hex":
+            return shapely.to_wkb(geom, hex=True, include_srid=True)
+        return shapely.to_wkt(geom)
 
     return str(geom)
 

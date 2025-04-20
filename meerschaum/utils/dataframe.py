@@ -1003,6 +1003,7 @@ def enforce_dtypes(
         attempt_cast_to_bytes,
         attempt_cast_to_geometry,
         coerce_timezone as _coerce_timezone,
+        get_geometry_type_srid,
     )
     from meerschaum.utils.dtypes.sql import get_numeric_precision_scale
     pandas = mrsm.attempt_import('pandas')
@@ -1028,11 +1029,11 @@ def enforce_dtypes(
         for col, typ in dtypes.items()
         if typ.startswith('numeric')
     ]
-    geometry_cols = [
-        col
+    geometry_cols_types_srids = {
+        col: get_geometry_type_srid(typ, default_srid=0)
         for col, typ in dtypes.items()
         if typ.startswith('geometry') or typ.startswith('geography')
-    ]
+    }
     uuid_cols = [
         col
         for col, typ in dtypes.items()
@@ -1122,12 +1123,12 @@ def enforce_dtypes(
             if col in df.columns:
                 df[col] = _coerce_timezone(df[col], strip_utc=strip_timezone)
 
-    if geometry_cols:
+    if geometry_cols_types_srids:
         geopandas = mrsm.attempt_import('geopandas')
         if debug:
-            dprint(f"Checking for geometry: {geometry_cols}")
+            dprint(f"Checking for geometry: {list(geometry_cols_types_srids)}")
         parsed_geom_cols = []
-        for col in geometry_cols:
+        for col in geometry_cols_types_srids:
             try:
                 df[col] = df[col].apply(attempt_cast_to_geometry)
                 parsed_geom_cols.append(col)
@@ -1139,10 +1140,19 @@ def enforce_dtypes(
             if debug:
                 dprint(f"Converting to GeoDataFrame (geometry column: '{parsed_geom_cols[0]}')...")
             try:
-                df = geopandas.GeoDataFrame(df, geometry=parsed_geom_cols[0])
-                df.rename_geometry(parsed_geom_cols[0], inplace=True)
+                _, default_srid = geometry_cols_types_srids[parsed_geom_cols[0]]
+                df = geopandas.GeoDataFrame(df, geometry=parsed_geom_cols[0], crs=default_srid)
+                for col, (_, srid) in geometry_cols_types_srids.items():
+                    if debug:
+                        dprint(f"Setting '{col}' to SRID '{srid}'...")
+                    if srid:
+                        _ = df[col].set_crs(srid)
+                if parsed_geom_cols[0] not in df.columns:
+                    df.rename_geometry(parsed_geom_cols[0], inplace=True)
             except (ValueError, TypeError):
-                pass
+                if debug:
+                    import traceback
+                    dprint(f"Failed to cast to GeoDataFrame:\n{traceback.format_exc()}")
 
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):
