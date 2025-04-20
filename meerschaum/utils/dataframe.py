@@ -1752,6 +1752,10 @@ def to_json(
     bytes_cols = get_bytes_cols(df)
     numeric_cols = get_numeric_cols(df)
     geometry_cols = get_geometry_cols(df)
+    geometry_cols_srids = {
+        col: int((getattr(df[col].crs, 'srs', '') or '').split(':', maxsplit=1)[-1] or '0')
+        for col in geometry_cols
+    } if 'geodataframe' in str(type(df)).lower() else {}
     if safe_copy and bool(uuid_cols or bytes_cols or geometry_cols or numeric_cols):
         df = df.copy()
     for col in uuid_cols:
@@ -1763,10 +1767,12 @@ def to_json(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for col in geometry_cols:
+            srid = geometry_cols_srids.get(col, None) or None
             df[col] = df[col].apply(
                 functools.partial(
                     serialize_geometry,
                     geometry_format=geometry_format,
+                    srid=srid,
                 )
             )
     return df.infer_objects(copy=False).fillna(pd.NA).to_json(
