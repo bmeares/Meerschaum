@@ -338,6 +338,7 @@ class Daemon:
                     result = False, str(e)
                 finally:
                     _results[self.daemon_id] = result
+                    self.properties['result'] = result
 
                     if keep_daemon_output:
                         self._capture_process_timestamp('ended')

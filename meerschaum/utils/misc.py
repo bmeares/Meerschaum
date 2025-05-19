@@ -1442,7 +1442,7 @@ def get_in_ex_params(params: Optional[Dict[str, Any]]) -> Dict[str, Tuple[List[A
         col: separate_negation_values(
             (
                 val
-                if isinstance(val, (list, tuple))
+                if isinstance(val, (list, tuple, set)) or hasattr(val, 'astype')
                 else [val]
             )
         )

@@ -79,7 +79,8 @@ def get_jobs(
         }
 
     def _get_systemd_jobs():
-        conn = mrsm.get_connector('systemd')
+        from meerschaum.jobs.systemd import SystemdExecutor
+        conn = SystemdExecutor('systemd')
         jobs = conn.get_jobs(debug=debug)
         return {
             name: job

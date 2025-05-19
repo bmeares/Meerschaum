@@ -588,8 +588,18 @@ def deserialize_geometry(geom_wkb: Union[str, bytes]):
     """
     Deserialize a WKB string into a shapely geometry object.
     """
-    shapely = mrsm.attempt_import(lazy=False)
+    shapely = mrsm.attempt_import('shapely', lazy=False)
     return shapely.wkb.loads(geom_wkb)
+
+
+def project_geometry(geom, srid: int, to_srid: int = 4326):
+    """
+    Project a shapely geometry object to a new CRS (SRID).
+    """
+    pyproj, shapely_ops = mrsm.attempt_import('pyproj', 'shapely.ops', lazy=False)
+    print(f"PROJECT GEOMETRY\n{srid=} {to_srid=}")
+    transformer = pyproj.Transformer.from_crs(f"EPSG:{srid}", f"EPSG:{to_srid}", always_xy=True)
+    return shapely_ops.transform(transformer.transform, geom)
 
 
 def deserialize_bytes_string(data: Optional[str], force_hex: bool = False) -> Union[bytes, None]:
