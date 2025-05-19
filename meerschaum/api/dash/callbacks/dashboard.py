@@ -358,7 +358,7 @@ def update_actions(action: str, subaction: str):
     _actions_options = sorted([
         {
             'label': a.replace('_', ' '),
-            'value': a,
+            'value': a.replace('_', ' '),
             'title': (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
         }
         for a, f in actions.items() if a not in omit_actions
@@ -366,7 +366,7 @@ def update_actions(action: str, subaction: str):
     _subactions_options = sorted([
         {
             'label': sa.replace('_', ' '),
-            'value': sa,
+            'value': sa.replace('_', ' '),
             'title': (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
         }
         for sa, f in get_subactions(action).items()

@@ -1171,11 +1171,11 @@ def test_geometry_custom_srid(flavor: str):
         'test', 'geometry', 'srid',
         instance=conn,
         columns={'primary': 'id'},
-        dtypes={'id': 'int', 'geom': 'geometry[MultiLineString,2001]'},
+        dtypes={'id': 'int', 'geom': 'geometry[Point,4326]'},
     )
 
-    geom = shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]])
-    geom_str = '01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F00000000000000400102000000020000000000000000001040000000000000104000000000000014400000000000001840'
+    geom = shapely.Point(-82.3511, 34.86965)
+    geom_str = '01010000000A68226C789654C0B37BF2B0506F4140'
     docs = [
         {'id': 1, 'geom': geom},
     ]
@@ -1183,7 +1183,7 @@ def test_geometry_custom_srid(flavor: str):
     assert success, msg
 
     df = pipe.get_data()
-    assert df['geom'][0] == geom
+    assert df['geom'][0].equals_exact(geom, 5)
 
     success, msg = pipe.sync(df, debug=debug)
     assert success, msg

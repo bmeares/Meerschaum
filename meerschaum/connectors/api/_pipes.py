@@ -185,7 +185,8 @@ def sync_pipe(
     """Sync a DataFrame into a Pipe."""
     from decimal import Decimal
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import json_serialize_datetime, items_str, interval_str
+    from meerschaum.utils.dtypes import json_serialize_value
+    from meerschaum.utils.misc import items_str, interval_str
     from meerschaum.config import get_config
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.dataframe import get_numeric_cols, to_json
@@ -198,7 +199,7 @@ def sync_pipe(
     def get_json_str(c):
         ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
         if isinstance(c, (dict, list)):
-            return json.dumps(c, default=json_serialize_datetime)
+            return json.dumps(c, default=json_serialize_value)
         return to_json(c, orient='columns')
 
     df = json.loads(df) if isinstance(df, str) else df

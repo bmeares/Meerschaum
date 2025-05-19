@@ -722,7 +722,7 @@ def accordion_items_from_pipe(
             dbc.Row(
                 [
                     dbc.Col([query_data_button], lg=2, md=3, sm=4, xs=6, width=2),
-                    dbc.Col([begin_end_input_group], lg=3, md=3, sm=4, width=4),
+                    dbc.Col([begin_end_input_group], lg=6, md=6, sm=4, width=6),
                     dbc.Col(html.Div([limit_input, dbc.FormText("Row Limit")]), lg=2, md=3, sm=4, xs=6, width=2),
                 ],
                 justify="between",

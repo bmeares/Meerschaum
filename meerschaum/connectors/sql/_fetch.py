@@ -265,7 +265,7 @@ def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
         schema = pipe.instance_connector.get_pipe_schema(pipe)
         return sql_item_name(target, pipe.instance_connector.flavor, schema)
 
-    definition = re.sub(r'\{\{Pipe\((.*?)\)\}\}', replace_pipe_match, definition)
+    definition = re.sub(r'\{\{\s*(?:mrsm\.)?Pipe\((.*?)\)\s*\}\}', replace_pipe_match, definition)
     return textwrap.dedent(definition.lstrip().rstrip())
 
 

@@ -702,7 +702,8 @@ class Job:
 
         _result = self.daemon.properties.get('result', None)
         if _result is None:
-            return False, "No result available."
+            from meerschaum.utils.daemon.Daemon import _results
+            return _results.get(self.daemon.daemon_id, (False, "No result available."))
 
         return tuple(_result)
 

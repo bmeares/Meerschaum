@@ -2833,7 +2833,6 @@ def get_pipe_rowcount(
             error(msg)
             return None
 
-
     flavor = self.flavor if not remote else pipe.connector.flavor
     conn = self if not remote else pipe.connector
     _pipe_name = sql_item_name(pipe.target, flavor, self.get_pipe_schema(pipe))
@@ -3881,13 +3880,15 @@ def get_pipe_schema(self, pipe: mrsm.Pipe) -> Union[str, None]:
     -------
     A schema string or `None` if nothing is configured.
     """
+    if self.flavor == 'sqlite':
+        return self.schema
     return pipe.parameters.get('schema', self.schema)
 
 
 @staticmethod
 def get_temporary_target(
     target: str,
-    transact_id: Optional[str, None] = None,
+    transact_id: Optional[str] = None,
     label: Optional[str] = None,
     separator: Optional[str] = None,
 ) -> str:

@@ -1143,9 +1143,9 @@ def enforce_dtypes(
                 _, default_srid = geometry_cols_types_srids[parsed_geom_cols[0]]
                 df = geopandas.GeoDataFrame(df, geometry=parsed_geom_cols[0], crs=default_srid)
                 for col, (_, srid) in geometry_cols_types_srids.items():
-                    if debug:
-                        dprint(f"Setting '{col}' to SRID '{srid}'...")
                     if srid:
+                        if debug:
+                            dprint(f"Setting '{col}' to SRID '{srid}'...")
                         _ = df[col].set_crs(srid)
                 if parsed_geom_cols[0] not in df.columns:
                     df.rename_geometry(parsed_geom_cols[0], inplace=True)
@@ -1543,9 +1543,14 @@ def query_df(
     NA = pandas.NA
 
     if params:
+        proto_in_ex_params = get_in_ex_params(params)
+        for key, (proto_in_vals, proto_ex_vals) in proto_in_ex_params.items():
+            if proto_ex_vals:
+                coerce_types = True
+                break
         params = params.copy()
         for key, val in {k: v for k, v in params.items()}.items():
-            if isinstance(val, (list, tuple)):
+            if isinstance(val, (list, tuple, set)) or hasattr(val, 'astype'):
                 if None in val:
                     val = [item for item in val if item is not None] + [NA]
                     params[key] = val

@@ -4,6 +4,26 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v2.9.6
+
+- **Project geometry data to WGS84 (EPSG:4326) when serializing as GeoJSON.**  
+  Setting `geometry_format` to `geojson` for `to_json()` (and `serialize_geometry()`) will project to WGS84 if a CRS is provided (to meet the 2016 GeoJSON specification).
+
+- **Add support for sets and Series in `query_df()`.**  
+  Sets and Pandas Series within `params` will now be treated as lists.
+
+- **Set `coerce_types` to `True` if any exclude parameters are provided.**  
+  Prefacing a value with the negation prefix in `params` for `query_df()` will now force `coerce_types` to be `True`.
+
+- **Allow for spaces and an optional `mrsm.` prefix for templated SQL query definitions.**  
+  The template format `{{Pipe(...)}}` will now match leading and trailing spaces around the `Pipe` declaration, and an optional `mrsm.` prefix is accepted.
+
+- **Fix custom actions with spaces in Web Console.**
+
+- **Ignore `schema` from pipes' parameters on SQLite.**
+
+- **Tweak `begin` and `end` input sizes in the pipes card.**
+
 ### v2.9.5
 
 - **Add the `Query Data` dropdown to pipes' cards.**  

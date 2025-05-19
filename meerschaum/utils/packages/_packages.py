@@ -63,7 +63,7 @@ packages: Dict[str, Dict[str, str]] = {
         'dataclass_wizard'           : 'dataclass-wizard>=0.28.0',
     },
     'jobs': {
-        'dill'                       : 'dill>=0.3.3',
+        'dill'                       : 'dill>=0.4.0',
         'daemon'                     : 'python-daemon>=0.2.3',
         'watchfiles'                 : 'watchfiles>=0.21.0',
         'psutil'                     : 'psutil>=5.8.0',
@@ -122,7 +122,7 @@ packages: Dict[str, Dict[str, str]] = {
         'mkdocs_section_index'       : 'mkdocs-section-index>=0.3.3',
         'mkdocs_linkcheck'           : 'mkdocs-linkcheck>=1.0.6',
         'mkdocs_redirects'           : 'mkdocs-redirects>=1.0.4',
-        'jinja2'                     : 'jinja2==3.0.3',
+        'jinja2'                     : 'jinja2>=3.1.6',
     },
     'gui': {
         'webview'                    : 'pywebview>=3.6.3',
