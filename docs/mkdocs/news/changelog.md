@@ -18,6 +18,12 @@ This is the current release cycle, so stay tuned for future releases!
 - **Allow for spaces and an optional `mrsm.` prefix for templated SQL query definitions.**  
   The template format `{{Pipe(...)}}` will now match leading and trailing spaces around the `Pipe` declaration, and an optional `mrsm.` prefix is accepted.
 
+- **Add `MRSM` config symlinks to pipe parameters.**  
+  TODO
+
+- **Access pipe attributes in template strings.**  
+  TODO
+
 - **Fix custom actions with spaces in Web Console.**
 
 - **Ignore `schema` from pipes' parameters on SQLite.**

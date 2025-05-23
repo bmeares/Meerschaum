@@ -12,9 +12,9 @@ from meerschaum.utils.typing import Dict, Any
 from meerschaum.utils.warnings import warn
 
 def apply_patch_to_config(
-        config: Dict[str, Any],
-        patch: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    config: Dict[str, Any],
+    patch: Dict[str, Any],
+) -> Dict[str, Any]:
     """Patch the config dict with a new dict (cascade patching)."""
     _base = copy.deepcopy(config) if isinstance(config, dict) else {}
     if not isinstance(patch, dict):
@@ -37,9 +37,9 @@ def apply_patch_to_config(
 
 
 def write_patch(
-        patch: Dict[str, Any],
-        debug: bool = False
-    ):
+    patch: Dict[str, Any],
+    debug: bool = False
+) -> None:
     """Write patch dict to yaml."""
     from meerschaum.utils.debug import dprint
     from meerschaum.config._paths import PATCH_DIR_PATH
