@@ -46,11 +46,11 @@ __pdoc__: Dict[str, bool] = {
 
 
 def add_method_to_class(
-        func: Callable[[Any], Any],
-        class_def: 'Class',
-        method_name: Optional[str] = None,
-        keep_self: Optional[bool] = None,
-    ) -> Callable[[Any], Any]:
+    func: Callable[[Any], Any],
+    class_def: 'Class',
+    method_name: Optional[str] = None,
+    keep_self: Optional[bool] = None,
+) -> Callable[[Any], Any]:
     """
     Add function `func` to class `class_def`.
 
@@ -202,7 +202,7 @@ def parse_config_substitution(
     leading_key: str = 'MRSM',
     begin_key: str = '{',
     end_key: str = '}',
-    delimeter: str = ':'
+    delimeter: str = ':',
 ) -> List[Any]:
     """
     Parse Meerschaum substitution syntax
@@ -311,7 +311,7 @@ def get_cols_lines(default_cols: int = 100, default_lines: int = 120) -> Tuple[i
     try:
         size = os.get_terminal_size()
         _cols, _lines = size.columns, size.lines
-    except Exception as e:
+    except Exception:
         _cols, _lines = (
             int(os.environ.get('COLUMNS', str(default_cols))),
             int(os.environ.get('LINES', str(default_lines))),
@@ -367,7 +367,7 @@ def sorted_dict(d: Dict[Any, Any]) -> Dict[Any, Any]:
     """
     try:
         return {key: value for key, value in sorted(d.items(), key=lambda item: item[1])}
-    except Exception as e:
+    except Exception:
         return d
 
 def flatten_pipes_dict(pipes_dict: PipesDict) -> List[Pipe]:
@@ -460,12 +460,12 @@ def round_time(
 
 
 def timed_input(
-        seconds: int = 10,
-        timeout_message: str = "",
-        prompt: str = "",
-        icon: bool = False,
-        **kw
-    ) -> Union[str, None]:
+    seconds: int = 10,
+    timeout_message: str = "",
+    prompt: str = "",
+    icon: bool = False,
+    **kw
+) -> Union[str, None]:
     """
     Accept user input only for a brief period of time.
 
@@ -515,15 +515,12 @@ def timed_input(
         signal.alarm(0) # cancel alarm
 
 
-
-
-
 def replace_pipes_in_dict(
-        pipes : Optional[PipesDict] = None,
-        func: 'function' = str,
-        debug: bool = False,
-        **kw
-    ) -> PipesDict:
+    pipes: Optional[PipesDict] = None,
+    func: 'function' = str,
+    debug: bool = False,
+    **kw
+) -> PipesDict:
     """
     Replace the Pipes in a Pipes dict with the result of another function.
 
@@ -634,10 +631,10 @@ def string_width(string: str, widest: bool = True) -> int:
     return _widest()
 
 def _pyinstaller_traverse_dir(
-        directory: str,
-        ignore_patterns: Iterable[str] = ('.pyc', 'dist', 'build', '.git', '.log'),
-        include_dotfiles: bool = False
-    ) -> list:
+    directory: str,
+    ignore_patterns: Iterable[str] = ('.pyc', 'dist', 'build', '.git', '.log'),
+    include_dotfiles: bool = False
+) -> list:
     """
     Recursively traverse a directory and return a list of its contents.
     """
@@ -717,7 +714,7 @@ def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, An
             from meerschaum.connectors.sql import SQLConnector
             try:
                 uri_params = SQLConnector.parse_uri(v)
-            except Exception as e:
+            except Exception:
                 uri_params = None
             if not uri_params:
                 continue
@@ -876,6 +873,7 @@ def dict_from_od(od: collections.OrderedDict) -> Dict[Any, Any]:
         ):
             _d[k] = dict_from_od(v)
     return _d
+
 
 def remove_ansi(s: str) -> str:
     """
@@ -1608,6 +1606,88 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
         tar.extractall(path=path, members=members, numeric_owner=numeric_owner)
 
     return safe_extract(tarf, output_dir)
+
+
+def evaluate_pipe_access_chain(access_chain: str, pipe: mrsm.Pipe):
+    """
+    Safely evaluate the access chain on a Pipe.
+    """
+    import ast
+    expr = f"pipe{access_chain}"
+    tree = ast.parse(expr, mode='eval')
+
+    def _eval(node, context):
+        if isinstance(node, ast.Expression):
+            return _eval(node.body, context)
+
+        elif isinstance(node, ast.Name):
+            if node.id == "pipe":
+                return context
+            raise ValueError(f"Unknown variable: {node.id}")
+
+        elif isinstance(node, ast.Attribute):
+            value = _eval(node.value, context)
+            return getattr(value, node.attr)
+
+        elif isinstance(node, ast.Subscript):
+            value = _eval(node.value, context)
+            key = _eval(node.slice, context) if isinstance(node.slice, ast.Index) else _eval(node.slice, context)
+            return value[key]
+
+        elif isinstance(node, ast.Constant):  # Python 3.8+
+            return node.value
+
+        elif isinstance(node, ast.Str):  # Older Python
+            return node.s
+
+        elif isinstance(node, ast.Index):  # Older Python AST style
+            return _eval(node.value, context)
+
+        else:
+            raise TypeError(f"Unsupported AST node: {ast.dump(node)}")
+
+    return _eval(tree, pipe)
+
+
+def replace_pipe_parameters_syntax(text: str) -> Any:
+    """
+    """
+    import re
+    import json
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.dtypes import json_serialize_value
+    pattern = r'\{\{\s*(?:mrsm\.)?Pipe\((.*?)\)((?:\.[\w]+|\[[^\]]+\])*)\s*\}\}'
+
+    def replace_hook(pipe_match: re.Match) -> str:
+        try:
+            args_str = pipe_match.group(1)
+            access_chain = pipe_match.group(2)
+            args, kwargs = parse_arguments_str(args_str)
+            pipe = mrsm.Pipe(*args, **kwargs)
+        except Exception as e:
+            warn(f"Failed to parse pipe from template string:\n{e}")
+            raise e
+
+        if access_chain is None:
+            target = pipe.target
+            schema = (
+                pipe.instance_connector.get_pipe_schema(pipe)
+                if hasattr(pipe.instance_connector, 'get_pipe_schema')
+                else None
+            )
+            return (
+                sql_item_name(target, pipe.instance_connector.flavor, schema)
+                if pipe.instance_connector.type == 'sql'
+                else pipe.target
+            )
+
+        access_val = evaluate_pipe_access_chain(access_chain, pipe)
+        if isinstance(access_val, (dict, list)):
+            return json.dumps(access_val, sort_keys=True, default=json_serialize_value)
+        return str(access_val)
+
+    return re.sub(pattern, replace_hook, text)
 
 
 ##################

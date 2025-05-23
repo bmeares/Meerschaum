@@ -9,7 +9,6 @@ from __future__ import annotations
 import pathlib
 
 from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
-from meerschaum.config import get_config
 
 
 def read_config(
@@ -49,8 +48,9 @@ def read_config(
     >>> read_config(keys=['meerschaum'], with_filename=True)
     >>> ({...}, ['meerschaum.yaml'])
     """
-    import sys, shutil, os, json, itertools
-    from meerschaum.utils.packages import attempt_import
+    import os
+    import json
+    import itertools
     from meerschaum.utils.yaml import yaml, _yaml
     from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.config.static import STATIC_CONFIG
@@ -106,7 +106,7 @@ def read_config(
             ### If default config contains symlinks, add them to the config to write.
             try:
                 _default_symlinks = _default_dict[symlinks_key][mk]
-            except Exception as e:
+            except Exception:
                 _default_symlinks = {}
             config[mk] = _default_dict[mk]
             if _default_symlinks:
@@ -208,15 +208,16 @@ def read_config(
 
 
 def search_and_substitute_config(
-        config: Dict[str, Any],
-        leading_key: str = "MRSM",
-        delimiter: str = ":",
-        begin_key: str = "{",
-        end_key: str = "}",
-        literal_key: str = '!',
-        keep_symlinks: bool = True,
-    ) -> Dict[str, Any]:
-    """Search the config for Meerschaum substitution syntax and substite with value of keys.
+    config: Dict[str, Any],
+    leading_key: str = "MRSM",
+    delimiter: str = ":",
+    begin_key: str = "{",
+    end_key: str = "}",
+    literal_key: str = '!',
+    keep_symlinks: bool = True,
+) -> Dict[str, Any]:
+    """
+    Search the config for Meerschaum substitution syntax and substite with value of keys.
 
     Parameters
     ----------
@@ -242,7 +243,7 @@ def search_and_substitute_config(
         - ' MRSM{a:b:c} '  => ' "{\'d\': 1}"' : not isolated
         - ' MRSM{!a:b:c} ' => ' {"d": 1}'     : literal
 
-    keep_symlinks :
+    keep_symlinks: bool, default True
         If True, include the symlinks under the top-level key '_symlinks' (never written to a file).
         Defaults to True.
         
@@ -252,6 +253,7 @@ def search_and_substitute_config(
         MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
         ``` 
     """
+    from meerschaum.config import get_config
 
     _links = []
     def _find_symlinks(d, _keys: Optional[List[str]] = None):
@@ -270,9 +272,6 @@ def search_and_substitute_config(
     import json
     needle = leading_key + begin_key
     haystack = json.dumps(config, separators=(',', ':'))
-    mod_haystack = list(str(haystack))
-    buff = str(needle)
-    max_index = len(haystack) - len(buff)
 
     patterns = {}
     isolated_patterns = {}
@@ -329,7 +328,7 @@ def search_and_substitute_config(
                 write_missing=False,
                 sync_files=False,
             )
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             valid = False
@@ -407,12 +406,13 @@ def get_possible_keys() -> List[str]:
 
 
 def get_keyfile_path(
-        key: str,
-        create_new: bool = False,
-        directory: Union[pathlib.Path, str, None] = None,
-    ) -> Union[pathlib.Path, None]:
+    key: str,
+    create_new: bool = False,
+    directory: Union[pathlib.Path, str, None] = None,
+) -> Union[pathlib.Path, None]:
     """Determine a key's file path."""
-    import os, pathlib
+    import os
+    import pathlib
     if directory is None:
         from meerschaum.config._paths import CONFIG_DIR_PATH
         directory = CONFIG_DIR_PATH
@@ -422,14 +422,14 @@ def get_keyfile_path(
             os.path.join(
                 directory,
                 read_config(
-                    keys = [key],
-                    with_filenames = True,
-                    write_missing = False,
-                    substitute = False,
+                    keys=[key],
+                    with_filenames=True,
+                    write_missing=False,
+                    substitute=False,
                 )[1][0]
             )
         )
-    except IndexError as e:
+    except IndexError:
         if create_new:
             from meerschaum.config.static import STATIC_CONFIG
             default_filetype = STATIC_CONFIG['config']['default_filetype']

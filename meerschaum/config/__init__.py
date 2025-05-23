@@ -9,13 +9,22 @@ and if interactive, print the welcome message.
 
 from __future__ import annotations
 
-import os, shutil, sys, pathlib, copy
-from meerschaum.utils.typing import Any, Dict, Optional, Union
+import os
+import shutil
+import sys
+import copy
+
+from meerschaum.utils.typing import Any, Dict, Optional
 from meerschaum.utils.threading import RLock
-from meerschaum.utils.warnings import warn, error
 
 from meerschaum.config._version import __version__
 from meerschaum.config._edit import edit_config, write_config
+from meerschaum.config._read_config import (
+    search_and_substitute_config,
+    get_possible_keys,
+    get_keyfile_path,
+    read_config,
+)
 from meerschaum.config.static import STATIC_CONFIG
 
 from meerschaum.config._paths import (
@@ -31,8 +40,15 @@ __all__ = (
     'write_plugin_config',
     'get_config',
     'write_config',
+    'edit_config',
     'set_config',
+    'search_and_substitute_config',
+    'get_possible_keys',
+    'get_keyfile_path',
+    'apply_patch_to_config',
+    'read_config',
     'paths',
+    'STATIC_CONFIG',
 )
 __pdoc__ = {'static': False, 'resources': False, 'stack': False, }
 _locks = {'config': RLock()}
@@ -40,9 +56,12 @@ _locks = {'config': RLock()}
 ### apply config preprocessing (e.g. main to meta)
 config = {}
 def _config(
-        *keys: str, reload: bool = False, substitute: bool = True,
-        sync_files: bool = True, write_missing: bool = True,
-    ) -> Dict[str, Any]:
+    *keys: str,
+    reload: bool = False,
+    substitute: bool = True,
+    sync_files: bool = True,
+    write_missing: bool = True,
+) -> Dict[str, Any]:
     """
     Read and process the configuration file.
     """
@@ -153,7 +172,7 @@ def get_config(
     ):
         try:
             _subbed = search_and_substitute_config({keys[0]: config[keys[0]]})
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
         config[keys[0]] = _subbed[keys[0]]
@@ -193,7 +212,7 @@ def get_config(
         for k in keys:
             try:
                 c = c[k]
-            except Exception as e:
+            except Exception:
                 invalid_keys = True
                 break
         if invalid_keys:
@@ -208,7 +227,7 @@ def get_config(
             for k in keys:
                 try:
                     _c = _c[k]
-                except Exception as e:
+                except Exception:
                     in_default = False
             if in_default:
                 c = _c
@@ -219,7 +238,7 @@ def get_config(
                     if warn:
                         from meerschaum.utils.warnings import warn as _warn
                         _warn(warning_msg, stacklevel=3, color=False)
-                except Exception as e:
+                except Exception:
                     if warn:
                         print(warning_msg)
                 if as_tuple:
@@ -247,14 +266,15 @@ def get_config(
 
 
 def get_plugin_config(
-        *keys: str,
-        warn: bool = False,
-        **kw: Any
-    ) -> Optional[Any]:
+    *keys: str,
+    warn: bool = False,
+    **kw: Any
+) -> Optional[Any]:
     """
     This may only be called from within a Meerschaum plugin.
     See `meerschaum.config.get_config` for arguments.
     """
+    from meerschaum.utils.warnings import error
     from meerschaum.plugins import _get_parent_plugin
     parent_plugin_name = _get_parent_plugin(2)
     if parent_plugin_name is None:
@@ -271,16 +291,17 @@ def get_plugin_config(
 
 
 def write_plugin_config(
-        config_dict: Dict[str, Any],
-        **kw : Any
-    ):
+    config_dict: Dict[str, Any],
+    **kw: Any
+):
     """
     Write a plugin's configuration dictionary.
     """
+    from meerschaum.utils.warnings import error
     from meerschaum.plugins import _get_parent_plugin
     parent_plugin_name = _get_parent_plugin(2)
     if parent_plugin_name is None:
-        error(f"You may only call `get_plugin_config()` from within a Meerschaum plugin.")
+        error("You may only call `get_plugin_config()` from within a Meerschaum plugin.")
     plugins_cf = get_config('plugins', warn=False)
     if plugins_cf is None:
         plugins_cf = {}
