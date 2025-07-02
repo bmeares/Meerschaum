@@ -6,7 +6,7 @@
 The default configuration values to write to config.yaml.
 """
 
-import sys, os, multiprocessing
+import multiprocessing
 
 from meerschaum.connectors import attributes as connector_attributes
 from meerschaum.config._paths import SQLITE_DB_PATH
@@ -22,7 +22,7 @@ default_meerschaum_config = {
             'main': {
                 'username': 'mrsm',
                 'password': 'mrsm',
-                'flavor': 'timescaledb',
+                'flavor': 'timescaledb-ha',
                 'host': 'localhost',
                 'database': 'meerschaum',
                 'port': 5432,
@@ -73,6 +73,7 @@ default_system_config = {
                 'postgis': True,
                 'citus': True,
                 'timescaledb': True,
+                'timescaledb-ha': True,
                 'mssql': True,
             },
             'instance': {

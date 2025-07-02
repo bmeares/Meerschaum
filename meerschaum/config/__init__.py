@@ -21,6 +21,7 @@ from meerschaum.config._version import __version__
 from meerschaum.config._edit import edit_config, write_config
 from meerschaum.config._read_config import (
     search_and_substitute_config,
+    revert_symlinks_config,
     get_possible_keys,
     get_keyfile_path,
     read_config,
@@ -43,6 +44,7 @@ __all__ = (
     'edit_config',
     'set_config',
     'search_and_substitute_config',
+    'revert_symlinks_config',
     'get_possible_keys',
     'get_keyfile_path',
     'apply_patch_to_config',
@@ -183,7 +185,7 @@ def get_config(
                 config[symlinks_key][keys[0]] = {}
             config[symlinks_key][keys[0]] = apply_patch_to_config(
                 _subbed,
-                config[symlinks_key][keys[0]]
+                {symlinks_key: config[symlinks_key][keys[0]]}
             )
 
     from meerschaum.config._sync import sync_files as _sync_files

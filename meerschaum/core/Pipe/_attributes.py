@@ -48,6 +48,12 @@ def attributes(self) -> Dict[str, Any]:
     return self._attributes
 
 
+def get_parameters(self, apply_symlinks: bool = True) -> Dict[str, Any]:
+    """
+    Return the `parameters` dictionary of the pipe.
+    """
+
+
 @property
 def parameters(self) -> Optional[Dict[str, Any]]:
     """
@@ -367,7 +373,7 @@ def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]
             col_name = self.columns[col]
             if col_name is None and error:
                 _error(f"Please define the name of the '{col}' column for {self}.")
-        except Exception as e:
+        except Exception:
             col_name = None
         if col_name is None and error:
             _error(f"Missing '{col}'" + f" column for {self}.")

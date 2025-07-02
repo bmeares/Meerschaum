@@ -20,6 +20,16 @@ conns = {
         host='localhost',
         schema='public',
     ),
+    'timescaledb-ha': get_connector(
+        'sql', 'test_timescaledb-ha',
+        flavor='timescaledb',
+        username='test',
+        password='test1234',
+        database='testdb',
+        port=5459,
+        host='localhost',
+        schema='public',
+    ),
     'postgis': get_connector(
         'sql', 'test_postgis',
         flavor='postgis',

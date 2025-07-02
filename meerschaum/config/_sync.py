@@ -40,10 +40,11 @@ def sync_yaml_configs(
         If provided, iterate through a list of tuples,
         replacing the old string (index 0) with the new string (index 1).
     """
-    import os, sys
+    import os
+    import sys
     try:
         from meerschaum.utils.yaml import yaml, _yaml
-    except Exception as e:
+    except Exception:
         return
     from meerschaum.config._patch import apply_patch_to_config
     import meerschaum.config
@@ -111,6 +112,7 @@ def sync_files(keys: Optional[List[str]] = None):
             GRAFANA_DASHBOARD_PATH,
         )
         from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum.config.stack import _write_initdb
 
         sync_yaml_configs(
             ['stack', STACK_COMPOSE_FILENAME],
@@ -131,6 +133,7 @@ def sync_files(keys: Optional[List[str]] = None):
             GRAFANA_DASHBOARD_PATH,
             substitute=True,
         )
+        _write_initdb()
 
     key_functions = {
         'stack': _stack,

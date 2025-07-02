@@ -157,6 +157,10 @@ paths = {
     'PLUGINS_TEMP_RESOURCES_PATH'    : ('{PLUGINS_RESOURCES_PATH}', '.tmp'),
     'PLUGINS_INIT_PATH'              : ('{PLUGINS_RESOURCES_PATH}', '__init__.py'),
 
+    'DB_RESOURCES_PATH'              : ('{ROOT_DIR_PATH}', 'db'),
+    'DB_INIT_RESOURCES_PATH'         : ('{DB_RESOURCES_PATH}', 'initdb'),
+    'DB_CREATE_EXTENSIONS_PATH'      : ('{DB_INIT_RESOURCES_PATH}', 'create-extensions.sql'),
+
     'SQLITE_RESOURCES_PATH'          : ('{ROOT_DIR_PATH}', 'sqlite'),
     'SQLITE_DB_PATH'                 : ('{SQLITE_RESOURCES_PATH}', 'mrsm_local.db'),
 

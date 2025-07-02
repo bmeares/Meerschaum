@@ -1,10 +1,10 @@
 # 🪵 Changelog
 
-## 2.9.x Releases
+## 2.10.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.9.6
+### v2.10.0
 
 - **Project geometry data to WGS84 (EPSG:4326) when serializing as GeoJSON.**  
   Setting `geometry_format` to `geojson` for `to_json()` (and `serialize_geometry()`) will project to WGS84 if a CRS is provided (to meet the 2016 GeoJSON specification).
@@ -18,6 +18,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Allow for spaces and an optional `mrsm.` prefix for templated SQL query definitions.**  
   The template format `{{Pipe(...)}}` will now match leading and trailing spaces around the `Pipe` declaration, and an optional `mrsm.` prefix is accepted.
 
+- **Add the SQL flavor `timescaledb-ha`.**  
+  The default instance connector `sql:main` is now of flavor `timescaledb-ha`, corresponding to the `timescale/timescaledb-ha` Docker image. This image includes PostGIS and other extensions.
+
 - **Add `MRSM` config symlinks to pipe parameters.**  
   TODO
 
@@ -29,6 +32,10 @@ This is the current release cycle, so stay tuned for future releases!
 - **Ignore `schema` from pipes' parameters on SQLite.**
 
 - **Tweak `begin` and `end` input sizes in the pipes card.**
+
+## 2.9.x Releases
+
+The 2.9 series added support for geometry data and improved the web console development experience.
 
 ### v2.9.5
 

@@ -7,8 +7,9 @@ Functions for editing the configuration file
 """
 
 from __future__ import annotations
+
 import pathlib
-from meerschaum.utils.typing import Optional, Any, SuccessTuple, Mapping, Dict, List, Union
+from meerschaum.utils.typing import Optional, Any, SuccessTuple, Dict, List, Union
 
 
 def edit_config(
@@ -19,20 +20,27 @@ def edit_config(
 ) -> SuccessTuple:
     """Edit the configuration files."""
     from meerschaum.config import get_config, config
-    from meerschaum.config._read_config import get_keyfile_path, read_config
+    from meerschaum.config._read_config import get_keyfile_path, read_config, revert_symlinks_config
     from meerschaum.config._paths import CONFIG_DIR_PATH
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.packages import reload_meerschaum
     from meerschaum.utils.misc import edit_file
-    from meerschaum.utils.warnings import warn, dprint
+    from meerschaum.utils.warnings import warn
     from meerschaum.utils.prompt import prompt
 
     if keys is None:
         keys = []
 
+    symlinks_key = STATIC_CONFIG['config']['symlinks_key']
     def _edit_key(key: str):
+        new_key_config = None
         while True:
             ### If defined in default, create the config file.
-            key_config = config.pop(key, None)
+            symlinks_key_config = config.get(symlinks_key, {}).get(key, {})
+            key_config = revert_symlinks_config({
+                key: config.pop(key, {}),
+                symlinks_key: {key: symlinks_key_config},
+            })
             keyfile_path = get_keyfile_path(key, create_new=True)
             get_config(key, write_missing=True, warn=False)
 
@@ -60,7 +68,7 @@ def edit_config(
         for k in keys:
             _edit_key(k)
     except KeyboardInterrupt:
-        return False, f""
+        return False, ""
 
     reload_meerschaum(debug=debug)
     return (True, "Success")
@@ -153,7 +161,7 @@ def write_config(
                 success = True
             except Exception as e:
                 success = False
-                print(f"FAILED TO WRITE!")
+                print("FAILED TO WRITE!")
                 print(e)
                 print(filter_keywords(
                     filetype_dumpers[filetype],
@@ -165,16 +173,16 @@ def write_config(
                 try:
                     if os.path.exists(filepath):
                         os.remove(filepath)
-                except Exception as e:
+                except Exception:
                     print(f"Failed to write '{k}'")
                 return False
 
     return True
 
 def general_write_yaml_config(
-        files: Optional[Dict[pathlib.Path, Dict[str, Any]]] = None,
-        debug: bool = False
-    ):
+    files: Optional[Dict[pathlib.Path, Dict[str, Any]]] = None,
+    debug: bool = False
+):
     """
     Write configuration dictionaries to file paths with optional headers.
 
@@ -216,18 +224,15 @@ def general_write_yaml_config(
     return True
 
 def general_edit_config(
-        action: Optional[List[str]] = None,
-        files: Optional[Dict[str, Union[str, pathlib.Path]]] = None,
-        default: Optional[str] = None,
-        debug: bool = False
-    ):
+    action: Optional[List[str]] = None,
+    files: Optional[Dict[str, Union[str, pathlib.Path]]] = None,
+    default: Optional[str] = None,
+    debug: bool = False
+) -> SuccessTuple:
     """Prompt the user to edit any config files."""
     if default is None:
         raise Exception("Provide a default choice for which file to edit")
-    import os
-    from subprocess import call
     from meerschaum.utils.misc import edit_file
-    from meerschaum.utils.debug import dprint
 
     if files is None:
         files = {}
@@ -257,11 +262,10 @@ def copy_default_to_config(debug : bool = False):
     return True
 
 def write_default_config(
-        debug : bool = False,
-        **kw
-    ):
+    debug: bool = False,
+    **kw
+):
     """Write the default configuration files."""
-    import os
     from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH
-    from meerschaum.config._default import default_config, default_header_comment
+    from meerschaum.config._default import default_config
     return write_config(default_config, directory=DEFAULT_CONFIG_DIR_PATH)

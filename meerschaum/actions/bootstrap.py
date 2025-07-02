@@ -330,8 +330,8 @@ def _bootstrap_connectors(
                 f"Flavor for connector '{_type}:{_label}':",
                 sorted(list(type_attributes['flavors'])),
                 default = (
-                    'timescaledb'
-                    if 'timescaledb' in type_attributes['flavors']
+                    'postgresql'
+                    if 'postgresql' in type_attributes['flavors']
                     else None
                 )
             )
