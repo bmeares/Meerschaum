@@ -14,17 +14,18 @@ import copy
 from meerschaum.utils.typing import SuccessTuple
 
 flavor_clis = {
-    'postgresql'  : 'pgcli',
-    'postgis'  : 'pgcli',
-    'timescaledb' : 'pgcli',
-    'cockroachdb' : 'pgcli',
-    'citus'       : 'pgcli',
-    'mysql'       : 'mycli',
-    'mariadb'     : 'mycli',
-    'percona'     : 'mycli',
-    'sqlite'      : 'litecli',
-    'mssql'       : 'mssqlcli',
-    'duckdb'      : 'gadwall',
+    'postgresql'     : 'pgcli',
+    'postgis'        : 'pgcli',
+    'timescaledb'    : 'pgcli',
+    'timescaledb-ha' : 'pgcli',
+    'cockroachdb'    : 'pgcli',
+    'citus'          : 'pgcli',
+    'mysql'          : 'mycli',
+    'mariadb'        : 'mycli',
+    'percona'        : 'mycli',
+    'sqlite'         : 'litecli',
+    'mssql'          : 'mssqlcli',
+    'duckdb'         : 'gadwall',
 }
 cli_deps = {
     'pgcli': ['pgspecial', 'pendulum', 'cli_helpers'],

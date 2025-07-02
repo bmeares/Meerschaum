@@ -14,6 +14,8 @@ import json
 from meerschaum.config._paths import (
     GRAFANA_DATASOURCE_PATH,
     GRAFANA_DASHBOARD_PATH,
+    DB_INIT_RESOURCES_PATH,
+    DB_CREATE_POSTGIS_PATH,
     ROOT_DIR_PATH,
 )
 from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
@@ -39,7 +41,7 @@ valkey_password = 'MRSM{meerschaum:connectors:valkey:main:password}'
 
 env_dict = {
     'COMPOSE_PROJECT_NAME': 'mrsm',
-    'TIMESCALEDB_VERSION': 'latest-pg16',
+    'TIMESCALEDB_VERSION': 'pg17',
     'POSTGRES_USER': db_user,
     'POSTGRES_PASSWORD': db_pass,
     'POSTGRES_DB': db_base,
@@ -131,13 +133,14 @@ default_docker_compose_config = {
                 'retries': 5
             },
             'restart': 'always',
-            'image': 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
+            'image': 'timescale/timescaledb-ha:' + env_dict['TIMESCALEDB_VERSION'],
             'ports': [
                 f'{db_port}:5432',
             ],
             'hostname': db_hostname,
             'volumes': [
                 'meerschaum_db_data:' + volumes['meerschaum_db_data'],
+                f'{DB_INIT_RESOURCES_PATH.as_posix()}:/docker-entrypoint-initdb.d:z,ro',
             ],
             'shm_size': '1024m',
             'networks': [
@@ -224,8 +227,8 @@ default_docker_compose_config = {
             'volumes': [
                 'grafana_storage' + ':' + volumes['grafana_storage'],
                 ### NOTE: Mount with the 'z' option for SELinux.
-                f'{GRAFANA_DATASOURCE_PATH.parent}:/etc/grafana/provisioning/datasources:z,ro',
-                f'{GRAFANA_DASHBOARD_PATH.parent}:/etc/grafana/provisioning/dashboards:z,ro',
+                f'{GRAFANA_DATASOURCE_PATH.parent.as_posix()}:/etc/grafana/provisioning/datasources:z,ro',
+                f'{GRAFANA_DASHBOARD_PATH.parent.as_posix()}:/etc/grafana/provisioning/dashboards:z,ro',
             ],
             'environment': {
                 'GF_SECURITY_ALLOW_EMBEDDING': 'true',
@@ -272,6 +275,18 @@ def _sync_stack_files():
         GRAFANA_DASHBOARD_PATH,
         substitute = True,
     )
+
+    _write_initdb()
+
+def _write_initdb():
+    create_postgis_text = (
+        "CREATE EXTENSION IF NOT EXISTS postgis;"
+    )
+    if DB_CREATE_POSTGIS_PATH.exists():
+        return
+
+    with open(DB_CREATE_POSTGIS_PATH, 'w+', encoding='utf-8') as f:
+        f.write(create_postgis_text)
 
 NECESSARY_FILES = [STACK_COMPOSE_PATH, GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH]
 def get_necessary_files():

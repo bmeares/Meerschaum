@@ -131,6 +131,7 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
 PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'int': {
         'timescaledb': 'BIGINT',
+        'timescaledb-ha': 'BIGINT',
         'postgresql': 'BIGINT',
         'postgis': 'BIGINT',
         'mariadb': 'BIGINT',
@@ -145,6 +146,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'uint': {
         'timescaledb': 'BIGINT',
+        'timescaledb-ha': 'BIGINT',
         'postgresql': 'BIGINT',
         'postgis': 'BIGINT',
         'mariadb': 'BIGINT',
@@ -159,6 +161,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'int8': {
         'timescaledb': 'SMALLINT',
+        'timescaledb-ha': 'SMALLINT',
         'postgresql': 'SMALLINT',
         'postgis': 'SMALLINT',
         'mariadb': 'SMALLINT',
@@ -173,6 +176,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'uint8': {
         'timescaledb': 'SMALLINT',
+        'timescaledb-ha': 'SMALLINT',
         'postgresql': 'SMALLINT',
         'postgis': 'SMALLINT',
         'mariadb': 'SMALLINT',
@@ -187,6 +191,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'int16': {
         'timescaledb': 'SMALLINT',
+        'timescaledb-ha': 'SMALLINT',
         'postgresql': 'SMALLINT',
         'postgis': 'SMALLINT',
         'mariadb': 'SMALLINT',
@@ -201,6 +206,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'int32': {
         'timescaledb': 'INT',
+        'timescaledb-ha': 'INT',
         'postgresql': 'INT',
         'postgis': 'INT',
         'mariadb': 'INT',
@@ -215,6 +221,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'int64': {
         'timescaledb': 'BIGINT',
+        'timescaledb-ha': 'BIGINT',
         'postgresql': 'BIGINT',
         'postgis': 'BIGINT',
         'mariadb': 'BIGINT',
@@ -229,6 +236,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'float': {
         'timescaledb': 'DOUBLE PRECISION',
+        'timescaledb-ha': 'DOUBLE PRECISION',
         'postgresql': 'DOUBLE PRECISION',
         'postgis': 'DOUBLE PRECISION',
         'mariadb': 'DOUBLE PRECISION',
@@ -243,6 +251,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'double': {
         'timescaledb': 'DOUBLE PRECISION',
+        'timescaledb-ha': 'DOUBLE PRECISION',
         'postgresql': 'DOUBLE PRECISION',
         'postgis': 'DOUBLE PRECISION',
         'mariadb': 'DOUBLE PRECISION',
@@ -257,6 +266,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'datetime64[ns]': {
         'timescaledb': 'TIMESTAMP',
+        'timescaledb-ha': 'TIMESTAMP',
         'postgresql': 'TIMESTAMP',
         'postgis': 'TIMESTAMP',
         'mariadb': 'DATETIME',
@@ -271,6 +281,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'datetime64[ns, UTC]': {
         'timescaledb': 'TIMESTAMPTZ',
+        'timescaledb-ha': 'TIMESTAMPTZ',
         'postgresql': 'TIMESTAMPTZ',
         'postgis': 'TIMESTAMPTZ',
         'mariadb': 'DATETIME',
@@ -285,6 +296,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'datetime': {
         'timescaledb': 'TIMESTAMPTZ',
+        'timescaledb-ha': 'TIMESTAMPTZ',
         'postgresql': 'TIMESTAMPTZ',
         'postgis': 'TIMESTAMPTZ',
         'mariadb': 'DATETIME',
@@ -299,6 +311,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'datetimetz': {
         'timescaledb': 'TIMESTAMPTZ',
+        'timescaledb-ha': 'TIMESTAMPTZ',
         'postgresql': 'TIMESTAMPTZ',
         'postgis': 'TIMESTAMPTZ',
         'mariadb': 'DATETIME',
@@ -313,6 +326,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'bool': {
         'timescaledb': 'BOOLEAN',
+        'timescaledb-ha': 'BOOLEAN',
         'postgresql': 'BOOLEAN',
         'postgis': 'BOOLEAN',
         'mariadb': 'BOOLEAN',
@@ -327,6 +341,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'object': {
         'timescaledb': 'TEXT',
+        'timescaledb-ha': 'TEXT',
         'postgresql': 'TEXT',
         'postgis': 'TEXT',
         'mariadb': 'TEXT',
@@ -341,6 +356,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'string': {
         'timescaledb': 'TEXT',
+        'timescaledb-ha': 'TEXT',
         'postgresql': 'TEXT',
         'postgis': 'TEXT',
         'mariadb': 'TEXT',
@@ -355,6 +371,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'unicode': {
         'timescaledb': 'TEXT',
+        'timescaledb-ha': 'TEXT',
         'postgresql': 'TEXT',
         'postgis': 'TEXT',
         'mariadb': 'TEXT',
@@ -369,6 +386,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'json': {
         'timescaledb': 'JSONB',
+        'timescaledb-ha': 'JSONB',
         'postgresql': 'JSONB',
         'postgis': 'JSONB',
         'mariadb': 'TEXT',
@@ -383,6 +401,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'numeric': {
         'timescaledb': 'NUMERIC',
+        'timescaledb-ha': 'NUMERIC',
         'postgresql': 'NUMERIC',
         'postgis': 'NUMERIC',
         'mariadb': f'DECIMAL{NUMERIC_PRECISION_FLAVORS["mariadb"]}',
@@ -397,6 +416,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'uuid': {
         'timescaledb': 'UUID',
+        'timescaledb-ha': 'UUID',
         'postgresql': 'UUID',
         'postgis': 'UUID',
         'mariadb': 'CHAR(36)',
@@ -412,6 +432,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'bytes': {
         'timescaledb': 'BYTEA',
+        'timescaledb-ha': 'BYTEA',
         'postgresql': 'BYTEA',
         'postgis': 'BYTEA',
         'mariadb': 'BLOB',
@@ -426,6 +447,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'geometry': {
         'timescaledb': 'TEXT',
+        'timescaledb-ha': 'GEOMETRY',
         'postgresql': 'TEXT',
         'postgis': 'GEOMETRY',
         'mariadb': 'TEXT',
@@ -440,6 +462,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'geography': {
         'timescaledb': 'TEXT',
+        'timescaledb-ha': 'GEOGRAPHY',
         'postgresql': 'TEXT',
         'postgis': 'GEOGRAPHY',
         'mariadb': 'TEXT',
@@ -456,6 +479,7 @@ PD_TO_DB_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
 PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     'int': {
         'timescaledb': 'BigInteger',
+        'timescaledb-ha': 'BigInteger',
         'postgresql': 'BigInteger',
         'postgis': 'BigInteger',
         'mariadb': 'BigInteger',
@@ -470,6 +494,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'uint': {
         'timescaledb': 'BigInteger',
+        'timescaledb-ha': 'BigInteger',
         'postgresql': 'BigInteger',
         'postgis': 'BigInteger',
         'mariadb': 'BigInteger',
@@ -484,6 +509,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'int8': {
         'timescaledb': 'SmallInteger',
+        'timescaledb-ha': 'SmallInteger',
         'postgresql': 'SmallInteger',
         'postgis': 'SmallInteger',
         'mariadb': 'SmallInteger',
@@ -498,6 +524,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'uint8': {
         'timescaledb': 'SmallInteger',
+        'timescaledb-ha': 'SmallInteger',
         'postgresql': 'SmallInteger',
         'postgis': 'SmallInteger',
         'mariadb': 'SmallInteger',
@@ -512,6 +539,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'int16': {
         'timescaledb': 'SmallInteger',
+        'timescaledb-ha': 'SmallInteger',
         'postgresql': 'SmallInteger',
         'postgis': 'SmallInteger',
         'mariadb': 'SmallInteger',
@@ -526,6 +554,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'int32': {
         'timescaledb': 'Integer',
+        'timescaledb-ha': 'Integer',
         'postgresql': 'Integer',
         'postgis': 'Integer',
         'mariadb': 'Integer',
@@ -540,6 +569,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'int64': {
         'timescaledb': 'BigInteger',
+        'timescaledb-ha': 'BigInteger',
         'postgresql': 'BigInteger',
         'postgis': 'BigInteger',
         'mariadb': 'BigInteger',
@@ -554,6 +584,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'float': {
         'timescaledb': 'Float',
+        'timescaledb-ha': 'Float',
         'postgresql': 'Float',
         'postgis': 'Float',
         'mariadb': 'Float',
@@ -568,6 +599,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'datetime': {
         'timescaledb': 'DateTime(timezone=True)',
+        'timescaledb-ha': 'DateTime(timezone=True)',
         'postgresql': 'DateTime(timezone=True)',
         'postgis': 'DateTime(timezone=True)',
         'mariadb': 'DateTime(timezone=True)',
@@ -582,6 +614,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'datetime64[ns]': {
         'timescaledb': 'DateTime',
+        'timescaledb-ha': 'DateTime',
         'postgresql': 'DateTime',
         'postgis': 'DateTime',
         'mariadb': 'DateTime',
@@ -596,6 +629,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'datetime64[ns, UTC]': {
         'timescaledb': 'DateTime(timezone=True)',
+        'timescaledb-ha': 'DateTime(timezone=True)',
         'postgresql': 'DateTime(timezone=True)',
         'postgis': 'DateTime(timezone=True)',
         'mariadb': 'DateTime(timezone=True)',
@@ -610,6 +644,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'bool': {
         'timescaledb': 'Boolean',
+        'timescaledb-ha': 'Boolean',
         'postgresql': 'Boolean',
         'postgis': 'Boolean',
         'mariadb': 'Integer',
@@ -624,6 +659,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'object': {
         'timescaledb': 'UnicodeText',
+        'timescaledb-ha': 'UnicodeText',
         'postgresql': 'UnicodeText',
         'postgis': 'UnicodeText',
         'mariadb': 'UnicodeText',
@@ -638,6 +674,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'string': {
         'timescaledb': 'UnicodeText',
+        'timescaledb-ha': 'UnicodeText',
         'postgresql': 'UnicodeText',
         'postgis': 'UnicodeText',
         'mariadb': 'UnicodeText',
@@ -652,6 +689,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'json': {
         'timescaledb': 'sqlalchemy.dialects.postgresql.JSONB',
+        'timescaledb-ha': 'sqlalchemy.dialects.postgresql.JSONB',
         'postgresql': 'sqlalchemy.dialects.postgresql.JSONB',
         'postgis': 'sqlalchemy.dialects.postgresql.JSONB',
         'mariadb': 'UnicodeText',
@@ -666,6 +704,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'numeric': {
         'timescaledb': 'Numeric',
+        'timescaledb-ha': 'Numeric',
         'postgresql': 'Numeric',
         'postgis': 'Numeric',
         'mariadb': 'Numeric',
@@ -680,6 +719,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'uuid': {
         'timescaledb': 'Uuid',
+        'timescaledb-ha': 'Uuid',
         'postgresql': 'Uuid',
         'postgis': 'Uuid',
         'mariadb': 'sqlalchemy.dialects.mysql.CHAR(36)',
@@ -694,6 +734,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'bytes': {
         'timescaledb': 'LargeBinary',
+        'timescaledb-ha': 'LargeBinary',
         'postgresql': 'LargeBinary',
         'postgis': 'LargeBinary',
         'mariadb': 'LargeBinary',
@@ -708,6 +749,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'geometry': {
         'timescaledb': 'UnicodeText',
+        'timescaledb-ha': 'geoalchemy2.Geometry',
         'postgresql': 'UnicodeText',
         'postgis': 'geoalchemy2.Geometry',
         'mariadb': 'UnicodeText',
@@ -722,6 +764,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
     },
     'geography': {
         'timescaledb': 'UnicodeText',
+        'timescaledb-ha': 'geoalchemy2.Geography',
         'postgresql': 'UnicodeText',
         'postgis': 'geoalchemy2.Geography',
         'mariadb': 'UnicodeText',
@@ -738,6 +781,7 @@ PD_TO_SQLALCHEMY_DTYPES_FLAVORS: Dict[str, Dict[str, str]] = {
 
 AUTO_INCREMENT_COLUMN_FLAVORS: Dict[str, str] = {
     'timescaledb': 'GENERATED BY DEFAULT AS IDENTITY',
+    'timescaledb-ha': 'GENERATED BY DEFAULT AS IDENTITY',
     'postgresql': 'GENERATED BY DEFAULT AS IDENTITY',
     'postgis': 'GENERATED BY DEFAULT AS IDENTITY',
     'mariadb': 'AUTO_INCREMENT',

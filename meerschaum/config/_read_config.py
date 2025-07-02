@@ -179,6 +179,7 @@ def read_config(
                         import traceback
                         traceback.print_exc()
                         _config_key = {}
+                substitute = False
                 _single_key_config = (
                     search_and_substitute_config({key: _config_key}) if substitute
                     else {key: _config_key}
@@ -252,6 +253,11 @@ def search_and_substitute_config(
         ```
         MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
         ``` 
+
+    Returns
+    -------
+    The configuration dictionary with `MRSM{}` symlinks replaced with
+    the values from the current configuration.
     """
     from meerschaum.config import get_config
 
@@ -383,11 +389,36 @@ def search_and_substitute_config(
         from meerschaum.config._patch import apply_patch_to_config
         from meerschaum.config.static import STATIC_CONFIG
         symlinks_key = STATIC_CONFIG['config']['symlinks_key']
-        if symlinks_key not in parsed_config:
-            parsed_config[symlinks_key] = {}
-        parsed_config[symlinks_key] = apply_patch_to_config(parsed_config[symlinks_key], symlinks)
+        if symlinks_key in parsed_config:
+            parsed_config[symlinks_key] = apply_patch_to_config(parsed_config[symlinks_key], symlinks)
 
     return parsed_config
+
+
+def revert_symlinks_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Given a configuration dictionary, re-apply the values from the
+    accompanying `_symlinks` dictionary.
+
+    Parameters
+    ----------
+    config: Dict[str, Any]
+        The configuration dictionary containing a `_symlinks` dictionary.
+
+    Returns
+    -------
+    A configuration dictionary with `_symlinks` re-applied.
+    """
+    from meerschaum.config import apply_patch_to_config
+    from meerschaum.config.static import STATIC_CONFIG
+    symlinks_key = STATIC_CONFIG['config']['symlinks_key']
+    if symlinks_key not in config:
+        return config
+
+    symlinks_config = config[symlinks_key]
+    reverted_config = apply_patch_to_config(config, symlinks_config)
+    _ = reverted_config.pop(symlinks_key, None)
+    return reverted_config
 
 
 def get_possible_keys() -> List[str]:

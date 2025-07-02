@@ -38,6 +38,16 @@ flavor_configs = {
             'port': 5432,
         },
     },
+    'timescaledb-ha': {
+        'engine': 'postgresql+psycopg',
+        'create_engine': default_create_engine_args,
+        'omit_create_engine': {'method',},
+        'to_sql': {},
+        'requirements': default_requirements,
+        'defaults': {
+            'port': 5432,
+        },
+    },
     'postgresql': {
         'engine': 'postgresql+psycopg',
         'create_engine': default_create_engine_args,
@@ -172,6 +182,7 @@ install_flavor_drivers = {
     'mysql': ['pymysql'],
     'mariadb': ['pymysql'],
     'timescaledb': ['psycopg'],
+    'timescaledb-ha': ['psycopg', 'geoalchemy'],
     'postgresql': ['psycopg'],
     'postgis': ['psycopg', 'geoalchemy'],
     'citus': ['psycopg'],
@@ -268,7 +279,7 @@ def create_engine(
 
         ### Sometimes the timescaledb:// flavor can slip in.
         if _uri and self.flavor in _uri:
-            if self.flavor in ('timescaledb', 'postgis'):
+            if self.flavor in ('timescaledb', 'timescaledb-ha', 'postgis'):
                 engine_str = engine_str.replace(self.flavor, 'postgresql', 1)
             elif _uri.startswith('postgresql://'):
                 engine_str = engine_str.replace('postgresql://', 'postgresql+psycopg2://')

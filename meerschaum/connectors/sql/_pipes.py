@@ -76,7 +76,7 @@ def register_pipe(
 
 def edit_pipe(
     self,
-    pipe : mrsm.Pipe = None,
+    pipe: mrsm.Pipe,
     patch: bool = False,
     debug: bool = False,
     **kw : Any
@@ -603,7 +603,10 @@ def get_create_index_queries(
     ### create datetime index
     dt_query = None
     if _datetime is not None:
-        if self.flavor == 'timescaledb' and pipe.parameters.get('hypertable', True):
+        if (
+            self.flavor in ('timescaledb', 'timescaledb-ha')
+            and pipe.parameters.get('hypertable', True)
+        ):
             _id_count = (
                 get_distinct_col_count(_id, f"SELECT {_id_name} FROM {_pipe_name}", self)
                 if (_id is not None and _create_space_partition) else None
@@ -719,7 +722,7 @@ def get_create_index_queries(
                         f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
                     )
                 ])
-            elif self.flavor == 'timescaledb':
+            elif self.flavor in ('timescaledb', 'timescaledb-ha'):
                 primary_queries.extend([
                     (
                         f"ALTER TABLE {_pipe_name}\n"
@@ -758,7 +761,7 @@ def get_create_index_queries(
 
     ### create id index
     if _id_name is not None:
-        if self.flavor == 'timescaledb':
+        if self.flavor in ('timescaledb', 'timescaledb-ha'):
             ### Already created indices via create_hypertable.
             id_query = (
                 None if (_id is not None and _create_space_partition)
@@ -797,7 +800,7 @@ def get_create_index_queries(
 
         cols_names_str = ", ".join(cols_names)
         index_query_params_clause = f" ({cols_names_str})"
-        if self.flavor == 'postgis':
+        if self.flavor in ('postgis', 'timescaledb-ha'):
             for col in cols:
                 col_typ = existing_cols_pd_types.get(cols[0], 'object')
                 if col_typ != 'object' and are_dtypes_equal(col_typ, 'geometry'):
@@ -1969,7 +1972,11 @@ def sync_pipe(
             if col and col in existing_cols
         ] if not primary_key or self.flavor == 'oracle' else (
             [dt_col, primary_key]
-            if self.flavor == 'timescaledb' and dt_col and dt_col in update_df.columns
+            if (
+                self.flavor in ('timescaledb', 'timescaledb-ha')
+                and dt_col
+                and dt_col in update_df.columns
+            )
             else [primary_key]
         )
         update_queries = get_update_queries(

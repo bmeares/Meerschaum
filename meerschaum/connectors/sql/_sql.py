@@ -17,7 +17,14 @@ from meerschaum.utils.debug import dprint
 from meerschaum.utils.warnings import warn
 
 ### database flavors that can use bulk insert
-_bulk_flavors = {'postgresql', 'postgis', 'timescaledb', 'citus', 'mssql'}
+_bulk_flavors = {
+    'postgresql',
+    'postgis',
+    'timescaledb',
+    'timescaledb-ha',
+    'citus',
+    'mssql',
+}
 ### flavors that do not support chunks
 _disallow_chunks_flavors = ['duckdb']
 _max_chunks_flavors = {'sqlite': 1000}

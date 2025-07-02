@@ -151,6 +151,9 @@ class SQLConnector(Connector):
             if uri.startswith('timescaledb://'):
                 uri = uri.replace('timescaledb://', 'postgresql+psycopg://', 1)
                 flavor = 'timescaledb'
+            if uri.startswith('timescaledb-ha://'):
+                uri = uri.replace('timescaledb-ha://', 'postgresql+psycopg://', 1)
+                flavor = 'timescaledb-ha'
             if uri.startswith('postgis://'):
                 uri = uri.replace('postgis://', 'postgresql+psycopg://', 1)
                 flavor = 'postgis'
