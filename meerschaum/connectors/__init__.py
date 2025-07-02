@@ -19,6 +19,7 @@ from meerschaum.utils.threading import RLock
 from meerschaum.utils.warnings import warn
 
 from meerschaum.connectors._Connector import Connector, InvalidAttributesError
+from meerschaum.connectors.instance._InstanceConnector import InstanceConnector
 from meerschaum.connectors.sql._SQLConnector import SQLConnector
 from meerschaum.connectors.api._APIConnector import APIConnector
 from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
@@ -26,6 +27,7 @@ from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavo
 __all__ = (
     "make_connector",
     "Connector",
+    "InstanceConnector",
     "SQLConnector",
     "APIConnector",
     "get_connector",

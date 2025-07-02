@@ -9,3 +9,4 @@ Import the core class definitions into the parent module.
 from meerschaum.core.Pipe import Pipe
 from meerschaum.core.Plugin import Plugin
 from meerschaum.core.User import User
+from meerschaum.core.Token import Token

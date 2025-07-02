@@ -1651,8 +1651,8 @@ def sync_pipe(
     self,
     pipe: mrsm.Pipe,
     df: Union[pd.DataFrame, str, Dict[Any, Any], None] = None,
-    begin: Optional[datetime] = None,
-    end: Optional[datetime] = None,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
     chunksize: Optional[int] = -1,
     check_existing: bool = True,
     blocking: bool = True,
@@ -1672,11 +1672,11 @@ def sync_pipe(
         An optional DataFrame or equivalent to sync into the pipe.
         Defaults to `None`.
 
-    begin: Optional[datetime], default None
+    begin: Union[datetime, int, None], default None
         Optionally specify the earliest datetime to search for data.
         Defaults to `None`.
 
-    end: Optional[datetime], default None
+    end: Union[datetime, int, None], default None
         Optionally specify the latest datetime to search for data.
         Defaults to `None`.
 
@@ -1837,9 +1837,10 @@ def sync_pipe(
     )
     if autoincrement and autoincrement not in pipe.parameters:
         pipe.parameters['autoincrement'] = autoincrement
-        edit_success, edit_msg = pipe.edit(debug=debug)
-        if not edit_success:
-            return edit_success, edit_msg
+        if not pipe.temporary:
+            edit_success, edit_msg = pipe.edit(debug=debug)
+            if not edit_success:
+                return edit_success, edit_msg
 
     def _check_pk(_df_to_clear):
         if _df_to_clear is None:
@@ -3418,12 +3419,13 @@ def get_alter_columns_queries(
 
     if numeric_cols:
         pipe.dtypes.update({col: 'numeric' for col in numeric_cols})
-        edit_success, edit_msg = pipe.edit(debug=debug)
-        if not edit_success:
-            warn(
-                f"Failed to update dtypes for numeric columns {items_str(numeric_cols)}:\n"
-                + f"{edit_msg}"
-            )
+        if not pipe.temporary:
+            edit_success, edit_msg = pipe.edit(debug=debug)
+            if not edit_success:
+                warn(
+                    f"Failed to update dtypes for numeric columns {items_str(numeric_cols)}:\n"
+                    + f"{edit_msg}"
+                )
     else:
         numeric_cols.extend([col for col, typ in pipe.dtypes.items() if typ.startswith('numeric')])
 

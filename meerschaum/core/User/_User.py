@@ -7,9 +7,11 @@ User class definition
 """
 
 from __future__ import annotations
+
 import os
 import hashlib
 import hmac
+import uuid
 from binascii import b2a_base64, a2b_base64, Error as _BinAsciiError
 
 import meerschaum as mrsm
@@ -177,7 +179,7 @@ class User:
         type: Optional[str] = None,
         email: Optional[str] = None,
         attributes: Optional[Dict[str, Any]] = None,
-        user_id: Optional[int] = None,
+        user_id: Union[int, str, uuid.UUID, None] = None,
         instance: Optional[str] = None
     ):
         if password is None:
@@ -210,7 +212,7 @@ class User:
         return self._instance_connector
 
     @property
-    def user_id(self) -> Union[int, str, None]:
+    def user_id(self) -> Union[int, str, uuid.UUID, None]:
         """NOTE: This causes recursion with the API,
               so don't try to get fancy with read-only attributes.
         """

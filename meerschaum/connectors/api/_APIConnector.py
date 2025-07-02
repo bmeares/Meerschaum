@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from meerschaum.utils.typing import Optional, List, Union
-from meerschaum.connectors import Connector
+from meerschaum.connectors import InstanceConnector
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
 
@@ -18,14 +18,12 @@ required_attributes = {
     'host',
 }
 
-class APIConnector(Connector):
+class APIConnector(InstanceConnector):
     """
     Connect to a Meerschaum API instance.
     """
 
-    IS_INSTANCE: bool = True
     IS_THREAD_SAFE: bool = False
-
     OPTIONAL_ATTRIBUTES: List[str] = ['port']
 
     from ._request import (

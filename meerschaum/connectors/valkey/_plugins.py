@@ -127,7 +127,8 @@ def get_plugin_id(
     """
     Return a plugin's ID.
     """
-    return plugin.name
+    user_id = self.get_plugin_user_id(plugin, debug=debug)
+    return plugin.name if user_id is not None else None
 
 
 def get_plugin_version(
@@ -197,31 +198,6 @@ def get_plugin_attributes(
         return json.loads(attributes_str)
     except Exception:
         return {}
-
-
-def get_plugins(
-    self,
-    user_id: Optional[int] = None,
-    search_term: Optional[str] = None,
-    debug: bool = False,
-    **kw: Any
-) -> List[str]:
-    """
-    Return a list of plugin names.
-    """
-    plugins_pipe = self.get_plugins_pipe()
-    params = {}
-    if user_id:
-        params['user_id'] = user_id
-
-    df = plugins_pipe.get_data(['plugin_name'], params=params, debug=debug)
-    docs = df.to_dict(orient='records')
-
-    return [
-        doc['plugin_name']
-        for doc in docs
-        if (plugin_name := doc['plugin_name']).startswith(search_term or '')
-    ]
 
 
 def delete_plugin(

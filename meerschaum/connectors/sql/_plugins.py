@@ -13,6 +13,7 @@ import json
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Any, List, SuccessTuple, Dict
 
+
 def register_plugin(
     self,
     plugin: 'mrsm.core.Plugin',
