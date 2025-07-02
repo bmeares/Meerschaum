@@ -325,9 +325,9 @@ def _do_action_wrapper(
                 import traceback
                 traceback.print_exception(type(e), e, e.__traceback__)
             result = False, (
-                f"Failed to execute `{action_name}` "
-                + "with exception:\n\n" +
-                f"{e}."
+                f"Failed to execute `{action_name.strip()}` "
+                + f"with `{type(e).__name__}`"
+                + (f':\n\n{e}' if str(e) else '.')
                 + (
                     "\n\nRun again with '--debug' to see a full stacktrace."
                     if not kw.get('debug', False) else ''

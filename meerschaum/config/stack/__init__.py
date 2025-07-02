@@ -15,7 +15,7 @@ from meerschaum.config._paths import (
     GRAFANA_DATASOURCE_PATH,
     GRAFANA_DASHBOARD_PATH,
     DB_INIT_RESOURCES_PATH,
-    DB_CREATE_POSTGIS_PATH,
+    DB_CREATE_EXTENSIONS_PATH,
     ROOT_DIR_PATH,
 )
 from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
@@ -122,8 +122,9 @@ default_docker_compose_config = {
                 'POSTGRES_DB': '<DOLLAR>POSTGRES_DB',
                 'POSTGRES_PASSWORD': '<DOLLAR>POSTGRES_PASSWORD',
                 'ALLOW_IP_RANGE': env_dict['ALLOW_IP_RANGE'],
+                'POSTGRES_INITDB_ARGS': '-c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100'
             },
-            'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB',
+            #  'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB',
             'healthcheck': {
                 'test': [
                     'CMD-SHELL', 'pg_isready -d <DOLLAR>POSTGRES_DB -U <DOLLAR>POSTGRES_USER',
@@ -280,12 +281,15 @@ def _sync_stack_files():
 
 def _write_initdb():
     create_postgis_text = (
-        "CREATE EXTENSION IF NOT EXISTS postgis;"
+        "CREATE EXTENSION IF NOT EXISTS timescaledb;\n"
+        "CREATE EXTENSION IF NOT EXISTS postgis;\n"
+        "CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit;\n"
+        "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;\n"
     )
-    if DB_CREATE_POSTGIS_PATH.exists():
+    if DB_CREATE_EXTENSIONS_PATH.exists():
         return
 
-    with open(DB_CREATE_POSTGIS_PATH, 'w+', encoding='utf-8') as f:
+    with open(DB_CREATE_EXTENSIONS_PATH, 'w+', encoding='utf-8') as f:
         f.write(create_postgis_text)
 
 NECESSARY_FILES = [STACK_COMPOSE_PATH, GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH]

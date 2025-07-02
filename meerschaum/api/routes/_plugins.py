@@ -29,6 +29,7 @@ from meerschaum.api.tables import get_tables
 from fastapi import File, UploadFile
 from meerschaum.utils.packages import attempt_import
 from meerschaum.core import Plugin
+from meerschaum.utils.misc import filter_arguments
 starlette_responses = attempt_import('starlette.responses', warn=False, lazy=False)
 FileResponse = starlette_responses.FileResponse
 
@@ -108,10 +109,9 @@ def register_plugin(
             return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'."
         plugin.user_id = curr_user_id
 
-    success, msg = get_api_connector(
-        PLUGINS_INSTANCE_KEYS
-    ).register_plugin(plugin, make_archive=False, debug=debug)
-
+    register_plugin = get_api_connector(PLUGINS_INSTANCE_KEYS).register_plugin
+    args, kwargs = filter_arguments(register_plugin, plugin, make_archive=False, debug=debug)
+    success, msg = register_plugin(*args, **kwargs)
     if success:
         archive_path = plugin.archive_path
         temp_archive_path = pathlib.Path(str(archive_path) + '.tmp')

@@ -833,3 +833,28 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
     if len(bounds) == 1:
         return bounds[0]
     return bounds
+
+
+def get_value(
+    self,
+    column: str,
+    params: Optional[Dict[str, Any]] = None,
+    **kwargs: Any
+) -> Any:
+    """
+    Convenience function to return a single value (or `None`) from `Pipe.get_data()`.
+    Keywords arguments are passed to `Pipe.get_data()`.
+    """
+    from meerschaum.utils.warnings import warn
+    kwargs['select_columns'] = [column]
+    kwargs['limit'] = 1
+    try:
+        result_df = self.get_data(params=params, **kwargs)
+        if result_df is None or len(result_df) == 0:
+            return None
+        if column not in result_df.columns:
+            raise ValueError(f"Column '{column}' was not included in the result set.")
+        return result_df[column][0]
+    except Exception as e:
+        warn(f"Failed to read value from {self}:\n{e}", stack=False)
+        return None

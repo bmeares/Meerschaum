@@ -1,25 +1,117 @@
 # 🪵 Changelog
 
-## 2.10.x Releases
+## 3.0.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.10.0
+### v3.0.0
+
+**Potentially Breaking Changes**
+
+- **Add `InstanceConnector` base class.**  
+  Custom connectors which implement the [instance connectors interface](https://meerschaum.io/reference/connectors/instance-connectors/) should now inherit from `InstanceConnector` as the base class:
+
+  ```python
+  # example.py
+
+  from meerschaum.connectors import InstanceConnector, make_connector
+
+  @make_connector
+  class ExampleConnector(InstanceConnector):
+      
+      def register_pipe(self, pipe: mrsm.Pipe, **kwargs):
+          ...
+
+      def get_pipe_attributes(self, pipe: mrsm.Pipe, **kwargs):
+          ...
+
+      ...
+  ```
+
+- **Set `coerce_types` to `True` in `query_df()` if any exclude parameters are provided.**  
+  Prefacing a value with the negation prefix in `params` for `query_df()` will now force `coerce_types` to be `True`.
+
+  ```python
+  import pandas as pd
+  from meerschaum.utils.dataframe import query_df
+
+  df = pd.DataFrame([
+      {'id': 1, 'color': 'red', 'count': 3},
+      {'id': 2, 'color': 'blue', 'count': 2},
+      {'id': 3, 'color': 'red', 'count': 1},
+      {'id': 4, 'color': 'green', 'count': 3},
+  ])
+  result_df = query_df(df, {'count': '_3'})
+  print(result_df)
+  #    id color  count
+  # 1   2  blue      2
+  # 2   3   red      1
+  ```
 
 - **Project geometry data to WGS84 (EPSG:4326) when serializing as GeoJSON.**  
-  Setting `geometry_format` to `geojson` for `to_json()` (and `serialize_geometry()`) will project to WGS84 if a CRS is provided (to meet the 2016 GeoJSON specification).
+  Setting `geometry_format` to `geojson` for `to_json()` (default) (and `serialize_geometry()`, though not default) will project to WGS84 if a CRS is provided (to meet the 2016 GeoJSON specification).
+
+  ```python
+  import meerschaum as mrsm
+  from meerschaum.utils.dataframe import to_json
+
+  pipe = mrsm.Pipe(
+      'demo', 'geojson',
+      instance='sql:memory',
+      temporary=True,
+      columns={'primary': 'id'},
+      dtypes={
+          'geometry': 'geometry[point, 6570]',
+      },
+  )
+  pipe.sync([{
+      'id': 1,
+      'geometry': 'POINT (1583385.033568 1111981.990433)',
+  }])
+
+  df = pipe.get_data()
+  json_data = to_json(df)
+  print(json_data)
+  # [{"id":1,"geometry":{"type":"Point","coordinates":[-82.389048539797542,34.881760860334396]}}] 
+  ```
+
+  - **Upgrade `sql:main` to PostgreSQL 17.**  
+    The Meerschaum stack database now ships as `timescale/timescaledb-ha:pg17`, which includes additional extensions such as PostGIS. The flavor for `sql:main` is now `timescaledb-ha` (see below).
+
+**New Features**
+
+- **Add the SQL flavor `timescaledb-ha`.**  
+  The default instance connector `sql:main` now has the flavor `timescaledb-ha`, corresponding to the `timescale/timescaledb-ha` Docker image. This image includes PostGIS, `timescaledb_toolkit`, and `pg_stat_statements`.
 
 - **Add support for sets and Series in `query_df()`.**  
   Sets and Pandas Series within `params` will now be treated as lists.
 
-- **Set `coerce_types` to `True` if any exclude parameters are provided.**  
-  Prefacing a value with the negation prefix in `params` for `query_df()` will now force `coerce_types` to be `True`.
-
 - **Allow for spaces and an optional `mrsm.` prefix for templated SQL query definitions.**  
   The template format `{{Pipe(...)}}` will now match leading and trailing spaces around the `Pipe` declaration, and an optional `mrsm.` prefix is accepted.
 
-- **Add the SQL flavor `timescaledb-ha`.**  
-  The default instance connector `sql:main` is now of flavor `timescaledb-ha`, corresponding to the `timescale/timescaledb-ha` Docker image. This image includes PostGIS and other extensions.
+- **Add `Pipe.get_value()`.**  
+  The convenience function `Pipe.get_value()` has been added for selecting single values from result sets of `Pipe.get_data`():
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'value',
+      instance='sql:memory',
+      temporary=True,
+      autoincrement=True,
+      columns={'primary': 'id'},
+  )
+  pipe.sync([
+      {'species': 'parrot', 'name': 'Polly'},
+      {'species': 'dog', 'name': 'Spot'},
+      {'species': 'rabbit', 'name': 'Peter Cottontail'},
+  ], debug=True)
+  
+  spot_id = pipe.get_value('id', params={'name': 'Spot'}, debug=True)
+  print(spot_id)
+  # 2
+  ```
 
 - **Add `MRSM` config symlinks to pipe parameters.**  
   TODO
@@ -32,6 +124,8 @@ This is the current release cycle, so stay tuned for future releases!
 - **Ignore `schema` from pipes' parameters on SQLite.**
 
 - **Tweak `begin` and `end` input sizes in the pipes card.**
+
+**Bugfixes**
 
 ## 2.9.x Releases
 

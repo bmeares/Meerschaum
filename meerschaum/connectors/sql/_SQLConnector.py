@@ -10,11 +10,11 @@ from __future__ import annotations
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Any, Union
 
-from meerschaum.connectors import Connector
+from meerschaum.connectors import InstanceConnector
 from meerschaum.utils.warnings import error, warn
 
 
-class SQLConnector(Connector):
+class SQLConnector(InstanceConnector):
     """
     Connect to SQL databases via `sqlalchemy`.
     
@@ -23,8 +23,6 @@ class SQLConnector(Connector):
     https://meerschaum.io/reference/connectors/
 
     """
-
-    IS_INSTANCE: bool = True
 
     from ._create_engine import flavor_configs, create_engine
     from ._sql import (

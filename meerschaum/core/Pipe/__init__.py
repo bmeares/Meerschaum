@@ -89,6 +89,7 @@ class Pipe:
         get_data,
         get_backtrack_data,
         get_rowcount,
+        get_value,
         _get_data_as_iterator,
         get_chunk_interval,
         get_chunk_bounds,
