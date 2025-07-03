@@ -7,11 +7,13 @@ Expose plugin management APIs from the `meerschaum.plugins` module.
 """
 
 from __future__ import annotations
+
 import functools
+
 import meerschaum as mrsm
 from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List, Tuple
 from meerschaum.utils.threading import Lock, RLock
-from meerschaum.plugins._Plugin import Plugin
+from meerschaum.core.Plugin import Plugin
 
 _api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
 _pre_sync_hooks: Dict[str, List[Callable[[Any], Any]]] = {}
@@ -28,14 +30,27 @@ _locks = {
     'PLUGINS_INTERNAL_LOCK_PATH': RLock(),
 }
 __all__ = (
-    "Plugin", "make_action", "api_plugin", "dash_plugin", "web_page",
-    "import_plugins", "from_plugin_import",
-    "reload_plugins", "get_plugins", "get_data_plugins", "add_plugin_argument",
-    "pre_sync_hook", "post_sync_hook",
+    "Plugin",
+    "make_action",
+    "api_plugin",
+    "dash_plugin",
+    "web_page",
+    "import_plugins",
+    "from_plugin_import",
+    "reload_plugins",
+    "get_plugins",
+    "get_data_plugins",
+    "add_plugin_argument",
+    "pre_sync_hook",
+    "post_sync_hook",
 )
 __pdoc__ = {
-    'venvs': False, 'data': False, 'stack': False, 'plugins': False,
+    'venvs': False,
+    'data': False,
+    'stack': False,
+    'plugins': False,
 }
+
 
 def make_action(
     function: Callable[[Any], Any],
