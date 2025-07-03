@@ -73,6 +73,7 @@ class SQLConnector(InstanceConnector):
         get_pipe_index_names,
     )
     from ._plugins import (
+        get_plugins_pipe,
         register_plugin,
         delete_plugin,
         get_plugin_id,
@@ -315,7 +316,7 @@ class SQLConnector(InstanceConnector):
         """
         Return the schema name for internal tables. 
         """
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         from meerschaum.utils.sql import NO_SCHEMA_FLAVORS
         schema_name = self.__dict__.get('internal_schema', None) or (
             STATIC_CONFIG['sql']['internal_schema']

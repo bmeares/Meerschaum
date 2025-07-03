@@ -231,7 +231,7 @@ def create_schemas(
     """
     Create the internal Meerschaum schema on the database.
     """
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import sql_item_name, NO_SCHEMA_FLAVORS, SKIP_IF_EXISTS_FLAVORS
     if conn.flavor in NO_SCHEMA_FLAVORS:

@@ -284,7 +284,7 @@ def _register_users(
     Register a new user to a Meerschaum instance.
     """
     from meerschaum.config import get_config
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.warnings import warn, info
     from meerschaum.core import User

@@ -15,7 +15,7 @@ import pathlib
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any
-from meerschaum.config.static import STATIC_CONFIG as _STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
 
 _systemd_result_path = None
 if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
@@ -66,7 +66,7 @@ def entry(
         sysargs_has_api_executor_keys,
         get_pipeline_sysargs,
     )
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     if sysargs is None:
         sysargs = []
     if not isinstance(sysargs, list):
@@ -206,7 +206,7 @@ def entry_with_args(
     from meerschaum.actions import get_action
     from meerschaum._internal.arguments import remove_leading_action
     from meerschaum.utils.venv import active_venvs, deactivate_venv
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.typing import is_success_tuple
 
     if _patch_args:

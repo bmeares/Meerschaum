@@ -16,7 +16,7 @@ from starlette.responses import JSONResponse
 
 from meerschaum.api import endpoints, get_api_connector, app, debug, manager, no_auth
 from meerschaum.core import User
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.typing import Dict, Any
 from meerschaum.core.User._User import verify_password
 from meerschaum.utils.warnings import warn

@@ -564,7 +564,7 @@ def check_noask(noask: bool = False) -> bool:
     """
     Flip `noask` to `True` if `MRSM_NOASK` is set.
     """
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     NOASK = STATIC_CONFIG['environment']['noask']
     if noask:
         return True

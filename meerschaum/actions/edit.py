@@ -218,7 +218,7 @@ def _edit_users(
     from meerschaum.utils.prompt import prompt, yes_no, get_password, get_email
     from meerschaum.utils.misc import edit_file
     from meerschaum.config._paths import USERS_CACHE_RESOURCES_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.yaml import yaml
     import os, pathlib
     instance_connector = parse_instance_keys(mrsm_instance)

@@ -14,7 +14,7 @@ from datetime import datetime
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Any, SuccessTuple, List, Union, Callable, Optional
 from meerschaum.jobs import Job
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn, dprint
 
 JOBS_ENDPOINT: str = STATIC_CONFIG['api']['endpoints']['jobs']

@@ -298,7 +298,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     import importlib.util
     from meerschaum.utils.misc import flatten_list, make_symlink, is_symlink
     from meerschaum.utils.warnings import error, warn as _warn
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.venv import Venv, activate_venv, deactivate_venv, is_venv_active
     from meerschaum.config._paths import (
         PLUGINS_RESOURCES_PATH,

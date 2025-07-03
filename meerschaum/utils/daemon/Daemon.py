@@ -24,7 +24,7 @@ from meerschaum.utils.typing import (
     is_success_tuple, Tuple,
 )
 from meerschaum.config import get_config
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.config._paths import (
     DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH, DAEMON_ERROR_LOG_PATH,
 )

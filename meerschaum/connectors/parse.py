@@ -56,7 +56,7 @@ def parse_connector_keys(
     import copy
     from meerschaum.connectors import get_connector
     from meerschaum.config import get_config
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import error
 
     ### `get_connector()` handles the logic for falling back to 'main',

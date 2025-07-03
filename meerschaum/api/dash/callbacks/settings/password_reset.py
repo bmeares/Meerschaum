@@ -11,7 +11,7 @@ from dash.dependencies import Input, Output, State
 import dash_bootstrap_components as dbc
 
 from meerschaum.core.User import User
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.api import get_api_connector, debug
 from meerschaum.api.dash import dash_app
 from meerschaum.api.dash.components import alert_from_success_tuple

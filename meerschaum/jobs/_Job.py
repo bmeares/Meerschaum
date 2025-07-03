@@ -24,7 +24,7 @@ from meerschaum._internal.entry import entry
 from meerschaum.utils.warnings import warn
 from meerschaum.config.paths import LOGS_RESOURCES_PATH
 from meerschaum.config import get_config
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 if TYPE_CHECKING:
     from meerschaum.jobs._Executor import Executor

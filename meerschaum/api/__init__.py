@@ -14,7 +14,7 @@ from fnmatch import fnmatch
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Any, Optional, PipesDict
 from meerschaum.config import get_config
-from meerschaum.config.static import STATIC_CONFIG, SERVER_ID
+from meerschaum._internal.static import STATIC_CONFIG, SERVER_ID
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils import get_pipes as _get_pipes
 from meerschaum.config._paths import API_UVICORN_CONFIG_PATH, API_UVICORN_RESOURCES_PATH

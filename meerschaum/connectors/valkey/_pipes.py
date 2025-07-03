@@ -13,7 +13,7 @@ from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, Li
 from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.dtypes import json_serialize_value
 from meerschaum.utils.warnings import warn, dprint
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 PIPES_TABLE: str = 'mrsm_pipes'
 PIPES_COUNTER: str = 'mrsm_pipes:counter'

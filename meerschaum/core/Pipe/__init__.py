@@ -274,7 +274,7 @@ class Pipe:
         if location in ('[None]', 'None'):
             location = None
 
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
         for k in (connector, metric, location, *(tags or [])):
             if str(k).startswith(negation_prefix):

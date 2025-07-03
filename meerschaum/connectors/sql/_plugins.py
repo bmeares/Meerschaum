@@ -14,6 +14,34 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Any, List, SuccessTuple, Dict
 
 
+def get_plugins_pipe(self) -> mrsm.Pipe:
+    """
+    Return the internal metadata plugins pipe.
+    """
+    users_pipe = self.get_users_pipe()
+    user_id_dtype = users_pipe.dtypes.get('user_id', 'int')
+    return mrsm.Pipe(
+        'mrsm', 'plugins',
+        instance=self,
+        temporary=True,
+        static=True,
+        null_indices=False,
+        columns={
+            'primary': 'plugin_id',
+            'user_id': 'user_id',    
+        },
+        dtypes={
+            'plugin_name': 'string',
+            'user_id': user_id_dtype,
+            'attributes': 'json',
+            'version': 'string',
+        },
+        indices={
+            'unique': 'plugin_name',
+        },
+    )
+
+
 def register_plugin(
     self,
     plugin: 'mrsm.core.Plugin',

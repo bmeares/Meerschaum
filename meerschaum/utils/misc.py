@@ -122,11 +122,30 @@ def is_int(s: str) -> bool:
 
     """
     try:
-        float(s)
+        return float(s).is_integer()
     except Exception:
         return False
-    
-    return float(s).is_integer()
+
+
+def is_uuid(s: str) -> bool:
+    """
+    Check if a string is a valid UUID.
+
+    Parameters
+    ----------
+    s: str
+        The string to be checked.
+
+    Returns
+    -------
+    A bool indicating whether the string is a valid UUID.
+    """
+    import uuid
+    try:
+        uuid.UUID(str(s))
+        return True
+    except Exception:
+        return False
 
 
 def string_to_dict(
@@ -1165,7 +1184,7 @@ def interval_str(delta: Union[timedelta, int]) -> str:
     A formatted string, fit for human eyes.
     """
     from meerschaum.utils.packages import attempt_import
-    if is_int(delta):
+    if is_int(str(delta)):
         return str(delta)
     humanfriendly = attempt_import('humanfriendly')
     delta_seconds = (
@@ -1404,7 +1423,7 @@ def separate_negation_values(
         If `None`, use the system default (`_`).
     """
     if negation_prefix is None:
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
     _in_vals, _ex_vals = [], []
     for v in vals:
@@ -1843,4 +1862,5 @@ __all__ = tuple(
     if callable(obj)
         and name not in __pdoc__
         and getattr(obj, '__module__', None) == _current_module.__name__
+        and not name.startswith('_')
 )

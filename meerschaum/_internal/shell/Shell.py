@@ -35,7 +35,7 @@ _clear_screen = get_config('shell', 'clear_screen', patch=True)
 from meerschaum.utils.misc import string_width, remove_ansi
 from meerschaum.utils.warnings import warn
 from meerschaum.jobs import get_executor_keys_from_context
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum._internal.arguments._parse_arguments import (
     split_chained_sysargs,
     split_pipeline_sysargs,

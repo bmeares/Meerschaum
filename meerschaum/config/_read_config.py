@@ -53,7 +53,7 @@ def read_config(
     import itertools
     from meerschaum.utils.yaml import yaml, _yaml
     from meerschaum.config._paths import CONFIG_DIR_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.config._patch import apply_patch_to_config
     if directory is None:
         directory = CONFIG_DIR_PATH
@@ -387,7 +387,7 @@ def search_and_substitute_config(
             s[_keys[-1]] = _pattern
 
         from meerschaum.config._patch import apply_patch_to_config
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         symlinks_key = STATIC_CONFIG['config']['symlinks_key']
         if symlinks_key in parsed_config:
             parsed_config[symlinks_key] = apply_patch_to_config(parsed_config[symlinks_key], symlinks)
@@ -410,7 +410,7 @@ def revert_symlinks_config(config: Dict[str, Any]) -> Dict[str, Any]:
     A configuration dictionary with `_symlinks` re-applied.
     """
     from meerschaum.config import apply_patch_to_config
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     symlinks_key = STATIC_CONFIG['config']['symlinks_key']
     if symlinks_key not in config:
         return config
@@ -462,7 +462,7 @@ def get_keyfile_path(
         )
     except IndexError:
         if create_new:
-            from meerschaum.config.static import STATIC_CONFIG
+            from meerschaum._internal.static import STATIC_CONFIG
             default_filetype = STATIC_CONFIG['config']['default_filetype']
             return pathlib.Path(os.path.join(directory, key + '.' + default_filetype))
         return None

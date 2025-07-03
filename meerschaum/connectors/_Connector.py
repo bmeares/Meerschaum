@@ -75,7 +75,7 @@ class Connector(metaclass=abc.ABCMeta):
         inherit_default: bool = True,
         **kw: Any
     ):
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         from meerschaum.utils.warnings import error
 
         self._attributes = {}
@@ -231,7 +231,7 @@ class Connector(metaclass=abc.ABCMeta):
         """
         _label = self.__dict__.get('label', None)
         if _label is None:
-            from meerschaum.config.static import STATIC_CONFIG
+            from meerschaum._internal.static import STATIC_CONFIG
             _label = STATIC_CONFIG['connectors']['default_label']
             self.__dict__['label'] = _label
         return _label

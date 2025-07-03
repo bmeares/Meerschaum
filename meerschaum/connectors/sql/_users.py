@@ -90,7 +90,7 @@ def register_user(
 
 def valid_username(username: str) -> SuccessTuple:
     """Verify that a given username is valid."""
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     fail_reasons = []
 
     min_length = STATIC_CONFIG['users']['min_username_length']

@@ -13,7 +13,7 @@ from meerschaum.api.dash.sessions import set_session
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
 from meerschaum.core import User
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.packages import attempt_import
 dash = attempt_import('dash', check_update=CHECK_UPDATE)
 from fastapi.exceptions import HTTPException

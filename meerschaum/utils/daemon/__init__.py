@@ -308,6 +308,6 @@ def running_in_daemon() -> bool:
     """
     Return whether the current thread is running in a Daemon context.
     """
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     daemon_env_var = STATIC_CONFIG['environment']['daemon_id']
     return daemon_env_var in os.environ
