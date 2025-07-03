@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.utils.typing import SuccessTuple, List
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.misc import remove_ansi
 from meerschaum._internal.shell.Shell import get_shell_intro
 from meerschaum.api import endpoints, CHECK_UPDATE, docs_enabled

@@ -22,7 +22,6 @@ from meerschaum.connectors._Connector import Connector, InvalidAttributesError
 from meerschaum.connectors.instance._InstanceConnector import InstanceConnector
 from meerschaum.connectors.sql._SQLConnector import SQLConnector
 from meerschaum.connectors.api._APIConnector import APIConnector
-from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
 
 __all__ = (
     "make_connector",
@@ -55,24 +54,7 @@ _locks: Dict[str, RLock] = {
     '_loaded_plugin_connectors': RLock(),
     'instance_types'           : RLock(),
 }
-attributes: Dict[str, Dict[str, Any]] = {
-    'api': {
-        'required': [
-            'host',
-            'username',
-            'password',
-        ],
-        'optional': [
-            'port',
-        ],
-        'default': {
-            'protocol': 'http',
-        },
-    },
-    'sql': {
-        'flavors': sql_flavor_configs,
-    },
-}
+
 ### Fill this with objects only when connectors are first referenced.
 types: Dict[str, Any] = {}
 custom_types: set = set()
@@ -132,7 +114,7 @@ def get_connector(
     """
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.config import get_config
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
     global _loaded_plugin_connectors
     if isinstance(type, str) and not label and ':' in type:

@@ -6,3 +6,4 @@
 Modules, classes, and variables declared in _internal are not intended for general public use.
 """
 
+from meerschaum._internal.static import STATIC_CONFIG

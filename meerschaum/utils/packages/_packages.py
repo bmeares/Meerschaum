@@ -174,6 +174,7 @@ packages['api'] = {
     'httpx'                          : 'httpx>=0.27.2',
     'httpcore'                       : 'httpcore>=1.0.6',
     'valkey'                         : 'valkey>=6.0.0',
+    'pydantic'                       : 'pydantic>=2.11.7',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])

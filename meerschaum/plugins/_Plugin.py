@@ -47,7 +47,7 @@ class Plugin:
         repo_connector: Optional['mrsm.connectors.api.APIConnector'] = None,
         repo: Union['mrsm.connectors.api.APIConnector', str, None] = None,
     ):
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         sep = STATIC_CONFIG['plugins']['repo_separator']
         _repo = None
         if sep in name:
@@ -722,7 +722,7 @@ class Plugin:
         """
         from meerschaum.utils.warnings import warn
         from meerschaum.config import get_config
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         from meerschaum.connectors.parse import is_valid_connector_keys
         plugins = []
         _deps = self.get_dependencies(debug=debug)
@@ -953,7 +953,7 @@ class Plugin:
         """
         Include the repo keys with the plugin's name.
         """
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         sep = STATIC_CONFIG['plugins']['repo_separator']
         return self.name + sep + str(self.repo_connector)
 

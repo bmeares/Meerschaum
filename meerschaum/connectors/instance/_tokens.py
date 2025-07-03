@@ -61,7 +61,7 @@ def register_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple
         'token_label': token.label,
         'is_valid': token.is_valid,
         'scopes': list(token.scopes) if token.scopes else None,
-        'token_hash': hash_password(token.secret),
+        'token_hash': hash_password(token.secret, rounds=100_000),
     }
     sync_success, sync_msg = tokens_pipe.sync([doc], check_existing=False, debug=debug)
     if not sync_success:

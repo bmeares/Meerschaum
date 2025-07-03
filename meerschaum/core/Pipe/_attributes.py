@@ -192,7 +192,7 @@ def tags(self, _tags: List[str, str]) -> None:
     Call `meerschaum.Pipe.edit` to persist changes.
     """
     from meerschaum.utils.warnings import error
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
     for t in _tags:
         if t.startswith(negation_prefix):
@@ -434,7 +434,7 @@ def get_columns_types(
     """
     import time
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import dprint
 
     now = time.perf_counter()
@@ -479,7 +479,7 @@ def get_columns_indices(
     """
     import time
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import dprint
 
     now = time.perf_counter()

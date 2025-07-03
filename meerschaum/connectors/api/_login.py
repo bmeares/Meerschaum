@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import datetime
 from meerschaum.utils.typing import SuccessTuple, Any, Union
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn as _warn
 
 

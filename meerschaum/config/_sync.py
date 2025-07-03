@@ -111,7 +111,7 @@ def sync_files(keys: Optional[List[str]] = None):
             GRAFANA_DATASOURCE_PATH,
             GRAFANA_DASHBOARD_PATH,
         )
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         from meerschaum.config.stack import _write_initdb
 
         sync_yaml_configs(

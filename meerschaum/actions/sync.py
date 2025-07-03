@@ -287,7 +287,7 @@ def _sync_pipes(
     from meerschaum.utils.formatting._shell import progress
     from meerschaum.utils.formatting._shell import clear_screen
     from meerschaum.utils.formatting import print_pipes_results
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.misc import interval_str
 
     noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)

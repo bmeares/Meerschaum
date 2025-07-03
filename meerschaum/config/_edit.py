@@ -22,7 +22,7 @@ def edit_config(
     from meerschaum.config import get_config, config
     from meerschaum.config._read_config import get_keyfile_path, read_config, revert_symlinks_config
     from meerschaum.config._paths import CONFIG_DIR_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.packages import reload_meerschaum
     from meerschaum.utils.misc import edit_file
     from meerschaum.utils.warnings import warn
@@ -103,7 +103,7 @@ def write_config(
     if directory is None:
         from meerschaum.config._paths import CONFIG_DIR_PATH
         directory = CONFIG_DIR_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.config._default import default_header_comment
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config._read_config import get_keyfile_path

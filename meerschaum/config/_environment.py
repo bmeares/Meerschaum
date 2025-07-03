@@ -10,7 +10,7 @@ import os
 import re
 import json
 from meerschaum.utils.typing import List, Union, Dict, Any
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 def apply_environment_patches() -> None:
     """

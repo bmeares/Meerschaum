@@ -16,7 +16,6 @@ from binascii import b2a_base64, a2b_base64, Error as _BinAsciiError
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, Union
-from meerschaum.config.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn
 
 
@@ -42,7 +41,7 @@ def hash_password(
 
     rounds: Optional[int], default None
         If provided, use this number of rounds to generate the hash.
-        Defaults to 3,000,000.
+        Defaults to 1,000,000.
         
     Returns
     -------
@@ -50,6 +49,7 @@ def hash_password(
     See the `passlib` documentation on the string format:
     https://passlib.readthedocs.io/en/stable/lib/passlib.hash.pbkdf2_digest.html#format-algorithm
     """
+    from meerschaum._internal.static import STATIC_CONFIG
     hash_config = STATIC_CONFIG['users']['password_hash']
     if password is None:
         password = ''
@@ -66,7 +66,7 @@ def hash_password(
     ) 
     return (
         f"$pbkdf2-{hash_config['algorithm_name']}"
-        + f"${hash_config['pbkdf2_sha256__default_rounds']}"
+        + f"${rounds}"
         + '$' + ab64_encode(salt).decode('utf-8')
         + '$' + ab64_encode(pw_hash).decode('utf-8')
     )
@@ -91,6 +91,7 @@ def verify_password(
     -------
     A `bool` indicating whether `password` matches `password_hash`.
     """
+    from meerschaum._internal.static import STATIC_CONFIG
     if password is None or password_hash is None:
         return False
     hash_config = STATIC_CONFIG['users']['password_hash']

@@ -5,6 +5,7 @@
 Define the API token routes.
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Optional, Tuple, List
 
@@ -20,8 +21,11 @@ from meerschaum.api import (
     get_api_connector,
     endpoints,
 )
-from meerschaum.utils.dtypes import coerce_timezone
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum.api.models import (
+    RegisterTokenResponseModel,
+)
+from meerschaum.utils.dtypes import coerce_timezone, json_serialize_value
+from meerschaum._internal.static import STATIC_CONFIG
 
 tokens_endpoint = endpoints['tokens']
 
@@ -29,6 +33,7 @@ tokens_endpoint = endpoints['tokens']
 @app.post(
     tokens_endpoint + '/register',
     tags=['Tokens'],
+    response_model=RegisterTokenResponseModel,
 )
 def register_token(
     label: Optional[str] = None,
@@ -37,7 +42,7 @@ def register_token(
     curr_user=(
         fastapi.Depends(manager) if not no_auth else None
     ),
-):
+) -> RegisterTokenResponseModel:
     """
     Register a new Token, returning its secret (unable to be retrieved later).
     """
@@ -55,8 +60,14 @@ def register_token(
             detail=f"Could not register new token:\n{register_msg}",
         )
 
-    return {
+    doc = {
         'label': token.label,
         'secret': token.secret,
-        'expires_at': token.expiration,
+        'expires_at': (
+            token.expiration.isoformat()
+            if token.expiration is not None
+            else None
+        ),
     }
+    payload = json.dumps(doc, default=json_serialize_value)
+    return fastapi.Response(payload, media_type='application/json')

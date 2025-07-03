@@ -23,7 +23,7 @@ def split_pipeline_sysargs(sysargs: List[str]) -> Tuple[List[str], List[str]]:
     """
     Split `sysargs` into the main pipeline and the flags following the pipeline separator (`:`).
     """
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     pipeline_key = STATIC_CONFIG['system']['arguments']['pipeline_key']
     if pipeline_key not in sysargs:
         return sysargs, []
@@ -40,7 +40,7 @@ def split_chained_sysargs(sysargs: List[str]) -> List[List[str]]:
     Split a `sysargs` list containing "and" keys (`+`)
     into a list of individual `sysargs`.
     """
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     and_key = STATIC_CONFIG['system']['arguments']['and_key']
 
     if not sysargs or and_key not in sysargs:
@@ -90,7 +90,7 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
 
     """
     import shlex
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum._internal.arguments._parser import parser
 
     global _loaded_plugins_args
@@ -360,7 +360,7 @@ def remove_leading_action(
     """
     from meerschaum.actions import get_action, get_main_action_name
     from meerschaum.utils.warnings import warn
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     action_function = get_action(action, _actions=_actions)
     if action_function is None:
         return action

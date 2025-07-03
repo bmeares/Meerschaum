@@ -755,7 +755,7 @@ def get_pip(
     import subprocess
     from meerschaum.utils.misc import wget
     from meerschaum.config._paths import CACHE_RESOURCES_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     url = STATIC_CONFIG['system']['urls']['get-pip.py']
     dest = CACHE_RESOURCES_PATH / 'get-pip.py'
     try:
@@ -837,7 +837,7 @@ def pip_install(
 
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
     if args is None:
         args = ['--upgrade'] if not _uninstall else []

@@ -32,11 +32,12 @@ class Token:
     ):
         from meerschaum.utils.dtypes import coerce_timezone
         from meerschaum.utils.daemon import get_new_daemon_name
+        from meerschaum._internal.static import STATIC_CONFIG
         self.expiration = coerce_timezone(expiration) if expiration is not None else None
         self._instance_keys = str(instance) if instance is not None else None
         self.label = label or get_new_daemon_name()
         self.user = user
-        self.scopes = scopes
+        self.scopes = scopes or list(STATIC_CONFIG['tokens']['scopes'])
         self.is_valid = is_valid
 
     def generate_secret(self) -> str:
@@ -44,7 +45,7 @@ class Token:
         Generate the internal secret value for this token.
         """
         from meerschaum.utils.misc import generate_password
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         min_len = STATIC_CONFIG['tokens']['minimum_length']
         max_len = STATIC_CONFIG['tokens']['maximum_length']
 

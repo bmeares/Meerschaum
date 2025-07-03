@@ -174,7 +174,7 @@ def fetch_pipes_keys(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import separate_negation_values
     from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS, table_exists
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     import json
     from copy import deepcopy
     sqlalchemy, sqlalchemy_sql_functions = attempt_import(

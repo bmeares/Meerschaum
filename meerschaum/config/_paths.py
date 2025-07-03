@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 import os, platform, sys, json
 from meerschaum.utils.typing import Union
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 DOT_CONFIG_DIR_PATH = Path(
     os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')

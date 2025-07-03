@@ -7,10 +7,29 @@ The default configuration values to write to config.yaml.
 """
 
 import multiprocessing
+from typing import Dict, Any
 
-from meerschaum.connectors import attributes as connector_attributes
 from meerschaum.config._paths import SQLITE_DB_PATH
+from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
 
+CONNECTOR_ATTRIBUTES: Dict[str, Dict[str, Any]] = {
+    'api': {
+        'required': [
+            'host',
+            'username',
+            'password',
+        ],
+        'optional': [
+            'port',
+        ],
+        'default': {
+            'protocol': 'http',
+        },
+    },
+    'sql': {
+        'flavors': sql_flavor_configs,
+    },
+}
 default_meerschaum_config = {
     'instance': 'sql:main',
     'api_instance': 'MRSM{meerschaum:instance}',
@@ -37,7 +56,7 @@ default_meerschaum_config = {
             },
         },
         'api': {
-            'default': connector_attributes['api']['default'],
+            'default': CONNECTOR_ATTRIBUTES['api']['default'],
             'main': {
                 'host': 'localhost',
                 'port': 8000,

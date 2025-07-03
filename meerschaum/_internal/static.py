@@ -1,18 +1,18 @@
-#! /usr/bin/env python
-# -*- coding: utf-8 -*-
+#! /usr/bin/env python3
 # vim:fenc=utf-8
 
 """
-Insert non-user-editable configuration files here.
+Define internal static config (formerly `meerschaum.config.static`).
 """
 
 import os
+import random
+import string
 from typing import Dict, Any
-from meerschaum.utils.misc import generate_password
 
-__all__ = ['STATIC_CONFIG']
+__all__ = ('STATIC_CONFIG',)
 
-SERVER_ID: str = os.environ.get('MRSM_SERVER_ID', generate_password(6))
+SERVER_ID: str = os.environ.get('MRSM_SERVER_ID', ''.join(random.sample(string.ascii_lowercase+string.digits, 6)))
 STATIC_CONFIG: Dict[str, Any] = {
     'api': {
         'endpoints': {
@@ -189,10 +189,3 @@ STATIC_CONFIG: Dict[str, Any] = {
         'license_files': ('LICENSE',),
     },
 }
-
-
-def _static_config():
-    """
-    Alias function for the global `STATIC_CONFIG` dictionary.
-    """
-    return STATIC_CONFIG

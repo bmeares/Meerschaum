@@ -7,18 +7,23 @@ Manage users via the API Connector.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, Any, List, SuccessTuple
+
+import json
+from uuid import UUID
+
+import meerschaum as mrsm
+from meerschaum.utils.typing import Optional, Any, List, SuccessTuple, Union
+
 
 def get_users(
-        self,
-        debug: bool = False,
-        **kw : Any
-    ) -> List[str]:
+    self,
+    debug: bool = False,
+    **kw: Any
+) -> List[str]:
     """
     Return a list of registered usernames.
     """
-    from meerschaum.config.static import STATIC_CONFIG
-    import json
+    from meerschaum._internal.static import STATIC_CONFIG
     response = self.get(
         f"{STATIC_CONFIG['api']['endpoints']['users']}",
         debug = debug,
@@ -31,15 +36,15 @@ def get_users(
     except Exception as e:
         return []
 
+
 def edit_user(
-        self,
-        user: 'meerschaum.core.User',
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    user: mrsm.core.User,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """Edit an existing user."""
-    import json
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     r_url = f"{STATIC_CONFIG['api']['endpoints']['users']}/edit"
     data = {
         'username': user.username,
@@ -62,14 +67,13 @@ def edit_user(
 
 
 def register_user(
-        self,
-        user: 'meerschaum.core.User',
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    user: mrsm.core.User,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """Register a new user."""
-    import json
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     r_url = f"{STATIC_CONFIG['api']['endpoints']['users']}/register"
     data = {
         'username': user.username,
@@ -94,31 +98,37 @@ def register_user(
 
     
 def get_user_id(
-        self,
-        user: 'meerschaum.core.User',
-        debug: bool = False,
-        **kw: Any
-    ) -> Optional[int]:
+    self,
+    user: mrsm.core.User,
+    debug: bool = False,
+    **kw: Any
+) -> Union[int, str, UUID, None]:
     """Get a user's ID."""
-    from meerschaum.config.static import STATIC_CONFIG
-    import json
+    from meerschaum._internal.static import STATIC_CONFIG
+    from meerschaum.utils.misc import is_int, is_uuid
     r_url = f"{STATIC_CONFIG['api']['endpoints']['users']}/{user.username}/id"
     response = self.get(r_url, debug=debug, **kw)
     try:
-        user_id = int(json.loads(response.text))
+        id_text = str(json.loads(response.text))
+        if is_int(id_text):
+            user_id = int(id_text)
+        elif is_uuid(id_text):
+            user_id = UUID(id_text)
+        else:
+            user_id = id_text
     except Exception as e:
         user_id = None
     return user_id
 
+
 def delete_user(
-        self,
-        user: 'meerschaum.core.User',
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    user: mrsm.core.User,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """Delete a user."""
-    from meerschaum.config.static import STATIC_CONFIG
-    import json
+    from meerschaum._internal.static import STATIC_CONFIG
     r_url = f"{STATIC_CONFIG['api']['endpoints']['users']}/{user.username}"
     response = self.delete(r_url, debug=debug)
     try:
@@ -130,15 +140,15 @@ def delete_user(
         success_tuple = False, f"Failed to delete user '{user.username}'."
     return success_tuple
 
+
 def get_user_attributes(
-        self,
-        user: 'meerschaum.core.User',
-        debug: bool = False,
-        **kw
-    ) -> int:
+    self,
+    user: mrsm.core.User,
+    debug: bool = False,
+    **kw
+) -> int:
     """Get a user's attributes."""
-    from meerschaum.config.static import STATIC_CONFIG
-    import json
+    from meerschaum._internal.static import STATIC_CONFIG
     r_url = f"{STATIC_CONFIG['api']['endpoints']['users']}/{user.username}/attributes"
     response = self.get(r_url, debug=debug, **kw)
     try:
@@ -147,32 +157,34 @@ def get_user_attributes(
         attributes = None
     return attributes
 
+
 #############################
 # Chaining functions below. #
 #############################
 
 def get_user_password_hash(
-        self,
-        user: 'meerschaum.core.User',
-        debug: bool = False,
-        **kw: Any
-    ) -> Optional[str]:
+    self,
+    user: mrsm.core.User,
+    debug: bool = False,
+    **kw: Any
+) -> Optional[str]:
     """If configured, get a user's password hash."""
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     r_url = STATIC_CONFIG['api']['endpoints']['users'] + '/' + user.username + '/password_hash'
     response = self.get(r_url, debug=debug, **kw)
     if not response:
         return None
     return response.json()
 
+
 def get_user_type(
-        self,
-        user: 'meerschaum.core.User',
-        debug: bool = False,
-        **kw: Any
-    ) -> Optional[str]:
+    self,
+    user: mrsm.core.User,
+    debug: bool = False,
+    **kw: Any
+) -> Optional[str]:
     """If configured, get a user's type."""
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     r_url = STATIC_CONFIG['api']['endpoints']['users'] + '/' + user.username + '/type'
     response = self.get(r_url, debug=debug, **kw)
     if not response:

@@ -14,7 +14,7 @@ from functools import partial
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, List, Callable, Optional
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 ACTIONS_ENDPOINT: str = STATIC_CONFIG['api']['endpoints']['actions']
 TEMP_PREFIX: str = STATIC_CONFIG['api']['jobs']['temp_prefix']
@@ -88,7 +88,7 @@ def do_action_legacy(
     """
     import sys, json
     from meerschaum.utils.debug import dprint
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.misc import json_serialize_datetime
     if action is None:
         action = []

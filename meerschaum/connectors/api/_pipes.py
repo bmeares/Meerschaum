@@ -21,7 +21,7 @@ def pipe_r_url(
     pipe: mrsm.Pipe
 ) -> str:
     """Return a relative URL path from a Pipe's keys."""
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     location_key = pipe.location_key
     if location_key is None:
         location_key = '[None]'
@@ -142,7 +142,7 @@ def fetch_pipes_keys(
     -------
     A list of tuples containing pipes' keys.
     """
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     if connector_keys is None:
         connector_keys = []
     if metric_keys is None:
@@ -577,7 +577,7 @@ def create_metadata(
     A bool indicating success.
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     r_url = STATIC_CONFIG['api']['endpoints']['metadata']
     response = self.post(r_url, debug=debug)
     if debug:

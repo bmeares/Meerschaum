@@ -26,7 +26,7 @@ from meerschaum.config._read_config import (
     get_keyfile_path,
     read_config,
 )
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 from meerschaum.config._paths import (
     PERMANENT_PATCH_DIR_PATH,

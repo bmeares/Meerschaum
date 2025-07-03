@@ -370,7 +370,7 @@ def start_check_jobs_thread():
     import atexit
     from functools import partial
     from meerschaum.utils.threading import RepeatTimer
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
 
     global _check_loop_stop_thread
     sleep_seconds = STATIC_CONFIG['jobs']['check_restart_seconds']

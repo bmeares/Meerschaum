@@ -32,7 +32,7 @@ from meerschaum.api import (
     no_auth,
     debug,
 )
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.core.User import is_user_allowed_to_execute
 
 

@@ -12,7 +12,7 @@ import time
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, Dict
 from meerschaum.utils.warnings import warn, info
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 
 def verify(

@@ -27,6 +27,11 @@ from meerschaum.api import (
     debug,
     no_auth,
 )
+from meerschaum.api.models import (
+    SuccessTupleResponseModel,
+    FetchPipesKeysResponseModel,
+    MetaPipe,
+)
 from meerschaum.api._chunks import generate_chunks_cursor_token
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.dataframe import to_json
@@ -49,6 +54,7 @@ MAX_RESPONSE_ROW_LIMIT: int = mrsm.get_config('system', 'api', 'data', 'max_resp
 @app.post(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/register',
     tags=['Pipes: Attributes'],
+    response_model=SuccessTupleResponseModel,
 )
 def register_pipe(
     connector_keys: str,
@@ -59,7 +65,7 @@ def register_pipe(
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
-):
+) -> SuccessTupleResponseModel:
     """
     Register a new pipe.
     """
@@ -69,7 +75,7 @@ def register_pipe(
             "The administrator for this server has not allowed pipe registration.\n\n"
             "Please contact the system administrator, or if you are running this server, "
             "open the configuration file with `edit config system` and search for 'permissions'."
-            " Under the keys `api:permissions:registration`, " +
+            " Under the keys `api:permissions:registration`, " + 
             "you can toggle various registration types."
         )
     pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
@@ -79,14 +85,15 @@ def register_pipe(
         )
     if parameters:
         pipe.parameters = parameters
-    results = get_api_connector(instance_keys).register_pipe(pipe, debug=debug)
+    success, msg = get_api_connector(instance_keys).register_pipe(pipe, debug=debug)
     pipes(instance_keys, refresh=True)
-    return results
+    return success, msg
 
 
 @app.patch(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/edit',
     tags=['Pipes: Attributes'],
+    response_model=SuccessTupleResponseModel,
 )
 def edit_pipe(
     connector_keys: str,
@@ -98,7 +105,7 @@ def edit_pipe(
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
-):
+) -> SuccessTupleResponseModel:
     """
     Edit an existing pipe's parameters.
     """
@@ -117,14 +124,15 @@ def edit_pipe(
             status_code=409, detail=f"{pipe} is not registered."
         )
     pipe.parameters = parameters
-    results = get_api_connector(instance_keys).edit_pipe(pipe, patch=patch, debug=debug)
+    success, msg = get_api_connector(instance_keys).edit_pipe(pipe, patch=patch, debug=debug)
     pipes(instance_keys, refresh=True)
-    return results
+    return success, msg
 
 
 @app.delete(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/delete',
     tags=['Pipes: Attributes'],
+    response_model=SuccessTupleResponseModel,
 )
 def delete_pipe(
     connector_keys: str,
@@ -134,7 +142,7 @@ def delete_pipe(
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
-):
+) -> SuccessTupleResponseModel:
     """
     Delete a Pipe (without dropping its table).
     """
@@ -157,7 +165,11 @@ def delete_pipe(
     return results
 
 
-@app.get(pipes_endpoint + '/keys', tags=['Pipes: Attributes'])
+@app.get(
+    pipes_endpoint + '/keys',
+    tags=['Pipes: Attributes'],
+    response_model=FetchPipesKeysResponseModel,
+)
 async def fetch_pipes_keys(
     connector_keys: str = "[]",
     metric_keys: str = "[]",
@@ -168,7 +180,7 @@ async def fetch_pipes_keys(
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
-):
+) -> FetchPipesKeysResponseModel:
     """
     Get a list of tuples of all registered pipes' keys.
     """
@@ -323,6 +335,7 @@ def get_sync_time(
 @app.post(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data',
     tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
 )
 def sync_pipe(
     connector_keys: str,
@@ -339,7 +352,7 @@ def sync_pipe(
         fastapi.Depends(manager) if not no_auth else None
     ),
     debug: bool = False,
-) -> List[Union[bool, str]]:
+) -> SuccessTupleResponseModel:
     """
     Add data to an existing Pipe.
     See [`meerschaum.Pipe.sync`](https://docs.meerschaum.io/meerschaum.html#Pipe.sync).
@@ -558,6 +571,7 @@ def get_pipe_chunk_bounds(
 @app.delete(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/drop',
     tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
 )
 def drop_pipe(
     connector_keys: str,
@@ -567,7 +581,7 @@ def drop_pipe(
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
-):
+) -> SuccessTupleResponseModel:
     """
     Drop a pipe's target table.
     """
@@ -577,7 +591,7 @@ def drop_pipe(
             "The administrator for this server has not allowed actions.\n\n"
             "Please contact the system administrator, or if you are running this server, "
             "open the configuration file with `edit config system` and search for 'permissions'."
-            " Under the keys `api:permissions:actions`, " +
+            " Under the keys `api:permissions:actions`, " + 
             "you can toggle non-admin actions."
         )
     pipe_object = get_pipe(connector_keys, metric_key, location_key, instance_keys)
@@ -589,6 +603,7 @@ def drop_pipe(
 @app.delete(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/clear',
     tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
 )
 def clear_pipe(
     connector_keys: str,
@@ -601,7 +616,7 @@ def clear_pipe(
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
-):
+) -> SuccessTupleResponseModel:
     """
     Delete rows from a pipe's target table.
     """
@@ -625,7 +640,7 @@ def clear_pipe(
             "The administrator for this server has not allowed actions.\n\n"
             "Please contact the system administrator, or if you are running this server, "
             "open the configuration file with `edit config system` and search for 'permissions'."
-            " Under the keys `api:permissions:actions`, " +
+            " Under the keys `api:permissions:actions`, " + 
             "you can toggle non-admin actions."
         )
     pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)

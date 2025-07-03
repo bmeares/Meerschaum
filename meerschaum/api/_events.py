@@ -25,7 +25,7 @@ from meerschaum.jobs import (
     start_check_jobs_thread,
     stop_check_jobs_thread,
 )
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 TEMP_PREFIX: str = STATIC_CONFIG['api']['jobs']['temp_prefix']
 

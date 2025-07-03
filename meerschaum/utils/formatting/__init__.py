@@ -247,7 +247,7 @@ def print_tuple(
         If `True`, use the default emoji and color scheme.
 
     """
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     do_print = True
 
     omit_messages = STATIC_CONFIG['system']['success']['ignore']

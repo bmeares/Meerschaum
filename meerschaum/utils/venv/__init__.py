@@ -386,7 +386,7 @@ def init_venv(
     import shutil
     import time
 
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.config._paths import (
         VIRTENV_RESOURCES_PATH,
         VENVS_CACHE_RESOURCES_PATH,
@@ -705,7 +705,7 @@ def venv_target_path(
     import pathlib
     import site
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
 
     ### Check sys.path for a user-writable site-packages directory.
     if venv is None:
