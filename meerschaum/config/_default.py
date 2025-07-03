@@ -10,7 +10,7 @@ import multiprocessing
 from typing import Dict, Any
 
 from meerschaum.config._paths import SQLITE_DB_PATH
-from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
+from meerschaum._internal.static import STATIC_CONFIG
 
 CONNECTOR_ATTRIBUTES: Dict[str, Dict[str, Any]] = {
     'api': {
@@ -27,7 +27,7 @@ CONNECTOR_ATTRIBUTES: Dict[str, Dict[str, Any]] = {
         },
     },
     'sql': {
-        'flavors': sql_flavor_configs,
+        'flavors': STATIC_CONFIG['sql']['create_engine_flavors'],
     },
 }
 default_meerschaum_config = {
@@ -48,7 +48,7 @@ default_meerschaum_config = {
             },
             'local': {
                 'flavor': 'sqlite',
-                'database': str(SQLITE_DB_PATH),
+                'database': SQLITE_DB_PATH.as_posix(),
             },
             'memory': {
                 'flavor': 'sqlite',
