@@ -12,6 +12,19 @@ from typing import Dict, Any
 
 __all__ = ('STATIC_CONFIG',)
 
+_default_create_engine_args = {
+    #  'method': 'multi',
+    'pool_size': 5,
+    'max_overflow': 10,
+    'pool_recycle': 3600,
+    'connect_args': {},
+}
+_default_db_requirements = {
+    'username',
+    'password',
+    'host',
+    'database',
+}
 SERVER_ID: str = os.environ.get('MRSM_SERVER_ID', ''.join(random.sample(string.ascii_lowercase+string.digits, 6)))
 STATIC_CONFIG: Dict[str, Any] = {
     'api': {
@@ -55,6 +68,156 @@ STATIC_CONFIG: Dict[str, Any] = {
     'sql': {
         'internal_schema': '_mrsm_internal',
         'instance_schema': 'mrsm',
+        'default_create_engine_args': _default_create_engine_args,
+        'create_engine_flavors': {
+            'timescaledb': {
+                'engine': 'postgresql+psycopg',
+                'create_engine': _default_create_engine_args,
+                'omit_create_engine': {'method',},
+                'to_sql': {},
+                'requirements': _default_db_requirements,
+                'defaults': {
+                    'port': 5432,
+                },
+            },
+            'timescaledb-ha': {
+                'engine': 'postgresql+psycopg',
+                'create_engine': _default_create_engine_args,
+                'omit_create_engine': {'method',},
+                'to_sql': {},
+                'requirements': _default_db_requirements,
+                'defaults': {
+                    'port': 5432,
+                },
+            },
+            'postgresql': {
+                'engine': 'postgresql+psycopg',
+                'create_engine': _default_create_engine_args,
+                'omit_create_engine': {'method',},
+                'to_sql': {},
+                'requirements': _default_db_requirements,
+                'defaults': {
+                    'port': 5432,
+                },
+            },
+            'postgis': {
+                'engine': 'postgresql+psycopg',
+                'create_engine': _default_create_engine_args,
+                'omit_create_engine': {'method',},
+                'to_sql': {},
+                'requirements': _default_db_requirements,
+                'defaults': {
+                    'port': 5432,
+                },
+            },
+            'citus': {
+                'engine': 'postgresql+psycopg',
+                'create_engine': _default_create_engine_args,
+                'omit_create_engine': {'method',},
+                'to_sql': {},
+                'requirements': _default_db_requirements,
+                'defaults': {
+                    'port': 5432,
+                },
+            },
+            'mssql': {
+                'engine': 'mssql+pyodbc',
+                'create_engine': {
+                    'fast_executemany': True,
+                    'use_insertmanyvalues': False,
+                    'isolation_level': 'AUTOCOMMIT',
+                    'use_setinputsizes': False,
+                    'pool_pre_ping': True,
+                    'ignore_no_transaction_on_rollback': True,
+                },
+                'omit_create_engine': {'method',},
+                'to_sql': {
+                    'method': None,
+                },
+                'requirements': _default_db_requirements,
+                'defaults': {
+                    'port': 1433,
+                    'options': (
+                        "driver=ODBC Driver 18 for SQL Server"
+                        "&UseFMTONLY=Yes"
+                        "&TrustServerCertificate=yes"
+                        "&Encrypt=no"
+                        "&MARS_Connection=yes"
+                    ),
+                },
+            },
+            'mysql': {
+                'engine': 'mysql+pymysql',
+                'create_engine': _default_create_engine_args,
+                'omit_create_engine': {'method',},
+                'to_sql': {
+                    'method': 'multi',
+                },
+                'requirements': _default_db_requirements,
+                'defaults': {
+                    'port': 3306,
+                },
+            },
+            'mariadb': {
+                'engine': 'mysql+pymysql',
+                'create_engine': _default_create_engine_args,
+                'omit_create_engine': {'method',},
+                'to_sql': {
+                    'method': 'multi',
+                },
+                'requirements': _default_db_requirements,
+                'defaults': {
+                    'port': 3306,
+                },
+            },
+            'oracle': {
+                'engine': 'oracle+oracledb',
+                'create_engine': _default_create_engine_args,
+                'omit_create_engine': {'method',},
+                'to_sql': {
+                    'method': None,
+                },
+                'requirements': _default_db_requirements,
+                'defaults': {
+                    'port': 1521,
+                },
+            },
+            'sqlite': {
+                'engine': 'sqlite',
+                'create_engine': _default_create_engine_args,
+                'omit_create_engine': {'method',},
+                'to_sql': {
+                    'method': 'multi',
+                },
+                'requirements': {'database'},
+                'defaults': {},
+            },
+            'duckdb': {
+                'engine': 'duckdb',
+                'create_engine': {},
+                'omit_create_engine': {'ALL',},
+                'to_sql': {
+                    'method': 'multi',
+                },
+                'requirements': '',
+                'defaults': {},
+            },
+            'cockroachdb': {
+                'engine': 'cockroachdb',
+                'omit_create_engine': {'method',},
+                'create_engine': _default_create_engine_args,
+                'to_sql': {
+                    'method': 'multi',
+                },
+                'requirements': {'host'},
+                'defaults': {
+                    'port': 26257,
+                    'database': 'defaultdb',
+                    'username': 'root',
+                    'password': 'admin',
+                },
+            },
+        },
     },
     'valkey': {
         'colon': '-_',
