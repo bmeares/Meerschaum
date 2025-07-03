@@ -1396,7 +1396,7 @@ def chunksize_to_npartitions(chunksize: Optional[int]) -> int:
 
 def df_from_literal(
     pipe: Optional[mrsm.Pipe] = None,
-    literal: str = None,
+    literal: Optional[str] = None,
     debug: bool = False
 ) -> 'pd.DataFrame':
     """
@@ -1418,8 +1418,8 @@ def df_from_literal(
 
     if pipe is None or literal is None:
         error("Please provide a Pipe and a literal value")
-    ### this will raise an error if the columns are undefined
-    dt_name, val_name = pipe.get_columns('datetime', 'value')
+    dt_col = pipe.columns.get('datetime', 'ts')
+    val_col = pipe.get_val_column(debug=debug)
 
     val = literal
     if isinstance(literal, str):
@@ -1439,7 +1439,7 @@ def df_from_literal(
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     pd = import_pandas()
-    return pd.DataFrame({dt_name: [now], val_name: [val]})
+    return pd.DataFrame({dt_col: [now], val_col: [val]})
 
 
 def get_first_valid_dask_partition(ddf: 'dask.dataframe.DataFrame') -> Union['pd.DataFrame', None]:

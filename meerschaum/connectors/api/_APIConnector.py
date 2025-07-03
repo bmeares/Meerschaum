@@ -80,6 +80,9 @@ class APIConnector(InstanceConnector):
         get_user_type,
         get_user_attributes,
     )
+    from ._tokens import (
+        register_token,
+    )
     from ._uri import from_uri
     from ._jobs import (
         get_jobs,

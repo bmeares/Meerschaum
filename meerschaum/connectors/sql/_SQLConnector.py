@@ -83,6 +83,7 @@ class SQLConnector(InstanceConnector):
         get_plugin_attributes,
     )
     from ._users import (
+        get_users_pipe,
         register_user,
         get_user_id,
         get_users,

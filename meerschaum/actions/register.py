@@ -7,6 +7,9 @@ Register new Pipes. Requires the API to be running.
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Dict
 
@@ -26,6 +29,7 @@ def register(
         'plugins'   : _register_plugins,
         'users'     : _register_users,
         'connectors': _register_connectors,
+        'tokens'    : _register_tokens,
     }
     return choose_subaction(action, options, **kw)
 
@@ -175,11 +179,11 @@ def _register_plugins(
     reload_plugins(debug=debug)
 
     repo_connector = parse_repo_keys(repository)
-    if repo_connector.__dict__.get('type', None) != 'api':
+    if repo_connector.type != 'api':
         return False, (
             "Can only upload plugins to the Meerschaum API." +
-            f"Connector '{repo_connector}' is of type " +
-            f"'{repo_connector.get('type', type(repo_connector))}'."
+            f"Connector '{repo_connector}' is " +
+            f"'{type(repo_connector)}'."
         )
 
     if len(action) == 0 or action == ['']:
@@ -441,6 +445,71 @@ def _complete_register_connectors(
 ) -> List[str]:
     from meerschaum.actions.show import _complete_show_connectors
     return _complete_show_connectors(action)
+
+
+def _register_tokens(
+    mrsm_instance: Optional[str] = None,
+    name: Optional[str] = None,
+    ttl_days: Optional[int] = None,
+    end: Optional[datetime] = None,
+    force: bool = False,
+    yes: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Register a new long-lived access token for API access.
+    Note that omitting and end time or TTL will generate token which does not expire.
+
+    Examples:
+
+    mrsm register token --end 2032-01-01
+
+    mrsm register token --ttl-days 1000
+
+    mrsm register token --name weather-sensor
+
+    """
+    from meerschaum.utils.schedule import parse_start_time
+    from meerschaum.core import Token
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils.prompt import yes_no
+
+    expiration = (
+        end
+        if end is not None
+        else (
+            parse_start_time(f"starting in {ttl_days} days")
+            if ttl_days
+            else None
+        )
+    )
+
+    instance_connector = parse_instance_keys(mrsm_instance)
+    if instance_connector.type != 'api':
+        continue_registering = force or yes_no(
+            (
+                "It is highly recommended to register tokens against an API instance"
+                f"\n    (currently connected to '{instance_connector}'.\n\n"
+                f"\n    Run again with `--force`, or answer `y` to continue.\n"
+                f"    Are you sure you want to register a token to instance '{instance_connector}'?"
+            ),
+            yes=yes,
+            noask=noask, 
+            default='n',
+        )
+        if not continue_registering:
+            return True, "Nothing was changed."
+
+    token = Token(
+        label=name,
+        expiration=expiration,
+        instance=mrsm_instance,
+    )
+
+    success, msg = token.register(debug=debug)
+    return success, msg
 
 
 ### NOTE: This must be the final statement of the module.

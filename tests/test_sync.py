@@ -1277,3 +1277,69 @@ def test_sync_sql_small_chunksize(flavor):
 
     mrsm.pprint((success, msg))
     assert msg.lower().count('inserted') == int(len(docs) / chunksize)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_autotime(flavor: str):
+    conn = conns[flavor]
+    pipe = mrsm.Pipe(
+        'test', 'autotime',
+        instance=conn,
+    )
+    pipe.delete()
+    dt_col = 'timestamp'
+    pipe = mrsm.Pipe(
+        'test', 'autotime',
+        instance=conn,
+        autotime=True,
+        static=True,
+        null_indices=False,
+        enforce=False,
+        columns={
+            'datetime': dt_col,
+            'primary': 'id',
+        },
+    )
+
+    success, msg = pipe.sync([
+        {'id': 1, 'val': 100.1},
+        {'id': 2, 'val': 200.2},
+    ])
+    assert success, msg
+
+    df = pipe.get_data()
+    assert dt_col in df.columns
+
+    ts_1 = df[dt_col][0]
+
+    success, msg = pipe.sync([
+        {'id': 1, 'val': 100.2},
+        {'id': 2, 'val': 200.3},
+    ])
+    assert success, msg
+
+    df = pipe.get_data()
+
+    assert len(df) == 4
+    
+    dt_vals = set(df[dt_col])
+    assert len(dt_vals) == 2
+
+    success, msg = pipe.sync([
+        {'id': 1, 'val': 90.1, dt_col: ts_1},
+    ])
+    assert success, msg
+
+    df = pipe.get_data(params={'id': 1})
+    assert 90.1 in list(df['val'])
+    assert len(df) == 2
+
+    success, msg = pipe.sync([
+        {'id': 1, 'val': 100.2},
+    ])
+    assert success, msg
+
+    df = pipe.get_data(params={'id': 1})
+    assert len(df) == 3
+
+    return pipe

@@ -195,6 +195,7 @@ groups['pipes'] = parser.add_argument_group(title='Pipes options')
 groups['sync'] = parser.add_argument_group(title='Sync options')
 groups['api'] = parser.add_argument_group(title='API options')
 groups['plugins'] = parser.add_argument_group(title='Plugins options')
+groups['tokens'] = parser.add_argument_group(title='Tokens options')
 groups['packages'] = parser.add_argument_group(title='Packages options')
 groups['debug'] = parser.add_argument_group(title='Debugging options')
 groups['misc'] = parser.add_argument_group(title='Miscellaneous options')
@@ -419,10 +420,17 @@ groups['api'].add_argument(
     '--certfile', type=str,
     help = "Start the API server with this certfile (requires --keyfile).",
 )
+
 ### Plugins options
 groups['plugins'].add_argument(
     '-r', '--repository', '--repo', type=str,
     help="Meerschaum plugins repository to connect to. Specify an API label (default: 'mrsm')"
+)
+
+### Tokens options
+groups['tokens'].add_argument(
+    '--ttl-days', type=int,
+    help="For how many days should a token be valid.",
 )
 
 ### Packages options
