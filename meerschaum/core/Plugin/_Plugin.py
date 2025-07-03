@@ -22,19 +22,13 @@ from meerschaum.utils.typing import (
     Union,
 )
 from meerschaum.utils.warnings import error, warn
-from meerschaum.config import get_config
-from meerschaum.config._paths import (
-    PLUGINS_RESOURCES_PATH,
-    PLUGINS_ARCHIVES_RESOURCES_PATH,
-    PLUGINS_TEMP_RESOURCES_PATH,
-    VIRTENV_RESOURCES_PATH,
-    PLUGINS_DIR_PATHS,
-)
 _tmpversion = None
 _ongoing_installations = set()
 
+
 class Plugin:
     """Handle packaging of Meerschaum plugins."""
+
     def __init__(
         self,
         name: str,
@@ -48,6 +42,7 @@ class Plugin:
         repo: Union['mrsm.connectors.api.APIConnector', str, None] = None,
     ):
         from meerschaum._internal.static import STATIC_CONFIG
+        from meerschaum.config.paths import PLUGINS_ARCHIVES_RESOURCES_PATH, VIRTENV_RESOURCES_PATH
         sep = STATIC_CONFIG['plugins']['repo_separator']
         _repo = None
         if sep in name:
@@ -129,6 +124,8 @@ class Plugin:
         """
         if self.__dict__.get('_module', None) is not None:
             return self.module.__file__
+
+        from meerschaum.config.paths import PLUGINS_RESOURCES_PATH
 
         potential_dir = PLUGINS_RESOURCES_PATH / self.name
         if (
@@ -295,6 +292,7 @@ class Plugin:
         from meerschaum.utils.packages import attempt_import, determine_version, reload_meerschaum
         from meerschaum.utils.venv import init_venv
         from meerschaum.utils.misc import safely_extract_tar
+        from meerschaum.config.paths import PLUGINS_TEMP_RESOURCES_PATH, PLUGINS_DIR_PATHS
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
