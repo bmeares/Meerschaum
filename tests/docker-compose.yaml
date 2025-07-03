@@ -25,18 +25,18 @@ services:
       - "timescaledb_volume:/var/lib/postgresql/data"
     image: "timescale/timescaledb:latest-pg17"
 
-  timescaledb-ha:
-    environment:
-      TIMESCALEDB_TELEMETRY: "off"
-      POSTGRES_DB: "testdb"
-      POSTGRES_USER: "test"
-      POSTGRES_PASSWORD: "test1234"
-      ALLOW_IP_RANGE: "0.0.0.0/0"
-    ports:
-      - "5459:5432"
-    volumes:
-      - "timescaledb-ha_volume:/var/lib/postgresql/data"
-    image: "timescale/timescaledb-ha:pg17"
+  # timescaledb-ha:
+    # environment:
+      # TIMESCALEDB_TELEMETRY: "off"
+      # POSTGRES_DB: "testdb"
+      # POSTGRES_USER: "test"
+      # POSTGRES_PASSWORD: "test1234"
+      # ALLOW_IP_RANGE: "0.0.0.0/0"
+    # ports:
+      # - "5459:5432"
+    # volumes:
+      # - "timescaledb-ha_volume:/var/lib/postgresql/data"
+    # image: "timescale/timescaledb-ha:pg17"
 
   postgis:
     environment:
