@@ -15,6 +15,7 @@ import meerschaum.api.routes._misc
 import meerschaum.api.routes._pipes
 import meerschaum.api.routes._plugins
 import meerschaum.api.routes._users
+import meerschaum.api.routes._tokens
 import meerschaum.api.routes._version
 
 from meerschaum.api import _include_dash

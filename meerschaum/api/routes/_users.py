@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Routes for managing users
+Routes for managing users.
 """
 
 from __future__ import annotations
@@ -14,15 +14,22 @@ from meerschaum.utils.typing import (
 
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api import (
-    fastapi, app, endpoints, get_api_connector, manager,
-    debug, check_allow_chaining, DISALLOW_CHAINING_MESSAGE,
-    no_auth, private, default_instance_keys,
+    fastapi,
+    app,
+    endpoints,
+    get_api_connector,
+    manager,
+    debug,
+    check_allow_chaining,
+    DISALLOW_CHAINING_MESSAGE,
+    no_auth,
+    private,
+    default_instance_keys,
 )
 from meerschaum.utils.misc import string_to_dict
 from meerschaum.config import get_config
 from meerschaum.core import User
 
-sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 users_endpoint = endpoints['users']
 
 import fastapi

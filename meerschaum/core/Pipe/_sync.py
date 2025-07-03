@@ -13,7 +13,7 @@ import time
 import threading
 import multiprocessing
 import functools
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import meerschaum as mrsm
@@ -209,7 +209,7 @@ def sync(
                 p._exists = None
                 return False, f"Unable to create the connector for {p}."
 
-            ### Sync in place if this is a SQL pipe.
+            ### Sync in place if possible.
             if (
                 str(self.connector) == str(self.instance_connector)
                 and 
@@ -398,6 +398,12 @@ def sync(
             enforce=enforce_dtypes,
             debug=debug,
         )
+        if p.autotime:
+            dt_col = p.columns.get('datetime', 'ts')
+            if dt_col and hasattr(df, 'columns') and dt_col not in df.columns:
+                df[dt_col] = datetime.now(timezone.utc)
+                check_existing = False
+                kw['check_existing'] = False
 
         ### Capture `numeric`, `uuid`, `json`, and `bytes` columns.
         self._persist_new_json_columns(df, debug=debug)
@@ -691,7 +697,9 @@ def filter_existing(
         NA = pd.NA
 
     primary_key = self.columns.get('primary', None)
+    dt_col = self.columns.get('datetime', None)
     autoincrement = self.parameters.get('autoincrement', False)
+    autotime = self.parameters.get('autotime', False)
     pipe_columns = self.columns.copy()
 
     if primary_key and autoincrement and df is not None and primary_key in df.columns:
@@ -701,6 +709,14 @@ def filter_existing(
         if df[primary_key].isnull().all():
             del df[primary_key]
             _ = self.columns.pop(primary_key, None)
+
+    if dt_col and autotime and df is not None and dt_col in df.columns:
+        if safe_copy:
+            df = df.copy()
+            safe_copy = False
+        if df[dt_col].isnull().all():
+            del df[dt_col]
+            _ = self.columns.pop(dt_col, None)
 
     def get_empty_df():
         empty_df = pd.DataFrame([])
@@ -726,6 +742,11 @@ def filter_existing(
     dt_type = self.dtypes.get(dt_col, 'datetime64[ns, UTC]') if dt_col else None
 
     if autoincrement and primary_key == dt_col and dt_col not in df.columns:
+        if enforce_dtypes:
+            df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+        return df, get_empty_df(), df
+
+    if autotime and dt_col and dt_col not in df.columns:
         if enforce_dtypes:
             df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
         return df, get_empty_df(), df

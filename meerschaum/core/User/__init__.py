@@ -9,7 +9,15 @@ Manager users' metadata via the User class
 from typing import Optional
 
 import meerschaum as mrsm
-from meerschaum.core.User._User import User
+from meerschaum.core.User._User import User, hash_password, verify_password
+
+
+__all__ = (
+    'User',
+    'hash_password',
+    'verify_password',
+    'is_user_allowed_to_execute',
+)
 
 
 def is_user_allowed_to_execute(

@@ -116,6 +116,9 @@ def parse_repo_keys(keys: Optional[str] = None, **kw):
     if ':' not in keys:
         keys = 'api:' + keys
 
+    if not keys.startswith('api:'):
+        raise ValueError("Only APIConnectors may be treated as repositories.")
+
     return parse_connector_keys(keys, **kw)
 
 

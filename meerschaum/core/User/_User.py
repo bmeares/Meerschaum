@@ -190,7 +190,7 @@ class User:
         self.type = type
         self._attributes = attributes
         self._user_id = user_id
-        self._instance_keys = str(instance)
+        self._instance_keys = str(instance) if instance is not None else None
 
     def __repr__(self):
         return str(self)
@@ -205,7 +205,7 @@ class User:
         return self._attributes
 
     @property
-    def instance_connector(self) -> 'mrsm.connectors.Connector':
+    def instance_connector(self) -> mrsm.connectors.InstanceConnector:
         from meerschaum.connectors.parse import parse_instance_keys
         if '_instance_connector' not in self.__dict__:
             self._instance_connector = parse_instance_keys(self._instance_keys)

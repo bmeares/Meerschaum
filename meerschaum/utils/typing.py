@@ -76,10 +76,7 @@ import collections.abc
 collections.Iterable = collections.abc.Iterable
 
 SuccessTuple = Tuple[bool, str]
-InstanceConnector = Union[
-    'meerschaum.connectors.sql.SQLConnector',
-    'meerschaum.connectors.api.APIConnector'
-]
+InstanceConnector = 'meerschaum.connectors.InstanceConnector'
 PipesDict = Dict[
     str, Dict[                           ### connector_keys : metrics
         str, Dict[                       ### metric_key     : locations

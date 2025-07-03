@@ -282,6 +282,25 @@ def autoincrement(self, _autoincrement: bool) -> None:
 
 
 @property
+def autotime(self) -> bool:
+    """
+    Return the `autotime` parameter for the pipe.
+    """
+    if 'autotime' not in self.parameters:
+        self.parameters['autotime'] = False
+
+    return self.parameters['autotime']
+
+
+@autotime.setter
+def autotime(self, _autotime: bool) -> None:
+    """
+    Set the `autotime` parameter for the pipe.
+    """
+    self.parameters['autotime'] = _autotime
+
+
+@property
 def tzinfo(self) -> Union[None, timezone]:
     """
     Return `timezone.utc` if the pipe is timezone-aware.

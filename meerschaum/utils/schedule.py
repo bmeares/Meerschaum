@@ -14,6 +14,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Callable, Any, Optional, List, Dict
 from meerschaum.utils.warnings import warn, error
 
+
 STARTING_KEYWORD: str = 'starting'
 INTERVAL_UNITS: List[str] = ['months', 'weeks', 'days', 'hours', 'minutes', 'seconds', 'years']
 FREQUENCY_ALIASES: Dict[str, str] = {

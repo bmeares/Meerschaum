@@ -52,9 +52,13 @@ with correct credentials, as well as a network connection and valid permissions.
 from __future__ import annotations
 import sys
 import copy
-from meerschaum.utils.typing import Optional, Dict, Any, Union, InstanceConnector, List
+
+import meerschaum as mrsm
+from meerschaum.connectors import Connector, SQLConnector
+from meerschaum.utils.typing import Optional, Dict, Any, Union, List, InstanceConnector
 from meerschaum.utils.formatting._pipes import pipe_repr
 from meerschaum.config import get_config
+
 
 class Pipe:
     """
@@ -105,6 +109,7 @@ class Pipe:
         indexes,
         dtypes,
         autoincrement,
+        autotime,
         upsert,
         static,
         tzinfo,
@@ -169,6 +174,7 @@ class Pipe:
         temporary: bool = False,
         upsert: Optional[bool] = None,
         autoincrement: Optional[bool] = None,
+        autotime: Optional[bool] = None,
         static: Optional[bool] = None,
         enforce: Optional[bool] = None,
         null_indices: Optional[bool] = None,
@@ -226,6 +232,9 @@ class Pipe:
 
         autoincrement: Optional[bool], default None
             If `True`, set `autoincrement` in the parameters.
+
+        autotime: Optional[bool], default None
+            If `True`, set `autotime` in the parameters.
 
         static: Optional[bool], default None
             If `True`, set `static` in the parameters.
@@ -335,6 +344,9 @@ class Pipe:
         if isinstance(autoincrement, bool):
             self._attributes['parameters']['autoincrement'] = autoincrement
 
+        if isinstance(autotime, bool):
+            self._attributes['parameters']['autotime'] = autotime
+
         if isinstance(static, bool):
             self._attributes['parameters']['static'] = static
 
@@ -384,9 +396,7 @@ class Pipe:
     @property
     def instance_connector(self) -> Union[InstanceConnector, None]:
         """
-        The connector to where this pipe resides.
-        May either be of type `meerschaum.connectors.sql.SQLConnector` or
-        `meerschaum.connectors.api.APIConnector`.
+        The instance connector on which this pipe resides.
         """
         if '_instance_connector' not in self.__dict__:
             from meerschaum.connectors.parse import parse_instance_keys
@@ -398,7 +408,7 @@ class Pipe:
         return self._instance_connector
 
     @property
-    def connector(self) -> Union[meerschaum.connectors.Connector, None]:
+    def connector(self) -> Union[Connector, None]:
         """
         The connector to the data source.
         """
@@ -418,7 +428,7 @@ class Pipe:
         return self._connector
 
     @property
-    def cache_connector(self) -> Union[meerschaum.connectors.sql.SQLConnector, None]:
+    def cache_connector(self) -> Union[SQLConnector, None]:
         """
         If the pipe was created with `cache=True`, return the connector to the pipe's
         SQLite database for caching.
@@ -439,7 +449,7 @@ class Pipe:
         return self._cache_connector
 
     @property
-    def cache_pipe(self) -> Union['meerschaum.Pipe', None]:
+    def cache_pipe(self) -> Union[mrsm.Pipe, None]:
         """
         If the pipe was created with `cache=True`, return another `meerschaum.Pipe` used to
         manage the local data.
@@ -471,10 +481,10 @@ class Pipe:
                 self.instance_keys,
                 (self.connector_keys + '_' + self.metric_key + '_cache'),
                 self.location_key,
-                mrsm_instance = self.cache_connector,
-                parameters = _parameters,
-                cache = False,
-                temporary = True,
+                mrsm_instance=self.cache_connector,
+                parameters=_parameters,
+                cache=False,
+                temporary=True,
             )
 
         return self._cache_pipe

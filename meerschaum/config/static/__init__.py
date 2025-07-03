@@ -25,6 +25,7 @@ STATIC_CONFIG: Dict[str, Any] = {
             'jobs': '/jobs',
             'logs': '/logs',
             'users': '/users',
+            'tokens': '/tokens',
             'login': '/login',
             'connectors': '/connectors',
             'version': '/version',
@@ -155,6 +156,17 @@ STATIC_CONFIG: Dict[str, Any] = {
     },
     'jobs': {
         'check_restart_seconds': 1.0,
+    },
+    'tokens': {
+        'minimum_length': 64,
+        'maximum_length': 128,
+        'scopes': (
+            'read',
+            'write',
+            'drop',
+            'exec',
+            'delete',
+        ),
     },
     'setup': {
         'name': 'meerschaum',

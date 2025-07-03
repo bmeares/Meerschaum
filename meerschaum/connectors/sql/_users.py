@@ -12,6 +12,32 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Optional, Any, Dict, List, Union
 
 
+def get_users_pipe(self) -> mrsm.Pipe:
+    """
+    Return the internal metadata pipe for users management.
+    """
+    return mrsm.Pipe(
+        'mrsm', 'users',
+        temporary=True,
+        static=True,
+        null_indices=False,
+        enforce=False,
+        autoincrement=True,
+        columns={
+            'primary': 'user_id',
+        },
+        dtypes={
+            'user_id': 'int',
+            'username': 'string',
+            'attributes': 'json',
+            'user_type': 'string',
+        },
+        indices={
+            'unique': 'username',
+        },
+    )
+
+
 def register_user(
     self,
     user: mrsm.core.User,
