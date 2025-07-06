@@ -597,7 +597,6 @@ def project_geometry(geom, srid: int, to_srid: int = 4326):
     Project a shapely geometry object to a new CRS (SRID).
     """
     pyproj, shapely_ops = mrsm.attempt_import('pyproj', 'shapely.ops', lazy=False)
-    print(f"PROJECT GEOMETRY\n{srid=} {to_srid=}")
     transformer = pyproj.Transformer.from_crs(f"EPSG:{srid}", f"EPSG:{to_srid}", always_xy=True)
     return shapely_ops.transform(transformer.transform, geom)
 

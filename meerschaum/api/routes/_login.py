@@ -6,10 +6,12 @@
 Manage access and refresh tokens.
 """
 
+import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Union
 
 import fastapi
-from fastapi import Request, status
+from fastapi import Request, status, Response
 from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
@@ -18,7 +20,9 @@ from meerschaum.api import endpoints, get_api_connector, app, debug, manager, no
 from meerschaum.core import User
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.typing import Dict, Any
-from meerschaum.core.User._User import verify_password
+from meerschaum.utils.misc import is_uuid
+from meerschaum.core.User import verify_password
+from meerschaum.core import Token
 from meerschaum.utils.warnings import warn
 from meerschaum.api._oauth2 import CustomOAuth2PasswordRequestForm
 
@@ -38,27 +42,55 @@ def login(
     """
     Login and set the session token.
     """
-    username, password = (
-        (data['username'], data['password'])
+    print(f"{grant_type=}")
+    grant_type = (
+        data.get('grant_type', 'password')
         if isinstance(data, dict)
-        else (data.username, data.password)
-    ) if not no_auth else ('no-auth', 'no-auth')
-
-    user = User(username, password)
-    correct_password = no_auth or verify_password(
-        password,
-        get_api_connector().get_user_password_hash(user, debug=debug)
+        else data.grant_type
     )
-    if not correct_password:
+    expires_dt: Union[datetime, None] = None
+    if grant_type == 'password':
+        username, password = (
+            (data.get('username', None), data.get('password', None))
+            if isinstance(data, dict)
+            else (data.username, data.password)
+        )
+        user = User(str(username), str(password), instance=get_api_connector())
+        correct_password = no_auth or verify_password(
+            str(password),
+            get_api_connector().get_user_password_hash(user, debug=debug)
+        )
+        if not correct_password:
+            raise InvalidCredentialsException
+
+    elif grant_type == 'client_credentials':
+        client_id, client_secret = (
+            (data.get('client_id', None), data.get('client_secret', None))
+            if isinstance(data, dict)
+            else (data.client_id, data.client_secret)
+        )
+
+        if not is_uuid(str(client_id)):
+            raise InvalidCredentialsException
+        token_id = uuid.UUID(client_id)
+        token = Token(id=token_id, secret=client_secret, instance=get_api_connector())
+        correct_password = no_auth or verify_password(
+            str(client_secret),
+            str(get_api_connector().get_token_secret_hash(token_id, debug=debug))
+        )
+        if not correct_password:
+            raise InvalidCredentialsException
+    else:
         raise InvalidCredentialsException
 
     expires_minutes = STATIC_CONFIG['api']['oauth']['token_expires_minutes']
     expires_delta = timedelta(minutes=expires_minutes)
     expires_dt = datetime.now(timezone.utc).replace(tzinfo=None) + expires_delta
     access_token = manager.create_access_token(
-        data={'sub': username},
+        data={'sub': username if grant_type == 'password' else client_id},
         expires=expires_delta
     )
+
     return {
         'access_token': access_token,
         'token_type': 'bearer',

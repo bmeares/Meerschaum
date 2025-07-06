@@ -23,6 +23,7 @@ from meerschaum.api import (
 )
 from meerschaum.api.models import (
     RegisterTokenResponseModel,
+    RegisterTokenRequestModel,
 )
 from meerschaum.utils.dtypes import coerce_timezone, json_serialize_value
 from meerschaum._internal.static import STATIC_CONFIG
@@ -36,21 +37,17 @@ tokens_endpoint = endpoints['tokens']
     response_model=RegisterTokenResponseModel,
 )
 def register_token(
-    label: Optional[str] = None,
-    expiration: Optional[str] = None,
-    scopes: List[str] = STATIC_CONFIG['tokens']['scopes'],
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    request_model: RegisterTokenRequestModel,
+    curr_user=(fastapi.Depends(manager) if not no_auth else None),
 ) -> RegisterTokenResponseModel:
     """
     Register a new Token, returning its secret (unable to be retrieved later).
     """
-    expiration = coerce_timezone(datetime.fromisoformat(expiration)) if expiration else None
     token = Token(
         user=curr_user,
-        label=label,
-        expiration=expiration,
+        label=request_model.label,
+        expiration=request_model.expiration,
+        scopes=request_model.scopes,
         instance=get_api_connector(),
     )
     register_success, register_msg = token.register(debug=debug)
@@ -60,14 +57,8 @@ def register_token(
             detail=f"Could not register new token:\n{register_msg}",
         )
 
-    doc = {
-        'label': token.label,
-        'secret': token.secret,
-        'expires_at': (
-            token.expiration.isoformat()
-            if token.expiration is not None
-            else None
-        ),
-    }
-    payload = json.dumps(doc, default=json_serialize_value)
-    return fastapi.Response(payload, media_type='application/json')
+    return RegisterTokenResponseModel(
+        label=token.label,
+        secret=token.secret,
+        expiration=token.expiration,
+    )

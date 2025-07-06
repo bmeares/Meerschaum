@@ -7,6 +7,7 @@ Miscellaneous functions go here
 
 from __future__ import annotations
 import sys
+import functools
 from datetime import timedelta, datetime, timezone
 from meerschaum.utils.typing import (
     Union,
@@ -534,49 +535,6 @@ def timed_input(
         signal.alarm(0) # cancel alarm
 
 
-def replace_pipes_in_dict(
-    pipes: Optional[PipesDict] = None,
-    func: 'function' = str,
-    debug: bool = False,
-    **kw
-) -> PipesDict:
-    """
-    Replace the Pipes in a Pipes dict with the result of another function.
-
-    Parameters
-    ----------
-    pipes: Optional[PipesDict], default None
-        The pipes dict to be processed.
-
-    func: Callable[[Any], Any], default str
-        The function to be applied to every pipe.
-        Defaults to the string constructor.
-
-    debug: bool, default False
-        Verbosity toggle.
-    
-
-    Returns
-    -------
-    A dictionary where every pipe is replaced with the output of a function.
-
-    """
-    import copy
-    def change_dict(d : Dict[Any, Any], func : 'function') -> None:
-        for k, v in d.items():
-            if isinstance(v, dict):
-                change_dict(v, func)
-            else:
-                d[k] = func(v)
-
-    if pipes is None:
-        from meerschaum import get_pipes
-        pipes = get_pipes(debug=debug, **kw)
-
-    result = copy.deepcopy(pipes)
-    change_dict(result, func)
-    return result
-
 def enforce_gevent_monkey_patch():
     """
     Check if gevent monkey patching is enabled, and if not, then apply patching.
@@ -691,6 +649,43 @@ def _pyinstaller_traverse_dir(
 
             paths.append((path, _path))
     return paths
+
+
+def get_val_from_dict_path(d: Dict[Any, Any], path: Tuple[Any, ...]) -> Any:
+    """
+    Get a value from a dictionary with a tuple of keys.
+
+    Parameters
+    ----------
+    d: Dict[Any, Any]
+        The dictionary to search.
+
+    path: Tuple[Any, ...]
+        The path of keys to traverse.
+
+    Returns
+    -------
+    The value from the end of the path.
+    """
+    return functools.reduce(lambda di, key: di[key], path, d)
+
+
+def set_val_in_dict_path(d: Dict[Any, Any], path: Tuple[Any, ...], val: Any) -> None:
+    """
+    Set a value in a dictionary with a tuple of keys.
+
+    Parameters
+    ----------
+    d: Dict[Any, Any]
+        The dictionary to search.
+
+    path: Tuple[Any, ...]
+        The path of keys to traverse.
+
+    val: Any
+        The value to set at the end of the path.
+    """
+    get_val_from_dict_path(d, path[:-1])[path[-1]] = val
 
 
 def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, Any]:
@@ -1627,88 +1622,6 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
     return safe_extract(tarf, output_dir)
 
 
-def evaluate_pipe_access_chain(access_chain: str, pipe: mrsm.Pipe):
-    """
-    Safely evaluate the access chain on a Pipe.
-    """
-    import ast
-    expr = f"pipe{access_chain}"
-    tree = ast.parse(expr, mode='eval')
-
-    def _eval(node, context):
-        if isinstance(node, ast.Expression):
-            return _eval(node.body, context)
-
-        elif isinstance(node, ast.Name):
-            if node.id == "pipe":
-                return context
-            raise ValueError(f"Unknown variable: {node.id}")
-
-        elif isinstance(node, ast.Attribute):
-            value = _eval(node.value, context)
-            return getattr(value, node.attr)
-
-        elif isinstance(node, ast.Subscript):
-            value = _eval(node.value, context)
-            key = _eval(node.slice, context) if isinstance(node.slice, ast.Index) else _eval(node.slice, context)
-            return value[key]
-
-        elif isinstance(node, ast.Constant):  # Python 3.8+
-            return node.value
-
-        elif isinstance(node, ast.Str):  # Older Python
-            return node.s
-
-        elif isinstance(node, ast.Index):  # Older Python AST style
-            return _eval(node.value, context)
-
-        else:
-            raise TypeError(f"Unsupported AST node: {ast.dump(node)}")
-
-    return _eval(tree, pipe)
-
-
-def replace_pipe_parameters_syntax(text: str) -> Any:
-    """
-    """
-    import re
-    import json
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.sql import sql_item_name
-    from meerschaum.utils.dtypes import json_serialize_value
-    pattern = r'\{\{\s*(?:mrsm\.)?Pipe\((.*?)\)((?:\.[\w]+|\[[^\]]+\])*)\s*\}\}'
-
-    def replace_hook(pipe_match: re.Match) -> str:
-        try:
-            args_str = pipe_match.group(1)
-            access_chain = pipe_match.group(2)
-            args, kwargs = parse_arguments_str(args_str)
-            pipe = mrsm.Pipe(*args, **kwargs)
-        except Exception as e:
-            warn(f"Failed to parse pipe from template string:\n{e}")
-            raise e
-
-        if access_chain is None:
-            target = pipe.target
-            schema = (
-                pipe.instance_connector.get_pipe_schema(pipe)
-                if hasattr(pipe.instance_connector, 'get_pipe_schema')
-                else None
-            )
-            return (
-                sql_item_name(target, pipe.instance_connector.flavor, schema)
-                if pipe.instance_connector.type == 'sql'
-                else pipe.target
-            )
-
-        access_val = evaluate_pipe_access_chain(access_chain, pipe)
-        if isinstance(access_val, (dict, list)):
-            return json.dumps(access_val, sort_keys=True, default=json_serialize_value)
-        return str(access_val)
-
-    return re.sub(pattern, replace_hook, text)
-
-
 ##################
 # Legacy imports #
 ##################
@@ -1853,6 +1766,15 @@ def json_serialize_datetime(dt: datetime) -> Union[str, None]:
     """
     from meerschaum.utils.dtypes import serialize_datetime
     return serialize_datetime(dt)
+
+
+def replace_pipes_in_dict(*args, **kwargs):
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.pipes.replace_pipes_in_dict`.
+    """
+    from meerschaum.utils.pipes import replace_pipes_in_dict
+    return replace_pipes_in_dict(*args, **kwargs)
 
 
 _current_module = sys.modules[__name__]

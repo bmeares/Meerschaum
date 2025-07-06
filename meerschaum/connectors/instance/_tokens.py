@@ -7,12 +7,14 @@ Define the high level tokens instance methods.
 
 from __future__ import annotations
 
+from typing import List, Union, Optional, Dict
 import uuid
 from datetime import datetime, timezone
 
 import meerschaum as mrsm
 from meerschaum.core import Token
 from meerschaum.core.User import hash_password
+from meerschaum.models import TokenModel
 
 
 def get_tokens_pipe(self) -> mrsm.Pipe:
@@ -31,18 +33,22 @@ def get_tokens_pipe(self) -> mrsm.Pipe:
         autotime=True,
         null_indices=True,
         columns={
-            'primary': 'token_id',
+            'datetime': 'creation',
+            'primary': 'id',
             'user_id': 'user_id',
         },
+        indices={
+            'unique': 'label',
+        },
         dtypes={
-            'created_at': 'datetime64[ns, UTC]',
-            'expires_at': 'datetime64[ns, UTC]',
+            'id': 'uuid',
+            'creation': 'datetime64[ns, UTC]',
+            'expiration': 'datetime64[ns, UTC]',
             'is_valid': 'bool',
-            'token_id': 'uuid',
-            'token_label': 'string',
+            'label': 'string',
             'user_id': user_id_dtype,
             'scopes': 'json',
-            'token_hash': 'string',
+            'secret_hash': 'string',
         },
     )
 
@@ -54,16 +60,73 @@ def register_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple
     tokens_pipe = self.get_tokens_pipe()
     user_id = self.get_user_id(token.user) if token.user is not None else None
     doc = {
-        'token_id': uuid.uuid4(),
+        'id': uuid.uuid4(),
         'user_id': user_id,
-        'created_at': datetime.now(timezone.utc),
-        'expires_at': token.expiration,
-        'token_label': token.label,
+        'creation': datetime.now(timezone.utc),
+        'expiration': token.expiration,
+        'label': token.label,
         'is_valid': token.is_valid,
         'scopes': list(token.scopes) if token.scopes else None,
-        'token_hash': hash_password(token.secret, rounds=100_000),
+        'secret_hash': hash_password(str(token.secret), rounds=100_000),
     }
     sync_success, sync_msg = tokens_pipe.sync([doc], check_existing=False, debug=debug)
     if not sync_success:
         return False, f"Failed to register token:\n{sync_msg}"
     return True, "Success"
+
+
+def get_tokens(self, debug: bool = False) -> List[Token]:
+    """
+    Return a list of `Token` objects.
+    """
+    tokens_pipe = self.get_tokens_pipe()
+    tokens_df = tokens_pipe.get_data(debug=debug)
+    if tokens_df is None:
+        return []
+
+    tokens_docs = tokens_df.to_dict(orient='records')
+    return [
+        Token(
+            instance=self,
+            **token_doc
+        )
+        for token_doc in tokens_docs
+    ]
+
+
+def get_token(self, token_id: Union[uuid.UUID, str], debug: bool = False) -> Union[Token, None]:
+    """
+    Return the `Token` from its ID.
+    """
+    from meerschaum.utils.misc import is_uuid
+    if isinstance(token_id, str):
+        if is_uuid(token_id):
+            token_id = uuid.UUID(token_id)
+        else:
+            raise ValueError("Invalid token ID.")
+    token_model = self.get_token_model(token_id)
+    if token_model is None:
+        return None
+    return Token(**dict(token_model))
+
+
+def get_token_model(self, token_id: uuid.UUID, debug: bool = False) -> Union[TokenModel, None]:
+    """
+    Return a token's model from the instance.
+    """
+    tokens_pipe = self.get_tokens_pipe()
+    doc = tokens_pipe.get_doc(
+        params={'id': token_id},
+        debug=debug,
+    )
+    if doc is None:
+        return None
+    return TokenModel(**doc)
+
+
+def get_token_secret_hash(self, token_id: uuid.UUID, debug: bool = False) -> Union[str, None]:
+    """
+    Return the secret hash for a given token.
+    """
+    tokens_pipe = self.get_tokens_pipe()
+    return tokens_pipe.get_value('secret_hash', params={'id': token_id}, debug=debug)

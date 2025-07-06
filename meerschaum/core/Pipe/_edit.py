@@ -47,6 +47,13 @@ def edit(
     if self.temporary:
         return False, "Cannot edit pipes created with `temporary=True` (read-only)."
 
+    if hasattr(self, '_symlinks'):
+        from meerschaum.utils.misc import get_val_from_dict_path, set_val_in_dict_path
+        for path, vals in self._symlinks.items():
+            current_val = get_val_from_dict_path(self.parameters, path)
+            if current_val == vals['substituted']:
+                set_val_in_dict_path(self.parameters, path, vals['original'])
+
     if not interactive:
         with Venv(get_connector_plugin(self.instance_connector)):
             return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
@@ -65,7 +72,8 @@ def edit(
     from meerschaum.config import get_config
     parameters = dict(get_config('pipes', 'parameters', patch=True))
     from meerschaum.config._patch import apply_patch_to_config
-    parameters = apply_patch_to_config(parameters, self.parameters)
+    raw_parameters = self.attributes.get('parameters', {})
+    parameters = apply_patch_to_config(parameters, raw_parameters)
 
     ### write parameters to yaml file
     with open(parameters_path, 'w+') as f:

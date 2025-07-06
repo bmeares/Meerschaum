@@ -11,15 +11,12 @@ from meerschaum.utils.threading import Lock
 _locks = {'_tried_clear_command': Lock()}
 
 
-def make_header(
-    message: str,
-    ruler: str = '─',
-) -> str:
+def make_header(message: str, ruler: str = '─', left_pad: int = 4) -> str:
     """Format a message string with a ruler.
     Length of the ruler is the length of the longest word.
     
     Example:
-        'My\nheader' -> 'My\nheader\n──────'
+        'My\nheader' -> '  My\n  header\n  ──────'
     """
 
     from meerschaum.utils.formatting import ANSI, UNICODE, colored
@@ -32,10 +29,15 @@ def make_header(
         if length > max_length:
             max_length = length
 
-    s = message + "\n"
-    for i in range(max_length):
-        s += ruler
-    return s
+    left_buffer = left_pad * ' '
+
+    return (
+        left_buffer
+        + message.replace('\n', '\n' + left_buffer)
+        + "\n"
+        + left_buffer
+        + (ruler * max_length)
+    )
 
 
 _tried_clear_command = None

@@ -1500,15 +1500,12 @@ def import_pandas(
 def import_rich(
     lazy: bool = True,
     debug: bool = False,
-    **kw : Any
+    **kw: Any
 ) -> 'ModuleType':
     """
     Quality of life function for importing `rich`.
     """
     from meerschaum.utils.formatting import ANSI, UNICODE
-    if not ANSI and not UNICODE:
-        return None
-
     ## need typing_extensions for `from rich import box`
     typing_extensions = attempt_import(
         'typing_extensions', lazy=False, debug=debug

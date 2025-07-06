@@ -141,6 +141,9 @@ default_system_config = {
         'endpoints': {
             'docs_in_production': True,
         },
+        'tokens': {
+            'valid_refresh_minutes': 60,
+        },
         'permissions':       {
             'registration': {
                 'users': True,

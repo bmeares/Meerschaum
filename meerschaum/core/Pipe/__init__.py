@@ -50,11 +50,11 @@ with correct credentials, as well as a network connection and valid permissions.
 """
 
 from __future__ import annotations
+
 import sys
 import copy
 
 import meerschaum as mrsm
-from meerschaum.connectors import Connector, SQLConnector
 from meerschaum.utils.typing import Optional, Dict, Any, Union, List, InstanceConnector
 from meerschaum.utils.formatting._pipes import pipe_repr
 from meerschaum.config import get_config
@@ -93,6 +93,8 @@ class Pipe:
         get_data,
         get_backtrack_data,
         get_rowcount,
+        get_data,
+        get_doc,
         get_value,
         _get_data_as_iterator,
         get_chunk_interval,
@@ -119,6 +121,7 @@ class Pipe:
         get_columns_types,
         get_columns_indices,
         get_indices,
+        get_parameters,
         tags,
         get_id,
         id,
@@ -301,11 +304,13 @@ class Pipe:
                 warn(f"The provided parameters are of invalid type '{type(parameters)}'.")
             self._attributes['parameters'] = {}
 
-        columns = columns or self._attributes.get('parameters', {}).get('columns', {})
-        if isinstance(columns, list):
+        columns = columns or self._attributes.get('parameters', {}).get('columns', None)
+        if isinstance(columns, (list, tuple)):
             columns = {str(col): str(col) for col in columns}
         if isinstance(columns, dict):
             self._attributes['parameters']['columns'] = columns
+        elif isinstance(columns, str) and 'Pipe(' in columns:
+            pass
         elif columns is not None:
             warn(f"The provided columns are of invalid type '{type(columns)}'.")
 
@@ -408,7 +413,7 @@ class Pipe:
         return self._instance_connector
 
     @property
-    def connector(self) -> Union[Connector, None]:
+    def connector(self) -> Union['Connector', None]:
         """
         The connector to the data source.
         """
@@ -428,7 +433,7 @@ class Pipe:
         return self._connector
 
     @property
-    def cache_connector(self) -> Union[SQLConnector, None]:
+    def cache_connector(self) -> Union['Connector', None]:
         """
         If the pipe was created with `cache=True`, return the connector to the pipe's
         SQLite database for caching.
