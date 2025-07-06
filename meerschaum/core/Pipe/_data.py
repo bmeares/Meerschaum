@@ -835,6 +835,22 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
     return bounds
 
 
+def get_doc(self, **kwargs) -> Union[Dict[str, Any], None]:
+    """
+    Convenience function to return a single row as a dictionary (or `None`) from `Pipe.get_data().
+    Keywords arguments are passed to `Pipe.get_data()`.
+    """
+    from meerschaum.utils.warnings import warn
+    kwargs['limit'] = 1
+    try:
+        result_df = self.get_data(**kwargs)
+        if result_df is None or len(result_df) == 0:
+            return None
+        return result_df.reset_index(drop=True).iloc[0].to_dict()
+    except Exception as e:
+        warn(f"Failed to read value from {self}:\n{e}", stack=False)
+        return None
+
 def get_value(
     self,
     column: str,

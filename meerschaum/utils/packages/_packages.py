@@ -54,6 +54,8 @@ packages: Dict[str, Dict[str, str]] = {
         'virtualenv'                 : 'virtualenv>=20.1.0',
         'attrs'                      : 'attrs>=24.2.0',
         'uv'                         : 'uv>=0.2.11',
+        'pydantic'                   : 'pydantic>=2.11.7',
+        'annotated-types'            : 'annotated-types>=0.7.0',
     },
     '_internal'                      : {
         'apscheduler'                : (
@@ -174,7 +176,6 @@ packages['api'] = {
     'httpx'                          : 'httpx>=0.27.2',
     'httpcore'                       : 'httpcore>=1.0.6',
     'valkey'                         : 'valkey>=6.0.0',
-    'pydantic'                       : 'pydantic>=2.11.7',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])

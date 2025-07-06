@@ -10,10 +10,20 @@ from __future__ import annotations
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
-    Sequence, Optional, Union, Mapping, Any, InstanceConnector, PipesDict, List, Dict, Tuple
+    Sequence,
+    Optional,
+    Union,
+    Mapping,
+    Any,
+    PipesDict,
+    List,
+    Dict,
+    Tuple,
+    InstanceConnector,
 )
 
 __pdoc__ = {'get_pipes': True, 'fetch_pipes_keys': True}
+
 
 def get_pipes(
     connector_keys: Union[str, List[str], None] = None,

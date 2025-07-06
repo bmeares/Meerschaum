@@ -48,10 +48,62 @@ def attributes(self) -> Dict[str, Any]:
     return self._attributes
 
 
-def get_parameters(self, apply_symlinks: bool = True) -> Dict[str, Any]:
+def get_parameters(
+    self,
+    apply_symlinks: bool = True,
+    _visited: 'Optional[set[mrsm.Pipe]]' = None,
+) -> Dict[str, Any]:
     """
     Return the `parameters` dictionary of the pipe.
     """
+    from meerschaum.config._patch import apply_patch_to_config
+    from meerschaum.utils.warnings import warn
+
+    if _visited is None:
+        _visited = {self}
+
+    raw_parameters = self.attributes.get('parameters', {})
+    ref_keys = raw_parameters.get('reference')
+    if not apply_symlinks:
+        return raw_parameters
+
+    if ref_keys:
+        try:
+            ref_pipe = mrsm.Pipe(**ref_keys)
+            if ref_pipe in _visited:
+                warn(f"Circular reference detected in {self}: chain involves {ref_pipe}.")
+                return raw_parameters
+
+            _visited.add(ref_pipe)
+            base_params = ref_pipe.get_parameters(_visited=_visited)
+        except Exception as e:
+            warn(f"Failed to resolve reference pipe for {self}: {e}")
+            base_params = {}
+
+        params_to_apply = {k: v for k, v in raw_parameters.items() if k != 'reference'}
+        parameters = apply_patch_to_config(base_params, params_to_apply)
+    else:
+        parameters = raw_parameters
+
+    from meerschaum.utils.pipes import replace_pipes_syntax
+    self._symlinks = {}
+
+    def recursive_replace(obj: Any, path: tuple) -> Any:
+        if isinstance(obj, dict):
+            return {k: recursive_replace(v, path + (k,)) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [recursive_replace(elem, path + (i,)) for i, elem in enumerate(obj)]
+        if isinstance(obj, str):
+            substituted_val = replace_pipes_syntax(obj)
+            if substituted_val != obj:
+                self._symlinks[path] = {
+                    'original': obj,
+                    'substituted': substituted_val,
+                }
+            return substituted_val
+        return obj
+
+    return recursive_replace(parameters, tuple())
 
 
 @property
@@ -59,16 +111,10 @@ def parameters(self) -> Optional[Dict[str, Any]]:
     """
     Return the parameters dictionary of the pipe.
     """
-    if 'parameters' not in self.attributes:
-        self.attributes['parameters'] = {}
-    _parameters = self.attributes['parameters']
-    dt_col = _parameters.get('columns', {}).get('datetime', None)
-    dt_typ = _parameters.get('dtypes', {}).get(dt_col, None) if dt_col else None
-    if dt_col and not dt_typ:
-        if 'dtypes' not in _parameters:
-            self.attributes['parameters']['dtypes'] = {}
-        self.attributes['parameters']['dtypes'][dt_col] = 'datetime'
-    return self.attributes['parameters']
+    if (_parameters := self.__dict__.get('_parameters', None)) is not None:
+        return _parameters
+    self._parameters = self.get_parameters()
+    return self._parameters
 
 
 @parameters.setter
@@ -78,6 +124,8 @@ def parameters(self, parameters: Dict[str, Any]) -> None:
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
     self.attributes['parameters'] = parameters
+    if '_parameters' in self.__dict__:
+        del self.__dict__['_parameters']
 
 
 @property
@@ -85,12 +133,9 @@ def columns(self) -> Union[Dict[str, str], None]:
     """
     Return the `columns` dictionary defined in `meerschaum.Pipe.parameters`.
     """
-    if 'columns' not in self.parameters:
-        self.parameters['columns'] = {}
-    cols = self.parameters['columns']
+    cols = self.parameters.get('columns', {})
     if not isinstance(cols, dict):
-        cols = {}
-        self.parameters['columns'] = cols
+        return {}
     return {col_ix: col for col_ix, col in cols.items() if col}
 
 

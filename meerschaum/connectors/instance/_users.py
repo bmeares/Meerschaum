@@ -5,6 +5,8 @@
 Define high-level user-management methods for instance connectors.
 """
 
+from __future__ import annotations
+
 import uuid
 from typing import Any, Union, Optional, List, Dict
 

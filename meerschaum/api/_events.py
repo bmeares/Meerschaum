@@ -35,6 +35,29 @@ async def startup():
     """
     Connect to the instance database and begin monitoring jobs.
     """
+    app.openapi_schema = app.openapi()
+
+    ### Remove the implicitly added HTTPBearer scheme if it exists.
+    if 'BearerAuth' in app.openapi_schema['components']['securitySchemes']:
+        del app.openapi_schema['components']['securitySchemes']['BearerAuth']
+    elif 'HTTPBearer' in app.openapi_schema['components']['securitySchemes']:
+        del app.openapi_schema['components']['securitySchemes']['HTTPBearer']
+
+    app.openapi_schema['components']['securitySchemes']['APIKey'] = {
+        'type': 'http',
+        'scheme': 'bearer',
+        'bearerFormat': 'token_id:secret',
+        'description': 'Authentication using a Meerschaum API Key.',
+    }
+    app.openapi_schema['security'] = [
+        {
+            'OAuth2PasswordBearer': [],
+        },
+        {
+            'APIKey': [],
+        }
+    ]
+
     try:
         if not no_dash:
             from meerschaum.api.dash.webterm import start_webterm

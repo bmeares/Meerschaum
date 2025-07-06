@@ -321,15 +321,15 @@ STATIC_CONFIG: Dict[str, Any] = {
         'check_restart_seconds': 1.0,
     },
     'tokens': {
-        'minimum_length': 64,
-        'maximum_length': 128,
-        'scopes': (
-            'read',
-            'write',
-            'drop',
-            'exec',
-            'delete',
-        ),
+        'minimum_length': 24,
+        'maximum_length': 32,
+        'scopes': {
+            'pipes:read': "Read pipes' parameters and the contents of target tables.",
+            'pipes:write': "Update pipes' parameters and sync to target tables.",
+            'pipes:drop': "Drop target tables.",
+            'pipes:delete': "Delete pipes' parameters and drop target tables.",
+            'actions:execute': "Execute arbitrary actions.",
+        },
     },
     'setup': {
         'name': 'meerschaum',

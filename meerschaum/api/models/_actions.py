@@ -7,9 +7,10 @@ Define actions response models.
 
 from typing import Tuple
 from pydantic import RootModel, ConfigDict
+from meerschaum.utils.typing import SuccessTuple
 
 
-class SuccessTupleResponseModel(RootModel[Tuple[bool, str]]):
+class SuccessTupleResponseModel(RootModel[SuccessTuple]):
     """
     A response model for a tuple of a boolean and a string.
     E.g. `[true, "Success"]`

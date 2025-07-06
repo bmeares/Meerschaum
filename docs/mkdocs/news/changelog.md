@@ -6,7 +6,102 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v3.0.0
 
-**Potentially Breaking Changes**
+- **Inherit another pipe's base parameters with `reference`.**  
+  Pipes may inherit the base parameters of other pipes by setting the key `reference`:
+
+  ```python
+  import meerschaum as mrsm
+
+  base_pipe = mrsm.Pipe(
+      'demo', 'reference', 'parent',
+      instance='sql:memory',
+      columns={
+          'datetime': 'ts',
+          'id': 'id',
+      },
+      parameters={
+          'custom': {
+              'foo': 'bar',
+              'color': 'red',
+          },
+      },
+  )
+  base_pipe.register()
+
+  pipe = mrsm.Pipe(
+      'demo', 'reference', 'child',
+      instance='sql:memory',
+      parameters={
+          'reference': {
+              'connector': 'demo',
+              'metric': 'reference',
+              'location': 'parent',
+              'instance': 'sql:memory',
+          },
+          'custom': {
+              'color': 'blue',
+          },
+      },
+  )
+
+  print(pipe.parameters)
+  # {'custom': {'foo': 'bar', 'color': 'blue'}, 'columns': {'datetime': 'ts', 'id': 'id'}} 
+  ```
+
+- **Dynamically symlink to other pipes' attributes.**  
+  Reference attributes of other pipes using the `{{ Pipe(...) }}` syntax. These references are resolved at run-time when `Pipe.parameters` is accessed:
+
+  ```python
+  import json
+  import meerschaum as mrsm
+
+  some_pipe = mrsm.Pipe(
+      'demo', 'symlink',
+      instance='sql:memory',
+      parameters={
+          'target': 'some_table',
+          'columns': {
+              'datetime': 'id',
+              'id': 'id',
+          },
+          'upsert': True,
+          'custom': {
+              'stations': ['KATL', 'KGMU', 'KCEU'],
+          },
+      },
+  )
+  some_pipe.register()
+
+  pipe = mrsm.Pipe(
+      'demo', 'symlink', 'child',
+      instance='sql:memory',
+      parameters={
+          'target': "{{ Pipe('demo', 'symlink', instance='sql:memory').target }}",
+          'columns': "{{ Pipe('demo', 'symlink', instance='sql:memory').columns }}",
+          'upsert': "{{ Pipe('demo', 'symlink', instance='sql:memory').upsert }}",
+          'custom': "{{ Pipe('demo', 'symlink', instance='sql:memory').parameters['custom'] }}",
+          'parent_pipe_id': "{{ Pipe('demo', 'symlink', instance='sql:memory').id }}",
+      },
+  )
+
+  print(json.dumps(pipe.parameters, indent=4))
+  # {
+  #     "target": "some_table",
+  #     "columns": {
+  #         "datetime": "id",
+  #         "id": "id"
+  #     },
+  #     "upsert": true,
+  #     "custom": {
+  #         "stations": [
+  #             "KATL",
+  #             "KGMU",
+  #             "KCEU"
+  #         ]
+  #     },
+  #     "parent_pipe_id": 1
+  # }  
+  ```
 
 - **Add `InstanceConnector` base class.**  
   Custom connectors which implement the [instance connectors interface](https://meerschaum.io/reference/connectors/instance-connectors/) should now inherit from `InstanceConnector` as the base class:
@@ -77,8 +172,6 @@ This is the current release cycle, so stay tuned for future releases!
 
   - **Upgrade `sql:main` to PostgreSQL 17.**  
     The Meerschaum stack database now ships as `timescale/timescaledb-ha:pg17`, which includes additional extensions such as PostGIS. The flavor for `sql:main` is now `timescaledb-ha` (see below).
-
-**New Features**
 
 - **Add the SQL flavor `timescaledb-ha`.**  
   The default instance connector `sql:main` now has the flavor `timescaledb-ha`, corresponding to the `timescale/timescaledb-ha` Docker image. This image includes PostGIS, `timescaledb_toolkit`, and `pg_stat_statements`.

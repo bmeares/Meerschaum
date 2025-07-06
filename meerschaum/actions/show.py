@@ -45,6 +45,7 @@ def show(
         'tags'       : _show_tags,
         'schedules'  : _show_schedules,
         'venvs'      : _show_venvs,
+        'tokens'     : _show_tokens,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -113,11 +114,11 @@ def _show_help(**kw: Any) -> SuccessTuple:
 
 
 def _show_config(
-        action: Optional[List[str]] = None,
-        debug: bool = False,
-        nopretty: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    debug: bool = False,
+    nopretty: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Show the configuration dictionary.
     Sub-actions defined in the action list are recursive indices in the config dictionary.
@@ -904,9 +905,7 @@ def _show_schedules(
     return True, "Success"
         
 
-def _show_venvs(
-    **kwargs: Any    
-):
+def _show_venvs(**kwargs: Any) -> SuccessTuple:
     """
     Print the available virtual environments in the current MRSM_ROOT_DIR.
     """
@@ -921,11 +920,27 @@ def _show_venvs(
         for _venv in os.listdir(VIRTENV_RESOURCES_PATH)
         if venv_exists(_venv)
     ]
-    print_options(
-        venvs,
-        name = 'Venvs:',
-        **kwargs
-    )
+    print_options(venvs, name='Virtual Environments:', **kwargs)
+    return True, "Success"
+
+
+def _show_tokens(mrsm_instance: Optional[str] = None, **kwargs: Any) -> SuccessTuple:
+    """
+    Print the labels of the registered tokens on the instance.
+    """
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils.misc import print_options
+    from meerschaum.utils.packages import import_rich
+    rich = import_rich()
+    rich_table = mrsm.attempt_import('rich.table')
+
+    conn = parse_instance_keys(mrsm_instance)
+    tokens = conn.get_tokens()
+    print_options(tokens, name=f"Registered Tokens on instance '{conn}':", **kwargs) 
+
+    table = rich_table.Table()
+
+    mrsm.pprint(table)
 
     return True, "Success"
 

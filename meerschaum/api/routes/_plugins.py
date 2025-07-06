@@ -25,6 +25,7 @@ from meerschaum.api import (
     no_auth,
     default_instance_keys,
 )
+from meerschaum.api.models import SuccessTupleResponseModel
 from meerschaum.api.tables import get_tables
 from fastapi import File, UploadFile
 from meerschaum.utils.packages import attempt_import
@@ -39,7 +40,11 @@ plugins_endpoint = endpoints['plugins']
 PLUGINS_INSTANCE_KEYS = default_instance_keys
 
 
-@app.post(plugins_endpoint + '/{name}', tags=['Plugins'])
+@app.post(
+    plugins_endpoint + '/{name}',
+    tags=['Plugins'],
+    response_model=SuccessTupleResponseModel,
+)
 def register_plugin(
     name: str,
     version: str = None,
@@ -48,13 +53,13 @@ def register_plugin(
     curr_user = (
         fastapi.Depends(manager) if not no_auth else None
     ),
-) -> SuccessTuple:
+) -> SuccessTupleResponseModel:
     """
     Register a plugin and save its archive file.
 
     Parameters
     ----------
-    name: str :
+    name: str
         The name of the plugin.
         
     version: str, default None
@@ -122,7 +127,10 @@ def register_plugin(
 
     return success, msg
 
-@app.get(plugins_endpoint + '/{name}', tags=['Plugins'])
+@app.get(
+    plugins_endpoint + '/{name}',
+    tags=['Plugins'],
+)
 def get_plugin(
     name: str,
     curr_user = (
@@ -179,13 +187,17 @@ def get_plugins(
     ).get_plugins(user_id=user_id, search_term=search_term)
 
 
-@app.delete(plugins_endpoint + '/{name}', tags=['Plugins'])
+@app.delete(
+    plugins_endpoint + '/{name}',
+    tags=['Plugins'],
+    response_model=SuccessTupleResponseModel,
+)
 def delete_plugin(
     name: str,
     curr_user = (
         fastapi.Depends(manager) if private else None
     ),
-) -> SuccessTuple:
+) -> SuccessTupleResponseModel:
     """
     Delete a plugin and its archive file from the repository.
     """

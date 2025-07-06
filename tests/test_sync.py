@@ -1297,7 +1297,7 @@ def test_autotime(flavor: str):
         enforce=False,
         columns={
             'datetime': dt_col,
-            'primary': 'id',
+            'id': 'id',
         },
     )
 
@@ -1341,5 +1341,3 @@ def test_autotime(flavor: str):
 
     df = pipe.get_data(params={'id': 1})
     assert len(df) == 3
-
-    return pipe

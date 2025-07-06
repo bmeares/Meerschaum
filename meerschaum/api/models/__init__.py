@@ -7,16 +7,19 @@ Create and manipulate SQL tables with ORM
 """
 
 import meerschaum as mrsm
-
-pydantic = mrsm.attempt_import('pydantic', lazy=False)
+import meerschaum.models
 
 from meerschaum.api.models._pipes import (
-    ConnectorKeysModel,
-    MetricKeyModel,
-    LocationKeyModel,
-    InstanceKeysModel,
-    MetaPipe,
     FetchPipesKeysResponseModel,
 )
 from meerschaum.api.models._actions import SuccessTupleResponseModel
-from meerschaum.api.models._tokens import RegisterTokenResponseModel
+from meerschaum.api.models._tokens import (
+    RegisterTokenResponseModel,
+    RegisterTokenRequestModel,
+)
+
+__all__ = (
+    'FetchPipesKeysResponseModel',
+    'SuccessTupleResponseModel',
+    'RegisterTokenResponseModel',
+)

@@ -455,6 +455,7 @@ def _register_tokens(
     force: bool = False,
     yes: bool = False,
     noask: bool = False,
+    nopretty: bool = False,
     debug: bool = False,
     **kwargs: Any
 ) -> mrsm.SuccessTuple:
@@ -471,10 +472,13 @@ def _register_tokens(
     mrsm register token --name weather-sensor
 
     """
+    import json
     from meerschaum.utils.schedule import parse_start_time
     from meerschaum.core import Token
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.formatting import make_header, print_tuple
+    from meerschaum.utils.dtypes import value_is_null
 
     expiration = (
         end
@@ -491,7 +495,7 @@ def _register_tokens(
         continue_registering = force or yes_no(
             (
                 "It is highly recommended to register tokens against an API instance"
-                f"\n    (currently connected to '{instance_connector}'.\n\n"
+                f"\n    (currently connected to '{instance_connector}').\n\n"
                 f"\n    Run again with `--force`, or answer `y` to continue.\n"
                 f"    Are you sure you want to register a token to instance '{instance_connector}'?"
             ),
@@ -507,9 +511,47 @@ def _register_tokens(
         expiration=expiration,
         instance=mrsm_instance,
     )
+    token_secret = token.generate_secret()
 
-    success, msg = token.register(debug=debug)
-    return success, msg
+    register_success, register_msg = token.register(debug=debug)
+    if not register_success:
+        return False, f"Failed to register token '{token.label}':\n{register_msg}"
+
+    token_model = token.to_model(refresh=True)
+    token = Token(secret=token_secret, **dict(token_model))
+
+    if not nopretty:
+        print_tuple(
+            (
+                True,
+                (
+                    f"Registered token '{token}'.\n    "
+                    "Write down the client secret, because it won't be shown again."
+                )
+            ),
+            calm=True
+        )
+
+    msg_to_print = (
+        (
+            make_header(f"Attributes for token '{token}':") + "\n"
+            + f"    - Client ID: {token_model.id}\n"
+            + f"    - Client Secret: {token_secret}\n"
+            + "    - Expiration: "
+            + (
+                token.expiration.isoformat()
+                if not value_is_null(token.expiration)
+                else 'Does not expire.'
+            )
+            + "\n"
+            + f"    - API Key: {token.get_api_key()}\n"
+            + f"    - Scope: " + " ".join(token_model.scopes or [])
+        )
+        if not nopretty
+        else json.dumps({'secret': token_secret, **dict(token_model)})
+    ) 
+    print(msg_to_print)
+    return True, f"Successfully registered token '{token.label}'."
 
 
 ### NOTE: This must be the final statement of the module.
