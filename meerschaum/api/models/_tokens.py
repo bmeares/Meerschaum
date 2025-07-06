@@ -34,6 +34,7 @@ class RegisterTokenRequestModel(BaseModel):
 class RegisterTokenResponseModel(BaseModel):
     label: str
     secret: str
+    id: str
     expiration: Optional[datetime]
     model_config = ConfigDict(
         json_schema_extra = {

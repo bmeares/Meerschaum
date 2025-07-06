@@ -24,7 +24,7 @@ class APIConnector(InstanceConnector):
     """
 
     IS_THREAD_SAFE: bool = False
-    OPTIONAL_ATTRIBUTES: List[str] = ['port']
+    OPTIONAL_ATTRIBUTES: List[str] = ['port', 'client_secret', 'client_id', 'api_key']
 
     from ._request import (
         make_request,
@@ -155,9 +155,15 @@ class APIConnector(InstanceConnector):
         """
         Return the fully qualified URI.
         """
+        import urllib.parse
         username = self.__dict__.get('username', None)
         password = self.__dict__.get('password', None)
+        client_id = self.__dict__.get('client_id', None)
+        client_secret = self.__dict__.get('client_secret', None)
+        api_key = self.__dict__.get('api_key', None)
         creds = (username + ':' + password + '@') if username and password else ''
+        params = {}
+        params_str = ('?' + urllib.parse.urlencode(params)) if params else ''
         return (
             self.protocol
             + '://'
@@ -168,8 +174,8 @@ class APIConnector(InstanceConnector):
                 if self.__dict__.get('port', None)
                 else ''
             )
+            + params_str
         )
-
 
     @property
     def session(self):

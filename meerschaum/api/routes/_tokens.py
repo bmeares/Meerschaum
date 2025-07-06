@@ -25,6 +25,7 @@ from meerschaum.api.models import (
     RegisterTokenResponseModel,
     RegisterTokenRequestModel,
 )
+from meerschaum.api._tokens import optional_token, get_current_token
 from meerschaum.utils.dtypes import coerce_timezone, json_serialize_value
 from meerschaum._internal.static import STATIC_CONFIG
 
@@ -50,15 +51,31 @@ def register_token(
         scopes=request_model.scopes,
         instance=get_api_connector(),
     )
+    secret = token.generate_secret()
     register_success, register_msg = token.register(debug=debug)
     if not register_success:
         raise fastapi.HTTPException(
             status_code=409,
             detail=f"Could not register new token:\n{register_msg}",
         )
+    token_model = token.to_model(refresh=True)
 
     return RegisterTokenResponseModel(
         label=token.label,
-        secret=token.secret,
+        secret=secret,
+        id=str(token_model.id),
         expiration=token.expiration,
     )
+
+
+@app.post(
+    tokens_endpoint + '/validate',
+    tags=['Tokens'],
+)
+def validate_api_key(
+    curr_token=(fastapi.Depends(get_current_token) if not no_auth else None),
+):
+    """
+    Return a 200 if the given Authorization token (API key) is valid.
+    """
+    return True, "Success"

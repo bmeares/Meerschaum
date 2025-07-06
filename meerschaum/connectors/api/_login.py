@@ -22,12 +22,40 @@ def login(
     **kw: Any
 ) -> SuccessTuple:
     """Log in and set the session token."""
+    if 'username' in self.__dict__:
+        login_scheme = 'password'
+    elif 'client_id' in self.__dict__:
+        login_scheme = 'client_credentials'
+    elif 'api_key' in self.__dict__:
+        validate_response = self.post(
+            STATIC_CONFIG['api']['endpoints']['tokens'] + '/validate',
+            headers={'Authorization': f'Bearer {self.api_key}'},
+            use_token=False,
+            debug=debug,
+        )
+        if not validate_response:
+            return False, "API key is not valid."
+        return True, "API key is valid."
+
     try:
-        login_data = {
-            'username': self.username,
-            'password': self.password,
-        }
+        if login_scheme == 'password':
+            login_data = {
+                'username': self.username,
+                'password': self.password,
+            }
+        elif login_scheme == 'client_credentials':
+            login_data = {
+                'client_id': self.client_id,
+                'client_secret': self.client_secret,
+            }
+        else:
+            login_data = {
+                'api_key': self.api_key,
+            }
     except AttributeError:
+        login_data = None
+
+    if not login_data:
         return False, f"Please login with the command `login {self}`."
 
     response = self.post(

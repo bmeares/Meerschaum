@@ -121,8 +121,6 @@ def ScopedAuth(scopes: List[str]):
     ) -> Union[User, Token, None]:
         if no_auth:
             return None
-        print(f"{user=}")
-        print(f"{token=}")
         if user:
             return user
         
