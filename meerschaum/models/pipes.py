@@ -30,6 +30,7 @@ class ConnectorKeysModel(RootModel[str]):
         - May contain one or zero colons (:).
     """
     model_config = ConfigDict(
+        frozen=True,
         json_schema_extra={
             'example': 'sql:main',
         },
@@ -55,6 +56,7 @@ class MetricKeyModel(RootModel[str]):
         - Must be at least one character long.
     """
     model_config = ConfigDict(
+        frozen=True,
         json_schema_extra={
             'example': 'weather',
         },
@@ -79,6 +81,7 @@ class LocationKeyModel(RootModel[Optional[str]]):
         - If not null, must be at least one character long.
     """
     model_config = ConfigDict(
+        frozen=True,
         json_schema_extra={
             'example': 'us.co.denver',
         },
@@ -102,6 +105,7 @@ class InstanceKeysModel(RootModel[str]):
     (e.g. `'sql:main'`).
     """
     model_config = ConfigDict(
+        frozen=True,
         json_schema_extra={
             'example': 'sql:main',
         },
@@ -125,7 +129,7 @@ class PipeModel(BaseModel):
     """
     connector_keys: ConnectorKeysModel
     metric_key: MetricKeyModel
-    location_key: LocationKeyModel = None
+    location_key: Optional[LocationKeyModel] = None
     instance_keys: Optional[InstanceKeysModel] = None
     model_config = ConfigDict(
         json_schema_extra={
