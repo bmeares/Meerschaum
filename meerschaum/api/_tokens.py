@@ -17,7 +17,6 @@ from starlette import status
 import meerschaum as mrsm
 from meerschaum.api import (
     get_api_connector,
-    manager,
     no_auth,
 )
 from meerschaum.core import Token, User
@@ -26,13 +25,16 @@ from meerschaum.core.User import verify_password
 
 http_bearer = HTTPBearer(auto_error=False, scheme_name="APIKey")
 
-def _get_token_from_creds(auth_creds: HTTPAuthorizationCredentials) -> Token:
+
+def get_token_from_authorization(authorization: str) -> Token:
     """
     Helper function to decode and verify a token from credentials.
     Raises HTTPException on failure.
     """
+    if authorization.startswith('mrsm-key:'):
+        authorization = authorization[len('mrsm-key:'):]
     try:
-        credential_string = base64.b64decode(auth_creds.credentials).decode('utf-8')
+        credential_string = base64.b64decode(authorization).decode('utf-8')
         token_id_str, secret = credential_string.split(':', 1)
         token_id = uuid.UUID(token_id_str)
     except Exception:
@@ -82,7 +84,7 @@ def get_current_token(
             detail="Not authenticated.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return _get_token_from_creds(auth_creds)
+    return get_token_from_authorization(auth_creds.credentials)
 
 
 async def optional_token(
@@ -93,50 +95,8 @@ async def optional_token(
     """
     if not auth_creds:
         return None
+
     try:
-        return _get_token_from_creds(auth_creds)
+        return get_token_from_authorization(auth_creds.credentials)
     except HTTPException as e:
         return None
-
-
-async def optional_user(request: Request) -> Optional[User]:
-    """
-    FastAPI dependency that returns a User if logged in, otherwise None.
-    """
-    if no_auth:
-        return None
-    try:
-        return await manager(request)
-    except HTTPException:
-        return None
-
-
-def ScopedAuth(scopes: List[str]):
-    """
-    Dependency factory for authenticating with either a user session or a scoped token.
-    """
-    async def _authenticate(
-        user: Optional[User] = Depends(optional_user),
-        token: Optional[Token] = Depends(optional_token),
-    ) -> Union[User, Token, None]:
-        if no_auth:
-            return None
-        if user:
-            return user
-        
-        if not token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Not authenticated.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        for scope in scopes:
-            if scope not in token.scopes:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Token is missing required scope: '{scope}'",
-                )
-        
-        return token
-    return _authenticate

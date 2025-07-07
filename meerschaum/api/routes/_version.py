@@ -7,12 +7,12 @@ Return version information
 """
 
 import fastapi
-from meerschaum.api import app, endpoints, private, manager
+from meerschaum.api import app, endpoints, private, ScopedAuth
 
 @app.get(endpoints['version'], tags=['Version'])
 def get_api_version(
     curr_user = (
-        fastapi.Depends(manager) if private else None
+        fastapi.Depends(ScopedAuth(['instance:read'])) if private else None
     ),
 ):
     """
@@ -24,7 +24,7 @@ def get_api_version(
 @app.get(endpoints['version'] + "/mrsm", tags=['Version'])
 def get_meerschaum_version(
     curr_user = (
-        fastapi.Depends(manager) if private else None
+        fastapi.Depends(ScopedAuth(['instance:read'])) if private else None
     ),
 ):
     """

@@ -22,11 +22,7 @@ def login(
     **kw: Any
 ) -> SuccessTuple:
     """Log in and set the session token."""
-    if 'username' in self.__dict__:
-        login_scheme = 'password'
-    elif 'client_id' in self.__dict__:
-        login_scheme = 'client_credentials'
-    elif 'api_key' in self.__dict__:
+    if self.login_scheme == 'api_key':
         validate_response = self.post(
             STATIC_CONFIG['api']['endpoints']['tokens'] + '/validate',
             headers={'Authorization': f'Bearer {self.api_key}'},
@@ -38,25 +34,27 @@ def login(
         return True, "API key is valid."
 
     try:
-        if login_scheme == 'password':
+        if self.login_scheme == 'password':
             login_data = {
                 'username': self.username,
                 'password': self.password,
             }
-        elif login_scheme == 'client_credentials':
+        elif self.login_scheme == 'client_credentials':
             login_data = {
                 'client_id': self.client_id,
                 'client_secret': self.client_secret,
             }
-        else:
-            login_data = {
-                'api_key': self.api_key,
-            }
     except AttributeError:
-        login_data = None
+        login_data = {}
 
     if not login_data:
         return False, f"Please login with the command `login {self}`."
+
+    login_scheme_msg = (
+        f" as user '{login_data['username']}'"
+        if self.login_scheme == 'username'
+        else ''
+    )
 
     response = self.post(
         STATIC_CONFIG['api']['endpoints']['login'],
@@ -65,7 +63,7 @@ def login(
         debug=debug,
     )
     if response:
-        msg = f"Successfully logged into '{self}' as user '{login_data['username']}'."
+        msg = f"Successfully logged into '{self}'{login_scheme_msg}'."
         self._token = json.loads(response.text)['access_token']
         self._expires = datetime.datetime.strptime(
             json.loads(response.text)['expires'], 
@@ -73,7 +71,7 @@ def login(
         )
     else:
         msg = (
-            f"Failed to log into '{self}' as user '{login_data['username']}'.\n" +
+            f"Failed to log into '{self}'{login_scheme_msg}.\n" +
             f"    Please verify login details for connector '{self}'."
         )
         if warn and not self.__dict__.get('_emitted_warning', False):

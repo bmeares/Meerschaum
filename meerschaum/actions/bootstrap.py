@@ -249,7 +249,7 @@ def _bootstrap_connectors(
     from meerschaum.config._edit import write_config
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.formatting._shell import clear_screen
-    from meerschaum.connectors import attributes as connector_attributes
+    from meerschaum.config._default import CONNECTOR_ATTRIBUTES
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.misc import is_int
 
@@ -314,7 +314,7 @@ def _bootstrap_connectors(
     cls_required_attrs = getattr(cls, 'REQUIRED_ATTRIBUTES', [])
     cls_optional_attrs = getattr(cls, 'OPTIONAL_ATTRIBUTES', [])
     cls_default_attrs = getattr(cls, 'DEFAULT_ATTRIBUTES', {})
-    type_attributes = connector_attributes.get(
+    type_attributes = CONNECTOR_ATTRIBUTES.get(
         _type,
         {
             'required': cls_required_attrs,
@@ -338,8 +338,8 @@ def _bootstrap_connectors(
         except KeyboardInterrupt:
             return abort_tuple
         new_attributes['flavor'] = flavor
-        required = sorted(list(connector_attributes[_type]['flavors'][flavor]['requirements']))
-        optional = sorted(list(connector_attributes[_type]['flavors'][flavor].get('optional', {})))
+        required = sorted(list(CONNECTOR_ATTRIBUTES[_type]['flavors'][flavor]['requirements']))
+        optional = sorted(list(CONNECTOR_ATTRIBUTES[_type]['flavors'][flavor].get('optional', {})))
         default = type_attributes['flavors'][flavor].get('defaults', {})
     else:
         required = sorted(list(type_attributes.get('required', {})))

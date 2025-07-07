@@ -168,11 +168,11 @@ class PipeWithParametersModel(PipeModel):
 class PipesWithParametersDictModel(
     RootModel[
         Dict[
-            ConnectorKeysModel,
+            str,
             Dict[
-                MetricKeyModel,
+                str,
                 Dict[
-                    LocationKeyModel,
+                    str,
                     PipeWithParametersModel
                 ]
             ]
@@ -182,6 +182,20 @@ class PipesWithParametersDictModel(
     """
     A dictionary of pipes' parameters, nested by connector, metric, and location keys.
     """
+    @field_validator('root')
+    @classmethod
+    def validate_keys(cls, v: dict, info: ValidationInfo) -> dict:
+        """
+        Validate the dictionary keys.
+        """
+        for c_key, metrics in v.items():
+            ConnectorKeysModel(root=c_key)
+            for m_key, locations in metrics.items():
+                MetricKeyModel(root=m_key)
+                for l_key in locations:
+                    LocationKeyModel(root=l_key if l_key not in ('None', 'null', '[None]') else None)
+        return v
+
     model_config = ConfigDict(
         json_schema_extra={
             'example': {

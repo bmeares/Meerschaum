@@ -52,10 +52,12 @@ class InstanceConnector(Connector):
     from ._tokens import (
         get_tokens_pipe,
         register_token,
+        edit_token,
         get_token,
         get_tokens,
         get_token_model,
         get_token_secret_hash,
+        token_id_exists,
     )
 
     @abc.abstractmethod

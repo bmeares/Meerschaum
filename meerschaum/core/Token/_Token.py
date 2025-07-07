@@ -10,12 +10,13 @@ from __future__ import annotations
 import base64
 import uuid
 from random import randint
-from typing import Optional, Union, List, Dict
+from typing import Optional, Union, List, Dict, Tuple
 from datetime import datetime, timedelta, timezone
 
 import meerschaum as mrsm
 from meerschaum.models import TokenModel
 
+_PLACEHOLDER_EXPIRATION = datetime(2000, 1, 1)
 
 class Token:
     """
@@ -27,7 +28,7 @@ class Token:
         self,
         label: Optional[str] = None,
         creation: Optional[datetime] = None,
-        expiration: Optional[datetime] = None,
+        expiration: Optional[datetime] = _PLACEHOLDER_EXPIRATION,
         instance: Optional[str] = None,
         user: Optional[mrsm.core.User] = None,
         user_id: Union[int, str, uuid.UUID, None] = None,
@@ -39,7 +40,18 @@ class Token:
     ):
         from meerschaum.utils.dtypes import coerce_timezone
         from meerschaum.utils.daemon import get_new_daemon_name
+        from meerschaum.utils.misc import round_time
         from meerschaum._internal.static import STATIC_CONFIG
+        now = datetime.now(timezone.utc)
+        default_expiration_days = mrsm.get_config(
+            'system', 'api', 'tokens', 'default_expiration_days',
+        ) or 366
+        default_expiration = round_time(
+            now + timedelta(days=default_expiration_days),
+            timedelta(days=1),
+        )
+        if expiration == _PLACEHOLDER_EXPIRATION:
+            expiration = default_expiration
         self.creation = coerce_timezone(creation) if creation is not None else None
         self.expiration = coerce_timezone(expiration) if expiration is not None else None
         self._instance_keys = str(instance) if instance is not None else None
@@ -52,12 +64,12 @@ class Token:
         self.secret = secret
         self.secret_hash = secret_hash
 
-    def generate_secret(self) -> str:
+    def generate_credentials(self) -> Tuple[uuid.UUID, str]:
         """
-        Generate the internal secret value for this token.
+        Generate and return the client ID and secret values for this token.
         """
-        if self.secret:
-            return self.secret
+        if self.id and self.secret:
+            return self.id, self.secret
 
         from meerschaum.utils.misc import generate_password
         from meerschaum._internal.static import STATIC_CONFIG
@@ -66,13 +78,14 @@ class Token:
 
         secret_len = randint(min_len, max_len + 1)
         self.secret = generate_password(secret_len)
-        return self.secret
+        self.id = uuid.uuid4()
+        return self.id, self.secret
 
     def get_api_key(self) -> str:
         """
         Return the API key to be sent in the `Authorization` header.
         """
-        return base64.b64encode(f"{self.id}:{self.secret}".encode('utf-8')).decode('utf-8')
+        return 'mrsm-key:' + base64.b64encode(f"{self.id}:{self.secret}".encode('utf-8')).decode('utf-8')
 
     @property
     def instance_connector(self) -> mrsm.connectors.InstanceConnector:
@@ -108,8 +121,21 @@ class Token:
         """
         Register the new token to the configured instance.
         """
-        _ = self.generate_secret()
         return self.instance_connector.register_token(self, debug=debug)
+
+    def edit(self, debug: bool = False) -> mrsm.SuccessTuple:
+        """
+        Edit some of the token's attributes (expiration, scopes).
+        """
+        return self.instance_connector.edit_token(self, debug=debug)
+
+    def exists(self, debug: bool = False) -> bool:
+        """
+        Return `True` if a token's ID exists in the tokens pipe.
+        """
+        if not self.id:
+            return False
+        return self.instance_connector.token_id_exists(self.id, debug=debug)
 
     def to_model(self, refresh: bool = False, debug: bool = False) -> TokenModel:
         """
@@ -124,20 +150,17 @@ class Token:
             'user_id': self._user_id,
             'scopes': self.scopes,
         }
-        doc = in_memory_doc
+        if not refresh:
+            return TokenModel(**in_memory_doc)
 
-        if refresh:
-            tokens_pipe = self.instance_connector.get_tokens_pipe()
-            params: Dict[str, Union[str, uuid.UUID]] = {
-                'id': self.id
-            } if self.id else {
-                'label': self.label,
-            }
-            doc = tokens_pipe.get_doc(params=params, debug=debug)
-            if doc is None:
-                raise ValueError(f"{self} does not exist on instance '{self.instance_connector}'.")
+        if not self.id:
+            raise ValueError(f"ID is not set for {self}.")
 
-        return TokenModel(**doc)
+        token_model = self.instance_connector.get_token_model(self.id, debug=debug)
+        if token_model is None:
+            raise ValueError(f"{self} does not exist on instance '{self.instance_connector}'.")
+
+        return token_model
 
     def __str__(self):
         return self.label

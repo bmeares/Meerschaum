@@ -42,11 +42,23 @@ async def startup():
         del app.openapi_schema['components']['securitySchemes']['BearerAuth']
     elif 'HTTPBearer' in app.openapi_schema['components']['securitySchemes']:
         del app.openapi_schema['components']['securitySchemes']['HTTPBearer']
+    if 'LoginManager' in app.openapi_schema['components']['securitySchemes']:
+        del app.openapi_schema['components']['securitySchemes']['LoginManager']
 
+    scopes = STATIC_CONFIG['tokens']['scopes']
+    app.openapi_schema['components']['securitySchemes']['OAuth2PasswordBearer'] = {
+        'type': 'oauth2',
+        'flows': {
+            'password': {
+                'tokenUrl': STATIC_CONFIG['api']['endpoints']['login'],
+                'scopes': scopes,
+            },
+        },
+    }
     app.openapi_schema['components']['securitySchemes']['APIKey'] = {
         'type': 'http',
         'scheme': 'bearer',
-        'bearerFormat': 'token_id:secret',
+        'bearerFormat': 'mrsm-key:{client_id}:{client_secret}',
         'description': 'Authentication using a Meerschaum API Key.',
     }
     app.openapi_schema['security'] = [

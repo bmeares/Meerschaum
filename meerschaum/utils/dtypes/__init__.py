@@ -361,7 +361,7 @@ def value_is_null(value: Any) -> bool:
     """
     Determine if a value is a null-like string.
     """
-    return str(value).lower() in ('none', 'nan', 'na', 'nat', '', '<na>')
+    return str(value).lower() in ('none', 'nan', 'na', 'nat', 'natz', '', '<na>')
 
 
 def none_if_null(value: Any) -> Any:

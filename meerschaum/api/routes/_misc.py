@@ -19,7 +19,8 @@ from meerschaum.api import (
     debug,
     get_api_connector,
     private,
-    manager
+    manager,
+    ScopedAuth,
 )
 from meerschaum.config.paths import API_STATIC_PATH
 from meerschaum import __version__ as version
@@ -38,9 +39,7 @@ def get_favicon() -> Any:
 
 @app.get(endpoints['chaining'], tags=['Misc'])
 def get_chaining_status(
-    curr_user = (
-        fastapi.Depends(manager) if private else None
-    ),
+    curr_user = fastapi.Depends(ScopedAuth(['instance:read'])) if private else None,
 ) -> bool:
     """
     Return whether this API instance may be chained.
@@ -50,9 +49,7 @@ def get_chaining_status(
 
 @app.get(endpoints['info'], tags=['Misc'])
 def get_instance_info(
-    curr_user = (
-        fastapi.Depends(manager) if private else None
-    ),
+    curr_user = fastapi.Depends(ScopedAuth(['instance:read'])) if private else None,
     instance_keys: Optional[str] = None,
 ) -> Dict[str, Union[str, int]]:
     """
@@ -87,9 +84,7 @@ def get_healtheck(instance_keys: Optional[str] = None) -> Dict[str, Any]:
 if debug:
     @app.get('/id', tags=['Misc'])
     def get_ids(
-        curr_user = (
-            fastapi.Depends(manager) if private else None
-        ),
+        curr_user = fastapi.Depends(ScopedAuth(['instance:read'])) if private else None,
     ) -> Dict[str, Union[int, str]]:
         return {
             'server': SERVER_ID,

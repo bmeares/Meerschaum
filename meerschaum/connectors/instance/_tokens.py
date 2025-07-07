@@ -15,6 +15,7 @@ import meerschaum as mrsm
 from meerschaum.core import Token
 from meerschaum.core.User import hash_password
 from meerschaum.models import TokenModel
+from meerschaum._internal.static import STATIC_CONFIG
 
 
 def get_tokens_pipe(self) -> mrsm.Pipe:
@@ -35,10 +36,10 @@ def get_tokens_pipe(self) -> mrsm.Pipe:
         columns={
             'datetime': 'creation',
             'primary': 'id',
-            'user_id': 'user_id',
         },
         indices={
             'unique': 'label',
+            'user_id': 'user_id',
         },
         dtypes={
             'id': 'uuid',
@@ -57,21 +58,55 @@ def register_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple
     """
     Register the new token to the tokens table.
     """
+    token_id, token_secret = token.generate_credentials()
     tokens_pipe = self.get_tokens_pipe()
     user_id = self.get_user_id(token.user) if token.user is not None else None
     doc = {
-        'id': uuid.uuid4(),
+        'id': token_id,
         'user_id': user_id,
         'creation': datetime.now(timezone.utc),
         'expiration': token.expiration,
         'label': token.label,
         'is_valid': token.is_valid,
-        'scopes': list(token.scopes) if token.scopes else None,
-        'secret_hash': hash_password(str(token.secret), rounds=100_000),
+        'scopes': list(token.scopes) if token.scopes else [],
+        'secret_hash': hash_password(
+            str(token_secret),
+            rounds=STATIC_CONFIG['tokens']['hash_rounds']
+        ),
     }
     sync_success, sync_msg = tokens_pipe.sync([doc], check_existing=False, debug=debug)
     if not sync_success:
         return False, f"Failed to register token:\n{sync_msg}"
+    return True, "Success"
+
+
+def edit_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple:
+    """
+    Persist the token's in-memory state to the tokens pipe.
+    """
+    if not token.id:
+        return False, "Token ID is not set."
+
+    if not token.exists(debug=debug):
+        return False, f"Token {token.id} does not exist."
+
+    if not token.creation:
+        token_model = self.get_token_model(token.id)
+        token.creation = token_model.creation
+
+    tokens_pipe = self.get_tokens_pipe()
+    doc = {
+        'id': token.id,
+        'creation': token.creation,
+        'expiration': token.expiration,
+        'label': token.label,
+        'is_valid': token.is_valid,
+        'scopes': list(token.scopes) if token.scopes else [],
+    }
+    sync_success, sync_msg = tokens_pipe.sync([doc], debug=debug)
+    if not sync_success:
+        return False, f"Failed to edit token '{token.id}':\n{sync_msg}"
+
     return True, "Success"
 
 
@@ -130,3 +165,19 @@ def get_token_secret_hash(self, token_id: uuid.UUID, debug: bool = False) -> Uni
     """
     tokens_pipe = self.get_tokens_pipe()
     return tokens_pipe.get_value('secret_hash', params={'id': token_id}, debug=debug)
+
+
+def get_token_user_id(self, token: Token, debug: bool = False) -> Union[int, str, uuid.UUID, None]:
+    """
+    Return a token's user_id.
+    """
+    tokens_pipe = self.get_tokens_pipe()
+    return tokens_pipe.get_value('user_id', params={'id': token_id}, debug=debug)
+
+
+def token_id_exists(self, token_id: uuid.UUID, debug: bool = False) -> bool:
+    """
+    Return `True` if a token exists in the tokens pipe.
+    """
+    tokens_pipe = self.get_tokens_pipe()
+    return tokens_pipe.get_value('creation', params={'id': token_id}, debug=debug) is not None

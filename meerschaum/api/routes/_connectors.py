@@ -10,7 +10,7 @@ import fastapi
 from fastapi import HTTPException
 
 import meerschaum as mrsm
-from meerschaum.api import app, endpoints, no_auth, manager
+from meerschaum.api import app, endpoints, ScopedAuth
 from meerschaum.utils.typing import Optional, Dict, List, Union
 
 endpoint = endpoints['connectors']
@@ -19,9 +19,7 @@ endpoint = endpoints['connectors']
 @app.get(endpoint, tags=['Connectors'])
 def get_connectors(
     type: Optional[str] = None,
-    curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Depends(ScopedAuth(['connectors:read'])),
 ) -> Union[Dict[str, List[str]], List[str]]:
     """
     Return the keys of the registered connectors.
@@ -54,9 +52,7 @@ def get_connectors(
 @app.get(endpoint + "/{type}", tags=['Connectors'])
 def get_connectors_by_type(
     type: str,
-    curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Depends(ScopedAuth(['connectors:read']))
 ):
     """
     Convenience method for `get_connectors()`.
