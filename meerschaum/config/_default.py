@@ -16,11 +16,14 @@ CONNECTOR_ATTRIBUTES: Dict[str, Dict[str, Any]] = {
     'api': {
         'required': [
             'host',
-            'username',
-            'password',
         ],
         'optional': [
             'port',
+            'username',
+            'password',
+            'client_id',
+            'client_secret',
+            'api_key',
         ],
         'default': {
             'protocol': 'http',
@@ -143,6 +146,7 @@ default_system_config = {
         },
         'tokens': {
             'valid_refresh_minutes': 60,
+            'default_expiration_days': 366,
         },
         'permissions':       {
             'registration': {

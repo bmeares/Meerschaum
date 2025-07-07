@@ -16,6 +16,7 @@ from meerschaum.api.models._actions import SuccessTupleResponseModel
 from meerschaum.api.models._tokens import (
     RegisterTokenResponseModel,
     RegisterTokenRequestModel,
+    GetTokenResponseModel,
 )
 
 __all__ = (

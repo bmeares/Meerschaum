@@ -167,6 +167,8 @@ def fetch_pipes_keys(
             debug=debug
         ).json()
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         error(str(e))
 
     if 'detail' in j:

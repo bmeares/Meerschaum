@@ -21,6 +21,8 @@ from pydantic import (
     Field,
 )
 from meerschaum.models.users import UserModel
+from meerschaum._internal.static import STATIC_CONFIG
+
 
 class TokenModel(BaseModel):
     """Pydantic model for a Meerschaum token."""
@@ -32,5 +34,5 @@ class TokenModel(BaseModel):
     label: Optional[str] = Field(default=None)
     user_id: Optional[Union[int, uuid.UUID]] = Field(default=None)
     secret_hash: Optional[str] = Field(default=None)
-    scopes: Optional[List[str]] = Field(default=None)
+    scopes: Optional[List[str]] = Field(default=list(STATIC_CONFIG['tokens']['scopes']))
     is_valid: bool = Field(default=True)

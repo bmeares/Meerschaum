@@ -451,6 +451,7 @@ def _register_tokens(
     mrsm_instance: Optional[str] = None,
     name: Optional[str] = None,
     ttl_days: Optional[int] = None,
+    scopes: Optional[List[str]] = None,
     end: Optional[datetime] = None,
     force: bool = False,
     yes: bool = False,
@@ -474,7 +475,7 @@ def _register_tokens(
     """
     import json
     from meerschaum.utils.schedule import parse_start_time
-    from meerschaum.core import Token
+    from meerschaum.core.Token._Token import Token, _PLACEHOLDER_EXPIRATION
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import make_header, print_tuple
@@ -486,7 +487,7 @@ def _register_tokens(
         else (
             parse_start_time(f"starting in {ttl_days} days")
             if ttl_days
-            else None
+            else _PLACEHOLDER_EXPIRATION
         )
     )
 
@@ -509,16 +510,21 @@ def _register_tokens(
     token = Token(
         label=name,
         expiration=expiration,
+        scopes=scopes,
         instance=mrsm_instance,
     )
-    token_secret = token.generate_secret()
 
     register_success, register_msg = token.register(debug=debug)
+    token_id = token.id
+    token_secret = token.secret
     if not register_success:
         return False, f"Failed to register token '{token.label}':\n{register_msg}"
 
     token_model = token.to_model(refresh=True)
-    token = Token(secret=token_secret, **dict(token_model))
+    token_kwargs = dict(token_model)
+    token_kwargs['id'] = token_id
+    token_kwargs['secret'] = token_secret
+    token = Token(**token_kwargs)
 
     if not nopretty:
         print_tuple(

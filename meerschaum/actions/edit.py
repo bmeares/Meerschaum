@@ -27,6 +27,7 @@ def edit(
         'users'     : _edit_users,
         'plugins'   : _edit_plugins,
         'jobs'      : _edit_jobs,
+        'tokens'    : _edit_tokens,
     }
     return choose_subaction(action, options, **kw)
 
@@ -66,7 +67,7 @@ def _complete_edit(
     return default_action_completer(action=(['edit'] + action), **kw)
 
 
-def _edit_config(action: Optional[List[str]] = None, **kw : Any) -> SuccessTuple:
+def _edit_config(action: Optional[List[str]] = None, **kw: Any) -> SuccessTuple:
     """
     Edit Meerschaum configuration files.
 
@@ -104,14 +105,14 @@ def _complete_edit_config(action: Optional[List[str]] = None, **kw: Any) -> List
     return possibilities
 
 def _edit_pipes(
-        action: Optional[List[str]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        yes: bool = False,
-        force: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Open and edit pipes' configuration files.
     
@@ -308,7 +309,7 @@ def _edit_plugins(
     action: Optional[List[str]] = None,
     debug: bool = False,
     **kwargs: Any
-):
+) -> mrsm.SuccessTuple:
     """
     Edit a plugin's source code.
     """
@@ -505,6 +506,86 @@ def _edit_jobs(
         + '.'
         ) if num_edited > 0 else "Nothing was edited."
     return True, msg
+
+
+def _edit_tokens(
+    action: Optional[List[str]] = None,
+    mrsm_instance: Optional[str] = None,
+    debug: bool = False,
+) -> mrsm.SuccessTuple:
+    """
+    Edit tokens registered to an instance.
+    """
+    import uuid
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import is_uuid
+    from meerschaum.core import Token
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils.prompt import prompt, yes_no
+    from meerschaum._internal.static import STATIC_CONFIG
+    dateutil_parser = mrsm.attempt_import('dateutil.parser')
+
+    if not action:
+        return False, "Provide token IDs for the tokens to edit."
+
+    conn = parse_instance_keys(mrsm_instance)
+    keys_to_skip = ['secret_hash']
+
+    num_edited = 0
+    for potential_token_id_str in action:
+        if not is_uuid(potential_token_id_str):
+            warn(f"Invalid ID '{potential_token_id_str}', skipping...", stack=False)
+            continue
+        
+        token_id = uuid.UUID(potential_token_id_str)
+        token = Token(id=token_id, instance=conn)
+        token_model = token.to_model(refresh=True)
+        if token_model is None:
+            warn(f"Token '{token_id}' does not exist.", stack=False)
+            continue
+        new_attrs = {}
+
+        new_expiration_str = prompt(
+            "Expiration (empty for no expiration):",
+            default_editable=('' if token.expiration is None else str(token_model.expiration)),
+        )
+        new_attrs['expiration'] = (
+            dateutil_parser.parse(new_expiration_str)
+            if new_expiration_str
+            else None
+        )
+        new_attrs['label'] = prompt("Label:", default_editable=token_model.label)
+        new_scopes_str = prompt(
+            "Scope (`*` to grant all permissions):",
+            default_editable=' '.join(token_model.scopes),
+        )
+        new_attrs['scopes'] = (
+            new_scopes_str.split(' ')
+            if new_scopes_str != '*'
+            else list(STATIC_CONFIG['tokens']['scopes'])
+        )
+        invalidate = (
+            yes_no("Do you want to invalidate this token?", default='n')
+            if token_model.is_valid
+            else True
+        )
+        new_attrs['is_valid'] = token_model.is_valid and not invalidate
+
+        new_token = Token(**{**dict(token_model), **new_attrs})
+        edit_success, edit_msg = new_token.edit(debug=debug)
+        if not edit_success:
+            return False, edit_msg
+        num_edited += 1
+
+    msg = (
+        f"Successfully edited {num_edited} token"
+        + ('s' if num_edited != 1 else '')
+        + '.'
+    )
+
+    return True, msg
+
+        
 
 
 ### NOTE: This must be the final statement of the module.

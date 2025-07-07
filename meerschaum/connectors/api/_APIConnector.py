@@ -82,6 +82,7 @@ class APIConnector(InstanceConnector):
     )
     from ._tokens import (
         register_token,
+        get_token_model,
     )
     from ._uri import from_uri
     from ._jobs import (
@@ -213,3 +214,17 @@ class APIConnector(InstanceConnector):
         Return the instance keys to be sent alongside pipe requests.
         """
         return self._instance_keys
+
+    @property
+    def login_scheme(self) -> str:
+        """
+        Return the login scheme to use based on the configured credentials.
+        """
+        if 'username' in self.__dict__:
+            return 'password'
+        if 'client_id' in self.__dict__:
+            return 'client_credentials'
+        elif 'api_key' in self.__dict__:
+            return 'api_key'
+
+        raise ValueError(f"Could not determine the login scheme for '{self}'.")

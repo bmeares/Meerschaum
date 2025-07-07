@@ -432,6 +432,10 @@ groups['tokens'].add_argument(
     '--ttl-days', type=int,
     help="For how many days should a token be valid.",
 )
+groups['tokens'].add_argument(
+    '--scopes', '--scope', nargs='+',
+    help="Which scope permissions to grant to a token.",
+)
 
 ### Packages options
 groups['packages'].add_argument(

@@ -210,6 +210,11 @@ def get_pipe(
     if location_key in ('[None]', 'None', 'null'):
         location_key = None
     instance_keys = str(get_api_connector(instance_keys))
+    if connector_keys == 'mrsm':
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail="Unable to serve any pipes with connector keys `mrsm` over the API.",
+        )
     pipe = mrsm.Pipe(connector_keys, metric_key, location_key, mrsm_instance=instance_keys)
     if is_pipe_registered(pipe, pipes(instance_keys)):
         return pipes(instance_keys, refresh=refresh)[connector_keys][metric_key][location_key]
@@ -291,7 +296,7 @@ def __getattr__(name: str):
     raise AttributeError(f"Could not import '{name}'.")
 
 ### Import everything else within the API.
-from meerschaum.api._oauth2 import manager
+from meerschaum.api._oauth2 import manager, ScopedAuth
 import meerschaum.api.routes as routes
 import meerschaum.api._events
 import meerschaum.api._websockets

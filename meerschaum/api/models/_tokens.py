@@ -5,8 +5,9 @@
 Response models for tokens.
 """
 
+import uuid
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
 
 import meerschaum as mrsm
 from meerschaum._internal.static import STATIC_CONFIG
@@ -34,7 +35,8 @@ class RegisterTokenRequestModel(BaseModel):
 class RegisterTokenResponseModel(BaseModel):
     label: str
     secret: str
-    id: str
+    id: uuid.UUID
+    api_key: str
     expiration: Optional[datetime]
     model_config = ConfigDict(
         json_schema_extra = {
@@ -42,8 +44,20 @@ class RegisterTokenResponseModel(BaseModel):
                 {
                     'label': 'my-iot-device',
                     'secret': 'a_very_long_secret_string_that_is_only_shown_once',
+                    'id': '1540c2f6-a99d-463c-bfab-47d361200123',
                     'expiration': '2026-01-01T00:00:00Z',
+                    'api_key': 'MTU0MGMyZjYtYTk5ZC00NjNjLWJmYWItNDdkMzYxMjAwMTIzOmFfdmVyeV9sb25nX3NlY3JldF9zdHJpbmdfdGhhdF9pc19vbmx5X3Nob3duX29uY2U=',
                 }
             ]
         }
     )
+
+
+class GetTokenResponseModel(BaseModel):
+    id: Optional[uuid.UUID] = Field(default=None)
+    creation: datetime = Field()
+    expiration: Optional[datetime] = Field()
+    label: str = Field()
+    user_id: Optional[Union[int, str, uuid.UUID]] = Field(default=None)
+    scopes: List[str] = Field(default=list(STATIC_CONFIG['tokens']['scopes']))
+    is_valid: bool = Field(default=True)

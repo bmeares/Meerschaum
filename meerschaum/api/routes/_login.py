@@ -42,19 +42,33 @@ def login(
     """
     Login and set the session token.
     """
-    print(f"{grant_type=}")
+    username, password = (
+        (data.get('username', None), data.get('password', None))
+        if isinstance(data, dict)
+        else (data.username, data.password)
+    )
+    client_id, client_secret = (
+        (data.get('client_id', None), data.get('client_secret', None))
+        if isinstance(data, dict)
+        else (data.client_id, data.client_secret)
+    )
     grant_type = (
-        data.get('grant_type', 'password')
+        data.get('grant_type', None)
         if isinstance(data, dict)
         else data.grant_type
     )
+    if not grant_type:
+        grant_type = (
+            'password'
+            if username and password
+            else 'client_credentials'
+        )
+    print(f"{grant_type=}")
+    print(f"{client_id=}")
+    print(f"{client_secret=}")
+
     expires_dt: Union[datetime, None] = None
     if grant_type == 'password':
-        username, password = (
-            (data.get('username', None), data.get('password', None))
-            if isinstance(data, dict)
-            else (data.username, data.password)
-        )
         user = User(str(username), str(password), instance=get_api_connector())
         correct_password = no_auth or verify_password(
             str(password),
@@ -64,12 +78,6 @@ def login(
             raise InvalidCredentialsException
 
     elif grant_type == 'client_credentials':
-        client_id, client_secret = (
-            (data.get('client_id', None), data.get('client_secret', None))
-            if isinstance(data, dict)
-            else (data.client_id, data.client_secret)
-        )
-
         if not is_uuid(str(client_id)):
             raise InvalidCredentialsException
         token_id = uuid.UUID(client_id)
@@ -87,7 +95,9 @@ def login(
     expires_delta = timedelta(minutes=expires_minutes)
     expires_dt = datetime.now(timezone.utc).replace(tzinfo=None) + expires_delta
     access_token = manager.create_access_token(
-        data={'sub': username if grant_type == 'password' else client_id},
+        data={
+            'sub': (username if grant_type == 'password' else client_id),
+        },
         expires=expires_delta
     )
 

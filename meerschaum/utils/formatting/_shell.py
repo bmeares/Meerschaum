@@ -11,7 +11,7 @@ from meerschaum.utils.threading import Lock
 _locks = {'_tried_clear_command': Lock()}
 
 
-def make_header(message: str, ruler: str = '─', left_pad: int = 4) -> str:
+def make_header(message: str, ruler: str = '─', left_pad: int = 2) -> str:
     """Format a message string with a ruler.
     Length of the ruler is the length of the longest word.
     
