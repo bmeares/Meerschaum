@@ -453,9 +453,9 @@ def sync(
         if self.cache_pipe is not None:
             if debug:
                 dprint("Caching retrieved dataframe.", **kw)
-                _sync_cache_tuple = self.cache_pipe.sync(df, debug=debug, **kw)
-                if not _sync_cache_tuple[0]:
-                    warn(f"Failed to sync local cache for {self}.")
+            _sync_cache_tuple = self.cache_pipe.sync(df, debug=debug, **kw)
+            if not _sync_cache_tuple[0]:
+                warn(f"Failed to sync local cache for {self}.")
 
         self._exists = None
         return return_tuple
