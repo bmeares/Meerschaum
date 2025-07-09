@@ -1787,3 +1787,15 @@ def to_json(
         orient=orient,
         **kwargs
     )
+
+
+def to_simple_lines(df: 'pd.DataFrame') -> str:
+    """
+    Serialize a Pandas Dataframe as lines of simple dictionaries.
+    """
+    from meerschaum.utils.misc import to_simple_dict
+    if df is None or len(df) == 0:
+        return ''
+
+    docs = df.to_dict(orient='records')
+    return '\n'.join(to_simple_dict(doc) for doc in docs)

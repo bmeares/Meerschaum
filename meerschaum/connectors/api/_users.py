@@ -59,7 +59,7 @@ def edit_user(
         if isinstance(_json, dict) and 'detail' in _json:
             return False, _json['detail']
         success_tuple = tuple(_json)
-    except Exception as e:
+    except Exception:
         msg = response.text if response else f"Failed to edit user '{user}'."
         return False, msg
 
@@ -136,7 +136,7 @@ def delete_user(
         if isinstance(_json, dict) and 'detail' in _json:
             return False, _json['detail']
         success_tuple = tuple(_json)
-    except Exception as e:
+    except Exception:
         success_tuple = False, f"Failed to delete user '{user.username}'."
     return success_tuple
 
@@ -153,7 +153,7 @@ def get_user_attributes(
     response = self.get(r_url, debug=debug, **kw)
     try:
         attributes = json.loads(response.text)
-    except Exception as e:
+    except Exception:
         attributes = None
     return attributes
 

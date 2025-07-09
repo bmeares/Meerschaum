@@ -8,12 +8,12 @@ Functions for editing elements belong here.
 
 from __future__ import annotations
 import meerschaum as mrsm
-from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Dict
+from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
 
 def tag(
-        action: Optional[List[str]] = None,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Edit an existing element.
     """
@@ -25,10 +25,10 @@ def tag(
 
 
 def _tag_pipes(
-        action: Optional[List[str]] = None,
-        debug: bool = False,
-        **kwargs: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Add or remove tags to registered pipes.
     Prefix a tag with a leading underscore to remove it.
@@ -68,6 +68,7 @@ def _tag_pipes(
                 pipe_was_edited = True
 
         if pipe_was_edited:
+            pipe.tags = pipe_tags
             edited_pipes.append(pipe)
 
     if not edited_pipes:

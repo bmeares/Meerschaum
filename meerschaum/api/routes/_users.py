@@ -8,11 +8,11 @@ Routes for managing users.
 
 from __future__ import annotations
 
+from uuid import UUID
 from meerschaum.utils.typing import (
     Union, SuccessTuple, Any, Dict, List
 )
 
-from meerschaum.utils.packages import attempt_import
 from meerschaum.api import (
     fastapi,
     app,
@@ -25,8 +25,9 @@ from meerschaum.api import (
     no_auth,
     private,
     default_instance_keys,
+    ScopedAuth,
 )
-from meerschaum.utils.misc import string_to_dict
+from meerschaum.utils.misc import string_to_dict, is_uuid
 from meerschaum.config import get_config
 from meerschaum.core import User
 
@@ -41,23 +42,27 @@ USERS_INSTANCE_KEYS = default_instance_keys
 @app.get(users_endpoint + "/me", tags=['Users'])
 def read_current_user(
     curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
+        fastapi.Depends(ScopedAuth(['users:read'])) if not no_auth else None
     ),
 ) -> Dict[str, Union[str, int, None, Dict[str, Any]]]:
     """
     Get information about the currently logged-in user.
     """
+    user_id = (
+        get_api_connector(USERS_INSTANCE_KEYS).get_user_id(curr_user)
+        if curr_user is not None
+        else None
+    )
+    if is_uuid(str(user_id)):
+        user_id = str(user_id)
+
     return {
         'username': (
             curr_user.username
             if curr_user is not None
             else 'no_auth'
         ),
-        'user_id': (
-            get_api_connector(USERS_INSTANCE_KEYS).get_user_id(curr_user)
-            if curr_user is not None
-            else -1
-        ),
+        'user_id': user_id,
         'user_type': (
             get_api_connector(USERS_INSTANCE_KEYS).get_user_type(curr_user)
             if curr_user is not None
@@ -73,9 +78,7 @@ def read_current_user(
 
 @app.get(users_endpoint, tags=['Users'])
 def get_users(
-    curr_user = (
-        fastapi.Depends(manager) if private else None
-    ),
+    curr_user = (fastapi.Depends(ScopedAuth(['users:read'])) if private else None),
 ) -> List[str]:
     """
     Get a list of the registered users.
@@ -91,7 +94,7 @@ def register_user(
     type: str = Form(None),
     email: str = Form(None),
     curr_user = (
-        fastapi.Depends(manager) if private else None
+        fastapi.Depends(ScopedAuth(['users:register', 'users:write'])) if private else None
     ),
 ) -> SuccessTuple:
     """
@@ -121,7 +124,7 @@ def register_user(
             "Register a normal user first, then edit the user from an authorized account, "
             "or use a SQL connector instead."
         )
-    user = User(username, password, type=type, email=email, attributes=attributes)
+    user = User(username, password, type=type, email=email, attributes=attributes, instance=get_api_connector(USERS_INSTANCE_KEYS))
     return get_api_connector(USERS_INSTANCE_KEYS).register_user(user, debug=debug)
 
 
@@ -132,9 +135,7 @@ def edit_user(
     type: str = Form(None),
     email: str = Form(None),
     attributes: str = Form(None),
-    curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user = fastapi.Depends(ScopedAuth(['users:write'])),
 ) -> SuccessTuple:
     """
     Edit an existing user.
@@ -145,47 +146,51 @@ def edit_user(
         except Exception:
             return False, "Invalid dictionary string received for attributes."
 
-    user = User(username, password, email=email, attributes=attributes)
+    user = User(username, password, email=email, attributes=attributes, instance=get_api_connector(USERS_INSTANCE_KEYS))
     user_type = get_api_connector(USERS_INSTANCE_KEYS).get_user_type(curr_user) if curr_user is not None else 'admin'
     if user_type == 'admin' and type is not None:
         user.type = type
     if user_type == 'admin' or curr_user.username == user.username:
         return get_api_connector(USERS_INSTANCE_KEYS).edit_user(user, debug=debug)
 
-    return False, f"Cannot edit user '{user}': Permission denied"
+    raise fastapi.HTTPException(
+        status=403,
+        detail="Permission denied.",
+    )
 
 
 @app.get(users_endpoint + "/{username}/id", tags=['Users'])
 def get_user_id(
     username: str,
-    curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
-    ),
-) -> Union[int, None]:
+    curr_user = fastapi.Depends(ScopedAuth(['users:read'])),
+) -> Union[int, str, None]:
     """
     Get a user's ID.
     """
-    return get_api_connector(USERS_INSTANCE_KEYS).get_user_id(User(username), debug=debug)
+    user_id = get_api_connector(USERS_INSTANCE_KEYS).get_user_id(User(username, instance=get_api_connector(USERS_INSTANCE_KEYS)), debug=debug)
+    if is_uuid(user_id):
+        return str(user_id)
+    return user_id
 
 
 @app.get(users_endpoint + "/{username}/attributes", tags=['Users'])
 def get_user_attributes(
     username: str,
     curr_user = (
-        fastapi.Depends(manager) if private else None
+        fastapi.Depends(ScopedAuth(['users:read'])) if private else None
     ),
 ) -> Union[Dict[str, Any], None]:
     """
     Get a user's attributes.
     """
-    return get_api_connector(USERS_INSTANCE_KEYS).get_user_attributes(User(username), debug=debug)
+    return User(username, instance=get_api_connector(USERS_INSTANCE_KEYS)).get_attributes(refresh=True, debug=debug)
 
 
 @app.delete(users_endpoint + "/{username}", tags=['Users'])
 def delete_user(
     username: str,
     curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
+        fastapi.Depends(ScopedAuth(['users:delete'])) if not no_auth else None
     ),
 ) -> SuccessTuple:
     """
@@ -210,7 +215,7 @@ def delete_user(
 def get_user_password_hash(
     username: str,
     curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
+        fastapi.Depends(ScopedAuth(['users:read', 'instance:chain']))
     ),
 ) -> str:
     """
@@ -218,14 +223,14 @@ def get_user_password_hash(
     """
     if not check_allow_chaining():
         raise HTTPException(status_code=403, detail=DISALLOW_CHAINING_MESSAGE)
-    return get_api_connector(USERS_INSTANCE_KEYS).get_user_password_hash(User(username), debug=debug)
+    return get_api_connector(USERS_INSTANCE_KEYS).get_user_password_hash(User(username, instance=get_api_connector(USERS_INSTANCE_KEYS)), debug=debug)
 
 
 @app.get(users_endpoint + '/{username}/type', tags=['Users'])
 def get_user_type(
     username: str,
     curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
+        fastapi.Depends(ScopedAuth(['users:read', 'instance:chain']))
     ),
 ) -> str:
     """
@@ -233,4 +238,4 @@ def get_user_type(
     """
     if not check_allow_chaining():
         raise HTTPException(status_code=403, detail=DISALLOW_CHAINING_MESSAGE)
-    return get_api_connector(USERS_INSTANCE_KEYS).get_user_type(User(username))
+    return get_api_connector(USERS_INSTANCE_KEYS).get_user_type(User(username, instance=get_api_connector(USERS_INSTANCE_KEYS)))

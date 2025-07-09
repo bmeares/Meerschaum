@@ -130,6 +130,7 @@ def edit_user(
 ) -> SuccessTuple:
     """Update an existing user's metadata."""
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.sql import json_flavors
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
@@ -157,7 +158,7 @@ def edit_user(
         bind_variables['email'] = user.email
     if user.attributes is not None and user.attributes != {}:
         bind_variables['attributes'] = (
-            json.dumps(user.attributes) if self.flavor in ('duckdb',)
+            json.dumps(user.attributes) if self.flavor not in json_flavors
             else user.attributes
         )
     if user.type != '':

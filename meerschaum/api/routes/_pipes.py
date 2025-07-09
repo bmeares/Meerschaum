@@ -40,6 +40,7 @@ from meerschaum.models import (
 from meerschaum.api.models import (
     SuccessTupleResponseModel,
     FetchPipesKeysResponseModel,
+    SyncPipeRequestModel,
 )
 from meerschaum.api._chunks import generate_chunks_cursor_token
 from meerschaum.utils.packages import attempt_import
@@ -49,6 +50,7 @@ from meerschaum.utils.misc import (
     is_pipe_registered,
     is_int,
     replace_pipes_in_dict,
+    string_to_dict,
 )
 from meerschaum.connectors.sql.tables import get_tables
 
@@ -330,12 +332,36 @@ def get_sync_time(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/data',
     tags=['Pipes: Data'],
     response_model=SuccessTupleResponseModel,
+    openapi_extra={
+        'requestBody': {
+            'content': {
+                'application/json': {
+                    'example': [
+                        {
+                            'timestamp': '2026-01-01',
+                            'id': 1,
+                            'value': 100.1,
+                        },
+                        {
+                            'timestamp': '2026-01-02',
+                            'id': 1,
+                            'value': 200.2,
+                        },
+                    ],
+                },
+                'text/plain': {
+                    'example': 'a:1,b:2',
+                },
+            },
+            'required': True,
+        },
+    },
 )
-def sync_pipe(
+async def sync_pipe(
     connector_keys: str,
     metric_key: str,
     location_key: str,
-    data: Union[List[Dict[Any, Any]], Dict[Any, Any]],
+    request: fastapi.Request,
     instance_keys: Optional[str] = None,
     check_existing: bool = True,
     blocking: bool = True,
@@ -344,15 +370,35 @@ def sync_pipe(
     columns: Optional[str] = None,
     curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
     debug: bool = False,
-) -> SuccessTupleResponseModel:
+) -> mrsm.SuccessTuple:
     """
     Add data to an existing Pipe.
     See [`meerschaum.Pipe.sync`](https://docs.meerschaum.io/meerschaum.html#Pipe.sync).
     """
+    body = await request.body()
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        data = body.decode('utf-8', errors='replace')
+
     if not data:
-        return [True, "No data to sync."]
+        return True, "No data to sync."
+
+    if isinstance(data, str):
+        try:
+            lines = data.splitlines()
+            data = [string_to_dict(line) for line in lines]
+        except Exception:
+            data = None
+
+    if not data:
+        raise fastapi.HTTPException(
+            status=400,
+            detail="Cannot sync given data.",
+        )
+
     pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
-    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes'):
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
         raise fastapi.HTTPException(
             status_code=409,
             detail=f"Cannot sync data to protected table '{pipe.target}'.",
@@ -369,7 +415,7 @@ def sync_pipe(
         force=force,
         workers=workers,
     )
-    return list((success, msg))
+    return success, msg
 
 
 @app.get(

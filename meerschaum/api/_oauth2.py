@@ -8,10 +8,11 @@ Define JWT authorization here.
 
 import os
 import base64
+import functools
+import inspect
 from typing import List, Optional, Union
 
-import meerschaum as mrsm
-from meerschaum.api import app, endpoints, CHECK_UPDATE, no_auth
+from meerschaum.api import endpoints, CHECK_UPDATE, no_auth, debug
 from meerschaum.api._tokens import optional_token, get_token_from_authorization
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.packages import attempt_import
@@ -59,9 +60,7 @@ class CustomOAuth2PasswordRequestForm:
                     self.client_id = _client_id
                     self.client_secret = _client_secret
                     self.grant_type = 'client_credentials'
-            except ValueError as e:
-                import traceback
-                traceback.print_exc()
+            except ValueError:
                 pass
 
 
@@ -78,7 +77,11 @@ async def optional_user(request: Request) -> Optional[User]:
         return None
 
 
-async def load_user_or_token(request: Request) -> Union[User, Token, None]:
+async def load_user_or_token(
+    request: Request,
+    users: bool = True,
+    tokens: bool = True,
+) -> Union[User, Token, None]:
     """
     Load the current user or token.
     """
@@ -90,7 +93,17 @@ async def load_user_or_token(request: Request) -> Union[User, Token, None]:
         )
     authorization = authorization.replace('Basic ', '').replace('Bearer ', '')
     if not authorization.startswith('mrsm-key:'):
+        if not users:
+            raise HTTPException(
+                status=status.HTTP_401_UNAUTHORIZED,
+                detail="Users not authenticated for this endpoint.",
+            )
         return await manager(request)
+    if not tokens:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Tokens not authenticated for this endpoint.",
+        )
     return get_token_from_authorization(authorization)
 
 
@@ -99,31 +112,32 @@ def ScopedAuth(scopes: List[str]):
     Dependency factory for authenticating with either a user session or a scoped token.
     """
     async def _authenticate(
-        user_or_token: Union[User, Token, None] = Depends(load_user_or_token),
+        user_or_token: Union[User, Token, None] = Depends(
+            load_user_or_token,
+        ),
     ) -> Union[User, Token, None]:
         if no_auth:
             return None
 
-        if isinstance(user_or_token, User):
-            return user_or_token
-
-        token = user_or_token
-        
-        if not token:
+        if not user_or_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Not authenticated.",
                 headers={"WWW-Authenticate": "Basic"},
             )
 
+        if inspect.iscoroutinefunction(user_or_token):
+            user_or_token = await user_or_token(users=users, tokens=tokens)
+
+        fresh_scopes = user_or_token.get_scopes(refresh=True, debug=debug)
         for scope in scopes:
-            if scope not in token.scopes:
+            if scope not in fresh_scopes:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Token is missing required scope: '{scope}'",
+                    detail=f"Missing required scope: '{scope}'",
                 )
         
-        return token
+        return user_or_token
     return _authenticate
 
 

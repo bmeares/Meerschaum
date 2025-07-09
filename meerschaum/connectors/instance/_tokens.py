@@ -145,10 +145,14 @@ def get_token(self, token_id: Union[uuid.UUID, str], debug: bool = False) -> Uni
     return Token(**dict(token_model))
 
 
-def get_token_model(self, token_id: uuid.UUID, debug: bool = False) -> Union[TokenModel, None]:
+def get_token_model(self, token_id: Union[uuid.UUID, Token], debug: bool = False) -> Union[TokenModel, None]:
     """
     Return a token's model from the instance.
     """
+    if isinstance(token_id, Token):
+        token_id = Token.id
+    if not token_id:
+        raise ValueError("Invalid token ID.")
     tokens_pipe = self.get_tokens_pipe()
     doc = tokens_pipe.get_doc(
         params={'id': token_id},
@@ -159,25 +163,52 @@ def get_token_model(self, token_id: uuid.UUID, debug: bool = False) -> Union[Tok
     return TokenModel(**doc)
 
 
-def get_token_secret_hash(self, token_id: uuid.UUID, debug: bool = False) -> Union[str, None]:
+def get_token_secret_hash(self, token_id: Union[uuid.UUID, Token], debug: bool = False) -> Union[str, None]:
     """
     Return the secret hash for a given token.
     """
+    if isinstance(token_id, Token):
+        token_id = token_id.id
+    if not token_id:
+        raise ValueError("Invalid token ID.")
     tokens_pipe = self.get_tokens_pipe()
     return tokens_pipe.get_value('secret_hash', params={'id': token_id}, debug=debug)
 
 
-def get_token_user_id(self, token: Token, debug: bool = False) -> Union[int, str, uuid.UUID, None]:
+def get_token_user_id(self, token_id: Union[uuid.UUID, Token], debug: bool = False) -> Union[int, str, uuid.UUID, None]:
     """
     Return a token's user_id.
     """
+    if isinstance(token_id, Token):
+        token_id = token_id.id
+    if not token_id:
+        raise ValueError("Invalid token ID.")
+
     tokens_pipe = self.get_tokens_pipe()
     return tokens_pipe.get_value('user_id', params={'id': token_id}, debug=debug)
 
 
-def token_id_exists(self, token_id: uuid.UUID, debug: bool = False) -> bool:
+def get_token_scopes(self, token_id: Union[uuid.UUID, Token], debug: bool = False) -> List[str]:
+    """
+    Return the scopes for a token.
+    """
+    if isinstance(token_id, Token):
+        token_id = token_id.id
+    if not token_id:
+        raise ValueError("Invalid token ID.")
+
+    tokens_pipe = self.get_tokens_pipe()
+    return tokens_pipe.get_value('scopes', params={'id': token_id}, debug=debug) or []
+
+
+def token_exists(self, token_id: Union[uuid.UUID, Token], debug: bool = False) -> bool:
     """
     Return `True` if a token exists in the tokens pipe.
     """
+    if isinstance(token_id, Token):
+        token_id = token_id.id
+    if not token_id:
+        raise ValueError("Invalid token ID.")
+
     tokens_pipe = self.get_tokens_pipe()
     return tokens_pipe.get_value('creation', params={'id': token_id}, debug=debug) is not None

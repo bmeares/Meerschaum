@@ -673,7 +673,7 @@ def serialize_datetime(dt: datetime) -> Union[str, None]:
     return dt.isoformat() + tz_suffix
 
 
-def json_serialize_value(x: Any, default_to_str: bool = True) -> str:
+def json_serialize_value(x: Any, default_to_str: bool = True) -> Union[str, None]:
     """
     Serialize the given value to a JSON value. Accounts for datetimes, bytes, decimals, etc.
 
@@ -707,6 +707,9 @@ def json_serialize_value(x: Any, default_to_str: bool = True) -> str:
 
     if value_is_null(x):
         return None
+
+    if isinstance(x, (dict, list, tuple)):
+        return json.dumps(x, default=json_serialize_value, separators=(',', ':'))
 
     return str(x) if default_to_str else x
 

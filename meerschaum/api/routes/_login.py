@@ -22,7 +22,6 @@ from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.typing import Dict, Any
 from meerschaum.utils.misc import is_uuid
 from meerschaum.core.User import verify_password
-from meerschaum.core import Token
 from meerschaum.utils.warnings import warn
 from meerschaum.api._oauth2 import CustomOAuth2PasswordRequestForm
 
@@ -63,9 +62,6 @@ def login(
             if username and password
             else 'client_credentials'
         )
-    print(f"{grant_type=}")
-    print(f"{client_id=}")
-    print(f"{client_secret=}")
 
     expires_dt: Union[datetime, None] = None
     if grant_type == 'password':
@@ -81,7 +77,6 @@ def login(
         if not is_uuid(str(client_id)):
             raise InvalidCredentialsException
         token_id = uuid.UUID(client_id)
-        token = Token(id=token_id, secret=client_secret, instance=get_api_connector())
         correct_password = no_auth or verify_password(
             str(client_secret),
             str(get_api_connector().get_token_secret_hash(token_id, debug=debug))

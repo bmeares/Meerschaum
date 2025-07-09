@@ -1299,6 +1299,9 @@ def test_autotime(flavor: str):
             'datetime': dt_col,
             'id': 'id',
         },
+        dtypes={
+            dt_col: 'int',
+        },
     )
 
     success, msg = pipe.sync([
@@ -1309,16 +1312,17 @@ def test_autotime(flavor: str):
 
     df = pipe.get_data()
     assert dt_col in df.columns
+    print(df)
 
     ts_1 = df[dt_col][0]
 
     success, msg = pipe.sync([
         {'id': 1, 'val': 100.2},
         {'id': 2, 'val': 200.3},
-    ])
+    ], debug=debug)
     assert success, msg
 
-    df = pipe.get_data()
+    df = pipe.get_data(debug=debug)
 
     assert len(df) == 4
     
@@ -1330,7 +1334,7 @@ def test_autotime(flavor: str):
     ])
     assert success, msg
 
-    df = pipe.get_data(params={'id': 1})
+    df = pipe.get_data(params={'id': 1}, debug=debug)
     assert 90.1 in list(df['val'])
     assert len(df) == 2
 
@@ -1341,3 +1345,4 @@ def test_autotime(flavor: str):
 
     df = pipe.get_data(params={'id': 1})
     assert len(df) == 3
+    print(df)

@@ -18,7 +18,7 @@ from meerschaum.utils.packages import attempt_import, import_dcc, import_html, i
 from meerschaum.utils.sql import get_pd_type
 from meerschaum.utils.yaml import yaml
 from meerschaum.utils.warnings import warn
-from meerschaum.utils.dataframe import to_json
+from meerschaum.utils.dataframe import to_json, to_simple_lines
 from meerschaum.connectors.sql._fetch import get_pipe_query
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash import debug, _get_pipes
@@ -58,28 +58,20 @@ def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, N
 
 def keys_from_state(
     state: Dict[str, Any],
-    with_params: bool = False
+    with_tags: bool = False,
 ) -> Union[
     Tuple[List[str], List[str], List[str]],
-    Tuple[List[str], List[str], List[str], str],
+    Tuple[List[str], List[str], List[str], List[str]],
 ]:
     """
     Read the current state and return the selected keys lists.
     """
     _filters = {
-        'ck' : state.get(f"connector-keys-{state['pipes-filter-tabs.active_tab']}.value", None),
-        'mk' : state.get(f"metric-keys-{state['pipes-filter-tabs.active_tab']}.value", None),
-        'lk' : state.get(f"location-keys-{state['pipes-filter-tabs.active_tab']}.value", None),
+        'ck': state.get("connector-keys-dropdown.value", None),
+        'mk': state.get("metric-keys-dropdown.value", None),
+        'lk': state.get("location-keys-dropdown.value", None),
+        'tags': state.get("tags-dropdown.value", None),
     }
-    if state['pipes-filter-tabs.active_tab'] == 'input':
-        try:
-            #  params = string_to_dict(state['params-textarea.value'])
-            params = string_to_dict(state['search-parameters-editor.value'])
-        except Exception:
-            params = None
-    else:
-        params = None
-
     for k in _filters:
         _filters[k] = [] if _filters[k] is None else _filters[k]
         if not isinstance(_filters[k], list):
@@ -89,8 +81,8 @@ def keys_from_state(
                 print(e)
                 _filters[k] = []
     keys = [_filters['ck'], _filters['mk'], _filters['lk']]
-    if with_params:
-        keys.append(params)
+    if with_tags:
+        keys.append(_filters['tags'])
     return tuple(keys)
 
 
@@ -98,12 +90,12 @@ def pipes_from_state(
     state: Dict[str, Any],
     **kw
 ):
-    _ck, _mk, _lk, _params = keys_from_state(state, with_params=True)
+    _ck, _mk, _lk, _tags = keys_from_state(state, with_tags=True)
     try:
         _pipes = _get_pipes(
             _ck, _mk, _lk,
-            params = _params,
-            mrsm_instance = get_web_connector(state), 
+            tags=(_tags or []),
+            mrsm_instance=get_web_connector(state), 
             **kw
         )
     except Exception as e:
@@ -579,21 +571,28 @@ def accordion_items_from_pipe(
             parameters_editor,
             html.Br(),
             dbc.Row([
-                dbc.Col(html.Span(
-                    (
-                        ([update_parameters_button] if authenticated else []) +
-                        [
-                            as_json_button,
-                            as_yaml_button,
-                        ]
-                    )
-                ), width=4),
-                dbc.Col([
-                    html.Div(
-                        id={'type': 'update-parameters-success-div', 'index': json.dumps(pipe.meta)}
-                    )
-                ],
-                width=True,
+                dbc.Col(
+                    html.Span(
+                        (
+                            ([update_parameters_button] if authenticated else []) +
+                            [
+                                as_json_button,
+                                as_yaml_button,
+                            ]
+                        )
+                    ),
+                    width=4,
+                ),
+                dbc.Col(
+                    [
+                        html.Div(
+                            id={
+                                'type': 'update-parameters-success-div',
+                                'index': json.dumps(pipe.meta),
+                            }
+                        )
+                    ],
+                    width=True,
                 )
             ]),
         ]
@@ -733,23 +732,9 @@ def accordion_items_from_pipe(
         ])
 
     if 'sync-data' in active_items:
-        backtrack_df = pipe.get_backtrack_data(debug=debug, limit=1)
-        try:
-            json_text = to_json(
-                backtrack_df,
-                orient='records',
-                date_format='iso',
-                force_ascii=False,
-                indent=4,
-                date_unit='us',
-            ) if backtrack_df is not None else '[]'
-        except Exception as e:
-            warn(e)
-            json_text = '[]'
-
-        json_text = json.dumps(json.loads(json_text), indent=4, separators=(',', ': '))
+        backtrack_text = get_backtrack_text(pipe)
         sync_editor = dash_ace.DashAceEditor(
-            value = json_text,
+            value = backtrack_text,
             mode = 'norm',
             tabSize = 4,
             theme = 'twilight',
@@ -763,6 +748,22 @@ def accordion_items_from_pipe(
             wrapEnabled = True,
             style = {'min-height': '120px'},
         )
+
+        sync_as_json_button = dbc.Button(
+            "JSON",
+            id={'type': 'sync-as-json-button', 'index': json.dumps(pipe.meta)},
+            color='link',
+            size='sm',
+            style={'text-decoration': 'none', 'margin-left': '10px'},
+        )
+        sync_as_lines_button = dbc.Button(
+            "Lines",
+            id={'type': 'sync-as-lines-button', 'index': json.dumps(pipe.meta)},
+            color='link',
+            size='sm',
+            style={'text-decoration': 'none', 'margin-left': '10px'},
+        )
+
         update_sync_button = dbc.Button(
             "Sync",
             id = {'type': 'update-sync-button', 'index': json.dumps(pipe.meta)},
@@ -772,7 +773,15 @@ def accordion_items_from_pipe(
             sync_editor,
             html.Br(),
             dbc.Row([
-                dbc.Col([update_sync_button], width=1),
+                dbc.Col(html.Span(
+                    (
+                        ([update_sync_button] if authenticated else []) +
+                        [
+                            sync_as_json_button,
+                            sync_as_lines_button,
+                        ]
+                    )
+                ), width=4),
                 dbc.Col([sync_success_div], width=True),
             ]),
         ])
@@ -782,3 +791,29 @@ def accordion_items_from_pipe(
         for item_id, title in items_titles.items()
     ]
 
+
+def get_backtrack_text(
+    pipe: mrsm.Pipe,
+    lines: bool = False,
+    limit: int = 5,
+) -> str:
+    """
+    Return the backtrack documents as text for the sync editor.
+    """
+    backtrack_df = pipe.get_backtrack_data(debug=debug, limit=limit)
+    if lines:
+        return to_simple_lines(backtrack_df)
+    try:
+        json_text = to_json(
+            backtrack_df,
+            orient='records',
+            date_format='iso',
+            force_ascii=False,
+            indent=4,
+            date_unit='us',
+        ) if backtrack_df is not None else '[]'
+    except Exception as e:
+        warn(e)
+        json_text = '[]'
+
+    return json.dumps(json.loads(json_text), indent=4, separators=(',', ': '))
