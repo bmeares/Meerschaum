@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import abc
 from typing import Any, Union, Dict, List, Tuple, Optional
-from datetime import datetime
 
 import meerschaum as mrsm
 from meerschaum.connectors._Connector import Connector
@@ -22,6 +21,7 @@ class InstanceConnector(Connector):
     """
 
     IS_INSTANCE: bool = True
+    IS_THREAD_SAFE: bool = False
 
     from ._users import (
         get_users_pipe,
@@ -57,7 +57,8 @@ class InstanceConnector(Connector):
         get_tokens,
         get_token_model,
         get_token_secret_hash,
-        token_id_exists,
+        token_exists,
+        get_token_scopes,
     )
 
     from ._pipes import (

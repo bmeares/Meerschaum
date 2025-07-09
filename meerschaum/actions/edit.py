@@ -236,7 +236,7 @@ def _edit_users(
                 minimum_length = STATIC_CONFIG['users']['min_password_length'],
             )
 
-        ## Make an admin
+        ### Make an admin
         _type = ''
         if yes_no(f"Change the user type for user '{username}'?", default='n', yes=yes, noask=noask):
             is_admin = yes_no(
@@ -249,15 +249,34 @@ def _edit_users(
         if yes_no(f"Change the email for user '{username}'?", default='n', yes=yes, noask=noask):
             email = get_email(username)
 
+        attributes = {}
+        ### Change the scopes.
+        attributes['scopes'] = prompt(
+            f"Scopes for user '{username}' (`*` to grant all scopes):",
+            default_editable=' '.join(User(
+                username,
+                instance=instance_connector,
+            ).get_scopes(refresh=True, debug=debug)),
+        ).split()
+        if attributes['scopes'] == ['*']:
+            attributes['scopes'] = list(STATIC_CONFIG['tokens']['scopes'])
+
         ### Change the attributes
-        attributes = None
         if yes_no(
-                f"Edit the attributes YAML file for user '{username}'?",
-                default='n', yes=yes, noask=noask
+            f"Edit the attributes YAML file for user '{username}'?",
+            default='n',
+            yes=yes,
+            noask=noask,
         ):
             attr_path = pathlib.Path(os.path.join(USERS_CACHE_RESOURCES_PATH, f'{username}.yaml'))
             try:
-                existing_attrs = instance_connector.get_user_attributes(User(username), debug=debug)
+                existing_attrs = instance_connector.get_user_attributes(
+                    User(
+                        username,
+                        instance=instance_connector,
+                    ),
+                    debug=debug,
+                )
                 with open(attr_path, 'w+') as f:
                     yaml.dump(existing_attrs, stream=f, sort_keys=False)
                 edit_file(attr_path)
@@ -272,7 +291,14 @@ def _edit_users(
                 attributes = None
 
         ### Submit changes
-        return User(username, password, email=email, type=_type, attributes=attributes)
+        return User(
+            username,
+            password,
+            email=email,
+            type=_type,
+            attributes=attributes,
+            instance=instance_connector,
+        )
 
     if not action:
         return False, "No users to edit."
@@ -302,7 +328,7 @@ def _edit_users(
         f"    ({succeeded} succeeded, {failed} failed)."
     )
     info(msg)
-    return True, msg
+    return succeeded > 0, msg
 
 
 def _edit_plugins(

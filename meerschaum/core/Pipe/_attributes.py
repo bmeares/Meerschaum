@@ -8,6 +8,7 @@ Fetch and manipulate Pipes' attributes
 
 from __future__ import annotations
 
+import uuid
 from datetime import timezone
 
 import meerschaum as mrsm
@@ -123,7 +124,7 @@ def parameters(self, parameters: Dict[str, Any]) -> None:
     Set the parameters dictionary of the in-memory pipe.
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
-    self.attributes['parameters'] = parameters
+    self._attributes['parameters'] = parameters
     if '_parameters' in self.__dict__:
         del self.__dict__['_parameters']
 
@@ -150,7 +151,7 @@ def columns(self, _columns: Union[Dict[str, str], List[str]]) -> None:
     if not isinstance(_columns, dict):
         warn(f"{self}.columns must be a dictionary, received {type(_columns)}.")
         return
-    self.parameters['columns'] = _columns
+    self.update_parameters({'columns': _columns}, persist=False)
 
 
 @property
@@ -209,7 +210,7 @@ def indices(self, _indices: Union[Dict[str, Union[str, List[str]]], List[str]]) 
         if 'indexes' in self.parameters
         else 'indices'
     )
-    self.parameters[indices_key] = _indices
+    self.update_parameters({indices_key: _indices}, persist=False)
 
 
 @indexes.setter
@@ -225,13 +226,11 @@ def tags(self) -> Union[List[str], None]:
     """
     If defined, return the `tags` list defined in `meerschaum.Pipe.parameters`.
     """
-    if 'tags' not in self.parameters:
-        self.parameters['tags'] = []
-    return self.parameters['tags']
+    return self.parameters.get('tags', [])
 
 
 @tags.setter
-def tags(self, _tags: List[str, str]) -> None:
+def tags(self, _tags: List[str]) -> None:
     """
     Override the tags list of the in-memory pipe.
     Call `meerschaum.Pipe.edit` to persist changes.
@@ -242,7 +241,7 @@ def tags(self, _tags: List[str, str]) -> None:
     for t in _tags:
         if t.startswith(negation_prefix):
             error(f"Tags cannot begin with '{negation_prefix}'.")
-    self.parameters['tags'] = _tags
+    self.update_parameters({'tags': _tags}, persist=False)
 
 
 @property
@@ -268,7 +267,7 @@ def dtypes(self, _dtypes: Dict[str, Any]) -> None:
     Override the dtypes dictionary of the in-memory pipe.
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
-    self.parameters['dtypes'] = _dtypes
+    self.update_parameters({'dtypes': _dtypes}, persist=False)
 
 
 @property
@@ -276,9 +275,7 @@ def upsert(self) -> bool:
     """
     Return whether `upsert` is set for the pipe.
     """
-    if 'upsert' not in self.parameters:
-        self.parameters['upsert'] = False
-    return self.parameters['upsert']
+    return self.parameters.get('upsert', False)
 
 
 @upsert.setter
@@ -286,7 +283,7 @@ def upsert(self, _upsert: bool) -> None:
     """
     Set the `upsert` parameter for the pipe.
     """
-    self.parameters['upsert'] = _upsert
+    self.update_parameters({'upsert': _upsert}, persist=False)
 
 
 @property
@@ -294,9 +291,7 @@ def static(self) -> bool:
     """
     Return whether `static` is set for the pipe.
     """
-    if 'static' not in self.parameters:
-        self.parameters['static'] = False
-    return self.parameters['static']
+    return self.parameters.get('static', False)
 
 
 @static.setter
@@ -304,7 +299,7 @@ def static(self, _static: bool) -> None:
     """
     Set the `static` parameter for the pipe.
     """
-    self.parameters['static'] = _static
+    self.update_parameters({'static': _static}, persist=False)
 
 
 @property
@@ -312,10 +307,7 @@ def autoincrement(self) -> bool:
     """
     Return the `autoincrement` parameter for the pipe.
     """
-    if 'autoincrement' not in self.parameters:
-        self.parameters['autoincrement'] = False
-
-    return self.parameters['autoincrement']
+    return self.parameters.get('autoincrement', False)
 
 
 @autoincrement.setter
@@ -323,7 +315,7 @@ def autoincrement(self, _autoincrement: bool) -> None:
     """
     Set the `autoincrement` parameter for the pipe.
     """
-    self.parameters['autoincrement'] = _autoincrement
+    self.update_parameters({'autoincrement': _autoincrement}, persist=False)
 
 
 @property
@@ -331,10 +323,7 @@ def autotime(self) -> bool:
     """
     Return the `autotime` parameter for the pipe.
     """
-    if 'autotime' not in self.parameters:
-        self.parameters['autotime'] = False
-
-    return self.parameters['autotime']
+    return self.parameters.get('autotime', False)
 
 
 @autotime.setter
@@ -342,7 +331,7 @@ def autotime(self, _autotime: bool) -> None:
     """
     Set the `autotime` parameter for the pipe.
     """
-    self.parameters['autotime'] = _autotime
+    self.update_parameters({'autotime': _autotime}, persist=False)
 
 
 @property
@@ -369,10 +358,7 @@ def enforce(self) -> bool:
     """
     Return the `enforce` parameter for the pipe.
     """
-    if 'enforce' not in self.parameters:
-        self.parameters['enforce'] = True
-
-    return self.parameters['enforce']
+    return self.parameters.get('enforce', True)
 
 
 @enforce.setter
@@ -380,7 +366,7 @@ def enforce(self, _enforce: bool) -> None:
     """
     Set the `enforce` parameter for the pipe.
     """
-    self.parameters['enforce'] = _enforce
+    self.update_parameters({'enforce': _enforce}, persist=False)
 
 
 @property
@@ -388,10 +374,7 @@ def null_indices(self) -> bool:
     """
     Return the `null_indices` parameter for the pipe.
     """
-    if 'null_indices' not in self.parameters:
-        self.parameters['null_indices'] = True
-
-    return self.parameters['null_indices']
+    return self.parameters.get('null_indices', True)
 
 
 @null_indices.setter
@@ -399,7 +382,7 @@ def null_indices(self, _null_indices: bool) -> None:
     """
     Set the `null_indices` parameter for the pipe.
     """
-    self.parameters['null_indices'] = _null_indices
+    self.update_parameters({'null_indices': _null_indices}, persist=False)
 
 
 def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]:
@@ -427,7 +410,7 @@ def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]
     >>> pipe.get_columns('value', error=True)
     Exception:  🛑 Missing 'value' column for Pipe('test', 'test').
     """
-    from meerschaum.utils.warnings import error as _error, warn
+    from meerschaum.utils.warnings import error as _error
     if not args:
         args = tuple(self.columns.keys())
     col_names = []
@@ -579,7 +562,7 @@ def get_id(self, **kw: Any) -> Union[int, None]:
 
 
 @property
-def id(self) -> Union[int, None]:
+def id(self) -> Union[int, str, uuid.UUID, None]:
     """
     Fetch and cache a pipe's ID.
     """
@@ -609,7 +592,7 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
         dprint('Attempting to determine the value column...')
     try:
         val_name = self.get_columns('value')
-    except Exception as e:
+    except Exception:
         val_name = None
     if val_name is not None:
         if debug:
@@ -623,11 +606,11 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
         return None
     try:
         dt_name = self.get_columns('datetime', error=False)
-    except Exception as e:
+    except Exception:
         dt_name = None
     try:
         id_name = self.get_columns('id', errors=False)
-    except Exception as e:
+    except Exception:
         id_name = None
 
     if debug:
@@ -784,7 +767,7 @@ def target(self, _target: str) -> None:
     Override the target of the in-memory pipe.
     Call `meerschaum.Pipe.edit` to persist changes.
     """
-    self.parameters['target'] = _target
+    self.update_parameters({'target': _target}, persist=False)
 
 
 def guess_datetime(self) -> Union[str, None]:
@@ -825,3 +808,36 @@ def get_indices(self) -> Dict[str, str]:
             result = {}
     
     return result
+
+
+def update_parameters(
+    self,
+    parameters_patch: Dict[str, Any],
+    persist: bool = True,
+    debug: bool = False,
+) -> mrsm.SuccessTuple:
+    """
+    Apply a patch to a pipe's `parameters` dictionary.
+
+    Parameters
+    ----------
+    parameters_patch: Dict[str, Any]
+        The patch to be applied to `Pipe.parameters`.
+
+    persist: bool, default True
+        If `True`, call `Pipe.edit()` to persist the new parameters.
+    """
+    from meerschaum.config import apply_patch_to_config
+    if '_parameters' in self.__dict__:
+        del self.__dict__['_parameters']
+    if 'parameters' not in self._attributes:
+        self._attributes['parameters'] = {}
+
+    self._attributes['parameters'] = apply_patch_to_config(
+        self._attributes['parameters'],
+        parameters_patch,
+    )
+
+    if not persist:
+        return True, "Success"
+    return self.edit(debug=debug)

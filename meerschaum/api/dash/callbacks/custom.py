@@ -36,9 +36,9 @@ def add_plugin_pages(debug: bool = False):
     """
     Allow users to add pages via the `@web_page` decorator.
     """
-    for plugin_name, pages_dicts in _plugin_endpoints_to_pages.items():
+    for page_group, pages_dicts in _plugin_endpoints_to_pages.items():
         if debug:
-            dprint(f"Adding pages from plugin '{plugin_name}'...")
+            dprint(f"Adding pages for group '{page_group}'...")
         for _endpoint, _page_dict in pages_dicts.items():
             page_layout = _page_dict['function']()
             if not _page_dict['skip_navbar']:

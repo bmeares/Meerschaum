@@ -276,6 +276,7 @@ def _complete_register_plugins(*args, **kw):
 def _register_users(
     action: Optional[List[str]] = None,
     mrsm_instance: Optional[str] = None,
+    scopes: Optional[List[str]] = None,
     shell: bool = False,
     debug: bool = False,
     **kw: Any
@@ -337,9 +338,17 @@ def _register_users(
             )
         if len(email) == 0:
             email = None
-        user = User(username, password, email=email)
+        user = User(
+            username,
+            password,
+            email=email,
+            attributes={
+                'scopes': scopes or list(STATIC_CONFIG['tokens']['scopes']),
+            },
+            instance=instance_connector,
+        )
         info(f"Registering user '{user}' to Meerschaum instance '{instance_connector}'...")
-        result_tuple = instance_connector.register_user(user, debug=debug)
+        result_tuple = user.register(debug=debug)
         print_tuple(result_tuple)
         success[username] = result_tuple[0]
         if success[username]:

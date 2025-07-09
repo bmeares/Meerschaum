@@ -15,7 +15,7 @@ import uuid
 from binascii import b2a_base64, a2b_base64, Error as _BinAsciiError
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Dict, Any, Union
+from meerschaum.utils.typing import Optional, Dict, Any, Union, List
 from meerschaum.utils.warnings import warn
 
 
@@ -234,3 +234,26 @@ class User:
 
         self._password_hash = hash_password(self.password)
         return self._password_hash
+
+    def get_attributes(self, refresh: bool = False, debug: bool = False) -> Dict[str, Any]:
+        """
+        Return the user's attributes.
+        """
+        if not refresh:
+            return self.attributes
+        self._attributes = self.instance_connector.get_user_attributes(self, debug=debug) or {}
+        return self._attributes
+
+    def get_scopes(self, refresh: bool = False, debug: bool = False) -> List[str]:
+        """
+        Return the scopes for this user.
+        """
+        from meerschaum._internal.static import STATIC_CONFIG
+        _attributes = self.get_attributes(refresh=refresh, debug=debug)
+        return _attributes.get('scopes', None) or list(STATIC_CONFIG['tokens']['scopes'])
+
+    def register(self, debug: bool = False, **kwargs: Any) -> mrsm.SuccessTuple:
+        """
+        Register a user to the instance connector.
+        """
+        return self.instance_connector.register_user(self, debug=debug, **kwargs)

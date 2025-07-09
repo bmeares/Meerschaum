@@ -8,7 +8,7 @@ Pydantic model for a pipe's keys.
 
 from __future__ import annotations
 
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Union, Any
 
 import meerschaum as mrsm
 
@@ -62,8 +62,38 @@ class FetchPipesKeysResponseModel(
     model_config = ConfigDict(
         json_schema_extra={
             'example': [
-                ['sql:main', 'weather', 'us.co.denver'],
-                ['plugin:noaa', 'weather', 'us.co.boulder'],
+                ['sql:main', 'weather', 'greenville'],
+                ['plugin:noaa', 'weather', 'greenville'],
             ],
         },
+    )
+
+
+class SyncPipeRequestModel(
+    RootModel[
+        Union[
+            List[Dict[str, Any]],
+            Dict[str, List[Any]],
+            str
+        ]
+    ]
+):
+    """
+    The accepted formats of dataframes to be synced.
+    """
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': [
+                {
+                    'timestamp': '2026-01-01',
+                    'id': 1,
+                    'value': 100.1,
+                },
+                {
+                    'timestamp': '2026-01-02',
+                    'id': 1,
+                    'value': 200.2,
+                }
+            ],
+        }
     )

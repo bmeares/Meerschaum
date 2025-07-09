@@ -6,7 +6,6 @@
 The main dashboard layout.
 """
 
-import uuid
 from meerschaum.config import __doc__ as doc, get_config
 from meerschaum.utils.misc import get_connector_labels
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc, import_pandas
@@ -43,7 +42,6 @@ from meerschaum.api.dash.components import (
 )
 from meerschaum.api.dash.keys import (
     keys_lists_content,
-    text_tab_content,
     dropdown_tab_content,
 )
 
@@ -62,24 +60,7 @@ layout = html.Div(
                 children=[
                     dbc.Col(
                         children=[
-                            dbc.Tabs(
-                                id='pipes-filter-tabs',
-                                children=[
-                                    dbc.Tab(
-                                        dropdown_tab_content,
-                                        label='Filters',
-                                        id='pipes-filter-dropdown-tab',
-                                        tab_id='dropdown',
-                                    ),
-                                    dbc.Tab(
-                                        text_tab_content,
-                                        label='Text',
-                                        id='pipes-filter-input-tab',
-                                        tab_id='input',
-                                        tab_style={"display": "none"},
-                                    ),
-                                ]
-                            ),
+                            dropdown_tab_content,
                             html.Br(),
                             bottom_buttons_content,
                             test_button,

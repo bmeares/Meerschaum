@@ -11,6 +11,7 @@ import meerschaum.models
 
 from meerschaum.api.models._pipes import (
     FetchPipesKeysResponseModel,
+    SyncPipeRequestModel,
 )
 from meerschaum.api.models._actions import SuccessTupleResponseModel
 from meerschaum.api.models._tokens import (
@@ -21,6 +22,9 @@ from meerschaum.api.models._tokens import (
 
 __all__ = (
     'FetchPipesKeysResponseModel',
+    'SyncPipeRequestModel',
     'SuccessTupleResponseModel',
     'RegisterTokenResponseModel',
+    'RegisterTokenRequestModel',
+    'GetTokenResponseModel',
 )

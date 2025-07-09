@@ -267,6 +267,26 @@ def build_pages_offcanvas_children():
 
     plugins_accordion_items = []
     for page_group, pages_dicts in _plugin_endpoints_to_pages.items():
+        if len(pages_dicts) == 1:
+            page_href, page_dict = list(pages_dicts.items())[0]
+            if page_dict['page_key'].lower() == page_group.lower():
+                pages_listgroup_items.append(
+                    dbc.ListGroupItem(
+                        dbc.Button(
+                            ' '.join([word.capitalize() for word in page_dict['page_key'].split(' ')]),
+                            style={
+                                'width': '100%',
+                                'text-align': 'left',
+                                'text-decoration': 'none',
+                                'padding-left': '0',
+                            },
+                            href=page_href,
+                            color='dark',
+                        )
+                    )
+                )
+                continue
+
         plugin_listgroup_items = [
             dbc.ListGroupItem(
                 dbc.Button(
@@ -294,13 +314,15 @@ def build_pages_offcanvas_children():
             class_name='pages-offcanvas-accordion',
         )
         plugins_accordion_items.append(plugin_accordion_item)
-    plugins_accordion = dbc.Accordion(
-        plugins_accordion_items,
-        start_collapsed=True,
-        flush=True,
-        always_open=True,
-    )
-    pages_listgroup_items.append(plugins_accordion)
+
+    if plugins_accordion_items:
+        plugins_accordion = dbc.Accordion(
+            plugins_accordion_items,
+            start_collapsed=True,
+            flush=True,
+            always_open=True,
+        )
+        pages_listgroup_items.append(plugins_accordion)
 
     pages_children = dbc.Card(
         dbc.ListGroup(

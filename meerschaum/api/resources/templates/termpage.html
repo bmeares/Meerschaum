@@ -30,6 +30,7 @@ window.addEventListener(
     let connector_keys = event.data['connector_keys'] ? event.data['connector_keys'] : [];
     let metric_keys = event.data['metric_keys'] ? event.data['metric_keys'] : [];
     let location_keys = event.data['location_keys'] ? event.data['location_keys'] : [];
+    let tags = event.data['tags'] ? event.data['tags'] : [];
     let connector_keys_str = " -c";
     for (let ck of connector_keys){
         if (typeof ck === "string"){
@@ -61,6 +62,16 @@ window.addEventListener(
     }
     if (location_keys_str === " -l"){
         location_keys_str = "";
+    }
+    let tags_str = " -t";
+    for (tag of tags){
+        if (typeof tag === "string"){
+            quote_str = tag.includes(" ") ? "'" : "";
+            tags_str += " " + quote_str + tag + quote_str;
+        }
+    }
+    if (tags_str === " -t"){
+        tags_str = "";
     }
 
     let instance = event.data['instance'] ? event.data['instance'] : '';
@@ -105,6 +116,7 @@ window.addEventListener(
       + connector_keys_str
       + metric_keys_str
       + location_keys_str
+      + tags_str
       + flags_str
       + '\r'
     );

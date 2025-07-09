@@ -162,6 +162,16 @@ class Token:
 
         return token_model
 
+    def get_scopes(self, refresh: bool = False, debug: bool = False) -> List[str]:
+        """
+        Return the scopes for this `Token`.
+        """
+        if not refresh:
+            return self.scopes
+
+        self.scopes = self.instance_connector.get_token_scopes(self, debug=debug)
+        return self.scopes
+
     def __str__(self):
         return self.label
 

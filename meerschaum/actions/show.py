@@ -790,34 +790,22 @@ def _show_tags(
     from meerschaum.utils.formatting import pipe_repr, UNICODE, ANSI
     from meerschaum.utils.pool import get_pool
     from meerschaum.config import get_config
+    from meerschaum.connectors.parse import parse_instance_keys
     rich_tree, rich_panel, rich_text, rich_console, rich_columns = (
         mrsm.attempt_import('rich.tree', 'rich.panel', 'rich.text', 'rich.console', 'rich.columns')
     )
-    panel = rich_panel.Panel.fit('Tags')
-    tree = rich_tree.Tree(panel)
     action = action or []
     tags = action + (tags or [])
-    pipes = mrsm.get_pipes(as_list=True, tags=tags, **kwargs)
-    if not pipes:
-        return False, f"No pipes were found with the given tags."
 
-    pool = get_pool(workers=workers)
     tag_prefix = get_config('formatting', 'pipes', 'unicode', 'icons', 'tag') if UNICODE else ''
     tag_style = get_config('formatting', 'pipes', 'ansi', 'styles', 'tags') if ANSI else None
 
-    tags_pipes = defaultdict(lambda: [])
-    gather_pipe_tags = lambda pipe: (pipe, (pipe.tags or []))
-
-    pipes_tags = dict(pool.map(gather_pipe_tags, pipes))
-
-    for pipe, tags in pipes_tags.items():
-        for tag in tags:
-            if action and tag not in action:
-                continue
-            tags_pipes[tag].append(pipe)
+    tags_pipes = mrsm.get_pipes(as_tags_dict=True, tags=tags, **kwargs)
+    if action:
+        tags_pipes = {tag: pipes for tag, pipes in tags_pipes.items() if tag in action}
 
     columns = []
-    sorted_tags = sorted([tag for tag in tags_pipes])
+    sorted_tags = sorted(list(tags_pipes))
     for tag in sorted_tags:
         _pipes = tags_pipes[tag]
         tag_text = (

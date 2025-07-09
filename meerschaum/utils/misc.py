@@ -149,9 +149,7 @@ def is_uuid(s: str) -> bool:
         return False
 
 
-def string_to_dict(
-    params_string: str
-) -> Dict[str, Any]:
+def string_to_dict(params_string: str) -> Dict[str, Any]:
     """
     Parse a string into a dictionary.
     
@@ -174,7 +172,7 @@ def string_to_dict(
     {'a': 1, 'b': 2}
 
     """
-    if params_string == "":
+    if not params_string:
         return {}
 
     import json
@@ -189,13 +187,60 @@ def string_to_dict(
         and params_string[-2] == "}"
     ):
         return json.loads(params_string[1:-1])
+
     if str(params_string).startswith('{'):
         return json.loads(params_string)
 
     import ast
     params_dict = {}
-    for param in params_string.split(","):
+    
+    items = []
+    bracket_level = 0
+    brace_level = 0
+    current_item = ''
+    in_quotes = False
+    quote_char = ''
+    
+    i = 0
+    while i < len(params_string):
+        char = params_string[i]
+        
+        if in_quotes:
+            if char == quote_char and (i == 0 or params_string[i-1] != '\\'):
+                in_quotes = False
+        else:
+            if char in ('"', "'"):
+                in_quotes = True
+                quote_char = char
+            elif char == '[':
+                bracket_level += 1
+            elif char == ']':
+                bracket_level -= 1
+            elif char == '{':
+                brace_level += 1
+            elif char == '}':
+                brace_level -= 1
+            elif char == ',' and bracket_level == 0 and brace_level == 0:
+                items.append(current_item)
+                current_item = ''
+                i += 1
+                continue
+        
+        current_item += char
+        i += 1
+        
+    if current_item:
+        items.append(current_item)
+
+    for param in items:
+        param = param.strip()
+        if not param:
+            continue
+
         _keys = param.split(":", maxsplit=1)
+        if len(_keys) != 2:
+            continue
+
         keys = _keys[:-1]
         try:
             val = ast.literal_eval(_keys[-1])
@@ -215,6 +260,29 @@ def string_to_dict(
         c[keys[-1]] = val
 
     return params_dict
+
+
+def to_simple_dict(doc: Dict[str, Any]) -> str:
+    """
+    Serialize a document dictionary in simple-dict format.
+    """
+    import json
+    import ast
+    from meerschaum.utils.dtypes import json_serialize_value
+
+    def serialize_value(value):
+        if isinstance(value, str):
+            try:
+                evaluated = ast.literal_eval(value)
+                if not isinstance(evaluated, str):
+                    return json.dumps(value, separators=(',', ':'), default=json_serialize_value)
+                return value
+            except (ValueError, SyntaxError, TypeError, MemoryError):
+                return value
+        
+        return json.dumps(value, separators=(',', ':'), default=json_serialize_value)
+
+    return ','.join(f"{key}:{serialize_value(val)}" for key, val in doc.items())
 
 
 def parse_config_substitution(
