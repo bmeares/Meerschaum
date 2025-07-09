@@ -31,6 +31,10 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
     """
     Start the webterm and return its iframe.
     """
+    from meerschaum.api import _include_webterm
+    if not _include_webterm:
+        return console_div, []
+
     session_id = state['session-store.data'].get('session-id', None)
     username = get_username_from_session(session_id)
     if not is_session_authenticated(session_id):

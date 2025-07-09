@@ -16,6 +16,8 @@ from meerschaum.api import (
     get_uvicorn_config,
     debug,
     no_dash,
+    _include_dash,
+    _include_webterm,
 )
 from meerschaum.utils.debug import dprint
 from meerschaum.connectors.poll import retry_connect
@@ -71,7 +73,7 @@ async def startup():
     ]
 
     try:
-        if not no_dash:
+        if _include_webterm:
             from meerschaum.api.dash.webterm import start_webterm
             start_webterm()
 

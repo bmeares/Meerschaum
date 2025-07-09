@@ -96,6 +96,7 @@ def _api_start(
     workers: Optional[int] = None,
     mrsm_instance: Optional[str] = None,
     no_dash: bool = False,
+    no_webterm: bool = False,
     no_auth: bool = False,
     private: bool = False,
     secure: bool = False,
@@ -244,6 +245,7 @@ def _api_start(
         'env_file': str(uvicorn_env_path.as_posix()),
         'mrsm_instance': mrsm_instance,
         'no_dash': no_dash,
+        'no_webterm': no_webterm or no_auth,
         'no_auth': no_auth,
         'private': private,
         'production': production,
@@ -263,7 +265,15 @@ def _api_start(
     if secure:
         cf['system']['api']['permissions']['actions']['non_admin'] = False
 
-    custom_keys = ['mrsm_instance', 'no_dash', 'no_auth', 'private', 'debug', 'production']
+    custom_keys = [
+        'mrsm_instance',
+        'no_dash',
+        'no_webterm',
+        'no_auth',
+        'private',
+        'debug',
+        'production',
+    ]
 
     ### write config to a temporary file to communicate with uvicorn threads
     try:

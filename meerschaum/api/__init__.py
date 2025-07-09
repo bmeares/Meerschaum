@@ -95,10 +95,12 @@ def get_uvicorn_config() -> Dict[str, Any]:
 
 debug = get_uvicorn_config().get('debug', False)
 no_dash = get_uvicorn_config().get('no_dash', False)
+no_webterm = get_uvicorn_config().get('no_webterm', False)
 no_auth = get_uvicorn_config().get('no_auth', False)
 private = get_uvicorn_config().get('private', False)
 production = get_uvicorn_config().get('production', False)
 _include_dash = (not no_dash)
+_include_webterm = (not no_webterm) and _include_dash
 docs_enabled = not production or sys_config.get('endpoints', {}).get('docs_in_production', True)
 
 default_instance_keys = None

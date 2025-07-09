@@ -66,4 +66,3 @@ def edit_plugin_description(
         success, _msg = get_api_connector().register_plugin(plugin, debug=debug, force=True)
         msg = _msg if not success else "Successfully updated description."
     return [alert_from_success_tuple((success, msg))]
-
