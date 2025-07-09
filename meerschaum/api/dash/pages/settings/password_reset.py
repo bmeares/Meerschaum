@@ -14,7 +14,7 @@ from meerschaum.plugins import web_page
 @web_page('password-reset', login_required=True, page_group='Settings')
 def page_layout():
     """
-    Return the layout for this page.
+    Return the layout for the password reset page.
     """
     return dbc.Container([
         html.Br(),

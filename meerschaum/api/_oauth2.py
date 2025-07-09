@@ -126,10 +126,10 @@ def ScopedAuth(scopes: List[str]):
                 headers={"WWW-Authenticate": "Basic"},
             )
 
-        if inspect.iscoroutinefunction(user_or_token):
-            user_or_token = await user_or_token(users=users, tokens=tokens)
-
         fresh_scopes = user_or_token.get_scopes(refresh=True, debug=debug)
+        if '*' in fresh_scopes:
+            return user_or_token
+
         for scope in scopes:
             if scope not in fresh_scopes:
                 raise HTTPException(

@@ -394,7 +394,11 @@ groups['api'].add_argument(
 )
 groups['api'].add_argument(
     '--no-dash', '--nodash', action='store_true',
-    help = 'When starting the API, do not start the Web interface.',
+    help = 'When starting the API, do not start the Web Console dashboard.',
+)
+groups['api'].add_argument(
+    '--no-webterm', '--nowebterm', action='store_true',
+    help="When starting the API, do not start the Webterm.",
 )
 groups['api'].add_argument(
     '--private', '--private-mode', action='store_true',

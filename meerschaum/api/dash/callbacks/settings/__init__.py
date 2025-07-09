@@ -6,3 +6,4 @@ Define the callbacks for the settings pages.
 """
 
 import meerschaum.api.dash.callbacks.settings.password_reset
+import meerschaum.api.dash.callbacks.settings.tokens

@@ -1233,7 +1233,7 @@ def items_str(
     return output
 
 
-def interval_str(delta: Union[timedelta, int]) -> str:
+def interval_str(delta: Union[timedelta, int], round_unit: bool = False) -> str:
     """
     Return a human-readable string for a `timedelta` (or `int` minutes).
 
@@ -1242,20 +1242,57 @@ def interval_str(delta: Union[timedelta, int]) -> str:
     delta: Union[timedelta, int]
         The interval to print. If `delta` is an integer, assume it corresponds to minutes.
 
+    round_unit: bool, default False
+        If `True`, round the output to a single unit.
+
     Returns
     -------
     A formatted string, fit for human eyes.
     """
     from meerschaum.utils.packages import attempt_import
-    if is_int(str(delta)):
+    if is_int(str(delta)) and not round_unit:
         return str(delta)
-    humanfriendly = attempt_import('humanfriendly')
+
+    humanfriendly = attempt_import('humanfriendly', lazy=False)
     delta_seconds = (
         delta.total_seconds()
-        if isinstance(delta, timedelta)
+        if hasattr(delta, 'total_seconds')
         else (delta * 60)
     )
-    return humanfriendly.format_timespan(delta_seconds)
+
+    is_negative = delta_seconds < 0
+    delta_seconds = abs(delta_seconds)
+    replace_units = {}
+
+    if round_unit:
+        if delta_seconds < 1:
+            delta_seconds = round(delta_seconds, 2)
+        elif delta_seconds < 60:
+            delta_seconds = int(delta_seconds)
+        elif delta_seconds < 3600:
+            delta_seconds = int(delta_seconds / 60) * 60
+        elif delta_seconds < 86400:
+            delta_seconds = int(delta_seconds / 3600) * 3600
+        elif delta_seconds < (86400 * 7):
+            delta_seconds = int(delta_seconds / 86400) * 86400
+        elif delta_seconds < (86400 * 7 * 4):
+            delta_seconds = int(delta_seconds / (86400 * 7)) * (86400 * 7)
+        elif delta_seconds < (86400 * 7 * 4 * 13):
+            delta_seconds = int(delta_seconds / (86400 * 7 * 4)) * (86400 * 7)
+            replace_units['weeks'] = 'months'
+        else:
+            delta_seconds = int(delta_seconds / (86400 * 364)) * (86400 * 364)
+
+    delta_str = humanfriendly.format_timespan(delta_seconds)
+    if ',' in delta_str and round_unit:
+        delta_str = delta_str.split(',')[0]
+    elif ' and ' in delta_str and round_unit:
+        delta_str = delta_str.split(' and ')[0]
+
+    for parsed_unit, replacement_unit in replace_units.items():
+        delta_str = delta_str.replace(parsed_unit, replacement_unit)
+
+    return delta_str + (' ago' if is_negative else '')
 
 
 def is_docker_available() -> bool:

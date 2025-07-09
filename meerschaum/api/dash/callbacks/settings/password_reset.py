@@ -39,7 +39,7 @@ def password_reset_button_click(n_clicks, new_password_value, session_store_data
         )
 
     instance_connector = get_api_connector()
-    user = User(username, new_password_value)
+    user = User(username, new_password_value, instance=instance_connector)
     success, msg = instance_connector.edit_user(user, debug=debug)
     return alert_from_success_tuple((success, msg))
 
