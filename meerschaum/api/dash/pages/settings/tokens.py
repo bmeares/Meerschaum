@@ -22,64 +22,16 @@ def page_layout():
         html.H3('Tokens'),
         html.Div(id="tokens-alert-div"),
         dbc.Modal(
-            [
-                dbc.ModalHeader(html.H4("Register Token")),
-                dbc.ModalBody([
-                    dbc.Form([
-                        dbc.Row(
-                            [
-                                dbc.Label("Label", width='auto'),
-                                dbc.Col(
-                                    [
-                                        dbc.Input(placeholder="Enter optional label"),
-                                    ],
-                                    className="me-3",
-                                ),
-                            ],
-                            className='g-2',
-                        ),
-                        html.Br(),
-                        dbc.Row([
-                            dbc.Switch(
-                                id="tokens-toggle-scopes-switch",
-                                label="Grant all scopes",
-                                value=True,
-                            ),
-                        ]),
-                        html.Div([
-                            dbc.Button(
-                                "Deselect all",
-                                size='sm',
-                                id="tokens-deselect-scopes-button",
-                            ),
-                            dbc.Row([
-                                dbc.Label("Scopes", width='auto'),
-                                dbc.Col([
-                                    dbc.Checklist(
-                                        options=[
-                                            {"label": scope, "value": scope}
-                                            for scope in STATIC_CONFIG['tokens']['scopes']
-                                        ],
-                                        value=[
-                                            scope
-                                            for scope in STATIC_CONFIG['tokens']['scopes']
-                                        ],
-                                        id="tokens-scopes-checklist",
-                                        style={'columnCount': 3},
-                                    ),
-                                ]),
-                            ]),
-                        ], id='tokens-scopes-checklist-div', style={'display': 'none'}),
-                    ]),
-                ]),
-                dbc.ModalFooter([
-                    dbc.Button('Register', id='tokens-register-button'),
-                ]),
-            ],
-            id='tokens-create-modal',
+            id="tokens-register-input-modal",
             size='lg',
             is_open=False,
         ),
+        dbc.Modal(
+            id="tokens-register-output-modal",
+            size='lg',
+            is_open=False,
+        ),
+        html.Div(id='tokens-register-output-modal-div'),
         html.Div(
             [
                 dbc.Button(
