@@ -59,6 +59,7 @@ def get_parameters(
     """
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.warnings import warn
+    from meerschaum.config._read_config import search_and_substitute_config
 
     if _visited is None:
         _visited = {self}
@@ -73,7 +74,7 @@ def get_parameters(
             ref_pipe = mrsm.Pipe(**ref_keys)
             if ref_pipe in _visited:
                 warn(f"Circular reference detected in {self}: chain involves {ref_pipe}.")
-                return raw_parameters
+                return search_and_substitute_config(raw_parameters)
 
             _visited.add(ref_pipe)
             base_params = ref_pipe.get_parameters(_visited=_visited)
@@ -104,7 +105,7 @@ def get_parameters(
             return substituted_val
         return obj
 
-    return recursive_replace(parameters, tuple())
+    return search_and_substitute_config(recursive_replace(parameters, tuple()))
 
 
 @property

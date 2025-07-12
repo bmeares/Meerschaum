@@ -102,6 +102,32 @@ This is the current release cycle, so stay tuned for future releases!
   #     "parent_pipe_id": 1
   # }  
   ```
+  
+- **Add `MRSM` config symlinks to pipe parameters.**  
+  Similar to the `{{ Pipe(...) }}` syntax, you can now reference your Meerschaum configuration from within a pipe's parameters:
+
+  ```yaml
+  meerschaum:
+    connectors:
+      sql:
+        main:
+          username: 'user'
+          password: 'password'
+          ...
+  ```
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'demo', 'config_symlinks',
+      parameters = {
+          'username': 'MRSM{meerschaum:connectors:sql:main:username}',
+          'password': 'MRSM{meerschaum:connectors:sql:main:password}',
+      }
+  )
+  print(pipe.parameters['username'])
+  # 'user'
+  ```
 
 - **Add `InstanceConnector` base class.**  
   Custom connectors which implement the [instance connectors interface](https://meerschaum.io/reference/connectors/instance-connectors/) should now inherit from `InstanceConnector` as the base class:
@@ -180,8 +206,8 @@ This is the current release cycle, so stay tuned for future releases!
   # [{"id":1,"geometry":{"type":"Point","coordinates":[-82.389048539797542,34.881760860334396]}}] 
   ```
 
-  - **Upgrade `sql:main` to PostgreSQL 17.**  
-    The Meerschaum stack database now ships as `timescale/timescaledb-ha:pg17`, which includes additional extensions such as PostGIS. The flavor for `sql:main` is now `timescaledb-ha` (see below).
+- **Upgrade `sql:main` to PostgreSQL 17.**  
+  The Meerschaum stack database now ships as `timescale/timescaledb-ha:pg17`, which includes additional extensions such as PostGIS. The flavor for `sql:main` is now `timescaledb-ha` (see below).
 
 - **Add the SQL flavor `timescaledb-ha`.**  
   The default instance connector `sql:main` now has the flavor `timescaledb-ha`, corresponding to the `timescale/timescaledb-ha` Docker image. This image includes PostGIS, `timescaledb_toolkit`, and `pg_stat_statements`.
@@ -193,7 +219,7 @@ This is the current release cycle, so stay tuned for future releases!
   The template format `{{Pipe(...)}}` will now match leading and trailing spaces around the `Pipe` declaration, and an optional `mrsm.` prefix is accepted.
 
 - **Add `Pipe.get_value()`.**  
-  The convenience function `Pipe.get_value()` has been added for selecting single values from result sets of `Pipe.get_data`():
+  The convenience function `Pipe.get_value()` has been added for selecting single values from result sets of `Pipe.get_data()`:
 
   ```python
   import meerschaum as mrsm
@@ -215,12 +241,6 @@ This is the current release cycle, so stay tuned for future releases!
   print(spot_id)
   # 2
   ```
-
-- **Add `MRSM` config symlinks to pipe parameters.**  
-  TODO
-
-- **Access pipe attributes in template strings.**  
-  TODO
 
 - **Fix custom actions with spaces in Web Console.**
 
