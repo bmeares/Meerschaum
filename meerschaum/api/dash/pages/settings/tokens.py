@@ -30,6 +30,7 @@ def page_layout():
             id="tokens-register-output-modal",
             size='lg',
             is_open=False,
+            backdrop='static',
         ),
         html.Div(id='tokens-register-output-modal-div'),
         html.Div(

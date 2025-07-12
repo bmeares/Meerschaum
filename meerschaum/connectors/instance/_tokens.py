@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 
 import meerschaum as mrsm
-from meerschaum.core import Token
+from meerschaum.core import Token, User
 from meerschaum.core.User import hash_password
 from meerschaum.models import TokenModel
 from meerschaum._internal.static import STATIC_CONFIG
@@ -110,12 +110,30 @@ def edit_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple:
     return True, "Success"
 
 
-def get_tokens(self, debug: bool = False) -> List[Token]:
+def get_tokens(self, user: Optional[User] = None, debug: bool = False) -> List[Token]:
     """
     Return a list of `Token` objects.
     """
     tokens_pipe = self.get_tokens_pipe()
-    tokens_df = tokens_pipe.get_data(debug=debug)
+    user_id = (
+        self.get_user_id(user, debug=debug)
+        if user is not None
+        else None
+    )
+    user_type = self.get_user_type(user, debug=debug) if user is not None else None
+    params = (
+        {
+            'user_id': (
+                user_id
+                if user_type != 'admin'
+                else [user_id, None]
+            )
+        }
+        if user_id is not None
+        else {}
+    )
+        
+    tokens_df = tokens_pipe.get_data(params=params, debug=debug)
     if tokens_df is None:
         return []
 
