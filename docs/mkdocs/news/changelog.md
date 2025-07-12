@@ -129,6 +129,9 @@ This is the current release cycle, so stay tuned for future releases!
   # 'user'
   ```
 
+- **Add `Pipe.update_parameters()`.**  
+  Due to the symlinking features, the method `Pipe.update_parameters()` will now appropriately handle updating the parameters within the pipe's attributes. Therefore, mutating `Pipe.parameters` no longer affects the state of the pipe directly.
+
 - **Add `InstanceConnector` base class.**  
   Custom connectors which implement the [instance connectors interface](https://meerschaum.io/reference/connectors/instance-connectors/) should now inherit from `InstanceConnector` as the base class:
 

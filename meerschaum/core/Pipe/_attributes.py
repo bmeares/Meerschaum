@@ -255,11 +255,15 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
     configured_dtypes = self.parameters.get('dtypes', {})
     remote_dtypes = self.infer_dtypes(persist=False)
     patched_dtypes = apply_patch_to_config(remote_dtypes, configured_dtypes)
-    return {
+    dt_col = self.columns.get('datetime', None)
+    _dtypes = {
         col: MRSM_ALIAS_DTYPES.get(typ, typ)
         for col, typ in patched_dtypes.items()
         if col and typ
     }
+    if dt_col not in _dtypes:
+        _dtypes[dt_col] = 'datetime'
+    return _dtypes
 
 
 @dtypes.setter
