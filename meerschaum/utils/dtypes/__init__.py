@@ -502,14 +502,6 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
     dt_is_series = hasattr(dt_val, 'dtype') and hasattr(dt_val, '__module__')
     pd = pandas if dd is None else dd
 
-    try:
-        new_dt_val = pd.to_datetime(dt_val, utc=True, format='ISO8601')
-        if as_pydatetime:
-            return new_dt_val.to_pydatetime()
-        return new_dt_val
-    except (pd.errors.OutOfBoundsDatetime, ValueError):
-        pass
-
     def parse(x: Any) -> Any:
         try:
             return dateutil_parser.parse(x)
@@ -517,10 +509,25 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
             return x
 
     if dt_is_series:
-        new_series = dt_val.apply(parse)
+        try:
+            new_dt_series = dt_val.astype("datetime64[ns, UTC]")
+        except pd.errors.OutOfBoundsDatetime:
+            new_dt_series = dt_val.astype("datetime64[ms, UTC]")
+        except ValueError:
+            new_dt_series = dt_val.apply(parse)
+
         if coerce_utc:
-            return coerce_timezone(new_series)
-        return new_series
+            return coerce_timezone(new_dt_series)
+
+        return new_dt_series
+
+    try:
+        new_dt_val = pd.to_datetime(dt_val, utc=True, format='ISO8601')
+        if as_pydatetime:
+            return new_dt_val.to_pydatetime()
+        return new_dt_val
+    except (pd.errors.OutOfBoundsDatetime, ValueError):
+        pass
 
     new_dt_val = parse(dt_val)
     if not coerce_utc:
