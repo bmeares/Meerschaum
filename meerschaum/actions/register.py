@@ -484,9 +484,10 @@ def _register_tokens(
     """
     import json
     from meerschaum.utils.schedule import parse_start_time
+    from meerschaum.core import User
     from meerschaum.core.Token._Token import Token, _PLACEHOLDER_EXPIRATION
     from meerschaum.connectors.parse import parse_instance_keys
-    from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.prompt import yes_no, choose
     from meerschaum.utils.formatting import make_header, print_tuple
     from meerschaum.utils.dtypes import value_is_null
 
@@ -501,25 +502,30 @@ def _register_tokens(
     )
 
     instance_connector = parse_instance_keys(mrsm_instance)
+    user = None
     if instance_connector.type != 'api':
-        continue_registering = force or yes_no(
-            (
-                "It is highly recommended to register tokens against an API instance"
-                f"\n    (currently connected to '{instance_connector}').\n\n"
-                f"\n    Run again with `--force`, or answer `y` to continue.\n"
-                f"    Are you sure you want to register a token to instance '{instance_connector}'?"
-            ),
-            yes=yes,
-            noask=noask, 
-            default='n',
+        usernames = instance_connector.get_users(debug=debug)
+        if not usernames:
+            return False, f"No users are registered to '{instance_connector}'."
+
+        username = choose(
+            "To which user should this token be registered? Enter the number.",
+            usernames,
         )
-        if not continue_registering:
-            return True, "Nothing was changed."
+        user_id = instance_connector.get_user_id(
+            User(username, instance=mrsm_instance),
+            debug=debug,
+        )
+        if user_id is None:
+            return False, f"Cannot load ID for user '{username}'."
+
+        user = User(username, user_id=user_id, instance=mrsm_instance)
 
     token = Token(
         label=name,
         expiration=expiration,
         scopes=scopes,
+        user=user,
         instance=mrsm_instance,
     )
 
@@ -560,7 +566,6 @@ def _register_tokens(
             )
             + "\n"
             + f"    - API Key: {token.get_api_key()}\n"
-            + f"    - Scope: " + " ".join(token_model.scopes or [])
         )
         if not nopretty
         else json.dumps({'secret': token_secret, **dict(token_model)})

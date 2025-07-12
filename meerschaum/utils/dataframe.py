@@ -1792,6 +1792,15 @@ def to_json(
 def to_simple_lines(df: 'pd.DataFrame') -> str:
     """
     Serialize a Pandas Dataframe as lines of simple dictionaries.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The dataframe to serialize into simple lines text.
+
+    Returns
+    -------
+    A string of simple line dictionaries joined by newlines.
     """
     from meerschaum.utils.misc import to_simple_dict
     if df is None or len(df) == 0:
@@ -1799,3 +1808,32 @@ def to_simple_lines(df: 'pd.DataFrame') -> str:
 
     docs = df.to_dict(orient='records')
     return '\n'.join(to_simple_dict(doc) for doc in docs)
+
+
+def parse_simple_lines(data: str) -> 'pd.DataFrame':
+    """
+    Parse simple lines text into a DataFrame.
+
+    Parameters
+    ----------
+    data: str
+        The simple lines text to parse into a DataFrame.
+
+    Returns
+    -------
+    A dataframe containing the rows serialized in `data`.
+    """
+    from meerschaum.utils.misc import string_to_dict
+    from meerschaum.utils.packages import import_pandas
+    pd = import_pandas()
+    lines = data.splitlines()
+    try:
+        docs = [string_to_dict(line) for line in lines]
+        df = pd.DataFrame(docs)
+    except Exception:
+        df = None
+
+    if df is None:
+        raise ValueError("Cannot parse simple lines into a dataframe.")
+
+    return df

@@ -1,20 +1,27 @@
 # 🗄️ Instance Connectors
 
-Instance connectors store pipes' registrations and data in addition to the usual `#!python fetch()` functionality of regular connectors, e.g. the [`#!python SQLConnector`](/reference/connectors/sql-connectors/).
+Instance connectors store pipes' metadata (and may also be used as a source connector, e.g. the [`#!python SQLConnector`](/reference/connectors/sql-connectors/)).
 
-To use your custom connector type as an instance connector, implement the following methods, replacing the pseudocode under the `TODO` comments with your connector's equivalent. See the [`MongoDBConnector`](https://github.com/bmeares/mongodb-connector/blob/main/plugins/mongodb-connector/_pipes.py) for  a specific reference.
+To use your custom connector type as an instance connector, inherit from `InstanceConnector` and implement the following methods (replacing the pseudocode under the `TODO` comments with your connector's equivalent). See the [`MongoDBConnector`](https://github.com/bmeares/mongodb-connector/blob/main/plugins/mongodb-connector/_pipes.py) for a specific reference.
 
-!!! note ""
-    The `#!python SuccessTuple` type annotation is an alias for `Tuple[bool, str]` and may be imported:
+
+!!! example "Inherit from `InstanceConnector`"
+    Your connector class inherits from `InstanceConnector`, a subclass of `Connector` which implements the pipes' methods as an interface.
 
     ```python
-    from meerschaum.utils.typing import SuccessTuple
+    from meerschaum.connectors import InstanceConnector, make_connector
+
+    @make_connector
+    class FooConnector(InstanceConnector):
+        def register_pipe(pipe: mrsm.Pipe, **kwargs) -> mrsm.SuccessTuple:
+            ...
+        ...
     ```
 
 ??? tip "Using the `params` Filter"
     Methods which take the `params` argument ([`get_pipe_data()`](#get_pipe_data), [`get_sync_time()`](#get_sync_time), [`get_backtrack_data()`](#get_backtrack_data)) behave similarly to the filters applied to [`fetch_pipes_keys`](#fetch_pipes_keys).
 
-    The easiest way to support `params` is with [meerschaum.utils.dataframe.query_df()](https://docs.meerschaum.io/meerschaum/utils/dataframe.html#query_df):
+    The easiest way to support `params` is with [`meerschaum.utils.dataframe.query_df()`](https://docs.meerschaum.io/meerschaum/utils/dataframe.html#query_df):
 
     ```python
     from meerschaum.utils.dataframe import query_df, parse_df_datetimes
@@ -49,66 +56,6 @@ To use your custom connector type as an instance connector, implement the follow
     >>> 
     >>> build_query({'a': []})
     {}
-    ```
-
-??? warning "`get_backtrack_data()` Deprecation Notice"
-    As of v1.7.0+, `get_backtrack_data()` was replaced with a generic alternative. Your connector may still override this method:
-
-    ```python
-    def get_backtrack_data(
-        self,
-        pipe: mrsm.Pipe,
-        backtrack_minutes: int = 0,
-        begin: datetime | int | None = None,
-        params: dict[str, Any] | None = None,
-        debug: bool = False,
-        **kwargs: Any
-    ) -> 'pd.DataFrame':
-        """
-        Return the most recent interval of data leading up to `begin` (defaults to the sync time).
-
-        Parameters
-        ----------
-        pipe: mrsm.Pipe,
-            The number of minutes leading up to `begin` from which to search.
-            If `begin` is an integer, then subtract this value from `begin`.
-
-        backtrack_minutes: int, default 0
-            The number of minutes leading up to `begin` from which to search.
-            If `begin` is an integer, then subtract this value from `begin`.
-
-        begin: datetime | int | None, default None
-            The point from which to begin backtracking.
-            If `None`, then use the pipe's sync time (most recent datetime value).
-
-        params: dict[str, Any] | None, default None
-            Additional filter parameters.
-
-        Returns
-        -------
-        A Pandas DataFrame for the interval of size `backtrack_minutes` leading up to `begin`.
-        """
-        from datetime import datetime, timedelta
-
-        if begin is None:
-            begin = pipe.get_sync_time(params=params, debug=debug)
-
-        backtrack_interval = (
-            timedelta(minutes=backtrack_minutes)
-            if isinstance(begin, datetime)
-            else backtrack_minutes
-        )
-
-        if begin is not None:
-            begin = begin - backtrack_interval
-
-        return self.get_pipe_data(
-            pipe,
-            begin = begin,
-            params = params,
-            debug = debug,
-            **kwargs
-        )
     ```
 
 ## `#!python register_pipe()`
@@ -489,7 +436,7 @@ You may use the built-in method [`pipe.filter_existing()`](https://docs.meerscha
 
 ### `#!python sync_pipe_inplace()` (optional)
 
-For situations where the source and instance connectors are the same, the method `#!python sync_pipe_inplace()` allows you to bypass loading DataFrames into RAM and instead handle the syncs remotely. See the [`#!python SQLConnector.sync_pipe_inplace()`](https://docs.meerschaum.io/connectors/sql/SQLConnector.html#meerschaum.connectors.sql.SQLConnector.SQLConnector.sync_pipe_inplace) method for reference.
+For situations where the source and instance connectors are the same, the method `#!python sync_pipe_inplace()` allows you to bypass loading DataFrames into RAM and instead handle the syncs remotely. See the [`SQLConnector.sync_pipe_inplace()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.sync_pipe_inplace) method for reference.
 
 ### `#!python create_pipe_indices()` (optional)
 
@@ -703,6 +650,7 @@ You may choose to implement `get_pipe_columns_indices()`, which returns a dictio
 
     ```python
     def get_pipe_columns_indices(
+        self,
         debug: bool = False,
     ) -> dict[str, list[dict[str, str]]]:
         """

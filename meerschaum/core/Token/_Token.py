@@ -121,6 +121,9 @@ class Token:
         """
         Register the new token to the configured instance.
         """
+        if self.user is None:
+            raise ValueError("Cannot register a token with a user.")
+
         return self.instance_connector.register_token(self, debug=debug)
 
     def edit(self, debug: bool = False) -> mrsm.SuccessTuple:
@@ -136,13 +139,11 @@ class Token:
         self.is_valid = False
         return self.instance_connector.invalidate_token(self, debug=debug)
 
-
     def delete(self, debug: bool = False) -> mrsm.SuccessTuple:
         """
         Delete this token from the instance connector.
         """
         return self.instance_connector.delete_token(self, debug=debug)
-
 
     def exists(self, debug: bool = False) -> bool:
         """
@@ -186,6 +187,32 @@ class Token:
 
         self.scopes = self.instance_connector.get_token_scopes(self, debug=debug)
         return self.scopes
+
+    def get_expiration_status(self, debug: bool = False) -> bool:
+        """
+        Check the token's expiration against the current timestamp.
+        If it's expired, invalidate the token.
+
+        Returns
+        -------
+        A bool to indication whether the token has expired.
+        A value of `True` means the token is invalid,
+        and `False` indicates a valid token.
+        """
+        expiration = self.expiration
+        if expiration is None:
+            return False
+
+        now = datetime.now(timezone.utc)
+        is_expired = expiration <= now
+        if is_expired:
+            self.is_valid = False
+            invalidate_success, invalidate_msg = self.invalidate(debug=debug)
+            if not invalidate_success:
+                from meerschaum.utils.warnings import warn
+                warn(f"Failed to invalidate {self}:\n{invalidate_msg}")
+
+        return is_expired
 
     def __str__(self):
         return self.label

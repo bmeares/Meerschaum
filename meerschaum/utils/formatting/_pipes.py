@@ -12,6 +12,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import PipesDict, Dict, Union, Optional, SuccessTuple, Any, List
 from meerschaum.config import get_config
 
+
 def pprint_pipes(pipes: PipesDict) -> None:
     """Print a stylized tree of a Pipes dictionary.
     Supports ANSI and UNICODE global settings."""
@@ -379,10 +380,10 @@ def highlight_pipes(message: str) -> str:
 
 
 def format_pipe_success_tuple(
-        pipe: mrsm.Pipe,
-        success_tuple: SuccessTuple,
-        nopretty: bool = False,
-    ) -> str:
+    pipe: mrsm.Pipe,
+    success_tuple: SuccessTuple,
+    nopretty: bool = False,
+) -> str:
     """
     Return a formatted string of a pipe and its resulting SuccessTuple.
 

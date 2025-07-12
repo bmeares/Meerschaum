@@ -9,11 +9,11 @@ Show information about a Pipe
 from meerschaum.utils.typing import SuccessTuple
 
 def show(
-        self,
-        nopretty: bool = False,
-        debug: bool = False,
-        **kw
-    ) -> SuccessTuple:
+    self,
+    nopretty: bool = False,
+    debug: bool = False,
+    **kw
+) -> SuccessTuple:
     """
     Show attributes of a Pipe.
 
