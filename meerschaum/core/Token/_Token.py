@@ -135,7 +135,7 @@ class Token:
         """
         if not self.id:
             return False
-        return self.instance_connector.token_id_exists(self.id, debug=debug)
+        return self.instance_connector.token_exists(self.id, debug=debug)
 
     def to_model(self, refresh: bool = False, debug: bool = False) -> TokenModel:
         """

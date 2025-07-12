@@ -1422,7 +1422,7 @@ def get_pipe_data_query(
             if k in existing_cols or skip_existing_cols_check
         }
         if valid_params:
-            where += build_where(valid_params, self).replace(
+            where += '    ' + build_where(valid_params, self).lstrip().replace(
                 'WHERE', ('    AND' if is_dt_bound else "    ")
             )
 
