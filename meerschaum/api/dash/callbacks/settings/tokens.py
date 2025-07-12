@@ -16,6 +16,7 @@ import dash_bootstrap_components as dbc
 import dash.html as html
 import dash.dcc as dcc
 
+import meerschaum as mrsm
 from meerschaum.api import get_api_connector, debug
 from meerschaum.api.dash import dash_app
 from meerschaum.api.dash.sessions import get_user_from_session
@@ -162,7 +163,7 @@ def register_token_click(
     token = Token(
         label=(name or None),
         user=get_user_from_session(session_id),
-        expiration=expiration,
+        expiration=(datetime.fromisoformat(f"{expiration}T00:00:00Z") if expiration is not None else None),
     )
     return False, True, build_tokens_register_output_modal(token)
 
@@ -170,15 +171,29 @@ def register_token_click(
 @dash_app.callback(
     Output("tokens-refresh-button", "n_clicks"),
     Input("tokens-register-output-modal", "is_open"),
+    Input({'type': 'tokens-edit-modal', 'index': ALL}, 'is_open'),
+    Input({'type': 'tokens-invalidate-modal', 'index': ALL}, 'is_open'),
+    Input({'type': 'tokens-delete-modal', 'index': ALL}, 'is_open'),
     State("tokens-refresh-button", "n_clicks"),
     prevent_initial_call=True,
 )
-def register_token_modal_close_refresh(is_open: bool, n_clicks: int):
+def register_token_modal_close_refresh(
+    register_is_open: bool,
+    edit_is_open_list,
+    invalidate_is_open_list,
+    delete_is_open_list,
+    n_clicks: int,
+):
     """
-    Refresh the cards when the registration modal changes visibility.
+    Refresh the cards when the registration, edit, invalidate, or delete modals changes visibility.
     """
-    if not n_clicks:
+    if any(
+        edit_is_open_list
+        + invalidate_is_open_list
+        + delete_is_open_list
+    ):
         raise PreventUpdate
+
     return (n_clicks or 0) + 1
 
 
@@ -197,7 +212,7 @@ def copy_token_button_click(
     clipboard_n_clicks: Optional[int],
     token_id: str,
     token_secret: str,
-) -> Tuple[str, str]:
+) -> Tuple[str, int, str]:
     """
     Copy the token's ID and secret to the clipboard.
     """
@@ -240,24 +255,6 @@ def close_register_output_modal(n_clicks: int) -> bool:
 
 
 @dash_app.callback(
-    Output({'type': 'tokens-scopes-collapse', 'index': MATCH}, 'is_open'),
-    Output({'type': 'tokens-view-scopes-button', 'index': MATCH}, 'children'),
-    Input({'type': 'tokens-view-scopes-button', 'index': MATCH}, 'n_clicks'),
-    State({'type': 'tokens-scopes-collapse', 'index': MATCH}, 'is_open'),
-    prevent_initial_call=True,
-)
-def view_scopes_click(
-    n_clicks: int,
-    is_open: bool,
-):
-    if not n_clicks:
-        raise PreventUpdate
-
-    button_text = 'Hide' if not is_open else 'View'
-    return (not is_open), button_text
-
-
-@dash_app.callback(
     Output({'type': 'tokens-edit-modal', 'index': MATCH}, 'is_open'),
     Input({'type': 'tokens-edit-button', 'index': MATCH}, 'n_clicks'),
     prevent_initial_call=True,
@@ -269,16 +266,19 @@ def edit_token_button_click(n_clicks: int):
 
 
 @dash_app.callback(
+    Output({'type': 'tokens-edit-modal', 'index': MATCH}, 'is_open'),
     Output({'type': 'tokens-edit-alerts-div', 'index': MATCH}, 'children'),
     Input({'type': 'tokens-edit-submit-button', 'index': MATCH}, 'n_clicks'),
     State({'type': 'tokens-expiration-datepickersingle', 'index': MATCH}, 'date'),
     State({'type': 'tokens-scopes-checklist', 'index': MATCH}, 'value'),
+    State({'type': 'tokens-name-input', 'index': MATCH}, 'value'),
     prevent_initial_call=True,
 )
 def edit_token_submit_button_click(
     n_clicks: int,
     expiration: Optional[datetime],
     scopes: List[str],
+    label: str,
 ):
     if not n_clicks:
         raise PreventUpdate
@@ -290,24 +290,99 @@ def edit_token_submit_button_click(
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     token_id = component_dict['index']
 
-    ### TODO: Figure out why the label is inconsistent.
     token = Token(
         id=token_id,
-        expiration=expiration,
+        label=label,
+        expiration=(datetime.fromisoformat(f"{expiration}T00:00:00Z") if expiration is not None else None),
         scopes=scopes,
         instance=get_api_connector(),
     )
 
-    token_model = token.to_model()
-    token.label = token_model.label
-
     success, msg = token.edit(debug=debug)
-    if success:
-        msg = f"Successfully edited token '{token.label}'."
-    return alert_from_success_tuple((success, msg))
+    if not success:
+        return dash.no_update, alert_from_success_tuple((success, msg))
+
+    return False, dash.no_update
 
 
-#  @dash_app.callback(
-    #  Input()
-#  )
-#  def 
+@dash_app.callback(
+    Output({'type': 'tokens-invalidate-modal', 'index': MATCH}, 'is_open'),
+    Input({'type': 'tokens-invalidate-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True,
+)
+def invalidate_token_click(n_clicks: int):
+    if not n_clicks:
+        raise PreventUpdate
+    return True
+
+
+@dash_app.callback(
+    Output({'type': 'tokens-delete-modal', 'index': MATCH}, 'is_open'),
+    Input({'type': 'tokens-delete-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True,
+)
+def invalidate_token_click(n_clicks: int):
+    if not n_clicks:
+        raise PreventUpdate
+    return True
+
+
+
+@dash_app.callback(
+    Output({'type': 'tokens-edit-modal', 'index': MATCH}, 'is_open'),
+    Output({'type': 'tokens-invalidate-modal', 'index': MATCH}, 'is_open'),
+    Output({'type': 'tokens-invalidate-alerts-div', 'index': MATCH}, 'children'),
+    Input({'type': 'tokens-invalidate-confirm-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True,
+)
+def invalidate_token_confirm_click(n_clicks: int):
+    if not n_clicks:
+        raise PreventUpdate
+
+    ctx = dash.callback_context.triggered
+    if ctx[0]['value'] is None:
+        raise PreventUpdate
+
+    component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
+    token_id = component_dict['index']
+
+    token = Token(
+        id=token_id,
+        instance=get_api_connector(),
+    )
+
+    success, msg = token.invalidate(debug=debug)
+    if not success:
+        return dash.no_update, dash.no_update, alert_from_success_tuple((success, msg))
+
+    return False, False, dash.no_update
+
+
+@dash_app.callback(
+    Output({'type': 'tokens-edit-modal', 'index': MATCH}, 'is_open'),
+    Output({'type': 'tokens-delete-modal', 'index': MATCH}, 'is_open'),
+    Output({'type': 'tokens-delete-alerts-div', 'index': MATCH}, 'children'),
+    Input({'type': 'tokens-delete-confirm-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True,
+)
+def delete_token_confirm_click(n_clicks: int):
+    if not n_clicks:
+        raise PreventUpdate
+
+    ctx = dash.callback_context.triggered
+    if ctx[0]['value'] is None:
+        raise PreventUpdate
+
+    component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
+    token_id = component_dict['index']
+
+    token = Token(
+        id=token_id,
+        instance=get_api_connector(),
+    )
+
+    success, msg = token.delete(debug=debug)
+    if not success:
+        return dash.no_update, dash.no_update, alert_from_success_tuple((success, msg))
+
+    return False, False, []

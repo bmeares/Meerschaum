@@ -53,6 +53,8 @@ class InstanceConnector(Connector):
         get_tokens_pipe,
         register_token,
         edit_token,
+        invalidate_token,
+        delete_token,
         get_token,
         get_tokens,
         get_token_model,

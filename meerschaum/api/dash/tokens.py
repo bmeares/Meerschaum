@@ -50,8 +50,8 @@ def get_tokens_table(session_id: Optional[str] = None) -> Tuple[dbc.Table, List[
                 html.Th("Client ID"),
                 html.Th("Created"),
                 html.Th("Expires in"),
-                html.Th("Scopes"),
-                html.Th("Edit"),
+                html.Th("Is Valid"),
+                html.Th(""),
             ]),
         ),
     ]
@@ -61,126 +61,286 @@ def get_tokens_table(session_id: Optional[str] = None) -> Tuple[dbc.Table, List[
             html.Td(str(token.label)),
             html.Td(html.Pre(str(token.id))),
             html.Td(get_creation_string(token).replace('Created ', '')),
-            html.Td(get_expiration_string(token).replace('Expires ', '').capitalize()),
+            html.Td(get_expiration_string(token).replace('Expires in ', '')),
+            html.Td("✅" if token.is_valid else "❌"),
             html.Td([
                 dbc.Button(
-                    "View",
-                    color='link',
-                    style={'text-decoration': 'none'},
-                    id={'type': 'tokens-view-scopes-button', 'index': str(token.id)},
-                ),
-                dbc.Collapse(
-                    dbc.ListGroup(
-                        [
-                            dbc.ListGroupItem(scope)
-                            for scope in token.scopes
-                        ],
-                        flush=True,
-                    ),
-                    id={'type': 'tokens-scopes-collapse', 'index': str(token.id)},
-                )
-            ]),
-            html.Td([
-                dbc.Button(
-                    html.B("🖉"),
+                    html.B("⠇"),
                     color='link',
                     size='sm',
-                    id={'type': 'tokens-edit-button', 'index': str(token.id)},
+                    id={'type': 'tokens-context-button', 'index': str(token.id)},
                     style={'text-decoration': 'none'},
                 ),
-                dbc.Modal(
-                    [
-                        dbc.ModalHeader([
-                            html.H4([
-                                "Edit token ",
-                                html.B(str(token.label))
-                            ]),
-                        ]),
-                        dbc.ModalBody([
-                            html.Div(id={'type': 'tokens-edit-alerts-div', 'index': str(token.id)}),
-
-                            dbc.Form([
-                                dbc.Row(
-                                    [
-                                        dbc.Label("Name", width='auto'),
-                                        dbc.Col(
-                                            [
-                                                dbc.Input(
-                                                    placeholder="Enter token's label",
-                                                    value=str(token.label),
-                                                    id={'type': 'tokens-name-input', 'index': str(token.id)},
-                                                ),
-                                            ],
-                                            className="me-3",
-                                        ),
-                                        dbc.Label("Expiration", width='auto'),
-                                        dbc.Col(
-                                            dcc.DatePickerSingle(
-                                                date=(token.expiration.to_pydatetime() if hasattr(token.expiration, 'to_pydatetime') else token.expiration),
-                                                clearable=True,
-                                                min_date_allowed=datetime.today().date(),
-                                                display_format="YYYY-MM-DD",
-                                                id={'type': 'tokens-expiration-datepickersingle', 'index': str(token.id)},
-                                            )
-                                        ),
-                                    ],
-                                    className='g-2',
-                                ),
-                                html.Br(),
-                                dbc.Row([
-                                ]),
-                                html.Div([
-                                    dbc.Button(
-                                        "Deselect all",
-                                        size='sm',
-                                        color='link',
-                                        id={'type': "tokens-deselect-scopes-button", 'index': str(token.id)},
-                                        style={'text-decoration': 'none'},
-                                    ),
-                                    html.Br(),
-                                    dbc.Row([
-                                        dbc.Label("Scopes", width='auto'),
-                                        dbc.Col([
-                                            dbc.Checklist(
-                                                options=[
-                                                    {"label": scope, "value": scope}
-                                                    for scope in STATIC_CONFIG['tokens']['scopes']
-                                                ],
-                                                value=token.scopes,
-                                                id={'type': "tokens-scopes-checklist", 'index': str(token.id)},
-                                                style={'columnCount': 3},
-                                            ),
-                                        ]),
-                                    ]),
-                                ], id={'type': 'tokens-scopes-checklist-div', 'index': str(token.id)}),
-                            ]),
-
-                        ]),
-                        dbc.ModalFooter([
-                            dbc.Button(
-                                "Edit",
-                                id={'type': 'tokens-edit-submit-button', 'index': str(token.id)},
-                            ),
-                        ]),
-                    ],
-                    size='lg',
-                    is_open=False,
-                    id={'type': 'tokens-edit-modal', 'index': str(token.id)},
-                ),
+                build_manage_token_popover(token),
+                build_edit_token_modal(token),
+                build_invalidate_token_modal(token),
+                build_delete_token_modal(token),
             ]),
         ])
         for token in tokens
     ]
 
     table_body = [html.Tbody(rows)]
-
-    table = dbc.Table(
-        table_header + table_body,
-    )
-
+    table = dbc.Table(table_header + table_body)
     return table, alerts
 
 
+def build_manage_token_popover(token: Token) -> dbc.Popover:
+    """
+    Return the "Manage token" popover.
+    """
+    return dbc.Popover(
+        [
+            dbc.PopoverHeader(["Manage token"]),
+            dbc.PopoverBody([
+                dbc.ButtonGroup(
+                    ([
+                        dbc.Button(
+                            "Edit",
+                            outline=True,
+                            color='light',
+                            id={
+                                'type': 'tokens-edit-button',
+                                'index': str(token.id),
+                            },
+                        ),
+                        dbc.Button(
+                            "Invalidate",
+                            outline=True,
+                            color='warning',
+                            id={
+                                'type': 'tokens-invalidate-button',
+                                'index': str(token.id),
+                            },
+                        ),
+                    ] if token.is_valid else []) + [
+                    dbc.Button(
+                        "Delete",
+                        color='danger',
+                        outline=True,
+                        id={
+                            'type': 'tokens-delete-button',
+                            'index': str(token.id),
+                        },
+                    ),
+                ]),
+            ]),
+        ],
+        body=True,
+        trigger='legacy',
+        autohide=True,
+        id={'type': 'tokens-context-popover', 'index': str(token.id)},
+        target={'type': 'tokens-context-button', 'index': str(token.id)},
+    )
+
+
+def build_edit_token_modal(token: Token) -> dbc.Modal:
+    """
+    Return the Modal for editing the token.
+    """
+    return dbc.Modal(
+        [
+            dbc.ModalHeader([
+                html.H4([
+                    "Edit token ",
+                    html.B(str(token.label))
+                ]),
+            ]),
+            dbc.ModalBody([
+                html.Div(id={'type': 'tokens-edit-alerts-div', 'index': str(token.id)}),
+
+                dbc.Form([
+                    dbc.Row(
+                        ([
+                            dbc.Label("Name", width='auto'),
+                            dbc.Col(
+                                [
+                                    dbc.Input(
+                                        placeholder="Enter token's label",
+                                        value=str(token.label),
+                                        id={
+                                            'type': 'tokens-name-input',
+                                            'index': str(token.id),
+                                        },
+                                    ),
+                                ],
+                                className="me-3",
+                            ),
+                            dbc.Label("Expiration", width='auto'),
+                            dbc.Col(
+                                dcc.DatePickerSingle(
+                                    date=(
+                                        token.expiration.to_pydatetime()
+                                        if hasattr(token.expiration, 'to_pydatetime')
+                                        else token.expiration
+                                    ),
+                                    clearable=True,
+                                    min_date_allowed=datetime.today().date(),
+                                    display_format="YYYY-MM-DD",
+                                    id={
+                                        'type': 'tokens-expiration-datepickersingle',
+                                        'index': str(token.id),
+                                    },
+                                )
+                            ),
+                        ] if token.is_valid else []) + [
+                            dbc.Col([
+                            ]),
+                        ],
+                        className='g-2',
+                    ),
+                    html.Br(),
+                    dbc.Row([
+                    ]),
+                    html.Div([
+                        dbc.Button(
+                            "Deselect all",
+                            size='sm',
+                            color='link',
+                            id={
+                                'type': "tokens-deselect-scopes-button",
+                                'index': str(token.id),
+                            },
+                            style={'text-decoration': 'none'},
+                        ),
+                        html.Br(),
+                        dbc.Row([
+                            dbc.Label("Scopes", width='auto'),
+                            dbc.Col([
+                                dbc.Checklist(
+                                    options=[
+                                        {"label": scope, "value": scope}
+                                        for scope in STATIC_CONFIG['tokens']['scopes']
+                                    ],
+                                    value=token.scopes,
+                                    id={
+                                        'type': "tokens-scopes-checklist",
+                                        'index': str(token.id),
+                                    },
+                                    style={'columnCount': 3},
+                                ),
+                            ]),
+                        ]),
+                    ] if token.is_valid else [], id={
+                        'type': 'tokens-scopes-checklist-div',
+                        'index': str(token.id),
+                    }),
+                ]),
+
+            ]),
+            dbc.ModalFooter(
+                [
+                    html.Small(str(token.id)),
+                    dbc.Button(
+                        "Submit",
+                        id={'type': 'tokens-edit-submit-button', 'index': str(token.id)},
+                    ),
+                ],
+                className='d-flex justify-content-between',
+            ),
+        ],
+        size='lg',
+        is_open=False,
+        id={'type': 'tokens-edit-modal', 'index': str(token.id)},
+    )
+
+
+def build_invalidate_token_modal(token: Token) -> dbc.Modal:
+    """
+    Return the Invalidate token modal.
+    """
+    return dbc.Modal(
+        [
+            dbc.ModalHeader([
+                html.H4([
+                    "Invalidate token ",
+                    html.B(token.label),
+                    "?"
+                ]),
+            ]),
+            dbc.ModalBody([
+                html.Div(
+                    id={
+                        'type': 'tokens-invalidate-alerts-div',
+                        'index': str(token.id)
+                    },
+                ),
+                html.P(
+                    [
+                        "Are you sure you want to invalidate token ",
+                        html.B(token.label),
+                        " (",
+                        html.I(str(token.id)),
+                        ")?",
+                    ],
+                ),
+                html.P([html.B("This action cannot be undone!")]),
+            ]),
+            dbc.ModalFooter([
+                dbc.Button(
+                    "Invalidate",
+                    color='danger',
+                    id={
+                        'type': 'tokens-invalidate-confirm-button',
+                        'index': str(token.id),
+                    },
+                ),
+            ]),
+        ],
+        id={
+            'type': 'tokens-invalidate-modal',
+            'index': str(token.id),
+        },
+    )
+
+
+def build_delete_token_modal(token: Token) -> dbc.Modal:
+    """
+    Return the delete token modal.
+    """
+    return dbc.Modal(
+        [
+            dbc.ModalHeader([
+                html.H4([
+                    "Delete token ",
+                    html.B(token.label),
+                    "?"
+                ]),
+            ]),
+            dbc.ModalBody([
+                html.Div(
+                    id={
+                        'type': 'tokens-delete-alerts-div',
+                        'index': str(token.id)
+                    },
+                ),
+                html.P(
+                    [
+                        "Are you sure you want to delete token ",
+                        html.B(token.label),
+                        " (",
+                        html.I(str(token.id)),
+                        ")?",
+                    ],
+                ),
+                html.P([html.B("This action cannot be undone!")]),
+            ]),
+            dbc.ModalFooter([
+                dbc.Button(
+                    "Delete",
+                    color='danger',
+                    id={
+                        'type': 'tokens-delete-confirm-button',
+                        'index': str(token.id),
+                    },
+                ),
+            ]),
+        ],
+        id={
+            'type': 'tokens-delete-modal',
+            'index': str(token.id),
+        },
+    )
 
 
 def get_tokens_cards(session_id: Optional[str] = None) -> Tuple[List[dbc.Card], List[dbc.Alert]]:
