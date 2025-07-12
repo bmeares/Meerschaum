@@ -110,6 +110,57 @@ def edit_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple:
     return True, "Success"
 
 
+def invalidate_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple:
+    """
+    Set `is_valid` to `False` for the given token.
+    """
+    if not token.id:
+        return False, "Token ID is not set."
+
+    if not token.exists(debug=debug):
+        return False, f"Token {token.id} does not exist."
+
+    if not token.creation:
+        token_model = self.get_token_model(token.id)
+        token.creation = token_model.creation
+
+    token.is_valid = False
+    tokens_pipe = self.get_tokens_pipe()
+    doc = {
+        'id': token.id,
+        'creation': token.creation,
+        'is_valid': False,
+    }
+    sync_success, sync_msg = tokens_pipe.sync([doc], debug=debug)
+    if not sync_success:
+        return False, f"Failed to invalidate token '{token.id}':\n{sync_msg}"
+
+    return True, "Success"
+
+
+def delete_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple:
+    """
+    Delete the given token from the tokens table.
+    """
+    if not token.id:
+        return False, "Token ID is not set."
+
+    if not token.exists(debug=debug):
+        return False, f"Token {token.id} does not exist."
+
+    if not token.creation:
+        token_model = self.get_token_model(token.id)
+        token.creation = token_model.creation
+
+    token.is_valid = False
+    tokens_pipe = self.get_tokens_pipe()
+    clear_success, clear_msg = tokens_pipe.clear(params={'id': token.id}, debug=debug)
+    if not clear_success:
+        return False, f"Failed to delete token '{token.id}':\n{clear_msg}"
+
+    return True, "Success"
+
+
 def get_tokens(self, user: Optional[User] = None, debug: bool = False) -> List[Token]:
     """
     Return a list of `Token` objects.
@@ -143,7 +194,7 @@ def get_tokens(self, user: Optional[User] = None, debug: bool = False) -> List[T
             instance=self,
             **token_doc
         )
-        for token_doc in tokens_docs
+        for token_doc in reversed(tokens_docs)
     ]
 
 

@@ -129,6 +129,21 @@ class Token:
         """
         return self.instance_connector.edit_token(self, debug=debug)
 
+    def invalidate(self, debug: bool = False) -> mrsm.SuccessTuple:
+        """
+        Set `is_valid` to False for this token.
+        """
+        self.is_valid = False
+        return self.instance_connector.invalidate_token(self, debug=debug)
+
+
+    def delete(self, debug: bool = False) -> mrsm.SuccessTuple:
+        """
+        Delete this token from the instance connector.
+        """
+        return self.instance_connector.delete_token(self, debug=debug)
+
+
     def exists(self, debug: bool = False) -> bool:
         """
         Return `True` if a token's ID exists in the tokens pipe.
