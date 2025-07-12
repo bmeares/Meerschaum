@@ -7,19 +7,15 @@ Define the API token routes.
 
 import json
 import uuid
-from datetime import datetime, timezone
-from typing import Optional, Tuple, List
 
 import meerschaum as mrsm
 from meerschaum.core import Token
-from meerschaum.models import TokenModel
 from meerschaum.api import (
     app,
     fastapi,
     debug,
     no_auth,
     manager,
-    private,
     get_api_connector,
     endpoints,
 )
@@ -28,13 +24,37 @@ from meerschaum.api.models import (
     RegisterTokenRequestModel,
     SuccessTupleResponseModel,
     GetTokenResponseModel,
+    GetTokensResponseModel,
 )
-from meerschaum.api._tokens import optional_token, get_current_token
-from meerschaum.utils.dtypes import coerce_timezone, json_serialize_value, value_is_null
-from meerschaum._internal.static import STATIC_CONFIG
+from meerschaum.api._tokens import get_current_token
+from meerschaum.utils.dtypes import json_serialize_value, value_is_null
 from meerschaum.utils.misc import is_uuid
 
 tokens_endpoint = endpoints['tokens']
+
+
+@app.get(
+    tokens_endpoint,
+    tags=['Tokens'],
+    response_model=GetTokensResponseModel,
+)
+def get_tokens(
+    labels: str = '',
+    curr_user=(fastapi.Depends(manager) if not no_auth else None),
+):
+    """
+    Return the tokens registered to the current user.
+    """
+    _labels = None if not labels else labels.split(',')
+    tokens = get_api_connector().get_tokens(user=curr_user, labels=_labels, debug=debug)
+    return [
+        {
+            key: (None if value_is_null(val) else val)
+            for key, val in dict(token.to_model()).items()
+            if key != 'secret_hash'
+        }
+        for token in tokens
+    ]
 
 
 @app.post(
@@ -81,7 +101,7 @@ def register_token(
 )
 def validate_api_key(
     curr_token=(fastapi.Depends(get_current_token) if not no_auth else None),
-) -> SuccessTupleResponseModel:
+) -> mrsm.SuccessTuple:
     """
     Return a 200 if the given Authorization token (API key) is valid.
     """
@@ -131,4 +151,86 @@ def get_token_model(
     return fastapi.Response(
         json.dumps(payload, default=json_serialize_value),
         media_type='application/json',
+    )
+
+
+@app.post(
+    tokens_endpoint + '/{token_id}/edit',
+    tags=['Tokens'],
+    response_model=SuccessTupleResponseModel,
+)
+def edit_token(
+    token_id: str,
+    token_model: GetTokenResponseModel,
+    curr_user=(fastapi.Depends(manager) if not no_auth else None),
+) -> mrsm.SuccessTuple:
+    """
+    Edit the token's scope, expiration,, etc.
+    """
+    if not is_uuid(token_id):
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail="Token ID must be a UUID.",
+        )
+
+    token = Token(
+        id=uuid.UUID(token_id),
+        user=curr_user,
+        is_valid=token_model.is_valid,
+        creation=token_model.creation,
+        expiration=token_model.expiration,
+        scopes=token_model.scopes,
+        label=token_model.label,
+        instance=get_api_connector(),
+    )
+    return token.edit(debug=debug)
+
+
+@app.post(
+    tokens_endpoint + '/{token_id}/invalidate',
+    tags=['Tokens'],
+    response_model=SuccessTupleResponseModel,
+)
+def invalidate_token(
+    token_id: str,
+    curr_user=(fastapi.Depends(manager) if not no_auth else None),
+) -> mrsm.SuccessTuple:
+    """
+    Invalidate the token, disabling it for future requests.
+    """
+    if not is_uuid(token_id):
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail="Token ID must be a UUID.",
+        )
+
+    _token_id = uuid.UUID(token_id)
+    return get_api_connector().invalidate_token(
+        Token(id=_token_id, instance=get_api_connector()),
+        debug=debug,
+    )
+
+
+@app.delete(
+    tokens_endpoint + '/{token_id}',
+    tags=['Tokens'],
+    response_model=SuccessTupleResponseModel,
+)
+def delete_token(
+    token_id: str,
+    curr_user=(fastapi.Depends(manager) if not no_auth else None),
+) -> mrsm.SuccessTuple:
+    """
+    Delete the token from the instance.
+    """
+    if not is_uuid(token_id):
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail="Token ID must be a UUID.",
+        )
+
+    _token_id = uuid.UUID(token_id)
+    return get_api_connector().delete_token(
+        Token(id=_token_id, instance=get_api_connector()),
+        debug=debug,
     )

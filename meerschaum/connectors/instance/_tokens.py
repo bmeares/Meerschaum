@@ -61,6 +61,9 @@ def register_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple
     token_id, token_secret = token.generate_credentials()
     tokens_pipe = self.get_tokens_pipe()
     user_id = self.get_user_id(token.user) if token.user is not None else None
+    if user_id is None:
+        raise ValueError("Cannot register a token without a user.")
+
     doc = {
         'id': token_id,
         'user_id': user_id,
@@ -161,7 +164,13 @@ def delete_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple:
     return True, "Success"
 
 
-def get_tokens(self, user: Optional[User] = None, debug: bool = False) -> List[Token]:
+def get_tokens(
+    self,
+    user: Optional[User] = None,
+    labels: Optional[List[str]] = None,
+    ids: Optional[List[uuid.UUID]] = None,
+    debug: bool = False,
+) -> List[Token]:
     """
     Return a list of `Token` objects.
     """
@@ -183,6 +192,10 @@ def get_tokens(self, user: Optional[User] = None, debug: bool = False) -> List[T
         if user_id is not None
         else {}
     )
+    if labels:
+        params['label'] = labels
+    if ids:
+        params['id'] = ids
         
     tokens_df = tokens_pipe.get_data(params=params, debug=debug)
     if tokens_df is None:

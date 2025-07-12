@@ -83,6 +83,12 @@ class APIConnector(InstanceConnector):
     from ._tokens import (
         register_token,
         get_token_model,
+        get_tokens,
+        edit_token,
+        invalidate_token,
+        get_token_scopes,
+        token_exists,
+        delete_token,
     )
     from ._uri import from_uri
     from ._jobs import (

@@ -42,6 +42,7 @@ def sync(
         pd.DataFrame,
         Dict[str, List[Any]],
         List[Dict[str, Any]],
+        str,
         InferFetch
     ] = InferFetch,
     begin: Union[datetime, int, str, None] = '',
@@ -71,6 +72,7 @@ def sync(
     ----------
     df: Union[None, pd.DataFrame, Dict[str, List[Any]]], default None
         An optional DataFrame to sync into the pipe. Defaults to `None`.
+        If `df` is a string, it will be parsed via `meerschaum.utils.dataframe.parse_simple_lines()`.
 
     begin: Union[datetime, int, str, None], default ''
         Optionally specify the earliest datetime to search for data.
@@ -171,6 +173,7 @@ def sync(
             'pd.DataFrame',
             Dict[str, List[Any]],
             List[Dict[str, Any]],
+            str,
             InferFetch
         ] = InferFetch,
     ) -> SuccessTuple:
@@ -189,6 +192,10 @@ def sync(
                 if 'already' not in register_msg:
                     p._exists = None
                     return register_success, register_msg
+
+        if isinstance(df, str):
+            from meerschaum.utils.dataframe import parse_simple_lines
+            df = parse_simple_lines(df)
 
         ### If connector is a plugin with a `sync()` method, return that instead.
         ### If the plugin does not have a `sync()` method but does have a `fetch()` method,

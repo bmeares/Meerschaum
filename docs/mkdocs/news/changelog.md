@@ -123,6 +123,16 @@ This is the current release cycle, so stay tuned for future releases!
       ...
   ```
 
+- **Add long-lived authentication tokens.**  
+  You may now register [tokens](https://meerschaum.io/reference/api-instance/tokens) to programmatically authenticate your applications to a Meerschaum API instance. This is ideal for use cases such as CI/CD, IoT, and other automated workloads. Tokens are restricted by scopes, may expire or be invalidated, and are owned by a user account. Tokens may be managed via the CLI or web console (at `/dash/tokens`, under `Settings` > `Tokens`).
+
+  ```bash
+  mrsm register token
+  ```
+
+- **Add scopes to user accounts.**  
+  Similar to tokens, users may be restricted by scopes. Run `edit user` to edit the `scopes` attribute for a given user (more comprehensive editing to come). 
+
 - **Set `coerce_types` to `True` in `query_df()` if any exclude parameters are provided.**  
   Prefacing a value with the negation prefix in `params` for `query_df()` will now force `coerce_types` to be `True`.
 

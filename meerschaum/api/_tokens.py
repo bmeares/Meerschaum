@@ -17,7 +17,7 @@ from starlette import status
 import meerschaum as mrsm
 from meerschaum.api import (
     get_api_connector,
-    no_auth,
+    debug,
 )
 from meerschaum.core import Token, User
 from meerschaum.core.User import verify_password
@@ -54,7 +54,7 @@ def get_token_from_authorization(authorization: str) -> Token:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if token.expiration and token.expiration < datetime.now(timezone.utc):
+    if token.get_expiration_status(debug=debug):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired.",

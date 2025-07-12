@@ -1,22 +1,220 @@
 # 🪵 Changelog
 
-## 2.9.x Releases
+## 3.0.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v2.9.6
+### v3.0.0
+
+- **Inherit another pipe's base parameters with `reference`.**  
+  Pipes may inherit the base parameters of other pipes by setting the key `reference`:
+
+  ```python
+  import meerschaum as mrsm
+
+  base_pipe = mrsm.Pipe(
+      'demo', 'reference', 'parent',
+      instance='sql:memory',
+      columns={
+          'datetime': 'ts',
+          'id': 'id',
+      },
+      parameters={
+          'custom': {
+              'foo': 'bar',
+              'color': 'red',
+          },
+      },
+  )
+  base_pipe.register()
+
+  pipe = mrsm.Pipe(
+      'demo', 'reference', 'child',
+      instance='sql:memory',
+      parameters={
+          'reference': {
+              'connector': 'demo',
+              'metric': 'reference',
+              'location': 'parent',
+              'instance': 'sql:memory',
+          },
+          'custom': {
+              'color': 'blue',
+          },
+      },
+  )
+
+  print(pipe.parameters)
+  # {'custom': {'foo': 'bar', 'color': 'blue'}, 'columns': {'datetime': 'ts', 'id': 'id'}} 
+  ```
+
+- **Dynamically symlink to other pipes' attributes.**  
+  Reference attributes of other pipes using the `{{ Pipe(...) }}` syntax. These references are resolved at run-time when `Pipe.parameters` is accessed:
+
+  ```python
+  import json
+  import meerschaum as mrsm
+
+  some_pipe = mrsm.Pipe(
+      'demo', 'symlink',
+      instance='sql:memory',
+      parameters={
+          'target': 'some_table',
+          'columns': {
+              'datetime': 'id',
+              'id': 'id',
+          },
+          'upsert': True,
+          'custom': {
+              'stations': ['KATL', 'KGMU', 'KCEU'],
+          },
+      },
+  )
+  some_pipe.register()
+
+  pipe = mrsm.Pipe(
+      'demo', 'symlink', 'child',
+      instance='sql:memory',
+      parameters={
+          'target': "{{ Pipe('demo', 'symlink', instance='sql:memory').target }}",
+          'columns': "{{ Pipe('demo', 'symlink', instance='sql:memory').columns }}",
+          'upsert': "{{ Pipe('demo', 'symlink', instance='sql:memory').upsert }}",
+          'custom': "{{ Pipe('demo', 'symlink', instance='sql:memory').parameters['custom'] }}",
+          'parent_pipe_id': "{{ Pipe('demo', 'symlink', instance='sql:memory').id }}",
+      },
+  )
+
+  print(json.dumps(pipe.parameters, indent=4))
+  # {
+  #     "target": "some_table",
+  #     "columns": {
+  #         "datetime": "id",
+  #         "id": "id"
+  #     },
+  #     "upsert": true,
+  #     "custom": {
+  #         "stations": [
+  #             "KATL",
+  #             "KGMU",
+  #             "KCEU"
+  #         ]
+  #     },
+  #     "parent_pipe_id": 1
+  # }  
+  ```
+
+- **Add `InstanceConnector` base class.**  
+  Custom connectors which implement the [instance connectors interface](https://meerschaum.io/reference/connectors/instance-connectors/) should now inherit from `InstanceConnector` as the base class:
+
+  ```python
+  # example.py
+
+  from meerschaum.connectors import InstanceConnector, make_connector
+
+  @make_connector
+  class ExampleConnector(InstanceConnector):
+      
+      def register_pipe(self, pipe: mrsm.Pipe, **kwargs):
+          ...
+
+      def get_pipe_attributes(self, pipe: mrsm.Pipe, **kwargs):
+          ...
+
+      ...
+  ```
+
+- **Add long-lived authentication tokens.**  
+  You may now register [tokens](https://meerschaum.io/reference/api-instance/tokens) to programmatically authenticate your applications to a Meerschaum API instance. This is ideal for use cases such as CI/CD, IoT, and other automated workloads. Tokens are restricted by scopes, may expire or be invalidated, and are owned by a user account. Tokens may be managed via the CLI or web console (at `/dash/tokens`, under `Settings` > `Tokens`).
+
+  ```bash
+  mrsm register token
+  ```
+
+- **Add scopes to user accounts.**  
+  Similar to tokens, users may be restricted by scopes. Run `edit user` to edit the `scopes` attribute for a given user (more comprehensive editing to come). 
+
+- **Set `coerce_types` to `True` in `query_df()` if any exclude parameters are provided.**  
+  Prefacing a value with the negation prefix in `params` for `query_df()` will now force `coerce_types` to be `True`.
+
+  ```python
+  import pandas as pd
+  from meerschaum.utils.dataframe import query_df
+
+  df = pd.DataFrame([
+      {'id': 1, 'color': 'red', 'count': 3},
+      {'id': 2, 'color': 'blue', 'count': 2},
+      {'id': 3, 'color': 'red', 'count': 1},
+      {'id': 4, 'color': 'green', 'count': 3},
+  ])
+  result_df = query_df(df, {'count': '_3'})
+  print(result_df)
+  #    id color  count
+  # 1   2  blue      2
+  # 2   3   red      1
+  ```
 
 - **Project geometry data to WGS84 (EPSG:4326) when serializing as GeoJSON.**  
-  Setting `geometry_format` to `geojson` for `to_json()` (and `serialize_geometry()`) will project to WGS84 if a CRS is provided (to meet the 2016 GeoJSON specification).
+  Setting `geometry_format` to `geojson` for `to_json()` (default) (and `serialize_geometry()`, though not default) will project to WGS84 if a CRS is provided (to meet the 2016 GeoJSON specification).
+
+  ```python
+  import meerschaum as mrsm
+  from meerschaum.utils.dataframe import to_json
+
+  pipe = mrsm.Pipe(
+      'demo', 'geojson',
+      instance='sql:memory',
+      temporary=True,
+      columns={'primary': 'id'},
+      dtypes={
+          'geometry': 'geometry[point, 6570]',
+      },
+  )
+  pipe.sync([{
+      'id': 1,
+      'geometry': 'POINT (1583385.033568 1111981.990433)',
+  }])
+
+  df = pipe.get_data()
+  json_data = to_json(df)
+  print(json_data)
+  # [{"id":1,"geometry":{"type":"Point","coordinates":[-82.389048539797542,34.881760860334396]}}] 
+  ```
+
+  - **Upgrade `sql:main` to PostgreSQL 17.**  
+    The Meerschaum stack database now ships as `timescale/timescaledb-ha:pg17`, which includes additional extensions such as PostGIS. The flavor for `sql:main` is now `timescaledb-ha` (see below).
+
+- **Add the SQL flavor `timescaledb-ha`.**  
+  The default instance connector `sql:main` now has the flavor `timescaledb-ha`, corresponding to the `timescale/timescaledb-ha` Docker image. This image includes PostGIS, `timescaledb_toolkit`, and `pg_stat_statements`.
 
 - **Add support for sets and Series in `query_df()`.**  
   Sets and Pandas Series within `params` will now be treated as lists.
 
-- **Set `coerce_types` to `True` if any exclude parameters are provided.**  
-  Prefacing a value with the negation prefix in `params` for `query_df()` will now force `coerce_types` to be `True`.
-
 - **Allow for spaces and an optional `mrsm.` prefix for templated SQL query definitions.**  
   The template format `{{Pipe(...)}}` will now match leading and trailing spaces around the `Pipe` declaration, and an optional `mrsm.` prefix is accepted.
+
+- **Add `Pipe.get_value()`.**  
+  The convenience function `Pipe.get_value()` has been added for selecting single values from result sets of `Pipe.get_data`():
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'value',
+      instance='sql:memory',
+      temporary=True,
+      autoincrement=True,
+      columns={'primary': 'id'},
+  )
+  pipe.sync([
+      {'species': 'parrot', 'name': 'Polly'},
+      {'species': 'dog', 'name': 'Spot'},
+      {'species': 'rabbit', 'name': 'Peter Cottontail'},
+  ], debug=True)
+  
+  spot_id = pipe.get_value('id', params={'name': 'Spot'}, debug=True)
+  print(spot_id)
+  # 2
+  ```
 
 - **Add `MRSM` config symlinks to pipe parameters.**  
   TODO
@@ -29,6 +227,12 @@ This is the current release cycle, so stay tuned for future releases!
 - **Ignore `schema` from pipes' parameters on SQLite.**
 
 - **Tweak `begin` and `end` input sizes in the pipes card.**
+
+**Bugfixes**
+
+## 2.9.x Releases
+
+The 2.9 series added support for geometry data and improved the web console development experience.
 
 ### v2.9.5
 

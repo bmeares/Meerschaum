@@ -552,25 +552,37 @@ def _edit_tokens(
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
     if not action:
-        return False, "Provide token IDs for the tokens to edit."
+        return False, "Provide token labels or IDs for the tokens to edit."
 
     conn = parse_instance_keys(mrsm_instance)
-    keys_to_skip = ['secret_hash']
+
+    labels = [
+        label
+        for label in (action or [])
+        if not is_uuid(label)
+    ]
+    potential_token_ids = [
+        uuid.UUID(potential_id)
+        for potential_id in (action or [])
+        if is_uuid(potential_id)
+    ]
+
+    tokens = conn.get_tokens(
+        labels=(labels or None),
+        ids=(potential_token_ids or None),
+        debug=debug,
+    )
 
     num_edited = 0
-    for potential_token_id_str in action:
-        if not is_uuid(potential_token_id_str):
-            warn(f"Invalid ID '{potential_token_id_str}', skipping...", stack=False)
-            continue
-        
-        token_id = uuid.UUID(potential_token_id_str)
-        token = Token(id=token_id, instance=conn)
+    for token in tokens:
         token_model = token.to_model(refresh=True)
         if token_model is None:
-            warn(f"Token '{token_id}' does not exist.", stack=False)
+            warn(f"Token '{token.id}' does not exist.", stack=False)
             continue
+
         new_attrs = {}
 
+        new_attrs['label'] = prompt("Label:", default_editable=token_model.label)
         new_expiration_str = prompt(
             "Expiration (empty for no expiration):",
             default_editable=('' if token.expiration is None else str(token_model.expiration)),
@@ -580,7 +592,6 @@ def _edit_tokens(
             if new_expiration_str
             else None
         )
-        new_attrs['label'] = prompt("Label:", default_editable=token_model.label)
         new_scopes_str = prompt(
             "Scope (`*` to grant all permissions):",
             default_editable=' '.join(token_model.scopes),
@@ -601,6 +612,12 @@ def _edit_tokens(
         edit_success, edit_msg = new_token.edit(debug=debug)
         if not edit_success:
             return False, edit_msg
+
+        if invalidate:
+            invalidate_success, invalidate_msg = new_token.invalidate(debug=debug)
+            if not invalidate_success:
+                return False, invalidate_msg
+
         num_edited += 1
 
     msg = (

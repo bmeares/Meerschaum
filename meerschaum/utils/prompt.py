@@ -399,6 +399,8 @@ def choose(
             noask = noask,
             **kw
         )
+        if not answer:
+            continue
         ### Split along the delimiter.
         _answers = [answer] if not multiple else [a for a in answer.split(delimiter)]
 

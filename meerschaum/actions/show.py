@@ -912,24 +912,109 @@ def _show_venvs(**kwargs: Any) -> SuccessTuple:
     return True, "Success"
 
 
-def _show_tokens(mrsm_instance: Optional[str] = None, **kwargs: Any) -> SuccessTuple:
+def _show_tokens(
+    action: Optional[List[str]] = None,
+    mrsm_instance: Optional[str] = None,
+    nopretty: bool = False,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
-    Print the labels of the registered tokens on the instance.
+    Print a table of the registered tokens on the instance.
     """
+    import json
+    import uuid
     from meerschaum.connectors.parse import parse_instance_keys
-    from meerschaum.utils.misc import print_options
+    from meerschaum.utils.dtypes import value_is_null, json_serialize_value
+    from meerschaum.utils.misc import is_uuid
     from meerschaum.utils.packages import import_rich
+    from meerschaum.utils.formatting import UNICODE, get_console
     rich = import_rich()
-    rich_table = mrsm.attempt_import('rich.table')
+    rich_table, rich_json = mrsm.attempt_import('rich.table', 'rich.json')
 
     conn = parse_instance_keys(mrsm_instance)
-    tokens = conn.get_tokens()
-    print_options(tokens, name=f"Registered Tokens on instance '{conn}':", **kwargs) 
 
-    table = rich_table.Table()
+    labels = [
+        label
+        for label in (action or [])
+        if not is_uuid(label)
+    ]
+    potential_token_ids = [
+        uuid.UUID(potential_id)
+        for potential_id in (action or [])
+        if is_uuid(potential_id)
+    ]
+
+    tokens = conn.get_tokens(
+        labels=(labels or None),
+        ids=(potential_token_ids or None),
+        debug=debug,
+    )
+
+    if nopretty:
+        for token in tokens:
+            print(json.dumps({
+                'id': str(token.id),
+                'label': token.label,
+                'scopes': token.scopes,
+                'expiration': (
+                    token.expiration.isoformat()
+                    if not value_is_null(token.expiration)
+                    else None
+                ),
+                'creation': (token.creation.isoformat() if not value_is_null(token.creation) else None),
+                'user': (token.user.username if token.user is not None else None),
+                'is_valid': token.is_valid,
+            }))
+        return True, "Success"
+
+    if len(tokens) == 1:
+        token = tokens[0]
+        tokens_json = json.dumps({
+            'id': str(token.id),
+            'label': token.label,
+            'scopes': token.scopes,
+            'creation': (token.creation.isoformat() if not value_is_null(token.creation) else None),
+            'expiration': (token.expiration.isoformat() if not value_is_null(token.expiration) else None),
+            'user': (token.user.username if token.user is not None else None),
+            'is_valid': token.is_valid,
+        }, default=json_serialize_value, indent=4)
+        get_console().print(rich_json.JSON(tokens_json))
+        
+        return True, "Success"
+
+    is_valid_true = (
+        "🟢"
+        if UNICODE
+        else "[+]"
+    )
+    is_valid_false = (
+        "🔴"
+        if UNICODE
+        else "[-]"
+    )
+
+    table = rich_table.Table(title=f"Registered Tokens on instance '{conn}'")
+    table.add_column("ID")
+    table.add_column("Label")
+    table.add_column("User")
+    table.add_column("Expiration")
+    table.add_column("Valid")
+
+    for token in tokens:
+        table.add_row(
+            str(token.id),
+            token.label,
+            (token.user.username if token.user is not None else ""),
+            (
+                token.expiration.isoformat()
+                if not value_is_null(token.expiration)
+                else 'Does not expire'
+            ),
+            (is_valid_true if token.is_valid else is_valid_false),
+        )
 
     mrsm.pprint(table)
-
     return True, "Success"
 
 
