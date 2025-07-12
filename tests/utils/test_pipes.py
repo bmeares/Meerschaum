@@ -19,12 +19,31 @@ import pytest
         ),
         (
             "{{Pipe('test', 'replace_pipe_syntax', instance='sql:memory').parameters['test']}}",
-            '123',
+            123,
             mrsm.Pipe(
                 'test', 'replace_pipe_syntax',
                 instance='sql:memory',
                 parameters={
                     'test': 123,
+                },
+            ),
+        ),
+        (
+            "{{ mrsm.Pipe('test', 'replace_pipe_syntax', instance='sql:memory').parameters['idk'] }}",
+            {
+                'a': 1,
+                'b': 2,
+                'c': [1,2,3],
+            },
+            mrsm.Pipe(
+                'test', 'replace_pipe_syntax',
+                instance='sql:memory',
+                parameters={
+                    'idk': {
+                        'a': 1,
+                        'b': 2,
+                        'c': [1,2,3],
+                    },
                 },
             ),
         ),
@@ -39,7 +58,6 @@ def test_replace_pipe_syntax(text, expected_output, pipe):
         pipe.delete()
         pipe.register()
     output = replace_pipes_syntax(text)
-    print(output)
     assert output == expected_output
 
 
@@ -92,8 +110,6 @@ def test_pipes_symlinking(parameters, expected_parameters, reference_parameters)
         parameters=reference_parameters,
     )
     reference_pipe.register()
-    return pipe, reference_pipe
 
     resolved_parameters = pipe.get_parameters()
-    print(f"{resolved_parameters=}")
     assert resolved_parameters == expected_parameters

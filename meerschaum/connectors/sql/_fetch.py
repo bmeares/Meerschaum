@@ -230,11 +230,9 @@ def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
     - query
     - sql
     """
-    import re
     import textwrap
     from meerschaum.utils.warnings import warn as _warn
     from meerschaum.utils.pipes import replace_pipes_syntax
-    from meerschaum.utils.sql import sql_item_name
     if pipe.parameters.get('fetch', {}).get('definition', None):
         definition = pipe.parameters['fetch']['definition']
     elif pipe.parameters.get('definition', None):
