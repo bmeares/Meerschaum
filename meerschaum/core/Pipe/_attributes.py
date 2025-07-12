@@ -256,13 +256,16 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
     remote_dtypes = self.infer_dtypes(persist=False)
     patched_dtypes = apply_patch_to_config(remote_dtypes, configured_dtypes)
     dt_col = self.columns.get('datetime', None)
+    primary_col = self.columns.get('primary', None)
     _dtypes = {
         col: MRSM_ALIAS_DTYPES.get(typ, typ)
         for col, typ in patched_dtypes.items()
         if col and typ
     }
-    if dt_col not in _dtypes:
+    if dt_col and dt_col not in _dtypes:
         _dtypes[dt_col] = 'datetime'
+    if primary_col and self.autoincrement and primary_col not in _dtypes:
+        _dtypes[primary_col] = 'int'
     return _dtypes
 
 
