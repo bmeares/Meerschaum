@@ -45,7 +45,7 @@ def register_pipe(
     ###    (which shouldn't be able to be registered anyway but that's an issue for later).
     parameters = None
     try:
-        parameters = pipe.parameters
+        parameters = pipe.get_parameters(apply_symlinks=False)
     except Exception as e:
         if debug:
             dprint(str(e))
@@ -108,10 +108,10 @@ def edit_pipe(
         original_parameters = Pipe(
             pipe.connector_keys, pipe.metric_key, pipe.location_key,
             mrsm_instance=pipe.instance_keys
-        ).parameters
+        ).get_parameters(apply_symlinks=False)
         parameters = apply_patch_to_config(
             original_parameters,
-            pipe.parameters
+            pipe._attributes['parameters']
         )
 
     ### ensure pipes table exists
@@ -1836,11 +1836,12 @@ def sync_pipe(
         )
     )
     if autoincrement and autoincrement not in pipe.parameters:
-        pipe.parameters['autoincrement'] = autoincrement
-        if not pipe.temporary:
-            edit_success, edit_msg = pipe.edit(debug=debug)
-            if not edit_success:
-                return edit_success, edit_msg
+        update_success, update_msg = pipe.update_parameters(
+            {'autoincrement': autoincrement},
+            debug=debug,
+        )
+        if not update_success:
+            return update_success, update_msg
 
     def _check_pk(_df_to_clear):
         if _df_to_clear is None:

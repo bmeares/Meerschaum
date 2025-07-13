@@ -1051,15 +1051,7 @@ def _persist_new_numeric_columns(self, df, debug: bool = False) -> SuccessTuple:
     self._attributes_sync_time = None
     dtypes = self.parameters.get('dtypes', {})
     dtypes.update({col: 'numeric' for col in new_numeric_cols})
-    self.parameters['dtypes'] = dtypes
-    if not self.temporary:
-        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update NUMERIC dtypes for {self}:\n{edit_msg}")
-
-        return edit_success, edit_msg
-
-    return True, "Success"
+    return self.update_parameters({'dtypes': dtypes}, debug=debug)
 
 
 def _persist_new_uuid_columns(self, df, debug: bool = False) -> SuccessTuple:
@@ -1076,15 +1068,7 @@ def _persist_new_uuid_columns(self, df, debug: bool = False) -> SuccessTuple:
     self._attributes_sync_time = None
     dtypes = self.parameters.get('dtypes', {})
     dtypes.update({col: 'uuid' for col in new_uuid_cols})
-    self.parameters['dtypes'] = dtypes
-    if not self.temporary:
-        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update UUID dtypes for {self}:\n{edit_msg}")
-
-        return edit_success, edit_msg
-
-    return True, "Success"
+    return self.update_parameters({'dtypes': dtypes}, debug=debug)
 
 
 def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
@@ -1101,16 +1085,7 @@ def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
     self._attributes_sync_time = None
     dtypes = self.parameters.get('dtypes', {})
     dtypes.update({col: 'json' for col in new_json_cols})
-    self.parameters['dtypes'] = dtypes
-
-    if not self.temporary:
-        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update JSON dtypes for {self}:\n{edit_msg}")
-
-        return edit_success, edit_msg
-
-    return True, "Success"
+    return self.update_parameters({'dtypes': dtypes}, debug=debug)
 
 
 def _persist_new_bytes_columns(self, df, debug: bool = False) -> SuccessTuple:
@@ -1127,16 +1102,7 @@ def _persist_new_bytes_columns(self, df, debug: bool = False) -> SuccessTuple:
     self._attributes_sync_time = None
     dtypes = self.parameters.get('dtypes', {})
     dtypes.update({col: 'bytes' for col in new_bytes_cols})
-    self.parameters['dtypes'] = dtypes
-
-    if not self.temporary:
-        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update bytes dtypes for {self}:\n{edit_msg}")
-
-        return edit_success, edit_msg
-
-    return True, "Success"
+    return self.update_parameters({'dtypes': dtypes}, debug=debug)
 
 
 def _persist_new_geometry_columns(self, df, debug: bool = False) -> SuccessTuple:
@@ -1184,13 +1150,4 @@ def _persist_new_geometry_columns(self, df, debug: bool = False) -> SuccessTuple
         new_cols_types[col] = f"{new_dtype}{modifier}"
 
     dtypes.update(new_cols_types)
-    self.parameters['dtypes'] = dtypes
-
-    if not self.temporary:
-        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update bytes dtypes for {self}:\n{edit_msg}")
-
-        return edit_success, edit_msg
-
-    return True, "Success"
+    return self.update_parameters({'dtypes': dtypes})

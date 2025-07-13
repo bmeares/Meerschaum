@@ -10,7 +10,7 @@ Functions for bootstrapping elements
 from __future__ import annotations
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple, List
+from meerschaum.utils.typing import Union, Any, SuccessTuple, Optional, Tuple, List
 
 
 def bootstrap(

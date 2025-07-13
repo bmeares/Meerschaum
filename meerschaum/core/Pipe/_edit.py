@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Edit a Pipe's parameters here.
+Edit a Pipe's parameters.
 """
 
 from __future__ import annotations
@@ -202,7 +202,7 @@ def edit_definition(
         return True, "Success"
 
     def _edit_sql():
-        import pathlib, os, textwrap
+        import textwrap
         from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
         from meerschaum.utils.misc import edit_file
         definition_filename = str(self) + '.sql'
@@ -222,7 +222,7 @@ def edit_definition(
 
         edit_file(definition_path)
         try:
-            with open(definition_path, 'r') as f:
+            with open(definition_path, 'r', encoding='utf-8') as f:
                 file_definition = f.read()
         except Exception as e:
             return False, f"Failed reading file '{definition_path}':\n" + str(e)

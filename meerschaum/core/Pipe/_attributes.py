@@ -846,6 +846,10 @@ def update_parameters(
         parameters_patch,
     )
 
+    if self.temporary:
+        persist = False
+
     if not persist:
         return True, "Success"
+
     return self.edit(debug=debug)

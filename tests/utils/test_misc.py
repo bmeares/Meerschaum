@@ -50,3 +50,20 @@ def test_to_simple_dict(doc_str: str, doc: Dict[str, Any]):
     from meerschaum.utils.misc import to_simple_dict
     parsed_doc_str = to_simple_dict(doc)
     assert parsed_doc_str == doc_str
+
+@pytest.mark.parametrize(
+    "input_str, expected_output",
+    [
+        ("HelloWorld!", "hello_world"),
+        ("This has spaces in it.", "this_has_spaces_in_it"),
+        ("already_in_snake_case", "already_in_snake_case"),
+        ("getHTTPResponseCode", "get_http_response_code"),
+        ("HTTPStatus", "http_status"),
+    ]
+)
+def test_to_snake_case(input_str: str, expected_output: str):
+    """
+    Test that `to_snake_case()` correctly converts strings to snake case.
+    """
+    from meerschaum.utils.misc import to_snake_case
+    assert to_snake_case(input_str) == expected_output
