@@ -455,7 +455,10 @@ def coerce_timezone(
 
     if isinstance(dt, str):
         dateutil_parser = mrsm.attempt_import('dateutil.parser')
-        dt = dateutil_parser.parse(dt)
+        try:
+            dt = dateutil_parser.parse(dt)
+        except Exception:
+            return dt
 
     dt_is_series = hasattr(dt, 'dtype') and hasattr(dt, '__module__')
 
@@ -508,13 +511,32 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
         except Exception:
             return x
 
+    if isinstance(dt_val, pd.Timestamp):
+        dt_val_to_return = dt_val if not as_pydatetime else dt_val.to_pydatetime()
+        return (
+            coerce_timezone(dt_val_to_return)
+            if coerce_utc
+            else dt_val_to_return
+        )
+
     if dt_is_series:
         try:
             new_dt_series = dt_val.astype("datetime64[ns, UTC]")
         except pd.errors.OutOfBoundsDatetime:
-            new_dt_series = dt_val.astype("datetime64[ms, UTC]")
+            try:
+                new_dt_series = dt_val.astype("datetime64[ms, UTC]")
+            except Exception:
+                new_dt_series = None
         except ValueError:
-            new_dt_series = dt_val.apply(parse)
+            new_dt_series = None
+        except TypeError:
+            try:
+                new_dt_series = dt_val.astype("datetime64[ns]")
+            except Exception:
+                new_dt_series = None
+
+        if new_dt_series is None:
+            new_dt_series = dt_val.apply(lambda x: parse(str(x)))
 
         if coerce_utc:
             return coerce_timezone(new_dt_series)

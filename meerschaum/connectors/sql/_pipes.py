@@ -1077,13 +1077,13 @@ def get_pipe_data(
     cols_types = pipe.get_columns_types(debug=debug) if pipe.enforce else {}
     dtypes = {
         **{
+            col: get_pd_type_from_db_type(typ)
+            for col, typ in cols_types.items()
+        },
+        **{
             p_col: to_pandas_dtype(p_typ)
             for p_col, p_typ in pipe.dtypes.items()
         },
-        **{
-            col: get_pd_type_from_db_type(typ)
-            for col, typ in cols_types.items()
-        }
     } if pipe.enforce else {}
     if dtypes:
         if self.flavor == 'sqlite':

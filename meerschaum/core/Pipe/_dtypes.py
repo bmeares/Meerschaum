@@ -31,7 +31,11 @@ def enforce_dtypes(
     import traceback
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.dataframe import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
+    from meerschaum.utils.dataframe import (
+        parse_df_datetimes,
+        enforce_dtypes as _enforce_dtypes,
+        parse_simple_lines,
+    )
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas(debug=debug)
@@ -45,23 +49,34 @@ def enforce_dtypes(
 
     if not self.enforce:
         enforce = False
+
     pipe_dtypes = self.dtypes if enforce else {}
 
     try:
         if isinstance(df, str):
-            df = parse_df_datetimes(
-                pd.read_json(StringIO(df)),
-                ignore_cols=[
-                    col
-                    for col, dtype in pipe_dtypes.items()
-                    if (not enforce or not are_dtypes_equal(dtype, 'datetime'))
-                ],
-                ignore_all=(not enforce),
-                strip_timezone=(self.tzinfo is None),
-                chunksize=chunksize,
-                debug=debug,
-            )
-        elif isinstance(df, (dict, list)):
+            if df.strip() and df.strip()[0] not in ('{', '['):
+                df = parse_df_datetimes(
+                    parse_simple_lines(df),
+                    ignore_cols=[
+                        col
+                        for col, dtype in pipe_dtypes.items()
+                        if (not enforce or not are_dtypes_equal(dtype, 'datetime'))
+                    ],
+                )
+            else:
+                df = parse_df_datetimes(
+                    pd.read_json(StringIO(df)),
+                    ignore_cols=[
+                        col
+                        for col, dtype in pipe_dtypes.items()
+                        if (not enforce or not are_dtypes_equal(dtype, 'datetime'))
+                    ],
+                    ignore_all=(not enforce),
+                    strip_timezone=(self.tzinfo is None),
+                    chunksize=chunksize,
+                    debug=debug,
+                )
+        elif isinstance(df, (dict, list, tuple)):
             df = parse_df_datetimes(
                 df,
                 ignore_cols=[

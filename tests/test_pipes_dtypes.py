@@ -968,7 +968,6 @@ def test_distant_datetimes(flavor: str):
     assert success, msg
 
     df = pipe.get_data()
-    print(f"df=\n{df}")
     assert df['ts'][0].year == 1
 
 
