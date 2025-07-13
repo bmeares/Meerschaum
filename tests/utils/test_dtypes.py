@@ -146,3 +146,58 @@ def test_parse_geometry_formats(input_data, expected_output):
     """
     output = attempt_cast_to_geometry(input_data)
     assert output == expected_output
+
+
+@pytest.mark.parametrize(
+    "input_dt_val,expected_output,kwargs",
+    [
+        (
+            "2026-01-01T12:00:00Z",
+            datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            {'as_pydatetime': True, 'coerce_utc': True},
+        ),
+        (
+            pd.Series(["2026-01-01T12:00:00Z"]),
+            pd.Series([pd.Timestamp("2026-01-01T12:00:00Z")]),
+            {},
+        ),
+        (
+            pd.Timestamp("2026-01-01"),
+            datetime(2026, 1, 1, tzinfo=timezone.utc),
+            {'as_pydatetime': True, 'coerce_utc': True},
+        ),
+        (
+            pd.Series([pd.Timestamp("2026-01-01")]),
+            pd.Series(pd.Timestamp("2026-01-01T00:00:00Z")),
+            {'coerce_utc': True},
+        ),
+        (
+            pd.Series([pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02", tz='US/Eastern')]),
+            pd.Series([
+                pd.Timestamp("2026-01-01 00:00:00+0000", tz='UTC'),
+                pd.Timestamp("2026-01-02 05:00:00+0000", tz='UTC')
+            ]),
+            {'coerce_utc': True},
+        ),
+        (
+            pd.Series([datetime(2026, 1, 1), datetime(2026, 1, 2, tzinfo=timezone.utc)]),
+            pd.Series([
+                pd.Timestamp("2026-01-01 00:00:00+0000", tz='UTC'),
+                pd.Timestamp("2026-01-02 00:00:00+0000", tz='UTC')
+            ]),
+            {'coerce_utc': True},
+        ),
+    ],
+)
+def test_to_datetime(input_dt_val, expected_output, kwargs):
+    """
+    Test the `to_datetime()` parsing.
+    """
+    from meerschaum.utils.dtypes import to_datetime
+    output_dt_val = to_datetime(input_dt_val, **kwargs)
+    print(f"{output_dt_val=}")
+    print(f"{expected_output=}")
+    if isinstance(output_dt_val, pd.Series):
+        assert output_dt_val.to_dict() == expected_output.to_dict()
+    else:
+        assert output_dt_val == expected_output

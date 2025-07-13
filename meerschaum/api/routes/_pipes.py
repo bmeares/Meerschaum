@@ -384,7 +384,7 @@ async def sync_pipe(
     if not data:
         return True, "No data to sync."
 
-    if isinstance(data, str):
+    if isinstance(data, str) and data.strip() and not data.lstrip()[0] not in ('{', '['):
         try:
             lines = data.splitlines()
             data = [string_to_dict(line) for line in lines]

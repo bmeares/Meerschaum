@@ -276,7 +276,7 @@ def edit_pipe(
         return False, f"{pipe} is not registered."
 
     parameters_key = get_pipe_parameters_key(pipe)
-    parameters_str = json.dumps(pipe.parameters, separators=(',', ':'))
+    parameters_str = json.dumps(pipe.get_parameters(apply_symlinks=False), separators=(',', ':'))
     self.set(parameters_key, parameters_str)
     return True, "Success"
 

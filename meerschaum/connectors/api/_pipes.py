@@ -87,7 +87,7 @@ def edit_pipe(
     response = self.patch(
         r_url + '/edit',
         params={'patch': patch, 'instance_keys': self.get_pipe_instance_keys(pipe)},
-        json=pipe.parameters,
+        json=pipe.get_parameters(apply_symlinks=False),
         debug=debug,
     )
     if debug:
@@ -200,7 +200,9 @@ def sync_pipe(
 
     def get_json_str(c):
         ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
-        if isinstance(c, (dict, list)):
+        if isinstance(c, str):
+            return c
+        if isinstance(c, (dict, list, tuple)):
             return json.dumps(c, default=json_serialize_value)
         return to_json(c, orient='columns')
 
@@ -231,11 +233,7 @@ def sync_pipe(
                 for col in numeric_cols
                 if pipe_dtypes.get(col, None) != 'numeric'
             ]
-            pipe.dtypes.update({
-                col: 'numeric'
-                for col in new_numeric_cols
-            })
-            edit_success, edit_msg = pipe.edit(debug=debug)
+            edit_success, edit_msg = pipe.update_parameters({'dtypes': {col: 'numeric' for col in new_numeric_cols}})
             if not edit_success:
                 warn(
                     "Failed to update new numeric columns "
@@ -316,7 +314,7 @@ def sync_pipe(
 
     success_tuple = True, (
         f"It took {interval_str(timedelta(seconds=(time.perf_counter() - begin)))} "
-        + "to sync {rowcount:,} row"
+        + f"to sync {rowcount:,} row"
         + ('s' if rowcount != 1 else '')
         + f" across {num_success_chunks:,} chunk" + ('s' if num_success_chunks != 1 else '') +
         f" to {pipe}."
@@ -666,7 +664,7 @@ def drop_pipe(
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
     if pipe is None:
-        error(f"Pipe cannot be None.")
+        error("Pipe cannot be None.")
     r_url = pipe_r_url(pipe)
     response = self.delete(
         r_url + '/drop',
