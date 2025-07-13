@@ -1727,6 +1727,36 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
     return safe_extract(tarf, output_dir)
 
 
+def to_snake_case(name: str) -> str:
+    """
+    Return the given string in snake-case-style.
+
+    Parameters
+    ----------
+    name: str
+        The input text to convert to snake case.
+
+    Returns
+    -------
+    A snake-case version of `name`.
+
+    Examples
+    --------
+    >>> to_snake_case("HelloWorld!")
+    'hello_world'
+    >>> to_snake_case("This has spaces in it.")
+    'this_has_spaces_in_it'
+    >>> to_snake_case("already_in_snake_case")
+    'already_in_snake_case'
+    """
+    import re
+    name = re.sub(r'(.)([A-Z][a-z]+)', r'\1_\2', name)
+    name = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', name)
+    name = re.sub(r'[^\w\s]', '', name)
+    name = re.sub(r'\s+', '_', name)
+    return name.lower()
+
+
 ##################
 # Legacy imports #
 ##################

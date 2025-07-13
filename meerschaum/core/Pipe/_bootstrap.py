@@ -7,6 +7,8 @@ Attempt to create a pipe's requirements in one method.
 """
 
 from __future__ import annotations
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Dict, Any
 
 
@@ -207,28 +209,56 @@ def _ask_for_columns(pipe, debug: bool=False) -> Dict[str, str]:
     """
     Prompt the user for the column names.
     """
-    from meerschaum.utils.warnings import info, warn
-    from meerschaum.utils.prompt import prompt
+    import json
+    from meerschaum.utils.warnings import info
+    from meerschaum.utils.prompt import prompt, yes_no
+    from meerschaum.utils.formatting import get_console
+    from meerschaum.utils.formatting._shell import clear_screen
+    from meerschaum.utils.misc import to_snake_case
+    from meerschaum.config import get_config
+    rich_json = mrsm.attempt_import('rich.json')
 
-    info(f"Please enter column names for {pipe}:")
-    while True:
-        try:
-            datetime_name = prompt(f"Datetime column (empty to omit):", icon=False)
-        except KeyboardInterrupt:
-            return False, f"Cancelled bootstrapping {pipe}."
-        if datetime_name == '':
-            datetime_name = None
+    do_clear = get_config('shell', 'clear_screen')
 
-        try:
-            id_name = prompt(f"ID column (empty to omit):", icon=False)
-        except KeyboardInterrupt:
-            return False, f"Cancelled bootstrapping {pipe}."
-        if id_name == '':
-            id_name = None
+    cols = {}
 
-        break
+    info(f"Please enter index columns for {pipe}:")
+    try:
+        datetime_name = prompt("Datetime column (empty to omit):", icon=False)
+    except KeyboardInterrupt:
+        datetime_name = None
 
-    return {
-        'datetime': datetime_name,
-        'id': id_name,
-    }
+    if datetime_name:
+        cols['datetime'] = datetime_name
+
+    try:
+        id_name = prompt("ID column (empty to omit):", icon=False)
+    except KeyboardInterrupt:
+        id_name = None
+
+    if id_name:
+        cols['id'] = id_name
+
+    if yes_no("Add more columns?"):
+        while True:
+            if do_clear:
+                clear_screen(debug=debug)
+
+            cols_text = json.dumps(cols, indent=4)
+            info("Current index columns:")
+            get_console().print(rich_json.JSON(cols_text))
+
+            col_name = prompt("Enter index column (empty to stop):")
+            if not col_name:
+                break
+
+            if col_name in cols.values():
+                continue
+
+            col_ix = to_snake_case(col_name)
+            if col_ix in cols:
+                col_ix = col_ix + '_'
+
+            cols[col_ix] = col_name
+
+    return cols

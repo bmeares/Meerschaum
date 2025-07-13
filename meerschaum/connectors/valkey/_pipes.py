@@ -337,7 +337,7 @@ def drop_pipe(
     if 'valkey' not in pipe.parameters:
         return True, "Success"
 
-    pipe.parameters['valkey']['dtypes'] = {}
+    pipe._attributes['parameters']['valkey']['dtypes'] = {}
     if not pipe.temporary:
         edit_success, edit_msg = pipe.edit(debug=debug)
         if not edit_success:
@@ -577,13 +577,12 @@ def sync_pipe(
 
     if new_dtypes and (not static or not valkey_dtypes):
         valkey_dtypes.update(new_dtypes)
-        if 'valkey' not in pipe.parameters:
-            pipe.parameters['valkey'] = {}
-        pipe.parameters['valkey']['dtypes'] = valkey_dtypes
-        if not pipe.temporary:
-            edit_success, edit_msg = pipe.edit(debug=debug)
-            if not edit_success:
-                return edit_success, edit_msg
+        update_success, update_msg = pipe.update_parameters(
+            {'valkey': {'dtypes': valkey_dtypes}},
+            debug=debug,
+        )
+        if not update_success:
+            return False, update_msg
 
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(df, include_unchanged_columns=True, debug=debug)
