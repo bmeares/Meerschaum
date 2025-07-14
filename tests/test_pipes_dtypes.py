@@ -899,6 +899,7 @@ def test_parse_date_bounds(flavor: str):
     pipe.delete()
     pipe = mrsm.Pipe('test', 'parse_date_bounds', 'tz', instance=conn, columns={'datetime': 'ts'})
     success, msg = pipe.sync([{'ts': '2024-01-01'}], debug=debug)
+    return pipe
     assert success, msg
 
     success, msg = pipe.sync([{'ts': '2024-01-02'}], debug=debug)

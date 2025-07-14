@@ -893,7 +893,9 @@ def get_pipe_columns_types(
     }
     ```
     """
-    return get_pipe(connector_keys, metric_key, location_key, instance_keys).dtypes
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    columns_types = pipe.get_columns_types(debug=debug)
+    return pipe.dtypes
 
 
 @app.get(

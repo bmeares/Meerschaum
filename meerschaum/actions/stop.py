@@ -7,7 +7,8 @@ Stop running jobs that were started with `-d` or `start job`.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, List, Dict, SuccessTuple, Any
+from meerschaum.utils.typing import Optional, List, SuccessTuple, Any
+
 
 def stop(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
     """
@@ -111,6 +112,8 @@ def _stop_jobs(
         )
 
     if not jobs_to_stop:
+        if jobs:
+            return True, "The selected jobs are currently running."
         return False, "No running, paused or restarting jobs to stop."
 
     if not action:

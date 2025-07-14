@@ -109,7 +109,6 @@ def get_data(
     from meerschaum.utils.packages import attempt_import
     dd = attempt_import('dask.dataframe') if as_dask else None
     dask = attempt_import('dask') if as_dask else None
-    dateutil_parser = attempt_import('dateutil.parser')
 
     if select_columns == '*':
         select_columns = None

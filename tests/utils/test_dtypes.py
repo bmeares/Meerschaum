@@ -162,13 +162,13 @@ def test_parse_geometry_formats(input_data, expected_output):
             {},
         ),
         (
-            pd.Timestamp("2026-01-01"),
-            datetime(2026, 1, 1, tzinfo=timezone.utc),
+            pd.Timestamp("2026-02-10"),
+            datetime(2026, 2, 10, tzinfo=timezone.utc),
             {'as_pydatetime': True, 'coerce_utc': True},
         ),
         (
-            pd.Series([pd.Timestamp("2026-01-01")]),
-            pd.Series(pd.Timestamp("2026-01-01T00:00:00Z")),
+            pd.Series([pd.Timestamp("2026-03-03")]),
+            pd.Series([pd.Timestamp("2026-03-03 00:00:00+0000", tz='UTC')]),
             {'coerce_utc': True},
         ),
         (
@@ -183,7 +183,7 @@ def test_parse_geometry_formats(input_data, expected_output):
             pd.Series([datetime(2026, 1, 1), datetime(2026, 1, 2, tzinfo=timezone.utc)]),
             pd.Series([
                 pd.Timestamp("2026-01-01 00:00:00+0000", tz='UTC'),
-                pd.Timestamp("2026-01-02 00:00:00+0000", tz='UTC')
+                pd.Timestamp("2026-01-02 00:00:00+0000", tz='UTC'),
             ]),
             {'coerce_utc': True},
         ),
