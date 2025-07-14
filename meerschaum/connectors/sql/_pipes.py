@@ -1061,78 +1061,10 @@ def get_pipe_data(
     A `pd.DataFrame` of the pipe's data.
 
     """
-    import json
     import functools
-    from meerschaum.utils.misc import parse_df_datetimes, to_pandas_dtype
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dtypes import (
-        attempt_cast_to_numeric,
-        attempt_cast_to_uuid,
-        attempt_cast_to_bytes,
-        attempt_cast_to_geometry,
-        are_dtypes_equal,
-    )
-    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
-
-    #  cols_types = pipe.get_columns_types(debug=debug) if pipe.enforce else {}
-    #  cols_pandas_dtypes = {
-        #  col: get_pd_type_from_db_type(typ)
-        #  for col, typ in cols_types.items()
-    #  }
-    #  pipe_dtypes = pipe.dtypes
-    #  pipe_pandas_dtypes = {
-        #  col: to_pandas_dtype(typ)
-        #  for col, typ in pipe.dtypes.items()
-    #  }
-
-    #  dtypes = {
-        #  **{
-            #  col: get_pd_type_from_db_type(typ)
-            #  for col, typ in cols_types.items()
-        #  },
-        #  **{
-            #  p_col: to_pandas_dtype(p_typ)
-            #  for p_col, p_typ in pipe.dtypes.items()
-        #  },
-    #  } if pipe.enforce else {}
-    #  if dtypes:
-        #  if self.flavor == 'sqlite':
-            #  if not pipe.columns.get('datetime', None):
-                #  _dt = pipe.guess_datetime()
-            #  else:
-                #  _dt = pipe.get_columns('datetime')
-
-            #  if _dt:
-                #  dt_type = dtypes.get(_dt, 'object').lower()
-                #  if 'datetime' not in dt_type:
-                    #  if 'int' not in dt_type:
-                        #  dtypes[_dt] = 'datetime64[ns, UTC]'
-
-    #  existing_cols = cols_types.keys()
-    #  select_columns = (
-        #  [
-            #  col
-            #  for col in existing_cols
-            #  if col not in (omit_columns or [])
-        #  ]
-        #  if not select_columns
-        #  else [
-            #  col
-            #  for col in select_columns
-            #  if col in existing_cols
-            #  and col not in (omit_columns or [])
-        #  ]
-    #  ) if pipe.enforce else select_columns
-    #  if select_columns:
-        #  dtypes = {col: typ for col, typ in dtypes.items() if col in select_columns}
-
-    #  dtypes = {
-        #  col: to_pandas_dtype(typ)
-        #  for col, typ in dtypes.items()
-        #  if col in select_columns and col not in (omit_columns or [])
-    #  } if pipe.enforce else {}
 
     query = self.get_pipe_data_query(
         pipe,
@@ -1149,16 +1081,10 @@ def get_pipe_data(
         **kw
     )
 
+    read_kwargs = {}
     if is_dask:
         index_col = pipe.columns.get('datetime', None)
-        kw['index_col'] = index_col
-
-    numeric_columns = [
-        col
-        for col, typ in pipe_dtypes.items()
-        if typ.startswith('numeric') and col in (select_columns or [])
-    ]
-    kw['coerce_float'] = kw.get('coerce_float', (len(numeric_columns) == 0))
+        read_kwargs['index_col'] = index_col
 
     chunks = self.read(
         query,
@@ -1166,62 +1092,11 @@ def get_pipe_data(
         as_iterator=True,
         as_hook_results=True,
         chunk_hook=functools.partial(_enforce_pipe_dtypes_chunks_hook, pipe),
+        coerce_float=False,
         debug=debug,
+        **read_kwargs
     )
     return pd.concat(chunks)
-    #  for col in numeric_columns:
-        #  if col not in df.columns:
-            #  continue
-        #  df[col] = df[col].apply(attempt_cast_to_numeric)
-
-    #  for col in uuid_columns:
-        #  if col not in df.columns:
-            #  continue
-        #  df[col] = df[col].apply(attempt_cast_to_uuid)
-
-    #  for col in bytes_columns:
-        #  if col not in df.columns:
-            #  continue
-        #  df[col] = df[col].apply(attempt_cast_to_bytes)
-
-    #  for col in geometry_columns:
-        #  if col not in df.columns:
-            #  continue
-        #  df[col] = df[col].apply(attempt_cast_to_geometry)
-
-    #  if self.flavor == 'sqlite':
-        #  ignore_dt_cols = [
-            #  col
-            #  for col, dtype in pipe.dtypes.items()
-            #  if not are_dtypes_equal(str(dtype), 'datetime')
-        #  ]
-        #  ### NOTE: We have to consume the iterator here to ensure that datetimes are parsed correctly
-        #  df = (
-            #  parse_df_datetimes(
-                #  df,
-                #  ignore_cols=ignore_dt_cols,
-                #  chunksize=kw.get('chunksize', None),
-                #  strip_timezone=(pipe.tzinfo is None),
-                #  debug=debug,
-            #  ) if isinstance(df, pd.DataFrame) else (
-                #  [
-                    #  parse_df_datetimes(
-                        #  c,
-                        #  ignore_cols=ignore_dt_cols,
-                        #  chunksize=kw.get('chunksize', None),
-                        #  strip_timezone=(pipe.tzinfo is None),
-                        #  debug=debug,
-                    #  )
-                    #  for c in df
-                #  ]
-            #  )
-        #  )
-        #  for col, typ in dtypes.items():
-            #  if typ != 'json':
-                #  continue
-            #  df[col] = df[col].apply(lambda x: json.loads(x) if x is not None else x)
-
-    #  return df
 
 
 def get_pipe_data_query(
