@@ -13,7 +13,7 @@ from datetime import timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Tuple, Dict, Any, Union, Optional, List
-from meerschaum.utils.warnings import warn
+from meerschaum.utils.warnings import warn, dprint
 
 
 @property
@@ -52,6 +52,7 @@ def attributes(self) -> Dict[str, Any]:
 def get_parameters(
     self,
     apply_symlinks: bool = True,
+    debug: bool = False,
     _visited: 'Optional[set[mrsm.Pipe]]' = None,
 ) -> Dict[str, Any]:
     """
@@ -71,6 +72,8 @@ def get_parameters(
 
     if ref_keys:
         try:
+            if debug:
+                dprint(f"Building reference pipe from keys: {ref_keys}")
             ref_pipe = mrsm.Pipe(**ref_keys)
             if ref_pipe in _visited:
                 warn(f"Circular reference detected in {self}: chain involves {ref_pipe}.")
@@ -246,27 +249,11 @@ def tags(self, _tags: List[str]) -> None:
 
 
 @property
-def dtypes(self) -> Union[Dict[str, Any], None]:
+def dtypes(self) -> Dict[str, Any]:
     """
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
-    from meerschaum.config._patch import apply_patch_to_config
-    from meerschaum.utils.dtypes import MRSM_ALIAS_DTYPES
-    configured_dtypes = self.parameters.get('dtypes', {})
-    remote_dtypes = self.infer_dtypes(persist=False)
-    patched_dtypes = apply_patch_to_config(remote_dtypes, configured_dtypes)
-    dt_col = self.columns.get('datetime', None)
-    primary_col = self.columns.get('primary', None)
-    _dtypes = {
-        col: MRSM_ALIAS_DTYPES.get(typ, typ)
-        for col, typ in patched_dtypes.items()
-        if col and typ
-    }
-    if dt_col and dt_col not in configured_dtypes:
-        _dtypes[dt_col] = 'datetime'
-    if primary_col and self.autoincrement and primary_col not in _dtypes:
-        _dtypes[primary_col] = 'int'
-    return _dtypes
+    return self.get_dtypes(refresh=False)
 
 
 @dtypes.setter
@@ -276,6 +263,47 @@ def dtypes(self, _dtypes: Dict[str, Any]) -> None:
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
     self.update_parameters({'dtypes': _dtypes}, persist=False)
+
+
+def get_dtypes(
+    self,
+    refresh: bool = True,
+    debug: bool = False,
+) -> Dict[str, Any]:
+    """
+    If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
+    """
+    from meerschaum.config._patch import apply_patch_to_config
+    from meerschaum.utils.dtypes import MRSM_ALIAS_DTYPES
+    parameters = (
+        self.get_parameters(debug=debug)
+        if refresh
+        else self.parameters
+    )
+    configured_dtypes = parameters.get('dtypes', {})
+
+    refresh_remote_dtypes = refresh or self.__dict__.get('_remote_dtypes', None) is None
+    remote_dtypes = (
+        self.infer_dtypes(persist=False)
+        if refresh_remote_dtypes
+        else self._remote_dtypes
+    )
+    if refresh_remote_dtypes:
+        self._remote_dtypes = remote_dtypes
+
+    patched_dtypes = apply_patch_to_config(remote_dtypes, configured_dtypes)
+    dt_col = parameters.get('columns', {}).get('datetime', None)
+    primary_col = parameters.get('columns', {}).get('primary', None)
+    _dtypes = {
+        col: MRSM_ALIAS_DTYPES.get(typ, typ)
+        for col, typ in patched_dtypes.items()
+        if col and typ
+    }
+    if dt_col and dt_col not in configured_dtypes:
+        _dtypes[dt_col] = 'datetime'
+    if primary_col and parameters.get('autoincrement', False) and primary_col not in _dtypes:
+        _dtypes[primary_col] = 'int'
+    return _dtypes
 
 
 @property
@@ -347,18 +375,22 @@ def tzinfo(self) -> Union[None, timezone]:
     """
     Return `timezone.utc` if the pipe is timezone-aware.
     """
+    if '_tzinfo' in self.__dict__:
+        return self.__dict__['_tzinfo']
+
     dt_col = self.columns.get('datetime', None)
     if not dt_col:
-        return None
+        _tzinfo = None
 
     dt_typ = str(self.dtypes.get(dt_col, 'datetime64[ns, UTC]'))
     if 'utc' in dt_typ.lower() or dt_typ == 'datetime':
-        return timezone.utc
+        _tzinfo = timezone.utc
 
-    if dt_typ == 'datetime64[ns]':
-        return None
+    if dt_typ in ('datetime64[ns]', 'datetime64[ms]'):
+        _tzinfo = None
 
-    return None
+    self._tzinfo = _tzinfo
+    return _tzinfo
 
 
 @property

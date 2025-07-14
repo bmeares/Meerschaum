@@ -122,6 +122,7 @@ class Pipe:
         get_columns_indices,
         get_indices,
         get_parameters,
+        get_dtypes,
         update_parameters,
         tags,
         get_id,
