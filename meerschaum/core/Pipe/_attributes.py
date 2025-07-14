@@ -262,7 +262,7 @@ def dtypes(self) -> Union[Dict[str, Any], None]:
         for col, typ in patched_dtypes.items()
         if col and typ
     }
-    if dt_col and dt_col not in _dtypes:
+    if dt_col and dt_col not in configured_dtypes:
         _dtypes[dt_col] = 'datetime'
     if primary_col and self.autoincrement and primary_col not in _dtypes:
         _dtypes[primary_col] = 'int'

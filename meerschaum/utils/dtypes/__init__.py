@@ -520,8 +520,20 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
         )
 
     if dt_is_series:
+        changed_tz = False
+        original_tz = None
+        dtype = str(getattr(dt_val, 'dtype', 'object'))
+        if are_dtypes_equal(dtype, 'datetime') and 'utc' not in dtype.lower():
+            original_tz = dt_val.dt.tz
+            dt_val = dt_val.dt.tz_localize(timezone.utc)
+            changed_tz = True
+            dtype = str(getattr(dt_val, 'dtype', 'object'))
         try:
-            new_dt_series = dt_val.astype("datetime64[ns, UTC]")
+            new_dt_series = (
+                dt_val
+                if dtype == 'datetime64[ns, UTC]'
+                else dt_val.astype("datetime64[ns, UTC]")
+            )
         except pd.errors.OutOfBoundsDatetime:
             try:
                 new_dt_series = dt_val.astype("datetime64[ms, UTC]")
@@ -531,7 +543,11 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
             new_dt_series = None
         except TypeError:
             try:
-                new_dt_series = dt_val.astype("datetime64[ns]")
+                new_dt_series = (
+                    new_dt_series
+                    if str(getattr(new_dt_series, 'dtype', None)) == 'datetime64[ns]'
+                    else dt_val.astype("datetime64[ns]")
+                )
             except Exception:
                 new_dt_series = None
 
@@ -541,6 +557,8 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
         if coerce_utc:
             return coerce_timezone(new_dt_series)
 
+        if changed_tz:
+            new_dt_series = new_dt_series.dt.tz_localize(original_tz)
         return new_dt_series
 
     try:
