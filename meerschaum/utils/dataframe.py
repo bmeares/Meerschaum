@@ -1121,7 +1121,17 @@ def enforce_dtypes(
             dprint(f"Checking for datetime conversion: {datetime_cols}")
         for col in datetime_cols:
             if col in df.columns:
+                if debug:
+                    dprint(
+                        f"Data type for column '{col}' before timezone coersion: "
+                        f"{str(df[col].dtype)}"
+                    )
                 df[col] = _coerce_timezone(df[col], strip_utc=strip_timezone)
+                if debug:
+                    dprint(
+                        f"Data type for column '{col}' after timezone coersion: "
+                        f"{str(df[col].dtype)}"
+                    )
 
     if geometry_cols_types_srids:
         geopandas = mrsm.attempt_import('geopandas')
