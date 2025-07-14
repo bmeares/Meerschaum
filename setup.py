@@ -11,7 +11,7 @@ with open('meerschaum/config/_version.py', encoding='utf-8') as version_file:
     exec(version_file.read())
 with open('meerschaum/utils/packages/_packages.py', encoding='utf-8') as packages_file:
     exec(packages_file.read())
-with open('meerschaum/config/static/__init__.py', encoding='utf-8') as static_file:
+with open('meerschaum/_internal/static.py', encoding='utf-8') as static_file:
     exec(static_file.read())
 with open('README.md', 'r', encoding='utf-8') as readme_file:
     readme = readme_file.read()
