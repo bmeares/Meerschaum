@@ -253,7 +253,7 @@ def dtypes(self) -> Dict[str, Any]:
     """
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
-    return self.get_dtypes(refresh=False)
+    return self.get_dtypes(refresh=True)
 
 
 @dtypes.setter
