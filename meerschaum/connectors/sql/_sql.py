@@ -131,23 +131,28 @@ def read(
     """
     if chunks is not None and chunks <= 0:
         return []
+
     from meerschaum.utils.sql import sql_item_name, truncate_item_name
     from meerschaum.utils.dtypes import are_dtypes_equal, coerce_timezone
     from meerschaum.utils.dtypes.sql import TIMEZONE_NAIVE_FLAVORS
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.pool import get_pool
     from meerschaum.utils.dataframe import chunksize_to_npartitions, get_numeric_cols
+    from meerschaum.utils.misc import filter_arguments
     import warnings
     import traceback
     from decimal import Decimal
+
     pd = import_pandas()
     dd = None
+
     is_dask = 'dask' in pd.__name__
     pandas = attempt_import('pandas')
     is_dask = dd is not None
     npartitions = chunksize_to_npartitions(chunksize)
     if is_dask:
         chunksize = None
+
     schema = schema or self.schema
     utc_dt_cols = [
         col
@@ -222,26 +227,33 @@ def read(
         else format_sql_query_for_dask(str_query)
     )
 
+    def _get_chunk_args_kwargs(_chunk):
+        return filter_arguments(
+            chunk_hook,
+            _chunk,
+            workers=workers,
+            chunksize=chunksize,
+            debug=debug,
+            **kw
+        )
+
     chunk_list = []
     chunk_hook_results = []
     def _process_chunk(_chunk, _retry_on_failure: bool = True):
         if self.flavor in TIMEZONE_NAIVE_FLAVORS:
             for col in utc_dt_cols:
-                _chunk[col] = coerce_timezone(_chunk[col], strip_timezone=False)
+                _chunk[col] = coerce_timezone(_chunk[col], strip_utc=False)
         if not as_hook_results:
             chunk_list.append(_chunk)
+
         if chunk_hook is None:
             return None
 
+        chunk_args, chunk_kwargs = _get_chunk_args_kwargs(_chunk)
+
         result = None
         try:
-            result = chunk_hook(
-                _chunk,
-                workers=workers,
-                chunksize=chunksize,
-                debug=debug,
-                **kw
-            )
+            result = chunk_hook(*chunk_args, **chunk_kwargs)
         except Exception:
             result = False, traceback.format_exc()
             from meerschaum.utils.formatting import get_console
@@ -292,8 +304,16 @@ def read(
                         self.engine,
                         **read_sql_query_kwargs
                     )
+
                     to_return = (
-                        chunk_generator
+                        (
+                            chunk_generator
+                            if not (as_hook_results or chunksize is None)
+                            else (
+                                _process_chunk(_chunk)
+                                for _chunk in chunk_generator
+                            )
+                        )
                         if as_iterator or chunksize is None
                         else (
                             list(pool.imap(_process_chunk, chunk_generator))
@@ -339,9 +359,8 @@ def read(
         try:
             for chunk in chunk_generator:
                 if chunk_hook is not None:
-                    chunk_hook_results.append(
-                        chunk_hook(chunk, chunksize=chunksize, debug=debug, **kw)
-                    )
+                    chunk_args, chunk_kwargs = _get_chunk_args_kwargs(chunk)
+                    chunk_hook_results.append(chunk_hook(*chunk_args, **chunk_kwargs))
                 chunk_list.append(chunk)
                 read_chunks += 1
                 if chunks is not None and read_chunks >= chunks:
@@ -356,9 +375,8 @@ def read(
     try:
         for chunk in chunk_generator:
             if chunk_hook is not None:
-                chunk_hook_results.append(
-                    chunk_hook(chunk, chunksize=chunksize, debug=debug, **kw)
-                )
+                chunk_args, chunk_kwargs = _get_chunk_args_kwargs(chunk)
+                chunk_hook_results.append(chunk_hook(*chunk_args, **chunk_kwargs))
             chunk_list.append(chunk)
             read_chunks += 1
             if chunks is not None and read_chunks >= chunks:
@@ -389,9 +407,8 @@ def read(
     ### call the hook on any missed chunks.
     if chunk_hook is not None and len(chunk_list) > len(chunk_hook_results):
         for c in chunk_list[len(chunk_hook_results):]:
-            chunk_hook_results.append(
-                chunk_hook(c, chunksize=chunksize, debug=debug, **kw)
-            )
+            chunk_args, chunk_kwargs = _get_chunk_args_kwargs(c)
+            chunk_hook_results.append(chunk_hook(*chunk_args, **chunk_kwargs))
 
     ### chunksize is not None so must iterate
     if debug:
