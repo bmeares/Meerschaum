@@ -175,6 +175,9 @@ def _init_mssql_sqlalchemy():
         lazy=False,
         warn=False,
     )
+    if pyodbc is None:
+        raise EnvironmentError("Cannot import pyodbc. Is the MSSQL driver installed?")
+
     pyodbc.pooling = False
 
     MSDialect_pyodbc = sqlalchemy_dialects_mssql_pyodbc.MSDialect_pyodbc
