@@ -51,7 +51,7 @@ def enforce_dtypes(
         enforce = False
 
     pipe_dtypes = self.dtypes if enforce else {}
-    explicit_dtypes = self.get_dtypes(infer=False, debug=debug)
+    explicit_dtypes = self.get_dtypes(infer=False, debug=debug) if enforce else {}
 
     try:
         if isinstance(df, str):

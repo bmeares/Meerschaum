@@ -331,7 +331,7 @@ def get_dtypes(
             remote_dtypes = None
 
     if remote_dtypes is None:
-        remote_dtypes = self.infer_dtypes(persist=False)
+        remote_dtypes = self.infer_dtypes(persist=False, debug=debug)
         self.__dict__['_remote_dtypes'] = remote_dtypes
         self.__dict__['_remote_dtypes_timestamp'] = now
 
