@@ -269,11 +269,26 @@ def dtypes(self, _dtypes: Dict[str, Any]) -> None:
 
 def get_dtypes(
     self,
+    infer: bool = True,
     refresh: bool = False,
     debug: bool = False,
 ) -> Dict[str, Any]:
     """
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
+
+
+    Parameters
+    ----------
+    infer: bool, default True
+        If `True`, include the implicit existing dtypes.
+        Else only return the explicitly configured dtypes (e.g. `Pipe.parameters['dtypes']`).
+
+    refresh: bool, default False
+        If `True`, invalidate any cache and return the latest known dtypes.
+
+    Returns
+    -------
+    A dictionary mapping column names to dtypes.
     """
     import time
     from meerschaum.config._patch import apply_patch_to_config
@@ -286,6 +301,9 @@ def get_dtypes(
         else self.parameters
     )
     configured_dtypes = parameters.get('dtypes', {})
+
+    if not infer:
+        return configured_dtypes
 
     now = time.perf_counter()
     cache_seconds = STATIC_CONFIG['pipes']['static_schema_cache_seconds']

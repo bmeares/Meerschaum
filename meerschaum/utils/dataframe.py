@@ -951,6 +951,7 @@ def get_geometry_cols(
 def enforce_dtypes(
     df: 'pd.DataFrame',
     dtypes: Dict[str, str],
+    explicit_dtypes: Optional[Dict[str, str]] = None,
     safe_copy: bool = True,
     coerce_numeric: bool = True,
     coerce_timezone: bool = True,
@@ -967,6 +968,10 @@ def enforce_dtypes(
 
     dtypes: Dict[str, str]
         The data types to attempt to enforce on the DataFrame.
+
+    explicit_dtypes: Optional[Dict[str, str]], default None
+        If provided, automatic dtype coersion will respect explicitly configured
+        dtypes (`int`, `float`, `numeric`).
 
     safe_copy: bool, default True
         If `True`, create a copy before comparing and modifying the dataframes.
@@ -1015,6 +1020,7 @@ def enforce_dtypes(
             dprint("Incoming DataFrame has no columns. Skipping enforcement...")
         return df
 
+    explicit_dtypes = explicit_dtypes or {}
     pipe_pandas_dtypes = {
         col: to_pandas_dtype(typ)
         for col, typ in dtypes.items()
@@ -1206,9 +1212,9 @@ def enforce_dtypes(
     for col, typ in {k: v for k, v in common_diff_dtypes.items()}.items():
         previous_typ = common_dtypes[col]
         mixed_numeric_types = (is_dtype_numeric(typ) and is_dtype_numeric(previous_typ))
-        explicitly_float = are_dtypes_equal(dtypes.get(col, 'object'), 'float')
-        explicitly_int = are_dtypes_equal(dtypes.get(col, 'object'), 'int')
-        explicitly_numeric = dtypes.get(col, 'numeric').startswith('numeric')
+        explicitly_float = are_dtypes_equal(explicit_dtypes.get(col, 'object'), 'float')
+        explicitly_int = are_dtypes_equal(explicit_dtypes.get(col, 'object'), 'int')
+        explicitly_numeric = explicit_dtypes.get(col, 'object').startswith('numeric')
         all_nan = df[col].isnull().all()
         cast_to_numeric = (
             explicitly_numeric
