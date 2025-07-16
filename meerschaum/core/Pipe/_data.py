@@ -29,6 +29,7 @@ def get_data(
     as_iterator: bool = False,
     as_chunks: bool = False,
     as_dask: bool = False,
+    add_missing_columns: bool = False,
     chunk_interval: Union[timedelta, int, None] = None,
     order: Optional[str] = 'asc',
     limit: Optional[int] = None,
@@ -72,6 +73,9 @@ def get_data(
         If `True`, return a `dask.DataFrame`
         (which may be loaded into a Pandas DataFrame with `df.compute()`).
 
+    add_missing_columns: bool, default False
+        If `True`, add any missing columns from `Pipe.dtypes` to the dataframe.
+
     chunk_interval: Union[timedelta, int, None], default None
         If `as_iterator`, then return chunks with `begin` and `end` separated by this interval.
         This may be set under `pipe.parameters['chunk_minutes']`.
@@ -103,12 +107,13 @@ def get_data(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import iterate_chunks, items_str
-    from meerschaum.utils.dtypes import to_pandas_dtype, coerce_timezone
+    from meerschaum.utils.dtypes import to_pandas_dtype
     from meerschaum.utils.dataframe import add_missing_cols_to_df, df_is_chunk_generator
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.warnings import dprint
     dd = attempt_import('dask.dataframe') if as_dask else None
     dask = attempt_import('dask') if as_dask else None
+    _ = attempt_import('partd', lazy=False) if as_dask else None
 
     if select_columns == '*':
         select_columns = None
@@ -187,14 +192,17 @@ def get_data(
                 order=order,
                 limit=limit,
                 fresh=fresh,
+                add_missing_columns=True,
                 debug=debug,
             )
             for (chunk_begin, chunk_end) in bounds
         ]
         dask_meta = {
             col: to_pandas_dtype(typ)
-            for col, typ in self.dtypes.items()
+            for col, typ in self.get_dtypes(refresh=True, infer=True, debug=debug).items()
         }
+        if debug:
+            dprint(f"Dask meta:\n{dask_meta}")
         return _sort_df(dd.from_delayed(dask_chunks, meta=dask_meta))
 
     if not self.exists(debug=debug):
@@ -248,6 +256,7 @@ def get_data(
         if not select_columns:
             select_columns = [col for col in df.columns]
 
+        pipe_dtypes = self.get_dtypes(refresh=False, debug=debug)
         cols_to_omit = [
             col
             for col in df.columns
@@ -261,7 +270,11 @@ def get_data(
             col
             for col in select_columns
             if col not in df.columns
-        ]
+        ] + ([
+            col
+            for col in pipe_dtypes
+            if col not in df.columns
+        ] if add_missing_columns else [])
         if cols_to_omit:
             warn(
                 (
@@ -277,14 +290,13 @@ def get_data(
             df = df[_cols_to_select]
 
         if cols_to_add:
-            warn(
-                (
-                    f"Specified columns {items_str(cols_to_add)} were not found on {self}. "
-                    + "Adding these to the DataFrame as null columns."
-                ),
-                stack=False,
+            df = add_missing_cols_to_df(
+                df,
+                {
+                    col: pipe_dtypes.get(col, 'string')
+                    for col in cols_to_add
+                },
             )
-            df = add_missing_cols_to_df(df, {col: 'string' for col in cols_to_add})
 
         enforced_df = self.enforce_dtypes(df, debug=debug)
 
@@ -687,10 +699,25 @@ def get_chunk_bounds(
         elif are_dtypes_equal(str(type(end)), 'int'):
             end += 1
             consolidate_end_chunk = True
+
     if begin is None and end is None:
         return [(None, None)]
 
     begin, end = self.parse_date_bounds(begin, end)
+
+    if begin and end:
+        if begin >= end:
+            return (
+                [(begin, begin)]
+                if bounded
+                else [(begin, None)]
+            )
+        if end <= begin:
+            return (
+                [(end, end)]
+                if bounded
+                else [(None, begin)]
+            )
 
     ### Set the chunk interval under `pipe.parameters['verify']['chunk_minutes']`.
     chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
