@@ -14,8 +14,8 @@ __all__ = ('STATIC_CONFIG',)
 
 _default_create_engine_args = {
     #  'method': 'multi',
-    'pool_size': 5,
-    'max_overflow': 10,
+    'pool_size': (os.cpu_count() or 5),
+    'max_overflow': (os.cpu_count() or 10),
     'pool_recycle': 3600,
     'connect_args': {},
 }
