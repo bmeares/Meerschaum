@@ -959,7 +959,7 @@ def test_distant_datetimes(flavor: str):
         columns={
             'datetime': 'ts',
         },
-        enforce=False,
+        enforce=(flavor == 'sqlite'),
     )
     docs = [
         {'ts': datetime(1, 1, 1)},
