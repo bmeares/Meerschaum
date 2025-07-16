@@ -1207,12 +1207,28 @@ def enforce_dtypes(
         previous_typ = common_dtypes[col]
         mixed_numeric_types = (is_dtype_numeric(typ) and is_dtype_numeric(previous_typ))
         explicitly_float = are_dtypes_equal(dtypes.get(col, 'object'), 'float')
+        explicitly_int = are_dtypes_equal(dtypes.get(col, 'object'), 'int')
         explicitly_numeric = dtypes.get(col, 'numeric').startswith('numeric')
+        all_nan = df[col].isnull().all()
         cast_to_numeric = (
             explicitly_numeric
             or col in df_numeric_cols
-            or (mixed_numeric_types and not explicitly_float)
+            or (
+                mixed_numeric_types
+                and not (explicitly_float or explicitly_int)
+                and not all_nan
+            )
         ) and coerce_numeric
+
+        if debug:
+            dprint(
+                f"{explicitly_numeric=}\n"
+                f"{explicitly_int=}\n"
+                f"{explicitly_float=}\n"
+                f"{all_nan=}\n"
+                f"{cast_to_numeric=}\n"
+            )
+
         if cast_to_numeric:
             common_dtypes[col] = attempt_cast_to_numeric
             common_diff_dtypes[col] = attempt_cast_to_numeric

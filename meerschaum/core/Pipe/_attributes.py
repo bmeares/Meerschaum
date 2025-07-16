@@ -253,7 +253,7 @@ def dtypes(self) -> Dict[str, Any]:
     """
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
-    return self.get_dtypes(refresh=True)
+    return self.get_dtypes(refresh=False)
 
 
 @dtypes.setter
@@ -263,18 +263,23 @@ def dtypes(self, _dtypes: Dict[str, Any]) -> None:
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
     self.update_parameters({'dtypes': _dtypes}, persist=False)
+    self.__dict__.pop('_remote_dtypes', None)
+    self.__dict__.pop('_remote_dtypes_timestamp', None)
 
 
 def get_dtypes(
     self,
-    refresh: bool = True,
+    refresh: bool = False,
     debug: bool = False,
 ) -> Dict[str, Any]:
     """
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
+    import time
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.dtypes import MRSM_ALIAS_DTYPES
+    from meerschaum._internal.static import STATIC_CONFIG
+    from meerschaum.utils.warnings import dprint
     parameters = (
         self.get_parameters(debug=debug)
         if refresh
@@ -282,14 +287,35 @@ def get_dtypes(
     )
     configured_dtypes = parameters.get('dtypes', {})
 
-    refresh_remote_dtypes = refresh or self.__dict__.get('_remote_dtypes', None) is None
-    remote_dtypes = (
-        self.infer_dtypes(persist=False)
-        if refresh_remote_dtypes
-        else self._remote_dtypes
-    )
-    if refresh_remote_dtypes:
-        self._remote_dtypes = remote_dtypes
+    now = time.perf_counter()
+    cache_seconds = STATIC_CONFIG['pipes']['static_schema_cache_seconds']
+    if not self.static:
+        refresh = True
+
+    if refresh:
+        _ = self.__dict__.pop('_remote_dtypes_timestamp', None)
+        _ = self.__dict__.pop('_remote_dtypes', None)
+
+    remote_dtypes = self.__dict__.get('_remote_dtypes', None)
+    if remote_dtypes is not None:
+        remote_dtypes_timestamp = self.__dict__.get('_remote_dtypes_timestamp', None)
+        if remote_dtypes_timestamp is not None:
+            delta = now - remote_dtypes_timestamp
+            if delta < cache_seconds:
+                if debug:
+                    dprint(
+                        f"Returning cached `remote_dtypes` for {self} "
+                        f"({round(delta, 2)} seconds old)."
+                    )
+            else:
+                remote_dtypes = None
+        else:
+            remote_dtypes = None
+
+    if remote_dtypes is None:
+        remote_dtypes = self.infer_dtypes(persist=False)
+        self.__dict__['_remote_dtypes'] = remote_dtypes
+        self.__dict__['_remote_dtypes_timestamp'] = now
 
     patched_dtypes = apply_patch_to_config(remote_dtypes, configured_dtypes)
     dt_col = parameters.get('columns', {}).get('datetime', None)
@@ -378,12 +404,10 @@ def tzinfo(self) -> Union[None, timezone]:
     if '_tzinfo' in self.__dict__:
         return self.__dict__['_tzinfo']
 
+    _tzinfo = None
     dt_col = self.columns.get('datetime', None)
-    if not dt_col:
-        _tzinfo = None
-
-    dt_typ = str(self.dtypes.get(dt_col, 'datetime64[ns, UTC]'))
-    if 'utc' in dt_typ.lower() or dt_typ == 'datetime':
+    dt_typ = str(self.dtypes.get(dt_col, 'datetime64[ns, UTC]')) if dt_col else None
+    if dt_typ and 'utc' in dt_typ.lower() or dt_typ == 'datetime':
         _tzinfo = timezone.utc
 
     if dt_typ in ('datetime64[ns]', 'datetime64[ms]'):
