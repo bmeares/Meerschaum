@@ -1861,26 +1861,6 @@ def ensure_readline() -> 'ModuleType':
     sys.modules['readline'] = readline
     return readline
 
-_pkg_resources_get_distribution = None
-_custom_distributions = {}
-def _monkey_patch_get_distribution(_dist: str, _version: str) -> None:
-    """
-    Monkey patch `pkg_resources.get_distribution` to allow for importing `flask_compress`.
-    """
-    import pkg_resources
-    from collections import namedtuple
-    global _pkg_resources_get_distribution
-    with _locks['_pkg_resources_get_distribution']:
-        _pkg_resources_get_distribution = pkg_resources.get_distribution
-    _custom_distributions[_dist] = _version
-    _Dist = namedtuple('_Dist', ['version'])
-    def _get_distribution(dist):
-        """Hack for flask-compress."""
-        if dist in _custom_distributions:
-            return _Dist(_custom_distributions[dist])
-        return _pkg_resources_get_distribution(dist)
-    pkg_resources.get_distribution = _get_distribution
-
 
 def _get_pip_os_env(color: bool = True):
     """

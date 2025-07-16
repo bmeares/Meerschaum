@@ -31,7 +31,6 @@ install_flavor_drivers = {
     'mssql': ['pyodbc'],
     'oracle': ['oracledb'],
 }
-require_patching_flavors = {'cockroachdb': [('sqlalchemy-cockroachdb', 'sqlalchemy_cockroachdb')]}
 
 flavor_dialects = {
     'cockroachdb': (
@@ -63,19 +62,6 @@ def create_engine(
         )
         if self.flavor == 'mssql':
             _init_mssql_sqlalchemy()
-    if self.flavor in require_patching_flavors:
-        from meerschaum.utils.packages import determine_version, _monkey_patch_get_distribution
-        import pathlib
-        for install_name, import_name in require_patching_flavors[self.flavor]:
-            pkg = attempt_import(
-                import_name,
-                debug=debug,
-                lazy=False,
-                warn=False
-            )
-            _monkey_patch_get_distribution(
-                install_name, determine_version(pathlib.Path(pkg.__file__), venv='mrsm')
-            )
 
     ### supplement missing values with defaults (e.g. port number)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
