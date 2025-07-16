@@ -51,6 +51,7 @@ def enforce_dtypes(
         enforce = False
 
     pipe_dtypes = self.dtypes if enforce else {}
+    explicit_dtypes = self.get_dtypes(infer=False, debug=debug)
 
     try:
         if isinstance(df, str):
@@ -103,6 +104,7 @@ def enforce_dtypes(
     return _enforce_dtypes(
         df,
         pipe_dtypes,
+        explicit_dtypes=explicit_dtypes,
         safe_copy=safe_copy,
         strip_timezone=(self.tzinfo is None),
         coerce_timezone=enforce,
