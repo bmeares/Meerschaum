@@ -716,7 +716,7 @@ def test_nested_chunks(flavor: str):
     assert len(df) == num_docs
 
 
-@pytest.mark.skip(reason="Python 3.13 Dask, numpy compatability.")
+#  @pytest.mark.skip(reason="Python 3.13 Dask, numpy compatability.")
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_dask_dataframe(flavor: str):
     """
