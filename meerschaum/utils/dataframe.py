@@ -1127,6 +1127,10 @@ def enforce_dtypes(
             dprint(f"Checking for datetime conversion: {datetime_cols}")
         for col in datetime_cols:
             if col in df.columns:
+                if not strip_timezone and 'utc' in str(df.dtypes[col]).lower():
+                    if debug:
+                        dprint(f"Skip UTC coersion for column '{col}' ({str(df[col].dtype)}).")
+                    continue
                 if debug:
                     dprint(
                         f"Data type for column '{col}' before timezone coersion: "

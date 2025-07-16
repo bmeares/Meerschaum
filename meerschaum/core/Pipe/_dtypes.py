@@ -35,6 +35,7 @@ def enforce_dtypes(
         parse_df_datetimes,
         enforce_dtypes as _enforce_dtypes,
         parse_simple_lines,
+        add_missing_cols_to_df,
     )
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.packages import import_pandas
@@ -50,8 +51,12 @@ def enforce_dtypes(
     if not self.enforce:
         enforce = False
 
-    pipe_dtypes = self.dtypes if enforce else {}
+    cols_types = self.get_columns_types(debug=debug)
     explicit_dtypes = self.get_dtypes(infer=False, debug=debug) if enforce else {}
+    pipe_dtypes = {
+        **cols_types,
+        **explicit_dtypes
+    }
 
     try:
         if isinstance(df, str):
@@ -101,14 +106,17 @@ def enforce_dtypes(
             )
         return df
 
-    return _enforce_dtypes(
-        df,
-        pipe_dtypes,
-        explicit_dtypes=explicit_dtypes,
-        safe_copy=safe_copy,
-        strip_timezone=(self.tzinfo is None),
-        coerce_timezone=enforce,
-        debug=debug,
+    return add_missing_cols_to_df(
+        _enforce_dtypes(
+            df,
+            pipe_dtypes,
+            explicit_dtypes=explicit_dtypes,
+            safe_copy=safe_copy,
+            strip_timezone=(self.tzinfo is None),
+            coerce_timezone=enforce,
+            debug=debug,
+        ),
+        cols_types,
     )
 
 
