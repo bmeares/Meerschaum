@@ -10,7 +10,40 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 if [ -z "$DISTRO" ]; then
-  DISTRO="$(lsb_release -si)";
+  if [ -f "/etc/os-release" ]; then
+      DISTRO_ID=$(grep -E '^ID=' /etc/os-release | awk -F= '{print $2}' | tr -d '"')
+
+      case "$DISTRO_ID" in
+          ubuntu)
+              DISTRO="Ubuntu"
+              ;;
+          fedora)
+              DISTRO="Fedora"
+              ;;
+          *)
+              DISTRO="Unknown"
+              echo "Detected unknown distribution ID: $DISTRO_ID"
+              ;;
+      esac
+  else
+      # Fallback for older systems or non-standard setups
+      if [ -f "/etc/lsb-release" ]; then
+          if grep -q "DISTRIB_ID=Ubuntu" /etc/lsb-release; then
+              DISTRO="Ubuntu"
+          else
+              DISTRO="Unknown"
+          fi
+      elif [ -f "/etc/redhat-release" ]; then
+          if grep -q "Fedora" /etc/redhat-release; then
+              DISTRO="Fedora"
+          else
+              DISTRO="Unknown"
+          fi
+      else
+          DISTRO="Unknown"
+          echo "Could not determine distribution. /etc/os-release not found."
+      fi
+  fi
 fi
 
 install_mssql_ubuntu(){
