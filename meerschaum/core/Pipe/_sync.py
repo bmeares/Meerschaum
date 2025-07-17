@@ -410,16 +410,14 @@ def sync(
             dt_col = p.columns.get('datetime', 'ts')
             dt_typ = p.dtypes.get(dt_col, 'datetime') if dt_col else 'datetime'
             if dt_col and hasattr(df, 'columns') and dt_col not in df.columns:
-                now = get_current_timestamp(p.precision)
-                now_val = (
-                    int(now.timestamp() * p.autotime_scalar)
-                    if are_dtypes_equal(dt_typ, 'int')
-                    else now
+                now = get_current_timestamp(
+                    p.precision,
+                    as_int=(are_dtypes_equal(dt_typ, 'int')),
                 )
                 if debug:
-                    dprint(f"Adding current timestamp to dataframe synced to {p}: {now_val}")
+                    dprint(f"Adding current timestamp to dataframe synced to {p}: {now}")
 
-                df[dt_col] = now_val
+                df[dt_col] = now
                 kw['check_existing'] = False
 
         ### Capture `numeric`, `uuid`, `json`, and `bytes` columns.

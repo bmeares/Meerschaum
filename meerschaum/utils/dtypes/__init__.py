@@ -872,7 +872,7 @@ def get_geometry_type_srid(
 
 
 def get_current_timestamp(
-    unit: str = 'ns',
+    unit: str = 'us',
     as_pandas: bool = False,
     as_int: bool = False,
 ) -> 'Union[datetime, pd.Timestamp, int]':

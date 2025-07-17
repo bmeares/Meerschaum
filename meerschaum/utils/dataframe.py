@@ -1451,9 +1451,11 @@ def df_from_literal(
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.warnings import error, warn
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.dtypes import get_current_timestamp
 
     if pipe is None or literal is None:
         error("Please provide a Pipe and a literal value")
+
     dt_col = pipe.columns.get('datetime', 'ts')
     val_col = pipe.get_val_column(debug=debug)
 
@@ -1471,9 +1473,7 @@ def df_from_literal(
             )
             val = literal
 
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-
+    now = get_current_timestamp(pipe.precision)
     pd = import_pandas()
     return pd.DataFrame({dt_col: [now], val_col: [val]})
 
