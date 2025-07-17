@@ -788,14 +788,19 @@ def get_sync_time(
     table_name = self.quote_table(pipe.target)
     try:
         vals = (
-            self.client.zrevrange(table_name, 0, 0)
+            self.client.zrevrange(table_name, 0, 0, withscores=True)
             if newest
-            else self.client.zrange(table_name, 0, 0)
+            else self.client.zrange(table_name, 0, 0, withscores=True)
         )
         if not vals:
             return None
-        val = vals[0]
+        print(f"{vals=}")
+        val = vals[0][0]
+        if isinstance(val, bytes):
+            val = val.decode('utf-8')
     except Exception:
+        import traceback
+        traceback.print_exc()
         return None
 
     doc = json.loads(val)
