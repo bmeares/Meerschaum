@@ -136,7 +136,7 @@ def sync(
     from meerschaum.utils.misc import df_is_chunk_generator, filter_keywords, filter_arguments
     from meerschaum.utils.pool import get_pool
     from meerschaum.config import get_config
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, get_current_timestamp
 
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
@@ -410,9 +410,9 @@ def sync(
             dt_col = p.columns.get('datetime', 'ts')
             dt_typ = p.dtypes.get(dt_col, 'datetime') if dt_col else 'datetime'
             if dt_col and hasattr(df, 'columns') and dt_col not in df.columns:
-                now = datetime.now(timezone.utc)
+                now = get_current_timestamp(p.precision)
                 now_val = (
-                    int(now.timestamp() * 1000)
+                    int(now.timestamp() * p.autotime_scalar)
                     if are_dtypes_equal(dt_typ, 'int')
                     else now
                 )

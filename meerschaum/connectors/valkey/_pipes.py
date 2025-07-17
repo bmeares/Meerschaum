@@ -794,7 +794,6 @@ def get_sync_time(
         )
         if not vals:
             return None
-        print(f"{vals=}")
         val = vals[0][0]
         if isinstance(val, bytes):
             val = val.decode('utf-8')

@@ -6,6 +6,7 @@ Test miscellaneous utilities.
 """
 
 from typing import Dict, Any
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -67,3 +68,117 @@ def test_to_snake_case(input_str: str, expected_output: str):
     """
     from meerschaum.utils.misc import to_snake_case
     assert to_snake_case(input_str) == expected_output
+
+@pytest.mark.parametrize(
+    "dt, date_delta, to, expected_dt",
+    [
+        (
+            datetime(2023, 1, 1, 12, 30, 30, 500000),
+            timedelta(minutes=1),
+            'down',
+            datetime(2023, 1, 1, 12, 30, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 12, 30, 30, 500000),
+            timedelta(minutes=1),
+            'up',
+            datetime(2023, 1, 1, 12, 31, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 12, 30, 30, 500000),
+            timedelta(minutes=1),
+            'closest',
+            datetime(2023, 1, 1, 12, 31, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 12, 29, 29, 400000),
+            timedelta(minutes=1),
+            'closest',
+            datetime(2023, 1, 1, 12, 29, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 12, 30, 30, 500000),
+            timedelta(hours=1),
+            'down',
+            datetime(2023, 1, 1, 12, 0, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 12, 30, 30, 500000),
+            timedelta(hours=1),
+            'up',
+            datetime(2023, 1, 1, 13, 0, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 12, 30, 30, 500000),
+            timedelta(hours=1),
+            'closest',
+            datetime(2023, 1, 1, 13, 0, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 12, 29, 59, 999999),
+            timedelta(hours=1),
+            'closest',
+            datetime(2023, 1, 1, 12, 0, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 0, 0, 0, 1),
+            timedelta(microseconds=1),
+            'down',
+            datetime(2023, 1, 1, 0, 0, 0, 1)
+        ),
+        (
+            datetime(2023, 1, 1, 0, 0, 0, 1),
+            timedelta(microseconds=10),
+            'down',
+            datetime(2023, 1, 1, 0, 0, 0, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 0, 0, 0, 1),
+            timedelta(microseconds=10),
+            'up',
+            datetime(2023, 1, 1, 0, 0, 0, 10)
+        ),
+        (
+            datetime(2023, 1, 1, 0, 0, 0, 1),
+            timedelta(microseconds=10),
+            'closest',
+            datetime(2023, 1, 1, 0, 0, 0, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 0, 0, 0, 6),
+            timedelta(microseconds=10),
+            'closest',
+            datetime(2023, 1, 1, 0, 0, 0, 10)
+        ),
+        (
+            datetime(2023, 1, 1, 12, 0, 0),
+            timedelta(days=1),
+            'down',
+            datetime(2023, 1, 1, 0, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 12, 0, 0),
+            timedelta(days=1),
+            'up',
+            datetime(2023, 1, 2, 0, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 12, 0, 0),
+            timedelta(days=1),
+            'closest',
+            datetime(2023, 1, 2, 0, 0)
+        ),
+        (
+            datetime(2023, 1, 1, 11, 0, 0),
+            timedelta(days=1),
+            'closest',
+            datetime(2023, 1, 1, 0, 0)
+        ),
+    ]
+)
+def test_round_time(dt, date_delta, to, expected_dt):
+    """
+    Test that `round_time()` correctly rounds datetimes.
+    """
+    from meerschaum.utils.misc import round_time
+    assert round_time(dt, date_delta, to) == expected_dt

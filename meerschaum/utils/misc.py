@@ -527,24 +527,38 @@ def round_time(
     datetime.datetime(2022, 1, 1, 13, 0)
 
     """
+    from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN, ROUND_UP
     if date_delta is None:
         date_delta = timedelta(minutes=1)
-    round_to = date_delta.total_seconds()
+
     if dt is None:
         dt = datetime.now(timezone.utc).replace(tzinfo=None)
-    seconds = (dt.replace(tzinfo=None) - dt.min.replace(tzinfo=None)).seconds
 
-    if seconds % round_to == 0 and dt.microsecond == 0:
-        rounding = (seconds + round_to / 2) // round_to * round_to
+    def get_total_microseconds(td: timedelta) -> int:
+        return (td.days * 86400 + td.seconds) * 1_000_000 + td.microseconds
+
+    round_to_microseconds = get_total_microseconds(date_delta)
+    if round_to_microseconds == 0:
+        return dt
+
+    dt_delta_from_min = dt.replace(tzinfo=None) - datetime.min
+    dt_total_microseconds = get_total_microseconds(dt_delta_from_min)
+
+    dt_dec = Decimal(dt_total_microseconds)
+    round_to_dec = Decimal(round_to_microseconds)
+
+    div = dt_dec / round_to_dec
+    if to == 'down':
+        num_intervals = div.to_integral_value(rounding=ROUND_DOWN)
+    elif to == 'up':
+        num_intervals = div.to_integral_value(rounding=ROUND_UP)
     else:
-        if to == 'up':
-            rounding = (seconds + dt.microsecond/1000000 + round_to) // round_to * round_to
-        elif to == 'down':
-            rounding = seconds // round_to * round_to
-        else:
-            rounding = (seconds + round_to / 2) // round_to * round_to
+        num_intervals = div.to_integral_value(rounding=ROUND_HALF_UP)
 
-    return dt + timedelta(0, rounding - seconds, - dt.microsecond)
+    rounded_dt_total_microseconds = num_intervals * round_to_dec
+    adjustment_microseconds = int(rounded_dt_total_microseconds) - dt_total_microseconds
+
+    return dt + timedelta(microseconds=adjustment_microseconds)
 
 
 def timed_input(

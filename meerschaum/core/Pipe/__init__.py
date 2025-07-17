@@ -134,6 +134,8 @@ class Pipe:
         target,
         _target_legacy,
         guess_datetime,
+        precision,
+        get_precision,
     )
     from ._show import show
     from ._edit import edit, edit_definition, update
