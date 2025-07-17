@@ -51,7 +51,7 @@ def enforce_dtypes(
     if not self.enforce:
         enforce = False
 
-    cols_types = self.get_columns_types(debug=debug)
+    cols_types = self.get_columns_types(debug=debug) if enforce else {}
     explicit_dtypes = self.get_dtypes(infer=False, debug=debug) if enforce else {}
     pipe_dtypes = {
         **cols_types,
