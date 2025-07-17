@@ -911,6 +911,8 @@ def update_parameters(
         del self.__dict__['_parameters']
     if 'parameters' not in self._attributes:
         self._attributes['parameters'] = {}
+    if '_precision' in self.__dict__:
+        _ = self.__dict__.pop('_precision', None)
 
     self._attributes['parameters'] = apply_patch_to_config(
         self._attributes['parameters'],
@@ -924,3 +926,78 @@ def update_parameters(
         return True, "Success"
 
     return self.edit(debug=debug)
+
+
+def get_precision(self) -> Union[str, None]:
+    """
+    Return the timestamp precision unit for the `datetime` axis.
+    """
+    from meerschaum.utils.dtypes import (
+        MRSM_PRECISION_UNITS_SCALARS,
+        MRSM_PRECISION_UNITS_ALIASES,
+        are_dtypes_equal,
+    )
+
+    if '_precision' in self.__dict__:
+        return self._precision
+
+    parameters = self.parameters
+    _precision = parameters.get('precision', None)
+
+    if not _precision:
+
+        dt_col = parameters.get('columns', {}).get('datetime', None)
+        if not dt_col:
+            return None
+
+        dt_typ = self.dtypes.get(dt_col, 'datetime')
+        if are_dtypes_equal(dt_typ, 'datetime'):
+            if dt_typ == 'datetime':
+                dt_typ = 'datetime64[ns, UTC]'
+
+            _precision = (
+                dt_typ
+                .split('[', maxsplit=1)[-1]
+                .split(',', maxsplit=1)[0]
+                .split(' ', maxsplit=1)[0]
+            )
+
+        elif are_dtypes_equal(dt_typ, 'int'):
+            _precision = (
+                'second'
+                if '32' in dt_typ
+                else 'nanosecond'
+            )
+            if '32' in dt_typ:
+                _precision = 'second'
+            else:
+                _precision = 'nanosecond'
+
+    true_precision = MRSM_PRECISION_UNITS_ALIASES.get(_precision, _precision)
+    if true_precision not in MRSM_PRECISION_UNITS_SCALARS:
+        from meerschaum.utils.misc import items_str
+        raise ValueError(
+            f"Invalid precision unit '{true_precision}'.\n"
+            "Accepted values are "
+            f"{items_str(list(MRSM_PRECISION_UNITS_SCALARS) + list(MRSM_PRECISION_UNITS_ALIASES), and_str='or')}."
+        )
+
+    self._precision = true_precision
+    return true_precision
+
+
+@property
+def precision(self) -> Union[str, None]:
+    """
+    Return the configured or detected precision.
+    """
+    return self.get_precision()
+
+
+@precision.setter
+def precision(self, _precision: Union[str, None]) -> None:
+    """
+    Update the `precision` parameter.
+    """
+    self.update_parameters({'precision': _precision}, persist=False)
+    _ = self.__dict__.pop('_precision', None)

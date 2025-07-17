@@ -13,7 +13,7 @@ from datetime import timezone, datetime
 from decimal import Decimal, Context, InvalidOperation, ROUND_HALF_UP
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Dict, Union, Any, Optional, Tuple
+from meerschaum.utils.typing import Dict, Union, Any, Optional, Tuple, List
 from meerschaum.utils.warnings import warn
 
 MRSM_ALIAS_DTYPES: Dict[str, str] = {
@@ -47,6 +47,29 @@ MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'str': 'string[python]',
     'bytes': 'object',
     None: 'object',
+}
+
+MRSM_PRECISION_UNITS_SCALARS: Dict[str, Union[int, float]] = {
+    'nanosecond': 1_000_000_000,
+    'microsecond': 1_000_000,
+    'millisecond': 1000,
+    'second': 1,
+    'minute': (1 / 60),
+    'hour': (1 / 3600),
+    'day': (1 / 86400),
+}
+
+MRSM_PRECISION_UNITS_ALIASES: Dict[str, str] = {
+    'ns': 'nanosecond',
+    'us': 'microsecond',
+    'ms': 'millisecond',
+    's': 'second',
+    'sec': 'second',
+    'm': 'minute',
+    'min': 'minute',
+    'h': 'hour',
+    'hr': 'hour',
+    'd': 'day',
 }
 
 
@@ -846,3 +869,79 @@ def get_geometry_type_srid(
             break
 
     return geometry_type, srid
+
+
+def get_current_timestamp(
+    unit: str = 'ns',
+    as_pandas: bool = False,
+    as_int: bool = False,
+) -> 'Union[datetime, pd.Timestamp, int]':
+    """
+    Return the current UTC timestamp to nanosecond precision.
+
+    Parameters
+    ----------
+    unit: str, default 'ns'
+        The precision of the timestamp to be returned.
+        Valid values are `ns` / `nanosecond`, `us` / `microsecond`, `ms` / `millisecond`, `s`, `min`.
+            - `ns` / `nanosecond`
+            - `us` / `microsecond`
+            - `ms` / `millisecond`
+            - `s` / `sec` / `second`
+            - `m` / `min` / `minute`
+            - `h` / `hr` / `hour`
+            - `d` / `day`
+
+    as_pandas: bool, default False
+        If `True`, return a Pandas Timestamp.
+        This is always true if `unit` is `nanosecond`.
+
+    as_int: bool, default False
+        If `True`, return the timestamp to an integer.
+        Overrides `as_pandas`.
+
+    Returns
+    -------
+    A Pandas Timestamp, datetime object, or integer with precision to the provided unit.
+
+    Examples
+    --------
+    >>> get_current_timestamp('ns')
+    Timestamp('2025-07-17 17:59:16.423644369+0000', tz='UTC')
+    >>> get_current_timestamp('ms')
+    Timestamp('2025-07-17 17:59:16.424000+0000', tz='UTC')
+    """
+    from meerschaum.utils.misc import round_time
+    from datetime import datetime, timezone, timedelta
+    import time
+
+    true_unit = MRSM_PRECISION_UNITS_ALIASES.get(unit, unit)
+    if true_unit not in MRSM_PRECISION_UNITS_SCALARS:
+        from meerschaum.utils.misc import items_str
+        raise ValueError(
+            f"Unknown unit '{unit}'. "
+            "Accepted values are "
+            f"{items_str(list(MRSM_PRECISION_UNITS_SCALARS) + list(MRSM_PRECISION_UNITS_ALIASES), and_str='or')}."
+        )
+
+    as_pandas = as_pandas or true_unit == 'nanosecond'
+    pd = mrsm.attempt_import('pandas', lazy=False) if as_pandas else None
+
+    if true_unit == 'nanosecond':
+        now_ts = time.time_ns()
+        if as_int:
+            return now_ts
+        return pd.to_datetime(now_ts, unit='ns', utc=True)
+
+    now = datetime.now(timezone.utc)
+    delta = timedelta(**{true_unit + 's': 1})
+    rounded_now = round_time(now, delta)
+
+    if as_int:
+        return int(rounded_now.timestamp() * MRSM_PRECISION_UNITS_SCALARS[true_unit])
+
+    return (
+        pd.to_datetime(rounded_now, utc=True)
+        if as_pandas
+        else rounded_now
+    )
