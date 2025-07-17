@@ -347,7 +347,7 @@ def sync(
                             + f"(attempt {_chunk_attempts} / {_max_chunk_attempts}).\n"
                             + f"Sleeping for {_sleep_seconds} second"
                             + ('s' if _sleep_seconds != 1 else '')
-                            + ":\n{_chunk_msg}"
+                            + f":\n{_chunk_msg}"
                         ),
                         stack=False,
                     )

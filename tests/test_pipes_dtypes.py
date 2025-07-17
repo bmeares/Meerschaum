@@ -523,7 +523,6 @@ def test_sync_bools(flavor: str):
         columns={'datetime': 'dt'},
         dtypes={'is_bool': 'bool'},
     )
-    _ = pipe.drop()
     docs = [
         {'dt': '2023-01-01', 'is_bool': True},
         {'dt': '2023-01-02', 'is_bool': False},

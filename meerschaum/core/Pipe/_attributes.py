@@ -302,9 +302,6 @@ def get_dtypes(
     )
     configured_dtypes = parameters.get('dtypes', {})
 
-    if not infer:
-        return configured_dtypes
-
     now = time.perf_counter()
     cache_seconds = STATIC_CONFIG['pipes']['static_schema_cache_seconds']
     if not self.static:
@@ -330,12 +327,12 @@ def get_dtypes(
         else:
             remote_dtypes = None
 
-    if remote_dtypes is None:
+    if remote_dtypes is None and infer:
         remote_dtypes = self.infer_dtypes(persist=False, debug=debug)
         self.__dict__['_remote_dtypes'] = remote_dtypes
         self.__dict__['_remote_dtypes_timestamp'] = now
 
-    patched_dtypes = apply_patch_to_config(remote_dtypes, configured_dtypes)
+    patched_dtypes = apply_patch_to_config((remote_dtypes or {}), (configured_dtypes or {}))
     dt_col = parameters.get('columns', {}).get('datetime', None)
     primary_col = parameters.get('columns', {}).get('primary', None)
     _dtypes = {
