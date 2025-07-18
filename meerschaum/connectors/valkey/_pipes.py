@@ -571,6 +571,8 @@ def sync_pipe(
             try:
                 df[col] = df[col].astype(typ)
             except Exception:
+                import traceback
+                traceback.print_exc()
                 valkey_dtypes[col] = 'string'
                 new_dtypes[col] = 'string'
                 df[col] = df[col].astype('string')

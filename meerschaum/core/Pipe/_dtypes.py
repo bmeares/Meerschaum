@@ -22,6 +22,7 @@ def enforce_dtypes(
     chunksize: Optional[int] = -1,
     enforce: bool = True,
     safe_copy: bool = True,
+    add_missing_columns: bool = False,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -106,18 +107,19 @@ def enforce_dtypes(
             )
         return df
 
-    return add_missing_cols_to_df(
-        _enforce_dtypes(
-            df,
-            pipe_dtypes,
-            explicit_dtypes=explicit_dtypes,
-            safe_copy=safe_copy,
-            strip_timezone=(self.tzinfo is None),
-            coerce_timezone=enforce,
-            debug=debug,
-        ),
-        cols_types,
+    enforced_df = _enforce_dtypes(
+        df,
+        pipe_dtypes,
+        explicit_dtypes=explicit_dtypes,
+        safe_copy=safe_copy,
+        strip_timezone=(self.tzinfo is None),
+        coerce_timezone=enforce,
+        debug=debug,
     )
+    if not add_missing_columns:
+        return enforced_df
+
+    return enforced_df
 
 
 def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, Any]:
