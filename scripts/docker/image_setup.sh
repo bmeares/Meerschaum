@@ -10,18 +10,19 @@ groupadd -r $MRSM_USER -g $MRSM_GID \
   && chown -R $MRSM_USER:$MRSM_USER $MRSM_WORK_DIR
 
 ### We need sudo to switch from root to the user.
-apt-get update && apt-get install sudo curl less -y --no-install-recommends
+### Install Python, which is not included in the base fedora image.
+dnf install -y sudo curl less python3 python3-pip python-unversioned-command --setopt=install_weak_deps=False
 
 ### Install user-level build tools.
 sudo -u $MRSM_USER python -m pip install --user --upgrade wheel pip setuptools uv
 
 if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
-  apt-get install -y --no-install-recommends \
-    g++ \
+  dnf install -y --setopt=install_weak_deps=False \
+    gcc-c++ \
     make \
-    libpq-dev \
-    libffi-dev \
-    python3-dev \
+    libpq-devel \
+    libffi-devel \
+    python3-devel \
     git \
     tmux \
     || exit 1
@@ -33,13 +34,9 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
   if [ "$MRSM_DEP_GROUP" == "full" ]; then
 
     ### Install MSSQL ODBC driver.
-    apt-get install -y gpg || exit 1
-    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
-    curl https://packages.microsoft.com/config/debian/12/prod.list | tee /etc/apt/sources.list.d/mssql-release.list
-    apt-get update
-    ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev || exit 1
+    DISTRO="Fedora" /scripts/drivers.sh || exit 1
 
-    apt-get install -y --no-install-recommends \
+    dnf install -y --setopt=install_weak_deps=False \
       htop \
       openssl \
       || exit 1
@@ -112,7 +109,6 @@ function PostCommand() {
 PROMPT_COMMAND="PostCommand"
 ' > /home/$MRSM_USER/.bashrc
 chown $MRSM_USER:$MRSM_USER /home/$MRSM_USER/.bashrc
-
 
 if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
   sudo -u $MRSM_USER echo '
@@ -250,12 +246,11 @@ run -b '\''/home/'$MRSM_USER'/.tmux/plugins/tpm/tpm'\''
   sudo -u $MRSM_USER /home/$MRSM_USER/.tmux/plugins/tpm/bin/install_plugins
 fi
 
-### Remove apt lists, sudo, and cache.
-apt-get clean && \
-  apt-get purge -s sudo && \
-  rm -rf /var/lib/apt/lists/*
+### Remove dnf cache and sudo.
+dnf clean all
+dnf remove -y sudo
 
-### Also remove python3-dev and dependencies to get the image size down.
+### Also remove python3-devel and dependencies to get the image size down.
 if [ "$MRSM_DEP_GROUP" == "api" ]; then
-  apt-get purge -y $(apt-get -s purge python3-dev | grep '^ ' | tr -d '*')
+  dnf remove -y python3-devel
 fi

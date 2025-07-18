@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm AS runtime
+FROM fedora:42 AS runtime
 
 ARG dep_group=full \
     mrsm_user=meerschaum \
@@ -20,7 +20,7 @@ ENV MRSM_USER=$mrsm_user \
 
 ### Layer 1: Install static dependencies.
 ### Should not rebuild cache unless the base Python image has changed.
-COPY scripts/docker/image_setup.sh scripts/docker/dev.sh scripts/docker/sleep_forever.sh /scripts/
+COPY scripts/docker/image_setup.sh scripts/drivers.sh scripts/docker/dev.sh scripts/docker/sleep_forever.sh /scripts/
 RUN /scripts/image_setup.sh
 
 ### From this point on, run as a non-privileged user for security.
