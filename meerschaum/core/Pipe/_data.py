@@ -290,6 +290,13 @@ def get_data(
             df = df[_cols_to_select]
 
         if cols_to_add:
+            if not add_missing_columns:
+                from meerschaum.utils.misc import items_str
+                warn(
+                    f"Will add columns {items_str(cols_to_add)} as nulls to dataframe.",
+                    stack=False,
+                )
+
             df = add_missing_cols_to_df(
                 df,
                 {
