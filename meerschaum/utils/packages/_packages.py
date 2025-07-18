@@ -13,8 +13,7 @@ packages dictionary is structured in the following schema:
     }
 """
 
-from __future__ import annotations
-from meerschaum.utils.typing import Dict
+from typing import Dict
 
 _MRSM_PACKAGE_ARCHIVES_PREFIX: str = "https://meerschaum.io/files/archives/wheels/"
 

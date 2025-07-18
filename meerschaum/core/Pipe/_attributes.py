@@ -928,7 +928,7 @@ def update_parameters(
     return self.edit(debug=debug)
 
 
-def get_precision(self) -> Union[str, None]:
+def get_precision(self, debug: bool = False) -> Union[str, None]:
     """
     Return the timestamp precision unit for the `datetime` axis.
     """
@@ -939,6 +939,8 @@ def get_precision(self) -> Union[str, None]:
     )
 
     if '_precision' in self.__dict__:
+        if debug:
+            dprint(f"Returning cached precision: {self._precision}")
         return self._precision
 
     parameters = self.parameters
@@ -948,11 +950,15 @@ def get_precision(self) -> Union[str, None]:
 
         dt_col = parameters.get('columns', {}).get('datetime', None)
         if not dt_col:
+            if debug:
+                dprint("No datetime axis, returning `None` for precision.")
             return None
 
         dt_typ = self.dtypes.get(dt_col, 'datetime')
         if are_dtypes_equal(dt_typ, 'datetime'):
             if dt_typ == 'datetime':
+                if debug:
+                    dprint("Datetime type is `datetime`, assuming nanosecond precision.")
                 dt_typ = 'datetime64[ns, UTC]'
 
             _precision = (
@@ -960,7 +966,10 @@ def get_precision(self) -> Union[str, None]:
                 .split('[', maxsplit=1)[-1]
                 .split(',', maxsplit=1)[0]
                 .split(' ', maxsplit=1)[0]
-            )
+            ).rstrip(']')
+
+            if debug:
+                dprint(f"Extracted {_precision=} from {dt_typ=}")
 
         elif are_dtypes_equal(dt_typ, 'int'):
             _precision = (
@@ -969,8 +978,12 @@ def get_precision(self) -> Union[str, None]:
                 else 'nanosecond'
             )
             if '32' in dt_typ:
+                if debug:
+                    dprint("Falling back to second precision for int32")
                 _precision = 'second'
             else:
+                if debug:
+                    dprint("Assuming nanosecond precision for a generic integer datetime axis.")
                 _precision = 'nanosecond'
 
     true_precision = MRSM_PRECISION_UNITS_ALIASES.get(_precision, _precision)

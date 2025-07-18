@@ -468,7 +468,7 @@ def parse_df_datetimes(
     dtype: object
     >>> df = parse_df_datetimes(df)
     >>> df.dtypes
-    a    datetime64[ns]
+    a    datetime64[ns, UTC]
     dtype: object
 
     ```
@@ -582,7 +582,7 @@ def parse_df_datetimes(
             )
     except Exception:
         warn(
-            f"Unable to apply `pd.to_datetime` to {items_str(datetime_cols)}:\n"
+            f"Unable to apply `to_datetime()` to {items_str(datetime_cols)}:\n"
             + f"{traceback.format_exc()}"
         )
 

@@ -700,6 +700,7 @@ def filter_existing(
     from meerschaum.config import get_config
     pd = import_pandas()
     pandas = attempt_import('pandas')
+    print(f"{enforce_dtypes=}")
     if enforce_dtypes or 'dataframe' not in str(type(df)).lower():
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
     is_dask = hasattr('df', '__module__') and 'dask' in df.__module__
@@ -711,11 +712,13 @@ def filter_existing(
         merge = pd.merge
         NA = pd.NA
 
-    primary_key = self.columns.get('primary', None)
-    dt_col = self.columns.get('datetime', None)
-    autoincrement = self.parameters.get('autoincrement', False)
-    autotime = self.parameters.get('autotime', False)
-    pipe_columns = self.columns.copy()
+    parameters = self.parameters
+    pipe_columns = parameters.get('columns', {})
+    primary_key = pipe_columns.get('primary', None)
+    dt_col = pipe_columns.get('datetime', None)
+    dt_type = parameters.get('dtypes', {}).get(dt_col, 'datetime64[ns, UTC]') if dt_col else None
+    autoincrement = parameters.get('autoincrement', False)
+    autotime = parameters.get('autotime', False)
 
     if primary_key and autoincrement and df is not None and primary_key in df.columns:
         if safe_copy:
@@ -736,7 +739,9 @@ def filter_existing(
     def get_empty_df():
         empty_df = pd.DataFrame([])
         dtypes = dict(df.dtypes) if df is not None else {}
-        dtypes.update(self.dtypes)
+        print(f"1: {dtypes=}")
+        dtypes.update(self.dtypes) if self.enforce else {}
+        print(f"2: {dtypes=}")
         pd_dtypes = {
             col: to_pandas_dtype(str(typ))
             for col, typ in dtypes.items()
@@ -752,9 +757,6 @@ def filter_existing(
 
     ### begin is the oldest data in the new dataframe
     begin, end = None, None
-    dt_col = pipe_columns.get('datetime', None)
-    primary_key = pipe_columns.get('primary', None)
-    dt_type = self.dtypes.get(dt_col, 'datetime64[ns, UTC]') if dt_col else None
 
     if autoincrement and primary_key == dt_col and dt_col not in df.columns:
         if enforce_dtypes:
@@ -882,7 +884,8 @@ def filter_existing(
             and col in backtrack_df.columns
         )
     ] if not primary_key else [primary_key]
-    self_dtypes = self.dtypes
+
+    self_dtypes = self.dtypes if self.enforce else {}
     on_cols_dtypes = {
         col: to_pandas_dtype(typ)
         for col, typ in self_dtypes.items()

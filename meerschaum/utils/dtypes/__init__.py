@@ -875,6 +875,7 @@ def get_current_timestamp(
     unit: str = 'us',
     as_pandas: bool = False,
     as_int: bool = False,
+    _now: Union[datetime, int, None] = None,
 ) -> 'Union[datetime, pd.Timestamp, int]':
     """
     Return the current UTC timestamp to nanosecond precision.
@@ -883,7 +884,7 @@ def get_current_timestamp(
     ----------
     unit: str, default 'ns'
         The precision of the timestamp to be returned.
-        Valid values are `ns` / `nanosecond`, `us` / `microsecond`, `ms` / `millisecond`, `s`, `min`.
+        Valid values are the following:
             - `ns` / `nanosecond`
             - `us` / `microsecond`
             - `ms` / `millisecond`
@@ -928,12 +929,12 @@ def get_current_timestamp(
     pd = mrsm.attempt_import('pandas', lazy=False) if as_pandas else None
 
     if true_unit == 'nanosecond':
-        now_ts = time.time_ns()
+        now_ts = time.time_ns() if not isinstance(_now, int) else _now
         if as_int:
             return now_ts
         return pd.to_datetime(now_ts, unit='ns', utc=True)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc) if not isinstance(_now, datetime) else _now
     delta = timedelta(**{true_unit + 's': 1})
     rounded_now = round_time(now, delta)
 

@@ -86,27 +86,30 @@ If a `primary` index is defined (see [columns](#columns) below) and `autoincreme
 
 ## `autotime`
 
-Similar to `autoincrement`, `autotime` will generate the current timestamp for each document synced. If no `datetime` column is specified, then the column `ts` will be added (but not treated as an index). If the `datetime` column is specified as an integer, then the generated value will be an integer number of milliseconds since the Unix epoch (`#!python int(datetime.now(timezone.utc).timestamp() * 1000)`).
+!!! note inline end "Precision units"
+    See the description of `precision` [below](#precision) for timestamp values captured by `autotime`.
 
-This works for pipes stored in all instances (making it a good alternative to `autoincrement`).
+Similar to `autoincrement`, `autotime` will generate the current timestamp for each document synced. When the `datetime` column has an integer dtype, the generated value will be the number of `Pipe.precision` units since the Unix epoch.
 
-```python
-import meerschaum as mrsm
+This works for pipes stored in all instances, making it a good alternative to `autoincrement`. Setting `autotime` on pipes without a `datetime` axis will add the column `ts` (without treating it as an index).
 
-pipe = mrsm.Pipe(
-    'demo', 'autotime',
-    instance='sql:memory',
-    autotime=True,
-    columns={'datetime': 'timestamp_utc'},
-)
-pipe.sync("reading:100.1")
+??? example
+    ```python
+    import meerschaum as mrsm
 
-df = pipe.get_data()
-print(df)
+    pipe = mrsm.Pipe(
+        'demo', 'autotime',
+        instance='sql:memory',
+        autotime=True,
+        columns={'datetime': 'timestamp_utc'},
+    )
+    pipe.sync("reading:100.1")
 
-#    reading              timestamp_utc
-# 0    100.1 2025-07-12 14:39:57.262124
-```
+    df = pipe.get_data()
+    print(df)
+    #    reading                    timestamp_utc
+    # 0    100.1 2025-07-18 16:47:12.145056+00:00
+    ```
 
 ---------------
 
@@ -163,6 +166,9 @@ Below are the supported Meerschaum data types. See the [SQL dtypes source](https
 
 The `enforce` parameter controls whether a pipe coerces incoming data to match the set data types (default `True`). If your workload is performance-sensitive, consider experimenting with `enforce=False` to skip the extra work required to ensure incoming data matches the configured dtypes.
 
+!!! warning
+    Some instance connectors behave unexpectedly when `enforce=False` (e.g. SQLite).
+    
 ---------------
 
 ## `fetch`
@@ -193,29 +199,31 @@ The `indices` dictionary (alias `indexes`) allows you to create additional and m
 
 The keys specified in `columns` are included in `indices` by default, as well as a multi-column index `unique` for the columns in `columns`.
 
-In the example below, the unique constraint is only created for the columns `ts` and `station`, and an additional multi-column index is created on the columns `city`, `state`, and `country`.
+??? example
 
-```yaml
-connector: sql:main
-metric: temperature
-columns:
-  datetime: ts
-  id: station
-indices:
-  geo: ['city', 'state', 'country']
-parameters:
-  upsert: true
-  sql: |-
-    SELECT
-      ts,
-      station,
-      city,
-      state,
-      country,
-      temperature_c,
-      ((1.8 * temperature_c) + 32) as temperature_f
-    FROM weather
-```
+    In the example below, the unique constraint is only created for the columns `ts` and `station`, and an additional multi-column index is created on the columns `city`, `state`, and `country`.
+
+    ```yaml
+    connector: sql:main
+    metric: temperature
+    columns:
+      datetime: ts
+      id: station
+    indices:
+      geo: ['city', 'state', 'country']
+    upsert: true
+    parameters:
+      sql: |-
+        SELECT
+            ts,
+            station,
+            city,
+            state,
+            country,
+            temperature_c,
+            ((1.8 * temperature_c) + 32) as temperature_f
+        FROM weather
+    ```
 
 ---------------
 
@@ -225,54 +233,72 @@ Toggle whether a pipe will allow null indices (default `True`). Set this to `Fal
 
 ---------------
 
+## `precision`
+
+The unit set by `precision` determines the value of the timestamp captured by `autotime` in units since the Unix Epoch in UTC (see above). By default, the `datetime` axis dtype determines `Pipe.precision` (e.g. `datetime64[ns, UTC]` is `nanosecond` precision).
+
+| Units         | Aliases    | Datetimes                       | Integers              |
+|---------------|------------|---------------------------------|-----------------------|
+| `nanosecond`  | `ns`       | `2025-07-18 16:02:18.701925991` | `1752854538701925991` |
+| `microsecond` | `us`       | `2025-07-18 16:02:18.701925`    | `1752854538701925`    |
+| `millisecond` | `ms`       | `2025-07-18 16:02:18.701`       | `1752854538701`       |
+| `second`      | `sec`, `s` | `2025-07-18 16:02:18`           | `1752854538`          |
+| `minute`      | `min`, `m` | `2025-07-18 16:02`              | `29214242`            |
+| `hour`        | `hr`, `h`  | `2025-07-18 16:00`              | `486904`              |
+| `day`         | `d`        | `2025-07-18`                    | `20287`               |
+
+---------------
+
 ## `reference`
 
 A pipe may inherit the base parameters from another reference pipe. Set `reference` to the keys of the base pipe, and additional keys will override the base parameters. To symlink subsets of other pipes' parameters, see the example at top of the page on using the `{{ Pipe(...) }}` syntax.
 
-```python
-import meerschaum as mrsm
+??? example
 
-base_pipe = mrsm.Pipe(
-    'demo', 'reference', 'parent',
-    instance='sql:memory',
-    columns={
-        'datetime': 'ts',
-        'id': 'id',
-    },
-    parameters={
-        'custom': {
-            'foo': 'bar',
-            'color': 'red',
-        },
-    },
-)
-base_pipe.register()
+    ```python
+    import meerschaum as mrsm
 
-pipe = mrsm.Pipe(
-    'demo', 'reference', 'child',
-    instance='sql:memory',
-    parameters={
-        'reference': {
-            'connector': 'demo',
-            'metric': 'reference',
-            'location': 'parent',
-            'instance': 'sql:memory',
+    base_pipe = mrsm.Pipe(
+        'demo', 'reference', 'parent',
+        instance='sql:memory',
+        columns={
+            'datetime': 'ts',
+            'id': 'id',
         },
-        'custom': {
-            'color': 'blue',
+        parameters={
+            'custom': {
+                'foo': 'bar',
+                'color': 'red',
+            },
         },
-    },
-)
+    )
+    base_pipe.register()
 
-print(pipe.parameters)
-# {'custom': {'foo': 'bar', 'color': 'blue'}, 'columns': {'datetime': 'ts', 'id': 'id'}} 
-```
+    pipe = mrsm.Pipe(
+        'demo', 'reference', 'child',
+        instance='sql:memory',
+        parameters={
+            'reference': {
+                'connector': 'demo',
+                'metric': 'reference',
+                'location': 'parent',
+                'instance': 'sql:memory',
+            },
+            'custom': {
+                'color': 'blue',
+            },
+        },
+    )
+
+    print(pipe.parameters)
+    # {'custom': {'foo': 'bar', 'color': 'blue'}, 'columns': {'datetime': 'ts', 'id': 'id'}} 
+    ```
 
 ---------------
 
 ## `schema`
 
-When syncing a pipe via a `SQLConnector`, you may override the connector's configured schema for the given pipe. This is useful when syncing against multiple schemas on the same database with a single `SQLConnector`.
+When syncing a pipe via a `SQLConnector` (ignored on SQLite), you may override the connector's configured schema for the given pipe. This is useful when syncing against multiple schemas on the same database with a single `SQLConnector`.
 
 ```yaml
 schema: production
@@ -310,29 +336,31 @@ Setting `upsert` to `true` enables high-performance syncs by combining inserts a
 
 Upserts rely on unique constraints on indices and as such should be used in situations where a table's schema is fixed. See the [upsert SQL source](https://github.com/bmeares/Meerschaum/blob/main/meerschaum/utils/sql.py) for further details.
 
-```python
-import meerschaum as mrsm
+!!! warning
+    Ensure your instance connector supports upserts before enabling `upsert` (e.g. `SQLConnector`).
 
-pipe = mrsm.Pipe(
-    'demo', 'upsert',
-    instance = 'sql:local',
-    columns = ['datetime', 'id'],
-    parameters = {'upsert': True},
-)
+??? example
 
-mrsm.pprint(
-    pipe.sync(
-        [
-            {'datetime': '2023-01-01', 'id': 1, 'val': 1.1},
-            {'datetime': '2023-01-02', 'id': 2, 'val': 2.2},
-        ]
+    ```python
+    import meerschaum as mrsm
+
+    pipe = mrsm.Pipe(
+        'demo', 'upsert',
+        instance = 'sql:local',
+        columns = ['datetime', 'id'],
+        parameters = {'upsert': True},
     )
-)
-#  🎉 Upserted 2 rows.
-```
 
-!!! warn
-  Ensure your instance connector supports upserts before enabling `upsert` (e.g. `SQLConnector`)
+    mrsm.pprint(
+        pipe.sync(
+            [
+                {'datetime': '2023-01-01', 'id': 1, 'val': 1.1},
+                {'datetime': '2023-01-02', 'id': 2, 'val': 2.2},
+            ]
+        )
+    )
+    #  🎉 Upserted 2 rows.
+    ```
 
 ---------------
 

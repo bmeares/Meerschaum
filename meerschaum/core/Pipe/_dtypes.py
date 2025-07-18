@@ -36,7 +36,6 @@ def enforce_dtypes(
         parse_df_datetimes,
         enforce_dtypes as _enforce_dtypes,
         parse_simple_lines,
-        add_missing_cols_to_df,
     )
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.packages import import_pandas
