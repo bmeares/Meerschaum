@@ -1009,6 +1009,7 @@ def get_pipe_data(
     begin_add_minutes: int = 0,
     end_add_minutes: int = 0,
     chunksize: Optional[int] = -1,
+    as_iterator: bool = False,
     debug: bool = False,
     **kw: Any
 ) -> Union[pd.DataFrame, None]:
@@ -1053,6 +1054,9 @@ def get_pipe_data(
     chunksize: Optional[int], default -1
         The size of dataframe chunks to load into memory.
 
+    as_iterator: bool, default False
+        If `True`, return the chunks iterator directly.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -1090,12 +1094,13 @@ def get_pipe_data(
         query,
         chunksize=chunksize,
         as_iterator=True,
-        as_hook_results=True,
-        chunk_hook=functools.partial(_enforce_pipe_dtypes_chunks_hook, pipe),
         coerce_float=False,
         debug=debug,
         **read_kwargs
     )
+    if as_iterator:
+        return chunks
+
     return pd.concat(chunks)
 
 

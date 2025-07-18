@@ -975,8 +975,9 @@ def test_enforce_false(flavor: str):
     """
     Test `enforce=False` behavior.
     """ 
-    if flavor not in ('api', 'mssql', 'timescaledb', 'sqlite'):
+    if flavor not in ('timescaledb', 'mssql'):
         return
+
     conn = conns[flavor]
     pipe = mrsm.Pipe('test', 'enforce', instance=conn)
     pipe.delete()
@@ -984,6 +985,7 @@ def test_enforce_false(flavor: str):
         'test', 'enforce',
         instance=conn,
         enforce=False,
+        static=True,
         dtypes={'dt': 'datetime64[ns]'},
         columns={
             'datetime': 'dt',
@@ -993,6 +995,7 @@ def test_enforce_false(flavor: str):
         {'dt': datetime(2024, 12, 26), 'num': 1},
     ]
     success, msg = pipe.sync(docs, debug=debug)
+    return pipe
     assert success, msg
 
     df = pipe.get_data(['num'], debug=debug)

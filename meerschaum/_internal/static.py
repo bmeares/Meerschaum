@@ -349,24 +349,5 @@ STATIC_CONFIG: Dict[str, Any] = {
             'users:delete': "Delete the associated user account (or other users for admins).",
         },
     },
-    'setup': {
-        'name': 'meerschaum',
-        'formal_name': 'Meerschaum',
-        'app_id': 'io.meerschaum',
-        'description': 'Sync Time-Series Pipes with Meerschaum',
-        'url': 'https://meerschaum.io',
-        'project_urls': {
-            'Documentation': 'https://docs.meerschaum.io',
-            'Changelog': 'https://meerschaum.io/news/changelog',
-            'GitHub': 'https://github.com/bmeares/Meerschaum',
-            'Homepage': 'https://meerschaum.io',
-            'Donate': 'https://github.com/sponsors/bmeares',
-            'Discord': 'https://discord.gg/8U8qMUjvcc',
-        },
-        'author': 'Bennett Meares',
-        'author_email': 'bennett.meares@gmail.com',
-        'maintainer_email': 'bennett.meares@gmail.com',
-        'license': 'Apache Software License 2.0',
-        'license_files': ('LICENSE',),
-    },
+    
 }
