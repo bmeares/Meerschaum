@@ -259,7 +259,7 @@ columns_types_queries = {
             DATA_TYPE AS [type],
             NUMERIC_PRECISION AS [numeric_precision],
             NUMERIC_SCALE AS [numeric_scale]
-        FROM {db_prefix}INFORMATION_SCHEMA.COLUMNS
+        FROM {db_prefix}INFORMATION_SCHEMA.COLUMNS WITH (NOLOCK)
         WHERE TABLE_NAME IN (
             '{table}',
             '{table_trunc}'
