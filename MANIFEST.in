@@ -1,2 +1,2 @@
-prune docs
 prune tests
+prune docs
