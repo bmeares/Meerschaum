@@ -791,6 +791,8 @@ def test_sync_bytes_inplace(flavor: str):
     success, msg = inplace_pipe.sync(debug=debug)
     assert success, msg
 
+    return pipe, inplace_pipe
+
     assert 'bytes' in inplace_pipe.dtypes['bytes_col']
     assert inplace_pipe.get_rowcount() == len(docs)
 
@@ -962,6 +964,9 @@ def test_distant_datetimes(flavor: str):
         columns={
             'datetime': 'ts',
         },
+        dtypes={
+            'ts': 'datetime64[ms]',
+        },
         enforce=True,
     )
     docs = [
@@ -970,7 +975,7 @@ def test_distant_datetimes(flavor: str):
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
 
-    df = pipe.get_data()
+    df = pipe.get_data(debug=debug)
     assert df['ts'][0].year == 1
 
 

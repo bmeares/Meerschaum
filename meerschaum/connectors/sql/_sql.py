@@ -277,7 +277,7 @@ def read(
                 'dtype': dtype,
                 'coerce_float': coerce_float,
                 'index_col': index_col,
-                'dtype_backend': 'numpy_nullable',
+                'dtype_backend': 'numpy_nullable', ### TODO: Remove this for bytes parsing?
             }
             if is_dask:
                 if index_col is None:
@@ -898,6 +898,9 @@ def to_sql(
         col: get_db_type_from_pd_type(typ, flavor=self.flavor)
         for col, typ in cols_pd_types.items()
     }
+
+    if debug:
+        dprint(f"cols_pd_types:\n{cols_pd_types}\ncols_db_types:\n{cols_db_types}")
 
     enable_bulk_insert = mrsm.get_config(
         'system', 'connectors', 'sql', 'bulk_insert', self.flavor,

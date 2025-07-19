@@ -33,10 +33,10 @@ MRSM_ALIAS_DTYPES: Dict[str, str] = {
 }
 MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
-    'numeric': 'object',
-    'geometry': 'object',
-    'geography': 'object',
-    'uuid': 'object',
+    'numeric': 'decimal128(38, 18)[pyarrow]',
+    'geometry': 'wkb[pyarrow]',
+    'geography': 'wkb[pyarrow]',
+    'uuid': 'uuid[pyarrow]',
     'datetime': 'datetime64[ns, UTC]',
     'bool': 'bool[pyarrow]',
     'int': 'Int64',
@@ -45,7 +45,7 @@ MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'int32': 'Int32',
     'int64': 'Int64',
     'str': 'string[python]',
-    'bytes': 'object',
+    'bytes': 'binary[pyarrow]',
     None: 'object',
 }
 
@@ -178,7 +178,7 @@ def are_dtypes_equal(
     if ldtype in uuid_dtypes and rdtype in uuid_dtypes:
         return True
 
-    bytes_dtypes = ('bytes', 'object')
+    bytes_dtypes = ('bytes', 'object', 'binary')
     if ldtype in bytes_dtypes and rdtype in bytes_dtypes:
         return True
 
@@ -189,7 +189,7 @@ def are_dtypes_equal(
     if ldtype.lower() == rdtype.lower():
         return True
 
-    datetime_dtypes = ('datetime',)
+    datetime_dtypes = ('datetime', 'timestamp')
     ldtype_found_dt_prefix = False
     rdtype_found_dt_prefix = False
     for dt_prefix in datetime_dtypes:

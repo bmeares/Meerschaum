@@ -1067,8 +1067,56 @@ def get_pipe_data(
     """
     import functools
     from meerschaum.utils.packages import import_pandas
+    from meerschaum.utils.dtypes import to_pandas_dtype
+    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
+
+    cols_types = pipe.get_columns_types(debug=debug) if pipe.enforce else {}
+    pipe_dtypes = pipe.get_dtypes(infer=False, debug=debug)
+    dtypes = {
+        **{
+            col: get_pd_type_from_db_type(typ)
+            for col, typ in cols_types.items()
+        },
+        **{
+            p_col: to_pandas_dtype(p_typ)
+            for p_col, p_typ in pipe_dtypes.items()
+        },
+    } if pipe.enforce else {}
+
+    bytes_cols = [
+        col
+        for col, typ in pipe_dtypes.items()
+        if typ == 'bytes' and col in dtypes
+    ]
+    existing_cols = cols_types.keys()
+    select_columns = (
+        [
+            col
+            for col in existing_cols
+            if col not in (omit_columns or [])
+        ]
+        if not select_columns
+        else [
+            col
+            for col in select_columns
+            if col in existing_cols
+            and col not in (omit_columns or [])
+        ]
+    ) if pipe.enforce else select_columns
+
+    if select_columns:
+        dtypes = {col: typ for col, typ in dtypes.items() if col in select_columns}
+
+    dtypes = {
+        col: to_pandas_dtype(typ)
+        for col, typ in dtypes.items()
+        if col in (select_columns or [col]) and col not in (omit_columns or [])
+    } if pipe.enforce else {}
+
+    if debug:
+        dprint(f"Get pipe data dtypes:\n{dtypes}")
 
     query = self.get_pipe_data_query(
         pipe,
@@ -1095,9 +1143,11 @@ def get_pipe_data(
         chunksize=chunksize,
         as_iterator=True,
         coerce_float=False,
+        dtype=dtypes,
         debug=debug,
         **read_kwargs
     )
+
     if as_iterator:
         return chunks
 
