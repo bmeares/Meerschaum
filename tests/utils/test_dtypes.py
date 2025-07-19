@@ -34,7 +34,7 @@ shapely = mrsm.attempt_import('shapely')
         ('str', 'string', True),
         ('str', 'object', True),
         ('int', 'int32', True),
-        ('datetime64[ns, UTC]', 'Timestamp', True),
+        ('datetime64[ns, UTC]', 'datetime', True),
         ('float', 'float64', True),
         ('bool', 'bool[pyarrow]', True),
         ('Int64', 'int', True),
