@@ -265,8 +265,8 @@ def dtypes(self, _dtypes: Dict[str, Any]) -> None:
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
     self.update_parameters({'dtypes': _dtypes}, persist=False)
-    self.__dict__.pop('_remote_dtypes', None)
-    self.__dict__.pop('_remote_dtypes_timestamp', None)
+    _ = self.__dict__.pop('_remote_dtypes', None)
+    _ = self.__dict__.pop('_remote_dtypes_timestamp', None)
 
 
 def get_dtypes(
