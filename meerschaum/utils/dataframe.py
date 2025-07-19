@@ -1306,6 +1306,11 @@ def enforce_dtypes(
 
         if debug:
             dprint(
+                f"{previous_typ=}\n"
+                f"{typ=}\n"
+                f"{mixed_numeric_types=}\n"
+                f"{explicit_dtypes.get(col, None)=}\n"
+                f"{dtypes.get(col, None)=}\n"
                 f"{explicitly_numeric=}\n"
                 f"{explicitly_int=}\n"
                 f"{explicitly_float=}\n"
