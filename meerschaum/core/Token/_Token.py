@@ -14,7 +14,6 @@ from typing import Optional, Union, List, Tuple
 from datetime import datetime, timedelta, timezone
 
 import meerschaum as mrsm
-from meerschaum.models import TokenModel
 
 _PLACEHOLDER_EXPIRATION = datetime(2000, 1, 1)
 
@@ -153,10 +152,11 @@ class Token:
             return False
         return self.instance_connector.token_exists(self.id, debug=debug)
 
-    def to_model(self, refresh: bool = False, debug: bool = False) -> TokenModel:
+    def to_model(self, refresh: bool = False, debug: bool = False) -> 'TokenModel':
         """
         Export the current state to a `TokenModel`.
         """
+        from meerschaum.models import TokenModel
         in_memory_doc = {
             'id': self.id,
             'label': self.label,

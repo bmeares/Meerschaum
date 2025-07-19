@@ -12,7 +12,6 @@ from typing import Union, List, Optional
 
 import meerschaum as mrsm
 from meerschaum.core import Token
-from meerschaum.models import TokenModel
 from meerschaum._internal.static import STATIC_CONFIG
 tokens_endpoint = STATIC_CONFIG['api']['endpoints']['tokens']
 
@@ -45,10 +44,11 @@ def register_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple
     return True, f"Registered token '{token.label}'."
 
 
-def get_token_model(self, token_id: uuid.UUID, debug: bool = False) -> Union[TokenModel, None]:
+def get_token_model(self, token_id: uuid.UUID, debug: bool = False) -> 'Union[TokenModel, None]':
     """
     Return a token's model from the API instance.
     """
+    from meerschaum.models import TokenModel
     r_url = tokens_endpoint + f'/{token_id}'
     response = self.get(r_url, debug=debug)
     if not response:

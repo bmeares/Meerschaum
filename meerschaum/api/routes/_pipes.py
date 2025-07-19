@@ -397,7 +397,7 @@ async def sync_pipe(
             detail="Cannot sync given data.",
         )
 
-    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys, refresh=True)
     if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
         raise fastapi.HTTPException(
             status_code=409,
@@ -894,8 +894,11 @@ def get_pipe_columns_types(
     ```
     """
     pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
-    columns_types = pipe.get_columns_types(debug=debug)
-    return pipe.dtypes
+    columns_types = (
+        pipe.get_columns_types(debug=debug)
+        or pipe.get_dtypes(refresh=True, debug=debug)
+    )
+    return columns_types
 
 
 @app.get(

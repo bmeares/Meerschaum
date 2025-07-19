@@ -1644,18 +1644,16 @@ def sync_pipe(
             _ = pipe.__dict__.pop('_columns_types', None)
             if not self.exec_queries(alter_cols_queries, debug=debug):
                 warn(f"Failed to alter columns for {pipe}.")
-            else:
-                _ = pipe.infer_dtypes(persist=True)
 
     ### NOTE: Oracle SQL < 23c (2023) and SQLite does not support booleans,
     ### so infer bools and persist them to `dtypes`.
     if self.flavor in ('oracle', 'sqlite', 'mysql', 'mariadb'):
-        pipe_dtypes = pipe.dtypes
+        pipe_dtypes = pipe.get_dtypes(infer=False, debug=debug)
         new_bool_cols = {
             col: 'bool[pyarrow]'
             for col, typ in df.dtypes.items()
             if col not in pipe_dtypes
-            and are_dtypes_equal(str(typ), 'bool')
+                and are_dtypes_equal(str(typ), 'bool')
         }
         pipe_dtypes.update(new_bool_cols)
         pipe.dtypes = pipe_dtypes
@@ -3206,7 +3204,7 @@ def get_alter_columns_queries(
     if not pipe.exists(debug=debug):
         return []
     if pipe.static:
-        return
+        return []
     from meerschaum.utils.sql import (
         sql_item_name,
         get_table_cols_types,
@@ -3252,7 +3250,8 @@ def get_alter_columns_queries(
             debug=debug,
         ).items()
     }
-    pipe_bool_cols = [col for col, typ in pipe.dtypes.items() if are_dtypes_equal(str(typ), 'bool')]
+    pipe_dtypes = pipe.dtypes
+    pipe_bool_cols = [col for col, typ in pipe_dtypes.items() if are_dtypes_equal(str(typ), 'bool')]
     pd_db_df_aliases = {
         'int': 'bool',
         'float': 'bool',
@@ -3301,7 +3300,9 @@ def get_alter_columns_queries(
         return []
 
     if numeric_cols:
-        pipe.dtypes.update({col: 'numeric' for col in numeric_cols})
+        explicit_pipe_dtypes = pipe.get_dtypes(infer=False, debug=debug)
+        explicit_pipe_dtypes.update({col: 'numeric' for col in numeric_cols})
+        pipe.dtypes = explicit_pipe_dtypes
         if not pipe.temporary:
             edit_success, edit_msg = pipe.edit(debug=debug)
             if not edit_success:
@@ -3310,7 +3311,7 @@ def get_alter_columns_queries(
                     + f"{edit_msg}"
                 )
     else:
-        numeric_cols.extend([col for col, typ in pipe.dtypes.items() if typ.startswith('numeric')])
+        numeric_cols.extend([col for col, typ in pipe_dtypes.items() if typ.startswith('numeric')])
 
     numeric_type = get_db_type_from_pd_type('numeric', self.flavor, as_sqlalchemy=False)
     text_type = get_db_type_from_pd_type('str', self.flavor, as_sqlalchemy=False)
@@ -3518,20 +3519,18 @@ def get_to_sql_dtype(
     >>> get_to_sql_dtype(pipe, df)
     {'a': <class 'sqlalchemy.sql.sqltypes.JSON'>}
     """
-    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
+    from meerschaum.utils.dataframe import get_special_cols
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     df_dtypes = {
         col: str(typ)
         for col, typ in df.dtypes.items()
     }
-    json_cols = get_json_cols(df)
-    numeric_cols = get_numeric_cols(df)
-    uuid_cols = get_uuid_cols(df)
-    df_dtypes.update({col: 'json' for col in json_cols})
-    df_dtypes.update({col: 'numeric' for col in numeric_cols})
-    df_dtypes.update({col: 'uuid' for col in uuid_cols})
+    special_cols = get_special_cols(df)
+    df_dtypes.update(special_cols)
+
     if update_dtypes:
         df_dtypes.update(pipe.dtypes)
+
     return {
         col: get_db_type_from_pd_type(typ, self.flavor, as_sqlalchemy=True)
         for col, typ in df_dtypes.items()

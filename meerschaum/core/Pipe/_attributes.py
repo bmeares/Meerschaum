@@ -59,13 +59,15 @@ def get_parameters(
     Return the `parameters` dictionary of the pipe.
     """
     from meerschaum.config._patch import apply_patch_to_config
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, dprint
     from meerschaum.config._read_config import search_and_substitute_config
 
     if _visited is None:
         _visited = {self}
 
     raw_parameters = self.attributes.get('parameters', {})
+    if debug:
+        dprint(f"{raw_parameters=}")
     ref_keys = raw_parameters.get('reference')
     if not apply_symlinks:
         return raw_parameters
@@ -80,7 +82,7 @@ def get_parameters(
                 return search_and_substitute_config(raw_parameters)
 
             _visited.add(ref_pipe)
-            base_params = ref_pipe.get_parameters(_visited=_visited)
+            base_params = ref_pipe.get_parameters(_visited=_visited, debug=debug)
         except Exception as e:
             warn(f"Failed to resolve reference pipe for {self}: {e}")
             base_params = {}
@@ -301,6 +303,8 @@ def get_dtypes(
         else self.parameters
     )
     configured_dtypes = parameters.get('dtypes', {})
+    if debug:
+        dprint(f"{configured_dtypes=}")
 
     now = time.perf_counter()
     cache_seconds = STATIC_CONFIG['pipes']['static_schema_cache_seconds']
@@ -332,7 +336,14 @@ def get_dtypes(
         self.__dict__['_remote_dtypes'] = remote_dtypes
         self.__dict__['_remote_dtypes_timestamp'] = now
 
+    if debug:
+        dprint(f"{remote_dtypes=}")
+
     patched_dtypes = apply_patch_to_config((remote_dtypes or {}), (configured_dtypes or {}))
+
+    if debug:
+        dprint(f"{patched_dtypes=}")
+
     dt_col = parameters.get('columns', {}).get('datetime', None)
     primary_col = parameters.get('columns', {}).get('primary', None)
     _dtypes = {
@@ -344,6 +355,10 @@ def get_dtypes(
         _dtypes[dt_col] = 'datetime'
     if primary_col and parameters.get('autoincrement', False) and primary_col not in _dtypes:
         _dtypes[primary_col] = 'int'
+
+    if debug:
+        dprint(f"{_dtypes=}")
+
     return _dtypes
 
 

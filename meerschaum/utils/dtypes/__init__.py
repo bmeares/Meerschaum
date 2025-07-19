@@ -946,3 +946,33 @@ def get_current_timestamp(
         if as_pandas
         else rounded_now
     )
+
+
+def dtype_is_special(type_: str) -> bool:
+    """
+    Return whether a dtype should be treated as a special Meerschaum dtype.
+    This is not the same as a Meerschaum alias.
+    """
+    true_type = MRSM_ALIAS_DTYPES.get(type_, type_)
+    if true_type in (
+        'uuid',
+        'json',
+        'bytes',
+        'numeric',
+        'datetime',
+    ):
+        return True
+
+    if are_dtypes_equal(true_type, 'datetime'):
+        return True
+
+    if true_type.startswith('numeric'):
+        return True
+
+    if true_type.startswith('geometry'):
+        return True
+
+    if true_type.startswith('geography'):
+        return True
+
+    return False

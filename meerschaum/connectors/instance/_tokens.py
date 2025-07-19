@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 import meerschaum as mrsm
 from meerschaum.core import Token, User
 from meerschaum.core.User import hash_password
-from meerschaum.models import TokenModel
 from meerschaum._internal.static import STATIC_CONFIG
 
 
@@ -227,10 +226,11 @@ def get_token(self, token_id: Union[uuid.UUID, str], debug: bool = False) -> Uni
     return Token(**dict(token_model))
 
 
-def get_token_model(self, token_id: Union[uuid.UUID, Token], debug: bool = False) -> Union[TokenModel, None]:
+def get_token_model(self, token_id: Union[uuid.UUID, Token], debug: bool = False) -> 'Union[TokenModel, None]':
     """
     Return a token's model from the instance.
     """
+    from meerschaum.models import TokenModel
     if isinstance(token_id, Token):
         token_id = Token.id
     if not token_id:

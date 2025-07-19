@@ -28,13 +28,16 @@ def test_sync_change_columns_dtypes(flavor: str):
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 10},
     ]
-    pipe.sync(docs, debug=debug)
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
     assert len(pipe.get_data().columns) == 3
 
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 'foo'},
     ]
-    pipe.sync(docs, debug=debug)
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
     df = pipe.get_data()
     assert len(df.columns) == 3
     assert len(df) == 1
@@ -482,6 +485,7 @@ def test_no_indices_inferred_datetime_to_text(flavor: str):
         'test_no_indices', 'datetimes', 'text',
         instance=conn,
     )
+    assert not pipe.exists()
 
     docs = [
         {'fake-dt': '2023-01-01', 'a': 1},
@@ -958,7 +962,7 @@ def test_distant_datetimes(flavor: str):
         columns={
             'datetime': 'ts',
         },
-        enforce=(flavor == 'sqlite'),
+        enforce=True,
     )
     docs = [
         {'ts': datetime(1, 1, 1)},
@@ -995,7 +999,6 @@ def test_enforce_false(flavor: str):
         {'dt': datetime(2024, 12, 26), 'num': 1},
     ]
     success, msg = pipe.sync(docs, debug=debug)
-    return pipe
     assert success, msg
 
     df = pipe.get_data(['num'], debug=debug)

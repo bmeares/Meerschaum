@@ -75,7 +75,9 @@ def get_module_path(
 
     venv_target_candidate_paths = [vtp]
     if venv is None:
-        site_user_packages_dirs = [pathlib.Path(site.getusersitepackages())]
+        site_user_packages_dirs = [
+            pathlib.Path(site.getusersitepackages())
+        ] if not inside_venv() else []
         site_packages_dirs = [pathlib.Path(path) for path in site.getsitepackages()]
 
         paths_to_add = [
@@ -1770,6 +1772,10 @@ def is_installed(
     allow_outside_venv: bool, default True
         If `True`, search outside of the specified virtual environment
         if the package cannot be found.
+
+    Returns
+    -------
+    A bool indicating whether a package may be imported.
     """
     if debug:
         from meerschaum.utils.debug import dprint
