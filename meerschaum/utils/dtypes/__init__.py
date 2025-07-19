@@ -33,12 +33,12 @@ MRSM_ALIAS_DTYPES: Dict[str, str] = {
 }
 MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
-    'numeric': 'decimal128(38, 18)[pyarrow]',
-    'geometry': 'wkb[pyarrow]',
-    'geography': 'wkb[pyarrow]',
+    'numeric': 'object',
+    'geometry': 'object',
+    'geography': 'object',
     'uuid': 'uuid[pyarrow]',
     'datetime': 'datetime64[ns, UTC]',
-    'bool': 'bool[pyarrow]',
+    'bool': 'boolean',
     'int': 'Int64',
     'int8': 'Int8',
     'int16': 'Int16',
@@ -170,7 +170,7 @@ def are_dtypes_equal(
     if ldtype in json_dtypes and rdtype in json_dtypes:
         return True
 
-    numeric_dtypes = ('numeric', 'object')
+    numeric_dtypes = ('numeric', 'decimal', 'object')
     if ldtype in numeric_dtypes and rdtype in numeric_dtypes:
         return True
 
