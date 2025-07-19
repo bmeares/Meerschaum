@@ -15,7 +15,7 @@ from collections import defaultdict
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Optional, Dict, Any, List, Hashable, Generator,
-    Iterator, Iterable, Union, TYPE_CHECKING,
+    Iterator, Iterable, Union, TYPE_CHECKING, Tuple,
 )
 
 if TYPE_CHECKING:
@@ -778,7 +778,8 @@ def get_datetime_cols(
     df: 'pd.DataFrame',
     timezone_aware: bool = True,
     timezone_naive: bool = True,
-) -> List[str]:
+    with_tz_precision: bool = False,
+) -> Union[List[str], Dict[str, Tuple[Union[str, None], str]]]:
     """
     Get the columns which contain `datetime` or `Timestamp` objects from a Pandas DataFrame.
 
@@ -793,77 +794,179 @@ def get_datetime_cols(
     timezone_naive: bool, default True
         If `True`, include timezone-naive datetime columns.
 
+    with_tz_precision: bool, default False
+        If `True`, return a dictionary mapping column names to tuples in the form
+        `(timezone, precision)`.
+
     Returns
     -------
-    A list of columns to treat as datetimes.
+    A list of columns to treat as datetimes, or a dictionary of columns to tz+precision tuples
+    (if `with_tz_precision` is `True`).
     """
     if not timezone_aware and not timezone_naive:
         raise ValueError("`timezone_aware` and `timezone_naive` cannot both be `False`.")
 
     if df is None:
-        return []
+        return [] if not with_tz_precision else {}
 
     from datetime import datetime
     from meerschaum.utils.dtypes import are_dtypes_equal
     is_dask = 'dask' in df.__module__
     if is_dask:
         df = get_first_valid_dask_partition(df)
+   
+    def get_tz_precision_from_dtype(dtype: str) -> Tuple[Union[str, None], str]:
+        """
+        Extract the tz + precision tuple from a dtype string.
+        """
+        meta_str = dtype.split('[', maxsplit=1)[-1].rstrip(']').replace(' ', '')
+        tz = (
+            None
+            if ',' not in meta_str
+            else meta_str.split(',', maxsplit=1)[-1]
+        )
+        precision = (
+            meta_str
+            if ',' not in meta_str
+            else meta_str.split(',')[0]
+        )
+        return tz, precision
 
-    known_dt_cols = [
-        col
+    def get_tz_precision_from_datetime(dt: datetime) -> Tuple[Union[str, None], str]:
+        """
+        Return the tz + precision tuple from a Python datetime object.
+        """
+        return dt.tzname(), 'us'
+
+    known_dt_cols_types = {
+        col: str(typ)
         for col, typ in df.dtypes.items()
         if are_dtypes_equal('datetime', str(typ))
-    ]
+    }
+ 
+    known_dt_cols_tuples = {
+        col: get_tz_precision_from_dtype(typ)
+        for col, typ in known_dt_cols_types.items()
+    }
 
     if len(df) == 0:
-        return known_dt_cols
+        return (
+            list(known_dt_cols_types)
+            if not with_tz_precision
+            else known_dt_cols_tuples
+        )
 
     cols_indices = {
         col: df[col].first_valid_index()
         for col in df.columns
-        if col not in known_dt_cols
+        if col not in known_dt_cols_types
     }
-    pydt_cols = [
-        col
+    pydt_cols_tuples = {
+        col: get_tz_precision_from_datetime(sample_val)
         for col, ix in cols_indices.items()
         if (
             ix is not None
             and
-            isinstance(df.loc[ix][col], datetime)
+            isinstance((sample_val := df.loc[ix][col]), datetime)
         )
-    ]
-    dt_cols_set = set(known_dt_cols + pydt_cols)
-    all_dt_cols = [
-        col
+    }
+
+    dt_cols_tuples = {
+        **known_dt_cols_tuples,
+        **pydt_cols_tuples
+    }
+
+    all_dt_cols_tuples = {
+        col: dt_cols_tuples[col]
         for col in df.columns
-        if col in dt_cols_set
-    ]
+        if col in dt_cols_tuples
+    }
     if timezone_aware and timezone_naive:
-        return all_dt_cols
+        return (
+            list(all_dt_cols_tuples)
+            if not with_tz_precision
+            else all_dt_cols_tuples
+        )
 
     known_timezone_aware_dt_cols = [
         col
-        for col in known_dt_cols
+        for col in known_dt_cols_types
         if getattr(df[col], 'tz', None) is not None
     ]
-    timezone_aware_pydt_cols = [
-        col
-        for col in pydt_cols
+    timezone_aware_pydt_cols_tuples = {
+        col: (tz, precision)
+        for col, (tz, precision) in pydt_cols_tuples.items()
         if df.loc[cols_indices[col]][col].tzinfo is not None
-    ]
-    timezone_aware_dt_cols_set = set(known_timezone_aware_dt_cols + timezone_aware_pydt_cols)
-    if timezone_aware:
-        return [
-            col
-            for col in all_dt_cols
-            if col in timezone_aware_pydt_cols
-        ]
-
-    return [
-        col
-        for col in all_dt_cols
+    }
+    timezone_aware_dt_cols_set = set(
+        known_timezone_aware_dt_cols + list(timezone_aware_pydt_cols_tuples)
+    )
+    timezone_aware_cols_tuples = {
+        col: (tz, precision)
+        for col, (tz, precision) in all_dt_cols_tuples.items()
+        if col in timezone_aware_dt_cols_set
+    }
+    timezone_naive_cols_tuples = {
+        col: (tz, precision)
+        for col, (tz, precision) in all_dt_cols_tuples.items()
         if col not in timezone_aware_dt_cols_set
-    ]
+    }
+
+    if timezone_aware:
+        return (
+            list(timezone_aware_cols_tuples)
+            if not with_tz_precision
+            else timezone_aware_cols_tuples
+        )
+
+    return (
+        list(timezone_naive_cols_tuples)
+        if not with_tz_precision
+        else timezone_naive_cols_tuples
+    )
+
+
+def get_datetime_cols_types(df: 'pd.DataFrame') -> Dict[str, str]:
+    """
+    Return a dictionary mapping datetime columns to specific types strings.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain datetime columns.
+
+    Returns
+    -------
+    A dictionary mapping the datetime columns' names to dtype strings
+    (containing timezone and precision metadata).
+
+    Examples
+    --------
+    >>> from datetime import datetime, timezone
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({'dt_tz_aware': [datetime(2025, 1, 1, tzinfo=timezone.utc)]})
+    >>> get_datetime_cols_types(df)
+    {'dt_tz_aware': 'datetime64[ns, UTC]'}
+    >>> df = pd.DataFrame({'distant_dt': [datetime(1, 1, 1)]})
+    >>> get_datetime_cols_types(df)
+    {'distant_dt': 'datetime64[us]'}
+    >>> df = pd.DataFrame({'dt_second': datetime(2025, 1, 1)})
+    >>> df['dt_second'] = df['dt_second'].astype('datetime64[s]')
+    >>> get_datetime_cols_types(df)
+    {'dt_second': 'datetime64[s]'}
+    """
+    dt_cols_tuples = get_datetime_cols(df, with_tz_precision=True)
+    if not dt_cols_tuples:
+        return {}
+
+    return {
+        col: (
+            f"datetime64[{precision}]"
+            if tz is None
+            else f"datetime64[{precision}, {tz}]"
+        )
+        for col, (tz, precision) in dt_cols_tuples.items()
+    }
 
 
 def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
@@ -1010,15 +1113,25 @@ def get_special_cols(df: 'pd.DataFrame') -> Dict[str, str]:
     """
     Return a dtypes dictionary mapping special columns to their dtypes.
     """
+    datetime_cols_tz_aware = get_datetime_cols(
+        df,
+        timezone_aware=True,
+        timezone_naive=False,
+    )
+    datetime_cols_tz_naive = get_datetime_cols(
+        df,
+        timezone_aware=False,
+        timezone_naive=True,
+    )
+
     return {
         **{col: 'json' for col in get_json_cols(df)},
         **{col: 'uuid' for col in get_uuid_cols(df)},
         **{col: 'bytes' for col in get_bytes_cols(df)},
         **{col: 'bool' for col in get_bool_cols(df)},
         **{col: 'numeric' for col in get_numeric_cols(df)},
-        **{col: 'datetime' for col in get_datetime_cols(df, timezone_aware=True, timezone_naive=False)},
-        **{col: 'datetime64[ns]' for col in get_datetime_cols(df, timezone_aware=False, timezone_naive=True)},
-        **get_geometry_cols_types(df)
+        **get_datetime_cols_types(df),
+        **get_geometry_cols_types(df),
     }
 
 
