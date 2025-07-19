@@ -23,6 +23,7 @@ def enforce_dtypes(
     enforce: bool = True,
     safe_copy: bool = True,
     add_missing_columns: bool = False,
+    dtypes: Optional[Dict[str, str]] = None,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -51,12 +52,15 @@ def enforce_dtypes(
     if not self.enforce:
         enforce = False
 
-    cols_types = self.get_columns_types(debug=debug) if enforce else {}
     explicit_dtypes = self.get_dtypes(infer=False, debug=debug) if enforce else {}
     pipe_dtypes = {
-        **cols_types,
+        **(
+            self.get_columns_types(debug=debug)
+            if enforce
+            else {}
+        ),
         **explicit_dtypes
-    }
+    } if not dtypes else dtypes
 
     try:
         if isinstance(df, str):
@@ -130,6 +134,7 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
     ----------
     persist: bool, default False
         If `True`, persist the inferred data types to `meerschaum.Pipe.parameters`.
+        NOTE: Use with caution! Generally `dtypes` is meant to be user-configurable only.
 
     Returns
     -------

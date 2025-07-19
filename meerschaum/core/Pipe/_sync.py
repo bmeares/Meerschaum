@@ -400,15 +400,17 @@ def sync(
             return success, msg
 
         ### Cast to a dataframe and ensure datatypes are what we expect.
-        df = self.enforce_dtypes(
+        dtypes = p.get_dtypes(debug=debug)
+        df = p.enforce_dtypes(
             df,
             chunksize=chunksize,
             enforce=enforce_dtypes,
+            dtypes=dtypes,
             debug=debug,
         )
         if p.autotime:
             dt_col = p.columns.get('datetime', 'ts')
-            dt_typ = p.dtypes.get(dt_col, 'datetime') if dt_col else 'datetime'
+            dt_typ = dtypes.get(dt_col, 'datetime') if dt_col else 'datetime'
             if dt_col and hasattr(df, 'columns') and dt_col not in df.columns:
                 now = get_current_timestamp(
                     p.precision,
@@ -420,12 +422,14 @@ def sync(
                 df[dt_col] = now
                 kw['check_existing'] = False
 
-        ### Capture `numeric`, `uuid`, `json`, and `bytes` columns.
-        self._persist_new_json_columns(df, debug=debug)
-        self._persist_new_numeric_columns(df, debug=debug)
-        self._persist_new_uuid_columns(df, debug=debug)
-        self._persist_new_bytes_columns(df, debug=debug)
-        self._persist_new_geometry_columns(df, debug=debug)
+        ### Capture special columns.
+        capture_success, capture_msg = self._persist_new_special_columns(
+            df,
+            dtypes=dtypes,
+            debug=debug,
+        )
+        if not capture_success:
+            warn(f"Failed to capture new special columns for {self}:\n{capture_msg}")
 
         if debug:
             dprint(
@@ -700,7 +704,6 @@ def filter_existing(
     from meerschaum.config import get_config
     pd = import_pandas()
     pandas = attempt_import('pandas')
-    print(f"{enforce_dtypes=}")
     if enforce_dtypes or 'dataframe' not in str(type(df)).lower():
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
     is_dask = hasattr('df', '__module__') and 'dask' in df.__module__
@@ -739,9 +742,7 @@ def filter_existing(
     def get_empty_df():
         empty_df = pd.DataFrame([])
         dtypes = dict(df.dtypes) if df is not None else {}
-        print(f"1: {dtypes=}")
         dtypes.update(self.dtypes) if self.enforce else {}
-        print(f"2: {dtypes=}")
         pd_dtypes = {
             col: to_pandas_dtype(str(typ))
             for col, typ in dtypes.items()
@@ -885,7 +886,7 @@ def filter_existing(
         )
     ] if not primary_key else [primary_key]
 
-    self_dtypes = self.dtypes if self.enforce else {}
+    self_dtypes = self.get_dtypes(debug=debug) if self.enforce else {}
     on_cols_dtypes = {
         col: to_pandas_dtype(typ)
         for col, typ in self_dtypes.items()
@@ -1038,117 +1039,38 @@ def get_num_workers(self, workers: Optional[int] = None) -> int:
     )
 
 
-def _persist_new_numeric_columns(self, df, debug: bool = False) -> SuccessTuple:
+def _persist_new_special_columns(
+    self,
+    df: 'pd.DataFrame',
+    dtypes: Optional[Dict[str, str]] = None,
+    debug: bool = False,
+) -> mrsm.SuccessTuple:
     """
-    Check for new numeric columns and update the parameters.
+    Check for new special columns and update the parameters accordingly.
     """
-    from meerschaum.utils.dataframe import get_numeric_cols
-    numeric_cols = get_numeric_cols(df)
-    existing_numeric_cols = [col for col, typ in self.dtypes.items() if typ.startswith('numeric')]
-    new_numeric_cols = [col for col in numeric_cols if col not in existing_numeric_cols]
-    if not new_numeric_cols:
+    from meerschaum.utils.dataframe import get_special_cols
+    from meerschaum.utils.dtypes import dtype_is_special
+    from meerschaum.utils.warnings import dprint
+
+    special_cols = get_special_cols(df)
+    dtypes = dtypes or self.get_dtypes(debug=debug)
+    existing_special_cols = {
+        col: typ
+        for col, typ in dtypes.items()
+        if dtype_is_special(typ)
+    }
+    new_special_cols = {
+        col: typ
+        for col, typ in special_cols.items()
+        if col not in existing_special_cols
+    }
+    if debug:
+        dprint(f"{special_cols=}")
+        dprint(f"{dtypes=}")
+        dprint(f"{new_special_cols=}")
+
+    if not new_special_cols:
         return True, "Success"
 
     self._attributes_sync_time = None
-    dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'numeric' for col in new_numeric_cols})
-    return self.update_parameters({'dtypes': dtypes}, debug=debug)
-
-
-def _persist_new_uuid_columns(self, df, debug: bool = False) -> SuccessTuple:
-    """
-    Check for new numeric columns and update the parameters.
-    """
-    from meerschaum.utils.dataframe import get_uuid_cols
-    uuid_cols = get_uuid_cols(df)
-    existing_uuid_cols = [col for col, typ in self.dtypes.items() if typ == 'uuid']
-    new_uuid_cols = [col for col in uuid_cols if col not in existing_uuid_cols]
-    if not new_uuid_cols:
-        return True, "Success"
-
-    self._attributes_sync_time = None
-    dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'uuid' for col in new_uuid_cols})
-    return self.update_parameters({'dtypes': dtypes}, debug=debug)
-
-
-def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
-    """
-    Check for new JSON columns and update the parameters.
-    """
-    from meerschaum.utils.dataframe import get_json_cols
-    json_cols = get_json_cols(df)
-    existing_json_cols = [col for col, typ in self.dtypes.items() if typ == 'json']
-    new_json_cols = [col for col in json_cols if col not in existing_json_cols]
-    if not new_json_cols:
-        return True, "Success"
-
-    self._attributes_sync_time = None
-    dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'json' for col in new_json_cols})
-    return self.update_parameters({'dtypes': dtypes}, debug=debug)
-
-
-def _persist_new_bytes_columns(self, df, debug: bool = False) -> SuccessTuple:
-    """
-    Check for new `bytes` columns and update the parameters.
-    """
-    from meerschaum.utils.dataframe import get_bytes_cols
-    bytes_cols = get_bytes_cols(df)
-    existing_bytes_cols = [col for col, typ in self.dtypes.items() if typ == 'bytes']
-    new_bytes_cols = [col for col in bytes_cols if col not in existing_bytes_cols]
-    if not new_bytes_cols:
-        return True, "Success"
-
-    self._attributes_sync_time = None
-    dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'bytes' for col in new_bytes_cols})
-    return self.update_parameters({'dtypes': dtypes}, debug=debug)
-
-
-def _persist_new_geometry_columns(self, df, debug: bool = False) -> SuccessTuple:
-    """
-    Check for new `geometry` columns and update the parameters.
-    """
-    from meerschaum.utils.dataframe import get_geometry_cols
-    geometry_cols_types_srids = get_geometry_cols(df, with_types_srids=True)
-    existing_geometry_cols = [
-        col
-        for col, typ in self.dtypes.items()
-        if typ.startswith('geometry') or typ.startswith('geography')
-    ]
-    new_geometry_cols = [
-        col
-        for col in geometry_cols_types_srids
-        if col not in existing_geometry_cols
-    ]
-    if not new_geometry_cols:
-        return True, "Success"
-
-    self._attributes_sync_time = None
-    dtypes = self.parameters.get('dtypes', {})
-
-    new_cols_types = {}
-    for col, (geometry_type, srid) in geometry_cols_types_srids.items():
-        if col not in new_geometry_cols:
-            continue
-
-        new_dtype = "geometry"
-        modifier = ""
-        if not srid and geometry_type.lower() == 'geometry':
-            new_cols_types[col] = new_dtype
-            continue
-
-        modifier = "["
-        if geometry_type.lower() != 'geometry':
-            modifier += f"{geometry_type}"
-
-        if srid:
-            if modifier != '[':
-                modifier += ", "
-            modifier += f"{srid}"
-        modifier += "]"
-        new_cols_types[col] = f"{new_dtype}{modifier}"
-
-    dtypes.update(new_cols_types)
-    return self.update_parameters({'dtypes': dtypes})
+    return self.update_parameters({'dtypes': new_special_cols}, debug=debug)

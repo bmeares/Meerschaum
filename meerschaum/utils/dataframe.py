@@ -704,6 +704,38 @@ def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
     ]
 
 
+def get_bool_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the columns which contain `bool` objects from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain bools.
+
+    Returns
+    -------
+    A list of columns to treat as bools.
+    """
+    if df is None:
+        return []
+
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+
+    if len(df) == 0:
+        return []
+
+    from meerschaum.utils.dtypes import are_dtypes_equal
+
+    return [
+        col
+        for col, typ in df.dtypes.items()
+        if are_dtypes_equal(str(typ), 'bool')
+    ]
+
+
 def get_uuid_cols(df: 'pd.DataFrame') -> List[str]:
     """
     Get the columns which contain `uuid.UUID` objects from a Pandas DataFrame.
@@ -892,14 +924,14 @@ def get_geometry_cols(
     If `with_types_srids`, return a dictionary mapping columns to tuples in the form (type, SRID).
     """
     if df is None:
-        return []
+        return [] if not with_types_srids else {}
 
     is_dask = 'dask' in df.__module__
     if is_dask:
         df = get_first_valid_dask_partition(df)
 
     if len(df) == 0:
-        return []
+        return [] if not with_types_srids else {}
 
     cols_indices = {
         col: df[col].first_valid_index()
@@ -946,6 +978,48 @@ def get_geometry_cols(
         geo_cols_types_srids[col] = (geometry_type, srid)
 
     return geo_cols_types_srids
+
+
+def get_geometry_cols_types(df: 'pd.DataFrame') -> Dict[str, str]:
+    """
+    Return a dtypes dictionary mapping columns to specific geometry types (type, srid).
+    """
+    geometry_cols_types_srids = get_geometry_cols(df, with_types_srids=True)
+    new_cols_types = {}
+    for col, (geometry_type, srid) in geometry_cols_types_srids.items():
+        new_dtype = "geometry"
+        modifier = ""
+        if not srid and geometry_type.lower() == 'geometry':
+            new_cols_types[col] = new_dtype
+            continue
+
+        modifier = "["
+        if geometry_type.lower() != 'geometry':
+            modifier += f"{geometry_type}"
+
+        if srid:
+            if modifier != '[':
+                modifier += ", "
+            modifier += f"{srid}"
+        modifier += "]"
+        new_cols_types[col] = f"{new_dtype}{modifier}"
+    return new_cols_types
+
+
+def get_special_cols(df: 'pd.DataFrame') -> Dict[str, str]:
+    """
+    Return a dtypes dictionary mapping special columns to their dtypes.
+    """
+    return {
+        **{col: 'json' for col in get_json_cols(df)},
+        **{col: 'uuid' for col in get_uuid_cols(df)},
+        **{col: 'bytes' for col in get_bytes_cols(df)},
+        **{col: 'bool' for col in get_bool_cols(df)},
+        **{col: 'numeric' for col in get_numeric_cols(df)},
+        **{col: 'datetime' for col in get_datetime_cols(df, timezone_aware=True, timezone_naive=False)},
+        **{col: 'datetime64[ns]' for col in get_datetime_cols(df, timezone_aware=False, timezone_naive=True)},
+        **get_geometry_cols_types(df)
+    }
 
 
 def enforce_dtypes(

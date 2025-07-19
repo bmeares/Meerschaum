@@ -191,7 +191,7 @@ def sync_pipe(
     from meerschaum.utils.misc import items_str, interval_str
     from meerschaum.config import get_config
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dataframe import get_numeric_cols, to_json
+    from meerschaum.utils.dataframe import get_special_cols, to_json
     begin = time.perf_counter()
     more_itertools = attempt_import('more_itertools')
     if df is None:
@@ -223,22 +223,6 @@ def sync_pipe(
             else [partition.compute() for partition in df.partitions]
         )
 
-        numeric_cols = get_numeric_cols(df)
-        if numeric_cols:
-            for col in numeric_cols:
-                df[col] = df[col].apply(lambda x: f'{x:f}' if isinstance(x, Decimal) else x)
-            pipe_dtypes = pipe.dtypes
-            new_numeric_cols = [
-                col
-                for col in numeric_cols
-                if pipe_dtypes.get(col, None) != 'numeric'
-            ]
-            edit_success, edit_msg = pipe.update_parameters({'dtypes': {col: 'numeric' for col in new_numeric_cols}})
-            if not edit_success:
-                warn(
-                    "Failed to update new numeric columns "
-                    + f"{items_str(new_numeric_cols)}:\n{edit_msg}"
-                )
     elif isinstance(df, dict):
         ### `_chunks` is a dict of lists of dicts.
         ### e.g. {'a' : [ {'a':[1, 2]}, {'a':[3, 4]} ] }
@@ -325,7 +309,7 @@ def sync_pipe(
 def delete_pipe(
     self,
     pipe: Optional[mrsm.Pipe] = None,
-    debug: bool = None,        
+    debug: bool = False,
 ) -> SuccessTuple:
     """Delete a Pipe and drop its table."""
     if pipe is None:

@@ -217,3 +217,9 @@ for group, import_names in packages.items():
     for import_name, install_name in import_names.items():
         _full[import_name] = install_name
 packages['full'] = _full
+
+extras = {
+    group: list(import_names_install_names_map.values())
+    for group, import_names_install_names_map in packages.items()
+    if not group.startswith('_')
+}

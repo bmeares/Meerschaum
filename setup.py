@@ -22,12 +22,6 @@ class PostInstallCommand(install):
         except Exception as e:
             print(f"Post-install command failed: {e}")
 
-extras = {}
-for group in packages:
-    if group.startswith('_'):
-        continue
-    extras[group] = [ install_name for import_name, install_name in packages[group].items() ]
-
 setup(
     install_requires = extras.get('required', []),
     extras_require = extras,
@@ -35,4 +29,3 @@ setup(
         'install': PostInstallCommand,
     },
 )
-

@@ -1024,7 +1024,7 @@ def query_data_click(n_clicks, query_editor_text, limit_value, begin, end):
         raise PreventUpdate
 
     try:
-        params_query = json.loads(query_editor_text)
+        params_query = string_to_dict(query_editor_text)
     except Exception as e:
         return alert_from_success_tuple((False, f"Invalid query:\n{e}"))
 
