@@ -117,6 +117,7 @@ def enforce_dtypes(
         safe_copy=safe_copy,
         strip_timezone=(self.tzinfo is None),
         coerce_timezone=enforce,
+        coerce_numeric=False, ### TODO: Test
         debug=debug,
     )
     if not add_missing_columns:

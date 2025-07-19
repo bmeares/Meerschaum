@@ -189,7 +189,7 @@ def are_dtypes_equal(
     if ldtype.lower() == rdtype.lower():
         return True
 
-    datetime_dtypes = ('datetime', 'timestamp')
+    datetime_dtypes = ('datetime',)
     ldtype_found_dt_prefix = False
     rdtype_found_dt_prefix = False
     for dt_prefix in datetime_dtypes:

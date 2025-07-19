@@ -1294,15 +1294,16 @@ def enforce_dtypes(
         explicitly_int = are_dtypes_equal(explicit_dtypes.get(col, 'object'), 'int')
         explicitly_numeric = explicit_dtypes.get(col, 'object').startswith('numeric')
         all_nan = df[col].isnull().all()
-        cast_to_numeric = (
-            explicitly_numeric
-            or col in df_numeric_cols
-            or (
-                mixed_numeric_types
-                and not (explicitly_float or explicitly_int)
-                and not all_nan
-            )
-        ) and coerce_numeric
+        cast_to_numeric = explicitly_numeric or (
+            (
+                col in df_numeric_cols
+                or (
+                    mixed_numeric_types
+                    and not (explicitly_float or explicitly_int)
+                    and not all_nan
+                )
+            ) and coerce_numeric
+        )
 
         if debug:
             dprint(

@@ -277,7 +277,7 @@ def read(
                 'dtype': dtype,
                 'coerce_float': coerce_float,
                 'index_col': index_col,
-                'dtype_backend': 'pyarrow',
+                'dtype_backend': 'numpy_nullable',
             }
             if is_dask:
                 if index_col is None:
