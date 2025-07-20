@@ -336,13 +336,7 @@ def get_dtypes(
         self.__dict__['_remote_dtypes'] = remote_dtypes
         self.__dict__['_remote_dtypes_timestamp'] = now
 
-    if debug:
-        dprint(f"{remote_dtypes=}")
-
     patched_dtypes = apply_patch_to_config((remote_dtypes or {}), (configured_dtypes or {}))
-
-    if debug:
-        dprint(f"{patched_dtypes=}")
 
     dt_col = parameters.get('columns', {}).get('datetime', None)
     primary_col = parameters.get('columns', {}).get('primary', None)
