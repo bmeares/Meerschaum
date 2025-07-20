@@ -19,11 +19,13 @@ services:
       POSTGRES_USER: "test"
       POSTGRES_PASSWORD: "test1234"
       ALLOW_IP_RANGE: "0.0.0.0/0"
+    command: "postgres -c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100"
     ports:
       - "5439:5432"
     volumes:
       - "timescaledb_volume:/var/lib/postgresql/data"
     image: "timescale/timescaledb:latest-pg17"
+    shm_size: "1gb"
 
   # timescaledb-ha:
     # environment:
@@ -45,11 +47,13 @@ services:
       POSTGRES_USER: "test"
       POSTGRES_PASSWORD: "test1234"
       ALLOW_IP_RANGE: "0.0.0.0/0"
+    command: "postgres -c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100"
     ports:
       - "5449:5432"
     volumes:
       - "postgis_volume:/var/lib/postgresql/data"
     image: "postgis/postgis:17-3.5"
+    shm_size: "1gb"
 
   mssql:
     environment:

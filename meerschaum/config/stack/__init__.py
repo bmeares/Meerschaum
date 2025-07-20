@@ -122,9 +122,9 @@ default_docker_compose_config = {
                 'POSTGRES_DB': '<DOLLAR>POSTGRES_DB',
                 'POSTGRES_PASSWORD': '<DOLLAR>POSTGRES_PASSWORD',
                 'ALLOW_IP_RANGE': env_dict['ALLOW_IP_RANGE'],
-                'POSTGRES_INITDB_ARGS': '-c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100'
+                #  'POSTGRES_INITDB_ARGS': '-c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100'
             },
-            #  'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB',
+            'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100',
             'healthcheck': {
                 'test': [
                     'CMD-SHELL', 'pg_isready -d <DOLLAR>POSTGRES_DB -U <DOLLAR>POSTGRES_USER',
