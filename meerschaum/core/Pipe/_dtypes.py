@@ -108,6 +108,7 @@ def enforce_dtypes(
         explicit_dtypes=explicit_dtypes,
         safe_copy=safe_copy,
         strip_timezone=(self.tzinfo is None),
+        coerce_numeric=self.mixed_numerics,
         coerce_timezone=enforce,
         debug=debug,
     )

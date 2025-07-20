@@ -117,6 +117,7 @@ class Pipe:
         tzinfo,
         enforce,
         null_indices,
+        mixed_numerics,
         get_columns,
         get_columns_types,
         get_columns_indices,
@@ -182,6 +183,7 @@ class Pipe:
         static: Optional[bool] = None,
         enforce: Optional[bool] = None,
         null_indices: Optional[bool] = None,
+        mixed_numerics: Optional[bool] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         cache: bool = False,
         debug: bool = False,
@@ -254,6 +256,11 @@ class Pipe:
 
         null_indices: Optional[bool], default None
             Set to `False` if there will be no null values in the index columns.
+            Defaults to `True`.
+
+        mixed_numerics: bool, default None
+            If `True`, integer columns will be converted to `numeric` when floats are synced.
+            Set to `False` to disable this behavior.
             Defaults to `True`.
 
         temporary: bool, default False
@@ -369,6 +376,9 @@ class Pipe:
 
         if isinstance(null_indices, bool):
             self._attributes['parameters']['null_indices'] = null_indices
+
+        if isinstance(mixed_numerics, bool):
+            self._attributes['parameters']['mixed_numerics'] = mixed_numerics
 
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,

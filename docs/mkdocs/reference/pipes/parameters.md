@@ -224,6 +224,11 @@ The keys specified in `columns` are included in `indices` by default, as well as
             ((1.8 * temperature_c) + 32) as temperature_f
         FROM weather
     ```
+---------------
+
+## `mixed_numerics`
+
+Toggle whether a pipe will coerce mixed integer and float values into the `numeric` dtype (default `True`). Set this to `False` to disable this behavior, preventing potential schema changes on the target table (akin to `static=True`).
 
 ---------------
 

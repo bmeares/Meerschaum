@@ -1143,7 +1143,7 @@ def enforce_dtypes(
     dtypes: Dict[str, str],
     explicit_dtypes: Optional[Dict[str, str]] = None,
     safe_copy: bool = True,
-    coerce_numeric: bool = True,
+    coerce_numeric: bool = False,
     coerce_timezone: bool = True,
     strip_timezone: bool = False,
     debug: bool = False,
@@ -1168,7 +1168,7 @@ def enforce_dtypes(
         Setting to `False` may mutate the DataFrames.
         See `meerschaum.utils.dataframe.filter_unseen_df`.
 
-    coerce_numeric: bool, default True
+    coerce_numeric: bool, default False
         If `True`, convert float and int collisions to numeric.
 
     coerce_timezone: bool, default True
@@ -1321,11 +1321,20 @@ def enforce_dtypes(
                     if debug:
                         dprint(f"Skip UTC coersion for column '{col}' ({str(df[col].dtype)}).")
                     continue
+                if strip_timezone and ',' not in str(df.dtypes[col]):
+                    if debug:
+                        dprint(
+                            f"Skip UTC coersion (stripped) for column '{col}' "
+                            f"({str(df[col].dtype)})."
+                        )
+                        continue
+
                 if debug:
                     dprint(
                         f"Data type for column '{col}' before timezone coersion: "
                         f"{str(df[col].dtype)}"
                     )
+
                 df[col] = _coerce_timezone(df[col], strip_utc=strip_timezone)
                 if debug:
                     dprint(
@@ -1417,8 +1426,9 @@ def enforce_dtypes(
                     mixed_numeric_types
                     and not (explicitly_float or explicitly_int)
                     and not all_nan
+                    and coerce_numeric
                 )
-            ) and coerce_numeric
+            )
         )
 
         if debug:

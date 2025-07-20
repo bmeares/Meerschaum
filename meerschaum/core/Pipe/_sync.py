@@ -1065,9 +1065,11 @@ def _persist_new_special_columns(
         if col not in existing_special_cols
     }
     if debug:
-        dprint(f"{special_cols=}")
-        dprint(f"{dtypes=}")
-        dprint(f"{new_special_cols=}")
+        dprint(
+            f"{special_cols=}\n"
+            f"{dtypes=}\n"
+            f"{new_special_cols=}"
+        )
 
     if not new_special_cols:
         return True, "Success"
