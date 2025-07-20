@@ -7,6 +7,7 @@ Test functions from `meerschaum.utils.misc`.
 """
 
 from datetime import datetime, timezone
+from typing import Optional
 import pytest
 from meerschaum.utils.packages import attempt_import
 DEBUG: bool = True
@@ -14,27 +15,34 @@ pd = attempt_import('pandas')
 
 
 @pytest.mark.parametrize(
-    "dtype",
+    "dtype,expected_dtype",
     [
-        'object',
-        'bool[pyarrow]',
-        'float64',
-        'datetime64[ns]',
-        'int64',
-        'int32',
-        'int64[pyarrow]',
-        'datetime64[ns, UTC]',
+        ('object', None),
+        ('bool', 'bool[pyarrow]'),
+        ('bytes', 'binary[pyarrow]'),
+        ('bool[pyarrow]', None),
+        ('float64', None),
+        ('datetime64[ns]', None),
+        ('datetime', 'datetime64[ns, UTC]'),
+        ('int', 'int64[pyarrow]'),
+        ('int64', 'int64[pyarrow]'),
+        ('int32', 'int32[pyarrow]'),
+        ('int16', 'int16[pyarrow]'),
+        ('int8', 'int8[pyarrow]'),
+        ('int64[pyarrow]', None),
+        ('datetime64[ns, UTC]', None),
     ]
 )
-def test_add_missing_cols_to_df(dtype: str):
+def test_add_missing_cols_to_df(dtype: str, expected_dtype):
     """
     Test that new columns are successfully added to a dataframe.
     """
     from meerschaum.utils.dataframe import add_missing_cols_to_df
+    expected_dtype = expected_dtype or dtype
     df = pd.DataFrame([{'foo': 'bar'}])
     new_df = add_missing_cols_to_df(df, {'baz': dtype})
     assert len(new_df.columns) == 2
-    assert str(new_df.dtypes['baz']).lower() == dtype.lower()
+    assert str(new_df.dtypes['baz']) == expected_dtype
 
 
 @pytest.mark.parametrize(
