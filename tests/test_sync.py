@@ -172,14 +172,21 @@ def test_sync_new_columns(flavor: str):
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 10},
     ]
-    pipe.sync(docs, debug=debug)
-    assert len(pipe.get_data().columns) == 3
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(debug=debug)
+    assert df is not None
+    assert len(df.columns) == 3
 
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'b': 20},
     ]
-    pipe.sync(docs, debug=debug)
-    df = pipe.get_data()
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(debug=debug)
+    assert df is not None
     assert len(df.columns) == 4
     assert len(df) == 1
 
