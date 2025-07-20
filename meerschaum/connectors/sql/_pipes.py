@@ -1067,29 +1067,46 @@ def get_pipe_data(
     """
     import functools
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dtypes import to_pandas_dtype
+    from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
 
     cols_types = pipe.get_columns_types(debug=debug) if pipe.enforce else {}
-    pipe_dtypes = pipe.get_dtypes(infer=False, debug=debug)
+    pipe_dtypes = pipe.get_dtypes(infer=False, debug=debug) if pipe.enforce else {}
+
+    remote_pandas_types = {
+        col: get_pd_type_from_db_type(typ)
+        for col, typ in cols_types.items()
+    }
+    remote_dt_cols_types = {
+        col: typ
+        for col, typ in remote_pandas_types.items()
+        if are_dtypes_equal(typ, 'datetime')
+    }
+    remote_dt_tz_aware_cols_types = {
+        col: typ
+        for col, typ in remote_dt_cols_types.items()
+        if ',' in typ or typ == 'datetime'
+    }
+    remote_dt_tz_naive_cols_types = {
+        col: typ
+        for col, typ in remote_dt_cols_types.items()
+        if col not in remote_dt_tz_aware_cols_types
+    }
+
+    configured_pandas_types = {
+        col: to_pandas_dtype(typ)
+        for col, typ in pipe_dtypes.items()
+    }
+
     dtypes = {
-        **{
-            col: get_pd_type_from_db_type(typ)
-            for col, typ in cols_types.items()
-        },
-        **{
-            p_col: to_pandas_dtype(p_typ)
-            for p_col, p_typ in pipe_dtypes.items()
-        },
+        **remote_dt_cols_types,
+        **configured_pandas_types,
+        **remote_dt_tz_aware_cols_types,
+        **remote_dt_tz_naive_cols_types,
     } if pipe.enforce else {}
 
-    bytes_cols = [
-        col
-        for col, typ in pipe_dtypes.items()
-        if typ == 'bytes' and col in dtypes
-    ]
     existing_cols = cols_types.keys()
     select_columns = (
         [
