@@ -305,7 +305,11 @@ def get_data(
                 },
             )
 
-        enforced_df = self.enforce_dtypes(df, debug=debug)
+        enforced_df = self.enforce_dtypes(
+            df,
+            dtypes=pipe_dtypes,
+            debug=debug,
+        )
 
         if order:
             return _sort_df(enforced_df)
