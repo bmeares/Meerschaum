@@ -791,8 +791,6 @@ def test_sync_bytes_inplace(flavor: str):
     success, msg = inplace_pipe.sync(debug=debug)
     assert success, msg
 
-    return pipe, inplace_pipe
-
     assert 'bytes' in inplace_pipe.dtypes['bytes_col']
     assert inplace_pipe.get_rowcount() == len(docs)
 
