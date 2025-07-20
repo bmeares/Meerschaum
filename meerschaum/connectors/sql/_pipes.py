@@ -1076,7 +1076,7 @@ def get_pipe_data(
     pipe_dtypes = pipe.get_dtypes(infer=False, debug=debug) if pipe.enforce else {}
 
     remote_pandas_types = {
-        col: get_pd_type_from_db_type(typ)
+        col: to_pandas_dtype(get_pd_type_from_db_type(typ))
         for col, typ in cols_types.items()
     }
     remote_dt_cols_types = {
@@ -1112,7 +1112,7 @@ def get_pipe_data(
 
     if debug:
         dprint(
-            f"{remote_dt_cols_types=}\n"
+            f"{remote_pandas_types=}\n"
             f"{configured_pandas_types=}\n"
             f"{remote_dt_tz_aware_cols_types=}\n"
             f"{remote_dt_tz_naive_cols_types=}\n"

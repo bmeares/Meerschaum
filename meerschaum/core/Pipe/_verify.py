@@ -418,7 +418,7 @@ def verify(
             retry_failed_batch = False
 
         batch_msg_to_print = (
-            f"{make_header('Completed batch ' + batch_counter_str + ':')}\n{batch_msg}"
+            f"{make_header('Completed batch ' + batch_counter_str + ':', left_pad=0)}\n{batch_msg}"
         )
         mrsm.pprint((batch_success, batch_msg_to_print))
 
@@ -426,7 +426,7 @@ def verify(
             info(f"Retrying batch {batch_counter_str}...")
             retry_batch_success, retry_batch_msg = process_batch(batch)
             retry_batch_msg_to_print = (
-                f"Retried {make_header('batch ' + batch_label)}\n{retry_batch_msg}"
+                f"Retried {make_header('batch ' + batch_label, left_pad=0)}\n{retry_batch_msg}"
             )
             mrsm.pprint((retry_batch_success, retry_batch_msg_to_print))
 
