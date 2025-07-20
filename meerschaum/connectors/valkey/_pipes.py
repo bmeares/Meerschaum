@@ -321,14 +321,40 @@ def drop_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
-    for chunk_begin, chunk_end in pipe.get_chunk_bounds(debug=debug):
-        clear_chunk_success, clear_chunk_msg = pipe.clear(
-            begin=chunk_begin,
-            end=chunk_end,
-            debug=debug,
+    if not pipe.exists(debug=debug):
+        return True, f"{pipe} does not exist, so it was not dropped."
+
+    table_name = self.quote_table(pipe.target)
+    dt_col = pipe.columns.get('datetime', None)
+
+    try:
+        members = (
+            self.client.zrange(table_name, 0, -1)
+            if dt_col
+            else self.client.smembers(table_name)
         )
-        if not clear_chunk_success:
-            return clear_chunk_success, clear_chunk_msg
+        
+        keys_to_delete = []
+        for member_bytes in members:
+            member_str = member_bytes.decode('utf-8')
+            member_doc = json.loads(member_str)
+            ix_str = member_doc.get('ix')
+            if not ix_str:
+                continue
+            
+            ix_doc = string_to_dict(ix_str.replace(COLON, ':'))
+            doc_key = self.get_document_key(ix_doc, list(ix_doc.keys()), table_name)
+            keys_to_delete.append(doc_key)
+
+        if keys_to_delete:
+            batch_size = 1000
+            for i in range(0, len(keys_to_delete), batch_size):
+                batch = keys_to_delete[i:i+batch_size]
+                self.client.delete(*batch)
+
+    except Exception as e:
+        return False, f"Failed to delete documents for {pipe}:\n{e}"
+
     try:
         self.drop_table(pipe.target, debug=debug)
     except Exception as e:

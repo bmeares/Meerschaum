@@ -267,7 +267,9 @@ def test_no_indices_inferred_datetime_to_text(flavor: str):
         'test_no_indices', 'datetimes', 'text',
         instance=conn,
     )
-    pipe.delete()
+    success, msg = pipe.delete(debug=debug)
+    assert success, msg
+
     docs = [
         {'fake-dt': '2023-01-01', 'a': 1},
     ]
