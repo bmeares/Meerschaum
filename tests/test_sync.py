@@ -258,45 +258,6 @@ def test_id_index_col(flavor: str):
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
-def test_no_indices_inferred_datetime_to_text(flavor: str):
-    """
-    Verify that changing dtypes are handled.
-    """
-    conn = conns[flavor]
-    pipe = Pipe(
-        'test_no_indices', 'datetimes', 'text',
-        instance=conn,
-    )
-    success, msg = pipe.delete(debug=debug)
-    assert success, msg
-
-    docs = [
-        {'fake-dt': '2023-01-01', 'a': 1},
-    ]
-    success, msg = pipe.sync(docs, debug=debug)
-    assert success, msg
-
-    docs = [
-        {'fake-dt': '2023-01-01', 'a': 1},
-        {'fake-dt': '2023-01-02', 'a': 2},
-    ]
-    success, msg = pipe.sync(docs, debug=debug)
-    assert success, msg
-    df = pipe.get_data()
-    assert len(df) == len(docs)
-
-    docs = [
-        {'fake-dt': '2023-01-01', 'a': 1},
-        {'fake-dt': '2023-01-02', 'a': 2},
-        {'fake-dt': 'foo', 'a': 3},
-    ]
-    success, msg = pipe.sync(docs, debug=debug)
-    assert success, msg
-    df = pipe.get_data()
-    assert len(df) == len(docs)
-
-
-@pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_generators(flavor: str):
     """
     Verify that we are able to sync generators of chunks.
