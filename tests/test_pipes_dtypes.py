@@ -870,7 +870,6 @@ def test_mixed_timezone_aware_and_naive(flavor: str):
 
     src_df = pd.DataFrame([{'ts': datetime(2024, 1, 1), 'val': 2}])
     conn.to_sql(src_df, target, debug=debug)
-    return pipe
 
     df = pipe.get_data(debug=debug)
     unseen, update, delta = pipe.filter_existing(src_df, debug=debug)
