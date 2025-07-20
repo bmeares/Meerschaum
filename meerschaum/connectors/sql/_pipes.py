@@ -1484,13 +1484,7 @@ def create_pipe_table_from_df(
     """
     Create a pipe's table from its configured dtypes and an incoming dataframe.
     """
-    from meerschaum.utils.dataframe import (
-        get_json_cols,
-        get_numeric_cols,
-        get_uuid_cols,
-        get_datetime_cols,
-        get_bytes_cols,
-    )
+    from meerschaum.utils.dataframe import get_special_cols
     from meerschaum.utils.sql import (
         get_create_table_queries,
         sql_item_name,
@@ -1519,30 +1513,7 @@ def create_pipe_table_from_df(
             for col_ix, col in pipe.columns.items()
             if col and col_ix != 'primary'
         },
-        **{
-            col: 'uuid'
-            for col in get_uuid_cols(df)
-        },
-        **{
-            col: 'json'
-            for col in get_json_cols(df)
-        },
-        **{
-            col: 'numeric'
-            for col in get_numeric_cols(df)
-        },
-        **{
-            col: 'bytes'
-            for col in get_bytes_cols(df)
-        },
-        **{
-            col: 'datetime64[ns, UTC]'
-            for col in get_datetime_cols(df, timezone_aware=True, timezone_naive=False)
-        },
-        **{
-            col: 'datetime64[ns]'
-            for col in get_datetime_cols(df, timezone_aware=False, timezone_naive=True)
-        },
+        **get_special_cols(df),
         **pipe.dtypes
     }
     autoincrement = (

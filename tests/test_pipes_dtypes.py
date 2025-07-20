@@ -55,7 +55,7 @@ def test_dtype_enforcement(flavor: str):
     pipe = Pipe(
         'dtype', 'enforcement',
         static=False,
-        upsert=True, ### TODO: Test with `upsert=True`.
+        upsert=True,
         enforce=True,
         columns={
             'datetime': 'dt',

@@ -30,6 +30,7 @@ MRSM_ALIAS_DTYPES: Dict[str, str] = {
     'UUID': 'uuid',
     'geom': 'geometry',
     'geog': 'geography',
+    'boolean': 'bool',
 }
 MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
@@ -38,7 +39,7 @@ MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'geography': 'object',
     'uuid': 'object',
     'datetime': 'datetime64[ns, UTC]',
-    'bool': 'boolean',
+    'bool': 'bool[pyarrow]',
     'int': 'Int64',
     'int8': 'Int8',
     'int16': 'Int16',
@@ -170,7 +171,7 @@ def are_dtypes_equal(
     if ldtype in json_dtypes and rdtype in json_dtypes:
         return True
 
-    numeric_dtypes = ('numeric', 'object')
+    numeric_dtypes = ('numeric', 'decimal', 'object')
     if ldtype in numeric_dtypes and rdtype in numeric_dtypes:
         return True
 
@@ -202,7 +203,10 @@ def are_dtypes_equal(
     if ldtype in string_dtypes and rdtype in string_dtypes:
         return True
 
-    int_dtypes = ('int', 'int64', 'int32', 'int16', 'int8')
+    int_dtypes = (
+        'int', 'int64', 'int32', 'int16', 'int8',
+        'uint', 'uint64', 'uint32', 'uint16', 'uint8',
+    )
     if ldtype.lower() in int_dtypes and rdtype.lower() in int_dtypes:
         return True
 
@@ -960,6 +964,8 @@ def dtype_is_special(type_: str) -> bool:
         'bytes',
         'numeric',
         'datetime',
+        'geometry',
+        'geography',
     ):
         return True
 

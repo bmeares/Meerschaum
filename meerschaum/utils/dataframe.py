@@ -660,8 +660,7 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
         for col, ix in cols_indices.items()
         if (
             ix is not None
-            and
-            not isinstance(df.loc[ix][col], Hashable)
+            and isinstance(df.loc[ix][col], (dict, list))
         )
     ]
 
@@ -984,25 +983,40 @@ def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
     """
     if df is None:
         return []
+
     is_dask = 'dask' in df.__module__
     if is_dask:
         df = get_first_valid_dask_partition(df)
 
+    known_bytes_cols = [
+        col
+        for col, typ in df.dtypes.items()
+        if str(typ) == 'binary[pyarrow]'
+    ]
+
     if len(df) == 0:
-        return []
+        return known_bytes_cols
 
     cols_indices = {
         col: df[col].first_valid_index()
         for col in df.columns
+        if col not in known_bytes_cols
     }
-    return [
+    object_bytes_cols = [
         col
         for col, ix in cols_indices.items()
         if (
             ix is not None
-            and
-            isinstance(df.loc[ix][col], bytes)
+            and isinstance(df.loc[ix][col], bytes)
         )
+    ]
+
+    all_bytes_cols = set(known_bytes_cols + object_bytes_cols)
+
+    return [
+        col
+        for col in df.columns
+        if col in all_bytes_cols
     ]
 
 
@@ -1113,17 +1127,6 @@ def get_special_cols(df: 'pd.DataFrame') -> Dict[str, str]:
     """
     Return a dtypes dictionary mapping special columns to their dtypes.
     """
-    datetime_cols_tz_aware = get_datetime_cols(
-        df,
-        timezone_aware=True,
-        timezone_naive=False,
-    )
-    datetime_cols_tz_naive = get_datetime_cols(
-        df,
-        timezone_aware=False,
-        timezone_naive=True,
-    )
-
     return {
         **{col: 'json' for col in get_json_cols(df)},
         **{col: 'uuid' for col in get_uuid_cols(df)},
@@ -1448,7 +1451,7 @@ def enforce_dtypes(
             )
         except Exception as e:
             if debug:
-                dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}")
+                dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}\ndf:\n{df}")
             if 'int' in str(t).lower():
                 try:
                     df[d] = df[d].astype('float64').astype(t)

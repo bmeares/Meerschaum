@@ -52,14 +52,7 @@ def enforce_dtypes(
         enforce = False
 
     explicit_dtypes = self.get_dtypes(infer=False, debug=debug) if enforce else {}
-    pipe_dtypes = {
-        **(
-            self.get_columns_types(debug=debug)
-            if enforce
-            else {}
-        ),
-        **explicit_dtypes
-    } if not dtypes else dtypes
+    pipe_dtypes = self.get_dtypes(infer=True, debug=debug) if not dtypes else dtypes
 
     try:
         if isinstance(df, str):

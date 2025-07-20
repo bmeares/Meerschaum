@@ -277,7 +277,6 @@ def read(
                 'dtype': dtype,
                 'coerce_float': coerce_float,
                 'index_col': index_col,
-                'dtype_backend': 'numpy_nullable', ### TODO: Remove this for bytes parsing?
             }
             if is_dask:
                 if index_col is None:
