@@ -116,7 +116,7 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
         'DECIMAL': 'numeric',
         'NUMERIC': 'numeric',
         'NUMBER': 'numeric',
-        'INT': 'Int64',
+        'INT': 'int64[pyarrow]',
         'BOOL': 'bool[pyarrow]',
         'JSON': 'json',
         'BYTE': 'bytes',

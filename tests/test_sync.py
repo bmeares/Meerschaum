@@ -766,6 +766,7 @@ def test_sync_null_indices(flavor: str):
         'sync', 'null', 'indices',
         instance=conn,
         columns=['a', 'b'],
+        mixed_numerics=True,
     )
     docs = [{'a': 1, 'b': 1, 'c': 1}]
     success, msg = pipe.sync(docs, debug=debug)

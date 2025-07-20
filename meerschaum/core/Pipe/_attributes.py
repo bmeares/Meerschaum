@@ -473,6 +473,22 @@ def null_indices(self, _null_indices: bool) -> None:
     self.update_parameters({'null_indices': _null_indices}, persist=False)
 
 
+@property
+def mixed_numerics(self) -> bool:
+    """
+    Return the `mixed_numerics` parameter for the pipe.
+    """
+    return self.parameters.get('mixed_numerics', True)
+
+
+@mixed_numerics.setter
+def mixed_numerics(self, _mixed_numerics: bool) -> None:
+    """
+    Set the `mixed_numerics` parameter for the pipe.
+    """
+    self.update_parameters({'mixed_numerics': _mixed_numerics}, persist=False)
+
+
 def get_columns(self, *args: str, error: bool = False) -> Union[str, Tuple[str]]:
     """
     Check if the requested columns are defined.

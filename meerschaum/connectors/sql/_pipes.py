@@ -1099,12 +1099,32 @@ def get_pipe_data(
         col: to_pandas_dtype(typ)
         for col, typ in pipe_dtypes.items()
     }
+    configured_lower_precision_dt_cols_types = {
+        col: typ
+        for col, typ in pipe_dtypes.items()
+        if (
+            are_dtypes_equal('datetime', typ)
+            and '[' in typ
+            and 'ns' not in typ
+        )
+        
+    }
+
+    if debug:
+        dprint(
+            f"{remote_dt_cols_types=}\n"
+            f"{configured_pandas_types=}\n"
+            f"{remote_dt_tz_aware_cols_types=}\n"
+            f"{remote_dt_tz_naive_cols_types=}\n"
+            f"{configured_lower_precision_dt_cols_types=}\n"
+        )
 
     dtypes = {
-        **remote_dt_cols_types,
+        **remote_pandas_types,
         **configured_pandas_types,
         **remote_dt_tz_aware_cols_types,
         **remote_dt_tz_naive_cols_types,
+        **configured_lower_precision_dt_cols_types
     } if pipe.enforce else {}
 
     existing_cols = cols_types.keys()
@@ -1127,13 +1147,14 @@ def get_pipe_data(
         dtypes = {col: typ for col, typ in dtypes.items() if col in select_columns}
 
     dtypes = {
-        col: to_pandas_dtype(typ)
+        col: typ
         for col, typ in dtypes.items()
         if col in (select_columns or [col]) and col not in (omit_columns or [])
     } if pipe.enforce else {}
 
     if debug:
-        dprint(f"Get pipe data dtypes:\n{dtypes}")
+        dprint(f"read_sql_query() dtypes:")
+        mrsm.pprint(dtypes)
 
     query = self.get_pipe_data_query(
         pipe,
