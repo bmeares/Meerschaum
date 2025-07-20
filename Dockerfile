@@ -36,7 +36,7 @@ RUN python -m pip install --user --no-cache-dir \
 
 ### Layer 3: Install Meerschaum.
 ### Recache this every build.
-COPY --chown=$MRSM_USER:$MRSM_USER setup.py README.md $MRSM_SRC/
+COPY --chown=$MRSM_USER:$MRSM_USER pyproject.toml setup.py README.md $MRSM_SRC/
 COPY --chown=$MRSM_USER:$MRSM_USER meerschaum $MRSM_SRC/meerschaum
 RUN python -m pip install --user --no-cache-dir $MRSM_SRC && rm -rf $MRSM_SRC
 
