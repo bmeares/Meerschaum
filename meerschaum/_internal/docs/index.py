@@ -535,14 +535,25 @@ def init_dash(dash_app):
     <p></p>
     <ul>
       <li><code>meerschaum.utils.dataframe.add_missing_cols_to_df()</code></li>
+      <li><code>meerschaum.utils.dataframe.chunksize_to_npartitions()</code></li>
+      <li><code>meerschaum.utils.dataframe.df_from_literal()</code></li>
       <li><code>meerschaum.utils.dataframe.df_is_chunk_generator()</code></li>
       <li><code>meerschaum.utils.dataframe.enforce_dtypes()</code></li>
       <li><code>meerschaum.utils.dataframe.filter_unseen_df()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_bool_cols()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_bytes_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.get_datetime_bound_from_df()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_datetime_cols()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_datetime_cols_types()</code></li>
       <li><code>meerschaum.utils.dataframe.get_first_valid_dask_partition()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_geometry_cols()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_geometry_cols_types()</code></li>
       <li><code>meerschaum.utils.dataframe.get_json_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.get_numeric_cols()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_special_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.get_unhashable_cols()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_unique_index_values()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_uuid_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.parse_df_datetimes()</code></li>
       <li><code>meerschaum.utils.dataframe.query_df()</code></li>
       <li><code>meerschaum.utils.dataframe.to_json()</code></li>
@@ -559,14 +570,46 @@ def init_dash(dash_app):
     <p></p>
     <ul>
       <li><code>meerschaum.utils.dtypes.are_dtypes_equal()</code></li>
+      <li><code>meerschaum.utils.dtypes.attempt_cast_to_bytes()</code></li>
+      <li><code>meerschaum.utils.dtypes.attempt_cast_to_geometry()</code></li>
       <li><code>meerschaum.utils.dtypes.attempt_cast_to_numeric()</code></li>
+      <li><code>meerschaum.utils.dtypes.attempt_cast_to_uuid()</code></li>
+      <li><code>meerschaum.utils.dtypes.coerce_timezone()</code></li>
+      <li><code>meerschaum.utils.dtypes.deserialize_base64()</code></li>
+      <li><code>meerschaum.utils.dtypes.deserialize_bytes_string()</code></li>
+      <li><code>meerschaum.utils.dtypes.deserialize_geometry()</code></li>
+      <li><code>meerschaum.utils.dtypes.dtype_is_special()</code></li>
+      <li><code>meerschaum.utils.dtypes.encode_bytes_for_bytea()</code></li>
+      <li><code>meerschaum.utils.dtypes.geometry_is_wkt()</code></li>
+      <li><code>meerschaum.utils.dtypes.get_current_timestamp()</code></li>
+      <li><code>meerschaum.utils.dtypes.get_geometry_type_srid()</code></li>
       <li><code>meerschaum.utils.dtypes.is_dtype_numeric()</code></li>
+      <li><code>meerschaum.utils.dtypes.json_serialize_value()</code></li>
       <li><code>meerschaum.utils.dtypes.none_if_null()</code></li>
+      <li><code>meerschaum.utils.dtypes.project_geometry()</code></li>
       <li><code>meerschaum.utils.dtypes.quantize_decimal()</code></li>
+      <li><code>meerschaum.utils.dtypes.serialize_bytes()</code></li>
+      <li><code>meerschaum.utils.dtypes.serialize_datetime()</code></li>
+      <li><code>meerschaum.utils.dtypes.serialize_decimal()</code></li>
+      <li><code>meerschaum.utils.dtypes.serialize_geometry()</code></li>
+      <li><code>meerschaum.utils.dtypes.to_datetime()</code></li>
       <li><code>meerschaum.utils.dtypes.to_pandas_dtype()</code></li>
       <li><code>meerschaum.utils.dtypes.value_is_null()</code></li>
+    </ul>
+  </details>
+  </ul>
+
+  <ul>
+  <details>
+    <summary>
+    <code>meerschaum.utils.dtypes.sql</code><br>
+    Work with SQL data types.<br>
+    </summary>
+    <p></p>
+    <ul>
       <li><code>meerschaum.utils.dtypes.sql.get_pd_type_from_db_type()</code></li>
       <li><code>meerschaum.utils.dtypes.sql.get_db_type_from_pd_type()</code></li>
+      <li><code>meerschaum.utils.dtypes.sql.get_numeric_precision_scale()</code></li>
     </ul>
   </details>
   </ul>
