@@ -25,7 +25,7 @@ fi
 ### Start the test databases.
 if [ "$1" == "db" ]; then
   cd tests/
-  docker compose up -d $services
+  docker compose up --quiet-pull -d $services
   cd ../
 fi
 
