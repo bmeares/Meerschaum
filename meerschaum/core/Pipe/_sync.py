@@ -164,8 +164,8 @@ def sync(
         'safe_copy': True,
     })
 
-    ### NOTE: Invalidate `_exists` cache before and after syncing.
-    self._exists = None
+    self._invalidate_cache(debug=debug)
+    self._sync_ts = get_current_timestamp('ms')
 
     def _sync(
         p: mrsm.Pipe,
@@ -178,7 +178,7 @@ def sync(
         ] = InferFetch,
     ) -> SuccessTuple:
         if df is None:
-            p._exists = None
+            p._invalidate_cache(debug=debug)
             return (
                 False,
                 f"You passed `None` instead of data into `sync()` for {p}.\n"
@@ -190,7 +190,7 @@ def sync(
             register_success, register_msg = p.register(debug=debug)
             if not register_success:
                 if 'already' not in register_msg:
-                    p._exists = None
+                    p._invalidate_cache(debug=debug)
                     return register_success, register_msg
 
         if isinstance(df, str):
@@ -211,10 +211,10 @@ def sync(
                     msg = f"{p} does not have a valid connector."
                     if p.connector_keys.startswith('plugin:'):
                         msg += f"\n    Perhaps {p.connector_keys} has a syntax error?"
-                    p._exists = None
+                    p._invalidate_cache(debug=debug)
                     return False, msg
             except Exception:
-                p._exists = None
+                p._invalidate_cache(debug=debug)
                 return False, f"Unable to create the connector for {p}."
 
             ### Sync in place if possible.
@@ -228,7 +228,7 @@ def sync(
                 get_config('system', 'experimental', 'inplace_sync')
             ):
                 with Venv(get_connector_plugin(self.instance_connector)):
-                    p._exists = None
+                    p._invalidate_cache(debug=debug)
                     _args, _kwargs = filter_arguments(
                         p.instance_connector.sync_pipe_inplace,
                         p,
@@ -251,7 +251,7 @@ def sync(
                             **kw
                         )
                         return_tuple = p.connector.sync(*_args, **_kwargs)
-                    p._exists = None
+                    p._invalidate_cache(debug=debug)
                     if not isinstance(return_tuple, tuple):
                         return_tuple = (
                             False,
@@ -264,7 +264,7 @@ def sync(
                 msg = f"Failed to sync {p} with exception: '" + str(e) + "'"
                 if debug:
                     error(msg, silent=False)
-                p._exists = None
+                p._invalidate_cache(debug=debug)
                 return False, msg
 
             ### Fetch the dataframe from the connector's `fetch()` method.
@@ -289,7 +289,7 @@ def sync(
                 df = None
 
             if df is None:
-                p._exists = None
+                p._invalidate_cache(debug=debug)
                 return False, f"No data were fetched for {p}."
 
             if isinstance(df, list):
@@ -303,7 +303,7 @@ def sync(
                     return success, message
 
             if df is True:
-                p._exists = None
+                p._invalidate_cache(debug=debug)
                 return True, f"{p} is being synced in parallel."
 
         ### CHECKPOINT: Retrieved the DataFrame.
@@ -469,18 +469,18 @@ def sync(
 
         ### CHECKPOINT: Finished syncing. Handle caching.
         _checkpoint(**kw)
-        if self.cache_pipe is not None:
+        if p.cache_pipe is not None:
             if debug:
                 dprint("Caching retrieved dataframe.", **kw)
-            _sync_cache_tuple = self.cache_pipe.sync(df, debug=debug, **kw)
+            _sync_cache_tuple = p.cache_pipe.sync(df, debug=debug, **kw)
             if not _sync_cache_tuple[0]:
                 warn(f"Failed to sync local cache for {self}.")
 
-        self._exists = None
+        p._invalidate_cache(debug=debug)
         return return_tuple
 
     if blocking:
-        self._exists = None
+        self._invalidate_cache(debug=debug)
         return _sync(self, df=df)
 
     from meerschaum.utils.threading import Thread
@@ -505,10 +505,10 @@ def sync(
         )
         thread.start()
     except Exception as e:
-        self._exists = None
+        self._invalidate_cache(debug=debug)
         return False, str(e)
 
-    self._exists = None
+    self._invalidate_cache(debug=debug)
     return True, f"Spawned asyncronous sync for {self}."
 
 

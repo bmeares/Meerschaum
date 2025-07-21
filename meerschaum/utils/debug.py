@@ -10,16 +10,16 @@ from __future__ import annotations
 from meerschaum.utils.typing import Union, Optional, List
 
 def dprint(
-        msg: str,
-        leader: bool = True,
-        package: bool = True,
-        color: Optional[Union[str, List[str]]] = None,
-        attrs: Optional[List[str]] = None,
-        nopretty: bool = False,
-        _progress: Optional['rich.progress.Progress'] = None,
-        _task: Optional[int] = None,
-        **kw
-    ) -> None:
+    msg: str,
+    leader: bool = True,
+    package: bool = True,
+    color: Optional[Union[str, List[str]]] = None,
+    attrs: Optional[List[str]] = None,
+    nopretty: bool = False,
+    _progress: Optional['rich.progress.Progress'] = None,
+    _task: Optional[int] = None,
+    **kw
+) -> None:
     """Print a debug message."""
     if attrs is None:
         attrs = []
@@ -86,11 +86,11 @@ def dprint(
 
 
 def _checkpoint(
-        _progress: Optional['rich.progress.Progress'] = None,
-        _task: Optional[int] = None,
-        _total: Optional[int] = None,
-        **kw
-    ) -> None:
+    _progress: Optional['rich.progress.Progress'] = None,
+    _task: Optional[int] = None,
+    _total: Optional[int] = None,
+    **kw
+) -> None:
     """If the `_progress` and `_task` objects are provided, increment the task by one step.
     If `_total` is provided, update the total instead.
     """

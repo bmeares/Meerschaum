@@ -1110,15 +1110,6 @@ def get_pipe_data(
         
     }
 
-    if debug:
-        dprint(
-            f"{remote_pandas_types=}\n"
-            f"{configured_pandas_types=}\n"
-            f"{remote_dt_tz_aware_cols_types=}\n"
-            f"{remote_dt_tz_naive_cols_types=}\n"
-            f"{configured_lower_precision_dt_cols_types=}\n"
-        )
-
     dtypes = {
         **remote_pandas_types,
         **configured_pandas_types,
@@ -1153,7 +1144,7 @@ def get_pipe_data(
     } if pipe.enforce else {}
 
     if debug:
-        dprint(f"read_sql_query() dtypes:")
+        dprint(f"[{self}] `read()` dtypes:")
         mrsm.pprint(dtypes)
 
     query = self.get_pipe_data_query(

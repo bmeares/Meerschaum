@@ -898,9 +898,6 @@ def to_sql(
         for col, typ in cols_pd_types.items()
     }
 
-    if debug:
-        dprint(f"cols_pd_types:\n{cols_pd_types}\ncols_db_types:\n{cols_db_types}")
-
     enable_bulk_insert = mrsm.get_config(
         'system', 'connectors', 'sql', 'bulk_insert', self.flavor,
         warn=False,

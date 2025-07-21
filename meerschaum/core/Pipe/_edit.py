@@ -47,6 +47,8 @@ def edit(
     if self.temporary:
         return False, "Cannot edit pipes created with `temporary=True` (read-only)."
 
+    self._invalidate_cache(hard=True, debug=debug)
+
     if hasattr(self, '_symlinks'):
         from meerschaum.utils.misc import get_val_from_dict_path, set_val_in_dict_path
         for path, vals in self._symlinks.items():
