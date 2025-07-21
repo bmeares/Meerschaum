@@ -137,6 +137,7 @@ class Pipe:
         guess_datetime,
         precision,
         get_precision,
+        _invalidate_cache,
     )
     from ._show import show
     from ._edit import edit, edit_definition, update

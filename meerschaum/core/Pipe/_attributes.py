@@ -59,7 +59,6 @@ def get_parameters(
     Return the `parameters` dictionary of the pipe.
     """
     from meerschaum.config._patch import apply_patch_to_config
-    from meerschaum.utils.warnings import warn, dprint
     from meerschaum.config._read_config import search_and_substitute_config
 
     if _visited is None:
@@ -118,10 +117,7 @@ def parameters(self) -> Optional[Dict[str, Any]]:
     """
     Return the parameters dictionary of the pipe.
     """
-    if (_parameters := self.__dict__.get('_parameters', None)) is not None:
-        return _parameters
-    self._parameters = self.get_parameters()
-    return self._parameters
+    return self.get_parameters()
 
 
 @parameters.setter
@@ -170,14 +166,12 @@ def indices(self) -> Union[Dict[str, Union[str, List[str]]], None]:
         if 'indexes' in self.parameters
         else 'indices'
     )
-    if indices_key not in self.parameters:
-        self.parameters[indices_key] = {}
-    _indices = self.parameters[indices_key]
+
+    _indices = self.parameters.get(indices_key, {})
     _columns = self.columns
     dt_col = _columns.get('datetime', None)
     if not isinstance(_indices, dict):
         _indices = {}
-        self.parameters[indices_key] = _indices
     unique_cols = list(set((
         [dt_col]
         if dt_col
@@ -296,7 +290,6 @@ def get_dtypes(
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.dtypes import MRSM_ALIAS_DTYPES
     from meerschaum._internal.static import STATIC_CONFIG
-    from meerschaum.utils.warnings import dprint
     parameters = (
         self.get_parameters(debug=debug)
         if refresh
@@ -567,15 +560,17 @@ def get_columns_types(
     import time
     from meerschaum.connectors import get_connector_plugin
     from meerschaum._internal.static import STATIC_CONFIG
-    from meerschaum.utils.warnings import dprint
 
     now = time.perf_counter()
-    cache_seconds = STATIC_CONFIG['pipes']['static_schema_cache_seconds']
-    if not self.static:
-        refresh = True
+    cache_seconds = (
+        STATIC_CONFIG['pipes']['static_schema_cache_seconds']
+        if self.static
+        else STATIC_CONFIG['pipes']['dtypes']['columns_types_cache_seconds']
+    )
     if refresh:
         _ = self.__dict__.pop('_columns_types_timestamp', None)
         _ = self.__dict__.pop('_columns_types', None)
+
     _columns_types = self.__dict__.get('_columns_types', None)
     if _columns_types:
         columns_types_timestamp = self.__dict__.get('_columns_types_timestamp', None)
@@ -612,7 +607,6 @@ def get_columns_indices(
     import time
     from meerschaum.connectors import get_connector_plugin
     from meerschaum._internal.static import STATIC_CONFIG
-    from meerschaum.utils.warnings import dprint
 
     now = time.perf_counter()
     cache_seconds = (
@@ -691,7 +685,6 @@ def get_val_column(self, debug: bool = False) -> Union[str, None]:
     -------
     Either a string or `None`.
     """
-    from meerschaum.utils.debug import dprint
     if debug:
         dprint('Attempting to determine the value column...')
     try:
@@ -753,6 +746,7 @@ def parents(self) -> List[mrsm.Pipe]:
     """
     if 'parents' not in self.parameters:
         return []
+
     from meerschaum.utils.warnings import warn
     _parents_keys = self.parameters['parents']
     if not isinstance(_parents_keys, list):
@@ -791,6 +785,7 @@ def children(self) -> List[mrsm.Pipe]:
     """
     if 'children' not in self.parameters:
         return []
+
     from meerschaum.utils.warnings import warn
     _children_keys = self.parameters['children']
     if not isinstance(_children_keys, list):
@@ -932,12 +927,12 @@ def update_parameters(
         If `True`, call `Pipe.edit()` to persist the new parameters.
     """
     from meerschaum.config import apply_patch_to_config
-    if '_parameters' in self.__dict__:
-        del self.__dict__['_parameters']
+    self._invalidate_cache(hard=persist, debug=debug)
     if 'parameters' not in self._attributes:
         self._attributes['parameters'] = {}
-    if '_precision' in self.__dict__:
-        _ = self.__dict__.pop('_precision', None)
+
+    if '_parameters' not in self.__dict__:
+        self._parameters = {}
 
     self._attributes['parameters'] = apply_patch_to_config(
         self._attributes['parameters'],
@@ -1039,3 +1034,36 @@ def precision(self, _precision: Union[str, None]) -> None:
     """
     self.update_parameters({'precision': _precision}, persist=False)
     _ = self.__dict__.pop('_precision', None)
+
+
+def _invalidate_cache(
+    self,
+    hard: bool = False,
+    debug: bool = False,
+) -> None:
+    """
+    Invalidate temporary metadata cache.
+
+    Parameters
+    ----------
+    hard: bool, default False
+        If `True`, clear all temporary cache.
+        Otherwise only clear soft cache.
+    """
+    if debug:
+        dprint(f"Invalidating {'some' if not hard else 'all'} cache for {self}.")
+
+    self._exists = None
+    self._sync_ts = None
+
+    if not hard:
+        return
+
+    import traceback
+    traceback.print_stack()
+
+    _ = self.__dict__.pop('_parameters', None)
+    _ = self.__dict__.pop('_precision', None)
+    self._columns_types_timestamp = None
+    self._columns_types = None
+    self._attributes_sync_time = None

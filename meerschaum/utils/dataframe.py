@@ -1418,7 +1418,11 @@ def enforce_dtypes(
         explicitly_float = are_dtypes_equal(explicit_dtypes.get(col, 'object'), 'float')
         explicitly_int = are_dtypes_equal(explicit_dtypes.get(col, 'object'), 'int')
         explicitly_numeric = explicit_dtypes.get(col, 'object').startswith('numeric')
-        all_nan = df[col].isnull().all()
+        all_nan = (
+            df[col].isnull().all()
+            if mixed_numeric_types and coerce_numeric and not (explicitly_float or explicitly_int)
+            else None
+        )
         cast_to_numeric = explicitly_numeric or (
             (
                 col in df_numeric_cols
@@ -1432,18 +1436,17 @@ def enforce_dtypes(
         )
 
         if debug:
-            dprint(
-                f"{previous_typ=}\n"
-                f"{typ=}\n"
-                f"{mixed_numeric_types=}\n"
-                f"{explicit_dtypes.get(col, None)=}\n"
-                f"{dtypes.get(col, None)=}\n"
-                f"{explicitly_numeric=}\n"
-                f"{explicitly_int=}\n"
-                f"{explicitly_float=}\n"
-                f"{all_nan=}\n"
-                f"{cast_to_numeric=}\n"
+            from meerschaum.utils.formatting import make_header
+            msg = (
+                make_header(f"Coercing column '{col}' to numeric:", left_pad=0)
+                + "\n"
+                + f"  Previous type: {previous_typ}\n"
+                + f"  Current type: {typ if col not in df_numeric_cols else 'Decimal'}"
+                + ("\n  Column is explicitly numeric." if explicitly_numeric else "")
+            ) if cast_to_numeric else (
+                f"Will not coerce column '{col}' to numeric."
             )
+            dprint(msg)
 
         if cast_to_numeric:
             common_dtypes[col] = attempt_cast_to_numeric

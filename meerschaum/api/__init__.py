@@ -217,8 +217,9 @@ def get_pipe(
             status_code=403,
             detail="Unable to serve any pipes with connector keys `mrsm` over the API.",
         )
+
     pipe = mrsm.Pipe(connector_keys, metric_key, location_key, mrsm_instance=instance_keys)
-    if is_pipe_registered(pipe, pipes(instance_keys)):
+    if is_pipe_registered(pipe, pipes(instance_keys, refresh=False)):
         return pipes(instance_keys, refresh=refresh)[connector_keys][metric_key][location_key]
     return pipe
 

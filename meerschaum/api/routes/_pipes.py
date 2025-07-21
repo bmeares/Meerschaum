@@ -23,9 +23,7 @@ from meerschaum.api import (
     pipes,
     get_pipe,
     _get_pipes,
-    manager,
     debug,
-    no_auth,
     ScopedAuth,
 )
 from meerschaum.models import (
@@ -74,7 +72,7 @@ def register_pipe(
     instance_keys: Optional[str] = None,
     parameters: Optional[Dict[str, Any]] = None,
     curr_user = fastapi.Security(ScopedAuth(['pipes:write']), scopes=['pipes:write']),
-) -> SuccessTupleResponseModel:
+) -> mrsm.SuccessTuple:
     """
     Register a new pipe.
     """
@@ -94,8 +92,9 @@ def register_pipe(
         )
     if parameters:
         pipe.parameters = parameters
+
     success, msg = get_api_connector(instance_keys).register_pipe(pipe, debug=debug)
-    pipes(instance_keys, refresh=True)
+    _ = pipes(instance_keys, refresh=True)
     return success, msg
 
 
@@ -112,7 +111,7 @@ def edit_pipe(
     instance_keys: Optional[str] = None,
     patch: bool = False,
     curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
-) -> SuccessTupleResponseModel:
+) -> mrsm.SuccessTuple:
     """
     Edit an existing pipe's parameters.
     """
@@ -125,14 +124,16 @@ def edit_pipe(
             " Under the keys `api:permissions:actions`, "
             "you can toggle non-admin actions."
         )
+
     pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
     if not is_pipe_registered(pipe, pipes(instance_keys, refresh=True)):
         raise fastapi.HTTPException(
             status_code=409, detail=f"{pipe} is not registered."
         )
+
     pipe.parameters = parameters
     success, msg = get_api_connector(instance_keys).edit_pipe(pipe, patch=patch, debug=debug)
-    pipes(instance_keys, refresh=True)
+    _ = pipes(instance_keys, refresh=True)
     return success, msg
 
 
@@ -147,7 +148,7 @@ def delete_pipe(
     location_key: str,
     instance_keys: Optional[str] = None,
     curr_user = fastapi.Security(ScopedAuth(['pipes:delete'])),
-) -> SuccessTupleResponseModel:
+) -> SuccessTuple:
     """
     Delete a Pipe (without dropping its table).
     """
@@ -156,9 +157,10 @@ def delete_pipe(
         raise fastapi.HTTPException(
             status_code=409, detail=f"{pipe} is not registered."
         )
-    results = get_api_connector(instance_keys).delete_pipe(pipe, debug=debug)
-    pipes(instance_keys, refresh=True)
-    return results
+    
+    success, msg = get_api_connector(instance_keys).delete_pipe(pipe, debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg
 
 
 @app.get(
@@ -207,6 +209,7 @@ async def get_pipes(
         kw['metric_keys'] = metric_keys
     if location_keys != "":
         kw['location_keys'] = location_keys
+
     pipes_dict = replace_pipes_in_dict(_get_pipes(**kw), lambda p: p.attributes)
     for metrics in pipes_dict.values():
         for locations in metrics.values():
@@ -224,14 +227,19 @@ async def get_pipes_by_connector(
     """
     Get all registered Pipes by connector_keys with metadata, excluding parameters.
     """
-    if connector_keys not in pipes(instance_keys):
+    if connector_keys not in pipes(instance_keys, refresh=True):
         raise fastapi.HTTPException(
             status_code=404, detail=f"Connector '{connector_keys}' not found."
         )
-    metrics = replace_pipes_in_dict(pipes(instance_keys)[connector_keys], lambda p: p.attributes)
+
+    metrics = replace_pipes_in_dict(
+        pipes(instance_keys, refresh=False)[connector_keys],
+        lambda p: p.attributes
+    )
     for locations in metrics.values():
         if None in locations:
             locations['None'] = locations.pop(None)
+
     return metrics
 
 
@@ -245,22 +253,26 @@ async def get_pipes_by_connector_and_metric(
     """
     Get all registered Pipes by `connector_keys` and `metric_key` with metadata, excluding parameters.
     """
-    if connector_keys not in pipes(instance_keys):
+    if connector_keys not in pipes(instance_keys, refresh=True):
         raise fastapi.HTTPException(
             status_code=404,
             detail=f"Connector '{connector_keys}' not found.",
         )
-    if metric_key not in pipes(instance_keys)[connector_keys]:
+
+    if metric_key not in pipes(instance_keys, refresh=False)[connector_keys]:
         raise fastapi.HTTPException(
             status_code=404,
             detail=f"Metric '{metric_key}' not found.",
         )
+
     locations = replace_pipes_in_dict(
-        pipes(instance_keys)[connector_keys][metric_key],
+        pipes(instance_keys, refresh=False)[connector_keys][metric_key],
         lambda p: p.attributes
     )
+
     if None in locations:
         locations['None'] = locations.pop(None)
+
     return locations
 
 
@@ -278,22 +290,25 @@ async def get_pipe_by_connector_and_metric_and_location(
     """
     Get a specific Pipe with metadata, excluding parameters.
     """
-    if connector_keys not in pipes(instance_keys):
+    if connector_keys not in pipes(instance_keys, refresh=True):
         raise fastapi.HTTPException(
             status_code=404,
             detail=f"Connector '{connector_keys}' not found.",
         )
-    if metric_key not in pipes(instance_keys)[connector_keys]:
+
+    if metric_key not in pipes(instance_keys, refresh=False)[connector_keys]:
         raise fastapi.HTTPException(status_code=404, detail=f"Metric '{metric_key}' not found.")
+
     if location_key in ('[None]', 'None', 'null'):
         location_key = None
-    if location_key not in pipes(instance_keys)[connector_keys][metric_key]:
+
+    if location_key not in pipes(instance_keys, refresh=False)[connector_keys][metric_key]:
         raise fastapi.HTTPException(
             status_code=404,
             detail=f"location_key '{location_key}' not found."
         )
 
-    return pipes(instance_keys)[connector_keys][metric_key][location_key].attributes
+    return pipes(instance_keys, refresh=False)[connector_keys][metric_key][location_key].attributes
 
 
 @app.get(
@@ -616,23 +631,14 @@ def drop_pipe(
     location_key: str,
     instance_keys: Optional[str] = None,
     curr_user = fastapi.Security(ScopedAuth(['pipes:drop'])),
-) -> SuccessTupleResponseModel:
+) -> mrsm.SuccessTuple:
     """
     Drop a pipe's target table.
     """
-    allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
-    if not allow_actions:
-        return False, (
-            "The administrator for this server has not allowed actions.\n\n"
-            "Please contact the system administrator, or if you are running this server, "
-            "open the configuration file with `edit config system` and search for 'permissions'."
-            " Under the keys `api:permissions:actions`, " + 
-            "you can toggle non-admin actions."
-        )
-    pipe_object = get_pipe(connector_keys, metric_key, location_key, instance_keys)
-    results = get_api_connector(instance_keys=instance_keys).drop_pipe(pipe_object, debug=debug)
-    pipes(instance_keys, refresh=True)
-    return results
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    success, msg = pipe.drop(debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg
 
 
 @app.delete(
@@ -661,6 +667,7 @@ def clear_pipe(
             _params = json.loads(params)
         except Exception:
             _params = None
+
     if not isinstance(_params, dict):
         raise fastapi.HTTPException(
             status_code=409,
@@ -676,7 +683,7 @@ def clear_pipe(
         params=_params,
         debug=debug,
     )
-    pipes(instance_keys, refresh=True)
+    _ = pipes(instance_keys, refresh=True)
     return results
 
 
