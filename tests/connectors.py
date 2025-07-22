@@ -22,7 +22,7 @@ conns = {
     ),
     'timescaledb-ha': get_connector(
         'sql', 'test_timescaledb-ha',
-        flavor='timescaledb',
+        flavor='timescaledb-ha',
         username='test',
         password='test1234',
         database='testdb',
