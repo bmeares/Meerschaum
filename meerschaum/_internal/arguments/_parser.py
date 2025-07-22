@@ -40,7 +40,8 @@ class ArgumentParser(argparse.ArgumentParser):
 
 def parse_datetime(dt_str: str) -> Union[datetime, int, str]:
     """Parse a string into a datetime."""
-    from meerschaum.utils.misc import is_int, round_time
+    from meerschaum.utils.dtypes import round_time
+    from meerschaum.utils.misc import is_int
     if is_int(dt_str):
         return int(dt_str)
 

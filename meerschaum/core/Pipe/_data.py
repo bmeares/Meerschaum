@@ -333,7 +333,7 @@ def _get_data_as_iterator(
     """
     Return a pipe's data as a generator.
     """
-    from meerschaum.utils.misc import round_time
+    from meerschaum.utils.dtypes import round_time
     begin, end = self.parse_date_bounds(begin, end)
     if not self.exists(debug=debug):
         return

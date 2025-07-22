@@ -98,7 +98,7 @@ Decorate your connector classes with `meerschaum.make_connector()` to designate 
 from datetime import datetime, timezone
 from random import randint
 import meerschaum as mrsm
-from meerschaum.utils.misc import round_time
+from meerschaum.utils.dtypes import round_time
 
 @mrsm.make_connector
 class FooConnector(mrsm.Connector):
@@ -590,11 +590,16 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dtypes.quantize_decimal()</code></li>
       <li><code>meerschaum.utils.dtypes.serialize_bytes()</code></li>
       <li><code>meerschaum.utils.dtypes.serialize_datetime()</code></li>
+      <li><code>meerschaum.utils.dtypes.serialize_date()</code></li>
       <li><code>meerschaum.utils.dtypes.serialize_decimal()</code></li>
       <li><code>meerschaum.utils.dtypes.serialize_geometry()</code></li>
       <li><code>meerschaum.utils.dtypes.to_datetime()</code></li>
       <li><code>meerschaum.utils.dtypes.to_pandas_dtype()</code></li>
       <li><code>meerschaum.utils.dtypes.value_is_null()</code></li>
+      <li><code>meerschaum.utils.dtypes.get_current_timestamp()</code></li>
+      <li><code>meerschaum.utils.dtypes.dtype_is_special()</code></li>
+      <li><code>meerschaum.utils.dtypes.get_next_precision_unit()</code></li>
+      <li><code>meerschaum.utils.dtypes.round_time()</code></li>
     </ul>
   </details>
   </ul>
@@ -648,7 +653,6 @@ def init_dash(dash_app):
     <p></p>
     <ul>
       <li><code>meerschaum.utils.misc.items_str()</code></li>
-      <li><code>meerschaum.utils.misc.round_time()</code></li>
       <li><code>meerschaum.utils.misc.is_int()</code></li>
       <li><code>meerschaum.utils.misc.interval_str()</code></li>
       <li><code>meerschaum.utils.misc.filter_keywords()</code></li>

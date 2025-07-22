@@ -69,8 +69,8 @@ for _flavor, (_precision, _scale) in NUMERIC_PRECISION_FLAVORS.items():
         'DECIMAL': f"DECIMAL({_precision}, {_scale})",
     })
 
-_default_precision = _STATIC_CONFIG['dtypes']['datetime']['default_precision']
-_default_precision_abbreviation = _MRSM_PRECISION_UNITS_ABBREVIATIONS[_default_precision]
+_default_precision_unit = _STATIC_CONFIG['dtypes']['datetime']['default_precision_unit']
+_default_precision_abbreviation = _MRSM_PRECISION_UNITS_ABBREVIATIONS[_default_precision_unit]
 
 DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'FLOAT': 'float64[pyarrow]',

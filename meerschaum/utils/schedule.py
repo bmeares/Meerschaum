@@ -293,7 +293,7 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
     >>> parse_start_time('hourly starting 00:30')
     datetime.datetime(2024, 5, 13, 0, 30, tzinfo=datetime.timezone.utc)
     """
-    from meerschaum.utils.misc import round_time
+    from meerschaum.utils.dtypes import round_time
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
     starting_parts = schedule.split(STARTING_KEYWORD)
     starting_str = ('now' if len(starting_parts) == 1 else starting_parts[-1]).strip()

@@ -20,7 +20,7 @@ from meerschaum.utils.dtypes import (
     json_serialize_value,
     get_geometry_type_srid,
     attempt_cast_to_geometry,
-    get_next_precision,
+    get_next_precision_unit,
 )
 DEBUG: bool = True
 pd = import_pandas(debug=DEBUG)
@@ -196,8 +196,6 @@ def test_to_datetime(input_dt_val, expected_output, kwargs):
     """
     from meerschaum.utils.dtypes import to_datetime
     output_dt_val = to_datetime(input_dt_val, **kwargs)
-    print(f"{output_dt_val=}")
-    print(f"{expected_output=}")
     if isinstance(output_dt_val, pd.Series):
         assert output_dt_val.to_dict() == expected_output.to_dict()
     else:
@@ -247,17 +245,17 @@ def test_get_next_precision(precision, decrease, expected):
         ('ns', False),
     ]
 )
-def test_get_next_precision_raises_value_error_at_bounds(precision, decrease):
+def test_get_next_precision_unit_raises_value_error_at_bounds(precision_unit: str, decrease: bool):
     """
-    Test that `get_next_precision()` raises a `ValueError` at the bounds of the list.
+    Test that `get_next_precision_unit()` raises a `ValueError` at the bounds of the list.
     """
     with pytest.raises(ValueError):
-        get_next_precision(precision, decrease=decrease)
+        get_next_precision_unit(precision_unit, decrease=decrease)
 
 
-def test_get_next_precision_raises_value_error_for_invalid_precision():
+def test_get_next_precision_unit_raises_value_error_for_invalid_precision():
     """
-    Test that `get_next_precision()` raises a `ValueError` for an invalid precision string.
+    Test that `get_next_precision_unit()` raises a `ValueError` for an invalid precision string.
     """
     with pytest.raises(ValueError):
         get_next_precision('invalid_precision')

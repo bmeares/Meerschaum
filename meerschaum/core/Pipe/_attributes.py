@@ -421,6 +421,11 @@ def tzinfo(self) -> Union[None, timezone]:
     _tzinfo = None
     dt_col = self.columns.get('datetime', None)
     dt_typ = str(self.dtypes.get(dt_col, 'datetime')) if dt_col else None
+    if self.autotime:
+        ts_col = mrsm.get_config('pipes', 'autotime', 'column_name_if_datetime_missing')
+        ts_typ = self.dtypes.get(ts_col, 'datetime')
+        dt_typ = ts_typ
+
     if dt_typ and 'utc' in dt_typ.lower() or dt_typ == 'datetime':
         _tzinfo = timezone.utc
 
@@ -941,9 +946,9 @@ def update_parameters(
     return self.edit(debug=debug)
 
 
-def get_precision(self, debug: bool = False) -> Union[str, None]:
+def get_precision(self, debug: bool = False) -> Dict[str, Union[str, int]]:
     """
-    Return the timestamp precision unit for the `datetime` axis.
+    Return the timestamp precision unit and interval for the `datetime` axis.
     """
     from meerschaum.utils.dtypes import (
         MRSM_PRECISION_UNITS_SCALARS,
@@ -953,14 +958,16 @@ def get_precision(self, debug: bool = False) -> Union[str, None]:
     )
     from meerschaum._internal.static import STATIC_CONFIG
 
-    if '_precision' in self.__dict__:
+    if self.__dict__.get('_precision', None):
         if debug:
             dprint(f"Returning cached precision: {self._precision}")
         return self._precision
 
     parameters = self.parameters
-    _precision = parameters.get('precision', None)
-    default_precision = STATIC_CONFIG['dtypes']['datetime']['default_precision']
+    _precision = parameters.get('precision', {})
+    if isinstance(_precision, str):
+        _precision = {'unit': _precision}
+    default_precision_unit = STATIC_CONFIG['dtypes']['datetime']['default_precision_unit']
 
     if not _precision:
 
@@ -969,8 +976,8 @@ def get_precision(self, debug: bool = False) -> Union[str, None]:
             dt_col = mrsm.get_config('pipes', 'autotime', 'column_name_if_datetime_missing')
         if not dt_col:
             if debug:
-                dprint(f"No datetime axis, returning default precision '{default_precision}'.")
-            return default_precision
+                dprint(f"No datetime axis, returning default precision '{default_precision_unit}'.")
+            return {'unit': default_precision_unit}
 
         dt_typ = self.dtypes.get(dt_col, 'datetime')
         if are_dtypes_equal(dt_typ, 'datetime'):
@@ -979,55 +986,55 @@ def get_precision(self, debug: bool = False) -> Union[str, None]:
                 if debug:
                     dprint(f"Datetime type is `datetime`, assuming {dt_typ} precision.")
 
-            _precision = (
-                dt_typ
-                .split('[', maxsplit=1)[-1]
-                .split(',', maxsplit=1)[0]
-                .split(' ', maxsplit=1)[0]
-            ).rstrip(']')
+            _precision = {
+                'unit': (
+                    dt_typ
+                    .split('[', maxsplit=1)[-1]
+                    .split(',', maxsplit=1)[0]
+                    .split(' ', maxsplit=1)[0]
+                ).rstrip(']')
+            }
 
             if debug:
-                dprint(f"Extracted precision '{_precision}' from type '{dt_typ}'.")
+                dprint(f"Extracted precision '{_precision['unit']}' from type '{dt_typ}'.")
 
         elif are_dtypes_equal(dt_typ, 'int'):
-            _precision = (
-                'second'
-                if '32' in dt_typ
-                else default_precision
-            )
-            if '32' in dt_typ:
-                if debug:
-                    dprint("Falling back to second precision for int32.")
-                _precision = 'second'
-            else:
-                if debug:
-                    dprint(f"Assuming '{default_precision}' precision for a generic integer datetime axis.")
-                _precision = default_precision
+            _precision = {
+                'unit': (
+                    'second'
+                    if '32' in dt_typ
+                    else default_precision_unit
+                )
+            }
         elif are_dtypes_equal(dt_typ, 'date'):
             if debug:
                 dprint("Datetime axis is 'date', falling back to 'day' precision.")
-            _precision = 'day'
+            _precision = {'unit': 'day'}
 
-    true_precision = MRSM_PRECISION_UNITS_ALIASES.get(_precision, _precision)
-    if true_precision is None:
+    precision_unit = _precision.get('unit', default_precision_unit)
+    precision_interval = _precision.get('interval', None)
+    true_precision_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
+    if true_precision_unit is None:
         if debug:
-            dprint(f"No precision could be determined, falling back to '{default_precision}'.")
-        true_precision = default_precision
+            dprint(f"No precision could be determined, falling back to '{default_precision_unit}'.")
+        true_precision_unit = default_precision_unit
 
-    if true_precision not in MRSM_PRECISION_UNITS_SCALARS:
+    if true_precision_unit not in MRSM_PRECISION_UNITS_SCALARS:
         from meerschaum.utils.misc import items_str
         raise ValueError(
-            f"Invalid precision unit '{true_precision}'.\n"
+            f"Invalid precision unit '{true_precision_unit}'.\n"
             "Accepted values are "
-            f"{items_str(list(MRSM_PRECISION_UNITS_SCALARS) + list(MRSM_PRECISION_UNITS_ALIASES), and_str='or')}."
+            f"{items_str(list(MRSM_PRECISION_UNITS_SCALARS) + list(MRSM_PRECISION_UNITS_ALIASES))}."
         )
 
-    self._precision = true_precision
-    return true_precision
+    self._precision = {'unit': true_precision_unit}
+    if precision_interval:
+        self._precision['interval'] = precision_interval
+    return self._precision
 
 
 @property
-def precision(self) -> Union[str, None]:
+def precision(self) -> Dict[str, Union[str, int]]:
     """
     Return the configured or detected precision.
     """
@@ -1035,11 +1042,28 @@ def precision(self) -> Union[str, None]:
 
 
 @precision.setter
-def precision(self, _precision: Union[str, None]) -> None:
+def precision(self, _precision: Union[str, Dict[str, Union[str, int]]]) -> None:
     """
     Update the `precision` parameter.
     """
-    self.update_parameters({'precision': _precision}, persist=False)
+    existing_precision = self._attributes.get('parameters', {}).get('precision', None)
+    if isinstance(existing_precision, str):
+        existing_precision = {'unit': existing_precision}
+
+    true_precision = (
+        _precision
+        if isinstance(_precision, dict)
+        else {
+            'unit': _precision,
+            **(
+                {
+                    'interval': existing_precision['interval'],
+                } if existing_precision else {}
+            )
+        }
+    )
+
+    self.update_parameters({'precision': true_precision}, persist=False)
     _ = self.__dict__.pop('_precision', None)
 
 

@@ -252,6 +252,32 @@ The unit set by `precision` determines the value of the timestamp captured by `a
 | `hour`        | `hr`, `h`  | `2025-07-18 16:00`              | `486904`              |
 | `day`         | `d`        | `2025-07-18`                    | `20287`               |
 
+
+For additional functionality, you may set `precision` as a dictionary with the following keys:
+
+- `unit`
+- `interval`
+- `round_to`
+
+### `precision.unit`
+
+The precision unit to use when capturing the current timestamp. Setting `precision` as a string is shorthand for setting `precision.unit`.
+
+### `precision.interval`
+
+!!! warning inline end
+    Nanosecond precision only supports an interval of 1.
+
+When rounding the current timestamp, `precision.interval` determines the size of the delta (default 1). For example, when `precision.unit='minute'` and `precision.interval=15`, then the current timestamp will be rounded down (or nearest, see below) to even 15-minute intervals.
+
+### `precision.round_to`
+
+This determines the direction to which the current timestamp is coerced when rounding (See [`meerschaum.utils.misc.round_time()`](https://docs.meerschaum.io/meerschaum/utils/misc.html#round_time)). Accepted values are the following:
+
+- `down` (default)
+- `up`
+- `closest`
+
 ---------------
 
 ## `reference`
