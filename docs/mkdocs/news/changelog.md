@@ -221,6 +221,72 @@ This is the current release cycle, so stay tuned for future releases!
 - **Allow for spaces and an optional `mrsm.` prefix for templated SQL query definitions.**  
   The template format `{{Pipe(...)}}` will now match leading and trailing spaces around the `Pipe` declaration, and an optional `mrsm.` prefix is accepted.
 
+- **Add `Pipe.autotime`.**  
+  Similar to `Pipe.autoincrement`, setting `autotime` will capture the current timestamp for the value of the `datetime` axis (as datetimes or integers, depending on the dtype):
+
+  ```python
+  import time 
+  import meerschaum as mrsm
+  
+  pipe = mrsm.Pipe(
+      'demo', 'autotime',
+      instance='sql:local',
+      autotime=True,
+      precision='ms',
+      temporary=True,
+      columns={
+          'datetime': 'ts',
+          'id': 'id',
+      },
+      dtypes={
+          'ts': 'datetime64[ms, UTC]',
+          'id': 'int',
+      },
+  )
+
+  pipe.sync([
+      {'id': 1, 'val': 100.1},
+      {'id': 2, 'val': 200.2},
+  ])
+
+  time.sleep(3)
+
+  pipe.sync([
+      {'id': 1, 'val': 300.3},
+      {'id': 2, 'val': 400.4},
+  ])
+  
+  df = pipe.get_data()
+  print(df)
+
+  #    id    val                               ts
+  # 0   1  100.1 2025-07-22 00:59:19.914000+00:00
+  # 1   2  200.2 2025-07-22 00:59:19.914000+00:00
+  # 2   1  300.3 2025-07-22 00:59:23.674000+00:00
+  # 3   2  400.4 2025-07-22 00:59:23.674000+00:00
+  ```
+
+- **Add `Pipe.precision`.**  
+  The parameter `precision` determines the precision (and therefore the size) of the timestamp captured by `autotime`. Accepted values are `nanosecond`, `microsecond`, `millisecond`, `second`, `minute`, `hour`, and `day`. The default value of `precision` is derived from the dtype of the `datetime` axis (i.e. `datetime64[ns]` is `nanosecond` precision).
+
+  ```python
+  import meerschaum as mrsm
+
+  day_pipe = mrsm.Pipe(
+      'demo', 'precision', 'day',
+      instance='sql:memory',
+      columns={'datetime': 'day'},
+      dtypes={'day': 'date'},
+      autotime=True,
+      precision=True,
+  )
+
+  day_pipe.sync("val:1")
+
+  df = day_pipe.get_data()
+  print(df)
+  ```
+
 - **Add `Pipe.get_value()`.**  
   The convenience function `Pipe.get_value()` has been added for selecting single values from result sets of `Pipe.get_data()`:
 
@@ -244,6 +310,21 @@ This is the current release cycle, so stay tuned for future releases!
   print(spot_id)
   # 2
   ```
+
+- **Add `Pipe.get_doc()`.**  
+  Similar to `Pipe.get_value()`, the method `Pipe.get_doc()` will return a single row as a dictionary:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'doc',
+      instance='sql:memory',
+      autotime=True,
+      columns={},
+      precision='ms',
+  )
+  ``` 
 
 - **Fix custom actions with spaces in Web Console.**
 
