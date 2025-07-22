@@ -1849,7 +1849,7 @@ def round_time(*args, **kwargs):
     Placeholder function to prevent breaking legacy behavior.
     See `meerschaum.utils.dtypes.round_time`.
     """
-    from meerschaum.utils.dtyppes import round_time
+    from meerschaum.utils.dtypes import round_time
     return round_time(*args, **kwargs)
 
 
