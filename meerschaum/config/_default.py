@@ -207,6 +207,9 @@ default_pipes_config = {
     'verify': {
         'max_chunks_syncs': 3,
     },
+    'autotime': {
+        'column_name_if_datetime_missing': 'ts',
+    },
 }
 default_plugins_config = {}
 default_experimental_config = {

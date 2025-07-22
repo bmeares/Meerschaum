@@ -8,8 +8,7 @@ Utility functions for working with DataFrames.
 
 from __future__ import annotations
 
-import pathlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from collections import defaultdict
 
 import meerschaum as mrsm
@@ -988,6 +987,59 @@ def get_datetime_cols_types(df: 'pd.DataFrame') -> Dict[str, str]:
     }
 
 
+def get_date_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the `date` columns from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain dates.
+
+    Returns
+    -------
+    A list of columns to treat as dates.
+    """
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    if df is None:
+        return []
+
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+
+    known_date_cols = [
+        col
+        for col, typ in df.dtypes.items()
+        if are_dtypes_equal(typ, 'date')
+    ]
+
+    if len(df) == 0:
+        return known_date_cols
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+        if col not in known_date_cols
+    }
+    object_date_cols = [
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and isinstance(df.loc[ix][col], date)
+        )
+    ]
+
+    all_date_cols = set(known_date_cols + object_date_cols)
+
+    return [
+        col
+        for col in df.columns
+        if col in all_date_cols
+    ]
+
+
 def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
     """
     Get the columns which contain bytes strings from a Pandas DataFrame.
@@ -1153,6 +1205,7 @@ def get_special_cols(df: 'pd.DataFrame') -> Dict[str, str]:
         **{col: 'bytes' for col in get_bytes_cols(df)},
         **{col: 'bool' for col in get_bool_cols(df)},
         **{col: 'numeric' for col in get_numeric_cols(df)},
+        **{col: 'date' for col in get_date_cols(df)},
         **get_datetime_cols_types(df),
         **get_geometry_cols_types(df),
     }
@@ -1685,7 +1738,10 @@ def df_from_literal(
     if pipe is None or literal is None:
         error("Please provide a Pipe and a literal value")
 
-    dt_col = pipe.columns.get('datetime', 'ts')
+    dt_col = pipe.columns.get(
+        'datetime',
+        mrsm.get_config('pipes', 'autotime', 'column_name_if_datetime_missing')
+    )
     val_col = pipe.get_val_column(debug=debug)
 
     val = literal

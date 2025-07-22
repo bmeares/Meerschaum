@@ -409,18 +409,21 @@ def sync(
             debug=debug,
         )
         if p.autotime:
-            dt_col = p.columns.get('datetime', 'ts')
-            dt_typ = dtypes.get(dt_col, 'datetime') if dt_col else 'datetime'
-            if dt_col and hasattr(df, 'columns') and dt_col not in df.columns:
+            dt_col = p.columns.get('datetime', None)
+            ts_col = dt_col or mrsm.get_config(
+                'pipes', 'autotime', 'column_name_if_datetime_missing'
+            )
+            ts_typ = dtypes.get(ts_col, 'datetime') if ts_col else 'datetime'
+            if ts_col and hasattr(df, 'columns') and ts_col not in df.columns:
                 now = get_current_timestamp(
                     p.precision,
-                    as_int=(are_dtypes_equal(dt_typ, 'int')),
+                    as_int=(are_dtypes_equal(ts_typ, 'int')),
                 )
                 if debug:
                     dprint(f"Adding current timestamp to dataframe synced to {p}: {now}")
 
-                df[dt_col] = now
-                kw['check_existing'] = False
+                df[ts_col] = now
+                kw['check_existing'] = dt_col is not None
 
         ### Capture special columns.
         capture_success, capture_msg = self._persist_new_special_columns(
@@ -480,7 +483,6 @@ def sync(
         return return_tuple
 
     if blocking:
-        self._invalidate_cache(debug=debug)
         return _sync(self, df=df)
 
     from meerschaum.utils.threading import Thread

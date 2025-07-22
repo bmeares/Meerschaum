@@ -4,7 +4,7 @@
 
 import pytest
 import warnings
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from decimal import Decimal
 from uuid import UUID
 from tests import debug
@@ -72,6 +72,7 @@ def test_dtype_enforcement(flavor: str):
             'str': 'str',
             'uuid': 'uuid',
             'bytes': 'bytes',
+            'date': 'date',
         },
         instance=conn,
     )
@@ -84,11 +85,13 @@ def test_dtype_enforcement(flavor: str):
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'uuid': '00000000-1234-5678-0000-000000000000'}], debug=debug)
     pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bytes': 'Zm9vIGJhcg=='}], debug=debug)
+    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'date': '2025-01-01'}], debug=debug)
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
     assert len(df.columns) == 11
+    dtypes = pipe.dtypes
     for col, typ in df.dtypes.items():
-        pipe_dtype = pipe.dtypes[col]
+        pipe_dtype = dtypes[col]
         if pipe_dtype == 'json':
             assert isinstance(df[col][0], dict)
             pipe_dtype = 'object'
@@ -1202,3 +1205,60 @@ def test_geometry_custom_srid(flavor: str):
     success, msg = pipe.sync(new_docs, debug=debug)
     assert success, msg
     assert pipe.get_rowcount() == len(docs)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_date_as_datetime(flavor: str):
+    """
+    Test that the `datetime` axis may of type `date`.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'date', 'datetime_column', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'date', 'datetime_column',
+        instance=conn,
+        columns={
+            'datetime': 'day',
+            'id': 'id',
+        },
+        dtypes={
+            'day': 'date'
+        },
+    )
+
+    success, msg = pipe.sync([
+        {'day': '2025-07-22', 'id': 1, 'val': 100.1},
+        {'day': '2025-07-22', 'id': 2, 'val': 200.2},
+    ], debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(debug=debug)
+    assert 'date32' in str(df.dtypes['day'])
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_date_inferred(flavor: str):
+    """
+    Test that `date` objects are automatically detected as `date`.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'date', 'inferred', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'date', 'inferred',
+        instance=conn,
+        autotime=True,
+        columns=['id'],
+        dtypes={
+            'ts': 'int',
+        },
+    )
+
+    success, msg = pipe.sync([
+        {'day': date(2025, 7, 22), 'id': 1},
+        {'day': date(2025, 7, 22), 'id': 2},
+    ], debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(debug=debug)
+    assert 'date32' in str(df.dtypes['day'])
