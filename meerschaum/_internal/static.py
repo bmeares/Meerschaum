@@ -289,7 +289,7 @@ STATIC_CONFIG: Dict[str, Any] = {
     },
     'dtypes': {
         'datetime': {
-            'default_precision': 'microsecond',
+            'default_precision_unit': 'microsecond',
         },
     },
     'stack': {

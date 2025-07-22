@@ -28,6 +28,7 @@ from meerschaum.utils.typing import (
     List,
 )
 from meerschaum.utils.warnings import warn, error
+from meerschaum._internal.static import STATIC_CONFIG
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
@@ -415,8 +416,14 @@ def sync(
             )
             ts_typ = dtypes.get(ts_col, 'datetime') if ts_col else 'datetime'
             if ts_col and hasattr(df, 'columns') and ts_col not in df.columns:
+                precision = p.get_precision(debug=debug)
                 now = get_current_timestamp(
-                    p.precision,
+                    precision_unit=precision.get(
+                        'unit',
+                        STATIC_CONFIG['dtypes']['datetime']['default_precision_unit']
+                    ),
+                    precision_interval=precision.get('interval', 1),
+                    round_to=(precision.get('round_to', 'down')),
                     as_int=(are_dtypes_equal(ts_typ, 'int')),
                 )
                 if debug:
@@ -556,7 +563,8 @@ def get_sync_time(
     """
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import round_time, filter_keywords
+    from meerschaum.utils.misc import filter_keywords
+    from meerschaum.utils.dtypes import round_time
     from meerschaum.utils.warnings import warn
 
     if not self.columns.get('datetime', None):
@@ -690,7 +698,6 @@ def filter_existing(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import, import_pandas
-    from meerschaum.utils.misc import round_time
     from meerschaum.utils.dataframe import (
         filter_unseen_df,
         add_missing_cols_to_df,
@@ -702,6 +709,7 @@ def filter_existing(
         to_datetime,
         are_dtypes_equal,
         value_is_null,
+        round_time,
     )
     from meerschaum.config import get_config
     pd = import_pandas()

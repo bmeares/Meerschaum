@@ -37,9 +37,8 @@ class Token:
         secret: Optional[str] = None,
         secret_hash: Optional[str] = None,
     ):
-        from meerschaum.utils.dtypes import coerce_timezone
+        from meerschaum.utils.dtypes import coerce_timezone, round_time
         from meerschaum.utils.daemon import get_new_daemon_name
-        from meerschaum.utils.misc import round_time
         from meerschaum._internal.static import STATIC_CONFIG
         now = datetime.now(timezone.utc)
         default_expiration_days = mrsm.get_config(

@@ -180,7 +180,7 @@ class Pipe:
         upsert: Optional[bool] = None,
         autoincrement: Optional[bool] = None,
         autotime: Optional[bool] = None,
-        precision: Optional[str] = None,
+        precision: Union[str, Dict[str, Union[str, int]], None] = None,
         static: Optional[bool] = None,
         enforce: Optional[bool] = None,
         null_indices: Optional[bool] = None,
@@ -243,10 +243,12 @@ class Pipe:
         autotime: Optional[bool], default None
             If `True`, set `autotime` in the parameters.
 
-        precision: Optional[str], default None
+        precision: Union[str, Dict[str, Union[str, int]], None], default None
             If provided, set `precision` in the parameters.
+            This may be either a string (the precision unit) or a dictionary of in the form
+            `{'unit': <unit>, 'interval': <interval>}`.
             Default is determined by the `datetime` column dtype
-            (e.g. `datetime64[ns]` is `nanosecond` precision).
+            (e.g. `datetime64[us]` is `microsecond` precision).
 
         static: Optional[bool], default None
             If `True`, set `static` in the parameters.
@@ -366,8 +368,10 @@ class Pipe:
         if isinstance(autotime, bool):
             self._attributes['parameters']['autotime'] = autotime
 
-        if isinstance(precision, str):
+        if isinstance(precision, dict):
             self._attributes['parameters']['precision'] = precision
+        elif isinstance(precision, str):
+            self._attributes['parameters']['precision'] = {'unit': precision}
 
         if isinstance(static, bool):
             self._attributes['parameters']['static'] = static

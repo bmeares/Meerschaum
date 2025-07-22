@@ -479,88 +479,6 @@ def flatten_pipes_dict(pipes_dict: PipesDict) -> List[Pipe]:
     return pipes_list
 
 
-def round_time(
-    dt: Optional[datetime] = None,
-    date_delta: Optional[timedelta] = None,
-    to: 'str' = 'down'
-) -> datetime:
-    """
-    Round a datetime object to a multiple of a timedelta.
-    http://stackoverflow.com/questions/3463930/how-to-round-the-minute-of-a-datetime-object-python
-
-    NOTE: This function strips timezone information!
-
-    Parameters
-    ----------
-    dt: Optional[datetime], default None
-        If `None`, grab the current UTC datetime.
-
-    date_delta: Optional[timedelta], default None
-        If `None`, use a delta of 1 minute.
-
-    to: 'str', default 'down'
-        Available options are `'up'`, `'down'`, and `'closest'`.
-
-    Returns
-    -------
-    A rounded `datetime` object.
-
-    Examples
-    --------
-    >>> round_time(datetime(2022, 1, 1, 12, 15, 57, 200))
-    datetime.datetime(2022, 1, 1, 12, 15)
-    >>> round_time(datetime(2022, 1, 1, 12, 15, 57, 200), to='up')
-    datetime.datetime(2022, 1, 1, 12, 16)
-    >>> round_time(datetime(2022, 1, 1, 12, 15, 57, 200), timedelta(hours=1))
-    datetime.datetime(2022, 1, 1, 12, 0)
-    >>> round_time(
-    ...   datetime(2022, 1, 1, 12, 15, 57, 200),
-    ...   timedelta(hours=1),
-    ...   to = 'closest'
-    ... )
-    datetime.datetime(2022, 1, 1, 12, 0)
-    >>> round_time(
-    ...   datetime(2022, 1, 1, 12, 45, 57, 200),
-    ...   datetime.timedelta(hours=1),
-    ...   to = 'closest'
-    ... )
-    datetime.datetime(2022, 1, 1, 13, 0)
-
-    """
-    from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN, ROUND_UP
-    if date_delta is None:
-        date_delta = timedelta(minutes=1)
-
-    if dt is None:
-        dt = datetime.now(timezone.utc).replace(tzinfo=None)
-
-    def get_total_microseconds(td: timedelta) -> int:
-        return (td.days * 86400 + td.seconds) * 1_000_000 + td.microseconds
-
-    round_to_microseconds = get_total_microseconds(date_delta)
-    if round_to_microseconds == 0:
-        return dt
-
-    dt_delta_from_min = dt.replace(tzinfo=None) - datetime.min
-    dt_total_microseconds = get_total_microseconds(dt_delta_from_min)
-
-    dt_dec = Decimal(dt_total_microseconds)
-    round_to_dec = Decimal(round_to_microseconds)
-
-    div = dt_dec / round_to_dec
-    if to == 'down':
-        num_intervals = div.to_integral_value(rounding=ROUND_DOWN)
-    elif to == 'up':
-        num_intervals = div.to_integral_value(rounding=ROUND_UP)
-    else:
-        num_intervals = div.to_integral_value(rounding=ROUND_HALF_UP)
-
-    rounded_dt_total_microseconds = num_intervals * round_to_dec
-    adjustment_microseconds = int(rounded_dt_total_microseconds) - dt_total_microseconds
-
-    return dt + timedelta(microseconds=adjustment_microseconds)
-
-
 def timed_input(
     seconds: int = 10,
     timeout_message: str = "",
@@ -1924,6 +1842,15 @@ def replace_pipes_in_dict(*args, **kwargs):
     """
     from meerschaum.utils.pipes import replace_pipes_in_dict
     return replace_pipes_in_dict(*args, **kwargs)
+
+
+def round_time(*args, **kwargs):
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dtypes.round_time`.
+    """
+    from meerschaum.utils.dtyppes import round_time
+    return round_time(*args, **kwargs)
 
 
 _current_module = sys.modules[__name__]
