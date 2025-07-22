@@ -203,7 +203,7 @@ def test_to_datetime(input_dt_val, expected_output, kwargs):
 
 
 @pytest.mark.parametrize(
-    "precision,decrease,expected",
+    "precision_unit,decrease,expected",
     [
         ('nanosecond', True, 'microsecond'),
         ('ns', True, 'microsecond'),
@@ -229,15 +229,15 @@ def test_to_datetime(input_dt_val, expected_output, kwargs):
         ('microsecond', False, 'nanosecond'),
     ]
 )
-def test_get_next_precision(precision, decrease, expected):
+def test_get_next_precision(precision_unit, decrease, expected):
     """
-    Test the `get_next_precision()` function.
+    Test the `get_next_precision_unit()` function.
     """
-    assert get_next_precision(precision, decrease=decrease) == expected
+    assert get_next_precision_unit(precision_unit, decrease=decrease) == expected
 
 
 @pytest.mark.parametrize(
-    "precision,decrease",
+    "precision_unit,decrease",
     [
         ('day', True),
         ('d', True),
@@ -258,4 +258,4 @@ def test_get_next_precision_unit_raises_value_error_for_invalid_precision():
     Test that `get_next_precision_unit()` raises a `ValueError` for an invalid precision string.
     """
     with pytest.raises(ValueError):
-        get_next_precision('invalid_precision')
+        get_next_precision_unit('invalid_precision')
