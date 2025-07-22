@@ -13,8 +13,9 @@ from datetime import timezone, datetime
 from decimal import Decimal, Context, InvalidOperation, ROUND_HALF_UP
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Dict, Union, Any, Optional, Tuple, List
+from meerschaum.utils.typing import Dict, Union, Any, Optional, Tuple
 from meerschaum.utils.warnings import warn
+from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
 
 MRSM_ALIAS_DTYPES: Dict[str, str] = {
     'decimal': 'numeric',
@@ -40,7 +41,7 @@ MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'geography': 'object',
     'uuid': 'object',
     'date': 'object',
-    'datetime': 'datetime64[ms, UTC]',
+    'datetime': 'datetime64[us, UTC]',
     'bool': 'bool[pyarrow]',
     'int': 'int64[pyarrow]',
     'int8': 'int8[pyarrow]',
@@ -504,7 +505,6 @@ def coerce_timezone(
             return dt
 
     dt_is_series = hasattr(dt, 'dtype') and hasattr(dt, '__module__')
-
     if dt_is_series:
         pandas = mrsm.attempt_import('pandas', lazy=False)
 
@@ -544,7 +544,7 @@ def to_datetime(
     dt_val: Any,
     as_pydatetime: bool = False,
     coerce_utc: bool = True,
-    precision: str = 'millisecond',
+    precision: Optional[str] = None,
 ) -> Any:
     """
     Wrap `pd.to_datetime()` and add support for out-of-bounds values.
@@ -554,7 +554,10 @@ def to_datetime(
     dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
     dt_is_series = hasattr(dt_val, 'dtype') and hasattr(dt_val, '__module__')
     pd = pandas if dd is None else dd
-    precision_abbreviation = MRSM_PRECISION_UNITS_ABBREVIATIONS.get('precision', None)
+    enforce_precision = precision is not None
+    precision = precision or 'microsecond'
+    true_precision = MRSM_PRECISION_UNITS_ALIASES.get(precision, precision)
+    precision_abbreviation = MRSM_PRECISION_UNITS_ABBREVIATIONS.get(true_precision, None)
     if not precision_abbreviation:
         raise ValueError(f"Invalid precision '{precision}'.")
 
@@ -563,6 +566,21 @@ def to_datetime(
             return dateutil_parser.parse(x)
         except Exception:
             return x
+
+    def check_dtype(dtype_to_check: str, with_utc: bool = True) -> bool:
+        dtype_check_against = (
+            f"datetime64[{precision_abbreviation}, UTC]"
+            if with_utc
+            else f"datetime64[{precision_abbreviation}]"
+        )
+        return (
+            dtype_to_check == dtype_check_against
+            if enforce_precision
+            else (
+                dtype_to_check.startswith('datetime64[')
+                and (('utc' in dtype_to_check.lower()) if with_utc else ('utc' not in dtype_to_check.lower()))
+            )
+        )
 
     if isinstance(dt_val, pd.Timestamp):
         dt_val_to_return = dt_val if not as_pydatetime else dt_val.to_pydatetime()
@@ -576,7 +594,11 @@ def to_datetime(
         changed_tz = False
         original_tz = None
         dtype = str(getattr(dt_val, 'dtype', 'object'))
-        if are_dtypes_equal(dtype, 'datetime') and 'utc' not in dtype.lower():
+        if (
+            are_dtypes_equal(dtype, 'datetime')
+            and 'utc' not in dtype.lower()
+            and hasattr(dt_val, 'dt')
+        ):
             original_tz = dt_val.dt.tz
             dt_val = dt_val.dt.tz_localize(timezone.utc)
             changed_tz = True
@@ -584,12 +606,14 @@ def to_datetime(
         try:
             new_dt_series = (
                 dt_val
-                if dtype == f'datetime64[{precision_abbreviation}, UTC]'
-                else dt_val.astype("datetime64[{precision_abbreviation}, UTC]")
+                if check_dtype(dtype, with_utc=True)
+                else dt_val.astype(f"datetime64[{precision_abbreviation}, UTC]")
             )
         except pd.errors.OutOfBoundsDatetime:
             try:
-                new_dt_series = dt_val.astype("datetime64[s, UTC]")
+                next_precision = get_next_precision(true_precision)
+                next_precision_abbrevation = MRSM_PRECISION_UNITS_ABBREVIATIONS[next_precision]
+                new_dt_series = dt_val.astype(f"datetime64[{next_precision_abbrevation}, UTC]")
             except Exception:
                 new_dt_series = None
         except ValueError:
@@ -598,8 +622,8 @@ def to_datetime(
             try:
                 new_dt_series = (
                     new_dt_series
-                    if str(getattr(new_dt_series, 'dtype', None)) == 'datetime64[{precision_abbreviation}]'
-                    else dt_val.astype("datetime64[{precision_abbreviation}]")
+                    if check_dtype(str(getattr(new_dt_series, 'dtype', None)), with_utc=False)
+                    else dt_val.astype(f"datetime64[{precision_abbreviation}]")
                 )
             except Exception:
                 new_dt_series = None
@@ -902,7 +926,7 @@ def get_geometry_type_srid(
 
 
 def get_current_timestamp(
-    unit: str = 'us',
+    precision: str = _STATIC_CONFIG['dtypes']['datetime']['default_precision'],
     as_pandas: bool = False,
     as_int: bool = False,
     _now: Union[datetime, int, None] = None,
@@ -912,7 +936,7 @@ def get_current_timestamp(
 
     Parameters
     ----------
-    unit: str, default 'ns'
+    precision: str, default 'us'
         The precision of the timestamp to be returned.
         Valid values are the following:
             - `ns` / `nanosecond`
@@ -946,36 +970,46 @@ def get_current_timestamp(
     from datetime import datetime, timezone, timedelta
     import time
 
-    true_unit = MRSM_PRECISION_UNITS_ALIASES.get(unit, unit)
-    if true_unit not in MRSM_PRECISION_UNITS_SCALARS:
+    true_precision = MRSM_PRECISION_UNITS_ALIASES.get(precision, precision)
+    if true_precision not in MRSM_PRECISION_UNITS_SCALARS:
         from meerschaum.utils.misc import items_str
         raise ValueError(
-            f"Unknown unit '{unit}'. "
+            f"Unknown precision unit '{precision}'. "
             "Accepted values are "
             f"{items_str(list(MRSM_PRECISION_UNITS_SCALARS) + list(MRSM_PRECISION_UNITS_ALIASES), and_str='or')}."
         )
 
-    as_pandas = as_pandas or true_unit == 'nanosecond'
+    if not as_int:
+        as_pandas = as_pandas or true_precision == 'nanosecond'
     pd = mrsm.attempt_import('pandas', lazy=False) if as_pandas else None
 
-    if true_unit == 'nanosecond':
+    if true_precision == 'nanosecond':
         now_ts = time.time_ns() if not isinstance(_now, int) else _now
         if as_int:
             return now_ts
         return pd.to_datetime(now_ts, unit='ns', utc=True)
 
     now = datetime.now(timezone.utc) if not isinstance(_now, datetime) else _now
-    delta = timedelta(**{true_unit + 's': 1})
+    delta = timedelta(**{true_precision + 's': 1})
     rounded_now = round_time(now, delta)
 
     if as_int:
-        return int(rounded_now.timestamp() * MRSM_PRECISION_UNITS_SCALARS[true_unit])
+        return int(rounded_now.timestamp() * MRSM_PRECISION_UNITS_SCALARS[true_precision])
 
-    return (
+    ts_val = (
         pd.to_datetime(rounded_now, utc=True)
         if as_pandas
         else rounded_now
     )
+
+    if not as_pandas:
+        return ts_val
+
+    as_unit_precisions = ('microsecond', 'millisecond', 'second')
+    if true_precision not in as_unit_precisions:
+        return ts_val
+
+    return ts_val.as_unit(MRSM_PRECISION_UNITS_ABBREVIATIONS[true_precision])
 
 
 def dtype_is_special(type_: str) -> bool:
@@ -1009,3 +1043,47 @@ def dtype_is_special(type_: str) -> bool:
         return True
 
     return False
+
+
+def get_next_precision(precision: str, decrease: bool = True) -> str:
+    """
+    Get the next precision string in order of value.
+
+    Parameters
+    ----------
+    precision: str
+        The precision string (`'nanosecond'`, `'ms'`, etc.).
+
+    decrease: bool, defaul True
+        If `True` return the precision unit which is lower (e.g. `nanosecond` -> `millisecond`).
+        If `False`, return the precision unit which is higher.
+
+    Returns
+    -------
+    A `precision` string which is lower or higher than the given precision unit.
+
+    Examples
+    --------
+    >>> get_next_precision('nanosecond')
+    'microsecond'
+    >>> get_next_precision('ms')
+    'second'
+    >>> get_next_precision('hour', decrease=False)
+    'minute'
+    """
+    true_precision = MRSM_PRECISION_UNITS_ALIASES.get(precision, precision)
+    precision_scalar = MRSM_PRECISION_UNITS_SCALARS.get(true_precision, None)
+    if not precision_scalar:
+        raise ValueError(f"Invalid precision unit '{precision}'.")
+
+    precisions = sorted(
+        list(MRSM_PRECISION_UNITS_SCALARS),
+        key=lambda p: MRSM_PRECISION_UNITS_SCALARS[p]
+    )
+
+    precision_index = precisions.index(true_precision)
+    new_precision_index = precision_index + (-1 if decrease else 1)
+    if new_precision_index < 0 or new_precision_index >= len(precisions):
+        raise ValueError(f"No precision {'below' if decrease else 'above'} '{precision}'.")
+
+    return precisions[new_precision_index]

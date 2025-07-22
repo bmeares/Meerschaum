@@ -584,11 +584,7 @@ def sync_pipe(
 
     valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
     new_dtypes = {
-        str(key): (
-            str(val)
-            if not are_dtypes_equal(str(val), 'datetime')
-            else 'datetime64[ns, UTC]'
-        )
+        str(key): str(val)
         for key, val in df.dtypes.items()
         if str(key) not in valkey_dtypes
     }
@@ -808,7 +804,7 @@ def get_sync_time(
     """
     from meerschaum.utils.dtypes import are_dtypes_equal
     dt_col = pipe.columns.get('datetime', None)
-    dt_typ = pipe.dtypes.get(dt_col, 'datetime64[ns, UTC]')
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime')
     if not dt_col:
         return None
 

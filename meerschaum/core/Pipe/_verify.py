@@ -587,7 +587,7 @@ def get_bound_interval(self, debug: bool = False) -> Union[timedelta, int, None]
     if not dt_col:
         return bound_time_value
 
-    dt_typ = self.dtypes.get(dt_col, 'datetime64[ns, UTC]')
+    dt_typ = self.dtypes.get(dt_col, 'datetime')
     if 'int' in dt_typ.lower():
         return int(bound_time_value)
 

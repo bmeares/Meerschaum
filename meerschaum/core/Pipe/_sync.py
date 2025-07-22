@@ -719,7 +719,7 @@ def filter_existing(
     pipe_columns = parameters.get('columns', {})
     primary_key = pipe_columns.get('primary', None)
     dt_col = pipe_columns.get('datetime', None)
-    dt_type = parameters.get('dtypes', {}).get(dt_col, 'datetime64[ns, UTC]') if dt_col else None
+    dt_type = parameters.get('dtypes', {}).get(dt_col, 'datetime') if dt_col else None
     autoincrement = parameters.get('autoincrement', False)
     autotime = parameters.get('autotime', False)
 

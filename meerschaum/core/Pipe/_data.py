@@ -646,7 +646,7 @@ def get_chunk_interval(
     if dt_col is None:
         return timedelta(minutes=chunk_minutes)
 
-    dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns, UTC]')
+    dt_dtype = self.dtypes.get(dt_col, 'datetime')
     if 'int' in dt_dtype.lower():
         return chunk_minutes
     return timedelta(minutes=chunk_minutes)
@@ -836,7 +836,7 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
     Given a date bound (begin, end), coerce a timezone if necessary.
     """
     from meerschaum.utils.misc import is_int
-    from meerschaum.utils.dtypes import coerce_timezone
+    from meerschaum.utils.dtypes import coerce_timezone, MRSM_PD_DTYPES
     from meerschaum.utils.warnings import warn
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
@@ -861,9 +861,9 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
                 return None
 
         dt_col = self.columns.get('datetime', None)
-        dt_typ = str(self.dtypes.get(dt_col, 'datetime64[ns, UTC]'))
+        dt_typ = str(self.dtypes.get(dt_col, 'datetime'))
         if dt_typ == 'datetime':
-            dt_typ = 'datetime64[ns, UTC]'
+            dt_typ = MRSM_PD_DTYPES['datetime']
         return coerce_timezone(dt_val, strip_utc=('utc' not in dt_typ.lower()))
 
     bounds = tuple(_parse_date_bound(dt_val) for dt_val in dt_vals)

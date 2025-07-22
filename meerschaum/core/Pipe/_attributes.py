@@ -423,12 +423,9 @@ def tzinfo(self) -> Union[None, timezone]:
 
     _tzinfo = None
     dt_col = self.columns.get('datetime', None)
-    dt_typ = str(self.dtypes.get(dt_col, 'datetime64[ns, UTC]')) if dt_col else None
+    dt_typ = str(self.dtypes.get(dt_col, 'datetime')) if dt_col else None
     if dt_typ and 'utc' in dt_typ.lower() or dt_typ == 'datetime':
         _tzinfo = timezone.utc
-
-    if dt_typ in ('datetime64[ns]', 'datetime64[ms]'):
-        _tzinfo = None
 
     self._tzinfo = _tzinfo
     return _tzinfo
@@ -955,6 +952,7 @@ def get_precision(self, debug: bool = False) -> Union[str, None]:
     from meerschaum.utils.dtypes import (
         MRSM_PRECISION_UNITS_SCALARS,
         MRSM_PRECISION_UNITS_ALIASES,
+        MRSM_PD_DTYPES,
         are_dtypes_equal,
     )
 
@@ -977,9 +975,9 @@ def get_precision(self, debug: bool = False) -> Union[str, None]:
         dt_typ = self.dtypes.get(dt_col, 'datetime')
         if are_dtypes_equal(dt_typ, 'datetime'):
             if dt_typ == 'datetime':
+                dt_typ = MRSM_PD_DTYPES['datetime']
                 if debug:
-                    dprint("Datetime type is `datetime`, assuming nanosecond precision.")
-                dt_typ = 'datetime64[ns, UTC]'
+                    dprint(f"Datetime type is `datetime`, assuming {dt_typ} precision.")
 
             _precision = (
                 dt_typ

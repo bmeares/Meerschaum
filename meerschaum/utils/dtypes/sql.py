@@ -8,6 +8,8 @@ Utility functions for working with SQL data types.
 
 from __future__ import annotations
 from meerschaum.utils.typing import Dict, Union, Tuple, Optional
+from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
+from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_ABBREVIATIONS as _MRSM_PRECISION_UNITS_ABBREVIATIONS
 
 NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
     'mariadb': (38, 20),
@@ -67,6 +69,9 @@ for _flavor, (_precision, _scale) in NUMERIC_PRECISION_FLAVORS.items():
         'DECIMAL': f"DECIMAL({_precision}, {_scale})",
     })
 
+_default_precision = _STATIC_CONFIG['dtypes']['datetime']['default_precision']
+_default_precision_abbreviation = _MRSM_PRECISION_UNITS_ABBREVIATIONS[_default_precision]
+
 DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'FLOAT': 'float64[pyarrow]',
     'REAL': 'float64[pyarrow]',
@@ -80,13 +85,13 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'NUMERIC': 'numeric',
     'GEOMETRY': 'geometry',
     'GEOMETRY(GEOMETRY)': 'geometry',
-    'TIMESTAMP': 'datetime64[ns]',
-    'TIMESTAMP WITHOUT TIMEZONE': 'datetime64[ns]',
-    'TIMESTAMP WITH TIMEZONE': 'datetime64[ns, UTC]',
-    'TIMESTAMP WITH TIME ZONE': 'datetime64[ns, UTC]',
-    'TIMESTAMPTZ': 'datetime64[ns, UTC]',
-    'DATE': 'datetime',
-    'DATETIME': 'datetime64[ns]',
+    'TIMESTAMP': f'datetime64[{_default_precision_abbreviation}]',
+    'TIMESTAMP WITHOUT TIMEZONE': f'datetime64[{_default_precision_abbreviation}]',
+    'TIMESTAMP WITH TIMEZONE': f'datetime64[{_default_precision_abbreviation}, UTC]',
+    'TIMESTAMP WITH TIME ZONE': f'datetime64[{_default_precision_abbreviation}, UTC]',
+    'TIMESTAMPTZ': f'datetime64[{_default_precision_abbreviation}, UTC]',
+    'DATE': 'date',
+    'DATETIME': f'datetime64[{_default_precision_abbreviation}]',
     'DATETIME2': 'datetime64[ns]',
     'DATETIMEOFFSET': 'datetime64[ns, UTC]',
     'TEXT': 'string[pyarrow]',
@@ -109,8 +114,8 @@ DB_TO_PD_DTYPES: Dict[str, Union[str, Dict[str, str]]] = {
     'VARBINARY(MAX)': 'bytes',
     'substrings': {
         'CHAR': 'string[pyarrow]',
-        'TIMESTAMP': 'datetime64[ns]',
-        'TIME': 'datetime64[ns]',
+        'TIMESTAMP': f'datetime64[{_default_precision_abbreviation}]',
+        'TIME': f'datetime64[{_default_precision_abbreviation}]',
         'DATE': 'date',
         'DOUBLE': 'double[pyarrow]',
         'DECIMAL': 'numeric',
