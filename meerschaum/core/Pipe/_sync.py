@@ -1066,15 +1066,11 @@ def _persist_new_special_columns(
         for col, typ in special_cols.items()
         if col not in existing_special_cols
     }
-    if debug:
-        dprint(
-            f"{special_cols=}\n"
-            f"{dtypes=}\n"
-            f"{new_special_cols=}"
-        )
-
     if not new_special_cols:
         return True, "Success"
+
+    if debug:
+        dprint(f"New special columns:\n{new_special_cols}")
 
     self._attributes_sync_time = None
     return self.update_parameters({'dtypes': new_special_cols}, debug=debug)
