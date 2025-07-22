@@ -20,8 +20,8 @@ conns = {
         host='localhost',
         schema='public',
     ),
-    'timescaledb-ha': get_connector(
-        'sql', 'test_timescaledb-ha',
+    'timescaledb_ha': get_connector(
+        'sql', 'test_timescaledb_ha',
         flavor='timescaledb-ha',
         username='test',
         password='test1234',
