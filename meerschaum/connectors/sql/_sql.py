@@ -163,7 +163,7 @@ def read(
     if dtype and utc_dt_cols and self.flavor in TIMEZONE_NAIVE_FLAVORS:
         dtype = dtype.copy()
         for col in utc_dt_cols:
-            dtype[col] = 'datetime64[ns]'
+            dtype[col] = 'datetime64[ms]'
 
     pool = get_pool(workers=workers)
     sqlalchemy = attempt_import("sqlalchemy", lazy=False)

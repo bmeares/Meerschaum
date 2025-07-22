@@ -31,6 +31,7 @@ MRSM_ALIAS_DTYPES: Dict[str, str] = {
     'geom': 'geometry',
     'geog': 'geography',
     'boolean': 'bool',
+    'day': 'date',
 }
 MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'json': 'object',
@@ -38,7 +39,8 @@ MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'geometry': 'object',
     'geography': 'object',
     'uuid': 'object',
-    'datetime': 'datetime64[ns, UTC]',
+    'date': 'object',
+    'datetime': 'datetime64[ms, UTC]',
     'bool': 'bool[pyarrow]',
     'int': 'int64[pyarrow]',
     'int8': 'int8[pyarrow]',
@@ -71,6 +73,16 @@ MRSM_PRECISION_UNITS_ALIASES: Dict[str, str] = {
     'h': 'hour',
     'hr': 'hour',
     'd': 'day',
+    'D': 'day',
+}
+MRSM_PRECISION_UNITS_ABBREVIATIONS: Dict[str, str] = {
+    'nanosecond': 'ns',
+    'microsecond': 'us',
+    'millisecond': 'ms',
+    'second': 's',
+    'minute': 'min',
+    'hour': 'hr',
+    'day': 'D',
 }
 
 
@@ -216,6 +228,10 @@ def are_dtypes_equal(
 
     bool_dtypes = ('bool', 'boolean')
     if ldtype in bool_dtypes and rdtype in bool_dtypes:
+        return True
+
+    date_dtypes = ('date', 'object')
+    if ldtype in date_dtypes and rdtype in date_dtypes:
         return True
 
     return False
@@ -524,7 +540,12 @@ def coerce_timezone(
     return utc_dt
 
 
-def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = True) -> Any:
+def to_datetime(
+    dt_val: Any,
+    as_pydatetime: bool = False,
+    coerce_utc: bool = True,
+    precision: str = 'millisecond',
+) -> Any:
     """
     Wrap `pd.to_datetime()` and add support for out-of-bounds values.
     """
@@ -533,6 +554,9 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
     dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
     dt_is_series = hasattr(dt_val, 'dtype') and hasattr(dt_val, '__module__')
     pd = pandas if dd is None else dd
+    precision_abbreviation = MRSM_PRECISION_UNITS_ABBREVIATIONS.get('precision', None)
+    if not precision_abbreviation:
+        raise ValueError(f"Invalid precision '{precision}'.")
 
     def parse(x: Any) -> Any:
         try:
@@ -560,12 +584,12 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
         try:
             new_dt_series = (
                 dt_val
-                if dtype == 'datetime64[ns, UTC]'
-                else dt_val.astype("datetime64[ns, UTC]")
+                if dtype == f'datetime64[{precision_abbreviation}, UTC]'
+                else dt_val.astype("datetime64[{precision_abbreviation}, UTC]")
             )
         except pd.errors.OutOfBoundsDatetime:
             try:
-                new_dt_series = dt_val.astype("datetime64[ms, UTC]")
+                new_dt_series = dt_val.astype("datetime64[s, UTC]")
             except Exception:
                 new_dt_series = None
         except ValueError:
@@ -574,8 +598,8 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
             try:
                 new_dt_series = (
                     new_dt_series
-                    if str(getattr(new_dt_series, 'dtype', None)) == 'datetime64[ns]'
-                    else dt_val.astype("datetime64[ns]")
+                    if str(getattr(new_dt_series, 'dtype', None)) == 'datetime64[{precision_abbreviation}]'
+                    else dt_val.astype("datetime64[{precision_abbreviation}]")
                 )
             except Exception:
                 new_dt_series = None
@@ -592,6 +616,8 @@ def to_datetime(dt_val: Any, as_pydatetime: bool = False, coerce_utc: bool = Tru
 
     try:
         new_dt_val = pd.to_datetime(dt_val, utc=True, format='ISO8601')
+        if new_dt_val.unit != precision_abbreviation:
+            new_dt_val = new_dt_val.as_unit(precision_abbreviation)
         if as_pydatetime:
             return new_dt_val.to_pydatetime()
         return new_dt_val
@@ -966,6 +992,7 @@ def dtype_is_special(type_: str) -> bool:
         'datetime',
         'geometry',
         'geography',
+        'date',
     ):
         return True
 
