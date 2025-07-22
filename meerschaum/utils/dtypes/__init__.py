@@ -799,7 +799,7 @@ def serialize_datetime(dt: datetime) -> Union[str, None]:
     if not hasattr(dt, 'isoformat'):
         return None
 
-    tz_suffix = 'Z' if getattr(tz, 'tzinfo', None) is None else ''
+    tz_suffix = 'Z' if getattr(dt, 'tzinfo', None) is None else ''
     return dt.isoformat() + tz_suffix
 
 
@@ -808,6 +808,7 @@ def serialize_date(d: date) -> Union[str, None]:
     Serialize a date object into its ISO representation.
     """
     return d.isoformat() if hasattr(d, 'isoformat') else None
+
 
 def json_serialize_value(x: Any, default_to_str: bool = True) -> Union[str, None]:
     """
