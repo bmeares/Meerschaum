@@ -1074,7 +1074,7 @@ def to_sql(
     except Exception as e:
         if not silent:
             warn(str(e))
-        success, msg = False, str(e)
+        success, msg = False, traceback.format_exc()
 
     end = time.perf_counter()
     if success:
