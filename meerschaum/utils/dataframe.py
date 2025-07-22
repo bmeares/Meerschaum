@@ -428,7 +428,7 @@ def parse_df_datetimes(
     chunksize: Optional[int] = None,
     dtype_backend: str = 'numpy_nullable',
     ignore_all: bool = False,
-    precision: Optional[str] = None,
+    precision_unit: Optional[str] = None,
     coerce_utc: bool = True,
     debug: bool = False,
 ) -> 'pd.DataFrame':
@@ -457,8 +457,8 @@ def parse_df_datetimes(
     ignore_all: bool, default False
         If `True`, do not attempt to cast any columns to datetimes.
 
-    precision: Optional[str], default None
-        Optionally specify a precision (to be passed to `meerschaum.utils.dtypes.to_datetime()`).
+    precision_unit: Optional[str], default None
+        If provided, enforce the given precision on the coerced datetime columns.
 
     coerce_utc: bool, default True
         Coerce the datetime columns to UTC (see `meerschaum.utils.dtypes.to_datetime()`).
@@ -582,7 +582,7 @@ def parse_df_datetimes(
         dprint("Converting columns to datetimes: " + str(datetime_cols))
 
     def _parse_to_datetime(x):
-        return to_datetime(x, precision=precision, coerce_utc=coerce_utc)
+        return to_datetime(x, precision_unit=precision_unit, coerce_utc=coerce_utc)
 
     try:
         if not using_dask:

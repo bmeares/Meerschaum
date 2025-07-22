@@ -552,6 +552,20 @@ def to_datetime(
 ) -> Any:
     """
     Wrap `pd.to_datetime()` and add support for out-of-bounds values.
+
+    Parameters
+    ----------
+    dt_val: Any
+        The value to coerce to Pandas Timestamps.
+
+    as_pydatetime: bool, default False
+        If `True`, return a Python datetime object.
+
+    coerce_utc: bool, default True
+        If `True`, ensure the value has UTC tzinfo.
+
+    precision_unit: Optional[str], default None
+        If provided, enforce the provided precision unit.
     """
     pandas, dateutil_parser = mrsm.attempt_import('pandas', 'dateutil.parser', lazy=False)
     is_dask = 'dask' in getattr(dt_val, '__module__', '')
