@@ -127,7 +127,7 @@ def get_backtrack_interval(
     if dt_col is None:
         return backtrack_interval
 
-    dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns, UTC]')
+    dt_dtype = self.dtypes.get(dt_col, 'datetime')
     if 'int' in dt_dtype.lower():
         return backtrack_minutes
 

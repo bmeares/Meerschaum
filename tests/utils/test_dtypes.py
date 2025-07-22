@@ -20,6 +20,7 @@ from meerschaum.utils.dtypes import (
     json_serialize_value,
     get_geometry_type_srid,
     attempt_cast_to_geometry,
+    get_next_precision,
 )
 DEBUG: bool = True
 pd = import_pandas(debug=DEBUG)
@@ -201,3 +202,62 @@ def test_to_datetime(input_dt_val, expected_output, kwargs):
         assert output_dt_val.to_dict() == expected_output.to_dict()
     else:
         assert output_dt_val == expected_output
+
+
+@pytest.mark.parametrize(
+    "precision,decrease,expected",
+    [
+        ('nanosecond', True, 'microsecond'),
+        ('ns', True, 'microsecond'),
+        ('microsecond', True, 'millisecond'),
+        ('us', True, 'millisecond'),
+        ('millisecond', True, 'second'),
+        ('ms', True, 'second'),
+        ('second', True, 'minute'),
+        ('s', True, 'minute'),
+        ('minute', True, 'hour'),
+        ('min', True, 'hour'),
+        ('hour', True, 'day'),
+        ('hr', True, 'day'),
+        ('day', False, 'hour'),
+        ('d', False, 'hour'),
+        ('hour', False, 'minute'),
+        ('h', False, 'minute'),
+        ('minute', False, 'second'),
+        ('m', False, 'second'),
+        ('second', False, 'millisecond'),
+        ('sec', False, 'millisecond'),
+        ('millisecond', False, 'microsecond'),
+        ('microsecond', False, 'nanosecond'),
+    ]
+)
+def test_get_next_precision(precision, decrease, expected):
+    """
+    Test the `get_next_precision()` function.
+    """
+    assert get_next_precision(precision, decrease=decrease) == expected
+
+
+@pytest.mark.parametrize(
+    "precision,decrease",
+    [
+        ('day', True),
+        ('d', True),
+        ('nanosecond', False),
+        ('ns', False),
+    ]
+)
+def test_get_next_precision_raises_value_error_at_bounds(precision, decrease):
+    """
+    Test that `get_next_precision()` raises a `ValueError` at the bounds of the list.
+    """
+    with pytest.raises(ValueError):
+        get_next_precision(precision, decrease=decrease)
+
+
+def test_get_next_precision_raises_value_error_for_invalid_precision():
+    """
+    Test that `get_next_precision()` raises a `ValueError` for an invalid precision string.
+    """
+    with pytest.raises(ValueError):
+        get_next_precision('invalid_precision')

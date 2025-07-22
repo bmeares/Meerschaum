@@ -249,8 +249,10 @@ def filter_unseen_df(
     cast_dt_cols = True
     try:
         for col, typ in dt_dtypes.items():
+            _dtypes_col_dtype = str((dtypes or {}).get(col, 'datetime'))
             strip_utc = (
-                (dtypes or {}).get(col, 'datetime') == 'datetime64[ns]'
+                _dtypes_col_dtype.startswith('datetime64')
+                and 'utc' not in _dtypes_col_dtype.lower()
             )
             if col in old_df.columns:
                 old_df[col] = coerce_timezone(old_df[col], strip_utc=strip_utc)
@@ -327,8 +329,10 @@ def filter_unseen_df(
         if are_dtypes_equal(str(typ), 'datetime')
     ]
     for col in old_dt_cols:
+        _dtypes_col_dtype = str((dtypes or {}).get(col, 'datetime'))
         strip_utc = (
-            (dtypes or {}).get(col, 'datetime') == 'datetime64[ns]'
+            _dtypes_col_dtype.startswith('datetime64')
+            and 'utc' not in _dtypes_col_dtype.lower()
         )
         old_df[col] = coerce_timezone(old_df[col], strip_utc=strip_utc)
 
@@ -338,8 +342,10 @@ def filter_unseen_df(
         if are_dtypes_equal(str(typ), 'datetime')
     ]
     for col in new_dt_cols:
+        _dtypes_col_dtype = str((dtypes or {}).get(col, 'datetime'))
         strip_utc = (
-            (dtypes or {}).get(col, 'datetime') == 'datetime64[ns]'
+            _dtypes_col_dtype.startswith('datetime64')
+            and 'utc' not in _dtypes_col_dtype.lower()
         )
         new_df[col] = coerce_timezone(new_df[col], strip_utc=strip_utc)
 
@@ -423,6 +429,8 @@ def parse_df_datetimes(
     chunksize: Optional[int] = None,
     dtype_backend: str = 'numpy_nullable',
     ignore_all: bool = False,
+    precision: Optional[str] = None,
+    coerce_utc: bool = True,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -450,6 +458,12 @@ def parse_df_datetimes(
     ignore_all: bool, default False
         If `True`, do not attempt to cast any columns to datetimes.
 
+    precision: Optional[str], default None
+        Optionally specify a precision (to be passed to `meerschaum.utils.dtypes.to_datetime()`).
+
+    coerce_utc: bool, default True
+        Coerce the datetime columns to UTC (see `meerschaum.utils.dtypes.to_datetime()`).
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -466,9 +480,9 @@ def parse_df_datetimes(
     >>> df.dtypes
     a    object
     dtype: object
-    >>> df = parse_df_datetimes(df)
-    >>> df.dtypes
-    a    datetime64[ns, UTC]
+    >>> df2 = parse_df_datetimes(df)
+    >>> df2.dtypes
+    a    datetime64[us, UTC]
     dtype: object
 
     ```
@@ -478,8 +492,9 @@ def parse_df_datetimes(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import items_str
-    from meerschaum.utils.dtypes import to_datetime
+    from meerschaum.utils.dtypes import to_datetime, MRSM_PD_DTYPES
     import traceback
+
     pd = import_pandas()
     pandas = attempt_import('pandas')
     pd_name = pd.__name__
@@ -567,16 +582,19 @@ def parse_df_datetimes(
     if debug:
         dprint("Converting columns to datetimes: " + str(datetime_cols))
 
+    def _parse_to_datetime(x):
+        return to_datetime(x, precision=precision, coerce_utc=coerce_utc)
+
     try:
         if not using_dask:
-            df[datetime_cols] = df[datetime_cols].apply(to_datetime)
+            df[datetime_cols] = df[datetime_cols].apply(_parse_to_datetime)
         else:
             df[datetime_cols] = df[datetime_cols].apply(
-                to_datetime,
+                _parse_to_datetime,
                 utc=True,
                 axis=1,
                 meta={
-                    col: 'datetime64[ns, UTC]'
+                    col: MRSM_PD_DTYPES['datetime']
                     for col in datetime_cols
                 }
             )
@@ -809,7 +827,7 @@ def get_datetime_cols(
         return [] if not with_tz_precision else {}
 
     from datetime import datetime
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PRECISION_UNITS_ALIASES
     is_dask = 'dask' in df.__module__
     if is_dask:
         df = get_first_valid_dask_partition(df)
@@ -824,18 +842,19 @@ def get_datetime_cols(
             if ',' not in meta_str
             else meta_str.split(',', maxsplit=1)[-1]
         )
-        precision = (
+        precision_abbreviation = (
             meta_str
             if ',' not in meta_str
             else meta_str.split(',')[0]
         )
+        precision = MRSM_PRECISION_UNITS_ALIASES[precision_abbreviation]
         return tz, precision
 
     def get_tz_precision_from_datetime(dt: datetime) -> Tuple[Union[str, None], str]:
         """
         Return the tz + precision tuple from a Python datetime object.
         """
-        return dt.tzname(), 'us'
+        return dt.tzname(), 'microsecond'
 
     known_dt_cols_types = {
         col: str(typ)
@@ -945,7 +964,7 @@ def get_datetime_cols_types(df: 'pd.DataFrame') -> Dict[str, str]:
     >>> import pandas as pd
     >>> df = pd.DataFrame({'dt_tz_aware': [datetime(2025, 1, 1, tzinfo=timezone.utc)]})
     >>> get_datetime_cols_types(df)
-    {'dt_tz_aware': 'datetime64[ns, UTC]'}
+    {'dt_tz_aware': 'datetime64[us, UTC]'}
     >>> df = pd.DataFrame({'distant_dt': [datetime(1, 1, 1)]})
     >>> get_datetime_cols_types(df)
     {'distant_dt': 'datetime64[us]'}
@@ -954,15 +973,16 @@ def get_datetime_cols_types(df: 'pd.DataFrame') -> Dict[str, str]:
     >>> get_datetime_cols_types(df)
     {'dt_second': 'datetime64[s]'}
     """
+    from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_ABBREVIATIONS
     dt_cols_tuples = get_datetime_cols(df, with_tz_precision=True)
     if not dt_cols_tuples:
         return {}
 
     return {
         col: (
-            f"datetime64[{precision}]"
+            f"datetime64[{MRSM_PRECISION_UNITS_ABBREVIATIONS[precision]}]"
             if tz is None
-            else f"datetime64[{precision}, {tz}]"
+            else f"datetime64[{MRSM_PRECISION_UNITS_ABBREVIATIONS[precision]}, {tz}]"
         )
         for col, (tz, precision) in dt_cols_tuples.items()
     }

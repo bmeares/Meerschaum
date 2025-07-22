@@ -7,9 +7,9 @@ Test functions from `meerschaum.utils.misc`.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
 import pytest
 from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.dtypes import MRSM_PD_DTYPES
 DEBUG: bool = True
 pd = attempt_import('pandas')
 
@@ -23,7 +23,7 @@ pd = attempt_import('pandas')
         ('bool[pyarrow]', None),
         ('float64', None),
         ('datetime64[ns]', None),
-        ('datetime', 'datetime64[ns, UTC]'),
+        ('datetime', MRSM_PD_DTYPES['datetime']),
         ('int', 'int64[pyarrow]'),
         ('int64', 'int64[pyarrow]'),
         ('int32', 'int32[pyarrow]'),
@@ -130,9 +130,9 @@ def test_filter_unseen_df(old_docs, new_docs, expected_docs):
                 'dt_second': 'datetime64[s]',
             },
             {
-                'dt_tz_aware': ('UTC', 'ns'),
-                'distant_dt': (None, 'us'),
-                'dt_second': (None, 's'),
+                'dt_tz_aware': ('UTC', 'nanosecond'),
+                'distant_dt': (None, 'microsecond'),
+                'dt_second': (None, 'second'),
             },
         ),
     ]

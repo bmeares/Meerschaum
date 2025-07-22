@@ -287,6 +287,11 @@ STATIC_CONFIG: Dict[str, Any] = {
     'connectors': {
         'default_label': 'main',
     },
+    'dtypes': {
+        'datetime': {
+            'default_precision': 'microsecond',
+        },
+    },
     'stack': {
         'dollar_standin': '<DOLLAR>', ### Temporary replacement for docker-compose.yaml.
     },

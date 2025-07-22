@@ -42,8 +42,8 @@ def get_tokens_pipe(self) -> mrsm.Pipe:
         },
         dtypes={
             'id': 'uuid',
-            'creation': 'datetime64[ns, UTC]',
-            'expiration': 'datetime64[ns, UTC]',
+            'creation': 'datetime',
+            'expiration': 'datetime',
             'is_valid': 'bool',
             'label': 'string',
             'user_id': user_id_dtype,

@@ -214,7 +214,6 @@ default_experimental_config = {
 }
 
 
-
 ### build default config dictionary
 default_config = {}
 default_config['meerschaum'] = default_meerschaum_config
