@@ -9,7 +9,7 @@ Utility functions for working with data types.
 import traceback
 import json
 import uuid
-from datetime import timezone, datetime
+from datetime import timezone, datetime, date
 from decimal import Decimal, Context, InvalidOperation, ROUND_HALF_UP
 
 import meerschaum as mrsm
@@ -40,7 +40,7 @@ MRSM_PD_DTYPES: Dict[Union[str, None], str] = {
     'geometry': 'object',
     'geography': 'object',
     'uuid': 'object',
-    'date': 'object',
+    'date': 'date32[day][pyarrow]',
     'datetime': 'datetime64[us, UTC]',
     'bool': 'bool[pyarrow]',
     'int': 'int64[pyarrow]',
@@ -231,7 +231,10 @@ def are_dtypes_equal(
     if ldtype in bool_dtypes and rdtype in bool_dtypes:
         return True
 
-    date_dtypes = ('date', 'object')
+    date_dtypes = (
+        'date', 'date32[pyarrow]', 'date32[day][pyarrow]',
+        'date64[pyarrow]', 'date64[ms][pyarrow]',
+    )
     if ldtype in date_dtypes and rdtype in date_dtypes:
         return True
 
@@ -793,11 +796,18 @@ def serialize_datetime(dt: datetime) -> Union[str, None]:
     '{"a": "2022-01-01T00:00:00Z"}'
 
     """
-    if not isinstance(dt, datetime):
+    if not hasattr(dt, 'isoformat'):
         return None
-    tz_suffix = 'Z' if dt.tzinfo is None else ''
+
+    tz_suffix = 'Z' if getattr(tz, 'tzinfo', None) is None else ''
     return dt.isoformat() + tz_suffix
 
+
+def serialize_date(d: date) -> Union[str, None]:
+    """
+    Serialize a date object into its ISO representation.
+    """
+    return d.isoformat() if hasattr(d, 'isoformat') else None
 
 def json_serialize_value(x: Any, default_to_str: bool = True) -> Union[str, None]:
     """
@@ -821,6 +831,9 @@ def json_serialize_value(x: Any, default_to_str: bool = True) -> Union[str, None
 
     if hasattr(x, 'tzinfo'):
         return serialize_datetime(x)
+
+    if hasattr(x, 'isoformat'):
+        return serialize_date(x)
 
     if isinstance(x, bytes):
         return serialize_bytes(x)
@@ -1031,6 +1044,9 @@ def dtype_is_special(type_: str) -> bool:
         return True
 
     if are_dtypes_equal(true_type, 'datetime'):
+        return True
+
+    if are_dtypes_equal(true_type, 'date'):
         return True
 
     if true_type.startswith('numeric'):
