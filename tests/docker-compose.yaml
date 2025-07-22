@@ -27,7 +27,7 @@ services:
     image: "timescale/timescaledb:latest-pg17"
     shm_size: "1gb"
 
-  timescaledb-ha:
+  timescaledb_ha:
     environment:
       TIMESCALEDB_TELEMETRY: "off"
       POSTGRES_DB: "testdb"
@@ -39,6 +39,7 @@ services:
       - "5459:5432"
     volumes:
       - "timescaledb-ha_volume:/var/lib/postgresql/data"
+      - "./connector_resources/timescaledb_ha/initdb:/docker-entrypoint-initdb.d:z,ro"
     image: "timescale/timescaledb-ha:pg17"
 
   postgis:
