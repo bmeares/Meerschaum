@@ -801,6 +801,7 @@ def to_sql(
     from meerschaum.utils.warnings import error, warn
     import warnings
     import functools
+    import traceback
 
     if name is None:
         error(f"Name must not be `None` to insert data into {self}.")

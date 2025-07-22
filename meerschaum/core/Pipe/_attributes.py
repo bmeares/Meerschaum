@@ -343,9 +343,6 @@ def get_dtypes(
     if primary_col and parameters.get('autoincrement', False) and primary_col not in _dtypes:
         _dtypes[primary_col] = 'int'
 
-    if debug:
-        dprint(f"{_dtypes=}")
-
     return _dtypes
 
 
