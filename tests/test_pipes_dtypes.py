@@ -121,7 +121,10 @@ def test_dtype_enforcement(flavor: str):
             assert 'shapely' in str(type(df[col][0]))
             assert 'Point' in str(type(df[col][0]))
             pipe_dtype = 'object'
-        assert are_dtypes_equal(pipe_dtype.lower(), typ)
+        print(f"{col=}")
+        print(f"{str(typ)=}")
+        print(f"{pipe_dtype=}")
+        assert are_dtypes_equal(pipe_dtype.lower(), str(typ))
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

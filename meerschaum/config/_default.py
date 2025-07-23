@@ -199,11 +199,11 @@ default_pipes_config = {
         },
     },
     'attributes': {
-        'local_cache_timeout_seconds': 60,
+        'local_cache_timeout_seconds': 600.0,
     },
     'sync': {
         'filter_params_index_limit': 250,
-        'exists_cache_seconds': 5.0,
+        'exists_cache_seconds': 60.0,
     },
     'verify': {
         'max_chunks_syncs': 3,
@@ -213,10 +213,10 @@ default_pipes_config = {
     },
     'dtypes': {
         'min_ratio_columns_changed_for_full_astype': 0.5,
-        'columns_types_cache_seconds': 5.0,
+        'columns_types_cache_seconds': 60.0,
     },
     'static': {
-        'static_schema_cache_seconds': 60.0,
+        'static_schema_cache_seconds': 3600.0,
     },
 }
 default_plugins_config = {}
