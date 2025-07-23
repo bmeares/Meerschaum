@@ -1141,7 +1141,6 @@ def round_time(
 ) -> datetime:
     """
     Round a datetime object to a multiple of a timedelta.
-    http://stackoverflow.com/questions/3463930/how-to-round-the-minute-of-a-datetime-object-python
 
     Parameters
     ----------

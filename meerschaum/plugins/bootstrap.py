@@ -33,6 +33,9 @@ IMPORTS_LINES: Dict[str, str] = {
     'connector': (
         "from meerschaum.connectors import Connector, make_connector\n"
     ),
+    'instance-connector': (
+        "from meerschaum.connectors import InstanceConnector, make_connector"
+    ),
     'action': (
         "from meerschaum.actions import make_action\n"
     ),
@@ -105,6 +108,280 @@ FEATURE_LINES: Dict[str, str] = {
         "        docs = []\n"
         "        # populate docs with dictionaries (rows).\n"
         "        return docs\n\n\n"
+    ),
+    'instance-connector': (
+        "@make_connector\n"
+        "class {plugin_name_capitalized}Connector(InstanceConnector):\n"
+        "    \"\"\"Implement '{plugin_name_lower}' connectors.\"\"\"\n\n"
+        "    REQUIRED_ATTRIBUTES: list[str] = []\n"
+        "\n"
+        "    def fetch(\n"
+        "        self,\n"
+        "        pipe: mrsm.Pipe,\n"
+        "        begin: datetime | None = None,\n"
+        "        end: datetime | None = None,\n"
+        "        **kwargs\n"
+        "    ):\n"
+        "        \"\"\"Return or yield dataframes.\"\"\"\n"
+        "        docs = []\n"
+        "        # populate docs with dictionaries (rows).\n"
+        "        return docs\n\n\n"
+        """
+    def register_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        \"\"\"
+        Insert the pipe's attributes into the internal `pipes` table.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe to be registered.
+
+        Returns
+        -------
+        A `SuccessTuple` of the result.
+        \"\"\"
+        attributes = {
+            'connector_keys': str(pipe.connector_keys),
+            'metric_key': str(pipe.metric_key),
+            'location_key': str(pipe.location_key),
+            'parameters': pipe._attributes.get('parameters', {}),
+        }
+
+        ### TODO insert `attributes` as a row in the pipes table.
+        # self.pipes_collection.insert_one(attributes)
+
+        return True, \"Success\"
+
+    def get_pipe_attributes(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> dict[str, Any]:
+        \"\"\"
+        Return the pipe's document from the internal `pipes` collection.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose attributes should be retrieved.
+
+        Returns
+        -------
+        The document that matches the keys of the pipe.
+        \"\"\"
+        query = {
+            'connector_keys': str(pipe.connector_keys),
+            'metric_key': str(pipe.metric_key),
+            'location_key': str(pipe.location_key),
+        }
+        ### TODO query the `pipes` table either using these keys or `get_pipe_id()`.
+        result = {}
+        # result = self.pipes_collection.find_one(query) or {}
+        return result
+
+    def get_pipe_id(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> Union[str, int, None]:
+        \"\"\"
+        Return the `_id` for the pipe if it exists.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose `_id` to fetch.
+
+        Returns
+        -------
+        The `_id` for the pipe's document or `None`.
+        \"\"\"
+        query = {
+            'connector_keys': str(pipe.connector_keys),
+            'metric_key': str(pipe.metric_key),
+            'location_key': str(pipe.location_key),
+        }
+        ### TODO fetch the ID mapped to this pipe.
+        # oid = (self.pipes_collection.find_one(query, {'_id': 1}) or {}).get('_id', None)
+        # return str(oid) if oid is not None else None
+
+    def edit_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        \"\"\"
+        Edit the attributes of the pipe.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose in-memory parameters must be persisted.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        \"\"\"
+        query = {
+            'connector_keys': str(pipe.connector_keys),
+            'metric_key': str(pipe.metric_key),
+            'location_key': str(pipe.location_key),
+        }
+        pipe_parameters = pipe._attributes.get('parameters', {})
+        ### TODO Update the row with new parameters.
+        # self.pipes_collection.update_one(query, {'$set': {'parameters': pipe_parameters}})
+        return True, "Success"
+
+    def delete_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        \"\"\"
+        Delete a pipe's registration from the `pipes` collection.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe to be deleted.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        \"\"\"
+        ### TODO Delete the pipe's row from the pipes table.
+        # self.pipes_collection.delete_one({'_id': pipe_id})
+        return True, "Success"
+
+    def fetch_pipes_keys(
+        self,
+        connector_keys: list[str] | None = None,
+        metric_keys: list[str] | None = None,
+        location_keys: list[str] | None = None,
+        tags: list[str] | None = None,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> List[Tuple[str, str, str]]:
+        \"\"\"
+        Return a list of tuples for the registered pipes' keys according to the provided filters.
+
+        Parameters
+        ----------
+        connector_keys: list[str] | None, default None
+            The keys passed via `-c`.
+
+        metric_keys: list[str] | None, default None
+            The keys passed via `-m`.
+
+        location_keys: list[str] | None, default None
+            The keys passed via `-l`.
+
+        tags: List[str] | None, default None
+            Tags passed via `--tags` which are stored under `parameters:tags`.
+
+        Returns
+        -------
+        A list of connector, metric, and location keys in tuples.
+        You may return the string "None" for location keys in place of nulls.
+
+        Examples
+        --------
+        >>> import meerschaum as mrsm
+        >>> conn = mrsm.get_connector('example:demo')
+        >>> 
+        >>> pipe_a = mrsm.Pipe('a', 'demo', tags=['foo'], instance=conn)
+        >>> pipe_b = mrsm.Pipe('b', 'demo', tags=['bar'], instance=conn)
+        >>> pipe_a.register()
+        >>> pipe_b.register()
+        >>> 
+        >>> conn.fetch_pipes_keys(['a', 'b'])
+        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        >>> conn.fetch_pipes_keys(metric_keys=['demo'])
+        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        >>> conn.fetch_pipes_keys(tags=['foo'])
+        [('a', 'demo', 'None')]
+        >>> conn.fetch_pipes_keys(location_keys=[None])
+        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        
+        \"\"\"
+        from meerschaum.utils.misc import separate_negation_values
+
+        in_ck, nin_ck = separate_negation_values([str(val) for val in (connector_keys or [])])
+        in_mk, nin_mk = separate_negation_values([str(val) for val in (metric_keys or [])])
+        in_lk, nin_lk = separate_negation_values([str(val) for val in (location_keys or [])])
+        in_tags, nin_tags = separate_negation_values([str(val) for val in (tags or [])])
+
+        ### TODO build a query like so, only including clauses if the given list is not empty.
+        ### The `tags` clause is an OR ("?|"), meaning any of the tags may match.
+        ### 
+        ### 
+        ### SELECT connector_keys, metric_key, location_key
+        ### FROM pipes
+        ### WHERE connector_keys IN ({in_ck})
+        ###   AND connector_keys NOT IN ({nin_ck})
+        ###   AND metric_key IN ({in_mk})
+        ###   AND metric_key NOT IN ({nin_mk})
+        ###   AND location_key IN (in_lk)
+        ###   AND location_key NOT IN (nin_lk)
+        ###   AND (parameters->'tags')::JSONB ?| ARRAY[{tags}]
+        ###   AND NOT (parameters->'tags')::JSONB ?| ARRAY[{nin_tags}]
+        return []
+
+def pipe_exists(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kwargs: Any
+) -> bool:
+    \"\"\"
+    Check whether a pipe's target table exists.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe to check whether its table exists.
+
+    Returns
+    -------
+    A `bool` indicating the table exists.
+    \"\"\"
+    table_name = pipe.target
+    ### TODO write a query to determine the existence of `table_name`.
+    table_exists = False
+    return table_exists
+
+def drop_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    \"\"\"
+    Drop a pipe's collection if it exists.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe to be dropped.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    \"\"\"
+    ### TODO write a query to drop `table_name`.
+    table_name = pipe.target
+    return True, "Success"
+
+"""
     ),
     'action': (
         "@make_action\n"
