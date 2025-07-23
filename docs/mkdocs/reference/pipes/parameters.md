@@ -8,9 +8,7 @@ This page catalogs useful keys in the `parameters` dictionary.
 
     ```python
     pipe = mrsm.Pipe('a', 'b', parameters={'a': 1})
-    pipe.parameters.update({'a': 2})
-    pipe.edit() # alias: pipe.update()
-
+    pipe.update_parameters({'a': 2}, persist=True)
 
     print(mrsm.Pipe('a', 'b').parameters['a'])
     # 2
@@ -91,7 +89,7 @@ If a `primary` index is defined (see [columns](#columns) below) and `autoincreme
 
 Similar to `autoincrement`, `autotime` will generate the current timestamp for each document synced. When the `datetime` column has an integer dtype, the generated value will be the number of `Pipe.precision` units since the Unix epoch.
 
-This works for pipes stored in all instances, making it a good alternative to `autoincrement`. Setting `autotime` on pipes without a `datetime` axis will add the column `ts` (without treating it as an index).
+This works for pipes stored in all instances, making it a good alternative to `autoincrement`. Setting `autotime` on pipes without a `datetime` axis will add the column `ts` (without treating it as an index); the default name may be configured at the keys `pipes.autotime.column_name_if_datetime_missing`.
 
 ??? example
     ```python
@@ -143,22 +141,70 @@ You may designate the same column as both the `datetime` and `primary` indices.
 
 ## `dtypes`
 
-Meerschaum data types allow you to specify how columns should be parsed, deserialized, and stored. In addition to special types like `numeric`, `uuid`, `json`, and `bytes`, you may specify other Pandas data types (e.g. `datetime64[ns]`).
+You will often want to explictly set the dtypes for certain columns, which you can do with the `dtype` parameters.
+
+If not explicitly set, dtypes are inferred from the first sync, and syncing conflicting dtypes into an inferred dtype column will alter the column's type (unless [`static`](#static) is `True`. See [`mixed_numerics`](#mixed_numerics) for handling syncing floats into integer columns).
+
+??? tip "Generic, specific, or both"
+    You may either choose the base Meerschaum dtype (e.g. `int`) or a specific Pandas-supported dtype (e.g. `int32[pyarrow]`):
+
+    ```python
+    import meerschaum as mrsm
+
+    pipe = mrsm.Pipe(
+        'demo', 'dtypes',
+        temporary=True,
+        instance='sql:local',
+        autotime=True,
+        columns={'datetime': 'ts', 'id': 'id'},
+        dtypes={
+            'id': 'int32[pyarrow]',
+            'ts': 'datetime64[ms, UTC]',
+            'val': 'float',
+        },
+    )
+    pipe.sync("id:1,val:2.2")
+
+    df = pipe.get_data()
+    print(df.dtypes)
+    # id          int32[pyarrow]
+    # val                float64
+    # ts     datetime64[ms, UTC]
+    # dtype: object 
+
+    pipe.sync('id:2,foo:3')
+    print(pipe.dtypes)
+    # {'id': 'int32[pyarrow]', 'val': 'float', 'ts': 'datetime64[ms, UTC]', 'foo': 'int64[pyarrow]'}
+
+    pipe.sync("id:3,foo:4.4")
+    print(pipe.dtypes)
+    # {'id': 'int32[pyarrow]', 'val': 'float', 'ts': 'datetime64[ms, UTC]', 'foo': 'numeric'}
+
+    pipe.sync("id:4,bar:5.5")
+    print(pipe.dtypes)
+    # {'id': 'int32[pyarrow]', 'val': 'float', 'ts': 'datetime64[ms, UTC]', 'foo': 'numeric', 'bar': 'float64[pyarrow]'}
+
+    pipe.sync("id:5,bar:text")
+    print(pipe.dtypes)
+    # {'id': 'int32[pyarrow]', 'val': 'float', 'ts': 'datetime64[ms, UTC]', 'foo': 'numeric', 'bar': 'string[pyarrow]'}
+    ```
 
 Below are the supported Meerschaum data types. See the [SQL dtypes source](https://github.com/bmeares/Meerschaum/blob/main/meerschaum/utils/dtypes/sql.py) to see which types map to specific database types.
 
-| Data Types                                     | Examples                                          | Python, Pandas Types                                                            | SQL Types Notes                                                                     |
-|------------------------------------------------|---------------------------------------------------|---------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
-| `int`                                          | `1`                                               | `int`, `Int64`, `int64[pyarrow]`, etc.                                          | `BIGINT`                                                                            |
-| `float`                                        | `1.1`                                             | `float`, `float64`, `float64[pyarrow]`, etc.                                    | `DOUBLE PRECISION`, `FLOAT`                                                         |
-| `string`                                       | `'foo'`                                           | `str`, `string[python]`                                                         | `TEXT`, `NVARCHAR(MAX)` for MSSQL, `NVARCHAR2(2000)` for Oracle.                    |
-| `datetime`                                     | `Timestamp('2024-12-26 00:00:00+0000', tz='UTC')` | `datetime`, `datetime64[ns]`, `datetime64[ns, UTC]` (timezone-aware by default) | `TIMESTAMP`, `TIMESTAMPTZ`, `DATETIMEOFFSET` for MSSQL. Offsets are coerced to UTC. |
-| `numeric`, `numeric[precision,scale]`          | `Decimal('1.000')`                                | `Decimal`                                                                       | `NUMERIC`, `DECIMAL`. Uses `precision` and `scale` if provided.                     |
-| `uuid`                                         | `UUID('df2572b5-e42e-410d-a624-a14519f73e00')`    | `UUID`                                                                          | `UUID` where supported. `UNIQUEIDENTIFIER` for MSSQL                                |
-| `bool`                                         | `True`                                            | `boolean[pyarrow]`                                                              | `BOOL`, `BIT`, `INT` for Oracle, MSSQL, MySQL / MariaDB, `FLOAT` for SQLite.        |
-| `json`                                         | `{"foo": "bar"}`                                  | `dict`, `list`                                                                  | `JSONB` for PostgreSQL-like flavors, otherwise `TEXT`.                              |
-| `bytes`                                        | `b'foo bar'`                                      | `bytes`                                                                         | `BYTEA`, `BLOB`, `VARBINARY`                                                        |
-| `geometry`, `geometry[type,srid]`, `geography` | `Point`, `MultiLineString`, etc.                  | `shapely.Point`, etc.                                                           | `GEOMETRY`, `GEOMETRY[POINT, 4326]`, etc.                                           |
+| Data Types | Examples | Python, Pandas Types | SQL Types Notes |
+|---|---|---|---|
+| `int` | `1` | `int`, `Int64`, `int64[pyarrow]`, `Int32`, `int32[pyarrow]`, etc. | `BIGINT`, `INT` |
+| `float` | `1.1` | `float`, `float64`, `float64[pyarrow]`, etc. | `DOUBLE PRECISION`, `FLOAT` |
+| `string` | `'foo'` | `str`, `string[python]`, etc. | `TEXT`, `NVARCHAR(MAX)` for MSSQL, `NVARCHAR2(2000)` for Oracle. |
+| `datetime` (tz-aware) | `Timestamp('2024-12-26 00:00:00+0000', tz='UTC')` | `datetime`, `datetime64[us, UTC]`, etc. | `TIMESTAMPTZ`, `DATETIMEOFFSET`. Offsets are coerced to UTC. |
+| `datetime64[precision]` (tz-naive) | `Timestamp('2025-07-23 00:00:00')` | `datetime`, `datetime64[us]`, etc. | `TIMESTAMP`, `TIMESTAMP WITHOUT TIME ZONE` |
+| `date` | `date(2025, 1, 1)` | `date`, `date32[day][pyarrow]`, `date64[ms][pyarrow]` | `DATE` |
+| `numeric`, `numeric[precision,scale]` | `Decimal('1.000')` | `Decimal` | `NUMERIC`, `DECIMAL`. Use `precision` and `scale` if provided. |
+| `uuid` | `UUID('df2572b5-e42e-410d-a624-a14519f73e00')` | `UUID` | `UUID` where supported. `UNIQUEIDENTIFIER` for MSSQL, otherwise `TEXT`. |
+| `bool` | `True` | `boolean[pyarrow]` | `BOOL`, `BIT`, `INT` for Oracle, MSSQL, MySQL / MariaDB, `FLOAT` for SQLite. |
+| `json` | `{"foo": "bar"}` | `dict`, `list` | `JSONB` for PostgreSQL-like flavors, otherwise `TEXT`. |
+| `bytes` | `b'foo bar'` | `bytes`, `binary[pyarrow]` | `BYTEA`, `BLOB`, `VARBINARY`, otherwise base64-encoded. |
+| `geometry`, `geometry[type,srid]`, `geography` | `Point`, `MultiLineString`, etc. | `shapely.Point`, etc. | `GEOMETRY`, `GEOMETRY[POINT, 4326]`, `GEOGRAPHY`, etc. for PostGIS. Otherwise base64-encoded WKB. |
 
 ---------------
 
@@ -175,11 +221,11 @@ The `enforce` parameter controls whether a pipe coerces incoming data to match t
 
 The `fetch` key contains parameters concerning the [fetch stage](/reference/pipes/syncing/) of the syncing process.
 
-### `fetch:backtrack_minutes`
+### `fetch.backtrack_minutes`
 
 How many minutes of overlap to request when fetching new rows ― see [Backtracking](/reference/pipes/syncing/#backtracking). Defaults to 1440.
 
-### `fetch:definition`
+### `fetch.definition`
 
 !!! example inline end ""
     ```yaml
@@ -189,7 +235,7 @@ How many minutes of overlap to request when fetching new rows ― see [Backtrack
         FROM foo
     ```
     
-The base SQL query to be run when fetching new rows. Aliased as `sql` for convenience. This only applies to pipes with [`SQLConnectors`](/reference/connectors/sql-connectors/) as connectors.
+The base SQL query to be run when fetching new rows. Aliased as `sql` or `query` for convenience. This only applies to pipes with [`SQLConnectors`](/reference/connectors/sql-connectors/) as connectors.
 
 ---------------
 
@@ -240,7 +286,7 @@ Toggle whether a pipe will allow null indices (default `True`). Set this to `Fal
 
 ## `precision`
 
-The unit set by `precision` determines the value of the timestamp captured by `autotime` in units since the Unix Epoch in UTC (see above). By default, the `datetime` axis dtype determines `Pipe.precision` (e.g. `datetime64[ns, UTC]` is `nanosecond` precision).
+The unit set by `precision` determines the value of the timestamp captured by `autotime` in units since the Unix Epoch in UTC (see above). By default, the `datetime` axis dtype determines `Pipe.precision` (e.g. the default `datetime64[us, UTC]` is `microsecond` precision).
 
 | Units         | Aliases    | Datetimes                       | Integers              |
 |---------------|------------|---------------------------------|-----------------------|
@@ -250,7 +296,7 @@ The unit set by `precision` determines the value of the timestamp captured by `a
 | `second`      | `sec`, `s` | `2025-07-18 16:02:18`           | `1752854538`          |
 | `minute`      | `min`, `m` | `2025-07-18 16:02`              | `29214242`            |
 | `hour`        | `hr`, `h`  | `2025-07-18 16:00`              | `486904`              |
-| `day`         | `d`        | `2025-07-18`                    | `20287`               |
+| `day`         | `d`, `D`   | `2025-07-18`                    | `20287`               |
 
 
 For additional functionality, you may set `precision` as a dictionary with the following keys:
@@ -270,9 +316,33 @@ The precision unit to use when capturing the current timestamp. Setting `precisi
 
 When rounding the current timestamp, `precision.interval` determines the size of the delta (default 1). For example, when `precision.unit='minute'` and `precision.interval=15`, then the current timestamp will be rounded down (or nearest, see below) to even 15-minute intervals.
 
+??? example
+
+    ```python
+    import meerschaum as mrsm
+
+    pipe = mrsm.Pipe(
+        'demo', 'precision', 'interval',
+        instance='sql:memory',
+        autotime=True,
+        columns={'datetime': 'ts'},
+        precision={
+            'unit': 'minute',
+            'interval': 15,
+        },
+    )
+    pipe.sync("a:1")
+
+    df = pipe.get_data()
+    print(df)
+
+    #    a                        ts
+    # 0  1 2025-07-23 13:15:00+00:00
+    ```
+
 ### `precision.round_to`
 
-This determines the direction to which the current timestamp is coerced when rounding (See [`meerschaum.utils.misc.round_time()`](https://docs.meerschaum.io/meerschaum/utils/misc.html#round_time)). Accepted values are the following:
+This determines the direction to which the current timestamp is coerced when rounding (See [`meerschaum.utils.dtypes.round_time()`](https://docs.meerschaum.io/meerschaum/utils/dtypes.html#round_time)). Accepted values are the following:
 
 - `down` (default)
 - `up`
@@ -405,9 +475,9 @@ The `valkey` key is used internally to keep internal metadata separate from user
 
 The `verify` key contains parameters concerning [verification syncs](/reference/pipes/syncing/#verification-syncs).
 
-### `verify:bound_days`
+### `verify.bound_days`
 
-The key `verify:bound_days` specifies the interval when determining the bound time, which is limit at which long-running verfication syncs should stop.
+The key `verify.bound_days` specifies the interval when determining the bound time, which is limit at which long-running verfication syncs should stop.
 
 In addition to days, alias keys are allowed to specify other units of time. In order of priority, the supported keys are the following:
 
@@ -418,6 +488,36 @@ In addition to days, alias keys are allowed to specify other units of time. In o
 - `bound_years`
 - `bound_seconds`
 
-### `verify:chunk_minutes`
+??? example
 
-The key `verify:chunk_minutes` specifies the size of chunk intervals when verifying a pipe. See [`Pipe.get_chunk_bounds()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_chunk_bounds).
+    ```python
+    import meerschaum as mrsm
+    
+    pipe = mrsm.Pipe(
+        'foo', 'bar',
+        parameters={
+            'verify': {
+                'bound_days': 366,
+            },
+        },
+    )
+    ```
+
+### `verify.chunk_minutes`
+
+The key `verify.chunk_minutes` specifies the size of chunk intervals when verifying a pipe. See [`Pipe.get_chunk_bounds()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_chunk_bounds).
+
+??? example
+
+    ```python
+    import meerschaum as mrsm
+
+    pipe = mrsm.Pipe(
+        'foo', 'bar',
+        parameters={
+            'verify': {
+                'chunk_minutes': (1440 * 7),
+            },
+        },
+    )
+    ```
