@@ -285,10 +285,21 @@ This is the current release cycle, so stay tuned for future releases!
 
   df = day_pipe.get_data()
   print(df)
+  #    val         day
+  # 0    1  2025-07-23
   ```
 
+  The parameter `precision` may either be a string (the unit) or a dictionary with the following keys:
+
+  - `unit` (required)  
+    The precision unit (`microsecond`, `second`, etc.)
+  - `interval` (default 1)  
+    Optionally round to a specific number of units. For example, `precision='minute'` and `interval=15` would round to 15-minute intervals.
+  - `round_to`  
+    To which direction to round the current timestamp. Supported values are `down` (default), `up`, and `closest`. See [`meerschaum.utils.dtypes.round_time()`](https://docs.meerschaum.io/meerschaum/utils/dtypes.html#round_time).
+
 - **Add `Pipe.get_value()`.**  
-  The convenience function `Pipe.get_value()` has been added for selecting single values from result sets of `Pipe.get_data()`:
+  The convenience function `Pipe.get_value()` selects single values from result sets of `Pipe.get_data()`:
 
   ```python
   import meerschaum as mrsm
@@ -304,9 +315,9 @@ This is the current release cycle, so stay tuned for future releases!
       {'species': 'parrot', 'name': 'Polly'},
       {'species': 'dog', 'name': 'Spot'},
       {'species': 'rabbit', 'name': 'Peter Cottontail'},
-  ], debug=True)
+  ])
   
-  spot_id = pipe.get_value('id', params={'name': 'Spot'}, debug=True)
+  spot_id = pipe.get_value('id', params={'name': 'Spot'})
   print(spot_id)
   # 2
   ```
@@ -320,19 +331,27 @@ This is the current release cycle, so stay tuned for future releases!
   pipe = mrsm.Pipe(
       'demo', 'doc',
       instance='sql:memory',
-      autotime=True,
-      columns={},
-      precision='ms',
+      columns={'primary': 'id'},
   )
+  pipe.sync([
+      {'id': 1, 'name': 'Alice', 'fav_color': 'red'},
+      {'id': 2, 'name': 'Bob', 'fav_color': 'green'},
+      {'id': 3, 'name': 'Charlie', 'fav_color': 'blue'},
+  ])
+
+  doc = pipe.get_doc(params={'id': 2})
+  print(doc)
+  # {'id': 2, 'name': 'Bob', 'fav_color': 'green'}
   ``` 
+
+- **Add the parameter `mixed_numerics`.**  
+  Setting `mixed_numerics` to `False` will prevent the behavior of coercing integer to float columns as `numeric`, akin to `static=True` but just for this behavior.
 
 - **Fix custom actions with spaces in Web Console.**
 
 - **Ignore `schema` from pipes' parameters on SQLite.**
 
 - **Tweak `begin` and `end` input sizes in the pipes card.**
-
-**Bugfixes**
 
 ## 2.9.x Releases
 
