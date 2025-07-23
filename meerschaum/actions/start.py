@@ -676,7 +676,7 @@ def _start_pipeline(
 
     try:
         run_loop()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         warn("Cancelled pipeline.", stack=False)
         if proc is not None:
             _stop_process(proc)
