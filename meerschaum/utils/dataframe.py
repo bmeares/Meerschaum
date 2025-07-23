@@ -1508,7 +1508,7 @@ def enforce_dtypes(
             )
         )
 
-        if debug:
+        if debug and explicitly_numeric or df_numeric_cols or mixed_numeric_types:
             from meerschaum.utils.formatting import make_header
             msg = (
                 make_header(f"Coercing column '{col}' to numeric:", left_pad=0)
@@ -1517,7 +1517,13 @@ def enforce_dtypes(
                 + f"  Current type: {typ if col not in df_numeric_cols else 'Decimal'}"
                 + ("\n  Column is explicitly numeric." if explicitly_numeric else "")
             ) if cast_to_numeric else (
-                f"Will not coerce column '{col}' to numeric."
+                f"Will not coerce column '{col}' to numeric.\n"
+                f"{df_numeric_cols=}\n"
+                f"{mixed_numeric_types=}\n"
+                f"{explicitly_float=}\n"
+                f"{explicitly_int=}\n"
+                f"{all_nan=}\n"
+                f"{coerce_numeric=}"
             )
             dprint(msg)
 

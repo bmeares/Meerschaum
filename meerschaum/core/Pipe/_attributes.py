@@ -286,7 +286,6 @@ def get_dtypes(
     """
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
 
-
     Parameters
     ----------
     infer: bool, default True
@@ -310,7 +309,11 @@ def get_dtypes(
         dprint(f"Configured dtypes for {self}:")
         mrsm.pprint(configured_dtypes)
 
-    remote_dtypes = self.infer_dtypes(persist=False, refresh=refresh, debug=debug)
+    remote_dtypes = (
+        self.infer_dtypes(persist=False, refresh=refresh, debug=debug)
+        if infer
+        else {}
+    )
     patched_dtypes = apply_patch_to_config((remote_dtypes or {}), (configured_dtypes or {}))
 
     dt_col = parameters.get('columns', {}).get('datetime', None)
