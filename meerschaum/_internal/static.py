@@ -317,10 +317,7 @@ STATIC_CONFIG: Dict[str, Any] = {
     'pipes': {
         'dtypes': {
             'min_ratio_columns_changed_for_full_astype': 0.5,
-            'columns_types_cache_seconds': 5.0,
         },
-        'exists_timeout_seconds': 5.0,
-        'static_schema_cache_seconds': 60.0,
         'max_bound_time_days': 36525,
     },
     'jobs': {

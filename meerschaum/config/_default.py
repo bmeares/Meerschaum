@@ -203,12 +203,20 @@ default_pipes_config = {
     },
     'sync': {
         'filter_params_index_limit': 250,
+        'exists_cache_seconds': 5.0,
     },
     'verify': {
         'max_chunks_syncs': 3,
     },
     'autotime': {
         'column_name_if_datetime_missing': 'ts',
+    },
+    'dtypes': {
+        'min_ratio_columns_changed_for_full_astype': 0.5,
+        'columns_types_cache_seconds': 5.0,
+    },
+    'static': {
+        'static_schema_cache_seconds': 60.0,
     },
 }
 default_plugins_config = {}

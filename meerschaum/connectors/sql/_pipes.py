@@ -25,7 +25,6 @@ def register_pipe(
     Register a new pipe.
     A pipe's attributes must be set before registering.
     """
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import json_flavors
 
@@ -170,7 +169,6 @@ def fetch_pipes_keys(
     debug: bool, default False
         Verbosity toggle.
     """
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import separate_negation_values
     from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS, table_exists
@@ -338,7 +336,6 @@ def create_indices(
     """
     Create a pipe's indices.
     """
-    from meerschaum.utils.debug import dprint
     if debug:
         dprint(f"Creating indices for {pipe}...")
 
@@ -392,7 +389,6 @@ def drop_indices(
     """
     Drop a pipe's indices.
     """
-    from meerschaum.utils.debug import dprint
     if debug:
         dprint(f"Dropping indices for {pipe}...")
 
@@ -2718,7 +2714,6 @@ def pipe_exists(
         debug=debug,
     )
     if debug:
-        from meerschaum.utils.debug import dprint
         dprint(f"{pipe} " + ('exists.' if exists else 'does not exist.'))
     return exists
 
@@ -3055,11 +3050,17 @@ def get_pipe_columns_types(
             debug=debug,
         )
 
+    if debug:
+        dprint(f"Fetching columns_types for {pipe} with via SQLAlchemy table.")
+
     table_columns = {}
     try:
         pipe_table = self.get_pipe_table(pipe, debug=debug)
         if pipe_table is None:
             return {}
+        if debug:
+            dprint(f"Found columns:")
+            mrsm.pprint(dict(pipe_table.columns))
         for col in pipe_table.columns:
             table_columns[str(col.name)] = str(col.type)
     except Exception as e:
@@ -3251,10 +3252,9 @@ def get_alter_columns_queries(
     -------
     A list of the `ALTER TABLE` SQL query or queries to be executed on the provided connector.
     """
-    if not pipe.exists(debug=debug):
+    if not pipe.exists(debug=debug) or pipe.static:
         return []
-    if pipe.static:
-        return []
+
     from meerschaum.utils.sql import (
         sql_item_name,
         get_table_cols_types,
@@ -3309,7 +3309,10 @@ def get_alter_columns_queries(
         'guid': 'object',
     }
     if self.flavor == 'oracle':
-        pd_db_df_aliases['int'] = 'numeric'
+        pd_db_df_aliases.update({
+            'int': 'numeric',
+            'date': 'datetime',
+        })
 
     altered_cols = {
         col: (db_cols_types.get(col, 'object'), typ)
@@ -3317,6 +3320,10 @@ def get_alter_columns_queries(
         if not are_dtypes_equal(typ, db_cols_types.get(col, 'object').lower())
         and not are_dtypes_equal(db_cols_types.get(col, 'object'), 'string')
     }
+
+    if debug and altered_cols:
+        dprint(f"Columns to be altered:")
+        mrsm.pprint(altered_cols)
 
     ### NOTE: Sometimes bools are coerced into ints or floats.
     altered_cols_to_ignore = set()
@@ -3344,8 +3351,13 @@ def get_alter_columns_queries(
         if db_is_bool_compatible and df_is_bool_compatible:
             altered_cols_to_ignore.add(bool_col)
 
+    if debug and altered_cols_to_ignore:
+        dprint(f"Ignoring the following altered columns (false positives).")
+        mrsm.pprint(altered_cols_to_ignore)
+
     for col in altered_cols_to_ignore:
         _ = altered_cols.pop(col, None)
+
     if not altered_cols:
         return []
 
