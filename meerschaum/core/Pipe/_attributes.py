@@ -52,11 +52,24 @@ def attributes(self) -> Dict[str, Any]:
 def get_parameters(
     self,
     apply_symlinks: bool = True,
+    refresh: bool = False,
     debug: bool = False,
     _visited: 'Optional[set[mrsm.Pipe]]' = None,
 ) -> Dict[str, Any]:
     """
     Return the `parameters` dictionary of the pipe.
+
+    Parameters
+    ----------
+    apply_symlinks: bool, default True
+        If `True`, resolve references to parameters from other pipes.
+
+    refresh: bool, default False
+        If `True`, pull the latest attributes for the pipe.
+
+    Returns
+    -------
+    The pipe's parameters dictionary.
     """
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config._read_config import search_and_substitute_config
@@ -64,9 +77,10 @@ def get_parameters(
     if _visited is None:
         _visited = {self}
 
+    if refresh:
+        self._invalidate_cache(hard=True)
+
     raw_parameters = self.attributes.get('parameters', {})
-    if debug:
-        dprint(f"{raw_parameters=}")
     ref_keys = raw_parameters.get('reference')
     if not apply_symlinks:
         return raw_parameters
@@ -290,45 +304,13 @@ def get_dtypes(
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.dtypes import MRSM_ALIAS_DTYPES
     from meerschaum._internal.static import STATIC_CONFIG
-    parameters = (
-        self.get_parameters(debug=debug)
-        if refresh
-        else self.parameters
-    )
+    parameters = self.get_parameters(refresh=refresh, debug=debug)
     configured_dtypes = parameters.get('dtypes', {})
     if debug:
-        dprint(f"{configured_dtypes=}")
+        dprint(f"Configured dtypes for {self}:")
+        mrsm.pprint(configured_dtypes)
 
-    now = time.perf_counter()
-    cache_seconds = STATIC_CONFIG['pipes']['static_schema_cache_seconds']
-    if not self.static:
-        refresh = True
-
-    if refresh:
-        _ = self.__dict__.pop('_remote_dtypes_timestamp', None)
-        _ = self.__dict__.pop('_remote_dtypes', None)
-
-    remote_dtypes = self.__dict__.get('_remote_dtypes', None)
-    if remote_dtypes is not None:
-        remote_dtypes_timestamp = self.__dict__.get('_remote_dtypes_timestamp', None)
-        if remote_dtypes_timestamp is not None:
-            delta = now - remote_dtypes_timestamp
-            if delta < cache_seconds:
-                if debug:
-                    dprint(
-                        f"Returning cached `remote_dtypes` for {self} "
-                        f"({round(delta, 2)} seconds old)."
-                    )
-            else:
-                remote_dtypes = None
-        else:
-            remote_dtypes = None
-
-    if remote_dtypes is None and infer:
-        remote_dtypes = self.infer_dtypes(persist=False, debug=debug)
-        self.__dict__['_remote_dtypes'] = remote_dtypes
-        self.__dict__['_remote_dtypes_timestamp'] = now
-
+    remote_dtypes = self.infer_dtypes(persist=False, refresh=refresh, debug=debug)
     patched_dtypes = apply_patch_to_config((remote_dtypes or {}), (configured_dtypes or {}))
 
     dt_col = parameters.get('columns', {}).get('datetime', None)
@@ -562,9 +544,9 @@ def get_columns_types(
 
     now = time.perf_counter()
     cache_seconds = (
-        STATIC_CONFIG['pipes']['static_schema_cache_seconds']
+        mrsm.get_config('pipes', 'static', 'static_schema_cache_seconds')
         if self.static
-        else STATIC_CONFIG['pipes']['dtypes']['columns_types_cache_seconds']
+        else mrsm.get_config('pipes', 'dtypes', 'columns_types_cache_seconds')
     )
     if refresh:
         _ = self.__dict__.pop('_columns_types_timestamp', None)
@@ -609,9 +591,9 @@ def get_columns_indices(
 
     now = time.perf_counter()
     cache_seconds = (
-        STATIC_CONFIG['pipes']['static_schema_cache_seconds']
+        mrsm.get_config('pipes', 'static', 'static_schema_cache_seconds')
         if self.static
-        else STATIC_CONFIG['pipes']['exists_timeout_seconds']
+        else mrsm.get_config('pipes', 'dtypes', 'columns_types_cache_seconds')
     )
     if refresh:
         _ = self.__dict__.pop('_columns_indices_timestamp', None)

@@ -114,7 +114,12 @@ def enforce_dtypes(
     )
 
 
-def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, Any]:
+def infer_dtypes(
+    self,
+    persist: bool = False,
+    refresh: bool = False,
+    debug: bool = False,
+) -> Dict[str, Any]:
     """
     If `dtypes` is not set in `meerschaum.Pipe.parameters`,
     infer the data types from the underlying table if it exists.
@@ -124,6 +129,10 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
     persist: bool, default False
         If `True`, persist the inferred data types to `meerschaum.Pipe.parameters`.
         NOTE: Use with caution! Generally `dtypes` is meant to be user-configurable only.
+
+    refresh: bool, default False
+        If `True`, retrieve the latest columns-types for the pipe.
+        See `Pipe.get_columns.types()`.
 
     Returns
     -------
@@ -137,7 +146,7 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
 
     ### NOTE: get_columns_types() may return either the types as
     ###       PostgreSQL- or Pandas-style.
-    columns_types = self.get_columns_types(debug=debug)
+    columns_types = self.get_columns_types(refresh=refresh, debug=debug)
 
     remote_pd_dtypes = {
         c: (
@@ -150,7 +159,8 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
     if not persist:
         return remote_pd_dtypes
 
-    dtypes = self.parameters.get('dtypes', {})
+    parameters = self.get_parameters(refresh=refresh, debug=debug)
+    dtypes = parameters.get('dtypes', {})
     dtypes.update({
         col: typ
         for col, typ in remote_pd_dtypes.items()

@@ -73,22 +73,33 @@ def test_dtype_enforcement(flavor: str):
             'uuid': 'uuid',
             'bytes': 'bytes',
             'date': 'date',
+            'geometry': 'geometry',
         },
         instance=conn,
     )
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'int': '1'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'float': '1.0'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bool': 'True'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'object': 'foo'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'str': 'bar'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': '{"a": {"b": 1}}'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'uuid': '00000000-1234-5678-0000-000000000000'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bytes': 'Zm9vIGJhcg=='}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'date': '2025-01-01'}], debug=debug)
+
+    results = []
+
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'int': '1'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'float': '1.0'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bool': 'True'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'object': 'foo'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'str': 'bar'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': '{"a": {"b": 1}}'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'uuid': '00000000-1234-5678-0000-000000000000'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bytes': 'Zm9vIGJhcg=='}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'date': '2025-01-01'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'geometry': 'POINT (0 0)'}], debug=debug))
+
+    successes = [success for success, msg in results]
+    msgs = [msg for success, msg in results]
+    assert all(successes), '\n'.join(msgs)
+
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
-    assert len(df.columns) == 11
+    assert len(df.columns) == len(results) + len(pipe.columns)
+
     dtypes = pipe.dtypes
     for col, typ in df.dtypes.items():
         pipe_dtype = dtypes[col]
@@ -106,6 +117,10 @@ def test_dtype_enforcement(flavor: str):
             pipe_dtype = 'object'
         elif pipe_dtype == 'str':
             assert isinstance(df[col][0], str)
+        elif pipe_dtype == 'geometry':
+            assert 'shapely' in str(type(df[col][0]))
+            assert 'Point' in str(type(df[col][0]))
+            pipe_dtype = 'object'
         assert are_dtypes_equal(pipe_dtype.lower(), typ)
 
 
@@ -862,7 +877,7 @@ def test_mixed_timezone_aware_and_naive(flavor: str):
 
     pd = mrsm.attempt_import('pandas')
     target = 'test_timezone_mix'
-    pipe = mrsm.Pipe('test', 'timezone', 'aware_naive', instance=conn)
+    pipe = mrsm.Pipe('test', 'timezone', 'aware_naive', target=target, instance=conn)
     pipe.delete()
     pipe = mrsm.Pipe(
         'test', 'timezone', 'aware_naive',
@@ -871,7 +886,7 @@ def test_mixed_timezone_aware_and_naive(flavor: str):
         target=target,
     )
 
-    src_df = pd.DataFrame([{'ts': datetime(2024, 1, 1), 'val': 2}])
+    src_df = pd.DataFrame([{'ts': datetime(2024, 1, 1, 12, 13), 'val': 2}])
     conn.to_sql(src_df, target, debug=debug)
 
     df = pipe.get_data(debug=debug)
@@ -880,7 +895,7 @@ def test_mixed_timezone_aware_and_naive(flavor: str):
     assert len(update) == 0
     assert len(delta) == 0
 
-    success, msg = pipe.sync([{'ts': '2024-01-01 05:00:00', 'val': 3}])
+    success, msg = pipe.sync([{'ts': '2024-01-01 05:00:00', 'val': 3}], debug=debug)
     assert success, msg
 
     df = pipe.get_data(begin='2024-01-01 05:00:00', debug=debug)

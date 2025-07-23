@@ -623,17 +623,16 @@ def exists(
     import time
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.config import STATIC_CONFIG
     from meerschaum.utils.debug import dprint
     now = time.perf_counter()
-    exists_timeout_seconds = STATIC_CONFIG['pipes']['exists_timeout_seconds']
+    cache_seconds = mrsm.get_config('pipes', 'sync', 'exists_cache_seconds')
 
     _exists = self.__dict__.get('_exists', None)
     if _exists:
         exists_timestamp = self.__dict__.get('_exists_timestamp', None)
         if exists_timestamp is not None:
             delta = now - exists_timestamp
-            if delta < exists_timeout_seconds:
+            if delta < cache_seconds:
                 if debug:
                     dprint(f"Returning cached `exists` for {self} ({round(delta, 2)} seconds old).")
                 return _exists
