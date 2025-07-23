@@ -233,8 +233,8 @@ def are_dtypes_equal(
         return True
 
     date_dtypes = (
-        'date', 'date32[pyarrow]', 'date32[day][pyarrow]',
-        'date64[pyarrow]', 'date64[ms][pyarrow]',
+        'date', 'date32', 'date32[pyarrow]', 'date32[day][pyarrow]',
+        'date64', 'date64[pyarrow]', 'date64[ms][pyarrow]',
     )
     if ldtype in date_dtypes and rdtype in date_dtypes:
         return True
