@@ -347,6 +347,14 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add the parameter `mixed_numerics`.**  
   Setting `mixed_numerics` to `False` will prevent the behavior of coercing integer to float columns as `numeric`, akin to `static=True` but just for this behavior.
 
+- **Improve caching performance.**  
+  Metadata like pipes' dtypes are now cached more intelligently, drastically cutting down on the calls to the instance connector. The cache timeouts may be customized under the following configuration keys:
+
+  - `pipes.attributes.local_cache_timeout_seconds`
+  - `pipes.sync.exists_cache_seconds`
+  - `pipes.dtypes.columns_types_cache_seconds`
+  - `pipes.static.static_schema_cache_seconds`
+
 - **Fix custom actions with spaces in Web Console.**
 
 - **Ignore `schema` from pipes' parameters on SQLite.**
