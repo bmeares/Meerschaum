@@ -321,8 +321,8 @@ The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/mis
         ###   AND connector_keys NOT IN ({nin_ck})
         ###   AND metric_key IN ({in_mk})
         ###   AND metric_key NOT IN ({nin_mk})
-        ###   AND location_key IN (in_lk)
-        ###   AND location_key NOT IN (nin_lk)
+        ###   AND location_key IN ({in_lk})
+        ###   AND location_key NOT IN ({nin_lk})
         ###   AND (parameters->'tags')::JSONB ?| ARRAY[{tags}]
         ###   AND NOT (parameters->'tags')::JSONB ?| ARRAY[{nin_tags}]
         return []
@@ -405,31 +405,29 @@ You may use the built-in method [`pipe.filter_existing()`](https://docs.meerscha
     def sync_pipe(
         self,
         pipe: mrsm.Pipe,
-        df: 'pd.DataFrame' = None,
+        df: 'pd.DataFrame',
         debug: bool = False,
         **kwargs: Any
     ) -> mrsm.SuccessTuple:
         """
-        Upsert new documents into the pipe's collection.
+        Upsert new documents into the pipe's target table.
 
         Parameters
         ----------
         pipe: mrsm.Pipe
             The pipe whose collection should receive the new documents.
 
-        df: Union['pd.DataFrame', Iterator['pd.DataFrame']], default None
+        df: pd.DataFrame
             The data to be synced.
 
         Returns
         -------
         A `SuccessTuple` indicating success.
         """
-        if df is None:
-            return False, f"Received `None`, cannot sync {pipe}."
-
         ### TODO Write the upsert logic for the target table.
         ### `pipe.filter_existing()` is provided for your convenience to
         ### remove duplicates and separate inserts from updates.
+
         unseen_df, update_df, delta_df = pipe.filter_existing(df, debug=debug)
         return True, "Success"
     ```
