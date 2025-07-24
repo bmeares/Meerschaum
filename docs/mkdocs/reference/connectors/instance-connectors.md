@@ -151,18 +151,18 @@ Return the ID tied to the pipe's connector, metric, and location keys.
         pipe: mrsm.Pipe,
         debug: bool = False,
         **kwargs: Any
-    ) -> Union[str, int, None]:
+    ) -> str | int | None:
         """
-        Return the `_id` for the pipe if it exists.
+        Return the ID for the pipe if it exists.
 
         Parameters
         ----------
         pipe: mrsm.Pipe
-            The pipe whose `_id` to fetch.
+            The pipe whose ID to return.
 
         Returns
         -------
-        The `_id` for the pipe's document or `None`.
+        The ID for the pipe or `None`.
         """
         query = {
             'connector_keys': str(pipe.connector_keys),
@@ -170,8 +170,7 @@ Return the ID tied to the pipe's connector, metric, and location keys.
             'location_key': str(pipe.location_key),
         }
         ### TODO fetch the ID mapped to this pipe.
-        # oid = (self.pipes_collection.find_one(query, {'_id': 1}) or {}).get('_id', None)
-        # return str(oid) if oid is not None else None
+        return None
     ```
 
 ## `#!python edit_pipe()`
@@ -537,9 +536,6 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
         -------
         The target table's data as a DataFrame.
         """
-        if not pipe.exists(debug=debug):
-            return None
-
         table_name = pipe.target
         dt_col = pipe.columns.get("datetime", None)
 
@@ -593,13 +589,10 @@ Return the largest (or smallest) value in target table, according to the `params
         -------
         The largest `datetime` or `int` value of the `datetime` axis. 
         """
-		dt_col = pipe.columns.get('dt_col', None)
-		if dt_col is None:
-			return None
-
 		### TODO write a query to get the largest value for `dt_col`.
         ### If `newest` is `False`, return the smallest value.
         ### Apply the `params` filter in case of multiplexing.
+        return None
     ```
 
 ## `#!python get_pipe_columns_types()`
@@ -627,9 +620,6 @@ You may take advantage of automatic dtype enforcement by implementing this metho
         -------
         A dictionary mapping columns to data types.
         """
-        if not pipe.exists(debug=debug):
-            return {}
-
         table_name = pipe.target
         ### TODO write a query to fetch the columns contained in `table_name`.
         columns_types = {}
@@ -637,6 +627,8 @@ You may take advantage of automatic dtype enforcement by implementing this metho
         ### Return a dictionary mapping the columns
         ### to their Pandas dtypes, e.g.:
         ### `{'foo': 'int64'`}`
+        ### or SQL-style dtypes, e.g.:
+        ### `{'foo': 'INT'}`
         return columns_types
     ```
 

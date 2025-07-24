@@ -13,12 +13,13 @@ import time
 import traceback
 from datetime import datetime, timezone
 
+from meerschaum.jobs import get_jobs
 from meerschaum.utils.typing import Optional, Dict, Any
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash import dash_app
 from meerschaum.api.dash.sessions import get_username_from_session
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
-from meerschaum.api.dash.components import alert_from_success_tuple
+from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
 from meerschaum.api.dash.jobs import (
     build_job_card,
     build_manage_job_buttons_div_children,
@@ -251,17 +252,22 @@ def render_job_page_from_url(
     session_data: Optional[Dict[str, Any]],
 ):
     """
-    Load the `/job/{name}` page.
+    Load the `/dash/jobs/{name}` page.
     """
-    if not str(pathname).startswith('/dash/job'):
+    if not str(pathname).startswith('/dash/jobs'):
         return no_update
 
     session_id = (session_data or {}).get('session-id', None)
     authenticated = is_session_authenticated(str(session_id))
 
-    job_name = pathname.replace('/dash/job', '').lstrip('/').rstrip('/')
+    job_name = pathname.replace('/dash/jobs', '').lstrip('/').rstrip('/')
     if not job_name:
-        return no_update
+        jobs = get_jobs(executor_keys='local', combine_local_and_systemd=True)
+        cards = [
+            build_job_card(job, authenticated=authenticated, include_follow=False)
+            for job in jobs.values()
+        ]
+        return [html.Br(), build_cards_grid(cards, 3), html.Br()]
 
     job = _get_job(job_name)
     if not job.exists():

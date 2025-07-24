@@ -127,7 +127,7 @@ FEATURE_LINES: Dict[str, str] = {
         "        \"\"\"Return or yield dataframes.\"\"\"\n"
         "        docs = []\n"
         "        # populate docs with dictionaries (rows).\n"
-        "        return docs\n\n"
+        "        return docs\n"
         """
     def register_pipe(
         self,
@@ -192,18 +192,18 @@ FEATURE_LINES: Dict[str, str] = {
         pipe: mrsm.Pipe,
         debug: bool = False,
         **kwargs: Any
-    ) -> Union[str, int, None]:
+    ) -> str | int | None:
         \"\"\"
-        Return the `_id` for the pipe if it exists.
+        Return the ID for the pipe if it exists.
 
         Parameters
         ----------
         pipe: mrsm.Pipe
-            The pipe whose `_id` to fetch.
+            The pipe whose ID to fetch.
 
         Returns
         -------
-        The `_id` for the pipe's document or `None`.
+        The ID for the pipe or `None`.
         \"\"\"
         query = {{
             'connector_keys': str(pipe.connector_keys),
@@ -211,8 +211,7 @@ FEATURE_LINES: Dict[str, str] = {
             'location_key': str(pipe.location_key),
         }}
         ### TODO fetch the ID mapped to this pipe.
-        # oid = (self.pipes_collection.find_one(query, {{'_id': 1}}) or {{}}).get('_id', None)
-        # return str(oid) if oid is not None else None
+        return None
 
     def edit_pipe(
         self,
@@ -532,13 +531,10 @@ FEATURE_LINES: Dict[str, str] = {
         -------
         The largest `datetime` or `int` value of the `datetime` axis. 
         \"\"\"
-        dt_col = pipe.columns.get('dt_col', None)
-        if dt_col is None:
-            return None
-
         ### TODO write a query to get the largest value for `dt_col`.
         ### If `newest` is `False`, return the smallest value.
         ### Apply the `params` filter in case of multiplexing.
+        return None
 
     def get_pipe_columns_types(
         self,

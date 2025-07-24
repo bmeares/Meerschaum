@@ -33,9 +33,21 @@ mrsm register token
 
 This will prompt you for the owner of the token and print the Client ID, Client Secret and API Key. Registering to an `api` instance will assign the token the connector's configured user.
 
+## 🌐 Web UI
+
+The easiest way to can manage tokens is on the [Web Console](/reference/api-instance/web-console). Click the Meerschaum logo and navigate to `Settings` > `Tokens`. From here, you can:
+
+-   Create new tokens using the `+` button.
+-   Edit, invalidate, or delete existing tokens from the context menu (`⠇`).
+
+When you create a new token, a dialog will appear prompting you for a label, expiration date, and scopes. After registration, you **must** copy the generated credentials, as the secret will not be shown again.
+
+![Web Console tokens page](/assets/screenshots/web-console-tokens.png)
+
+---
 ## 🐍 Python API
 
-In addition to the CLI, uou can manage tokens directly from [instance connectors](/reference/connector/instance-connectors).
+In addition to the CLI and Web UI, you can manage tokens directly on [instance connectors](/reference/connector/instance-connectors).
 
 ### Creating a Token
 
@@ -72,8 +84,10 @@ To create a token, instantiate a `meerschaum.core.Token` object and call its `re
 You can retrieve a list of all tokens for a user from an instance connector.
 
 ```python
+import meerschaum as mrsm
+
 conn = mrsm.get_connector('sql:main')
-user = mrsm.User('myuser', instance=conn)
+user = mrsm.core.User('myuser', instance=conn)
 
 # Admins can see all tokens, including those without a user.
 # Regular users only see their own tokens.
@@ -107,7 +121,7 @@ success, msg = token.edit()
 
 ### Invalidating and Deleting Tokens
 
-If a token is compromised, you can invalidate it immediately. An invalidated token cannot be used but remains in the system. Deleting a token removes it permanently.
+If a token is compromised, you can invalidate it immediately. Invalidated tokens cannot be used but remains registered; deleting a token removes it permanently.
 
 ```python
 # Invalidate the token.
@@ -116,17 +130,6 @@ success, msg = token.invalidate()
 # Delete the token permanently.
 success, msg = token.delete()
 ```
-
----
-
-## 🌐 Web UI
-
-You can manage tokens from the Meerschaum dashboard by navigating to `Settings` > `Tokens`.
-
--   Create new tokens using the `+` button.
--   Edit, invalidate, or delete existing tokens from the context menu (`⠇`).
-
-When you create a new token, a dialog will appear prompting you for a label, expiration date, and scopes. After registration, you **must** copy the generated credentials, as the secret will not be shown again.
 
 ---
 
@@ -140,10 +143,11 @@ There are two ways to use a token to authenticate with the API:
   For situations where the standard OAuth flow isn't feasible (e.g. some IoT workloads), you can directly embed the API Key in the `Authorization` header. The API Key wraps the Client ID and Secret and is authenticated on every request.
 
 ??? example "Authenticating with `curl`"
+
     ```bash
     # Replace <API_KEY> with your generated key.
-    API_KEY="mrsm-key:YTg1ZTI3NDEtZ..."
+    export API_KEY="mrsm-key:YTg1ZTI3NDEtZ..."
 
-    curl -X GET http://localhost:8000/api/pipes \
+    curl -X GET http://localhost:8000/pipes \
       -H "Authorization: $API_KEY"
     ```

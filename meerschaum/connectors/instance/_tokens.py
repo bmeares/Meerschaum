@@ -53,7 +53,11 @@ def get_tokens_pipe(self) -> mrsm.Pipe:
     )
 
 
-def register_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple:
+def register_token(
+    self,
+    token: Token,
+    debug: bool = False,
+) -> mrsm.SuccessTuple:
     """
     Register the new token to the tokens table.
     """
@@ -61,7 +65,7 @@ def register_token(self, token: Token, debug: bool = False) -> mrsm.SuccessTuple
     tokens_pipe = self.get_tokens_pipe()
     user_id = self.get_user_id(token.user) if token.user is not None else None
     if user_id is None:
-        raise ValueError("Cannot register a token without a user.")
+        return False, "Cannot register a token without a user."
 
     doc = {
         'id': token_id,

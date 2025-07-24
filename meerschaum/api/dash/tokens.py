@@ -9,7 +9,7 @@ Dash utility functions for constructing tokens components.
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from typing import Any, List
+from typing import Any, List, Optional
 
 import meerschaum as mrsm
 from meerschaum.api import debug, CHECK_UPDATE, get_api_connector
@@ -91,39 +91,36 @@ def build_manage_token_popover(token: Token) -> dbc.Popover:
     """
     return dbc.Popover(
         [
-            dbc.PopoverHeader(["Manage token"]),
-            dbc.PopoverBody([
-                dbc.ButtonGroup(
-                    ([
-                        dbc.Button(
-                            "Edit",
-                            outline=True,
-                            color='light',
-                            id={
-                                'type': 'tokens-edit-button',
-                                'index': str(token.id),
-                            },
-                        ),
-                        dbc.Button(
-                            "Invalidate",
-                            outline=True,
-                            color='warning',
-                            id={
-                                'type': 'tokens-invalidate-button',
-                                'index': str(token.id),
-                            },
-                        ),
-                    ] if token.is_valid else []) + [
+            dbc.ButtonGroup(
+                ([
                     dbc.Button(
-                        "Delete",
-                        color='danger',
+                        "Edit",
                         outline=True,
+                        color='light',
                         id={
-                            'type': 'tokens-delete-button',
+                            'type': 'tokens-edit-button',
                             'index': str(token.id),
                         },
                     ),
-                ]),
+                    dbc.Button(
+                        "Invalidate",
+                        outline=True,
+                        color='warning',
+                        id={
+                            'type': 'tokens-invalidate-button',
+                            'index': str(token.id),
+                        },
+                    ),
+                ] if token.is_valid else []) + [
+                dbc.Button(
+                    "Delete",
+                    color='danger',
+                    outline=True,
+                    id={
+                        'type': 'tokens-delete-button',
+                        'index': str(token.id),
+                    },
+                ),
             ]),
         ],
         body=True,
@@ -600,7 +597,7 @@ def build_tokens_register_output_modal(token: Token) -> List[Any]:
             dbc.Button(
                 "Close",
                 id='tokens-close-register-output-modal-button',
-                disabled=True,
+                disabled=success,
             ),
         ]),
     ]

@@ -10,6 +10,7 @@ from meerschaum.api import debug as _debug
 import meerschaum.api.dash.callbacks.dashboard
 import meerschaum.api.dash.callbacks.login
 import meerschaum.api.dash.callbacks.plugins
+import meerschaum.api.dash.callbacks.tokens
 import meerschaum.api.dash.callbacks.jobs
 import meerschaum.api.dash.callbacks.register
 import meerschaum.api.dash.callbacks.pipes

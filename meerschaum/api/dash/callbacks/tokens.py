@@ -163,7 +163,7 @@ def register_token_click(
     token = Token(
         label=(name or None),
         user=get_user_from_session(session_id),
-        expiration=(datetime.fromisoformat(f"{expiration}T00:00:00Z") if expiration is not None else None),
+        expiration=(datetime.fromisoformat(f"{expiration}") if expiration is not None else None),
     )
     return False, True, build_tokens_register_output_modal(token)
 

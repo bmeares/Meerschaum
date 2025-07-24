@@ -3,7 +3,7 @@
 
 # 🔌 Connectors
 
-Meerschaum coordinates everything via connectors. Under the hood, Connectors are collections of attributes (e.g. username, host, uri, etc.) that allow Meerschaum to send and retrieve data by implementing Meerschaum's interface to another protocol. Use cases for Connectors include fetching and inserting data when [syncing pipes](/reference/pipes/syncing).
+Meerschaum coordinates everything via connectors. Use cases for Connectors include fetching and inserting data when [syncing pipes](/reference/pipes/syncing).
 
 A connector is identified by two keys: its **type** and **label**, separated by a colon (`:`). For example, the connector `sql:main` refers to a connector with the type `sql` and the label `main`.
 
@@ -11,7 +11,7 @@ The command `mrsm show connectors` will print out your defined connectors and th
 
 ## 🗃️ Instances and Repositories
 
-The terms **instance** and **repository** connectors refer to subclasses of standard Meerschaum connectors. When connecting to a Meerschaum instance, you use a standard `sql` or `api` connector, which expects to be able to access internal Meerschaum methods, such as retrieving users' and pipes' metadata.
+The terms **instance** and **repository** connectors refer to specific interfaces for connectors. When connecting to a Meerschaum instance, you use a standard `sql` or `api` connector, which expects to be able to access internal Meerschaum methods, such as retrieving users' and pipes' metadata.
 
 ![Meerschaum Connectors Venn Diagram](connectors_venn_diagram.png){align=right}
 

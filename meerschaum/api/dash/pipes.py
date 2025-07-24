@@ -12,6 +12,7 @@ import shlex
 from textwrap import dedent
 from urllib.parse import urlencode
 
+from meerschaum.utils import fetch_pipes_keys
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
@@ -817,3 +818,133 @@ def get_backtrack_text(
         json_text = '[]'
 
     return json.dumps(json.loads(json_text), indent=4, separators=(',', ': '))
+
+
+def build_pipes_dropdown_keys_row(
+    connector_keys: List[str],
+    metric_keys: List[str],
+    location_keys: List[str],
+    tags: List[str],
+    pipes: List[mrsm.Pipe],
+    instance_connector: mrsm.connectors.InstanceConnector,
+) -> dbc.Row:
+    """
+    Return the dropdown keys row for the dedicated pipes page.
+    """
+    ck_alone = connector_keys and not any([str(x) for x in (tags + metric_keys + location_keys)])
+    mk_alone = metric_keys and not any([str(x) for x in (connector_keys + tags + location_keys)])
+    lk_alone = location_keys and not any([str(x) for x in (connector_keys + metric_keys + tags)])
+    all_keys = fetch_pipes_keys('registered', instance_connector)
+    return dbc.Row(
+        [
+            dbc.Col(
+                html.Div(
+                    [
+                        dcc.Dropdown(
+                            id='pipes-connector-keys-dropdown',
+                            options=(
+                                sorted(list({pipe.connector_keys for pipe in pipes}))
+                                if not ck_alone
+                                else sorted(list({ck for ck, _, _ in all_keys}))
+                            ),
+                            value=[str(ck) for ck in connector_keys],
+                            placeholder='Connectors',
+                            multi=True,
+                        ),
+                    ],
+                    className='dbc_dark',
+                ),
+                lg=4,
+                md=12,
+                sm=12,
+            ),
+            dbc.Col(
+                html.Div(
+                    [
+                        dcc.Dropdown(
+                            id='pipes-metric-keys-dropdown',
+                            options=(
+                                sorted(list({pipe.metric_key for pipe in pipes}))
+                                if not mk_alone
+                                else sorted(list({mk for _, mk, _ in all_keys}))
+                            ),
+                            value=[str(mk) for mk in metric_keys],
+                            placeholder='Metrics',
+                            multi=True,
+                        ),
+                    ],
+                    className='dbc_dark'
+                ),
+                lg=4,
+                md=12,
+                sm=12,
+            ),
+            dbc.Col(
+                html.Div(
+                    [
+                        dcc.Dropdown(
+                            id='pipes-location-keys-dropdown',
+                            options=(
+                                sorted(list({str(pipe.location_key) for pipe in pipes}))
+                                if not lk_alone
+                                else sorted(list({str(lk) for _, _, lk in all_keys}))
+                            ),
+                            value=[str(lk) for lk in location_keys],
+                            placeholder='Locations',
+                            multi=True,
+                        ),
+                    ],
+                    className='dbc_dark'
+                ),
+                lg=4,
+                md=12,
+                sm=12,
+            ),
+        ] ### end of filters row children
+    )
+
+
+def build_pipes_tags_dropdown(
+    connector_keys: List[str],
+    metric_keys: List[str],
+    location_keys: List[str],
+    tags: List[str],
+    instance: str,
+) -> html.Div:
+    """
+    Build the tags dropdown for the dedicated pipes page.
+    """
+    _tags_alone = tags and not any([str(x) for x in (connector_keys + metric_keys + location_keys)])
+    _tags_pipes = mrsm.get_pipes(
+        connector_keys=connector_keys,
+        metric_keys=metric_keys,
+        location_keys=location_keys,
+        tags=tags,
+        instance=instance,
+        as_tags_dict=True,
+    )
+
+    _all_tags = list(
+        mrsm.get_pipes(
+            instance=instance,
+            as_tags_dict=True,
+        )
+    ) if _tags_alone else []
+
+    tags_options = [
+        str(tag)
+        for tag in (_all_tags if _tags_alone else _tags_pipes)
+    ]
+
+    return html.Div(
+        dcc.Dropdown(
+            id='pipes-tags-dropdown',
+            options=tags_options,
+            value=tags,
+            placeholder='Tags',
+            multi=True,
+            searchable=True,
+        ),
+        className="dbc_dark",
+        id="pipes-tags-dropdown-div",
+    )
