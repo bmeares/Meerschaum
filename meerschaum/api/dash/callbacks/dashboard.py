@@ -72,8 +72,6 @@ keys_state = (
     State({'type': 'input-flags-dropdown', 'index': ALL}, 'value'),
     State({'type': 'input-flags-dropdown-text', 'index': ALL}, 'value'),
     State('instance-select', 'value'),
-    State('content-div-right', 'children'),
-    State('success-alert-div', 'children'),
     State('session-store', 'data'),
 )
 
@@ -103,15 +101,20 @@ omit_actions = {
 _paths = {
     'login'   : pages.login.layout,
     ''        : pages.dashboard.layout,
+    'pipes'   : pages.pipes.layout,
     'plugins' : pages.plugins.layout,
+    'tokens'  : pages.tokens.layout,
     'register': pages.register.layout,
     'pipes'   : pages.pipes.layout,
-    'job'     : pages.job.layout,
+    'jobs'    : pages.jobs.layout,
 }
-_required_login = {''}
+_required_login = {'', 'tokens', 'jobs', 'pipes'}
 _pages = {
     'Web Console': '/dash/',
+    'Pipes': '/dash/pipes',
     'Plugins': '/dash/plugins',
+    'Tokens': '/dash/tokens',
+    'Jobs': '/dash/jobs',
 }
 
 
@@ -495,16 +498,12 @@ def update_flags(input_flags_dropdown_values, n_clicks, input_flags_texts):
 
 @dash_app.callback(
     Output('connector-keys-dropdown', 'options'),
-    Output('connector-keys-list', 'children'),
     Output('connector-keys-dropdown', 'value'),
     Output('metric-keys-dropdown', 'options'),
-    Output('metric-keys-list', 'children'),
     Output('metric-keys-dropdown', 'value'),
     Output('location-keys-dropdown', 'options'),
-    Output('location-keys-list', 'children'),
     Output('location-keys-dropdown', 'value'),
     Output('tags-dropdown', 'options'),
-    Output('tags-list', 'children'),
     Output('tags-dropdown', 'value'),
     Output('instance-select', 'value'),
     Output('instance-alert-div', 'children'),
@@ -664,22 +663,14 @@ def update_keys_options(
             for _tag in _tags_options
         ]
     ]
-    _connectors_datalist = [html.Option(value=o['value']) for o in _connectors_options]
-    _metrics_datalist = [html.Option(value=o['value']) for o in _metrics_options]
-    _locations_datalist = [html.Option(value=o['value']) for o in _locations_options]
-    _tags_datalist = [html.Option(value=o['value']) for o in _tags_options]
     return (
         _connectors_options,
-        _connectors_datalist,
         connector_keys,
         _metrics_options,
-        _metrics_datalist,
         metric_keys,
         _locations_options,
-        _locations_datalist,
         location_keys,
         _tags_options,
-        _tags_datalist,
         tags,
         (instance_keys if update_instance_keys else dash.no_update),
         instance_alerts,
@@ -856,6 +847,7 @@ dash_app.clientside_callback(
 @dash_app.callback(
     Output("download-dataframe-csv", "data"),
     Input({'type': 'pipe-download-csv-button', 'index': ALL}, 'n_clicks'),
+    prevent_initial_call=True,
 )
 def download_pipe_csv(n_clicks):
     """
@@ -885,6 +877,7 @@ def download_pipe_csv(n_clicks):
     Output({'type': 'pipe-accordion', 'index': MATCH}, 'children'),
     Input({'type': 'pipe-accordion', 'index': MATCH}, 'active_item'),
     State('session-store', 'data'),
+    prevent_initial_call=True,
 )
 def update_pipe_accordion(item, session_store_data):
     """
@@ -908,7 +901,8 @@ def update_pipe_accordion(item, session_store_data):
 @dash_app.callback(
     Output({'type': 'update-parameters-success-div', 'index': MATCH}, 'children'),
     Input({'type': 'update-parameters-button', 'index': MATCH}, 'n_clicks'),
-    State({'type': 'parameters-editor', 'index': MATCH}, 'value')
+    State({'type': 'parameters-editor', 'index': MATCH}, 'value'),
+    prevent_initial_call=True,
 )
 def update_pipe_parameters_click(n_clicks, parameters_editor_text):
     if not n_clicks:
@@ -942,6 +936,7 @@ def update_pipe_parameters_click(n_clicks, parameters_editor_text):
     Output({'type': 'update-sql-success-div', 'index': MATCH}, 'children'),
     Input({'type': 'update-sql-button', 'index': MATCH}, 'n_clicks'),
     State({'type': 'sql-editor', 'index': MATCH}, 'value'),
+    prevent_initial_call=True,
 )
 def update_pipe_sql_click(n_clicks, sql_editor_text):
     if not n_clicks:
@@ -968,7 +963,8 @@ def update_pipe_sql_click(n_clicks, sql_editor_text):
 @dash_app.callback(
     Output({'type': 'sync-success-div', 'index': MATCH}, 'children'),
     Input({'type': 'update-sync-button', 'index': MATCH}, 'n_clicks'),
-    State({'type': 'sync-editor', 'index': MATCH}, 'value')
+    State({'type': 'sync-editor', 'index': MATCH}, 'value'),
+    prevent_initial_call=True,
 )
 def sync_documents_click(n_clicks, sync_editor_text):
     if not n_clicks:
@@ -1014,6 +1010,7 @@ def sync_documents_click(n_clicks, sync_editor_text):
     State({'type': 'limit-input', 'index': MATCH}, 'value'),
     State({'type': 'query-data-begin-input', 'index': MATCH}, 'value'),
     State({'type': 'query-data-end-input', 'index': MATCH}, 'value'),
+    prevent_initial_call=True,
 )
 def query_data_click(n_clicks, query_editor_text, limit_value, begin, end):
     triggered = dash.callback_context.triggered
@@ -1130,6 +1127,7 @@ def toggle_navbar_collapse(n_clicks: Optional[int], is_open: bool) -> bool:
     Output('session-store', 'data'),
     Input("sign-out-button", "n_clicks"),
     State('session-store', 'data'),
+    prevent_initial_call=True,
 )
 def sign_out_button_click(
     n_clicks: Optional[int],
@@ -1150,6 +1148,7 @@ def sign_out_button_click(
     Output({'type': 'parameters-editor', 'index': MATCH}, 'value'),
     Input({'type': 'parameters-as-yaml-button', 'index': MATCH}, 'n_clicks'),
     Input({'type': 'parameters-as-json-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True,
 )
 def parameters_as_yaml_or_json_click(
     yaml_n_clicks: Optional[int],
@@ -1178,6 +1177,7 @@ def parameters_as_yaml_or_json_click(
     Output({'type': 'sync-editor', 'index': MATCH}, 'value'),
     Input({'type': 'sync-as-json-button', 'index': MATCH}, 'n_clicks'),
     Input({'type': 'sync-as-lines-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True,
 )
 def sync_as_json_or_lines_click(
     json_n_clicks: Optional[int],
@@ -1206,6 +1206,7 @@ def sync_as_json_or_lines_click(
     Output('pages-offcanvas', 'children'),
     Input('logo-img', 'n_clicks'),
     State('pages-offcanvas', 'is_open'),
+    prevent_initial_call=True,
 )
 def toggle_pages_offcanvas(n_clicks: Optional[int], is_open: bool):
     """

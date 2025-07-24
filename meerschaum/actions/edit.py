@@ -552,7 +552,12 @@ def _edit_tokens(
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
     if not action:
-        return False, "Provide token labels or IDs for the tokens to edit."
+        return (
+            False, (
+                "Provide token labels or IDs for the tokens to edit\n"
+                "    (run `show tokens` to see registered tokens)."
+            )
+        )
 
     conn = parse_instance_keys(mrsm_instance)
 
@@ -627,8 +632,6 @@ def _edit_tokens(
     )
 
     return True, msg
-
-        
 
 
 ### NOTE: This must be the final statement of the module.

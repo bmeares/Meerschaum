@@ -8,16 +8,13 @@ Define the tokens page layout.
 import dash_bootstrap_components as dbc
 import dash.html as html
 import dash.dcc as dcc
-from meerschaum.plugins import web_page
 from meerschaum._internal.static import STATIC_CONFIG
+from meerschaum.api.dash.components import pages_navbar
 
 
-@web_page('tokens', login_required=True, page_group='Settings')
-def page_layout():
-    """
-    Return the layout for the tokens page.
-    """
-    return dbc.Container([
+layout = [
+    pages_navbar,
+    dbc.Container([
         html.Br(), 
         html.H3('Tokens'),
         html.Div(id="tokens-alert-div"),
@@ -52,4 +49,5 @@ def page_layout():
             style={'text-align': 'right'},
         ),
         html.Div(id='tokens-output-div'),
-    ])
+    ]),
+]

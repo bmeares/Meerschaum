@@ -120,7 +120,7 @@ class Token:
         Register the new token to the configured instance.
         """
         if self.user is None:
-            raise ValueError("Cannot register a token with a user.")
+            return False, "Cannot register a token without a user."
 
         return self.instance_connector.register_token(self, debug=debug)
 

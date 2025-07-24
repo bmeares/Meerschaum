@@ -781,10 +781,11 @@ class Shell(cmd.Cmd):
             instance_keys += ':main'
 
         conn_attrs = parse_instance_keys(instance_keys, construct=False, debug=debug)
-        if conn_attrs is None or not conn_attrs:
-            conn_keys = str(get_connector(debug=debug))
-        else:
-            conn_keys = instance_keys
+        conn_keys = (
+            str(get_connector(debug=debug))
+            if conn_attrs is None
+            else instance_keys
+        )
 
         shell_attrs['instance_keys'] = conn_keys
 

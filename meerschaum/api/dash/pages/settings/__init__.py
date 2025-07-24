@@ -6,4 +6,3 @@ Define the layouts for the `settings` pages.
 """
 
 import meerschaum.api.dash.pages.settings.password_reset
-import meerschaum.api.dash.pages.settings.tokens

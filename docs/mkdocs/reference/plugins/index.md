@@ -1,6 +1,14 @@
 # ➕ Plugins
 
-Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes) as well as defining custom actions, API endpoints, and more.
+Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes) as well as defining custom actions, connectors, API endpoints, dash apps, and more.
+
+### Quickstart
+
+Run `bootstrap plugin` to get started:
+
+```bash
+mrsm bootstrap plugin
+```
 
 !!! question "What can I do with plugins?"
 
@@ -8,7 +16,7 @@ Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes)
 
 !!! question "If plugins are just Python modules, why don't I just use a normal Python package?"
 
-    Of course you can still use Meerschaum in typical Python packages! The plugins interface provides these benefits for your convenience, however:
+    Of course you can still use Meerschaum in typical Python packages. The plugins system provides these benefits for your convenience, however:
 
     - **No boilerplate.**  
       You might only need to define a short `fetch()` function. Skip `setup.py` / `pyproject.toml` and write only what you need.
@@ -17,7 +25,7 @@ Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes)
       Plugins are self-contained and portable, which means you can safely refactor your plugins without worrying about breaking imports somewhere else in your codebase.
 
     - **Get core functionality for free.**  
-      Writing your module as a plugin unlocks access to the rest of the Meerschaum system, e.g. the [connector management system](/reference/connectors), [date-bounded syncing](/reference/pipes/syncing/), and the [Meerschaum Compose workflow](/reference/compose/).
+      Writing your module as a plugin unlocks access to the rest of the Meerschaum system, e.g. [connector management](/reference/connectors), [date-bounded syncing](/reference/pipes/syncing/), integration with the [Web Console](/referenc/api-instance/web-console) and the [Meerschaum Compose workflow](/reference/compose/).
 
 !!! question "Ok, I think I understand. How do I make my own plugins?"
 

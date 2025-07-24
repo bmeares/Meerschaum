@@ -7,16 +7,17 @@ Display pipes via a shareable URL.
 
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.utils.packages import import_html, import_dcc
-from meerschaum.api.dash.components import download_dataframe, pages_navbar
+from meerschaum.api.dash.components import download_dataframe, pages_navbar, navbar
 
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
 
+
 layout = [
     pages_navbar,
+    dcc.Location('pipes-location'),
+    download_dataframe,
     dbc.Container([
-        dcc.Location('pipes-location'),
-        download_dataframe,
         html.Div(id='pipe-output-div'),
     ])
 ]
