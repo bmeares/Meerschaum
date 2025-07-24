@@ -16,7 +16,8 @@ from meerschaum.utils.formatting._shell import clear_screen
 
 FEATURE_CHOICES: Dict[str, str] = {
     'fetch'    : 'Fetch data\n     (e.g. extracting from a remote API)\n',
-    'connector': 'Custom connector\n     (e.g. manage credentials)\n',
+    'connector': 'Connector\n     (fetch data & manage credentials)\n',
+    'instance-connector': 'Instance connector\n     (implement the pipes interface)\n',
     'action'   : 'New actions\n     (e.g. `mrsm sing song`)\n',
     'api'      : 'New API endpoints\n     (e.g. `POST /my/new/endpoint`)\n',
     'web'      : 'New web console page\n     (e.g. `/dash/my-web-app`)\n',
@@ -25,6 +26,7 @@ FEATURE_CHOICES: Dict[str, str] = {
 IMPORTS_LINES: Dict[str, str] = {
     'stdlib': (
         "from datetime import datetime, timedelta, timezone\n"
+        "from typing import Any, Union, List, Dict\n"
     ),
     'default': (
         "import meerschaum as mrsm\n"
@@ -34,7 +36,7 @@ IMPORTS_LINES: Dict[str, str] = {
         "from meerschaum.connectors import Connector, make_connector\n"
     ),
     'instance-connector': (
-        "from meerschaum.connectors import InstanceConnector, make_connector"
+        "from meerschaum.connectors import InstanceConnector, make_connector\n"
     ),
     'action': (
         "from meerschaum.actions import make_action\n"
@@ -125,7 +127,7 @@ FEATURE_LINES: Dict[str, str] = {
         "        \"\"\"Return or yield dataframes.\"\"\"\n"
         "        docs = []\n"
         "        # populate docs with dictionaries (rows).\n"
-        "        return docs\n\n\n"
+        "        return docs\n\n"
         """
     def register_pipe(
         self,
@@ -145,12 +147,12 @@ FEATURE_LINES: Dict[str, str] = {
         -------
         A `SuccessTuple` of the result.
         \"\"\"
-        attributes = {
+        attributes = {{
             'connector_keys': str(pipe.connector_keys),
             'metric_key': str(pipe.metric_key),
             'location_key': str(pipe.location_key),
-            'parameters': pipe._attributes.get('parameters', {}),
-        }
+            'parameters': pipe._attributes.get('parameters', {{}}),
+        }}
 
         ### TODO insert `attributes` as a row in the pipes table.
         # self.pipes_collection.insert_one(attributes)
@@ -175,14 +177,14 @@ FEATURE_LINES: Dict[str, str] = {
         -------
         The document that matches the keys of the pipe.
         \"\"\"
-        query = {
+        query = {{
             'connector_keys': str(pipe.connector_keys),
             'metric_key': str(pipe.metric_key),
             'location_key': str(pipe.location_key),
-        }
+        }}
         ### TODO query the `pipes` table either using these keys or `get_pipe_id()`.
-        result = {}
-        # result = self.pipes_collection.find_one(query) or {}
+        result = {{}}
+        # result = self.pipes_collection.find_one(query) or {{}}
         return result
 
     def get_pipe_id(
@@ -203,13 +205,13 @@ FEATURE_LINES: Dict[str, str] = {
         -------
         The `_id` for the pipe's document or `None`.
         \"\"\"
-        query = {
+        query = {{
             'connector_keys': str(pipe.connector_keys),
             'metric_key': str(pipe.metric_key),
             'location_key': str(pipe.location_key),
-        }
+        }}
         ### TODO fetch the ID mapped to this pipe.
-        # oid = (self.pipes_collection.find_one(query, {'_id': 1}) or {}).get('_id', None)
+        # oid = (self.pipes_collection.find_one(query, {{'_id': 1}}) or {{}}).get('_id', None)
         # return str(oid) if oid is not None else None
 
     def edit_pipe(
@@ -230,14 +232,14 @@ FEATURE_LINES: Dict[str, str] = {
         -------
         A `SuccessTuple` indicating success.
         \"\"\"
-        query = {
+        query = {{
             'connector_keys': str(pipe.connector_keys),
             'metric_key': str(pipe.metric_key),
             'location_key': str(pipe.location_key),
-        }
-        pipe_parameters = pipe._attributes.get('parameters', {})
+        }}
+        pipe_parameters = pipe._attributes.get('parameters', {{}})
         ### TODO Update the row with new parameters.
-        # self.pipes_collection.update_one(query, {'$set': {'parameters': pipe_parameters}})
+        # self.pipes_collection.update_one(query, {{'$set': {{'parameters': pipe_parameters}}}})
         return True, "Success"
 
     def delete_pipe(
@@ -259,7 +261,7 @@ FEATURE_LINES: Dict[str, str] = {
         A `SuccessTuple` indicating success.
         \"\"\"
         ### TODO Delete the pipe's row from the pipes table.
-        # self.pipes_collection.delete_one({'_id': pipe_id})
+        # self.pipes_collection.delete_one({{'_id': pipe_id}})
         return True, "Success"
 
     def fetch_pipes_keys(
@@ -270,7 +272,7 @@ FEATURE_LINES: Dict[str, str] = {
         tags: list[str] | None = None,
         debug: bool = False,
         **kwargs: Any
-    ) -> List[Tuple[str, str, str]]:
+    ) -> list[tuple[str, str, str]]:
         \"\"\"
         Return a list of tuples for the registered pipes' keys according to the provided filters.
 
@@ -326,61 +328,286 @@ FEATURE_LINES: Dict[str, str] = {
         ### 
         ### SELECT connector_keys, metric_key, location_key
         ### FROM pipes
-        ### WHERE connector_keys IN ({in_ck})
-        ###   AND connector_keys NOT IN ({nin_ck})
-        ###   AND metric_key IN ({in_mk})
-        ###   AND metric_key NOT IN ({nin_mk})
-        ###   AND location_key IN (in_lk)
-        ###   AND location_key NOT IN (nin_lk)
-        ###   AND (parameters->'tags')::JSONB ?| ARRAY[{tags}]
-        ###   AND NOT (parameters->'tags')::JSONB ?| ARRAY[{nin_tags}]
+        ### WHERE connector_keys IN ({{in_ck}})
+        ###   AND connector_keys NOT IN ({{nin_ck}})
+        ###   AND metric_key IN ({{in_mk}})
+        ###   AND metric_key NOT IN ({{nin_mk}})
+        ###   AND location_key IN ({{in_lk}})
+        ###   AND location_key NOT IN ({{nin_lk}})
+        ###   AND (parameters->'tags')::JSONB ?| ARRAY[{{tags}}]
+        ###   AND NOT (parameters->'tags')::JSONB ?| ARRAY[{{nin_tags}}]
         return []
 
-def pipe_exists(
-    self,
-    pipe: mrsm.Pipe,
-    debug: bool = False,
-    **kwargs: Any
-) -> bool:
-    \"\"\"
-    Check whether a pipe's target table exists.
+    def pipe_exists(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> bool:
+        \"\"\"
+        Check whether a pipe's target table exists.
 
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe to check whether its table exists.
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe to check whether its table exists.
 
-    Returns
-    -------
-    A `bool` indicating the table exists.
-    \"\"\"
-    table_name = pipe.target
-    ### TODO write a query to determine the existence of `table_name`.
-    table_exists = False
-    return table_exists
+        Returns
+        -------
+        A `bool` indicating the table exists.
+        \"\"\"
+        table_name = pipe.target
+        ### TODO write a query to determine the existence of `table_name`.
+        table_exists = False
+        return table_exists
 
-def drop_pipe(
-    self,
-    pipe: mrsm.Pipe,
-    debug: bool = False,
-    **kwargs: Any
-) -> mrsm.SuccessTuple:
-    \"\"\"
-    Drop a pipe's collection if it exists.
+    def drop_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        \"\"\"
+        Drop a pipe's collection if it exists.
 
-    Parameters
-    ----------
-    pipe: mrsm.Pipe
-        The pipe to be dropped.
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe to be dropped.
 
-    Returns
-    -------
-    A `SuccessTuple` indicating success.
-    \"\"\"
-    ### TODO write a query to drop `table_name`.
-    table_name = pipe.target
-    return True, "Success"
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        \"\"\"
+        ### TODO write a query to drop `table_name`.
+        table_name = pipe.target
+        return True, \"Success\"
 
+    def sync_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        df: 'pd.DataFrame',
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        \"\"\"
+        Upsert new documents into the pipe's target table.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe to which the data should be upserted.
+
+        df: pd.DataFrame
+            The data to be synced.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        \"\"\"
+        ### TODO Write the upsert logic for the target table.
+        ### `pipe.filter_existing()` is provided for your convenience to
+        ### remove duplicates and separate inserts from updates.
+
+        unseen_df, update_df, delta_df = pipe.filter_existing(df, debug=debug)
+        return True, \"Success\"
+
+    def clear_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        begin: datetime | int | None = None,
+        end: datetime | int | None = None,
+        params: dict[str, Any] | None = None,
+        debug: bool = False,
+    ) -> mrsm.SuccessTuple:
+        \"\"\"
+        Delete rows within `begin`, `end`, and `params`.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose rows to clear.
+
+        begin: datetime | int | None, default None
+            If provided, remove rows >= `begin`.
+
+        end: datetime | int | None, default None
+            If provided, remove rows < `end`.
+
+        params: dict[str, Any] | None, default None
+            If provided, only remove rows which match the `params` filter.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        \"\"\"
+        ### TODO Write a query to remove rows which match `begin`, `end`, and `params`.
+        return True, \"Success\"
+
+    def get_pipe_data(
+        self,
+        pipe: mrsm.Pipe,
+        select_columns: list[str] | None = None,
+        omit_columns: list[str] | None = None,
+        begin: datetime | int | None = None,
+        end: datetime | int | None = None,
+        params: dict[str, Any] | None = None,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> Union['pd.DataFrame', None]:
+        \"\"\"
+        Query a pipe's target table and return the DataFrame.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe with the target table from which to read.
+
+        select_columns: list[str] | None, default None
+            If provided, only select these given columns.
+            Otherwise select all available columns (i.e. `SELECT *`).
+
+        omit_columns: list[str] | None, default None
+            If provided, remove these columns from the selection.
+
+        begin: datetime | int | None, default None
+            The earliest `datetime` value to search from (inclusive).
+
+        end: datetime | int | None, default None
+            The lastest `datetime` value to search from (exclusive).
+
+        params: dict[str | str] | None, default None
+            Additional filters to apply to the query.
+
+        Returns
+        -------
+        The target table's data as a DataFrame.
+        \"\"\"
+        if not pipe.exists(debug=debug):
+            return None
+
+        table_name = pipe.target
+        dt_col = pipe.columns.get(\"datetime\", None)
+
+        ### TODO Write a query to fetch from `table_name`
+        ###      and apply the filters `begin`, `end`, and `params`.
+        ### 
+        ###      To improve performance, add logic to only read from
+        ###      `select_columns` and not `omit_columns` (if provided).
+        ### 
+        ### SELECT {{', '.join(cols_to_select)}}
+        ### FROM \"{{table_name}}\"
+        ### WHERE \"{{dt_col}}\" >= '{{begin}}'
+        ###   AND \"{{dt_col}}\" <  '{{end}}'
+
+        ### The function `parse_df_datetimes()` is a convenience function
+        ### to cast a list of dictionaries into a DataFrame and convert datetime columns.
+        from meerschaum.utils.dataframe import parse_df_datetimes
+        rows = []
+        return parse_df_datetimes(rows)
+
+    def get_sync_time(
+        self,
+        pipe: mrsm.Pipe,
+        params: dict[str, Any] | None = None,
+        newest: bool = True,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> datetime | int | None:
+        \"\"\"
+        Return the most recent value for the `datetime` axis.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose collection contains documents.
+
+        params: dict[str, Any] | None, default None
+            Filter certain parameters when determining the sync time.
+
+        newest: bool, default True
+            If `True`, return the maximum value for the column.
+
+        Returns
+        -------
+        The largest `datetime` or `int` value of the `datetime` axis. 
+        \"\"\"
+        dt_col = pipe.columns.get('dt_col', None)
+        if dt_col is None:
+            return None
+
+        ### TODO write a query to get the largest value for `dt_col`.
+        ### If `newest` is `False`, return the smallest value.
+        ### Apply the `params` filter in case of multiplexing.
+
+    def get_pipe_columns_types(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> dict[str, str]:
+        \"\"\"
+        Return the data types for the columns in the target table for data type enforcement.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table contains columns and data types.
+
+        Returns
+        -------
+        A dictionary mapping columns to data types.
+        \"\"\"
+        table_name = pipe.target
+        ### TODO write a query to fetch the columns contained in `table_name`.
+        columns_types = {{}}
+
+        ### Return a dictionary mapping the columns
+        ### to their Pandas dtypes, e.g.:
+        ### `{{'foo': 'int64'`}}`
+        ### or to SQL-style dtypes, e.g.:
+        ### `{{'bar': 'INT'}}`
+        return columns_types
+
+    def get_pipe_rowcount(
+        self,
+        pipe: mrsm.Pipe,
+        begin: datetime | int | None = None,
+        end: datetime | int | None = None,
+        params: dict[str, Any] | None = None,
+        remote: bool = False,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> int:
+        \"\"\"
+        Return the rowcount for the pipe's table.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose table should be counted.
+
+        begin: datetime | int | None, default None
+            If provided, only count rows >= `begin`.
+
+        end: datetime | int | None, default None
+            If provided, only count rows < `end`.
+
+        params: dict[str, Any] | None
+            If provided, only count rows othat match the `params` filter.
+
+        remote: bool, default False
+            If `True`, return the rowcount for the pipe's fetch definition.
+            In this case, `self` refers to `Pipe.connector`, not `Pipe.instance_connector`.
+
+        Returns
+        -------
+        The rowcount for this pipe's table according the given parameters.
+        \"\"\"
+        ### TODO write a query to count how many rows exist in `table_name` according to the filters.
+        table_name = pipe.target
+        count = 0
+        return count
 """
     ),
     'action': (
@@ -489,8 +716,10 @@ def bootstrap_plugin(
     body_text += FEATURE_LINES['header'].format(**plugin_labels)
     body_text += IMPORTS_LINES['stdlib'].format(**plugin_labels)
     body_text += IMPORTS_LINES['default'].format(**plugin_labels)
-    if 'connector' in features:
+    if 'connector' in features and 'instance-connector' not in features:
         body_text += IMPORTS_LINES['connector'].format(**plugin_labels)
+    if 'instance-connector' in features:
+        body_text += IMPORTS_LINES['instance-connector'].format(**plugin_labels)
     if 'action' in features:
         body_text += IMPORTS_LINES['action'].format(**plugin_labels)
     if 'api' in features and 'web' in features:
@@ -508,8 +737,11 @@ def bootstrap_plugin(
         body_text += FEATURE_LINES['register'].format(**plugin_labels)
         body_text += FEATURE_LINES['fetch'].format(**plugin_labels)
 
-    if 'connector' in features:
+    if 'connector' in features and 'instance-connector' not in features:
         body_text += FEATURE_LINES['connector'].format(**plugin_labels)
+
+    if 'instance-connector' in features:
+        body_text += FEATURE_LINES['instance-connector'].format(**plugin_labels)
 
     if 'action' in features:
         body_text += FEATURE_LINES['action'].format(**plugin_labels)
