@@ -99,6 +99,7 @@ default_system_config = {
                 'mssql': True,
             },
             'instance': {
+                'create_metadata_cache_minutes': 14400,
                 'stale_temporary_tables_minutes': 1440,
                 'temporary_target': {
                     'prefix': '_',

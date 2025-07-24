@@ -188,7 +188,7 @@ def get_pipes(
         debug = debug
     )
     if result is None:
-        error(f"Unable to build pipes!")
+        error("Unable to build pipes!")
 
     ### Populate the `pipes` dictionary with Pipes based on the keys
     ### obtained from the chosen `method`.
