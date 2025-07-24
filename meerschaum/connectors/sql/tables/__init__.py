@@ -67,7 +67,15 @@ def get_tables(
     else: ### NOTE: mrsm_instance MUST BE a SQL Connector for this to work!
         conn = mrsm_instance
 
-    cache_expired = _check_create_cache(conn, debug=debug) if conn.type == 'sql' else False
+    cache_expired = (
+        (
+            _check_create_cache(conn, debug=debug)
+            if conn.flavor != 'sqlite'
+            else True
+        )
+        if conn.type == 'sql'
+        else False
+    )
     create = create or cache_expired
 
     ### Skip if the connector is not a SQL connector.
@@ -248,8 +256,9 @@ def get_tables(
 
                 _write_create_cache(mrsm.get_connector(str(mrsm_instance)), debug=debug)
 
-        with open(pickle_path, 'wb') as f:
-            pickle.dump(conn.metadata, f)
+        if conn.flavor != 'sqlite':
+            with open(pickle_path, 'wb') as f:
+                pickle.dump(conn.metadata, f)
 
     connector_tables[conn_key] = _tables
     return connector_tables[conn_key]
