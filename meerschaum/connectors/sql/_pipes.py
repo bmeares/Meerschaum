@@ -147,7 +147,7 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False
-) -> Optional[List[Tuple[str, str, Optional[str]]]]:
+) -> List[Tuple[str, str, Optional[str]]]:
     """
     Return a list of tuples corresponding to the parameters provided.
 
@@ -162,16 +162,27 @@ def fetch_pipes_keys(
     location_keys: Optional[List[str]], default None
         List of location_keys to search by.
 
+    tags: Optional[List[str]], default None
+        List of pipes to search by.
+
     params: Optional[Dict[str, Any]], default None
         Dictionary of additional parameters to search by.
         E.g. `--params pipe_id:1`
 
     debug: bool, default False
         Verbosity toggle.
+
+    Returns
+    -------
+    A list of tuples of pipes' keys (connector_keys, metric_key, location_key).
     """
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import separate_negation_values
-    from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS, table_exists
+    from meerschaum.utils.sql import (
+        OMIT_NULLSFIRST_FLAVORS,
+        table_exists,
+        json_flavors,
+    )
     from meerschaum._internal.static import STATIC_CONFIG
     import json
     from copy import deepcopy
@@ -259,25 +270,49 @@ def fetch_pipes_keys(
     in_ex_tag_groups = [separate_negation_values(tag_group) for tag_group in tag_groups]
 
     ors, nands = [], []
-    for _in_tags, _ex_tags in in_ex_tag_groups:
-        sub_ands = []
-        for nt in _in_tags:
-            sub_ands.append(
-                sqlalchemy.cast(
-                    pipes_tbl.c['parameters'],
-                    sqlalchemy.String,
-                ).like(f'%"tags":%"{nt}"%')
-            )
-        if sub_ands:
-            ors.append(sqlalchemy.and_(*sub_ands))
+    if self.flavor in json_flavors:
+        from sqlalchemy.dialects import postgresql
+        for _in_tags, _ex_tags in in_ex_tag_groups:
+            if _in_tags:
+                ors.append(
+                    sqlalchemy.and_(
+                        pipes_tbl.c['parameters'].cast(postgresql.JSONB).has_key('tags'),
+                        pipes_tbl.c['parameters']['tags'].cast(
+                            postgresql.JSONB
+                        ).contains(_in_tags)
+                    )
+                )
+            for xt in _ex_tags:
+                nands.append(
+                    sqlalchemy.not_(
+                        sqlalchemy.and_(
+                            pipes_tbl.c['parameters'].cast(postgresql.JSONB).has_key('tags'),
+                            pipes_tbl.c['parameters']['tags'].cast(
+                                postgresql.JSONB
+                            ).contains([xt])
+                        )
+                    )
+                )
+    else:
+        for _in_tags, _ex_tags in in_ex_tag_groups:
+            sub_ands = []
+            for nt in _in_tags:
+                sub_ands.append(
+                    sqlalchemy.cast(
+                        pipes_tbl.c['parameters'],
+                        sqlalchemy.String,
+                    ).like(f'%"tags":%"{nt}"%')
+                )
+            if sub_ands:
+                ors.append(sqlalchemy.and_(*sub_ands))
 
-        for xt in _ex_tags:
-            nands.append(
-                sqlalchemy.cast(
-                    pipes_tbl.c['parameters'],
-                    sqlalchemy.String,
-                ).not_like(f'%"tags":%"{xt}"%')
-            )
+            for xt in _ex_tags:
+                nands.append(
+                    sqlalchemy.cast(
+                        pipes_tbl.c['parameters'],
+                        sqlalchemy.String,
+                    ).not_like(f'%"tags":%"{xt}"%')
+                )
 
     q = q.where(sqlalchemy.and_(*nands)) if nands else q
     q = q.where(sqlalchemy.or_(*ors)) if ors else q
@@ -292,7 +327,7 @@ def fetch_pipes_keys(
 
     ### execute the query and return a list of tuples
     if debug:
-        dprint(q.compile(compile_kwargs={'literal_binds': True}))
+        dprint(q)
     try:
         rows = (
             self.execute(q).fetchall()

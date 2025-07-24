@@ -14,6 +14,8 @@ The Meerschaum Web Console provides a graphical interface for managing your Meer
 
 ## Webterm
 
+![Webterm](/assets/screenshots/web-console-webterm.png)
+
 ## Pipes
 
 ## Plugins

@@ -7,6 +7,8 @@ Interface with SQL servers using sqlalchemy.
 """
 
 from __future__ import annotations
+
+import pathlib
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Any, Union
 
@@ -375,6 +377,18 @@ class SQLConnector(InstanceConnector):
         _schema = sqlalchemy.inspect(self.engine).default_schema_name
         self.__dict__['schema'] = _schema
         return _schema
+
+    def get_metadata_cache_path(self, kind: str = 'json') -> pathlib.Path:
+        """
+        Return the path to the file to which to write metadata cache.
+        """
+        from meerschaum.config.paths import SQL_CONN_CACHE_RESOURCES_PATH
+        filename = (
+            f'{self.label}-metadata.pkl'
+            if kind == 'pkl'
+            else f'{self.label}.json'
+        )
+        return SQL_CONN_CACHE_RESOURCES_PATH / filename
 
     def __getstate__(self):
         return self.__dict__
