@@ -4,15 +4,13 @@ site_description: "Craft elegant data pipes with Meerschaum."
 site_author: Bennett Meares
 theme:
   features:
-    # - navigation.sections
-    # - navigation.instant
-    # - navigation.expand
     - navigation.tabs
     - navigation.top
     - toc.integrate
   favicon: assets/logo.ico
   logo: assets/logo_500x500.png
   name: material
+  custom_dir: mkdocs/overrides
   language: en
   palette:
     primary: deep orange
