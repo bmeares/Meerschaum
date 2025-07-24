@@ -429,7 +429,7 @@ def _bootstrap_plugins(
         action = [prompt("Enter the name of your new plugin:")]
 
     for plugin_name in action:
-        bootstrap_success, bootstrap_msg = bootstrap_plugin(plugin_name)
+        bootstrap_success, bootstrap_msg = bootstrap_plugin(plugin_name, debug=debug)
         if not bootstrap_success:
             return bootstrap_success, bootstrap_msg
 
