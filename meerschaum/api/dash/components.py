@@ -109,16 +109,7 @@ instance_select = dbc.Select(
     ],
     class_name='dbc_dark custom-select custom-select-sm',
 )
-instance_select_with_default = dbc.Select(
-    id='instance-select',
-    size='sm',
-    value=str(get_api_connector()),
-    options=[
-        {'label': (i[:32] + '…') if len(i) > 32 else i, 'value': i}
-        for i in get_connector_labels(*instance_types)
-    ],
-    class_name='dbc_dark custom-select custom-select-sm',
-)
+
 sign_out_button = dbc.Button(
     "Sign out",
     color='link',
@@ -172,35 +163,7 @@ pages_navbar = html.Div(
     id='pages-navbar-div',
 )
 
-pages_navbar_with_instance_select = html.Div(
-    [
-        pages_offcanvas,
-        dbc.Navbar(
-            dbc.Container(
-                [
-                    logo_row,
-                    dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
-                    dbc.Collapse(
-                        dbc.Row(
-                            [
-                                dbc.Col(instance_select_with_default, width='auto'),
-                                dbc.Col(sign_out_button, width='auto'),
-                            ],
-                            className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
-                            align='center',
-                        ),
-                        id='navbar-collapse',
-                        is_open=False,
-                        navbar=True,
-                    ),
-                ]
-            ),
-            dark=True,
-            color='dark'
-        ),
-    ],
-    id='pages-navbar-div',
-)
+
 navbar = dbc.Navbar(
     dbc.Container(
         [
