@@ -14,17 +14,24 @@ from urllib.parse import urlencode
 
 from meerschaum.utils import fetch_pipes_keys
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
-from meerschaum.utils.misc import string_to_dict
+from meerschaum.utils.misc import get_connector_labels
+from meerschaum.connectors import instance_types
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
 from meerschaum.utils.sql import get_pd_type
 from meerschaum.utils.yaml import yaml
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.dataframe import to_json, to_simple_lines
 from meerschaum.connectors.sql._fetch import get_pipe_query
-from meerschaum.api import CHECK_UPDATE
+from meerschaum.api import CHECK_UPDATE, get_api_connector
 from meerschaum.api.dash import debug, _get_pipes
 from meerschaum.api.dash.connectors import get_web_connector
-from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
+from meerschaum.api.dash.components import (
+    alert_from_success_tuple,
+    build_cards_grid,
+    sign_out_button,
+    logo_row,
+    pages_offcanvas,
+)
 from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.config import get_config
 import meerschaum as mrsm
@@ -835,6 +842,28 @@ def build_pipes_dropdown_keys_row(
     mk_alone = metric_keys and not any([str(x) for x in (connector_keys + tags + location_keys)])
     lk_alone = location_keys and not any([str(x) for x in (connector_keys + metric_keys + tags)])
     all_keys = fetch_pipes_keys('registered', instance_connector)
+
+    ck_options_source = (
+        {keys_tuple[0] for keys_tuple in all_keys}
+        if ck_alone
+        else {p.connector_keys for p in pipes}
+    )
+    ck_options = sorted(ck_options_source.union(connector_keys))
+
+    mk_options_source = (
+        {keys_tuple[1] for keys_tuple in all_keys}
+        if mk_alone
+        else {p.metric_key for p in pipes}
+    )
+    mk_options = sorted(mk_options_source.union(metric_keys))
+
+    lk_options_source = (
+        {str(keys_tuple[2]) for keys_tuple in all_keys}
+        if lk_alone
+        else {str(p.location_key) for p in pipes}
+    )
+    lk_options = sorted(lk_options_source.union({str(lk) for lk in location_keys}))
+
     return dbc.Row(
         [
             dbc.Col(
@@ -842,11 +871,7 @@ def build_pipes_dropdown_keys_row(
                     [
                         dcc.Dropdown(
                             id='pipes-connector-keys-dropdown',
-                            options=(
-                                sorted(list({pipe.connector_keys for pipe in pipes}))
-                                if not ck_alone
-                                else sorted(list({keys_tuple[0] for keys_tuple in all_keys}))
-                            ),
+                            options=ck_options,
                             value=[str(ck) for ck in connector_keys],
                             placeholder='Connectors',
                             multi=True,
@@ -863,11 +888,7 @@ def build_pipes_dropdown_keys_row(
                     [
                         dcc.Dropdown(
                             id='pipes-metric-keys-dropdown',
-                            options=(
-                                sorted(list({pipe.metric_key for pipe in pipes}))
-                                if not mk_alone
-                                else sorted(list({keys_tuple[1] for keys_tuple in all_keys}))
-                            ),
+                            options=mk_options,
                             value=[str(mk) for mk in metric_keys],
                             placeholder='Metrics',
                             multi=True,
@@ -884,11 +905,7 @@ def build_pipes_dropdown_keys_row(
                     [
                         dcc.Dropdown(
                             id='pipes-location-keys-dropdown',
-                            options=(
-                                sorted(list({str(pipe.location_key) for pipe in pipes}))
-                                if not lk_alone
-                                else sorted(list({str(keys_tuple[2]) for keys_tuple in all_keys}))
-                            ),
+                            options=lk_options,
                             value=[str(lk) for lk in location_keys],
                             placeholder='Locations',
                             multi=True,
@@ -910,7 +927,7 @@ def build_pipes_tags_dropdown(
     location_keys: List[str],
     tags: List[str],
     instance: str,
-) -> html.Div:
+) -> dbc.Row:
     """
     Build the tags dropdown for the dedicated pipes page.
     """
@@ -935,16 +952,84 @@ def build_pipes_tags_dropdown(
         str(tag)
         for tag in (_all_tags if _tags_alone else _tags_pipes)
     ]
+    if tags:
+        tags_options += [tag for tag in tags if tag not in tags_options]
 
+    return dbc.Row(
+        [
+            dbc.Col(
+                html.Div(
+                    dcc.Dropdown(
+                        id='pipes-tags-dropdown',
+                        options=tags_options,
+                        value=tags,
+                        placeholder='Tags',
+                        multi=True,
+                        searchable=True,
+                    ),
+                    className="dbc_dark",
+                    id="pipes-tags-dropdown-div",
+                ),
+                width=True,
+            ),
+            dbc.Col(
+                dbc.Button(
+                    "Clear all",
+                    color='link',
+                    size='sm',
+                    style={'text-decoration': 'none'},
+                    id='pipes-clear-all-button',
+                ),
+                width='auto',
+            ),
+        ],
+        className='g-0',
+        align='center',
+    )
+
+
+def build_pipes_navbar(instance_keys: Optional[str] = None, with_instance_select: bool = True):
+    """
+    Build the navbar from the selected instance keys.
+    """
+    instance_select = dbc.Select(
+        id='instance-select',
+        size='sm',
+        value=instance_keys or str(get_api_connector()),
+        options=[
+            {'label': (i[:32] + '…') if len(i) > 32 else i, 'value': i}
+            for i in get_connector_labels(*instance_types)
+        ],
+        class_name='dbc_dark custom-select custom-select-sm',
+    )
+    instance_select_div_style = {} if with_instance_select else {'visibility': 'hidden'}
+    instance_select_div = html.Div(instance_select, style=instance_select_div_style)
     return html.Div(
-        dcc.Dropdown(
-            id='pipes-tags-dropdown',
-            options=tags_options,
-            value=tags,
-            placeholder='Tags',
-            multi=True,
-            searchable=True,
-        ),
-        className="dbc_dark",
-        id="pipes-tags-dropdown-div",
+        [
+            pages_offcanvas,
+            dbc.Navbar(
+                dbc.Container(
+                    [
+                        logo_row,
+                        dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
+                        dbc.Collapse(
+                            dbc.Row(
+                                [
+                                    dbc.Col(instance_select_div, width='auto'),
+                                    dbc.Col(sign_out_button, width='auto'),
+                                ],
+                                className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
+                                align='center',
+                            ),
+                            id='navbar-collapse',
+                            is_open=False,
+                            navbar=True,
+                        ),
+                    ]
+                ),
+                dark=True,
+                color='dark'
+            ),
+        ],
+        id='pages-navbar-div',
     )

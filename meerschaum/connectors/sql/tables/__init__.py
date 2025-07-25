@@ -24,6 +24,7 @@ _skip_index_names_flavors = {'mssql',}
 def get_tables(
     mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
     create: Optional[bool] = None,
+    refresh: bool = False,
     debug: bool = False,
 ) -> Union[Dict[str, 'sqlalchemy.Table'], bool]:
     """
@@ -36,6 +37,9 @@ def get_tables(
 
     create: Optional[bool], default None
         If `True`, create the tables if they don't exist.
+
+    refresh: bool, default False
+        If `True`, invalidate and rebuild any cache.
 
     debug: bool, default False
         Verbosity Toggle.
@@ -67,7 +71,7 @@ def get_tables(
     else: ### NOTE: mrsm_instance MUST BE a SQL Connector for this to work!
         conn = mrsm_instance
 
-    cache_expired = (
+    cache_expired = refresh or (
         (
             _check_create_cache(conn, debug=debug)
             if conn.flavor != 'sqlite'
@@ -83,6 +87,10 @@ def get_tables(
         return {}
 
     conn_key = str(conn)
+
+    if refresh:
+        _ = connector_tables.pop(conn_key, None)
+
     if conn_key in connector_tables:
         return connector_tables[conn_key]
 

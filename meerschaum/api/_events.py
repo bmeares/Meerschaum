@@ -98,6 +98,11 @@ async def startup():
         await shutdown()
         os._exit(1)
 
+    conn = get_api_connector()
+    if conn.type == 'sql':
+        from meerschaum.connectors.sql.tables import get_tables
+        _ = get_tables(conn, refresh=True, create=True, debug=debug)
+
     start_check_jobs_thread()
 
 

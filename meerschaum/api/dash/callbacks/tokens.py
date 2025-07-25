@@ -54,7 +54,8 @@ def refresh_tokens_button_click(
                 html.H4('No tokens registered.'),
                 html.P('Click the `+` button to register a new token.'),
             ],
-            alerts
+            build_tokens_register_input_modal(),
+            alerts,
         )
 
     return tokens_table, build_tokens_register_input_modal(), alerts

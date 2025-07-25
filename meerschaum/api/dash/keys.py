@@ -227,7 +227,23 @@ dropdown_tab_content = html.Div([
             [
                 dropdown_keys_row,
                 html.Br(),
-                tags_dropdown,
+                dbc.Row(
+                    [
+                        dbc.Col(tags_dropdown, width=True),
+                        dbc.Col(
+                            dbc.Button(
+                                "Clear all",
+                                id='clear-all-keys-button',
+                                color='link',
+                                size='sm',
+                                style={'text-decoration': 'none'},
+                            ),
+                            width='auto',
+                        ),
+                    ],
+                    className='g-0',
+                    align='center',
+                ),
             ], ### end of card children
             className='card-text',
         )

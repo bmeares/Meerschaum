@@ -498,13 +498,9 @@ def update_flags(input_flags_dropdown_values, n_clicks, input_flags_texts):
 
 @dash_app.callback(
     Output('connector-keys-dropdown', 'options'),
-    Output('connector-keys-dropdown', 'value'),
     Output('metric-keys-dropdown', 'options'),
-    Output('metric-keys-dropdown', 'value'),
     Output('location-keys-dropdown', 'options'),
-    Output('location-keys-dropdown', 'value'),
     Output('tags-dropdown', 'options'),
-    Output('tags-dropdown', 'value'),
     Output('instance-select', 'value'),
     Output('instance-alert-div', 'children'),
     Input('connector-keys-dropdown', 'value'),
@@ -546,15 +542,6 @@ def update_keys_options(
     except Exception as e:
         instance_alerts += [alert_from_success_tuple((False, str(e)))]
 
-    ### Update the keys filters.
-    if connector_keys is None:
-        connector_keys = []
-    if metric_keys is None:
-        metric_keys = []
-    if location_keys is None:
-        location_keys = []
-    if tags is None:
-        tags = []
     num_filter = 0
     if connector_keys:
         num_filter += 1
@@ -565,10 +552,6 @@ def update_keys_options(
     if tags:
         num_filter += 1
 
-    _ck_filter = connector_keys
-    _mk_filter = metric_keys
-    _lk_filter = location_keys
-    _tags_filter = tags
     _ck_alone = (connector_keys and num_filter == 1) or instance_click
     _mk_alone = (metric_keys and num_filter == 1) or instance_click
     _lk_alone = (location_keys and num_filter == 1) or instance_click
@@ -581,101 +564,94 @@ def update_keys_options(
         _keys = fetch_pipes_keys(
             'registered',
             get_web_connector(ctx.states),
-            connector_keys=_ck_filter,
-            metric_keys=_mk_filter,
-            location_keys=_lk_filter,
-            tags=_tags_filter,
+            connector_keys=connector_keys,
+            metric_keys=metric_keys,
+            location_keys=location_keys,
+            tags=tags,
         )
         _tags_pipes = mrsm.get_pipes(
-            connector_keys=_ck_filter,
-            metric_keys=_mk_filter,
-            location_keys=_lk_filter,
-            tags=_tags_filter,
+            connector_keys=connector_keys,
+            metric_keys=metric_keys,
+            location_keys=location_keys,
+            tags=tags,
             instance=get_web_connector(ctx.states),
             as_tags_dict=True,
         )
         _all_tags = list(
-            mrsm.get_pipes(
-                instance=get_web_connector(ctx.states),
-                as_tags_dict=True,
-            )
+            set(
+                mrsm.get_pipes(
+                    instance=get_web_connector(ctx.states),
+                    as_tags_dict=True,
+                )
+            ).union(tags or [])
         ) if _tags_alone else []
     except Exception as e:
         instance_alerts += [alert_from_success_tuple((False, str(e)))]
         _all_keys, _all_tags, _keys = [], [], []
-    _connectors_options = []
-    _metrics_options = []
-    _locations_options = []
-    _tags_options = []
 
-    _seen_keys = {'ck' : set(), 'mk' : set(), 'lk' : set(), 'tags': set()}
+    connectors_options = sorted(
+        list(
+            set(
+                keys_tuple[0] for keys_tuple in (_all_keys if _ck_alone else _keys)
+            ).union(set(connector_keys or []))
+        ),
+        key=(lambda x: str(x).lower()),
+    )
+    metrics_options = sorted(
+        list(
+            set(
+                keys_tuple[1] for keys_tuple in (_all_keys if _mk_alone else _keys)
+            ).union(set(metric_keys or []))
+        ),
+        key=(lambda x: str(x).lower()),
+    )
+    locations_options = sorted(
+        list(
+            set(
+                (
+                    str(keys_tuple[2])
+                    for keys_tuple in (_all_keys if _lk_alone else _keys)
+                )
+            ).union(set((str(_lk) for _lk in (location_keys or []))))
+        ),
+        key=(lambda x: str(x).lower()),
+    )
 
-    def add_options(options, keys, key_type):
-        for keys_tuple in keys:
-            ck, mk, lk = keys_tuple[0], keys_tuple[1], keys_tuple[2]
-            k = locals()[key_type]
-            if k not in _seen_keys[key_type]:
-                _k = 'None' if k in (None, '[None]', 'None', 'null') else k
-                options.append({'label': _k, 'value': _k})
-                _seen_keys[key_type].add(k)
+    tags_options = sorted(
+        list(
+            set(
+                (_all_tags if _tags_alone else _tags_pipes)
+            ).union(set(tags or []))
+        ),
+        key=(lambda x: str(x).lower()),
+    )
 
-    add_options(_connectors_options, _all_keys if _ck_alone else _keys, 'ck')
-    add_options(_metrics_options, _all_keys if _mk_alone else _keys, 'mk')
-    add_options(_locations_options, _all_keys if _lk_alone else _keys, 'lk')
-
-    _tags_options = [
-        {'label': tag, 'value': tag}
-        for tag in (_all_tags if _tags_alone else _tags_pipes)
-    ]
-
-    _connectors_options.sort(key=lambda x: str(x).lower())
-    _metrics_options.sort(key=lambda x: str(x).lower())
-    _locations_options.sort(key=lambda x: str(x).lower())
-    _tags_options.sort(key=lambda x: str(x).lower())
-    connector_keys = [
-        ck
-        for ck in connector_keys
-        if ck in [
-            _ck['value']
-            for _ck in _connectors_options
-        ]
-    ]
-    metric_keys = [
-        mk
-        for mk in metric_keys
-        if mk in [
-            _mk['value']
-            for _mk in _metrics_options
-        ]
-    ]
-    location_keys = [
-        lk
-        for lk in location_keys
-        if lk in [
-            _lk['value']
-            for _lk in _locations_options
-        ]
-    ]
-    tags = [
-        tag
-        for tag in tags
-        if tag in [
-            _tag['value']
-            for _tag in _tags_options
-        ]
-    ]
     return (
-        _connectors_options,
-        connector_keys,
-        _metrics_options,
-        metric_keys,
-        _locations_options,
-        location_keys,
-        _tags_options,
-        tags,
+        connectors_options,
+        metrics_options,
+        locations_options,
+        tags_options,
         (instance_keys if update_instance_keys else dash.no_update),
         instance_alerts,
     )
+
+
+@dash_app.callback(
+    Output('connector-keys-dropdown', 'value'),
+    Output('metric-keys-dropdown', 'value'),
+    Output('location-keys-dropdown', 'value'),
+    Output('tags-dropdown', 'value'),
+    Input('clear-all-keys-button', 'n_clicks'),
+    prevent_initial_call=True,
+)
+def clear_all_keys_button_click(n_clicks):
+    """
+    Clear the keys dropdowns when the `Clear all` button is clicked.
+    """
+    if not n_clicks:
+        raise PreventUpdate
+
+    return [], [], [], []
 
 dash_app.clientside_callback(
     """
