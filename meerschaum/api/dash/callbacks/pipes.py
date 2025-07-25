@@ -5,8 +5,9 @@
 Define callbacks for the `/dash/pipes/` page.
 """
 
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote_plus
 
+import dash
 from dash.dependencies import Input, Output, State
 from dash import no_update
 from dash.exceptions import PreventUpdate
@@ -37,6 +38,7 @@ def render_pipe_page_from_url(
     pipe_search: str,
     session_data: Optional[Dict[str, Any]],
 ):
+    ctx = dash.callback_context.triggered
     if not str(pathname).startswith('/dash/pipes'):
         return no_update
 
@@ -136,21 +138,21 @@ def update_location_on_pipes_filter_change(connector_keys, metric_keys, location
     search_str = "?"
     
     if connector_keys:
-        search_str += "connector_keys=" + ','.join(connector_keys)
+        search_str += "connector_keys=" + ','.join((quote_plus(ck) for ck in connector_keys))
         if metric_keys or location_keys or tags:
             search_str += '&'
 
     if metric_keys:
-        search_str += "metric_keys=" + ','.join(metric_keys)
+        search_str += "metric_keys=" + ','.join((quote_plus(mk) for mk in metric_keys))
         if location_keys or tags:
             search_str += '&'
 
     if location_keys:
-        search_str += "location_keys=" + ','.join(location_keys)
+        search_str += "location_keys=" + ','.join((quote_plus(str(lk)) for lk in location_keys))
         if tags:
             search_str += '&'
 
     if tags:
-        search_str += "tags=" + ','.join(tags)
+        search_str += "tags=" + ','.join((quote_plus(tag) for tag in tags))
 
     return search_str

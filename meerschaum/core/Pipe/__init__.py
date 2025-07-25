@@ -562,7 +562,7 @@ class Pipe:
             'connector_keys': self.connector_keys,
             'metric_key': self.metric_key,
             'location_key': self.location_key,
-            'parameters': self.parameters,
+            'parameters': self._attributes.get('parameters', None),
             'instance_keys': self.instance_keys,
         }
 
@@ -598,3 +598,19 @@ class Pipe:
         if aliased_key is not None:
             key = aliased_key
         return getattr(self, key, None)
+
+    def __copy__(self):
+        """
+        Return a shallow copy of the current pipe.
+        """
+        return mrsm.Pipe(
+            self.connector_keys, self.metric_key, self.location_key,
+            instance=self.instance_keys,
+            parameters=self._attributes.get('parameters', None),
+        )
+
+    def __deepcopy__(self, memo):
+        """
+        Return a deep copy of the current pipe.
+        """
+        return self.__copy__()

@@ -845,7 +845,7 @@ def build_pipes_dropdown_keys_row(
                             options=(
                                 sorted(list({pipe.connector_keys for pipe in pipes}))
                                 if not ck_alone
-                                else sorted(list({ck for ck, _, _ in all_keys}))
+                                else sorted(list({keys_tuple[0] for keys_tuple in all_keys}))
                             ),
                             value=[str(ck) for ck in connector_keys],
                             placeholder='Connectors',
@@ -866,7 +866,7 @@ def build_pipes_dropdown_keys_row(
                             options=(
                                 sorted(list({pipe.metric_key for pipe in pipes}))
                                 if not mk_alone
-                                else sorted(list({mk for _, mk, _ in all_keys}))
+                                else sorted(list({keys_tuple[1] for keys_tuple in all_keys}))
                             ),
                             value=[str(mk) for mk in metric_keys],
                             placeholder='Metrics',
@@ -887,7 +887,7 @@ def build_pipes_dropdown_keys_row(
                             options=(
                                 sorted(list({str(pipe.location_key) for pipe in pipes}))
                                 if not lk_alone
-                                else sorted(list({str(lk) for _, _, lk in all_keys}))
+                                else sorted(list({str(keys_tuple[2]) for keys_tuple in all_keys}))
                             ),
                             value=[str(lk) for lk in location_keys],
                             placeholder='Locations',

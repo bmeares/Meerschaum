@@ -165,10 +165,14 @@ def replace_pipes_in_dict(
     A dictionary where every pipe is replaced with the output of a function.
 
     """
-    def change_dict(d : Dict[Any, Any], func : 'function') -> None:
+    def change_dict(d: Dict[Any, Any]) -> None:
         for k, v in d.items():
             if isinstance(v, dict):
                 change_dict(v, func)
+            elif isinstance(v, list):
+                d[k] = [func(i) for i in v]
+            elif isinstance(v, tuple):
+                d[k] = tuple([func(i) for i in v])
             else:
                 d[k] = func(v)
 
@@ -177,5 +181,5 @@ def replace_pipes_in_dict(
         pipes = get_pipes(debug=debug, **kw)
 
     result = copy.deepcopy(pipes)
-    change_dict(result, func)
+    change_dict(result)
     return result

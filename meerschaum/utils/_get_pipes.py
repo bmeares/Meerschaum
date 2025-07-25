@@ -128,11 +128,12 @@ def get_pipes(
     ```
     """
 
+    import json
+    from collections import defaultdict
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import error
     from meerschaum.utils.misc import filter_keywords
     from meerschaum.utils.pool import get_pool
-    from collections import defaultdict
 
     if connector_keys is None:
         connector_keys = []
@@ -194,19 +195,42 @@ def get_pipes(
     ### obtained from the chosen `method`.
     from meerschaum import Pipe
     pipes = {}
-    for ck, mk, lk in result:
+    for keys_tuple in result:
+        ck, mk, lk = keys_tuple[0], keys_tuple[1], keys_tuple[2]
+        pipe_tags_or_parameters = keys_tuple[3] if len(keys_tuple) == 4 else None
+        pipe_parameters = (
+            pipe_tags_or_parameters
+            if isinstance(pipe_tags_or_parameters, (dict, str))
+            else None
+        )
+        if isinstance(pipe_parameters, str):
+            pipe_parameters = json.loads(pipe_parameters)
+        pipe_tags = (
+            pipe_tags_or_parameters
+            if isinstance(pipe_tags_or_parameters, list)
+            else (
+                pipe_tags_or_parameters.get('tags', None)
+                if isinstance(pipe_tags_or_parameters, dict)
+                else None
+            )
+        )
+
         if ck not in pipes:
             pipes[ck] = {}
 
         if mk not in pipes[ck]:
             pipes[ck][mk] = {}
 
-        pipes[ck][mk][lk] = Pipe(
+        pipe = Pipe(
             ck, mk, lk,
             mrsm_instance = connector,
+            parameters = pipe_parameters,
+            tags = pipe_tags,
             debug = debug,
             **filter_keywords(Pipe, **kw)
         )
+        pipe.__dict__['_tags'] = pipe_tags
+        pipes[ck][mk][lk] = pipe
 
     if not as_list and not as_tags_dict:
         return pipes
@@ -218,7 +242,9 @@ def get_pipes(
 
     pool = get_pool(workers=(workers if connector.IS_THREAD_SAFE else 1))
     def gather_pipe_tags(pipe: mrsm.Pipe) -> Tuple[mrsm.Pipe, List[str]]:
-        return pipe, (pipe.tags or [])
+        _tags = pipe.__dict__.get('_tags', None)
+        gathered_tags = _tags if _tags is not None else pipe.tags
+        return pipe, (gathered_tags or [])
 
     tags_pipes = defaultdict(lambda: [])
     pipes_tags = dict(pool.map(gather_pipe_tags, pipes_list))

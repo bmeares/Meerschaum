@@ -65,7 +65,7 @@ def get_tokens_table(session_id: Optional[str] = None) -> Tuple[dbc.Table, List[
             html.Td("✅" if token.is_valid else "❌"),
             html.Td([
                 dbc.Button(
-                    html.B("⠇"),
+                    html.B("⋮"),
                     color='link',
                     size='sm',
                     id={'type': 'tokens-context-button', 'index': str(token.id)},
