@@ -147,7 +147,9 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False
-) -> List[Tuple[str, str, Optional[str]]]:
+) -> List[
+        Tuple[str, str, Union[str, None], Dict[str, Any]]
+    ]:
     """
     Return a list of tuples corresponding to the parameters provided.
 
@@ -174,7 +176,7 @@ def fetch_pipes_keys(
 
     Returns
     -------
-    A list of tuples of pipes' keys (connector_keys, metric_key, location_key).
+    A list of tuples of pipes' keys and parameters (connector_keys, metric_key, location_key, parameters).
     """
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import separate_negation_values
@@ -254,6 +256,11 @@ def fetch_pipes_keys(
             pipes_tbl.c.connector_keys,
             pipes_tbl.c.metric_key,
             pipes_tbl.c.location_key,
+            (
+                pipes_tbl.c.parameters['tags']
+                if self.flavor in json_flavors
+                else pipes_tbl.c.parameters
+            ),
         ]
     )
 
@@ -340,7 +347,7 @@ def fetch_pipes_keys(
     except Exception as e:
         error(str(e))
 
-    return [(row[0], row[1], row[2]) for row in rows]
+    return rows
 
 
 def create_pipe_indices(

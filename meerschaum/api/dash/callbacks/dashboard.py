@@ -602,7 +602,7 @@ def update_keys_options(
         ) if _tags_alone else []
     except Exception as e:
         instance_alerts += [alert_from_success_tuple((False, str(e)))]
-        _all_keys, _keys = [], []
+        _all_keys, _all_tags, _keys = [], [], []
     _connectors_options = []
     _metrics_options = []
     _locations_options = []
@@ -611,7 +611,8 @@ def update_keys_options(
     _seen_keys = {'ck' : set(), 'mk' : set(), 'lk' : set(), 'tags': set()}
 
     def add_options(options, keys, key_type):
-        for ck, mk, lk in keys:
+        for keys_tuple in keys:
+            ck, mk, lk = keys_tuple[0], keys_tuple[1], keys_tuple[2]
             k = locals()[key_type]
             if k not in _seen_keys[key_type]:
                 _k = 'None' if k in (None, '[None]', 'None', 'null') else k
