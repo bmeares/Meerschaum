@@ -42,17 +42,6 @@ def delete(
             + "You may want to call `pipe.drop()` instead."
         )
 
-    if self.cache_pipe is not None:
-        _drop_cache_tuple = self.cache_pipe.drop(debug=debug, **kw)
-        if not _drop_cache_tuple[0]:
-            warn(_drop_cache_tuple[1])
-        if getattr(self.cache_connector, 'flavor', None) == 'sqlite':
-            _cache_db_path = pathlib.Path(self.cache_connector.database)
-            try:
-                os.remove(_cache_db_path)
-            except Exception as e:
-                warn(f"Could not delete cache file '{_cache_db_path}' for {self}:\n{e}")
-
     if drop:
         drop_success, drop_msg = self.drop(debug=debug)
         if not drop_success:

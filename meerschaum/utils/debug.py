@@ -7,11 +7,31 @@ Functions to handle debug statements
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timezone
+import meerschaum as mrsm
 from meerschaum.utils.typing import Union, Optional, List
+
+
+_rich_text = None
+def _import_rich_text_for_dprint():
+    """
+    Avoid calling `attempt_import()` on every dprint.
+    """
+    global _rich_text
+    if _rich_text is not None:
+        return _rich_text
+
+    from meerschaum.utils.packages import import_rich, attempt_import
+    _ = import_rich()
+    _rich_text = attempt_import('rich.text', lazy=False)
+    return _rich_text
+
 
 def dprint(
     msg: str,
     leader: bool = True,
+    timestamp: bool = True,
     package: bool = True,
     color: Optional[Union[str, List[str]]] = None,
     attrs: Optional[List[str]] = None,
@@ -35,6 +55,12 @@ def dprint(
     else:
         CHARSET, ANSI, colored, _color, cf = 'ascii', False, None, None, None
 
+    if timestamp:
+        from meerschaum.utils.dtypes import get_current_timestamp
+        now = get_current_timestamp('ms').replace(tzinfo=None)
+    else:
+        now = None
+
     import logging, sys, inspect
     logging.basicConfig(format='%(message)s')
     log = logging.getLogger(__name__)
@@ -46,8 +72,13 @@ def dprint(
     parent_package = parent_globals['__name__']
     msg = str(msg)
     premsg = ""
+
+    if now:
+        premsg = now.isoformat().split('T', maxsplit=1)[-1][:-3] + (' | ' if package else ':')
     if package:
-        premsg = parent_package + ':' + str(parent_lineno) + '\n'
+        premsg = premsg + parent_package + ':' + str(parent_lineno)
+    if premsg:
+        premsg += "\n"
     if leader and cf is not None:
         try:
             debug_leader = cf['formatting']['debug'][CHARSET]['icon'] if cf is not None else ''
@@ -75,10 +106,9 @@ def dprint(
                 _color = {}
         if colored is not None:
             premsg = colored(premsg, **_color)
+
     if _progress is not None:
-        from meerschaum.utils.packages import import_rich, attempt_import
-        rich = import_rich()
-        rich_text = attempt_import('rich.text')
+        rich_text = _import_rich_text_for_dprint()
         text = rich_text.Text.from_ansi(premsg + msg)
         _progress.console.log(text)
     else:

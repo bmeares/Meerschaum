@@ -137,7 +137,17 @@ class Pipe:
         guess_datetime,
         precision,
         get_precision,
+    )
+    from ._cache import (
+        _get_cache_connector,
+        _cache_value,
+        _get_cached_value,
         _invalidate_cache,
+        _get_cache_dir_path,
+        _write_cache_file,
+        _read_cache_file,
+        _load_cache_files,
+        _clear_cache_key,
     )
     from ._show import show
     from ._edit import edit, edit_definition, update
@@ -176,7 +186,6 @@ class Pipe:
         target: Optional[str] = None,
         dtypes: Optional[Dict[str, str]] = None,
         instance: Optional[Union[str, InstanceConnector]] = None,
-        temporary: bool = False,
         upsert: Optional[bool] = None,
         autoincrement: Optional[bool] = None,
         autotime: Optional[bool] = None,
@@ -185,14 +194,16 @@ class Pipe:
         enforce: Optional[bool] = None,
         null_indices: Optional[bool] = None,
         mixed_numerics: Optional[bool] = None,
+        temporary: bool = False,
+        cache: Optional[bool] = None,
+        cache_connector_keys: Optional[str] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
-        cache: bool = False,
-        debug: bool = False,
         connector_keys: Optional[str] = None,
         metric_key: Optional[str] = None,
         location_key: Optional[str] = None,
         instance_keys: Optional[str] = None,
         indexes: Union[Dict[str, str], List[str], None] = None,
+        debug: bool = False,
     ):
         """
         Parameters
@@ -269,9 +280,13 @@ class Pipe:
         temporary: bool, default False
             If `True`, prevent instance tables (pipes, users, plugins) from being created.
 
-        cache: bool, default False
-            If `True`, cache fetched data into a local database file.
-            Defaults to `False`.
+        cache: Optional[bool], default None
+            If `True`, cache the pipe's metadata to disk (in addition to in-memory caching).
+            If `cache` is not explicitly `True`, it is set to `False` if `temporary` is `True`.
+            Defaults to `True` (from `None`).
+
+        cache_connector_keys: Optional[str], default None
+            If provided, use the keys to a Valkey connector (e.g. `valkey:main`).
         """
         from meerschaum.utils.warnings import error, warn
         if (not connector and not connector_keys) or (not metric and not metric_key):
@@ -304,8 +319,15 @@ class Pipe:
         self.metric_key = metric
         self.location_key = location
         self.temporary = temporary
+        self.cache = cache if cache is not None else (not temporary)
+        self.cache_connector_keys = (
+            str(cache_connector_keys)
+            if cache_connector_keys is not None
+            else None
+        )
+        self.debug = debug
 
-        self._attributes = {
+        self._attributes: Dict[str, Any] = {
             'connector_keys': self.connector_keys,
             'metric_key': self.metric_key,
             'location_key': self.location_key,
@@ -375,6 +397,7 @@ class Pipe:
 
         if isinstance(static, bool):
             self._attributes['parameters']['static'] = static
+            self._static = static
 
         if isinstance(enforce, bool):
             self._attributes['parameters']['enforce'] = enforce
@@ -398,7 +421,8 @@ class Pipe:
         else: ### NOTE: must be SQL or API Connector for this work
             self.instance_keys = _mrsm_instance
 
-        self._cache = cache and get_config('system', 'experimental', 'cache')
+        if self.cache:
+            self._load_cache_files(debug=debug)
 
     @property
     def meta(self):
@@ -455,68 +479,6 @@ class Pipe:
             else:
                 return None
         return self._connector
-
-    @property
-    def cache_connector(self) -> Union['Connector', None]:
-        """
-        If the pipe was created with `cache=True`, return the connector to the pipe's
-        SQLite database for caching.
-        """
-        if not self._cache:
-            return None
-
-        if '_cache_connector' not in self.__dict__:
-            from meerschaum.connectors import get_connector
-            from meerschaum.config._paths import DUCKDB_RESOURCES_PATH, SQLITE_RESOURCES_PATH
-            _resources_path = SQLITE_RESOURCES_PATH
-            self._cache_connector = get_connector(
-                'sql', '_cache_' + str(self),
-                flavor='sqlite',
-                database=str(_resources_path / ('_cache_' + str(self) + '.db')),
-            )
-
-        return self._cache_connector
-
-    @property
-    def cache_pipe(self) -> Union[mrsm.Pipe, None]:
-        """
-        If the pipe was created with `cache=True`, return another `meerschaum.Pipe` used to
-        manage the local data.
-        """
-        if self.cache_connector is None:
-            return None
-        if '_cache_pipe' not in self.__dict__:
-            from meerschaum.config._patch import apply_patch_to_config
-            from meerschaum.utils.sql import sql_item_name
-            _parameters = copy.deepcopy(self.parameters)
-            _fetch_patch = {
-                'fetch': ({
-                    'definition': (
-                        "SELECT * FROM "
-                        + sql_item_name(
-                            str(self.target),
-                            self.instance_connector.flavor,
-                            self.instance_connector.get_pipe_schema(self),
-                        )
-                    ),
-                }) if self.instance_connector.type == 'sql' else ({
-                    'connector_keys': self.connector_keys,
-                    'metric_key': self.metric_key,
-                    'location_key': self.location_key,
-                })
-            }
-            _parameters = apply_patch_to_config(_parameters, _fetch_patch)
-            self._cache_pipe = Pipe(
-                self.instance_keys,
-                (self.connector_keys + '_' + self.metric_key + '_cache'),
-                self.location_key,
-                mrsm_instance=self.cache_connector,
-                parameters=_parameters,
-                cache=False,
-                temporary=True,
-            )
-
-        return self._cache_pipe
 
     def __str__(self, ansi: bool=False):
         return pipe_repr(self, ansi=ansi)

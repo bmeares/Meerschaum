@@ -43,6 +43,9 @@ __pdoc__: Dict[str, bool] = {
     'df_is_chunk_generator': False,
     'choices_docstring': False,
     '_get_subaction_names': False,
+    'is_pipe_registered': False,
+    'replace_pipes_in_dict': False,
+    'round_time': False,
 }
 
 
@@ -345,37 +348,6 @@ def edit_file(
         pyvim = attempt_import('pyvim', lazy=False)
         rc = run_python_package('pyvim', [path], venv=package_venv(pyvim), debug=debug)
     return rc == 0
-
-
-def is_pipe_registered(
-    pipe: mrsm.Pipe,
-    pipes: PipesDict,
-    debug: bool = False
-) -> bool:
-    """
-    Check if a Pipe is inside the pipes dictionary.
-
-    Parameters
-    ----------
-    pipe: meerschaum.Pipe
-        The pipe to see if it's in the dictionary.
-
-    pipes: PipesDict
-        The dictionary to search inside.
-
-    debug: bool, default False
-        Verbosity toggle.
-
-    Returns
-    -------
-    A bool indicating whether the pipe is inside the dictionary.
-    """
-    from meerschaum.utils.debug import dprint
-    ck, mk, lk = pipe.connector_keys, pipe.metric_key, pipe.location_key
-    if debug:
-        dprint(f'{ck}, {mk}, {lk}')
-        dprint(f'{pipe}, {pipes}')
-    return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
 
 
 def get_cols_lines(default_cols: int = 100, default_lines: int = 120) -> Tuple[int, int]:
@@ -1842,6 +1814,15 @@ def replace_pipes_in_dict(*args, **kwargs):
     """
     from meerschaum.utils.pipes import replace_pipes_in_dict
     return replace_pipes_in_dict(*args, **kwargs)
+
+
+def is_pipe_registered(*args, **kwargs):
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.pipes.is_pipe_registered`.
+    """
+    from meerschaum.utils.pipes import is_pipe_registered
+    return is_pipe_registered(*args, **kwargs)
 
 
 def round_time(*args, **kwargs):

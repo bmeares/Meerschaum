@@ -477,15 +477,8 @@ def sync(
                         ("s" if retries != 1 else "") + "!"
                 )
 
-        ### CHECKPOINT: Finished syncing. Handle caching.
+        ### CHECKPOINT: Finished syncing.
         _checkpoint(**kw)
-        if p.cache_pipe is not None:
-            if debug:
-                dprint("Caching retrieved dataframe.", **kw)
-            _sync_cache_tuple = p.cache_pipe.sync(df, debug=debug, **kw)
-            if not _sync_cache_tuple[0]:
-                warn(f"Failed to sync local cache for {self}.")
-
         p._invalidate_cache(debug=debug)
         return return_tuple
 
@@ -627,9 +620,9 @@ def exists(
     now = time.perf_counter()
     cache_seconds = mrsm.get_config('pipes', 'sync', 'exists_cache_seconds')
 
-    _exists = self.__dict__.get('_exists', None)
+    _exists = self._get_cached_value('_exists', debug=debug)
     if _exists:
-        exists_timestamp = self.__dict__.get('_exists_timestamp', None)
+        exists_timestamp = self._get_cached_value('_exists_timestamp', debug=debug)
         if exists_timestamp is not None:
             delta = now - exists_timestamp
             if delta < cache_seconds:
@@ -644,8 +637,8 @@ def exists(
             else False
         )
 
-    self.__dict__['_exists'] = _exists
-    self.__dict__['_exists_timestamp'] = now
+    self._cache_value('_exists', _exists, debug=debug)
+    self._cache_value('_exists_timestamp', now, debug=debug)
     return _exists
 
 
@@ -1058,7 +1051,7 @@ def _persist_new_special_columns(
     Check for new special columns and update the parameters accordingly.
     """
     from meerschaum.utils.dataframe import get_special_cols
-    from meerschaum.utils.dtypes import dtype_is_special
+    from meerschaum.utils.dtypes import is_dtype_special
     from meerschaum.utils.warnings import dprint
 
     special_cols = get_special_cols(df)
@@ -1066,7 +1059,7 @@ def _persist_new_special_columns(
     existing_special_cols = {
         col: typ
         for col, typ in dtypes.items()
-        if dtype_is_special(typ)
+        if is_dtype_special(typ)
     }
     new_special_cols = {
         col: typ
@@ -1079,5 +1072,5 @@ def _persist_new_special_columns(
     if debug:
         dprint(f"New special columns:\n{new_special_cols}")
 
-    self._attributes_sync_time = None
+    self._clear_cache_key('_attributes_sync_time', debug=debug)
     return self.update_parameters({'dtypes': new_special_cols}, debug=debug)

@@ -33,11 +33,6 @@ def drop(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
-    if self.cache_pipe is not None:
-        _drop_cache_tuple = self.cache_pipe.drop(debug=debug, **kw)
-        if not _drop_cache_tuple[0]:
-            warn(_drop_cache_tuple[1])
-
     with Venv(get_connector_plugin(self.instance_connector)):
         if hasattr(self.instance_connector, 'drop_pipe'):
             result = self.instance_connector.drop_pipe(self, debug=debug, **kw)
@@ -87,11 +82,6 @@ def drop_indices(
     _ = self.__dict__.pop('_columns_indices_timestamp', None)
     _ = self.__dict__.pop('_columns_types_timestamp', None)
     _ = self.__dict__.pop('_columns_types', None)
-
-    if self.cache_pipe is not None:
-        _drop_cache_tuple = self.cache_pipe.drop_indices(columns=columns, debug=debug, **kw)
-        if not _drop_cache_tuple[0]:
-            warn(_drop_cache_tuple[1])
 
     with Venv(get_connector_plugin(self.instance_connector)):
         if hasattr(self.instance_connector, 'drop_pipe_indices'):

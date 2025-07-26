@@ -30,22 +30,20 @@ def attributes(self) -> Dict[str, Any]:
 
     timeout_seconds = get_config('pipes', 'attributes', 'local_cache_timeout_seconds')
 
-    if '_attributes' not in self.__dict__:
-        self._attributes = {}
-
     now = time.perf_counter()
-    last_refresh = self.__dict__.get('_attributes_sync_time', None)
+    _attributes_sync_time = self._get_cached_value('_attributes_sync_time', debug=self.debug)
     timed_out = (
-        last_refresh is None
+        _attributes_sync_time is None
         or
-        (timeout_seconds is not None and (now - last_refresh) >= timeout_seconds)
+        (timeout_seconds is not None and (now - _attributes_sync_time) >= timeout_seconds)
     )
     if not self.temporary and timed_out:
-        self._attributes_sync_time = now
-        local_attributes = self.__dict__.get('_attributes', {})
+        self._cache_value('_attributes_sync_time', now, debug=self.debug)
+        local_attributes = self._get_cached_value('attributes', debug=self.debug) or {}
         with Venv(get_connector_plugin(self.instance_connector)):
             instance_attributes = self.instance_connector.get_pipe_attributes(self)
         self._attributes = apply_patch_to_config(instance_attributes, local_attributes)
+        self._cache_value('attributes', local_attributes, debug=self.debug)
     return self._attributes
 
 
@@ -78,7 +76,7 @@ def get_parameters(
         _visited = {self}
 
     if refresh:
-        self._invalidate_cache(hard=True)
+        _ = self._invalidate_cache(hard=True)
 
     raw_parameters = self.attributes.get('parameters', {})
     ref_keys = raw_parameters.get('reference')
@@ -135,14 +133,13 @@ def parameters(self) -> Optional[Dict[str, Any]]:
 
 
 @parameters.setter
-def parameters(self, parameters: Dict[str, Any]) -> None:
+def parameters(self, _parameters: Dict[str, Any]) -> None:
     """
     Set the parameters dictionary of the in-memory pipe.
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
-    self._attributes['parameters'] = parameters
-    if '_parameters' in self.__dict__:
-        del self.__dict__['_parameters']
+    self._attributes['parameters'] = _parameters
+    self._clear_cache_key('_parameters', debug=self.debug)
 
 
 @property
@@ -263,7 +260,7 @@ def dtypes(self) -> Dict[str, Any]:
     """
     If defined, return the `dtypes` dictionary defined in `meerschaum.Pipe.parameters`.
     """
-    return self.get_dtypes(refresh=False)
+    return self.get_dtypes(refresh=False, debug=self.debug)
 
 
 @dtypes.setter
@@ -273,8 +270,8 @@ def dtypes(self, _dtypes: Dict[str, Any]) -> None:
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
     self.update_parameters({'dtypes': _dtypes}, persist=False)
-    _ = self.__dict__.pop('_remote_dtypes', None)
-    _ = self.__dict__.pop('_remote_dtypes_timestamp', None)
+    self._clear_cache_key('_remote_dtypes', debug=self.debug)
+    self._clear_cache_key('_remote_dtypes_timestamp', debug=self.debug)
 
 
 def get_dtypes(
@@ -361,6 +358,7 @@ def static(self, _static: bool) -> None:
     Set the `static` parameter for the pipe.
     """
     self.update_parameters({'static': _static}, persist=False)
+    self._static = _static
 
 
 @property
@@ -400,8 +398,9 @@ def tzinfo(self) -> Union[None, timezone]:
     """
     Return `timezone.utc` if the pipe is timezone-aware.
     """
-    if '_tzinfo' in self.__dict__:
-        return self.__dict__['_tzinfo']
+    _tzinfo = self._get_cached_value('tzinfo', debug=self.debug)
+    if _tzinfo is not None:
+        return _tzinfo if _tzinfo != 'None' else None
 
     _tzinfo = None
     dt_col = self.columns.get('datetime', None)
@@ -414,7 +413,7 @@ def tzinfo(self) -> Union[None, timezone]:
     if dt_typ and 'utc' in dt_typ.lower() or dt_typ == 'datetime':
         _tzinfo = timezone.utc
 
-    self._tzinfo = _tzinfo
+    self._cache_value('tzinfo', (_tzinfo if _tzinfo is not None else 'None'), debug=self.debug)
     return _tzinfo
 
 
@@ -552,12 +551,12 @@ def get_columns_types(
         else mrsm.get_config('pipes', 'dtypes', 'columns_types_cache_seconds')
     )
     if refresh:
-        _ = self.__dict__.pop('_columns_types_timestamp', None)
-        _ = self.__dict__.pop('_columns_types', None)
+        self._clear_cache_key('_columns_types_timestamp', debug=debug)
+        self._clear_cache_key('_columns_types', debug=debug)
 
-    _columns_types = self.__dict__.get('_columns_types', None)
+    _columns_types = self._get_cached_value('_columns_types', debug=debug)
     if _columns_types:
-        columns_types_timestamp = self.__dict__.get('_columns_types_timestamp', None)
+        columns_types_timestamp = self._get_cached_value('_columns_types_timestamp', debug=debug)
         if columns_types_timestamp is not None:
             delta = now - columns_types_timestamp
             if delta < cache_seconds:
@@ -575,8 +574,8 @@ def get_columns_types(
             else None
         )
 
-    self.__dict__['_columns_types'] = _columns_types
-    self.__dict__['_columns_types_timestamp'] = now
+    self._cache_value('_columns_types', _columns_types, debug=debug)
+    self._cache_value('_columns_types_timestamp', now, debug=debug)
     return _columns_types or {}
 
 
@@ -599,11 +598,13 @@ def get_columns_indices(
         else mrsm.get_config('pipes', 'dtypes', 'columns_types_cache_seconds')
     )
     if refresh:
-        _ = self.__dict__.pop('_columns_indices_timestamp', None)
-        _ = self.__dict__.pop('_columns_indices', None)
-    _columns_indices = self.__dict__.get('_columns_indices', None)
+        self._clear_cache_key('_columns_indices_timestamp', debug=debug)
+        self._clear_cache_key('_columns_indices', debug=debug)
+
+    _columns_indices = self._get_cached_value('_columns_indices', debug=debug)
+
     if _columns_indices:
-        columns_indices_timestamp = self.__dict__.get('_columns_indices_timestamp', None)
+        columns_indices_timestamp = self._get_cached_value('_columns_indices_timestamp', debug=debug)
         if columns_indices_timestamp is not None:
             delta = now - columns_indices_timestamp
             if delta < cache_seconds:
@@ -621,18 +622,19 @@ def get_columns_indices(
             else None
         )
 
-    self.__dict__['_columns_indices'] = _columns_indices
-    self.__dict__['_columns_indices_timestamp'] = now
+    self._cache_value('_columns_indices', _columns_indices, debug=debug)
+    self._cache_value('_columns_indices_timestamp', _columns_indices_timestamp, debug=debug)
     return {k: v for k, v in _columns_indices.items() if k and v} or {}
 
 
-def get_id(self, **kw: Any) -> Union[int, None]:
+def get_id(self, **kw: Any) -> Union[int, str, None]:
     """
     Fetch a pipe's ID from its instance connector.
-    If the pipe does not exist, return `None`.
+    If the pipe is not registered, return `None`.
     """
     if self.temporary:
         return None
+
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
@@ -648,9 +650,11 @@ def id(self) -> Union[int, str, uuid.UUID, None]:
     """
     Fetch and cache a pipe's ID.
     """
-    if not ('_id' in self.__dict__ and self._id):
-        self._id = self.get_id()
-    return self._id
+    _id = self._get_cached_value('_id', debug=self.debug)
+    if not _id:
+        _id = self.get_id(debug=self.debug)
+        self._cache_value('_id', _id, debug=self.debug)
+    return _id
 
 
 def get_val_column(self, debug: bool = False) -> Union[str, None]:
@@ -914,9 +918,6 @@ def update_parameters(
     if 'parameters' not in self._attributes:
         self._attributes['parameters'] = {}
 
-    if '_parameters' not in self.__dict__:
-        self._parameters = {}
-
     self._attributes['parameters'] = apply_patch_to_config(
         self._attributes['parameters'],
         parameters_patch,
@@ -943,10 +944,11 @@ def get_precision(self, debug: bool = False) -> Dict[str, Union[str, int]]:
     )
     from meerschaum._internal.static import STATIC_CONFIG
 
-    if self.__dict__.get('_precision', None):
+    _precision = self._get_cached_value('precision', debug=debug)
+    if _precision:
         if debug:
-            dprint(f"Returning cached precision: {self._precision}")
-        return self._precision
+            dprint(f"Returning cached precision: {_precision}")
+        return _precision
 
     parameters = self.parameters
     _precision = parameters.get('precision', {})
@@ -1012,9 +1014,10 @@ def get_precision(self, debug: bool = False) -> Dict[str, Union[str, int]]:
             f"{items_str(list(MRSM_PRECISION_UNITS_SCALARS) + list(MRSM_PRECISION_UNITS_ALIASES))}."
         )
 
-    self._precision = {'unit': true_precision_unit}
+    _precision = {'unit': true_precision_unit}
     if precision_interval:
-        self._precision['interval'] = precision_interval
+        _precision['interval'] = precision_interval
+    self._cache_value('precision', _precision, debug=debug)
     return self._precision
 
 
@@ -1023,7 +1026,7 @@ def precision(self) -> Dict[str, Union[str, int]]:
     """
     Return the configured or detected precision.
     """
-    return self.get_precision()
+    return self.get_precision(debug=self.debug)
 
 
 @precision.setter
@@ -1049,34 +1052,4 @@ def precision(self, _precision: Union[str, Dict[str, Union[str, int]]]) -> None:
     )
 
     self.update_parameters({'precision': true_precision}, persist=False)
-    _ = self.__dict__.pop('_precision', None)
-
-
-def _invalidate_cache(
-    self,
-    hard: bool = False,
-    debug: bool = False,
-) -> None:
-    """
-    Invalidate temporary metadata cache.
-
-    Parameters
-    ----------
-    hard: bool, default False
-        If `True`, clear all temporary cache.
-        Otherwise only clear soft cache.
-    """
-    if debug:
-        dprint(f"Invalidating {'some' if not hard else 'all'} cache for {self}.")
-
-    self._exists = None
-    self._sync_ts = None
-
-    if not hard:
-        return
-
-    _ = self.__dict__.pop('_parameters', None)
-    _ = self.__dict__.pop('_precision', None)
-    self._columns_types_timestamp = None
-    self._columns_types = None
-    self._attributes_sync_time = None
+    self._clear_cache_key('precision', debug=self.debug)
