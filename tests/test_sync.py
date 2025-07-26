@@ -1108,6 +1108,7 @@ def test_create_drop_indices(flavor):
         instance=conn,
         columns={'primary': 'Id', 'datetime': 'dt'},
         upsert=True,
+        debug=debug,
     )
     docs = [
         {'Id': 1, 'dt': '2025-01-01', 'val': 1.1},

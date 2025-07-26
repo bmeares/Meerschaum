@@ -429,8 +429,16 @@ class Pipe:
         if not isinstance(_mrsm_instance, str):
             self._instance_connector = _mrsm_instance
             self.instance_keys = str(_mrsm_instance)
-        else: ### NOTE: must be SQL or API Connector for this work
+        else:
             self.instance_keys = _mrsm_instance
+
+        if self.instance_keys == 'sql:memory':
+            self.cache = False
+
+        import traceback
+        traceback.print_stack()
+        print('self._attributes')
+        mrsm.pprint(self._attributes)
 
         if self.cache:
             self._load_cache_keys(debug=debug)

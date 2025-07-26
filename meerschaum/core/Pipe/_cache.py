@@ -58,20 +58,24 @@ def _cache_value(
     self,
     cache_key: str,
     value: Any,
+    memory_only: bool = False,
     debug: bool = False,
 ) -> None:
     """
-    Cache a value in-memory and (if `Pipe.cache` is `True`) on-disk.
+    Cache a value in-memory and (if `Pipe.cache` is `True`) on-disk or to the cache connector.
     """
     in_memory_key = _get_in_memory_key(cache_key)
     self.__dict__[in_memory_key] = value
+    if memory_only:
+        return
+
     write_success, write_msg = (
         self._write_cache_key(cache_key, value)
         if self.cache
         else (True, "Success")
     )
     if not write_success and debug:
-        dprint(f"Failed to cache '{cache_key}'.")
+        dprint(f"Failed to cache '{cache_key}':\n{write_msg}")
 
 
 def _get_cached_value(
@@ -82,9 +86,6 @@ def _get_cached_value(
     """
     Attempt to retrieve a cached value from in-memory on on-disk.
     """
-    if debug:
-        dprint(f"Attempting to read cache key: '{cache_key}'")
-
     in_memory_key = _get_in_memory_key(cache_key)
     if in_memory_key in self.__dict__:
         return self.__dict__[in_memory_key]
@@ -114,8 +115,8 @@ def _invalidate_cache(
     if debug:
         dprint(f"Invalidating {'some' if not hard else 'all'} cache for {self}.")
 
-    self._exists = None
-    self._sync_ts = None
+    self._clear_cache_key('_exists', debug=debug)
+    self._clear_cache_key('sync_ts', debug=debug)
 
     if not hard:
         return True, "Success"
@@ -124,9 +125,14 @@ def _invalidate_cache(
         return True, "Success"
 
     cache_keys = self._get_cache_keys(debug=debug)
+    print('#######################')
     for cache_key in cache_keys:
+        print(f"{cache_keys=}")
+        if cache_keys == 'attributes':
+            continue
         self._clear_cache_key(cache_key, debug=debug)
 
+    self._attributes = {}
     return True, "Success"
 
 
@@ -134,9 +140,6 @@ def _get_cache_dir_path(self, create_if_not_exists: bool = False) -> pathlib.Pat
     """
     Return the path to the cache directory.
     """
-    if '_cache_dir_path' in self.__dict__:
-        return self._cache_dir_path
-
     from meerschaum.config.paths import PIPES_CACHE_RESOURCES_PATH
     cache_dir_path = (
         PIPES_CACHE_RESOURCES_PATH
@@ -148,9 +151,8 @@ def _get_cache_dir_path(self, create_if_not_exists: bool = False) -> pathlib.Pat
         try:
             cache_dir_path.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            warn(f"Enocuntered an issue when creating local pipe metadata cache:\n{e}")
+            warn(f"Encountered an issue when creating local pipe metadata cache:\n{e}")
 
-    self._cache_dir_path = cache_dir_path
     return cache_dir_path
 
 
@@ -347,6 +349,8 @@ def _load_cache_files(self, debug: bool = False) -> mrsm.SuccessTuple:
     if not self.cache:
         return True, f"Skip checking for cache for {self}."
 
+    _ = self._get_cache_dir_path(create_if_not_exists=True)
+
     cache_keys = self._get_cache_file_keys(debug=debug)
     if not cache_keys:
         if debug:
@@ -500,13 +504,15 @@ def _clear_cache_file(
     meta_file_path = cache_dir_path / (cache_key + '.meta.json')
 
     try:
-        file_path.unlink()
+        if file_path.exists():
+            file_path.unlink()
     except Exception as e:
         if debug:
             dprint(f"Failed to delete cache file '{file_path}':\n{e}")
 
     try:
-        meta_file_path.unlink()
+        if meta_file_path.exists():
+            meta_file_path.unlink()
     except Exception as e:
         if debug:
             dprint(f"Failed to delete meta cache file '{meta_file_path}':{e}")

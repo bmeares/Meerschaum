@@ -14,7 +14,7 @@ import ast
 import copy
 import uuid
 
-from meerschaum.utils.typing import PipesDict, Optional, Any
+from meerschaum.utils.typing import PipesDict, Optional
 import meerschaum as mrsm
 
 
@@ -96,9 +96,7 @@ def replace_pipes_syntax(text: str) -> Any:
     Parse a string containing the `{{ Pipe() }}` syntax.
     """
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.dtypes import json_serialize_value
-    from meerschaum.utils.misc import parse_arguments_str
     pattern = r'\{\{\s*(?:mrsm\.)?Pipe\((.*?)\)((?:\.[\w]+|\[[^\]]+\])*)\s*\}\}'
 
     matches = list(re.finditer(pattern, text))

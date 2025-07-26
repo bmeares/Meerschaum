@@ -31,19 +31,31 @@ def attributes(self) -> Dict[str, Any]:
     timeout_seconds = get_config('pipes', 'attributes', 'local_cache_timeout_seconds')
 
     now = time.perf_counter()
-    _attributes_sync_time = self._get_cached_value('_attributes_sync_time', debug=self.debug)
+    #  _attributes_sync_time = self._get_cached_value('_attributes_sync_time', debug=self.debug)
+    _attributes_sync_time = self.__dict__.get('_attributes_sync_time', None)
     timed_out = (
         _attributes_sync_time is None
         or
         (timeout_seconds is not None and (now - _attributes_sync_time) >= timeout_seconds)
     )
     if not self.temporary and timed_out:
-        self._cache_value('_attributes_sync_time', now, debug=self.debug)
-        local_attributes = self._get_cached_value('attributes', debug=self.debug) or {}
+        #  self._cache_value('_attributes_sync_time', now, memory_only=True, debug=self.debug)
+        self.__dict__['_attributes_sync_time'] = now
+        #  local_attributes = self._get_cached_value('attributes', debug=self.debug) or {}
+        local_attributes = self.__dict__.get('_attributes', None) or {}
         with Venv(get_connector_plugin(self.instance_connector)):
             instance_attributes = self.instance_connector.get_pipe_attributes(self)
+
+        print(f"{local_attributes=}")
         self._attributes = apply_patch_to_config(instance_attributes, local_attributes)
-        self._cache_value('attributes', local_attributes, debug=self.debug)
+        print(f"{self._attributes=}")
+        #  self._cache_value(
+            #  'attributes',
+            #  apply_patch_to_config(instance_attributes, local_attributes),
+            #  memory_only=True,
+            #  debug=self.debug,
+        #  )
+
     return self._attributes
 
 
@@ -129,7 +141,7 @@ def parameters(self) -> Optional[Dict[str, Any]]:
     """
     Return the parameters dictionary of the pipe.
     """
-    return self.get_parameters()
+    return self.get_parameters(debug=self.debug)
 
 
 @parameters.setter
@@ -139,7 +151,6 @@ def parameters(self, _parameters: Dict[str, Any]) -> None:
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
     self._attributes['parameters'] = _parameters
-    self._clear_cache_key('_parameters', debug=self.debug)
 
 
 @property
@@ -172,13 +183,14 @@ def indices(self) -> Union[Dict[str, Union[str, List[str]]], None]:
     """
     Return the `indices` dictionary defined in `meerschaum.Pipe.parameters`.
     """
+    _parameters = self.get_parameters(debug=self.debug)
     indices_key = (
         'indexes'
-        if 'indexes' in self.parameters
+        if 'indexes' in _parameters
         else 'indices'
     )
 
-    _indices = self.parameters.get(indices_key, {})
+    _indices = _parameters.get(indices_key, {})
     _columns = self.columns
     dt_col = _columns.get('datetime', None)
     if not isinstance(_indices, dict):
@@ -296,10 +308,8 @@ def get_dtypes(
     -------
     A dictionary mapping column names to dtypes.
     """
-    import time
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.dtypes import MRSM_ALIAS_DTYPES
-    from meerschaum._internal.static import STATIC_CONFIG
     parameters = self.get_parameters(refresh=refresh, debug=debug)
     configured_dtypes = parameters.get('dtypes', {})
     if debug:
@@ -589,7 +599,6 @@ def get_columns_indices(
     """
     import time
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum._internal.static import STATIC_CONFIG
 
     now = time.perf_counter()
     cache_seconds = (
@@ -623,7 +632,7 @@ def get_columns_indices(
         )
 
     self._cache_value('_columns_indices', _columns_indices, debug=debug)
-    self._cache_value('_columns_indices_timestamp', _columns_indices_timestamp, debug=debug)
+    self._cache_value('_columns_indices_timestamp', now, debug=debug)
     return {k: v for k, v in _columns_indices.items() if k and v} or {}
 
 

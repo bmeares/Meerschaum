@@ -28,10 +28,10 @@ def drop(
     A `SuccessTuple` of success, message.
 
     """
-    self._exists = False
-    from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
+
+    self._clear_cache_key('_exists', debug=debug)
 
     with Venv(get_connector_plugin(self.instance_connector)):
         if hasattr(self.instance_connector, 'drop_pipe'):
@@ -45,9 +45,8 @@ def drop(
                 )
             )
 
-
-    _ = self.__dict__.pop('_exists', None)
-    _ = self.__dict__.pop('_exists_timestamp', None)
+    self._clear_cache_key('_exists', debug=debug)
+    self._clear_cache_key('_exists_timestamp', debug=debug)
 
     return result
 
@@ -74,14 +73,13 @@ def drop_indices(
     A `SuccessTuple` of success, message.
 
     """
-    from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
-    _ = self.__dict__.pop('_columns_indices', None)
-    _ = self.__dict__.pop('_columns_indices_timestamp', None)
-    _ = self.__dict__.pop('_columns_types_timestamp', None)
-    _ = self.__dict__.pop('_columns_types', None)
+    self._clear_cache_key('_columns_indices', debug=debug)
+    self._clear_cache_key('_columns_indices_timestamp', debug=debug)
+    self._clear_cache_key('_columns_types', debug=debug)
+    self._clear_cache_key('_columns_types_timestamp', debug=debug)
 
     with Venv(get_connector_plugin(self.instance_connector)):
         if hasattr(self.instance_connector, 'drop_pipe_indices'):
@@ -100,9 +98,9 @@ def drop_indices(
                 )
             )
 
-    _ = self.__dict__.pop('_columns_indices', None)
-    _ = self.__dict__.pop('_columns_indices_timestamp', None)
-    _ = self.__dict__.pop('_columns_types_timestamp', None)
-    _ = self.__dict__.pop('_columns_types', None)
+    self._clear_cache_key('_columns_indices', debug=debug)
+    self._clear_cache_key('_columns_indices_timestamp', debug=debug)
+    self._clear_cache_key('_columns_types', debug=debug)
+    self._clear_cache_key('_columns_types_timestamp', debug=debug)
 
     return result

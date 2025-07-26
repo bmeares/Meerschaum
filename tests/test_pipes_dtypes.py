@@ -138,13 +138,14 @@ def test_infer_json_dtype(flavor: str):
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', session_id, instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('foo', 'bar', session_id, instance=conn, columns=['id'])
+    pipe = Pipe('foo', 'bar', session_id, instance=conn, columns=['id'], debug=debug, cache=False)
     success, msg = pipe.sync([
         {'id': 1, 'a': ['b', 'c']},
         {'id': 2, 'a': {'b': 1}},
-    ])
+    ], debug=debug)
+    return pipe
     assert success, msg
-    pprint(pipe.get_columns_types())
+    pprint(pipe.get_columns_types(debug=debug))
     df = pipe.get_data(debug=debug)
     assert isinstance(df['a'][0], list)
     assert isinstance(df['a'][1], dict)
@@ -218,9 +219,9 @@ def test_infer_uuid_dtype(flavor: str):
     """
     from meerschaum.utils.formatting import pprint
     conn = conns[flavor]
-    pipe = Pipe('infer', 'uuid', instance=conn)
+    pipe = Pipe('infer', 'uuid', debug=debug, instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('infer', 'uuid', instance=conn, columns=['id'])
+    pipe = Pipe('infer', 'uuid', instance=conn, columns=['id'], debug=debug)
     uuid_str = "e6f3a4ea-f1af-4e93-8da9-716b57672206"
     success, msg = pipe.sync(
         [
@@ -229,7 +230,7 @@ def test_infer_uuid_dtype(flavor: str):
         debug=debug,
     )
     assert success, msg
-    pprint(pipe.get_columns_types())
+    pprint(pipe.get_columns_types(debug=debug))
     df = pipe.get_data(debug=debug)
     print(df)
     assert isinstance(df['a'][0], UUID)
