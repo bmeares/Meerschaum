@@ -11,8 +11,8 @@ import os
 import pickle
 import json
 import pathlib
-from datetime import datetime
-from typing import Any, Dict, Optional, Union, List
+from datetime import datetime, timedelta
+from typing import Any, Union, List
 
 import meerschaum as mrsm
 from meerschaum.utils.warnings import warn, dprint
@@ -120,17 +120,13 @@ def _invalidate_cache(
     if not hard:
         return True, "Success"
 
+    if self.__dict__.get('_static', None):
+        return True, "Success"
+
     cache_keys = self._get_cache_keys(debug=debug)
     for cache_key in cache_keys:
-        _ = self.__dict__.pop(cache_key)
+        self._clear_cache_key(cache_key, debug=debug)
 
-
-    _ = self.__dict__.pop('_parameters', None)
-    _ = self.__dict__.pop('_precision', None)
-    self._attributes_sync_time = None
-    if not self.__dict__.get('_static', False):
-        self._columns_types_timestamp = None
-        self._columns_types = None
     return True, "Success"
 
 
@@ -188,10 +184,6 @@ def _write_cache_file(
     cache_dir_path = self._get_cache_dir_path()
     file_path = cache_dir_path / (cache_key + '.pkl')
     meta_file_path = cache_dir_path / (cache_key + '.meta.json')
-    local_cache_timeout_seconds = mrsm.get_config(
-        'pipes', 'attributes', 'local_cache_timeout_seconds'
-    )
-
     metadata = {
         'created': now,
     }
@@ -292,6 +284,11 @@ def _read_cache_file(
     if not created:
         if debug:
             dprint(f"Could not read cache `created` timestamp for '{meta_file_path}'.")
+        return None
+
+    is_expired = (now - created) >= timedelta(seconds=local_cache_timeout_seconds)
+    if is_expired:
+        self._clear_cache_file(cache_key, debug=debug)
         return None
 
     try:
@@ -401,7 +398,7 @@ def _load_cache_conn_keys(self, debug: bool = False) -> mrsm.SuccessTuple:
             for key in keys
         }
     except Exception as e:
-        return False, f"Failed to retrieve cache keys for {self} from '{cache_connector}'."
+        return False, f"Failed to retrieve cache keys for {self} from '{cache_connector}':\n{e}"
 
     try:
         cache_keys_objs = {
@@ -409,7 +406,7 @@ def _load_cache_conn_keys(self, debug: bool = False) -> mrsm.SuccessTuple:
             for cache_key, obj_bytes in cache_keys_bytes.items()
         }
     except Exception as e:
-        return False, f"Failed to de-pickle cache bytes from '{self}'."
+        return False, f"Failed to de-pickle cache bytes from '{self}':\n{e}"
 
     cache_patch = {
         in_memory_key: obj
