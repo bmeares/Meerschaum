@@ -144,10 +144,17 @@ class Pipe:
         _get_cached_value,
         _invalidate_cache,
         _get_cache_dir_path,
+        _write_cache_key,
         _write_cache_file,
+        _write_cache_conn_key,
         _read_cache_file,
+        _read_cache_conn_key,
+        _load_cache_keys,
         _load_cache_files,
+        _load_cache_conn_keys,
         _clear_cache_key,
+        _clear_cache_file,
+        _clear_cache_conn_key,
     )
     from ._show import show
     from ._edit import edit, edit_definition, update
@@ -422,7 +429,7 @@ class Pipe:
             self.instance_keys = _mrsm_instance
 
         if self.cache:
-            self._load_cache_files(debug=debug)
+            self._load_cache_keys(debug=debug)
 
     @property
     def meta(self):
