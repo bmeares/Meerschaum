@@ -166,7 +166,7 @@ def sync(
     })
 
     self._invalidate_cache(debug=debug)
-    self._sync_ts = get_current_timestamp('ms')
+    self._cache_value('sync_ts', get_current_timestamp('ms'), debug=debug)
 
     def _sync(
         p: mrsm.Pipe,

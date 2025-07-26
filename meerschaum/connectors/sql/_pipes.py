@@ -1905,16 +1905,17 @@ def sync_pipe(
                 'hypertable': False,
             },
         )
-        temp_pipe.__dict__['_columns_types'] = {
+        _temp_columns_types = {
             col: get_db_type_from_pd_type(
                 dtypes.get(col, str(typ)),
                 self.flavor,
             )
             for col, typ in update_df.dtypes.items()
         }
+        temp_pipe._cache_value('_columns_types', _temp_columns_types, memory_only=True, debug=debug)
+        temp_pipe._cache_value('_skip_check_indices', True, memory_only=True, debug=debug)
         now_ts = time.perf_counter()
-        temp_pipe.__dict__['_columns_types_timestamp'] = now_ts
-        temp_pipe.__dict__['_skip_check_indices'] = True
+        temp_pipe._cache_value('_columns_types_timestamp', now_ts, memory_only=True, debug=debug)
         temp_success, temp_msg = temp_pipe.sync(update_df, check_existing=False, debug=debug)
         if not temp_success:
             return temp_success, temp_msg
@@ -2229,7 +2230,7 @@ def sync_pipe_inplace(
     add_cols_queries = self.get_add_columns_queries(pipe, new_cols, debug=debug)
     if add_cols_queries:
         pipe._clear_cache_key('_columns_types', debug=debug)
-        pipe._clear_cache_key('_columns_indices', deug=debug)
+        pipe._clear_cache_key('_columns_indices', debug=debug)
         self.exec_queries(add_cols_queries, debug=debug)
 
     alter_cols_queries = self.get_alter_columns_queries(pipe, new_cols, debug=debug)
