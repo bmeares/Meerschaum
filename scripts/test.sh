@@ -21,6 +21,9 @@ if [ ! -z "$MRSM_TEST_FLAVORS" ]; then
   services=`echo "$MRSM_TEST_FLAVORS" | sed 's/,/ /g'`
   services=`echo "$services" | sed 's/api//g'`
 fi
+if [ ! -z "$MRSM_DEBUG" ]; then
+  export MRSM_DEBUG='false'
+fi
 
 ### Start the test databases.
 if [ "$1" == "db" ]; then
