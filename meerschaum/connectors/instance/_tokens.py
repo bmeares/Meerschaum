@@ -15,6 +15,7 @@ import meerschaum as mrsm
 from meerschaum.core import Token, User
 from meerschaum.core.User import hash_password
 from meerschaum._internal.static import STATIC_CONFIG
+from meerschaum.utils.warnings import dprint
 
 
 def get_tokens_pipe(self) -> mrsm.Pipe:
@@ -22,16 +23,20 @@ def get_tokens_pipe(self) -> mrsm.Pipe:
     Return the internal pipe for tokens management.
     """
     users_pipe = self.get_users_pipe()
-    user_id_dtype = users_pipe.dtypes.get('user_id', 'uuid')
+    user_id_dtype = (
+        users_pipe._attributes.get('parameters', {}).get('dtypes', {}).get('user_id', 'uuid')
+    )
 
     return mrsm.Pipe(
         'mrsm', 'tokens',
         instance=self,
         target='mrsm_tokens',
         temporary=True,
+        cache=True,
         static=True,
+        debug=True,
         autotime=True,
-        null_indices=True,
+        null_indices=False,
         columns={
             'datetime': 'creation',
             'primary': 'id',
@@ -200,9 +205,15 @@ def get_tokens(
     if ids:
         params['id'] = ids
         
+    if debug:
+        dprint(f"Getting tokens with {user_id=}, {params=}")
+
     tokens_df = tokens_pipe.get_data(params=params, debug=debug)
     if tokens_df is None:
         return []
+
+    if debug:
+        dprint(f"Retrieved tokens dataframe:\n{tokens_df}")
 
     tokens_docs = tokens_df.to_dict(orient='records')
     return [

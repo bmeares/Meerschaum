@@ -183,3 +183,34 @@ def replace_pipes_in_dict(
     result = copy.deepcopy(pipes)
     change_dict(result)
     return result
+
+
+def is_pipe_registered(
+    pipe: mrsm.Pipe,
+    pipes: PipesDict,
+    debug: bool = False
+) -> bool:
+    """
+    Check if a Pipe is inside the pipes dictionary.
+
+    Parameters
+    ----------
+    pipe: meerschaum.Pipe
+        The pipe to see if it's in the dictionary.
+
+    pipes: PipesDict
+        The dictionary to search inside.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A bool indicating whether the pipe is inside the dictionary.
+    """
+    from meerschaum.utils.debug import dprint
+    ck, mk, lk = pipe.connector_keys, pipe.metric_key, pipe.location_key
+    if debug:
+        dprint(f'{ck}, {mk}, {lk}')
+        dprint(f'{pipe}, {pipes}')
+    return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]

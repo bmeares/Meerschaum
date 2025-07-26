@@ -208,35 +208,6 @@ def get_data(
     if not self.exists(debug=debug):
         return None
 
-    if self.cache_pipe is not None:
-        if not fresh:
-            _sync_cache_tuple = self.cache_pipe.sync(
-                begin=begin,
-                end=end,
-                params=params,
-                debug=debug,
-                **kw
-            )
-            if not _sync_cache_tuple[0]:
-                warn(f"Failed to sync cache for {self}:\n" + _sync_cache_tuple[1])
-                fresh = True
-            else: ### Successfully synced cache.
-                return self.enforce_dtypes(
-                    self.cache_pipe.get_data(
-                        select_columns=select_columns,
-                        omit_columns=omit_columns,
-                        begin=begin,
-                        end=end,
-                        params=params,
-                        order=order,
-                        limit=limit,
-                        debug=debug,
-                        fresh=True,
-                        **kw
-                    ),
-                    debug=debug,
-                )
-
     with Venv(get_connector_plugin(self.instance_connector)):
         df = self.instance_connector.get_pipe_data(
             pipe=self,
@@ -473,27 +444,6 @@ def get_backtrack_data(
             if isinstance(backtrack_interval, timedelta)
             else backtrack_interval
         )
-
-    if self.cache_pipe is not None:
-        if not fresh:
-            _sync_cache_tuple = self.cache_pipe.sync(begin=begin, params=params, debug=debug, **kw)
-            if not _sync_cache_tuple[0]:
-                warn(f"Failed to sync cache for {self}:\n" + _sync_cache_tuple[1])
-                fresh = True
-            else: ### Successfully synced cache.
-                return self.enforce_dtypes(
-                    self.cache_pipe.get_backtrack_data(
-                        fresh=True,
-                        begin=begin,
-                        backtrack_minutes=backtrack_minutes,
-                        params=params,
-                        limit=limit,
-                        order=kw.get('order', 'desc'),
-                        debug=debug,
-                        **kw
-                    ),
-                    debug=debug,
-                )
 
     if hasattr(self.instance_connector, 'get_backtrack_data'):
         with Venv(get_connector_plugin(self.instance_connector)):

@@ -578,12 +578,12 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dtypes.deserialize_base64()</code></li>
       <li><code>meerschaum.utils.dtypes.deserialize_bytes_string()</code></li>
       <li><code>meerschaum.utils.dtypes.deserialize_geometry()</code></li>
-      <li><code>meerschaum.utils.dtypes.dtype_is_special()</code></li>
       <li><code>meerschaum.utils.dtypes.encode_bytes_for_bytea()</code></li>
       <li><code>meerschaum.utils.dtypes.geometry_is_wkt()</code></li>
       <li><code>meerschaum.utils.dtypes.get_current_timestamp()</code></li>
       <li><code>meerschaum.utils.dtypes.get_geometry_type_srid()</code></li>
       <li><code>meerschaum.utils.dtypes.is_dtype_numeric()</code></li>
+      <li><code>meerschaum.utils.dtypes.is_dtype_special()</code></li>
       <li><code>meerschaum.utils.dtypes.json_serialize_value()</code></li>
       <li><code>meerschaum.utils.dtypes.none_if_null()</code></li>
       <li><code>meerschaum.utils.dtypes.project_geometry()</code></li>
@@ -597,7 +597,6 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dtypes.to_pandas_dtype()</code></li>
       <li><code>meerschaum.utils.dtypes.value_is_null()</code></li>
       <li><code>meerschaum.utils.dtypes.get_current_timestamp()</code></li>
-      <li><code>meerschaum.utils.dtypes.dtype_is_special()</code></li>
       <li><code>meerschaum.utils.dtypes.get_next_precision_unit()</code></li>
       <li><code>meerschaum.utils.dtypes.round_time()</code></li>
     </ul>

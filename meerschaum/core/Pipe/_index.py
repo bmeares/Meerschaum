@@ -38,11 +38,6 @@ def create_indices(
     _ = self.__dict__.pop('_columns_types_timestamp', None)
     _ = self.__dict__.pop('_columns_types', None)
 
-    if self.cache_pipe is not None:
-        cache_success, cache_msg = self.cache_pipe.index(columns=columns, debug=debug, **kw)
-        if not cache_success:
-            warn(cache_msg)
-
     with Venv(get_connector_plugin(self.instance_connector)):
         if hasattr(self.instance_connector, 'create_pipe_indices'):
             result = self.instance_connector.create_pipe_indices(

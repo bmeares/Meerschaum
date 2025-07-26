@@ -60,17 +60,6 @@ def clear(
 
     begin, end = self.parse_date_bounds(begin, end)
 
-    if self.cache_pipe is not None:
-        success, msg = self.cache_pipe.clear(
-            begin=begin,
-            end=end,
-            params=params,
-            debug=debug,
-            **kwargs
-        )
-        if not success:
-            warn(msg)
-
     with Venv(get_connector_plugin(self.instance_connector)):
         return self.instance_connector.clear_pipe(
             self,

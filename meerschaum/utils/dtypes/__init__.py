@@ -1054,7 +1054,7 @@ def get_current_timestamp(
     return ts_val.as_unit(MRSM_PRECISION_UNITS_ABBREVIATIONS[true_precision_unit])
 
 
-def dtype_is_special(type_: str) -> bool:
+def is_dtype_special(type_: str) -> bool:
     """
     Return whether a dtype should be treated as a special Meerschaum dtype.
     This is not the same as a Meerschaum alias.
@@ -1069,6 +1069,7 @@ def dtype_is_special(type_: str) -> bool:
         'geometry',
         'geography',
         'date',
+        'bool',
     ):
         return True
 
@@ -1079,6 +1080,9 @@ def dtype_is_special(type_: str) -> bool:
         return True
 
     if true_type.startswith('numeric'):
+        return True
+
+    if true_type.startswith('bool'):
         return True
 
     if true_type.startswith('geometry'):

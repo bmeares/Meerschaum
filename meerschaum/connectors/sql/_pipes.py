@@ -385,7 +385,7 @@ def create_indices(
 
     cols_to_include = set((columns or []) + (indices or [])) or None
 
-    _ = pipe.__dict__.pop('_columns_indices', None)
+    pipe._clear_cache_key('_columns_indices', debug=debug)
     ix_queries = {
         col: queries
         for col, queries in self.get_create_index_queries(pipe, debug=debug).items()
@@ -1691,6 +1691,7 @@ def sync_pipe(
 
     start = time.perf_counter()
     pipe_name = sql_item_name(pipe.target, self.flavor, schema=self.get_pipe_schema(pipe))
+    dtypes = pipe.get_dtypes(debug=debug)
 
     if not pipe.temporary and not pipe.get_id(debug=debug):
         register_tuple = pipe.register(debug=debug)
@@ -1707,6 +1708,7 @@ def sync_pipe(
             df,
             chunksize=chunksize,
             safe_copy=kw.get('safe_copy', False),
+            dtypes=dtypes,
             debug=debug,
         )
 
@@ -1719,34 +1721,17 @@ def sync_pipe(
         ### Check for new columns.
         add_cols_queries = self.get_add_columns_queries(pipe, df, debug=debug)
         if add_cols_queries:
-            _ = pipe.__dict__.pop('_columns_indices', None)
-            _ = pipe.__dict__.pop('_columns_types', None)
+            pipe._clear_cache_key('_columns_types', debug=debug)
+            pipe._clear_cache_key('_columns_indices', debug=debug)
             if not self.exec_queries(add_cols_queries, debug=debug):
                 warn(f"Failed to add new columns to {pipe}.")
 
         alter_cols_queries = self.get_alter_columns_queries(pipe, df, debug=debug)
         if alter_cols_queries:
-            _ = pipe.__dict__.pop('_columns_indices', None)
-            _ = pipe.__dict__.pop('_columns_types', None)
+            pipe._clear_cache_key('_columns_types', debug=debug)
+            pipe._clear_cache_key('_columns_types', debug=debug)
             if not self.exec_queries(alter_cols_queries, debug=debug):
                 warn(f"Failed to alter columns for {pipe}.")
-
-    ### NOTE: Oracle SQL < 23c (2023) and SQLite does not support booleans,
-    ### so infer bools and persist them to `dtypes`.
-    if self.flavor in ('oracle', 'sqlite', 'mysql', 'mariadb'):
-        pipe_dtypes = pipe.get_dtypes(infer=False, debug=debug)
-        new_bool_cols = {
-            col: 'bool[pyarrow]'
-            for col, typ in df.dtypes.items()
-            if col not in pipe_dtypes
-                and are_dtypes_equal(str(typ), 'bool')
-        }
-        pipe_dtypes.update(new_bool_cols)
-        pipe.dtypes = pipe_dtypes
-        if new_bool_cols and not pipe.temporary:
-            infer_bool_success, infer_bool_msg = pipe.edit(debug=debug)
-            if not infer_bool_success:
-                return infer_bool_success, infer_bool_msg
 
     upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in UPDATE_QUERIES
     if upsert:
@@ -1797,7 +1782,7 @@ def sync_pipe(
             is_new
             and primary_key
             and primary_key
-            not in pipe.dtypes
+            not in dtypes
             and primary_key not in unseen_df.columns
         )
     )
@@ -1907,7 +1892,7 @@ def sync_pipe(
             },
             dtypes={
                 col: typ
-                for col, typ in pipe.dtypes.items()
+                for col, typ in dtypes.items()
                 if col in update_df.columns
             },
             target=temp_target,
@@ -1922,7 +1907,7 @@ def sync_pipe(
         )
         temp_pipe.__dict__['_columns_types'] = {
             col: get_db_type_from_pd_type(
-                pipe.dtypes.get(col, str(typ)),
+                dtypes.get(col, str(typ)),
                 self.flavor,
             )
             for col, typ in update_df.dtypes.items()
@@ -1933,6 +1918,7 @@ def sync_pipe(
         temp_success, temp_msg = temp_pipe.sync(update_df, check_existing=False, debug=debug)
         if not temp_success:
             return temp_success, temp_msg
+
         existing_cols = pipe.get_columns_types(debug=debug)
         join_cols = [
             col
@@ -2242,13 +2228,13 @@ def sync_pipe_inplace(
 
     add_cols_queries = self.get_add_columns_queries(pipe, new_cols, debug=debug)
     if add_cols_queries:
-        _ = pipe.__dict__.pop('_columns_types', None)
-        _ = pipe.__dict__.pop('_columns_indices', None)
+        pipe._clear_cache_key('_columns_types', debug=debug)
+        pipe._clear_cache_key('_columns_indices', deug=debug)
         self.exec_queries(add_cols_queries, debug=debug)
 
     alter_cols_queries = self.get_alter_columns_queries(pipe, new_cols, debug=debug)
     if alter_cols_queries:
-        _ = pipe.__dict__.pop('_columns_types', None)
+        pipe._clear_cache_key('_columns_types', debug=debug)
         self.exec_queries(alter_cols_queries, debug=debug)
 
     insert_queries = [

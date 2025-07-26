@@ -377,7 +377,7 @@ groups['sync'].add_argument(
 groups['sync'].add_argument(
     '--cache', action='store_true',
     help=(
-        "When syncing or viewing a pipe's data, sync to a local database for later analysis."
+        "Sync pipes' metadata to disk."
     )
 )
 

@@ -21,7 +21,6 @@ from meerschaum.config._paths import API_UVICORN_CONFIG_PATH, API_UVICORN_RESOUR
 from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn, dprint
 from meerschaum.utils.threading import RLock
-from meerschaum.utils.misc import is_pipe_registered
 from meerschaum.connectors.parse import parse_instance_keys
 
 from meerschaum import __version__ as version
@@ -218,9 +217,23 @@ def get_pipe(
             detail="Unable to serve any pipes with connector keys `mrsm` over the API.",
         )
 
-    pipe = mrsm.Pipe(connector_keys, metric_key, location_key, mrsm_instance=instance_keys)
-    if is_pipe_registered(pipe, pipes(instance_keys, refresh=False)):
-        return pipes(instance_keys, refresh=refresh)[connector_keys][metric_key][location_key]
+    pipes_dict = pipes(instance_keys)
+    if (
+        not refresh
+        and connector_keys in pipes_dict
+        and metric_key in pipes_dict[connector_keys]
+        and location_key in pipes_dict[connector_keys][metric_key]
+    ):
+        return pipes_dict[connector_keys][metric_key][location_key]
+
+    pipe = mrsm.Pipe(
+        connector_keys,
+        metric_key,
+        location_key,
+        mrsm_instance=instance_keys,
+        cache=True,
+        cache_connector_keys=get_cache_connector(),
+    )
     return pipe
 
 
