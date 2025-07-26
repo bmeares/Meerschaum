@@ -140,13 +140,13 @@ class ValkeyConnector(InstanceConnector):
 
         return uri
 
-    def set(self, key: str, value: Any, **kwargs: Any) -> None:
+    def set(self, key: str, value: Any, **kwargs: Any) -> bool:
         """
         Set the `key` to `value`.
         """
         return self.client.set(key, value, **kwargs)
 
-    def get(self, key: str) -> Union[str, None]:
+    def get(self, key: str, decode: bool = True) -> Union[str, None]:
         """
         Get the value for `key`.
         """
@@ -154,7 +154,7 @@ class ValkeyConnector(InstanceConnector):
         if val is None:
             return None
 
-        return val.decode('utf-8')
+        return val.decode('utf-8') if decode else val
 
     def test_connection(self) -> bool:
         """
