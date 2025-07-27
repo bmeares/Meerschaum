@@ -14,7 +14,7 @@ import sys
 import pathlib
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any
+from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any, Union
 from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
 
 _systemd_result_path = None
@@ -47,6 +47,99 @@ if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
 
 def entry(
     sysargs: Optional[List[str]] = None,
+    _patch_args: Optional[Dict[str, Any]] = None,
+    _use_cli_daemon: bool = False,
+    _session_id: Optional[str] = None,
+) -> SuccessTuple:
+    """
+    Parse arguments and launch a Meerschaum action.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    if not _use_cli_daemon:
+        return entry_without_daemon(sysargs, _patch_args=_patch_args)
+
+    import uuid
+    import json
+    import time
+
+    daemon_is_ready = True
+
+    daemon = get_cli_daemon()
+    daemon.kill()
+    daemon.cleanup()
+    if daemon.status != 'running':
+        start_success, start_msg = daemon.run(allow_dirty_run=True)
+        time.sleep(0.4)
+
+        if not start_success:
+            daemon_is_ready = False
+
+    ### TODO: Find other conditions which may fail the daemon.
+
+    if not daemon_is_ready:
+        return entry_without_daemon(sysargs, _patch_args=_patch_args)
+
+    max_seconds = 86400
+    session_id = _session_id or uuid.uuid4().hex
+    action_id = uuid.uuid4().hex
+    
+    entry_data = {
+        'session_id': session_id,
+        'action_id': action_id,
+        'sysargs': sysargs,
+        'patch_args': _patch_args,
+    }
+
+    daemon.stdin_file.write(json.dumps(entry_data, separators=(',', ':')) + '\n')
+
+    start = time.perf_counter()
+
+    def _parse_line(line: str) -> Dict[str, Any]:
+        try:
+            print(f"{line=}")
+            return json.loads(line).strip()
+        except Exception as e:
+            from meerschaum.utils.warnings import warn
+            warn(f"Failed to parse line from CLI daemon:\n{e}")
+            return {}
+
+    while True:
+        lines = daemon.readlines()
+        if not lines:
+            time.sleep(0.1)
+            continue
+
+        for line in lines:
+            if session_id not in line:
+                continue
+            
+            line_data = _parse_line(line)
+            line_text = line_data.get('text', None)
+            if line_text is not None:
+                print(line_text)
+            if line_data.get('completed', False):
+                success, msg = line_data['success'], line_data['message']
+                return success, msg
+                break
+
+        if (time.perf_counter() - start) >= max_seconds:
+            from datetime import timedelta
+            from meerschaum.utils.misc import interval_str
+            return (
+                False,
+                (
+                    "Failed to communicate with CLI daemon in "
+                    + interval_str(timedelta(seconds=max_seconds))
+                    + '.'
+                )
+            )
+
+
+def entry_without_daemon(
+    sysargs: Union[List[str], str, None] = None,
     _patch_args: Optional[Dict[str, Any]] = None,
 ) -> SuccessTuple:
     """
@@ -370,3 +463,110 @@ def get_shell(
 
         _shells.append(_shell)
     return _shell
+
+
+def cli_daemon_loop():
+    """
+    The target function to run inside the CLI daemon.
+    """
+    import json
+    import pathlib
+    import tempfile
+    import uuid
+    import sys
+    from contextlib import redirect_stdout, redirect_stderr
+
+    from meerschaum.utils.prompt import prompt
+    from meerschaum._internal.entry import entry as _entry
+    from meerschaum.utils.daemon import RotatingFile
+
+    while True:
+        try:
+            input_data_str = prompt('', silent=True)
+        except (KeyboardInterrupt, EOFError):
+            return True, "Exiting CLI daemon process."
+
+        try:
+            input_data = json.loads(input_data_str)
+        except Exception as e:
+            input_data = {"error": str(e)}
+
+        sysargs = input_data.get('sysargs', None)
+        _patch_args = input_data.get('patch_args', None)
+        session_id = input_data.get('session_id', None)
+        action_id = input_data.get('action_id', None)
+        error_msg = input_data.get('error', "No sysargs provided.") if not sysargs else None
+
+        if error_msg:
+            print({
+                'session_id': session_id,
+                'action_id': action_id,
+                'success': False,
+                'message': error_msg,
+            })
+            continue
+
+        stdout = sys.stdout
+
+        def _print_line(text, completed: bool = False, result=None):
+            line_data = {
+                'completed': completed,
+                'session_id': session_id,
+                'action_id': action_id,
+                'text': text,
+            }
+            if result is not None:
+                _success, _message = result
+                line_data['success'] = _success
+                line_data['message'] = _message
+
+            stdout.write(json.dumps(line_data, separators=(',', ':')) + '\n')
+
+        tmp_dir = tempfile.TemporaryDirectory() if not error_msg else None
+        file_id = action_id or uuid.uuid4().hex
+        stdout_file = RotatingFile(
+            (pathlib.Path(tmp_dir.name) / (file_id + 'stdout.log')),
+            write_callback=_print_line,
+        )
+        stderr_file = RotatingFile(
+            (pathlib.Path(tmp_dir.name) / (file_id + 'stderr.log')),
+            write_callback=_print_line,
+        )
+
+        with redirect_stdout(stdout_file):
+            with redirect_stderr(stderr_file):
+                action_success, action_msg = _entry(
+                    sysargs,
+                    _patch_args=_patch_args,
+                    _use_cli_daemon=False,
+                )
+
+        _print_line(None, completed=True, result=(action_success, action_msg))
+
+        if tmp_dir is not None:
+            tmp_dir.cleanup()
+
+
+def get_cli_daemon():
+    """
+    Get the CLI daemon.
+    """
+    from meerschaum.utils.daemon import Daemon
+    return Daemon(
+        cli_daemon_loop,
+        env=dict(os.environ),
+        daemon_id='.cli',
+        label='Internal Meerschaum CLI Daemon',
+        properties={
+            'logs': {
+                'write_timestamps': False,
+            },
+        },
+    )
+
+def start_cli_daemon():
+    """
+    Start the `Daemon` which runs commands from the CLI.
+    """
+    daemon = get_cli_daemon()
+    return daemon.run(allow_dirty_run=True)

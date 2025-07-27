@@ -396,6 +396,8 @@ class Daemon:
         self,
         keep_daemon_output: bool = True,
         allow_dirty_run: bool = False,
+        wait: bool = False,
+        timeout: Union[int, float] = 4,
         debug: bool = False,
     ) -> SuccessTuple:
         """Run the daemon as a child process and continue executing the parent.
@@ -409,6 +411,12 @@ class Daemon:
             If `True`, run the daemon, even if the `daemon_id` directory exists.
             This option is dangerous because if the same `daemon_id` runs concurrently,
             the last to finish will overwrite the output of the first.
+
+        wait: bool, default True
+            If `True`, block until `Daemon.status` is running (or the timeout expires).
+
+        timeout: Union[int, float], default 4
+            If `wait` is `True`, block for up to `timeout` seconds before returning a failure.
 
         Returns
         -------
@@ -446,7 +454,33 @@ class Daemon:
             if _launch_success_bool
             else f"Failed to start daemon '{self.daemon_id}'."
         )
-        return _launch_success_bool, msg
+        if not wait or not _launch_success_bool:
+            return _launch_success_bool, msg
+
+        timeout = self.get_timeout_seconds(timeout)
+        check_timeout_interval = self.get_check_timeout_interval_seconds()
+
+        if not timeout:
+            success = self.status == 'running'
+            msg = "Success" if success else f"Failed to run daemon '{self.daemon_id}'."
+            if success:
+                self._capture_process_timestamp('began')
+            return success, msg
+
+        begin = time.perf_counter()
+        while (time.perf_counter() - begin) < timeout:
+            if self.status == 'running':
+                self._capture_process_timestamp('began')
+                return True, "Success"
+            time.sleep(check_timeout_interval)
+
+        return False, (
+            f"Failed to start daemon '{self.daemon_id}' within {timeout} second"
+            + ('s' if timeout != 1 else '') + '.'
+        )
+
+
+
 
     def kill(self, timeout: Union[int, float, None] = 8) -> SuccessTuple:
         """
@@ -598,6 +632,9 @@ class Daemon:
 
         self._remove_stop_file()
         try:
+            if self.process is None:
+                return False, f"Cannot resume daemon '{self.daemon_id}'."
+
             self.process.resume()
         except Exception as e:
             return False, f"Failed to resume daemon '{self.daemon_id}':\n{e}"
@@ -889,17 +926,20 @@ class Daemon:
         if '_rotating_log' in self.__dict__:
             return self._rotating_log
 
-        write_timestamps = (
-            self.properties.get('logs', {}).get('write_timestamps', None)
-        )
+        logs_cf = self.properties.get('logs', None) or {}
+        write_timestamps = logs_cf.get('write_timestamps', None)
         if write_timestamps is None:
             write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
+
+        timestamp_format = logs_cf.get('timestamp_format', None)
+        if timestamp_format is None:
+            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
 
         self._rotating_log = RotatingFile(
             self.log_path,
             redirect_streams=True,
             write_timestamps=write_timestamps,
-            timestamp_format=get_config('jobs', 'logs', 'timestamps', 'format'),
+            timestamp_format=timestamp_format,
         )
         return self._rotating_log
 
@@ -918,17 +958,26 @@ class Daemon:
         return self._stdin_file
 
     @property
-    def log_text(self) -> Optional[str]:
+    def log_text(self) -> Union[str, None]:
         """
         Read the log files and return their contents.
         Returns `None` if the log file does not exist.
         """
+        logs_cf = self.properties.get('logs', None) or {}
+        write_timestamps = logs_cf.get('write_timestamps', None)
+        if write_timestamps is None:
+            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
+
+        timestamp_format = logs_cf.get('timestamp_format', None)
+        if timestamp_format is None:
+            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
+
         new_rotating_log = RotatingFile(
             self.rotating_log.file_path,
-            num_files_to_keep = self.rotating_log.num_files_to_keep,
-            max_file_size = self.rotating_log.max_file_size,
-            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled'),
-            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format'),
+            num_files_to_keep=self.rotating_log.num_files_to_keep,
+            max_file_size=self.rotating_log.max_file_size,
+            write_timestamps=write_timestamps,
+            timestamp_format=timestamp_format,
         )
         return new_rotating_log.read()
 
