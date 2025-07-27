@@ -22,6 +22,7 @@ def prompt(
     is_password: bool = False,
     wrap_lines: bool = True,
     noask: bool = False,
+    silent: bool = False,
     **kw: Any
 ) -> str:
     """
@@ -58,6 +59,9 @@ def prompt(
 
     noask: bool, default False
         If `True`, only print the question and return the default answer.
+
+    silent: bool, default False
+        If `True` do not print anything to the screen, but still block for input.
 
     Returns
     -------
@@ -115,12 +119,14 @@ def prompt(
             ) if not noask else ''
         )
     else:
-        print(question, end='\n', flush=True)
+        if not silent:
+            print(question, end='\n', flush=True)
         try:
             answer = input() if not noask else ''
         except EOFError:
             answer = ''
-    if noask:
+
+    if noask and not silent:
         print(question)
     if answer == '' and default is not None:
         return default_answer
