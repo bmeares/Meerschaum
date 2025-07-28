@@ -93,8 +93,9 @@ class StdinFile(io.TextIOBase):
             except (OSError, EOFError):
                 pass
 
-            self.blocking_file_path.touch()
-            time.sleep(0.1)
+            if not self.blocking_file_path.exists():
+                self.blocking_file_path.touch()
+            time.sleep(0.05)
 
     def readline(self, size=-1):
         line = '' if self.decode else b''
@@ -121,12 +122,14 @@ class StdinFile(io.TextIOBase):
             try:
                 self._write_fp.close()
             except BrokenPipeError:
-                # The reading end of the pipe was closed before the writing end.
-                # This is expected in some scenarios, e.g., when the client
-                # disconnects or finishes reading.
                 pass
             self._write_fp = None
 
+        try:
+            if self.blocking_file_path.exists():
+                self.blocking_file_path.unlink()
+        except Exception:
+            pass
         super().close()
 
     def is_open(self):

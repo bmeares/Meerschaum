@@ -150,7 +150,9 @@ paths = {
     'USERS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'users'),
     'VENVS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'venvs'),
     'SQL_CONN_CACHE_RESOURCES_PATH'  : ('{CACHE_RESOURCES_PATH}', 'sql'),
-    'CLI_CACHE_RESOURCES_PATH'       : ('{CACHE_RESOURCES_PATH}', 'cli'),
+
+    'CLI_RESOURCES_PATH'             : ('{INTERNAL_RESOURCES_PATH}', 'cli'),
+    'CLI_LOCK_PATH'                  : ('{CLI_RESOURCES_PATH}', 'lock'),
 
     'PLUGINS_RESOURCES_PATH'         : ('{INTERNAL_RESOURCES_PATH}', 'plugins'),
     'PLUGINS_INTERNAL_LOCK_PATH'     : ('{INTERNAL_RESOURCES_PATH}', 'plugins.lock'),

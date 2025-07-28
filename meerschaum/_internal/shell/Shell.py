@@ -294,6 +294,8 @@ class Shell(cmd.Cmd):
                 pass
 
         ### NOTE: custom actions must be added to the self._actions dictionary
+        from meerschaum._internal.entry import get_cli_session_id
+        shell_attrs['_session_id'] = get_cli_session_id()
         shell_attrs['_actions'] = actions
         shell_attrs['_sysargs'] = sysargs
         shell_attrs['_actions']['instance'] = self.do_instance
@@ -672,7 +674,12 @@ class Shell(cmd.Cmd):
             ([':'] + pipeline_args) if pipeline_args else []
         )
         try:
-            success_tuple = entry(sysargs_to_execute, _patch_args=patch_args)
+            success_tuple = entry(
+                sysargs_to_execute,
+                _patch_args=patch_args,
+                _session_id=shell_attrs.get('session_id', None),
+                _use_cli_daemon=False,
+            )
         except Exception as e:
             success_tuple = False, str(e)
 

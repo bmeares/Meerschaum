@@ -352,5 +352,4 @@ STATIC_CONFIG: Dict[str, Any] = {
             'users:delete': "Delete the associated user account (or other users for admins).",
         },
     },
-    
 }

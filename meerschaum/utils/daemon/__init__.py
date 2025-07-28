@@ -16,7 +16,7 @@ import datetime
 import threading
 import shlex
 
-from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Dict
+from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Dict, Union
 from meerschaum.config._paths import DAEMON_RESOURCES_PATH
 from meerschaum.utils.daemon.StdinFile import StdinFile
 from meerschaum.utils.daemon.Daemon import Daemon
@@ -43,6 +43,8 @@ __all__ = (
     'FileDescriptorInterceptor',
     'DAEMON_RESOURCES_PATH',
 )
+
+_daemons = {}
 
 
 def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
@@ -311,3 +313,17 @@ def running_in_daemon() -> bool:
     from meerschaum._internal.static import STATIC_CONFIG
     daemon_env_var = STATIC_CONFIG['environment']['daemon_id']
     return daemon_env_var in os.environ
+
+
+def get_current_daemon() -> Union[Daemon, None]:
+    """
+    If running withing a daemon context, return the corresponding `Daemon`.
+    Otherwise return `None`.
+    """
+    from meerschaum._internal.static import STATIC_CONFIG
+    daemon_env_var = STATIC_CONFIG['environment']['daemon_id']
+    daemon_id = os.environ.get(daemon_env_var, None)
+    if daemon_id is None:
+        return None
+
+    return _daemons.get(daemon_id, Daemon(daemon_id=daemon_id))

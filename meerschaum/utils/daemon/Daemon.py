@@ -458,10 +458,11 @@ class Daemon:
             return _write_pickle_success_tuple
 
         _launch_daemon_code = (
-            "from meerschaum.utils.daemon import Daemon; "
-            + f"daemon = Daemon(daemon_id='{self.daemon_id}'); "
-            + f"daemon._run_exit(keep_daemon_output={keep_daemon_output}, "
-            + "allow_dirty_run=True)"
+            "from meerschaum.utils.daemon import Daemon, _daemons; "
+            f"daemon = Daemon(daemon_id='{self.daemon_id}'); "
+            f"_daemons['{self.daemon_id}'] = daemon; "
+            f"daemon._run_exit(keep_daemon_output={keep_daemon_output}, "
+            "allow_dirty_run=True)"
         )
         env = dict(os.environ)
         env[STATIC_CONFIG['environment']['noninteractive']] = 'true'
@@ -497,8 +498,6 @@ class Daemon:
         )
 
 
-
-
     def kill(self, timeout: Union[int, float, None] = 8) -> SuccessTuple:
         """
         Forcibly terminate a running daemon.
@@ -517,10 +516,14 @@ class Daemon:
             success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
             if success:
                 self._write_stop_file('kill')
+                self.stdin_file.close()
+                self._remove_blocking_stdin_file()
                 return success, msg
 
         if self.status == 'stopped':
             self._write_stop_file('kill')
+            self.stdin_file.close()
+            self._remove_blocking_stdin_file()
             return True, "Process has already stopped."
 
         psutil = attempt_import('psutil')
@@ -545,6 +548,8 @@ class Daemon:
                 pass
 
         self._write_stop_file('kill')
+        self.stdin_file.close()
+        self._remove_blocking_stdin_file()
         return True, "Success"
 
     def quit(self, timeout: Union[int, float, None] = None) -> SuccessTuple:
@@ -555,6 +560,8 @@ class Daemon:
         signal_success, signal_msg = self._send_signal(signal.SIGINT, timeout=timeout)
         if signal_success:
             self._write_stop_file('quit')
+            self.stdin_file.close()
+            self._remove_blocking_stdin_file()
         return signal_success, signal_msg
 
     def pause(
@@ -577,6 +584,8 @@ class Daemon:
         -------
         A `SuccessTuple` indicating whether the `Daemon` process was successfully suspended.
         """
+        self._remove_blocking_stdin_file()
+
         if self.process is None:
             return False, f"Daemon '{self.daemon_id}' is not running and cannot be paused."
 
@@ -584,6 +593,8 @@ class Daemon:
             return True, f"Daemon '{self.daemon_id}' is already paused."
 
         self._write_stop_file('pause')
+        self.stdin_file.close()
+        self._remove_blocking_stdin_file()
         try:
             self.process.suspend()
         except Exception as e:
@@ -724,6 +735,18 @@ class Daemon:
             return data
         except Exception:
             return {}
+
+    def _remove_blocking_stdin_file(self) -> mrsm.SuccessTuple:
+        """
+        Remove the blocking STDIN file if it exists.
+        """
+        try:
+            if self.blocking_stdin_file_path.exists():
+                self.blocking_stdin_file_path.unlink()
+        except Exception as e:
+            return False, str(e)
+
+        return True, "Success"
 
     def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
         """
@@ -964,15 +987,22 @@ class Daemon:
         if timestamp_format is None:
             timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
 
+        num_files_to_keep = logs_cf.get('num_files_to_keep', None)
+        if num_files_to_keep is None:
+            num_files_to_keep = get_config('jobs', 'logs', 'num_files_to_keep')
+
         max_file_size = logs_cf.get('max_file_size', None)
         if max_file_size is None:
             max_file_size = get_config('jobs', 'logs', 'max_file_size')
 
+        redirect_streams = logs_cf.get('redirect_streams', True)
+
         self._rotating_log = RotatingFile(
             self.log_path,
-            redirect_streams=True,
+            redirect_streams=redirect_streams,
             write_timestamps=write_timestamps,
             timestamp_format=timestamp_format,
+            num_files_to_keep=num_files_to_keep,
             max_file_size=max_file_size,
         )
         return self._rotating_log
@@ -1006,10 +1036,18 @@ class Daemon:
         if timestamp_format is None:
             timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
 
+        num_files_to_keep = logs_cf.get('num_files_to_keep', None)
+        if num_files_to_keep is None:
+            num_files_to_keep = get_config('jobs', 'logs', 'num_files_to_keep')
+
+        max_file_size = logs_cf.get('max_file_size', None)
+        if max_file_size is None:
+            max_file_size = get_config('jobs', 'logs', 'max_file_size')
+
         new_rotating_log = RotatingFile(
             self.rotating_log.file_path,
-            num_files_to_keep=self.rotating_log.num_files_to_keep,
-            max_file_size=self.rotating_log.max_file_size,
+            num_files_to_keep=num_files_to_keep,
+            max_file_size=max_file_size,
             write_timestamps=write_timestamps,
             timestamp_format=timestamp_format,
         )
