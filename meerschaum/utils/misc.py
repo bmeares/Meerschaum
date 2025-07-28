@@ -6,9 +6,12 @@ Miscellaneous functions go here
 """
 
 from __future__ import annotations
+
 import sys
 import functools
-from datetime import timedelta, datetime, timezone
+import contextlib
+from datetime import timedelta, datetime
+
 from meerschaum.utils.typing import (
     Union,
     Any,
@@ -20,13 +23,8 @@ from meerschaum.utils.typing import (
     Iterable,
     PipesDict,
     Tuple,
-    InstanceConnector,
-    Hashable,
-    Generator,
-    Iterator,
     TYPE_CHECKING,
 )
-import meerschaum as mrsm
 if TYPE_CHECKING:
     import collections
 
@@ -1659,6 +1657,27 @@ def to_snake_case(name: str) -> str:
     name = re.sub(r'[^\w\s]', '', name)
     name = re.sub(r'\s+', '_', name)
     return name.lower()
+
+
+@contextlib.contextmanager
+def set_env(env: Dict[str, Any]):
+    """
+    Temporarily modify environment variables.
+    https://stackoverflow.com/a/34333710/9699829
+
+    Parameters
+    ----------
+    env: Dict[str, Any]
+        The new environment dictionary to be patched on `os.environ`.
+    """
+    import os
+    old_environ = dict(os.environ)
+    os.environ.update(env)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old_environ)
 
 
 ##################

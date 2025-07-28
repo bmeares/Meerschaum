@@ -10,6 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional
 
 import threading
+import ctypes
+import signal
+
 Lock = threading.Lock
 RLock = threading.RLock
 Event = threading.Event
@@ -54,6 +57,26 @@ class Thread(threading.Thread):
         """Set the return to the result of the target."""
         self._return = self._target(*self._args, **self._kwargs)
 
+    def send_signal(self, signalnum):
+        """
+        Send a signal to the thread.
+        """
+        if not self.is_alive():
+            return
+
+        signal.pthread_kill(self.ident, signalnum)
+
+    def raise_exception(self, exc):
+        """
+        Raise an exception in the thread.
+        """
+        if not self.is_alive():
+            return
+
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(
+            ctypes.c_long(self.ident),
+            ctypes.py_object(exc)
+        )
 
 class Worker(threading.Thread):
     """Wrapper for `threading.Thread` for working with `queue.Queue` objects."""

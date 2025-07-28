@@ -183,7 +183,11 @@ def _write_cache_file(
     """
     from meerschaum.utils.dtypes import get_current_timestamp, json_serialize_value
     now = get_current_timestamp()
-    cache_dir_path = self._get_cache_dir_path()
+    _checked_if_cache_dir_exists = self.__dict__.get('_checked_if_cache_dir_exists', None)
+    cache_dir_path = self._get_cache_dir_path(create_if_not_exists=(not _checked_if_cache_dir_exists))
+    if not _checked_if_cache_dir_exists:
+        self._checked_if_cache_dir_exists = True
+
     file_path = cache_dir_path / (cache_key + '.pkl')
     meta_file_path = cache_dir_path / (cache_key + '.meta.json')
     metadata = {
@@ -349,7 +353,9 @@ def _load_cache_files(self, debug: bool = False) -> mrsm.SuccessTuple:
     if not self.cache:
         return True, f"Skip checking for cache for {self}."
 
-    _ = self._get_cache_dir_path(create_if_not_exists=True)
+    cache_dir_path = self._get_cache_dir_path(create_if_not_exists=True)
+    if not cache_dir_path.exists():
+        return True, f"No cache directory for {self}."
 
     cache_keys = self._get_cache_file_keys(debug=debug)
     if not cache_keys:
@@ -377,7 +383,7 @@ def _load_cache_files(self, debug: bool = False) -> mrsm.SuccessTuple:
         )
     }
     if debug:
-        dprint("Loading cache keys into {self}:")
+        dprint(f"Loading cache keys into {self}:")
         mrsm.pprint(cache_patch)
 
     self.__dict__.update(cache_patch)
