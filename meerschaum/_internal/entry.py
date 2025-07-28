@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import pathlib
+import threading
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any, Union
@@ -48,7 +49,7 @@ if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
 def entry(
     sysargs: Optional[List[str]] = None,
     _patch_args: Optional[Dict[str, Any]] = None,
-    _use_cli_daemon: bool = False,
+    _use_cli_daemon: bool = True,
     _session_id: Optional[str] = None,
 ) -> SuccessTuple:
     """
@@ -58,20 +59,47 @@ def entry(
     -------
     A `SuccessTuple` indicating success.
     """
-    if not _use_cli_daemon:
+    if not _use_cli_daemon or not mrsm.get_config('system', 'experimental', 'cli_daemon'):
         return entry_without_daemon(sysargs, _patch_args=_patch_args)
 
     import uuid
     import json
     import time
-    import threading
-    import shutil
+    import shlex
+    import traceback
     from meerschaum.utils.daemon import StdinFile
     from meerschaum.utils.prompt import prompt
 
     daemon_is_ready = True
-    daemon = get_cli_daemon()
-    start_success, start_msg = daemon.run(allow_dirty_run=True, wait=True)
+
+    found_acceptable_prefix = False
+    allowed_prefixes = mrsm.get_config('system', 'cli', 'allowed_prefixes')
+    for prefix in allowed_prefixes:
+        sysargs_str = sysargs if isinstance(sysargs, str) else shlex.join(sysargs)
+        if sysargs_str.startswith(prefix):
+            found_acceptable_prefix = True
+            break
+
+    if not found_acceptable_prefix:
+        daemon_is_ready = False
+
+    try:
+        daemon_ix = get_available_cli_daemon_ix() if daemon_is_ready else -1
+    except EnvironmentError as e:
+        warn(e, stack=False)
+        daemon_ix = -1
+        daemon_is_ready = False
+
+    daemon = get_cli_daemon(daemon_ix) if daemon_ix != -1 else None
+    cli_lock_path = get_cli_lock_path(daemon_ix)
+    if cli_lock_path.exists():
+        daemon_is_ready = False
+
+    start_success, start_msg = (
+        daemon.run(allow_dirty_run=True, wait=True)
+        if daemon_is_ready
+        else (False, "Lock exists.")
+    )
 
     if not start_success:
         daemon_is_ready = False
@@ -84,16 +112,13 @@ def entry(
             else:
                 break
 
-    ### TODO: Find other conditions which may fail the daemon.
-
     if not daemon_is_ready:
         return entry_without_daemon(sysargs, _patch_args=_patch_args)
 
-    session_id = _session_id or (
-        f"{os.getpid()}.{threading.current_thread().ident}"
-    )
+    cli_lock_path.touch()
+
+    session_id = _session_id or get_cli_session_id()
     action_id = uuid.uuid4().hex
-    session_dir_path = _get_cli_session_dir_path(session_id)
     
     entry_data = {
         'session_id': session_id,
@@ -105,63 +130,96 @@ def entry(
 
     daemon.stdin_file.write(json.dumps(entry_data, separators=(',', ':')) + '\n')
 
-    def _parse_line(line: bytes) -> Dict[str, Any]:
+    def _parse_line(line: str) -> Dict[str, Any]:
         try:
-            line_text = line.decode('utf-8')
+            line_text = line
             return json.loads(line_text)
         except Exception as e:
             from meerschaum.utils.warnings import warn
             warn(f"Failed to parse line from CLI daemon:\n{e}")
             return {}
 
-    stdout_file_path = _get_cli_stream_path(session_id, action_id, 'stdout')
-    stdout_file = StdinFile(stdout_file_path, decode=False)
-    stdin_file_path = _get_cli_stream_path(session_id, action_id, 'stdin')
-    stdin_file = StdinFile(stdin_file_path, decode=False)
-
     def _cleanup():
-        stdout_file.close()
-        stdin_file.close()
-        shutil.rmtree(session_dir_path)
+        try:
+            if cli_lock_path.exists():
+                cli_lock_path.unlink()
+
+            cleanup_data = {
+                'session_id': session_id,
+                'action_id': action_id,
+                'cleanup': True,
+            }
+            daemon.stdin_file.write(json.dumps(cleanup_data, separators=(',', ':')) + '\n')
+        except Exception:
+            traceback.print_exc()
+            pass
+
 
     while True:
         try:
             exit_data = None
-            line = stdout_file.readline()
-            if action_id.encode('utf-8') in line:
-                line_data = _parse_line(line)
-
-                if line_data.get('completed', False):
-                    success, msg = line_data['success'], line_data['message']
-                    _cleanup()
-                    return success, msg
-
-            if line:
-                sys.stdout.write(line.decode('utf-8') + '\n')
-                sys.stdout.flush()
-
-            if stdin_file.blocking_file_path.exists():
-                data_to_send_back = prompt('', silent=True)
-                daemon.stdin_file.write(data_to_send_back + '\n')
+            lines = daemon.readlines()
+            if not lines:
+                time.sleep(0.1)
                 continue
-        except (Exception, KeyboardInterrupt):
+            for line in lines:
+                if action_id in line:
+                    line_data = _parse_line(line)
+                    state = line_data.get('state', None)
+                    if state == 'completed':
+                        success, msg = line_data['success'], line_data['message']
+                        _cleanup()
+                        return success, msg
+                    elif state == 'accepted':
+                        continue
+
+                if line:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+
+        except KeyboardInterrupt:
             exit_data = {
                 'session_id': session_id,
                 'action_id': action_id,
                 'signal': 'SIGINT',
+                'traceback': traceback.format_exc(),
+                'success': True,
+                'message': 'Exiting due to keyboard interrupt.',
+            }
+        except Exception as e:
+            exit_data = {
+                'session_id': session_id,
+                'action_id': action_id,
+                'signal': 'SIGINT',
+                'traceback': traceback.format_exc(),
+                'success': False,
+                'message': f'Encountered exception: {e}',
             }
         except SystemExit:
             exit_data = {
                 'session_id': session_id,
                 'action_id': action_id,
                 'signal': 'SIGTERM',
+                'traceback': traceback.format_exc(),
+                'success': True,
+                'message': 'Exiting on SIGTERM.',
             }
+        except BrokenPipeError:
+            _cleanup()
+            return False, "Connection to daemon is broken."
 
         if exit_data:
-            daemon.stdin_file.write(json.dumps(exit_data, separators=(',', ':')) + '\n')
+            exit_success = exit_data['success']
+            exit_message = exit_data['message']
+            if not exit_success:
+                print(exit_data['traceback'])
+            try:
+                daemon.stdin_file.write(json.dumps(exit_data, separators=(',', ':')) + '\n')
+            except BrokenPipeError:
+                pass
             time.sleep(0.1)
             _cleanup()
-            return True, "Exiting due to interrupt."
+            return exit_success, exit_message
 
 
 def entry_without_daemon(
@@ -495,8 +553,8 @@ def _get_cli_session_dir_path(session_id: str) -> pathlib.Path:
     """
     Return the path to the file handles for the CLI session.
     """
-    from meerschaum.config.paths import CLI_CACHE_RESOURCES_PATH
-    return CLI_CACHE_RESOURCES_PATH / session_id
+    from meerschaum.config.paths import CLI_RESOURCES_PATH
+    return CLI_RESOURCES_PATH / session_id
 
 
 def _get_cli_stream_path(
@@ -522,41 +580,49 @@ def cli_daemon_loop():
     import os
     import threading
     import builtins
-    from typing import Dict, Any
+    import functools
+    from typing import Dict, Any, Optional
     from contextlib import redirect_stdout, redirect_stderr
 
+    import meerschaum as mrsm
     from meerschaum.utils.prompt import prompt
     from meerschaum._internal.entry import entry as _entry
-    from meerschaum.utils.daemon import StdinFile
+    from meerschaum.utils.daemon import StdinFile, get_current_daemon
     from meerschaum.utils.threading import Thread
     from meerschaum.utils.misc import set_env
-    from meerschaum.config.paths import CLI_CACHE_RESOURCES_PATH
+    from meerschaum.config.paths import CLI_RESOURCES_PATH
+
+    daemon = get_current_daemon()
 
     session_ids_threads = {}
-    session_ids_stdout_files = {}
     thread_idents_session_ids = {} 
 
-    def _print_monkey_patch(*args, **kwargs):
-        current_thread_ident = threading.current_thread().ident
-        session_id = thread_idents_session_ids.get(current_thread_ident, None)
-        stdout_file = session_ids_stdout_files.get(session_id, None)
-        file = stdout_file if stdout_file is not None else sys.stdout
-        if 'file' not in kwargs:
-            kwargs['file'] = file
-        print(*args, **kwargs)
+    def _cleanup(result, _session_id: Optional[str] = None):
+        session_thread = (
+            session_ids_threads.get(_session_id, None)
+            if _session_id is not None
+            else None
+        )
+        if session_thread is not None:
+            if session_thread.ident in thread_idents_session_ids:
+                del thread_idents_session_ids[session_thread.ident]
+            if _session_id in session_ids_threads:
+                del session_ids_threads[_session_id]
 
-    #  builtins.print = _print_monkey_patch
+        daemon.rotating_log.increment_subfiles()
+        if daemon.log_offset_path.exists():
+            daemon.log_offset_path.unlink()
+
 
     def _print_line(
         text,
         session_id: str,
         action_id: str,
-        completed: bool = False,
+        state: str,
         result=None,
-        output_stream=None,
     ):
         line_data = {
-            'completed': completed,
+            'state': state,
             'session_id': session_id,
             'action_id': action_id,
             'text': text,
@@ -566,50 +632,52 @@ def cli_daemon_loop():
             line_data['success'] = _success
             line_data['message'] = _message
 
-        (output_stream or sys.stdout).write(json.dumps(line_data, separators=(',', ':')) + '\n')
-        (output_stream or sys.stdout).flush()
+        sys.stdout.write(json.dumps(line_data, separators=(',', ':')) + '\n')
+        sys.stdout.flush()
 
-    def _entry_from_input_data(input_data: Dict[str, Any], output_stream=None):
+    def _entry_from_input_data(input_data: Dict[str, Any]):
         sysargs = input_data.get('sysargs', None)
         _patch_args = input_data.get('patch_args', None)
         session_id = input_data.get('session_id', None)
         action_id = input_data.get('action_id', None)
-        error_msg = input_data.get('error', "No sysargs provided.") if not sysargs else None
         env = input_data.get('env', os.environ)
 
-        if error_msg:
-            _print_line(
-                {"error": error_msg},
-                session_id,
-                action_id,
-                completed=True,
-                result=(False, error_msg),
-                output_stream=output_stream,
-            )
-            return
-
-        #  with redirect_stdout(output_stream):
-            #  with redirect_stderr(output_stream):
+        try:
             with set_env(env):
                 action_success, action_msg = _entry(
                     sysargs,
                     _patch_args=_patch_args,
                     _use_cli_daemon=False,
                 )
+        except Exception as e:
+            action_success, action_message = False, f"Failed to execute:\n{e}"
 
         _print_line(
             None,
             session_id,
             action_id,
-            completed=True,
+            state='completed',
             result=(action_success, action_msg),
-            output_stream=output_stream,
         )
+
+        return action_success, action_msg
+
+    def send_exc_to_session_thread(session_id: str, exc):
+        session_thread = session_ids_threads.get(session_id, None)
+        if session_thread is None:
+            return
+
+        session_thread.raise_exception(exc)
 
     while True:
         try:
-            input_data_str = prompt('', silent=True)
-        except (KeyboardInterrupt, EOFError):
+            input_data_str = input()
+        except (KeyboardInterrupt, EOFError, SystemExit) as e:
+            running_session_id = list(session_ids_threads)[0] if session_ids_threads else None
+            if running_session_id:
+                send_exc_to_session_thread(e)
+
+            _cleanup(None, None)
             return True, "Exiting CLI daemon process."
 
         try:
@@ -617,7 +685,20 @@ def cli_daemon_loop():
         except Exception as e:
             input_data = {"error": str(e)}
 
+        error_msg = input_data.get('error', None)
         session_id = input_data.get('session_id', None)
+
+        if error_msg:
+            _print_line(
+                {"error": error_msg},
+                session_id,
+                action_id,
+                state='completed',
+                result=(False, error_msg),
+            )
+            _cleanup(None, None)
+            return False, error_msg
+
         if session_id is None:
             session_id = uuid.uuid4()
             input_data['session_id'] = session_id
@@ -626,41 +707,83 @@ def cli_daemon_loop():
         if _signal:
             signal_to_send = getattr(signal, _signal)
             thread_to_stop = session_ids_threads.get(session_id, None)
-            thread_to_stop.send_signal(signal_to_send)
+            if thread_to_stop:
+                thread_to_stop.send_signal(signal_to_send)
+            continue
+
+        _do_cleanup = input_data.get('cleanup', False)
+        if _do_cleanup:
+            _cleanup(None, session_id)
             continue
 
         action_id = input_data.get('action_id', uuid.uuid4().hex)
-        session_dir_path = CLI_CACHE_RESOURCES_PATH / session_id
-        session_dir_path.mkdir(parents=True, exist_ok=True)
-        stdout_file_path = _get_cli_stream_path(session_id, action_id, 'stdout')
-        stdout_file = StdinFile(stdout_file_path, decode=False)
+
+        _print_line(
+            None,
+            session_id,
+            action_id,
+            state='accepted',
+        )
 
         thread = Thread(
             target=_entry_from_input_data,
             daemon=True,
-            args=(input_data, stdout_file),
+            args=(input_data,),
         )
         session_ids_threads[session_id] = thread
         thread_idents_session_ids[thread.ident] = session_id
-        session_ids_stdout_files[session_id] = stdout_file
         thread.start()
 
 
-def get_cli_daemon():
+def get_cli_daemon(ix: Optional[int] = None):
     """
     Get the CLI daemon.
     """
     from meerschaum.utils.daemon import Daemon
+    ix = ix if ix is not None else get_available_cli_daemon_ix()
     return Daemon(
         cli_daemon_loop,
         env=dict(os.environ),
-        daemon_id='.cli',
-        label='Internal Meerschaum CLI Daemon',
+        daemon_id=f'.cli.{ix}',
+        label=f'Internal Meerschaum CLI Daemon ({ix})',
         properties={
             'logs': {
                 'write_timestamps': False,
-                'refresh_files_seconds': 86400,
-                'max_file_size': 1_000_000,
+                'refresh_files_seconds': 31557600,
+                'max_file_size': 10_000_000,
+                'num_files_to_keep': 1,
+                'redirect_streams': True,
             },
         },
     )
+
+
+def get_cli_lock_path(ix: int) -> pathlib.Path:
+    """
+    Return the path to a CLI daemon's lock file.
+    """
+    from meerschaum.config.paths import CLI_RESOURCES_PATH
+    return CLI_RESOURCES_PATH / f"ix-{ix}.lock"
+
+
+def get_cli_session_id() -> str:
+    """
+    Return the session ID to use for the current process and thread.
+    """
+    import threading
+    return f"{os.getpid()}.{threading.current_thread().ident}"
+
+def get_available_cli_daemon_ix() -> int:
+    """
+    Return the index for an available CLI daemon.
+    """
+    max_ix = mrsm.get_config('system', 'cli', 'max_daemons') - 1
+    ix = 0
+    while True:
+        lock_path = get_cli_lock_path(ix)
+        if not lock_path.exists():
+            return ix
+        
+        ix += 1
+        if ix > max_ix:
+            raise EnvironmentError(f"Too many CLI daemons are running.")

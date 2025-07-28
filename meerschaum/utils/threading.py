@@ -64,7 +64,12 @@ class Thread(threading.Thread):
         if not self.is_alive():
             return
 
-        signal.pthread_kill(self.ident, signalnum)
+        if signalnum == signal.SIGINT:
+            self.raise_exception(KeyboardInterrupt)
+        elif signalnum == signal.SIGTERM:
+            self.raise_exception(SystemExit)
+        else:
+            signal.pthread_kill(self.ident, signalnum)
 
     def raise_exception(self, exc):
         """

@@ -215,4 +215,3 @@ def info(message: str, icon: bool = True, **kw):
         message = fill_ansi(lines[0], **info_config['ansi']['rich']) + (
             '\n' + '\n'.join(lines[1:]) if len(lines) > 1 else ''
         )
-    print(message)

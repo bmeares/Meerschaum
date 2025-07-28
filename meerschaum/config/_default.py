@@ -175,6 +175,16 @@ default_system_config = {
             'session_suffix': '_mrsm',
         },
     },
+    'cli': {
+        'max_daemons': 25,
+        'allowed_prefixes': [
+            'show',
+            'sync',
+            'deduplicate',
+            'verify',
+            'index',
+        ],
+    },
     'experimental': {
         'fetch': False,
         'cache': True,
@@ -184,6 +194,7 @@ default_system_config = {
         'uv_pip': True,
         'systemd_healthcheck': False,
         'valkey_session_cache': True,
+        'cli_daemon': False,
     },
 }
 default_pipes_config = {
