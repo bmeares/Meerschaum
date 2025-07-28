@@ -25,6 +25,7 @@ class StdinFile(io.TextIOBase):
         self,
         file_path: Union[pathlib.Path, str],
         lock_file_path: Optional[pathlib.Path] = None,
+        decode: bool = True,
     ):
         if isinstance(file_path, str):
             file_path = pathlib.Path(file_path)
@@ -38,6 +39,8 @@ class StdinFile(io.TextIOBase):
         self._file_handler = None
         self._fd = None
         self.sel = selectors.DefaultSelector()
+        self.decode = decode
+        self._write_fp = None
 
     @property
     def file_handler(self):
@@ -47,11 +50,9 @@ class StdinFile(io.TextIOBase):
         if self._file_handler is not None:
             return self._file_handler
 
-        if self.file_path.exists():
-            self.file_path.unlink()
-
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        os.mkfifo(self.file_path.as_posix(), mode=0o600)
+        if not self.file_path.exists():
+            self.file_path.parent.mkdir(parents=True, exist_ok=True)
+            os.mkfifo(self.file_path.as_posix(), mode=0o600)
 
         self._fd = os.open(self.file_path, os.O_RDONLY | os.O_NONBLOCK)
         self._file_handler = os.fdopen(self._fd, 'rb', buffering=0)
@@ -59,11 +60,16 @@ class StdinFile(io.TextIOBase):
         return self._file_handler
 
     def write(self, data):
+        if self._write_fp is None:
+            self.file_path.parent.mkdir(parents=True, exist_ok=True)
+            if not self.file_path.exists():
+                os.mkfifo(self.file_path.as_posix(), mode=0o600)
+            self._write_fp = open(self.file_path, 'wb')
+
         if isinstance(data, str):
             data = data.encode('utf-8')
-
-        with open(self.file_path, 'wb') as f:
-            f.write(data)
+        self._write_fp.write(data)
+        self._write_fp.flush()
 
     def fileno(self):
         fileno = self.file_handler.fileno()
@@ -83,7 +89,7 @@ class StdinFile(io.TextIOBase):
                             self.blocking_file_path.unlink()
                     except Exception:
                         warn(traceback.format_exc())
-                    return data.decode('utf-8')
+                    return data.decode('utf-8') if self.decode else data
             except (OSError, EOFError):
                 pass
 
@@ -91,10 +97,10 @@ class StdinFile(io.TextIOBase):
             time.sleep(0.1)
 
     def readline(self, size=-1):
-        line = ''
+        line = '' if self.decode else b''
         while True:
             data = self.read(1)
-            if not data or data == '\n':
+            if not data or ((data == '\n') if self.decode else (data == b'\n')):
                 break
             line += data
 
@@ -111,11 +117,20 @@ class StdinFile(io.TextIOBase):
             self._file_handler = None
             self._fd = None
 
+        if self._write_fp is not None:
+            try:
+                self._write_fp.close()
+            except BrokenPipeError:
+                # The reading end of the pipe was closed before the writing end.
+                # This is expected in some scenarios, e.g., when the client
+                # disconnects or finishes reading.
+                pass
+            self._write_fp = None
+
         super().close()
 
     def is_open(self):
         return self._file_handler is not None
-
 
     def __str__(self) -> str:
         return f"StdinFile('{self.file_path}')"

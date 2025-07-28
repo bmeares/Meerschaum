@@ -77,7 +77,6 @@ class FileDescriptorInterceptor:
                 break
 
             try:
-                first_char_is_newline = data[0] == b'\n'
                 last_char_is_newline = data[-1] == b'\n'
 
                 injected_str = self.injection_hook()

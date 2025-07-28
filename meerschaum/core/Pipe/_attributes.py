@@ -31,30 +31,24 @@ def attributes(self) -> Dict[str, Any]:
     timeout_seconds = get_config('pipes', 'attributes', 'local_cache_timeout_seconds')
 
     now = time.perf_counter()
-    #  _attributes_sync_time = self._get_cached_value('_attributes_sync_time', debug=self.debug)
-    _attributes_sync_time = self.__dict__.get('_attributes_sync_time', None)
+    _attributes_sync_time = self._get_cached_value('_attributes_sync_time', debug=self.debug)
     timed_out = (
         _attributes_sync_time is None
         or
         (timeout_seconds is not None and (now - _attributes_sync_time) >= timeout_seconds)
     )
     if not self.temporary and timed_out:
-        #  self._cache_value('_attributes_sync_time', now, memory_only=True, debug=self.debug)
-        self.__dict__['_attributes_sync_time'] = now
-        #  local_attributes = self._get_cached_value('attributes', debug=self.debug) or {}
-        local_attributes = self.__dict__.get('_attributes', None) or {}
+        self._cache_value('_attributes_sync_time', now, memory_only=True, debug=self.debug)
+        local_attributes = self._get_cached_value('attributes', debug=self.debug) or {}
         with Venv(get_connector_plugin(self.instance_connector)):
             instance_attributes = self.instance_connector.get_pipe_attributes(self)
 
-        print(f"{local_attributes=}")
-        self._attributes = apply_patch_to_config(instance_attributes, local_attributes)
-        print(f"{self._attributes=}")
-        #  self._cache_value(
-            #  'attributes',
-            #  apply_patch_to_config(instance_attributes, local_attributes),
-            #  memory_only=True,
-            #  debug=self.debug,
-        #  )
+        self._cache_value(
+            'attributes',
+            apply_patch_to_config(instance_attributes, local_attributes),
+            memory_only=True,
+            debug=self.debug,
+        )
 
     return self._attributes
 

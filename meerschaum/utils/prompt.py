@@ -112,7 +112,7 @@ def prompt(
     if not running_in_daemon():
         answer = (
             prompt_toolkit.prompt(
-                prompt_toolkit.formatted_text.ANSI(question),
+                prompt_toolkit.formatted_text.ANSI(question) if not silent else '',
                 wrap_lines=wrap_lines,
                 default=default_editable or '',
                 **filter_keywords(prompt_toolkit.prompt, **kw)

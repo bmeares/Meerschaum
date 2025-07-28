@@ -144,6 +144,7 @@ class Daemon:
         daemon_id: Optional[str] = None,
         label: Optional[str] = None,
         properties: Optional[Dict[str, Any]] = None,
+        pickle: bool = True,
     ):
         """
         Parameters
@@ -211,6 +212,8 @@ class Daemon:
                 error("Cannot create a Daemon without a target.")
             self.target = target
 
+        self.pickle = pickle
+
         ### NOTE: We have to check self.__dict__ in case we un-pickling.
         if '_target_args' not in self.__dict__:
             self._target_args = target_args
@@ -224,10 +227,17 @@ class Daemon:
                         else str(self.target)
                 )
             self.label = label
+        elif label is not None:
+            self.label = label
+
         if 'daemon_id' not in self.__dict__:
             self.daemon_id = get_new_daemon_name()
         if '_properties' not in self.__dict__:
             self._properties = properties
+        elif properties:
+            if self._properties is None:
+                self._properties = {}
+            self._properties.update(properties)
         if self._properties is None:
             self._properties = {}
 
@@ -293,10 +303,17 @@ class Daemon:
 
         _daemons.append(self)
 
-        log_refresh_seconds = get_config('jobs', 'logs', 'refresh_files_seconds')
+        logs_cf = self.properties.get('logs', {})
+        log_refresh_seconds = logs_cf.get('refresh_files_seconds', None)
+        if log_refresh_seconds is None:
+            log_refresh_seconds = get_config('jobs', 'logs', 'refresh_files_seconds')
+        write_timestamps = logs_cf.get('write_timestamps', None)
+        if write_timestamps is None:
+            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
+
         self._log_refresh_timer = RepeatTimer(
             log_refresh_seconds,
-            partial(self.rotating_log.refresh_files, start_interception=True),
+            partial(self.rotating_log.refresh_files, start_interception=write_timestamps),
         )
 
         try:
@@ -919,6 +936,18 @@ class Daemon:
         return LOGS_RESOURCES_PATH / ('.' + self.daemon_id + '.log.offset')
 
     @property
+    def log_offset_lock(self) -> 'fasteners.InterProcessLock':
+        """
+        Return the process lock context manager.
+        """
+        if '_log_offset_lock' in self.__dict__:
+            return self._log_offset_lock
+
+        fasteners = attempt_import('fasteners')
+        self._log_offset_lock = fasteners.InterProcessLock(self.log_offset_path)
+        return self._log_offset_lock
+
+    @property
     def rotating_log(self) -> RotatingFile:
         """
         The rotating log file for the daemon's output.
@@ -935,11 +964,16 @@ class Daemon:
         if timestamp_format is None:
             timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
 
+        max_file_size = logs_cf.get('max_file_size', None)
+        if max_file_size is None:
+            max_file_size = get_config('jobs', 'logs', 'max_file_size')
+
         self._rotating_log = RotatingFile(
             self.log_path,
             redirect_streams=True,
             write_timestamps=write_timestamps,
             timestamp_format=timestamp_format,
+            max_file_size=max_file_size,
         )
         return self._rotating_log
 
@@ -1002,20 +1036,25 @@ class Daemon:
         if not self.log_offset_path.exists():
             return 0, 0
 
-        with open(self.log_offset_path, 'r', encoding='utf-8') as f:
-            cursor_text = f.read()
-        cursor_parts = cursor_text.split(' ')
-        subfile_index, subfile_position = int(cursor_parts[0]), int(cursor_parts[1])
-        return subfile_index, subfile_position
+        try:
+            with open(self.log_offset_path, 'r', encoding='utf-8') as f:
+                cursor_text = f.read()
+            cursor_parts = cursor_text.split(' ')
+            subfile_index, subfile_position = int(cursor_parts[0]), int(cursor_parts[1])
+            return subfile_index, subfile_position
+        except Exception as e:
+            warn(f"Failed to read cursor:\n{e}")
+        return 0, 0
 
     def _write_log_offset(self) -> None:
         """
         Write the current log offset file.
         """
-        with open(self.log_offset_path, 'w+', encoding='utf-8') as f:
-            subfile_index = self.rotating_log._cursor[0]
-            subfile_position = self.rotating_log._cursor[1]
-            f.write(f"{subfile_index} {subfile_position}")
+        with self.log_offset_lock:
+            with open(self.log_offset_path, 'w+', encoding='utf-8') as f:
+                subfile_index = self.rotating_log._cursor[0]
+                subfile_position = self.rotating_log._cursor[1]
+                f.write(f"{subfile_index} {subfile_position}")
 
     @property
     def pid(self) -> Union[int, None]:
@@ -1173,6 +1212,10 @@ class Daemon:
         import pickle
         import traceback
         from meerschaum.utils.misc import generate_password
+
+        if not self.pickle:
+            return True, "Success"
+
         backup_path = self.pickle_path.parent / (generate_password(7) + '.pkl')
         try:
             self.path.mkdir(parents=True, exist_ok=True)
