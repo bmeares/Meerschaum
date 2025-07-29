@@ -7,7 +7,7 @@ Stop running jobs that were started with `-d` or `start job`.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, List, SuccessTuple, Any
+from meerschaum.utils.typing import Optional, List, SuccessTuple, Any, Union
 
 
 def stop(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
@@ -17,6 +17,7 @@ def stop(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
     from meerschaum.actions import choose_subaction
     options = {
         'jobs': _stop_jobs,
+        'daemons': _stop_daemons,
     }
     return choose_subaction(action, options, **kw)
 
@@ -53,7 +54,7 @@ def _complete_stop(
         return options[sub](action=action, **kw)
 
     from meerschaum._internal.shell import default_action_completer
-    return default_action_completer(action=(['start'] + action), **kw)
+    return default_action_completer(action=(['stop'] + action), **kw)
 
 
 def _stop_jobs(
@@ -161,6 +162,45 @@ def _stop_jobs(
         )
 
     return success, msg
+
+
+def _stop_daemons(
+    timeout_seconds: Union[int, float, None] = None,
+    debug: bool = False,
+    **kwargs
+) -> SuccessTuple:
+    """
+    Stop the Meerschaum CLI daemon.
+    """
+    from meerschaum.utils.warnings import warn, dprint
+    from meerschaum._internal.entry import get_existing_cli_daemons
+    daemons = get_existing_cli_daemons()
+    if not daemons:
+        if debug:
+            dprint("No CLI daemons to clean up.")
+        return True, "Success"
+
+    for daemon in daemons:
+        ix = daemon.daemon_id[len('.cli.'):]
+        if debug:
+            dprint(f"CLI daemon #{ix} status: {daemon.status}")
+        if daemon.status == 'running':
+            if debug:
+                dprint(f"Sending SIGINT to CLI daemon #{ix}...")
+            quit_success, quit_message = daemon.quit(timeout=timeout_seconds)
+            if not quit_success:
+                warn(f"Failed to quit CLI daemon #{ix}:\n{quit_message}", stack=False)
+                if debug:
+                    dprint(f"Sending SIGTERM to CLI daemon #{ix}...")
+                kill_success, kill_message = daemon.kill(timeout=timeout_seconds)
+                if not kill_success:
+                    return kill_success, kill_message
+
+        cleanup_success, cleanup_msg = daemon.cleanup(keep_logs=True)
+        if not cleanup_success:
+            warn(f"Failed to clean up CLI daemon #{ix}:\n{cleanup_msg}", stack=False)
+
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.

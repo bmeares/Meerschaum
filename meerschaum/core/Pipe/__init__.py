@@ -435,8 +435,6 @@ class Pipe:
         if self.instance_keys == 'sql:memory':
             self.cache = False
 
-        if self.cache:
-            self._load_cache_keys(debug=debug)
 
     @property
     def meta(self):

@@ -165,12 +165,16 @@ def error(
     Raise an exception with supressed traceback.
     """
     from meerschaum.utils.formatting import (
-        CHARSET, ANSI, get_console, fill_ansi, highlight_pipes, _init
+        CHARSET,
+        ANSI,
+        get_console,
+        fill_ansi,
+        highlight_pipes,
+        _init,
     )
     from meerschaum.utils.packages import import_rich, attempt_import
     from meerschaum.config import get_config
-    import types, inspect
-    rich = import_rich()
+    _ = import_rich()
     rich_traceback = attempt_import('rich.traceback')
     error_config = get_config('formatting', 'errors', patch=True)
     message = ' ' + error_config[CHARSET]['icon'] + ' ' + str(message)
@@ -186,23 +190,25 @@ def error(
             exception_class, exception, exception.__traceback__
         )
         rtb = rich_traceback.Traceback(trace)
-    except Exception as e:
+    except Exception:
         trace, rtb = None, None
     if trace is None or rtb is None:
         nopretty = True
     if not nopretty and stack:
         if get_console() is not None:
             get_console().print(rtb)
-    frame = sys._getframe(len(inspect.stack()) - 1)
     if raise_:
         raise color_exception
 
 
 def info(message: str, icon: bool = True, **kw):
     """Print an informative message."""
-    from meerschaum.utils.packages import import_rich, attempt_import
     from meerschaum.utils.formatting import (
-        CHARSET, ANSI, highlight_pipes, fill_ansi, _init
+        CHARSET,
+        ANSI,
+        highlight_pipes,
+        fill_ansi,
+        _init,
     )
     from meerschaum.config import get_config
     info_config = get_config('formatting', 'info', patch=True)
@@ -215,3 +221,4 @@ def info(message: str, icon: bool = True, **kw):
         message = fill_ansi(lines[0], **info_config['ansi']['rich']) + (
             '\n' + '\n'.join(lines[1:]) if len(lines) > 1 else ''
         )
+    print(message)

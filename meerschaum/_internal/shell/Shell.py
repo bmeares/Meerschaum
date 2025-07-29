@@ -678,7 +678,7 @@ class Shell(cmd.Cmd):
                 sysargs_to_execute,
                 _patch_args=patch_args,
                 _session_id=shell_attrs.get('session_id', None),
-                _use_cli_daemon=False,
+                _use_cli_daemon=True,
             )
         except Exception as e:
             success_tuple = False, str(e)

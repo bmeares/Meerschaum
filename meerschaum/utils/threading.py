@@ -65,23 +65,37 @@ class Thread(threading.Thread):
             return
 
         if signalnum == signal.SIGINT:
-            self.raise_exception(KeyboardInterrupt)
+            self.raise_exception(KeyboardInterrupt())
         elif signalnum == signal.SIGTERM:
-            self.raise_exception(SystemExit)
+            self.raise_exception(SystemExit())
         else:
             signal.pthread_kill(self.ident, signalnum)
 
-    def raise_exception(self, exc):
+    def raise_exception(self, exc: BaseException):
         """
         Raise an exception in the thread.
+
+        This uses a CPython-specific implementation and is not guaranteed to be stable.
+        It may also be deprecated in future Python versions.
         """
         if not self.is_alive():
             return
 
-        ctypes.pythonapi.PyThreadState_SetAsyncExc(
-            ctypes.c_long(self.ident),
-            ctypes.py_object(exc)
+        if not hasattr(ctypes.pythonapi, 'PyThreadState_SetAsyncExc'):
+            return
+
+        exc_class = exc if isinstance(exc, type) else type(exc)
+
+        ident = self.ident
+        if ident is None:
+            return
+
+        ret = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+            ctypes.c_ulong(ident),
+            ctypes.py_object(exc_class)
         )
+        if ret > 1:
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(ident, 0)
 
 class Worker(threading.Thread):
     """Wrapper for `threading.Thread` for working with `queue.Queue` objects."""

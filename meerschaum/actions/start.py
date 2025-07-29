@@ -575,7 +575,6 @@ def _start_pipeline(
     """
     import json
     import time
-    import sys
     from meerschaum._internal.entry import entry
     from meerschaum.utils.warnings import info, warn
     from meerschaum.utils.misc import is_int
@@ -630,7 +629,7 @@ def _start_pipeline(
     def do_entry() -> None:
         nonlocal success, msg, proc
         if timeout_seconds is None:
-            success, msg = entry(sub_args_line, _patch_args=patch_args)
+            success, msg = entry(sub_args_line, _patch_args=patch_args, _use_cli_daemon=False)
             return
 
         sub_args_line_escaped = sub_args_line.replace("'", "<QUOTE>")
@@ -640,7 +639,7 @@ def _start_pipeline(
             "from meerschaum._internal.entry import entry\n\n"
             f"sub_args_line = '{sub_args_line_escaped}'.replace(\"<QUOTE>\", \"'\")\n"
             f"patch_args = json.loads('{patch_args_escaped_str}'.replace('<QUOTE>', \"'\"))\n"
-            "success, msg = entry(sub_args_line, _patch_args=patch_args)\n"
+            "success, msg = entry(sub_args_line, _patch_args=patch_args, _use_cli_daemon=False)\n"
             f"print('{fence_begin}' + json.dumps((success, msg)) + '{fence_end}')"
         )
         proc = venv_exec(src, venv=None, as_proc=True)
