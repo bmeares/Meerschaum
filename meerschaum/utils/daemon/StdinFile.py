@@ -68,8 +68,11 @@ class StdinFile(io.TextIOBase):
 
         if isinstance(data, str):
             data = data.encode('utf-8')
-        self._write_fp.write(data)
-        self._write_fp.flush()
+        try:
+            self._write_fp.write(data)
+            self._write_fp.flush()
+        except BrokenPipeError:
+            pass
 
     def fileno(self):
         fileno = self.file_handler.fileno()
@@ -95,7 +98,7 @@ class StdinFile(io.TextIOBase):
 
             if not self.blocking_file_path.exists():
                 self.blocking_file_path.touch()
-            time.sleep(0.05)
+            time.sleep(0.01)
 
     def readline(self, size=-1):
         line = '' if self.decode else b''

@@ -300,8 +300,6 @@ def get_filtered_daemons(
             if warn:
                 _warn(f"Daemon '{d_id}' does not exist.", stack=False)
             continue
-        if d.hidden:
-            pass
         daemons.append(d)
     return daemons
 

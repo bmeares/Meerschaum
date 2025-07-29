@@ -67,8 +67,6 @@ def entry(
     import time
     import shlex
     import traceback
-    from meerschaum.utils.daemon import StdinFile
-    from meerschaum.utils.prompt import prompt
 
     daemon_is_ready = True
 
@@ -86,6 +84,7 @@ def entry(
     try:
         daemon_ix = get_available_cli_daemon_ix() if daemon_is_ready else -1
     except EnvironmentError as e:
+        from meerschaum.utils.warnings import warn
         warn(e, stack=False)
         daemon_ix = -1
         daemon_is_ready = False
@@ -107,7 +106,6 @@ def entry(
     if start_success:
         while True:
             if not daemon.blocking_stdin_file_path.exists():
-                print("Not yet accepting input, wait...")
                 time.sleep(0.01)
             else:
                 break
@@ -152,18 +150,19 @@ def entry(
             daemon.stdin_file.write(json.dumps(cleanup_data, separators=(',', ':')) + '\n')
         except Exception:
             traceback.print_exc()
-            pass
 
+    accepted = False
+    exit_data = None
 
     while True:
         try:
-            exit_data = None
             lines = daemon.readlines()
             if not lines:
-                time.sleep(0.1)
+                time.sleep(0.01)
                 continue
+
             for line in lines:
-                if action_id in line:
+                if line.startswith('{') and action_id in line:
                     line_data = _parse_line(line)
                     state = line_data.get('state', None)
                     if state == 'completed':
@@ -171,9 +170,10 @@ def entry(
                         _cleanup()
                         return success, msg
                     elif state == 'accepted':
+                        accepted = True
                         continue
 
-                if line:
+                elif line and accepted:
                     sys.stdout.write(line)
                     sys.stdout.flush()
 
@@ -578,23 +578,18 @@ def cli_daemon_loop():
     import uuid
     import sys
     import os
-    import threading
-    import builtins
-    import functools
+    import traceback
     from typing import Dict, Any, Optional
-    from contextlib import redirect_stdout, redirect_stderr
 
-    import meerschaum as mrsm
-    from meerschaum.utils.prompt import prompt
     from meerschaum._internal.entry import entry as _entry
-    from meerschaum.utils.daemon import StdinFile, get_current_daemon
+    from meerschaum.utils.daemon import get_current_daemon
     from meerschaum.utils.threading import Thread
     from meerschaum.utils.misc import set_env
-    from meerschaum.config.paths import CLI_RESOURCES_PATH
 
     daemon = get_current_daemon()
 
     session_ids_threads = {}
+    session_ids_action_ids = {}
     thread_idents_session_ids = {} 
 
     def _cleanup(result, _session_id: Optional[str] = None):
@@ -608,11 +603,12 @@ def cli_daemon_loop():
                 del thread_idents_session_ids[session_thread.ident]
             if _session_id in session_ids_threads:
                 del session_ids_threads[_session_id]
+            if _session_id in session_ids_action_ids:
+                del session_ids_action_ids[_session_id]
 
         daemon.rotating_log.increment_subfiles()
         if daemon.log_offset_path.exists():
             daemon.log_offset_path.unlink()
-
 
     def _print_line(
         text,
@@ -650,7 +646,7 @@ def cli_daemon_loop():
                     _use_cli_daemon=False,
                 )
         except Exception as e:
-            action_success, action_message = False, f"Failed to execute:\n{e}"
+            action_success, action_msg = False, f"Failed to execute:\n{e}"
 
         _print_line(
             None,
@@ -675,10 +671,41 @@ def cli_daemon_loop():
         except (KeyboardInterrupt, EOFError, SystemExit) as e:
             running_session_id = list(session_ids_threads)[0] if session_ids_threads else None
             if running_session_id:
-                send_exc_to_session_thread(e)
+                send_exc_to_session_thread(running_session_id, e)
 
-            _cleanup(None, None)
-            return True, "Exiting CLI daemon process."
+            running_action_id = (
+                session_ids_action_ids[running_session_id][-1]
+                if (running_session_id and session_ids_action_ids)
+                else None
+            )
+            running_thread = (
+                session_ids_threads.get(running_session_id, None)
+                if running_session_id
+                else None
+            )
+            exc_str = traceback.format_exc().splitlines()[-1]
+
+            action_success, action_msg = True, f"Exiting CLI daemon process:\n{exc_str}"
+
+            import time
+            start = time.perf_counter()
+            thread_is_dead = False
+            while (time.perf_counter() - start) <= 8:
+                if running_thread is None or not running_thread.is_alive():
+                    thread_is_dead = True
+                    break
+                time.sleep(0.1)
+
+            if not thread_is_dead:
+                _print_line(
+                    None,
+                    running_session_id,
+                    running_action_id,
+                    state='completed',
+                    result=(action_success, action_msg),
+                )
+            _cleanup((action_success, action_msg), running_session_id)
+            return action_success, action_msg
 
         try:
             input_data = json.loads(input_data_str)
@@ -687,6 +714,7 @@ def cli_daemon_loop():
 
         error_msg = input_data.get('error', None)
         session_id = input_data.get('session_id', None)
+        action_id = input_data.get('action_id', uuid.uuid4().hex)
 
         if error_msg:
             _print_line(
@@ -716,8 +744,6 @@ def cli_daemon_loop():
             _cleanup(None, session_id)
             continue
 
-        action_id = input_data.get('action_id', uuid.uuid4().hex)
-
         _print_line(
             None,
             session_id,
@@ -731,6 +757,9 @@ def cli_daemon_loop():
             args=(input_data,),
         )
         session_ids_threads[session_id] = thread
+        if session_id not in session_ids_action_ids:
+            session_ids_action_ids[session_id] = []
+        session_ids_action_ids[session_id].append(action_id)
         thread_idents_session_ids[thread.ident] = session_id
         thread.start()
 
@@ -770,8 +799,8 @@ def get_cli_session_id() -> str:
     """
     Return the session ID to use for the current process and thread.
     """
-    import threading
     return f"{os.getpid()}.{threading.current_thread().ident}"
+
 
 def get_available_cli_daemon_ix() -> int:
     """
@@ -786,4 +815,34 @@ def get_available_cli_daemon_ix() -> int:
         
         ix += 1
         if ix > max_ix:
-            raise EnvironmentError(f"Too many CLI daemons are running.")
+            raise EnvironmentError("Too many CLI daemons are running.")
+
+
+def get_existing_cli_daemon_indices() -> List[int]:
+    """
+    Return a list of the existing CLI daemons.
+    """
+    from meerschaum.utils.daemon import get_daemon_ids
+    daemon_ids = [daemon_id for daemon_id in get_daemon_ids() if daemon_id.startswith('.cli.')]
+    indices = []
+
+    for daemon_id in daemon_ids:
+        try:
+            ix = int(daemon_id[len('.cli.'):])
+            indices.append(ix)
+        except Exception:
+            pass
+
+    return indices
+
+
+def get_existing_cli_daemons() -> 'List[Daemon]':
+    """
+    Return a list of the existing CLI daemons.
+    """
+    from meerschaum.utils.daemon import Daemon
+    indices = get_existing_cli_daemon_indices()
+    return [
+        Daemon(daemon_id=f".cli.{ix}")
+        for ix in indices
+    ]
