@@ -197,13 +197,13 @@ def test_infer_numeric_dtype(flavor: str):
     conn = conns[flavor]
     pipe = Pipe('infer', 'numeric', instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('infer', 'numeric', instance=conn, columns=['id'])
+    pipe = Pipe('infer', 'numeric', instance=conn, columns=['id'], debug=debug)
     success, msg = pipe.sync([
         {'id': 1, 'a': Decimal('1')},
         {'id': 2, 'a': Decimal(numeric_str)},
-    ])
+    ], debug=debug)
     assert success, msg
-    pprint(pipe.get_columns_types())
+    pprint(pipe.get_columns_types(debug=debug))
     df = pipe.get_data(debug=debug)
     print(df)
     assert isinstance(df['a'][0], Decimal)
