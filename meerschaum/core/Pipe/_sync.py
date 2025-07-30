@@ -613,11 +613,11 @@ def exists(
     A `bool` corresponding to whether a pipe's underlying table exists.
 
     """
-    import time
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.debug import dprint
-    now = time.perf_counter()
+    from meerschaum.utils.dtypes import get_current_timestamp
+    now = get_current_timestamp('ms', as_int=True) / 1000
     cache_seconds = mrsm.get_config('pipes', 'sync', 'exists_cache_seconds')
 
     _exists = self._get_cached_value('_exists', debug=debug)

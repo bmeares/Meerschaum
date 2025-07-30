@@ -126,13 +126,15 @@ def _invalidate_cache(
 
     cache_keys = self._get_cache_keys(debug=debug)
     print('#######################')
+    print('#     CLEAR CACHE     #')
+    print('#######################')
     for cache_key in cache_keys:
         print(f"{cache_keys=}")
         if cache_keys == 'attributes':
             continue
         self._clear_cache_key(cache_key, debug=debug)
 
-    self._attributes = {}
+    #  self._attributes = {}
     return True, "Success"
 
 
@@ -455,6 +457,9 @@ def _get_cache_file_keys(self, debug: bool = False) -> List[str]:
             dprint(f"Cache path '{cache_dir_path}' does not exist; no keys to return.")
         return []
 
+    if debug:
+        dprint(f"Listing cache files from '{cache_dir_path}'.")
+
     return [
         filename[:(-1 * len('.pkl'))]
         for filename in os.listdir(cache_dir_path)
@@ -488,7 +493,11 @@ def _clear_cache_key(
     Clear a cached value from in-memory and on-disk / from Valkey.
     """
     in_memory_key = _get_in_memory_key(cache_key)
+    if debug:
+        dprint(f"{in_memory_key=}")
     _ = self.__dict__.pop(in_memory_key, None)
+    if debug:
+        mrsm.pprint(self.__dict__)
 
     cache_connector = self._get_cache_connector()
     if cache_connector is None:

@@ -194,7 +194,7 @@ default_system_config = {
         'uv_pip': True,
         'systemd_healthcheck': False,
         'valkey_session_cache': True,
-        'cli_daemon': False,
+        'cli_daemon': True,
     },
 }
 default_pipes_config = {

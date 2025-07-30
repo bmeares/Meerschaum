@@ -22,15 +22,15 @@ def attributes(self) -> Dict[str, Any]:
     Return a dictionary of a pipe's keys and parameters.
     These values are reflected directly from the pipes table of the instance.
     """
-    import time
     from meerschaum.config import get_config
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
+    from meerschaum.utils.dtypes import get_current_timestamp
 
     timeout_seconds = get_config('pipes', 'attributes', 'local_cache_timeout_seconds')
 
-    now = time.perf_counter()
+    now = get_current_timestamp('ms', as_int=True) / 1000
     _attributes_sync_time = self._get_cached_value('_attributes_sync_time', debug=self.debug)
     timed_out = (
         _attributes_sync_time is None
@@ -544,11 +544,10 @@ def get_columns_types(
     }
     >>>
     """
-    import time
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum._internal.static import STATIC_CONFIG
+    from meerschaum.utils.dtypes import get_current_timestamp
 
-    now = time.perf_counter()
+    now = get_current_timestamp('ms', as_int=True) / 1000
     cache_seconds = (
         mrsm.get_config('pipes', 'static', 'static_schema_cache_seconds')
         if self.static
@@ -591,10 +590,10 @@ def get_columns_indices(
     """
     Return a dictionary mapping columns to index information.
     """
-    import time
     from meerschaum.connectors import get_connector_plugin
+    from meerschaum.utils.dtypes import get_current_timestamp
 
-    now = time.perf_counter()
+    now = get_current_timestamp('ms', as_int=True) / 1000
     cache_seconds = (
         mrsm.get_config('pipes', 'static', 'static_schema_cache_seconds')
         if self.static
