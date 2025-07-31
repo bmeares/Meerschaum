@@ -508,3 +508,7 @@ groups['misc'].add_argument(
         + "Default behavior is to only allow recognized actions."
     )
 )
+groups['misc'].add_argument(
+    '--no-daemon', action='store_true',
+    help="Do not use the Meerschaum CLI daemon to execute the action.",
+)
