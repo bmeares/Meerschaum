@@ -112,6 +112,7 @@ class ActionWorker:
                     'max_file_size': 10_000_000,
                     'num_files_to_keep': 1,
                     'redirect_streams': True,
+                    'lines_to_show': 0,
                 },
             },
         )

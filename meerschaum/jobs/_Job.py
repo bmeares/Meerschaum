@@ -497,6 +497,7 @@ class Job:
             'user': stop_event,
             'stopped': asyncio.Event(),
             'stop_token': asyncio.Event(),
+            'stop_exception': asyncio.Event(),
         }
         combined_event = asyncio.Event()
         emitted_text = False
@@ -587,7 +588,13 @@ class Job:
         combine_events_task = asyncio.create_task(combine_events())
 
         log = _log if _log is not None else self.daemon.rotating_log
-        lines_to_show = get_config('jobs', 'logs', 'lines_to_show')
+        lines_to_show = (
+            self.daemon.properties.get(
+                'logs', {}
+            ).get(
+                'lines_to_show', get_config('jobs', 'logs', 'lines_to_show')
+            )
+        )
 
         async def emit_latest_lines():
             nonlocal emitted_text
@@ -611,6 +618,7 @@ class Job:
                         callback_function(line)
                     emitted_text = True
                 except StopMonitoringLogs:
+                    events['stop_exception'].set()
                     return
                 except Exception:
                     warn(f"Error in logs callback:\n{traceback.format_exc()}")
@@ -745,6 +753,20 @@ class Job:
         self._sysargs = target_args[0] if len(target_args) > 0 else []
         return self._sysargs
 
+    def get_daemon_properties(self) -> Dict[str, Any]:
+        """
+        Return the `properties` dictionary for the job's daemon.
+        """
+        remote_properties = (
+            {}
+            if self.executor is None
+            else self.executor.get_job_properties(self.name)
+        )
+        return {
+            **remote_properties,
+            **self._properties_patch
+        }
+
     @property
     def daemon(self) -> 'Daemon':
         """
@@ -754,20 +776,13 @@ class Job:
         if self._daemon is not None and self.executor is None and self._sysargs:
             return self._daemon
 
-        remote_properties = (
-            {}
-            if self.executor is None
-            else self.executor.get_job_properties(self.name)
-        )
-        properties = {**remote_properties, **self._properties_patch}
-
         self._daemon = Daemon(
             target=entry,
             target_args=[self._sysargs],
             target_kw={},
             daemon_id=self.name,
             label=shlex.join(self._sysargs),
-            properties=properties,
+            properties=self.get_daemon_properties(),
         )
         if '_rotating_log' in self.__dict__:
             self._daemon._rotating_log = self._rotating_log

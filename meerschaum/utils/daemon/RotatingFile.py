@@ -310,13 +310,13 @@ class RotatingFile(io.IOBase):
         self.subfile_objects[new_subfile_index] = self._current_file_obj
         self.flush()
 
-        if self._previous_file_obj is not None:
-            if self.redirect_streams:
+        if self.redirect_streams:
+            if self._previous_file_obj is not None:
                 self._redirected_subfile_objects[old_subfile_index] = self._previous_file_obj
                 daemon.daemon.redirect_stream(self._previous_file_obj, self._current_file_obj)
-                daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
-                daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
-            self.close(unused_only=True)
+            daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
+            daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
+        self.close(unused_only=True)
 
         ### Sanity check in case writing somehow fails.
         if self._previous_file_obj is self._current_file_obj:
