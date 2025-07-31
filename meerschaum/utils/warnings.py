@@ -100,11 +100,11 @@ def warn(*args, stacklevel=2, stack=True, color: bool = True, **kw) -> None:
 
 
 def exception_with_traceback(
-        message: str,
-        exception_class = Exception, 
-        stacklevel = 1,
-        tb_type = 'single'
-    ):
+    message: str,
+    exception_class = Exception, 
+    stacklevel = 1,
+    tb_type = 'single'
+):
     """Traceback construction help found here:
     https://stackoverflow.com/questions/27138440/how-to-create-a-traceback-object
     """
@@ -221,4 +221,4 @@ def info(message: str, icon: bool = True, **kw):
         message = fill_ansi(lines[0], **info_config['ansi']['rich']) + (
             '\n' + '\n'.join(lines[1:]) if len(lines) > 1 else ''
         )
-    print(message)
+    print(message, flush=True)

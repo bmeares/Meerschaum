@@ -12,7 +12,8 @@ from __future__ import annotations
 import os
 import sys
 import pathlib
-import threading
+import shlex
+import json
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any, Union
@@ -59,10 +60,14 @@ def entry(
     -------
     A `SuccessTuple` indicating success.
     """
-    if not _use_cli_daemon or not mrsm.get_config('system', 'experimental', 'cli_daemon'):
+    if (
+        not _use_cli_daemon
+        or not mrsm.get_config('system', 'experimental', 'cli_daemon')
+        or '--no-daemon' in (shlex.join(sysargs) if isinstance(sysargs, list) else (sysargs or ''))
+    ):
         return entry_without_daemon(sysargs, _patch_args=_patch_args)
 
-    from meerschaum._internal.cli.daemons import entry_with_daemon
+    from meerschaum._internal.cli.entry import entry_with_daemon
     return entry_with_daemon(sysargs, _patch_args=_patch_args)
 
 
@@ -77,8 +82,6 @@ def entry_without_daemon(
     -------
     A `SuccessTuple` indicating success.
     """
-    import shlex
-    import json
     from meerschaum.utils.formatting import make_header
     from meerschaum._internal.arguments import (
         parse_arguments,
@@ -195,7 +198,6 @@ def entry_without_daemon(
     ).rstrip() if len(chained_sysargs) > 1 else results[0][1]
 
     if _systemd_result_path:
-        import json
         from meerschaum.utils.warnings import warn
         import meerschaum as mrsm
 
