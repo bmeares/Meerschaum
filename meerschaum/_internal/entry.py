@@ -62,8 +62,8 @@ def entry(
     """
     if (
         not _use_cli_daemon
-        or not mrsm.get_config('system', 'experimental', 'cli_daemon')
         or '--no-daemon' in (shlex.join(sysargs) if isinstance(sysargs, list) else (sysargs or ''))
+        or not mrsm.get_config('system', 'experimental', 'cli_daemon')
     ):
         return entry_without_daemon(sysargs, _patch_args=_patch_args)
 

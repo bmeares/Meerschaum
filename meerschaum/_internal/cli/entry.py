@@ -84,24 +84,13 @@ def entry_with_daemon(
     session_id = _session_id or get_cli_session_id()
     action_id = uuid.uuid4().hex
     
-    entry_data = {
+    worker.write_input_data({
         'session_id': session_id,
         'action_id': action_id,
         'sysargs': sysargs,
         'patch_args': _patch_args,
         'env': dict(os.environ),
-    }
-
-    worker.write_input_data(entry_data)
-
-    def _parse_line(line: str) -> Dict[str, Any]:
-        try:
-            line_text = line
-            return json.loads(line_text)
-        except Exception as e:
-            from meerschaum.utils.warnings import warn
-            warn(f"Failed to parse line from CLI daemon:\n{e}")
-            return {}
+    })
 
     accepted = False
     exit_data = None
