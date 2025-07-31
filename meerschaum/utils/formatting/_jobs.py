@@ -97,7 +97,7 @@ def pprint_jobs(
             msg = '\n'.join(line.lstrip().rstrip() for line in lines)
             success_tuple = success, msg
             success_tuple_str = (
-                format_success_tuple(success_tuple, left_padding=1)
+                format_success_tuple(success_tuple, left_padding=0)
                 if success_tuple is not None
                 else None
             )

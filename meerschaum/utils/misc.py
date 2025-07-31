@@ -1233,11 +1233,13 @@ def is_systemd_available() -> bool:
     import subprocess
     try:
         has_systemctl = subprocess.call(
-            ['systemctl', '-h'],
+            ['systemctl', 'whoami'],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
         ) == 0
     except Exception:
+        import traceback
+        traceback.print_exc()
         has_systemctl = False
     return has_systemctl
 

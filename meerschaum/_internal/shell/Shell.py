@@ -31,6 +31,7 @@ prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, instal
 )
 from meerschaum._internal.shell.ValidAutoSuggest import ValidAutoSuggest
 from meerschaum._internal.shell.ShellCompleter import ShellCompleter
+from meerschaum._internal.cli.daemons import get_cli_daemon, get_cli_session_id
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
 from meerschaum.utils.misc import string_width, remove_ansi
 from meerschaum.utils.warnings import warn
@@ -294,7 +295,6 @@ class Shell(cmd.Cmd):
                 pass
 
         ### NOTE: custom actions must be added to the self._actions dictionary
-        from meerschaum._internal.entry import get_cli_session_id
         shell_attrs['_session_id'] = get_cli_session_id()
         shell_attrs['_actions'] = actions
         shell_attrs['_sysargs'] = sysargs
@@ -1052,9 +1052,10 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     Replace built-in `input()` with prompt_toolkit.prompt.
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, colored, UNICODE
-    from meerschaum.connectors import is_connected, connectors
+    from meerschaum.connectors import connectors
     from meerschaum.utils.misc import remove_ansi, truncate_text_for_display
     from meerschaum.config import get_config
+
     import platform
     if shell is None:
         from meerschaum.actions import get_shell
@@ -1119,7 +1120,16 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
 
         try:
             typ, label = shell_attrs['instance_keys'].split(':', maxsplit=1)
-            connected = typ in connectors and label in connectors[typ]
+            daemon = (
+                get_cli_daemon()
+                if get_config('system', 'experimental', 'cli_daemon')
+                else None
+            )
+            connected = (
+                daemon.status == 'running'
+                if daemon is not None
+                else (typ in connectors and label in connectors[typ])
+            )
         except Exception:
             connected = False
         last_connected = connected

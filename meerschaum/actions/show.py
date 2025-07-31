@@ -563,6 +563,7 @@ def _complete_show_packages(
 
     return possibilities
 
+
 def _show_jobs(
     action: Optional[List[str]] = None,
     executor_keys: Optional[str] = None,

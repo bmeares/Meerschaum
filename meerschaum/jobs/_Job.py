@@ -13,7 +13,6 @@ import asyncio
 import pathlib
 import sys
 import traceback
-from functools import partial
 from datetime import datetime, timezone
 
 import meerschaum as mrsm
@@ -39,12 +38,20 @@ RESTART_FLAGS: List[str] = [
     '--schedule',
     '--cron',
 ]
+STOP_TOKEN: str = STATIC_CONFIG['jobs']['stop_token']
 
 class StopMonitoringLogs(Exception):
     """
     Raise this exception to stop the logs monitoring.
     """
 
+
+def _default_stdout_callback(line: str):
+    if line == '\n':
+        print('', end='', flush=True)
+        return
+
+    print(line, end='', flush=True)
 
 class Job:
     """
@@ -257,7 +264,11 @@ class Job:
 
         return success, f"Started {self}."
 
-    def stop(self, timeout_seconds: Optional[int] = None, debug: bool = False) -> SuccessTuple:
+    def stop(
+        self,
+        timeout_seconds: Union[int, float, None] = None,
+        debug: bool = False,
+    ) -> SuccessTuple:
         """
         Stop the job's daemon.
         """
@@ -284,7 +295,11 @@ class Job:
 
         return kill_success, f"Killed {self}."
 
-    def pause(self, timeout_seconds: Optional[int] = None, debug: bool = False) -> SuccessTuple:
+    def pause(
+        self,
+        timeout_seconds: Union[int, float, None] = None,
+        debug: bool = False,
+    ) -> SuccessTuple:
         """
         Pause the job's daemon.
         """
@@ -342,7 +357,7 @@ class Job:
 
     def monitor_logs(
         self,
-        callback_function: Callable[[str], None] = partial(print, end=''),
+        callback_function: Callable[[str], None] = _default_stdout_callback,
         input_callback_function: Optional[Callable[[], str]] = None,
         stop_callback_function: Optional[Callable[[SuccessTuple], None]] = None,
         stop_event: Optional[asyncio.Event] = None,
@@ -414,7 +429,7 @@ class Job:
 
     async def monitor_logs_async(
         self,
-        callback_function: Callable[[str], None] = partial(print, end='', flush=True),
+        callback_function: Callable[[str], None] = _default_stdout_callback,
         input_callback_function: Optional[Callable[[], str]] = None,
         stop_callback_function: Optional[Callable[[SuccessTuple], None]] = None,
         stop_event: Optional[asyncio.Event] = None,
@@ -431,7 +446,7 @@ class Job:
 
         Parameters
         ----------
-        callback_function: Callable[[str], None], default partial(print, end='')
+        callback_function: Callable[[str], None], default _default_stdout_callback
             The callback to execute as new data comes in.
             Defaults to printing the output directly to `stdout`.
 
@@ -481,6 +496,7 @@ class Job:
         events = {
             'user': stop_event,
             'stopped': asyncio.Event(),
+            'stop_token': asyncio.Event(),
         }
         combined_event = asyncio.Event()
         emitted_text = False
@@ -492,7 +508,7 @@ class Job:
             if stopped_event is None:
                 return
 
-            sleep_time = 0.1
+            sleep_time = 0.01
             while sleep_time < 60:
                 if self.status == 'stopped':
                     if not emitted_text:
@@ -515,13 +531,13 @@ class Job:
                         events['stopped'].set()
 
                     break
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.01)
 
         async def check_blocking_on_input():
             while True:
                 if not emitted_text or not self.is_blocking_on_stdin():
                     try:
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.01)
                     except asyncio.exceptions.CancelledError:
                         break
                     continue
@@ -539,11 +555,11 @@ class Job:
                         data = input_callback_function()
                 except KeyboardInterrupt:
                     break
-                if not data.endswith('\n'):
-                    data += '\n'
+                #  if not data.endswith('\n'):
+                    #  data += '\n'
 
                 stdin_file.write(data)
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.01)
 
         async def combine_events():
             event_tasks = [
@@ -575,9 +591,14 @@ class Job:
 
         async def emit_latest_lines():
             nonlocal emitted_text
+            nonlocal stop_event
             lines = log.readlines()
             for line in lines[(-1 * lines_to_show):]:
                 if stop_event is not None and stop_event.is_set():
+                    return
+
+                if line.strip() == STOP_TOKEN:
+                    events['stop_token'].set()
                     return
 
                 if strip_timestamps:

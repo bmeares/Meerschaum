@@ -125,16 +125,11 @@ def _invalidate_cache(
         return True, "Success"
 
     cache_keys = self._get_cache_keys(debug=debug)
-    print('#######################')
-    print('#     CLEAR CACHE     #')
-    print('#######################')
     for cache_key in cache_keys:
-        print(f"{cache_keys=}")
         if cache_keys == 'attributes':
             continue
         self._clear_cache_key(cache_key, debug=debug)
 
-    #  self._attributes = {}
     return True, "Success"
 
 

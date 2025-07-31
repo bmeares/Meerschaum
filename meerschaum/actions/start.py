@@ -25,6 +25,7 @@ def start(
         'webterm': _start_webterm,
         'connectors': _start_connectors,
         'pipeline': _start_pipeline,
+        'daemons': _start_daemons,
     }
     return choose_subaction(action, options, **kw)
 
@@ -685,6 +686,110 @@ def _start_pipeline(
     if do_n_times != 1:
         info(f"Ran pipeline {ran_n_times} time" + ('s' if ran_n_times != 1 else '') + '.')
     return success, msg
+
+
+def _start_daemons(
+    timeout_seconds: Union[int, float, None] = None,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kwargs
+) -> SuccessTuple:
+    """
+    Start the Meerschaum CLI daemon processes.
+    """
+    from meerschaum.utils.warnings import warn, dprint
+    from meerschaum._internal.cli.daemons import (
+        get_existing_cli_daemons,
+        get_existing_cli_daemon_indices,
+        get_cli_daemon,
+        get_cli_lock_path,
+    )
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.actions import actions
+
+    daemons = get_existing_cli_daemons()
+    if not daemons:
+        if debug:
+            dprint("No daemons are running, spawning a new process...")
+        daemons = [get_cli_daemon()]
+
+    accepted_restart = False
+    any_daemons_are_running = any((daemon.status == 'running') for daemon in daemons)
+    lock_paths = [get_cli_lock_path(ix) for ix in get_existing_cli_daemon_indices()]
+    any_locks_exist = any(lock_path.exists() for lock_path in lock_paths)
+
+    if any_locks_exist:
+        warn(
+            "Locks are currently held by the CLI daemons.\n"
+            "Run again with `--force` to remove the locks.",
+            stack=False,
+        )
+
+        if not force:
+            return False, "Actions are currently running."
+
+        for lock_path in lock_paths:
+            try:
+                if lock_path.exists():
+                    lock_path.unlink()
+            except Exception as e:
+                warn(f"Failed to release lock:\n{e}")
+
+    if any_daemons_are_running:
+        accepted_restart = force or yes_no(
+            "Restart running CLI daemons?",
+            yes=yes,
+            noask=noask,
+            default='n',
+        )
+
+        if not accepted_restart:
+            return True, "Daemons are already running; nothing to do."
+
+        stop_success, stop_msg = actions['stop'](
+            ['daemons'],
+            timeout_seconds=timeout_seconds,
+            debug=debug,
+        )
+        if not stop_success:
+            return stop_success, stop_msg
+
+    daemon = get_cli_daemon()
+
+    if debug:
+        dprint("Cleaning up CLI daemon...")
+    cleanup_success, cleanup_msg = daemon.cleanup()
+    if not cleanup_success:
+        return cleanup_success, cleanup_msg
+
+    if debug:
+        dprint("Starting CLI daemon...")
+
+    start_success, start_msg = daemon.run(allow_dirty_run=True, wait=True)
+    if not start_success:
+        return start_success, start_msg
+
+    return True, "Success"
+
+
+def _start_worker(action: Optional[List[str]] = None, **kwargs: Any) -> mrsm.SuccessTuple:
+    """
+    Start a CLI worker process. This is intended for internal use only.
+    """
+    from meerschaum._internal.cli.workers import ActionWorker
+    from meerschaum.utils.misc import is_int
+
+    if not action:
+        return False, "No worker index is provided."
+
+    if not is_int(action[0]):
+        return False, "Invalid worker index."
+
+    ix = int(action[0])
+    worker = ActionWorker(ix)
+    return worker.run()
 
 
 ### NOTE: This must be the final statement of the module.

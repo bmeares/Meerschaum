@@ -172,13 +172,14 @@ def _stop_daemons(
     """
     Stop the Meerschaum CLI daemon.
     """
+    import os
+    import shutil
     from meerschaum.utils.warnings import warn, dprint
-    from meerschaum._internal.entry import get_existing_cli_daemons
+    from meerschaum._internal.cli.daemons import get_existing_cli_daemons
+    from meerschaum._internal.cli.workers import get_existing_cli_workers
+    from meerschaum.config.paths import CLI_RESOURCES_PATH, LOGS_RESOURCES_PATH
     daemons = get_existing_cli_daemons()
-    if not daemons:
-        if debug:
-            dprint("No CLI daemons to clean up.")
-        return True, "Success"
+    workers = get_existing_cli_workers()
 
     for daemon in daemons:
         ix = daemon.daemon_id[len('.cli.'):]
@@ -199,6 +200,37 @@ def _stop_daemons(
         cleanup_success, cleanup_msg = daemon.cleanup(keep_logs=True)
         if not cleanup_success:
             warn(f"Failed to clean up CLI daemon #{ix}:\n{cleanup_msg}", stack=False)
+
+    for worker in workers:
+        stop_success, stop_msg = worker.job.stop(timeout_seconds=timeout_seconds, debug=debug)
+        if not stop_success:
+            return stop_success, stop_msg
+
+        cleanup_success, cleanup_msg = worker.cleanup(debug=debug)
+        if not cleanup_success:
+            return cleanup_success, cleanup_msg
+
+    try:
+        if CLI_RESOURCES_PATH.exists():
+            shutil.rmtree(CLI_RESOURCES_PATH)
+        CLI_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return False, f"Failed to clean up CLI resources directory.\n{e}"
+
+    for filename in os.listdir(LOGS_RESOURCES_PATH):
+        if not filename.startswith('.'):
+            continue
+
+        if not filename.lstrip('.').startswith('cli'):
+            continue
+
+        file_path = LOGS_RESOURCES_PATH / filename
+
+        try:
+            if file_path.exists():
+                file_path.unlink()
+        except Exception as e:
+            return False, f"Failed to clean up stray logs:\n{e}"
 
     return True, "Success"
 
