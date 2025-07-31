@@ -322,6 +322,7 @@ STATIC_CONFIG: Dict[str, Any] = {
     },
     'jobs': {
         'check_restart_seconds': 1.0,
+        'stop_token': '<------- MRSM_STOP_TOKEN ------->'
     },
     'tokens': {
         'minimum_length': 24,

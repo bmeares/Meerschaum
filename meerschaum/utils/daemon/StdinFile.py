@@ -12,6 +12,7 @@ import time
 import os
 import selectors
 import traceback
+import sys
 
 from meerschaum.utils.typing import Optional, Union
 from meerschaum.utils.warnings import warn

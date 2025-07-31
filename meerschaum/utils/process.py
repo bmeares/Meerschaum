@@ -178,7 +178,7 @@ def run_process(
             # make us tty's foreground again
             try:
                 os.tcsetpgrp(sys.stdin.fileno(), old_pgrp)
-            except Exception as e:
+            except Exception:
                 pass
             # now restore the handler
             signal.signal(signal.SIGTTOU, hdlr)

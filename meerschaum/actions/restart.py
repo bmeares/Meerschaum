@@ -7,6 +7,7 @@ Restart stopped jobs which have not been manually stopped.
 
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
+
 def restart(
     action: Optional[List[str]] = None,
     executor_keys: Optional[str] = None,
@@ -18,6 +19,7 @@ def restart(
     from meerschaum.actions import choose_subaction
     attach_options = {
         'jobs': _restart_jobs,
+        'daemons': _restart_daemons,
     }
     return choose_subaction(action, attach_options, executor_keys=executor_keys, **kwargs)
 
@@ -111,3 +113,14 @@ def _restart_jobs(
             time.sleep(min_seconds)
 
     return check_success, check_msg
+
+
+def _restart_daemons(
+    action: Optional[List[str]] = None,
+    **kwargs
+) -> SuccessTuple:
+    """
+    Restart the CLI daemons.
+    """
+    from meerschaum.actions import actions
+    return actions['start'](['daemons'], **kwargs)

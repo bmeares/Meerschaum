@@ -316,6 +316,9 @@ class Daemon:
             partial(self.rotating_log.refresh_files, start_interception=write_timestamps),
         )
 
+        if sys.stdin is None:
+            raise OSError("Cannot daemonize without stdin.")
+
         try:
             os.environ['LINES'], os.environ['COLUMNS'] = str(int(lines)), str(int(columns))
             with self._daemon_context:
@@ -378,7 +381,13 @@ class Daemon:
         except Exception:
             daemon_error = traceback.format_exc()
             with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
-                f.write(daemon_error)
+                f.write(
+                    f"Error in Daemon '{self}':\n\n"
+                    f"{sys.stdin=}\n"
+                    f"{self.stdin_file_path=}\n"
+                    f"{self.stdin_file_path.exists()=}\n\n"
+                    f"{daemon_error}\n\n"
+                )
             warn(f"Encountered an error while running the daemon '{self}':\n{daemon_error}")
 
     def _capture_process_timestamp(
@@ -1012,8 +1021,8 @@ class Daemon:
         """
         Return the file handler for the stdin file.
         """
-        if (stdin_file := self.__dict__.get('_stdin_file', None)):
-            return stdin_file
+        if (_stdin_file := self.__dict__.get('_stdin_file', None)):
+            return _stdin_file
 
         self._stdin_file = StdinFile(
             self.stdin_file_path,

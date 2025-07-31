@@ -12,7 +12,6 @@ import sys
 import asyncio
 import json
 import time
-import traceback
 import shutil
 from datetime import datetime, timezone
 from functools import partial
@@ -23,7 +22,6 @@ from meerschaum.utils.typing import Dict, Any, List, SuccessTuple, Union, Option
 from meerschaum.config import get_config
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn, dprint
-from meerschaum._internal.arguments._parse_arguments import parse_arguments
 
 JOB_METADATA_CACHE_SECONDS: int = STATIC_CONFIG['api']['jobs']['metadata_cache_seconds']
 

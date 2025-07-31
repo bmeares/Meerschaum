@@ -8,6 +8,7 @@ Manage virtual environments.
 
 from __future__ import annotations
 
+import sys
 import pathlib
 
 from meerschaum.utils.typing import Optional, Union, Dict, List, Tuple
@@ -659,6 +660,7 @@ def venv_exec(
         cmd_list,
         stdout=stdout,
         stderr=stderr,
+        stdin=sys.stdin,
         env=env,
         **group_kwargs
     )
