@@ -687,6 +687,12 @@ class RotatingFile(io.IOBase):
                 warn(f"Failed to join interceptor threads:\n{traceback.format_exc()}")
         del interceptor_threads[:end_ix]
 
+    def touch(self):
+        """
+        Touch the latest subfile.
+        """
+        subfile_path = self.get_latest_subfile_path()
+        subfile_path.touch()
 
     def __repr__(self) -> str:
         """

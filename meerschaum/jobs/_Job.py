@@ -365,6 +365,10 @@ class Job:
         strip_timestamps: bool = False,
         accept_input: bool = True,
         debug: bool = False,
+        _logs_path: Optional[pathlib.Path] = None,
+        _log=None,
+        _stdin_file=None,
+        _wait_if_stopped: bool = True,
     ):
         """
         Monitor the job's log files and execute a callback on new lines.
@@ -424,6 +428,11 @@ class Job:
             stop_on_exit=stop_on_exit,
             strip_timestamps=strip_timestamps,
             accept_input=accept_input,
+            debug=debug,
+            _logs_path=_logs_path,
+            _log=_log,
+            _stdin_file=_stdin_file,
+            _wait_if_stopped=_wait_if_stopped,
         )
         return asyncio.run(monitor_logs_coroutine)
 
@@ -436,10 +445,11 @@ class Job:
         stop_on_exit: bool = False,
         strip_timestamps: bool = False,
         accept_input: bool = True,
+        debug: bool = False,
         _logs_path: Optional[pathlib.Path] = None,
         _log=None,
         _stdin_file=None,
-        debug: bool = False,
+        _wait_if_stopped: bool = True,
     ):
         """
         Monitor the job's log files and await a callback on new lines.
@@ -498,23 +508,24 @@ class Job:
             'stopped': asyncio.Event(),
             'stop_token': asyncio.Event(),
             'stop_exception': asyncio.Event(),
+            'stopped_timeout': asyncio.Event(),
         }
         combined_event = asyncio.Event()
         emitted_text = False
         stdin_file = _stdin_file if _stdin_file is not None else self.daemon.stdin_file
 
         async def check_job_status():
-            nonlocal emitted_text
-            stopped_event = events.get('stopped', None)
-            if stopped_event is None:
+            if not stop_on_exit:
                 return
 
-            sleep_time = 0.01
-            while sleep_time < 60:
+            nonlocal emitted_text
+
+            sleep_time = 0.1
+            while sleep_time < 0.2:
                 if self.status == 'stopped':
-                    if not emitted_text:
+                    if not emitted_text and _wait_if_stopped:
                         await asyncio.sleep(sleep_time)
-                        sleep_time = round(sleep_time * 1.1, 2)
+                        sleep_time = round(sleep_time * 1.1, 3)
                         continue
 
                     if stop_callback_function is not None:
@@ -532,7 +543,9 @@ class Job:
                         events['stopped'].set()
 
                     break
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.1)
+
+            events['stopped_timeout'].set()
 
         async def check_blocking_on_input():
             while True:
@@ -637,9 +650,14 @@ class Job:
         except Exception:
             warn(f"Failed to run async checks:\n{traceback.format_exc()}")
 
-        watchfiles = mrsm.attempt_import('watchfiles')
+        watchfiles = mrsm.attempt_import('watchfiles', lazy=False)
+        dir_path_to_monitor = (
+            _logs_path
+            or (log.file_path.parent if log else None)
+            or LOGS_RESOURCES_PATH
+        )
         async for changes in watchfiles.awatch(
-            _logs_path or LOGS_RESOURCES_PATH,
+            dir_path_to_monitor,
             stop_event=combined_event,
         ):
             for change in changes:

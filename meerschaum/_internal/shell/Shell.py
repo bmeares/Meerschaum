@@ -302,10 +302,12 @@ class Shell(cmd.Cmd):
         shell_attrs['_actions']['repo'] = self.do_repo
         shell_attrs['_actions']['executor'] = self.do_executor
         shell_attrs['_actions']['debug'] = self.do_debug
+        shell_attrs['_actions']['daemon'] = self.do_daemon
         shell_attrs['_update_bottom_toolbar'] = True
         shell_attrs['_old_bottom_toolbar'] = ''
         shell_attrs['debug'] = False
         shell_attrs['_reload'] = True
+        shell_attrs['daemon'] = get_config('system', 'experimental', 'cli_daemon')
         self.load_config(instance=instance_keys)
         self.hidden_commands = []
         ### update hidden commands list (cmd2 only)
@@ -678,7 +680,7 @@ class Shell(cmd.Cmd):
                 sysargs_to_execute,
                 _patch_args=patch_args,
                 _session_id=shell_attrs.get('session_id', None),
-                _use_cli_daemon=True,
+                _use_cli_daemon=shell_attrs.get('daemon', False),
             )
         except Exception as e:
             success_tuple = False, str(e)
@@ -738,6 +740,35 @@ class Shell(cmd.Cmd):
             info(f"Unknown state '{state}'. Ignoring...")
 
         info(f"Debug mode is {'on' if shell_attrs['debug'] else 'off'}.")
+
+    def do_daemon(self, action: Optional[List[str]] = None, executor_keys=None, **kw):
+        """
+        Toggle whether to route commands through the CLI daemon.
+        
+        Command:
+            `debug {on/true | off/false}`
+            Ommitting on / off will toggle the existing value.
+        """
+        from meerschaum.utils.warnings import info
+        on_commands = {'on', 'true', 'True'}
+        off_commands = {'off', 'false', 'False'}
+        if action is None:
+            action = []
+        try:
+            state = action[0]
+        except (IndexError, AttributeError):
+            state = ''
+        if state == '':
+            shell_attrs['daemon'] = not shell_attrs['daemon']
+        elif state.lower() in on_commands:
+            shell_attrs['daemon'] = True
+        elif state.lower() in off_commands:
+            shell_attrs['daemon'] = False
+        else:
+            info(f"Unknown state '{state}'. Ignoring...")
+
+        info(f"CLI daemon mode is {'on' if shell_attrs['daemon'] else 'off'}.")
+        return True, "Success"
 
     def do_instance(
         self,
@@ -1120,14 +1151,14 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
 
         try:
             typ, label = shell_attrs['instance_keys'].split(':', maxsplit=1)
-            daemon = (
+            cli_worker = (
                 get_cli_daemon()
-                if get_config('system', 'experimental', 'cli_daemon')
+                if shell_attrs.get('daemon', False)
                 else None
             )
             connected = (
-                daemon.status == 'running'
-                if daemon is not None
+                cli_worker.job.status == 'running'
+                if cli_worker is not None
                 else (typ in connectors and label in connectors[typ])
             )
         except Exception:

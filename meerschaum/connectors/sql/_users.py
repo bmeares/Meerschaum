@@ -16,7 +16,10 @@ def get_users_pipe(self) -> mrsm.Pipe:
     """
     Return the internal metadata pipe for users management.
     """
-    return mrsm.Pipe(
+    if '_users_pipe' in self.__dict__:
+        return self._users_pipe
+
+    self._users_pipe = mrsm.Pipe(
         'mrsm', 'users',
         temporary=True,
         static=True,
@@ -36,6 +39,7 @@ def get_users_pipe(self) -> mrsm.Pipe:
             'unique': 'username',
         },
     )
+    return self._users_pipe
 
 
 def register_user(

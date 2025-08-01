@@ -177,12 +177,14 @@ default_system_config = {
     },
     'cli': {
         'max_daemons': 25,
-        'allowed_prefixes': [
-            'show',
-            'sync',
-            'deduplicate',
-            'verify',
-            'index',
+        'refresh_seconds': 0.01,
+        'allowed_prefixes': ['*'],
+        'disallowed_prefixes': [
+            'edit',
+            'start daemon',
+            'stop daemon',
+            'restart daemon',
+            'start worker',
         ],
     },
     'experimental': {
