@@ -18,7 +18,10 @@ def get_users_pipe(self) -> 'mrsm.Pipe':
     """
     Return the pipe used for users registration.
     """
-    return mrsm.Pipe(
+    if '_users_pipe' in self.__dict__:
+        return self._users_pipe
+
+    self._users_pipe = mrsm.Pipe(
         'mrsm', 'users',
         instance=self,
         target='mrsm_users',
@@ -40,6 +43,7 @@ def get_users_pipe(self) -> 'mrsm.Pipe':
             'unique': 'username',
         },
     )
+    return self._users_pipe
 
 
 def register_user(

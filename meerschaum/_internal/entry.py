@@ -14,6 +14,7 @@ import sys
 import pathlib
 import shlex
 import json
+import time
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any, Union
@@ -60,15 +61,25 @@ def entry(
     -------
     A `SuccessTuple` indicating success.
     """
+    start = time.perf_counter()
+    sysargs_str = (shlex.join(sysargs) if isinstance(sysargs, list) else (sysargs or ''))
     if (
         not _use_cli_daemon
-        or '--no-daemon' in (shlex.join(sysargs) if isinstance(sysargs, list) else (sysargs or ''))
+        or ' --no-daemon' in sysargs_str
         or not mrsm.get_config('system', 'experimental', 'cli_daemon')
     ):
-        return entry_without_daemon(sysargs, _patch_args=_patch_args)
+        success, msg = entry_without_daemon(sysargs, _patch_args=_patch_args)
+        end = time.perf_counter()
+        if ' --debug' in sysargs_str:
+            print(f"Duration without daemon: {round(end - start, 3)}")
+        return success, msg
 
     from meerschaum._internal.cli.entry import entry_with_daemon
-    return entry_with_daemon(sysargs, _patch_args=_patch_args)
+    success, msg = entry_with_daemon(sysargs, _patch_args=_patch_args)
+    end = time.perf_counter()
+    if ' --debug' in sysargs_str:
+        print(f"Duration with daemon: {round(end - start, 3)}")
+    return success, msg
 
 
 def entry_without_daemon(
@@ -310,7 +321,6 @@ def entry_with_args(
     if kw.get('schedule', None) and not _skip_schedule:
         from meerschaum.utils.schedule import schedule_function
         from meerschaum.utils.misc import interval_str
-        import time
         from datetime import timedelta
         start_time = time.perf_counter()
         schedule_function(do_action, **kw)

@@ -123,4 +123,5 @@ def _restart_daemons(
     Restart the CLI daemons.
     """
     from meerschaum.actions import actions
+    kwargs['force'] = True
     return actions['start'](['daemons'], **kwargs)

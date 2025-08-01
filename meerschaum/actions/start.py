@@ -7,6 +7,7 @@ Start subsystems (API server, logging daemon, etc.).
 """
 
 from __future__ import annotations
+
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any, Union, Dict
 
 
@@ -701,23 +702,25 @@ def _start_daemons(
     """
     from meerschaum.utils.warnings import warn, dprint
     from meerschaum._internal.cli.daemons import (
-        get_existing_cli_daemons,
-        get_existing_cli_daemon_indices,
         get_cli_daemon,
         get_cli_lock_path,
+    )
+    from meerschaum._internal.cli.workers import (
+        get_existing_cli_workers,
+        get_existing_cli_worker_indices,
     )
     from meerschaum.utils.prompt import yes_no
     from meerschaum.actions import actions
 
-    daemons = get_existing_cli_daemons()
-    if not daemons:
+    workers = get_existing_cli_workers()
+    if not workers:
         if debug:
             dprint("No daemons are running, spawning a new process...")
-        daemons = [get_cli_daemon()]
+        workers = [get_cli_daemon()]
 
     accepted_restart = False
-    any_daemons_are_running = any((daemon.status == 'running') for daemon in daemons)
-    lock_paths = [get_cli_lock_path(ix) for ix in get_existing_cli_daemon_indices()]
+    any_daemons_are_running = any((worker.job.status == 'running') for worker in workers)
+    lock_paths = [get_cli_lock_path(ix) for ix in get_existing_cli_worker_indices()]
     any_locks_exist = any(lock_path.exists() for lock_path in lock_paths)
 
     if any_locks_exist:
@@ -756,25 +759,25 @@ def _start_daemons(
         if not stop_success:
             return stop_success, stop_msg
 
-    daemon = get_cli_daemon()
+    worker = get_cli_daemon()
 
     if debug:
         dprint("Cleaning up CLI daemon...")
-    cleanup_success, cleanup_msg = daemon.cleanup()
+    cleanup_success, cleanup_msg = worker.cleanup()
     if not cleanup_success:
         return cleanup_success, cleanup_msg
 
     if debug:
         dprint("Starting CLI daemon...")
 
-    start_success, start_msg = daemon.run(allow_dirty_run=True, wait=True)
+    start_success, start_msg = worker.job.start()
     if not start_success:
         return start_success, start_msg
 
     return True, "Success"
 
 
-def _start_worker(action: Optional[List[str]] = None, **kwargs: Any) -> mrsm.SuccessTuple:
+def _start_worker(action: Optional[List[str]] = None, **kwargs: Any) -> SuccessTuple:
     """
     Start a CLI worker process. This is intended for internal use only.
     """

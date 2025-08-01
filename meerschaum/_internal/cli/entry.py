@@ -8,11 +8,11 @@ Define the CLI daemon entrypoint.
 import os
 import time
 import uuid
-import json
 import shlex
+import shutil
 import traceback
 import signal
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Union
 
 import meerschaum as mrsm
 
@@ -39,14 +39,19 @@ def entry_with_daemon(
     daemon_is_ready = True
 
     found_acceptable_prefix = False
+    found_unacceptable_prefix = False
     allowed_prefixes = mrsm.get_config('system', 'cli', 'allowed_prefixes')
+    disallowed_prefixes = mrsm.get_config('system', 'cli', 'disallowed_prefixes')
+    sysargs_str = sysargs if isinstance(sysargs, str) else shlex.join(sysargs or [])
     for prefix in allowed_prefixes:
-        sysargs_str = sysargs if isinstance(sysargs, str) else shlex.join(sysargs or [])
-        if sysargs_str.startswith(prefix):
+        if sysargs_str.startswith(prefix) or prefix == '*':
             found_acceptable_prefix = True
             break
+    for prefix in disallowed_prefixes:
+        if sysargs_str.startswith(prefix) or prefix == '*':
+            found_unacceptable_prefix = True
 
-    if not found_acceptable_prefix:
+    if not found_acceptable_prefix or found_unacceptable_prefix:
         daemon_is_ready = False
 
     try:
@@ -72,24 +77,33 @@ def entry_with_daemon(
 
     if start_success and worker:
         start = time.perf_counter()
-        while (start - time.perf_counter()) < 3:
-            if not worker.is_ready():
-                time.sleep(0.01)
-            else:
+        while (time.perf_counter() - start) < 3:
+            if worker.is_ready():
                 break
+            time.sleep(0.01)
 
-    if not daemon_is_ready:
+    if not daemon_is_ready or worker is None:
         return entry_without_daemon(sysargs, _patch_args=_patch_args)
 
+    refresh_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
     session_id = _session_id or get_cli_session_id()
     action_id = uuid.uuid4().hex
+
+    terminal_size = shutil.get_terminal_size()
+    env = {
+        **{
+            'LINES': str(terminal_size.lines),
+            'COLUMNS': str(terminal_size.columns),
+        },
+        **dict(os.environ),
+    }
     
     worker.write_input_data({
         'session_id': session_id,
         'action_id': action_id,
         'sysargs': sysargs,
         'patch_args': _patch_args,
-        'env': dict(os.environ),
+        'env': env,
     })
 
     accepted = False
@@ -102,12 +116,17 @@ def entry_with_daemon(
             accepted = True
             break
 
-        time.sleep(0.1)
+        time.sleep(refresh_seconds)
+
+    start_cli_logs_refresh_thread(daemon_ix)
 
     try:
+        log = worker.job.daemon.rotating_log
         worker.job.monitor_logs(
             stop_on_exit=True,
             callback_function=worker.monitor_callback,
+            _log=log,
+            _wait_if_stopped=False,
         )
         worker_data = worker.read_output_data(block=True)
     except KeyboardInterrupt:
@@ -142,15 +161,50 @@ def entry_with_daemon(
 
     if exit_data:
         exit_success = bool(exit_data['success'])
-        exit_message = str(exit_data['message'])
         exit_signal = exit_data['signal']
         worker.send_signal(exit_signal)
+        try:
+            worker.job.monitor_logs(
+                stop_on_exit=True,
+                callback_function=worker.monitor_callback,
+                _wait_if_stopped=False,
+                _log=log,
+            )
+        except (KeyboardInterrupt, SystemExit):
+            worker.send_signal(signal.SIGTERM)
+        worker_data = worker.read_output_data(block=True, timeout_seconds=3)
+
         if not exit_success:
             print(exit_data['traceback'])
-        return exit_success, exit_message
 
     worker.write_input_data({'increment': True})
-
     success = (worker_data or {}).get('success', False)
     message = (worker_data or {}).get('message', "Failed to retrieve message from CLI worker.")
     return success, message
+
+
+def touch_cli_logs_loop(ix: int, refresh_seconds: Union[int, float] = 0.01):
+    """
+    Touch the CLI daemon's logs to refresh the logs monitoring.
+    """
+    from meerschaum._internal.cli.workers import ActionWorker
+    worker = ActionWorker(ix)
+
+    while True:
+        worker.job.daemon.rotating_log.touch()
+        time.sleep(refresh_seconds)
+
+
+def start_cli_logs_refresh_thread(ix: int):
+    """
+    Spin up a daemon thread to refresh the CLI's logs.
+    """
+    from meerschaum.utils.threading import Thread
+    refresh_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
+    thread = Thread(
+        target=touch_cli_logs_loop,
+        args=(ix,),
+        kwargs={'refresh_seconds': refresh_seconds},
+        daemon=True,
+    )
+    thread.start()

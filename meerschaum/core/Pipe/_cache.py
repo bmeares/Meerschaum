@@ -65,6 +65,8 @@ def _cache_value(
     Cache a value in-memory and (if `Pipe.cache` is `True`) on-disk or to the cache connector.
     """
     in_memory_key = _get_in_memory_key(cache_key)
+    if value is None:
+        value = 'None'
     self.__dict__[in_memory_key] = value
     if memory_only:
         return

@@ -22,12 +22,15 @@ def get_tokens_pipe(self) -> mrsm.Pipe:
     """
     Return the internal pipe for tokens management.
     """
+    if '_tokens_pipe' in self.__dict__:
+        return self._tokens_pipe
+
     users_pipe = self.get_users_pipe()
     user_id_dtype = (
         users_pipe._attributes.get('parameters', {}).get('dtypes', {}).get('user_id', 'uuid')
     )
 
-    return mrsm.Pipe(
+    self._tokens_pipe = mrsm.Pipe(
         'mrsm', 'tokens',
         instance=self,
         target='mrsm_tokens',
@@ -56,6 +59,7 @@ def get_tokens_pipe(self) -> mrsm.Pipe:
             'secret_hash': 'string',
         },
     )
+    return self._tokens_pipe
 
 
 def register_token(

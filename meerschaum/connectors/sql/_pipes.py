@@ -146,7 +146,7 @@ def fetch_pipes_keys(
     location_keys: Optional[List[str]] = None,
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
-    debug: bool = False
+    debug: bool = False,
 ) -> List[
         Tuple[str, str, Union[str, None], Dict[str, Any]]
     ]:
@@ -251,16 +251,18 @@ def fetch_pipes_keys(
         ) for key, val in _params.items()
         if not isinstance(val, (list, tuple)) and key in pipes_tbl.c
     ]
+    if self.flavor in json_flavors:
+        sqlalchemy_dialects = mrsm.attempt_import('sqlalchemy.dialects', lazy=False)
+        JSONB = sqlalchemy_dialects.postgresql.JSONB
+    else:
+        JSONB = sqlalchemy.String
+
     select_cols = (
         [
             pipes_tbl.c.connector_keys,
             pipes_tbl.c.metric_key,
             pipes_tbl.c.location_key,
-            (
-                pipes_tbl.c.parameters['tags']
-                if self.flavor in json_flavors
-                else pipes_tbl.c.parameters
-            ),
+            pipes_tbl.c.parameters,
         ]
     )
 
@@ -278,13 +280,12 @@ def fetch_pipes_keys(
 
     ors, nands = [], []
     if self.flavor in json_flavors:
-        from sqlalchemy.dialects import postgresql
         for _in_tags, _ex_tags in in_ex_tag_groups:
             if _in_tags:
                 ors.append(
                     sqlalchemy.and_(
                         pipes_tbl.c['parameters']['tags'].cast(
-                            postgresql.JSONB
+                            JSONB
                         ).contains(_in_tags)
                     )
                 )
@@ -293,7 +294,7 @@ def fetch_pipes_keys(
                     sqlalchemy.not_(
                         sqlalchemy.and_(
                             pipes_tbl.c['parameters']['tags'].cast(
-                                postgresql.JSONB
+                                JSONB
                             ).contains([xt])
                         )
                     )

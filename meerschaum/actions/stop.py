@@ -172,34 +172,10 @@ def _stop_daemons(
     """
     Stop the Meerschaum CLI daemon.
     """
-    import os
     import shutil
-    from meerschaum.utils.warnings import warn, dprint
-    from meerschaum._internal.cli.daemons import get_existing_cli_daemons
     from meerschaum._internal.cli.workers import get_existing_cli_workers
-    from meerschaum.config.paths import CLI_RESOURCES_PATH, LOGS_RESOURCES_PATH
-    daemons = get_existing_cli_daemons()
+    from meerschaum.config.paths import CLI_RESOURCES_PATH
     workers = get_existing_cli_workers()
-
-    for daemon in daemons:
-        ix = daemon.daemon_id[len('.cli.'):]
-        if debug:
-            dprint(f"CLI daemon #{ix} status: {daemon.status}")
-        if daemon.status == 'running':
-            if debug:
-                dprint(f"Sending SIGINT to CLI daemon #{ix}...")
-            quit_success, quit_message = daemon.quit(timeout=timeout_seconds)
-            if not quit_success:
-                warn(f"Failed to quit CLI daemon #{ix}:\n{quit_message}", stack=False)
-                if debug:
-                    dprint(f"Sending SIGTERM to CLI daemon #{ix}...")
-                kill_success, kill_message = daemon.kill(timeout=timeout_seconds)
-                if not kill_success:
-                    return kill_success, kill_message
-
-        cleanup_success, cleanup_msg = daemon.cleanup(keep_logs=True)
-        if not cleanup_success:
-            warn(f"Failed to clean up CLI daemon #{ix}:\n{cleanup_msg}", stack=False)
 
     for worker in workers:
         stop_success, stop_msg = worker.job.stop(timeout_seconds=timeout_seconds, debug=debug)
@@ -216,21 +192,6 @@ def _stop_daemons(
         CLI_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
     except Exception as e:
         return False, f"Failed to clean up CLI resources directory.\n{e}"
-
-    for filename in os.listdir(LOGS_RESOURCES_PATH):
-        if not filename.startswith('.'):
-            continue
-
-        if not filename.lstrip('.').startswith('cli'):
-            continue
-
-        file_path = LOGS_RESOURCES_PATH / filename
-
-        try:
-            if file_path.exists():
-                file_path.unlink()
-        except Exception as e:
-            return False, f"Failed to clean up stray logs:\n{e}"
 
     return True, "Success"
 

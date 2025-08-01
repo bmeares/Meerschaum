@@ -152,6 +152,7 @@ paths = {
     'SQL_CONN_CACHE_RESOURCES_PATH'  : ('{CACHE_RESOURCES_PATH}', 'sql'),
 
     'CLI_RESOURCES_PATH'             : ('{INTERNAL_RESOURCES_PATH}', 'cli'),
+    'CLI_LOGS_RESOURCES_PATH'        : ('{CLI_RESOURCES_PATH}', 'logs'),
 
     'PLUGINS_RESOURCES_PATH'         : ('{INTERNAL_RESOURCES_PATH}', 'plugins'),
     'PLUGINS_INTERNAL_LOCK_PATH'     : ('{INTERNAL_RESOURCES_PATH}', 'plugins.lock'),

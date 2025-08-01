@@ -10,10 +10,10 @@ import pathlib
 import time
 import json
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 
 import meerschaum as mrsm
-from meerschaum.utils.daemon import StdinFile
+from meerschaum.utils.daemon import StdinFile, RotatingFile
 from meerschaum.utils.warnings import warn
 from meerschaum.jobs import Job
 from meerschaum._internal.static import STATIC_CONFIG
@@ -100,13 +100,17 @@ class ActionWorker:
         """
         Return the job associated with this worker.
         """
+        from meerschaum.config.paths import CLI_LOGS_RESOURCES_PATH
+        log_path = CLI_LOGS_RESOURCES_PATH / f'cli.{self.ix}.worker.log'
+
         return Job(
             f'.cli.{self.ix}.worker',
             sysargs=['start', 'worker', str(self.ix)],
             executor_keys='local',
-            delete_after_completion=True,
+            delete_after_completion=False,
             _properties={
                 'logs': {
+                    'path': log_path.as_posix(),
                     'write_timestamps': False,
                     'refresh_files_seconds': 31557600,
                     'max_file_size': 10_000_000,
@@ -190,77 +194,93 @@ class ActionWorker:
 
         os.kill(pid, signalnum)
 
-    def read_input_data(self, block: bool = False) -> Dict[str, Any]:
+    @staticmethod
+    def _read_data(
+        file_to_read: StdinFile,
+        block: bool = False,
+        timeout_seconds: Union[int, float, None] = None,
+    ) -> Dict[str, Any]:
         """
-        Read input data from the input pipe file.
-        This method is called from within the worker's daemon context.
+        Common logic for reading data from a pipe.
         """
-        while True:
+        expired = False
+        start = time.perf_counter()
+        while not expired:
             try:
-                input_data_str = self.input_file.readline()
+                data_str = file_to_read.readline()
             except Exception as e:
-                warn(f"Could not read input data:\n{e}")
+                warn(f"Could not read data:\n{e}")
                 return {}
 
-            if not input_data_str:
+            if not data_str:
                 if not block:
                     return {}
 
                 time.sleep(0.01)
+                expired = (
+                    ((time.perf_counter() - start) > timeout_seconds)
+                    if timeout_seconds is not None
+                    else False
+                )
                 continue
 
             try:
-                input_data = json.loads(input_data_str)
+                data = json.loads(data_str)
             except Exception as e:
                 return {'error': str(e)}
 
-            return input_data
+            return data
+
+        return {}
+
+    @staticmethod
+    def _write_data(
+        file_to_write: StdinFile,
+        data: Dict[str, Any],
+    ) -> None:
+        """
+        Write a data dictionary to a pipe file.
+        """
+        try:
+            file_to_write.write(json.dumps(data, separators=(',', ':')) + '\n')
+        except Exception as e:
+            warn(f"Failed to write data:\n{e}")
+
+    def read_input_data(
+        self,
+        block: bool = False,
+        timeout_seconds: Union[int, float, None] = None,
+    ) -> Dict[str, Any]:
+        """
+        Read input data from the input pipe file.
+        This method is called from within the worker's daemon context.
+        """
+        return self._read_data(self.input_file, block=block, timeout_seconds=timeout_seconds)
 
     def write_output_data(self, output_data: Dict[str, Any]) -> None:
         """
         Write the output data dictionary to the output pipe file.
         This method is called from within the worker's daemon context.
         """
-        try:
-            self.output_file.write(json.dumps(output_data, separators=(',', ':')) + '\n')
-        except Exception as e:
-            warn(f"Failed to write output data from worker:\n{e}")
+        self._write_data(self.output_file, output_data)
 
     def write_input_data(self, input_data: Dict[str, Any]) -> None:
         """
         Write the input data dictionary to the input pipe file.
         This method is called from the client entry context.
         """
-        try:
-            self.input_file.write(json.dumps(input_data, separators=(',', ':')) + '\n')
-        except Exception as e:
-            warn(f"Failed to write input data to worker:\n{e}")
+        self._write_data(self.input_file, input_data)
 
-    def read_output_data(self, block: bool = False) -> Dict[str, Any]:
+    def read_output_data(
+        self,
+        block: bool = False,
+        timeout_seconds: Union[int, float, None] = None,
+    ) -> Dict[str, Any]:
         """
         Read output data from the output pipe file.
         This method is called from the client entry context.
         """
-        while True:
-            try:
-                output_data_str = self.output_file.readline()
-            except Exception as e:
-                warn(f"Could not read output data:\n{e}")
-                return {}
-
-            if not output_data_str:
-                if not block:
-                    return {}
-
-                time.sleep(0.01)
-                continue
-
-            try:
-                output_data = json.loads(output_data_str)
-            except Exception as e:
-                return {'error': str(e)}
-
-            return output_data
+        return self._read_data(self.output_file, block=block, timeout_seconds=timeout_seconds)
 
     def increment_log(self) -> None:
         """
@@ -287,8 +307,11 @@ class ActionWorker:
         from meerschaum.utils.misc import set_env
 
         while True:
+            self.release_lock()
             self.clear_stop_status()
+
             input_data = self.read_input_data(block=True)
+            self.set_lock()
 
             if 'error' in input_data:
                 warn(input_data['error'])
@@ -357,12 +380,12 @@ class ActionWorker:
 
         return True, "Success"
 
-
     def __repr__(self) -> str:
         return self.__str__()
 
     def __str__(self) -> str:
         return f'ActionWorker({self.ix})'
+
 
 def get_existing_cli_worker_indices() -> List[int]:
     """

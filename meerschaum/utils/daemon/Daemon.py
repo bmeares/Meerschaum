@@ -474,7 +474,6 @@ class Daemon:
             "allow_dirty_run=True)"
         )
         env = dict(os.environ)
-        env[STATIC_CONFIG['environment']['noninteractive']] = 'true'
         _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug, venv=None, env=env)
         msg = (
             "Success"
@@ -941,7 +940,11 @@ class Daemon:
         """
         Return the log path.
         """
-        return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
+        logs_cf = self.properties.get('logs', None) or {}
+        if 'path' not in logs_cf:
+            return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
+
+        return pathlib.Path(logs_cf['path'])
 
     @property
     def stdin_file_path(self) -> pathlib.Path:
