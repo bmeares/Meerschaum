@@ -37,7 +37,6 @@ def get_tokens_pipe(self) -> mrsm.Pipe:
         temporary=True,
         cache=True,
         static=True,
-        debug=True,
         autotime=True,
         null_indices=False,
         columns={

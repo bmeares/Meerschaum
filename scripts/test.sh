@@ -25,14 +25,14 @@ if [ -z "$MRSM_DEBUG" ]; then
   export MRSM_DEBUG='false'
 fi
 
-echo "MRSM_DEBUG=$MRSM_DEBUG"
-
 ### Start the test databases.
 if [ "$1" == "db" ]; then
   cd tests/
   docker compose up --quiet-pull -d $services
   cd ../
 fi
+
+$mrsm stop daemon
 
 if [ ! -z "$MRSM_INSTALL_PACKAGES" ]; then
   $mrsm install packages setuptools wheel -y

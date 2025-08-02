@@ -49,7 +49,7 @@ if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
 
 
 def entry(
-    sysargs: Optional[List[str]] = None,
+    sysargs: Union[List[str], str, None] = None,
     _patch_args: Optional[Dict[str, Any]] = None,
     _use_cli_daemon: bool = True,
     _session_id: Optional[str] = None,
@@ -62,22 +62,25 @@ def entry(
     A `SuccessTuple` indicating success.
     """
     start = time.perf_counter()
-    sysargs_str = (shlex.join(sysargs) if isinstance(sysargs, list) else (sysargs or ''))
+    sysargs_list = shlex.split(sysargs) if isinstance(sysargs, str) else sysargs
     if (
         not _use_cli_daemon
-        or ' --no-daemon' in sysargs_str
+        or not sysargs
+        or '--no-daemon' in sysargs_list
+        or '--daemon' in sysargs_list
+        or '-d' in sysargs_list
         or not mrsm.get_config('system', 'experimental', 'cli_daemon')
     ):
         success, msg = entry_without_daemon(sysargs, _patch_args=_patch_args)
         end = time.perf_counter()
-        if ' --debug' in sysargs_str:
+        if '--debug' in sysargs_list:
             print(f"Duration without daemon: {round(end - start, 3)}")
         return success, msg
 
     from meerschaum._internal.cli.entry import entry_with_daemon
     success, msg = entry_with_daemon(sysargs, _patch_args=_patch_args)
     end = time.perf_counter()
-    if ' --debug' in sysargs_str:
+    if '--debug' in sysargs_list:
         print(f"Duration with daemon: {round(end - start, 3)}")
     return success, msg
 
@@ -251,7 +254,7 @@ def entry_with_args(
     if and_key in (sysargs := kw.get('sysargs', [])):
         if '-d' in sysargs or '--daemon' in sysargs:
             sysargs = [(arg if arg != and_key else escaped_and_key) for arg in sysargs]
-        return entry(sysargs, _patch_args=_patch_args)
+        return entry(sysargs, _patch_args=_patch_args, _use_cli_daemon=False)
 
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace

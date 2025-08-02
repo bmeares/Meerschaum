@@ -72,7 +72,6 @@ def get_connector(
     Return existing connector or create new connection and store for reuse.
     
     You can create new connectors if enough parameters are provided for the given type and flavor.
-    
 
     Parameters
     ----------

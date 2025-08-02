@@ -143,7 +143,6 @@ def test_infer_json_dtype(flavor: str):
         {'id': 1, 'a': ['b', 'c']},
         {'id': 2, 'a': {'b': 1}},
     ], debug=debug)
-    return pipe
     assert success, msg
     pprint(pipe.get_columns_types(debug=debug))
     df = pipe.get_data(debug=debug)

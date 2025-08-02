@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import copy
+import contextlib
 
 from meerschaum.utils.typing import Any, Dict, Optional
 from meerschaum.utils.threading import RLock
@@ -43,6 +44,7 @@ __all__ = (
     'write_config',
     'edit_config',
     'set_config',
+    'replace_config',
     'search_and_substitute_config',
     'revert_symlinks_config',
     'get_possible_keys',
@@ -311,6 +313,24 @@ def write_plugin_config(
     cf = {'plugins' : plugins_cf}
     return write_config(cf, **kw)
 
+
+@contextlib.contextmanager
+def replace_config(config_: Dict[str, Any]):
+    """
+    Temporarily override the Meerschaum config dictionary.
+
+    Parameters
+    ----------
+    config_: Dict[str, Any]
+        The new config dictionary to temporarily replace the canonical `config`.
+    """
+    old_config = _config()
+    set_config(config_)
+
+    try:
+        yield
+    finally:
+        set_config(old_config)
 
 ### This need to be below get_config to avoid a circular import.
 from meerschaum.config._read_config import read_config

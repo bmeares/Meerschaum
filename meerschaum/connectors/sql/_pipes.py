@@ -1504,7 +1504,7 @@ def get_pipe_attributes(
     """
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     if pipe.get_id(debug=debug) is None:
         return {}
@@ -1515,16 +1515,16 @@ def get_pipe_attributes(
         q = sqlalchemy.select(pipes_tbl).where(pipes_tbl.c.pipe_id == pipe.id)
         if debug:
             dprint(q)
-        attributes = (
-            dict(self.exec(q, silent=True, debug=debug).first()._mapping)
+        rows = (
+            self.exec(q, silent=True, debug=debug).mappings().all()
             if self.flavor != 'duckdb'
-            else self.read(q, debug=debug).to_dict(orient='records')[0]
+            else self.read(q, debug=debug).to_dict(orient='records')
         )
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        warn(e)
-        print(pipe)
+        if not rows:
+            return {}
+        attributes = dict(rows[0])
+    except Exception:
+        warn(traceback.format_exc())
         return {}
 
     ### handle non-PostgreSQL databases (text vs JSON)
