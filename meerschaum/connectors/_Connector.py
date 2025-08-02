@@ -152,8 +152,7 @@ class Connector(metaclass=abc.ABCMeta):
         ------
         An error if any of the required attributes are missing.
         """
-        from meerschaum.utils.warnings import error, warn
-        from meerschaum.utils.debug import dprint
+        from meerschaum.utils.warnings import error
         from meerschaum.utils.misc import items_str
         if required_attributes is None:
             required_attributes = ['type', 'label']

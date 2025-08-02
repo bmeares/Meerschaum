@@ -8,6 +8,7 @@ Start subsystems (API server, logging daemon, etc.).
 
 from __future__ import annotations
 
+import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any, Union, Dict
 
 
@@ -485,7 +486,6 @@ def _start_connectors(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.formatting import pprint
     from meerschaum.utils.misc import items_str
     if action is None:
         action = []

@@ -106,7 +106,6 @@ def get_jobs(
             )
         return {**local_jobs, **systemd_jobs}
 
-    print(f"{include_local_and_system=}")
     if executor_keys == 'local':
         return _get_local_jobs()
 
