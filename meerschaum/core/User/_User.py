@@ -94,14 +94,13 @@ def verify_password(
     from meerschaum._internal.static import STATIC_CONFIG
     if password is None or password_hash is None:
         return False
-    hash_config = STATIC_CONFIG['users']['password_hash']
     try:
         digest, rounds_str, encoded_salt, encoded_checksum = password_hash.split('$')[1:]
         algorithm_name = digest.split('-')[-1]
         salt = ab64_decode(encoded_salt)
         checksum = ab64_decode(encoded_checksum)
         rounds = int(rounds_str)
-    except Exception as e:
+    except Exception:
         warn(f"Failed to extract context from password hash '{password_hash}'. Is it corrupted?")
         return False
 

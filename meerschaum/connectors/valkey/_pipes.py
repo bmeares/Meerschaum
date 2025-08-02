@@ -888,7 +888,9 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False
-) -> Optional[List[Tuple[str, str, Optional[str]]]]:
+) -> List[
+        Tuple[str, str, Union[str, None], Dict[str, Any]]
+    ]:
     """
     Return the keys for the registered pipes.
     """
@@ -919,6 +921,7 @@ def fetch_pipes_keys(
             doc['connector_keys'],
             doc['metric_key'],
             doc['location_key'],
+            doc.get('parameters', {})
         )
         for doc in df.to_dict(orient='records')
     ]
@@ -929,9 +932,8 @@ def fetch_pipes_keys(
     in_ex_tag_groups = [separate_negation_values(tag_group) for tag_group in tag_groups]
 
     filtered_keys = []
-    for ck, mk, lk in keys:
-        pipe = mrsm.Pipe(ck, mk, lk, instance=self)
-        pipe_tags = set(pipe.tags)
+    for ck, mk, lk, parameters in keys:
+        pipe_tags = set(parameters.get('tags', []))
         
         include_pipe = True
         for in_tags, ex_tags in in_ex_tag_groups:
@@ -943,6 +945,6 @@ def fetch_pipes_keys(
                 continue
 
         if include_pipe:
-            filtered_keys.append((ck, mk, lk))
+            filtered_keys.append((ck, mk, lk, parameters))
 
     return filtered_keys

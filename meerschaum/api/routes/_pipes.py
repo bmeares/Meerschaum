@@ -25,6 +25,7 @@ from meerschaum.api import (
     _get_pipes,
     debug,
     ScopedAuth,
+    manager,
 )
 from meerschaum.models import (
     ConnectorKeysModel,
@@ -764,7 +765,8 @@ def get_pipe_id(
     metric_key: str,
     location_key: str,
     instance_keys: Optional[str] = None,
-    curr_user = fastapi.Security(ScopedAuth(['pipes:read'])),
+    #  curr_user = fastapi.Security(ScopedAuth(['pipes:read'])),
+    curr_user = fastapi.Security(ScopedAuth(['pipes:read']), scopes=['pipes:read']),
 ) -> Union[int, str]:
     """
     Get a pipe's ID.

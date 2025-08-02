@@ -91,6 +91,7 @@ async def load_user_or_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated.",
         )
+
     authorization = authorization.replace('Basic ', '').replace('Bearer ', '')
     if not authorization.startswith('mrsm-key:'):
         if not users:
@@ -98,12 +99,15 @@ async def load_user_or_token(
                 status=status.HTTP_401_UNAUTHORIZED,
                 detail="Users not authenticated for this endpoint.",
             )
+
         return await manager(request)
+
     if not tokens:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Tokens not authenticated for this endpoint.",
         )
+
     return get_token_from_authorization(authorization)
 
 
@@ -159,4 +163,8 @@ def generate_secret_key() -> bytes:
 
 
 SECRET = generate_secret_key()
-manager = LoginManager(SECRET, token_url=endpoints['login'])
+manager = LoginManager(
+    SECRET,
+    token_url=endpoints['login'],
+    scopes=STATIC_CONFIG['tokens']['scopes'],
+)

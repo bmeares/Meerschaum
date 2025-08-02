@@ -16,22 +16,61 @@ from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
 
-from meerschaum.api import endpoints, get_api_connector, app, debug, manager, no_auth
+import meerschaum as mrsm
+from meerschaum.api import (
+    endpoints,
+    get_api_connector,
+    get_cache_connector,
+    app,
+    debug,
+    manager,
+    no_auth,
+)
 from meerschaum.core import User
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.typing import Dict, Any
-from meerschaum.utils.misc import is_uuid
+from meerschaum.utils.misc import is_uuid, is_int
 from meerschaum.core.User import verify_password
 from meerschaum.utils.warnings import warn
 from meerschaum.api._oauth2 import CustomOAuth2PasswordRequestForm
 
+
+USER_ID_CACHE_EXPIRES_SECONDS: int = mrsm.get_config('system', 'api', 'cache', 'session_expires_minutes') * 60
+_active_user_ids = {}
 
 @manager.user_loader()
 def load_user(username: str) -> User:
     """
     Create the `meerschaum.core.User` object from the username.
     """
-    return User(username, instance=get_api_connector())
+    cache_conn = get_cache_connector()
+    api_conn = get_api_connector()
+
+    cached_user_id = (
+        _active_user_ids.get(username)
+        if cache_conn is None
+        else cache_conn.get(f'mrsm:users:{username}:id')
+    )
+    if isinstance(cached_user_id, str):
+        if is_int(cached_user_id):
+            cached_user_id = int(cached_user_id)
+        elif is_uuid(cached_user_id):
+            cached_user_id = uuid.UUID(cached_user_id)
+
+    user = User(username, instance=api_conn, user_id=cached_user_id)
+
+    if cached_user_id is not None:
+        return user
+
+    user_id = api_conn.get_user_id(user)
+    if user_id is not None:
+        user._user_id = user_id
+        if cache_conn is not None:
+            cache_conn.set(f'mrsm:users:{username}:id', str(user_id), ex=USER_ID_CACHE_EXPIRES_SECONDS)
+        else:
+            _active_user_ids[username] = user_id
+    return user
+
 
 
 @app.post(endpoints['login'], tags=['Users'])
@@ -63,6 +102,8 @@ def login(
             else 'client_credentials'
         )
 
+    scopes = []
+    type_ = None
     expires_dt: Union[datetime, None] = None
     if grant_type == 'password':
         user = User(str(username), str(password), instance=get_api_connector())
@@ -72,6 +113,9 @@ def login(
         )
         if not correct_password:
             raise InvalidCredentialsException
+
+        scopes = user.get_scopes(debug=debug)
+        type_ = get_api_connector().get_user_type(user, debug=debug)
 
     elif grant_type == 'client_credentials':
         if not is_uuid(str(client_id)):
@@ -83,6 +127,9 @@ def login(
         )
         if not correct_password:
             raise InvalidCredentialsException
+
+        scopes = get_api_connector().get_token_scopes(token_id, debug=debug)
+
     else:
         raise InvalidCredentialsException
 
@@ -92,6 +139,8 @@ def login(
     access_token = manager.create_access_token(
         data={
             'sub': (username if grant_type == 'password' else client_id),
+            'scopes': scopes,
+            'type': type_,
         },
         expires=expires_delta
     )

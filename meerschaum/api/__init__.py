@@ -195,7 +195,11 @@ def pipes(instance_keys: Optional[str] = None, refresh: bool = False) -> PipesDi
     with _locks['pipes-' + instance_keys]:
         pipes = _instance_pipes[instance_keys]
         if pipes is None or refresh:
-            pipes = _get_pipes(mrsm_instance=instance_keys)
+            pipes = _get_pipes(
+                mrsm_instance=instance_keys,
+                cache=True,
+                cache_connector_keys=get_cache_connector(),
+            )
             _instance_pipes[instance_keys] = pipes
     return pipes
 

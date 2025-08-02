@@ -190,6 +190,11 @@ default_system_config = {
             'os',
             'sh',
             'start api',
+            'stack',
+            'instance',
+            'debug',
+            'bootstrap',
+            'daemon',
         ],
     },
     'experimental': {
