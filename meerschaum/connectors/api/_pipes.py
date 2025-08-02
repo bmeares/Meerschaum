@@ -112,7 +112,13 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False
-) -> Union[List[Tuple[str, str, Union[str, None]]]]:
+) -> List[
+        Union[
+            Tuple[str, str, Union[str, None]],
+            Tuple[str, str, Union[str, None], List[str]],
+            Tuple[str, str, Union[str, None], Dict[str, Any]]
+        ]
+    ]:
     """
     Fetch registered Pipes' keys from the API.
     

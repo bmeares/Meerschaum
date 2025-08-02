@@ -156,7 +156,6 @@ def replace_pipes_in_dict(
 
     debug: bool, default False
         Verbosity toggle.
-    
 
     Returns
     -------
@@ -166,7 +165,7 @@ def replace_pipes_in_dict(
     def change_dict(d: Dict[Any, Any]) -> None:
         for k, v in d.items():
             if isinstance(v, dict):
-                change_dict(v, func)
+                change_dict(v)
             elif isinstance(v, list):
                 d[k] = [func(i) for i in v]
             elif isinstance(v, tuple):

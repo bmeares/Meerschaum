@@ -230,7 +230,11 @@ def _write_cache_conn_key(
     if debug:
         dprint(f"Setting '{cache_conn_cache_key}' on '{cache_connector}'.")
 
-    success = cache_connector.set(obj_bytes, cache_conn_cache_key, ex=local_cache_timeout_seconds)
+    success = cache_connector.set(
+        cache_conn_cache_key,
+        obj_bytes,
+        ex=local_cache_timeout_seconds,
+    )
     if not success:
         return False, f"Failed to set '{cache_conn_cache_key}' on '{cache_connector}'."
 
@@ -323,6 +327,8 @@ def _read_cache_conn_key(
     cache_conn_cache_key = _get_cache_conn_cache_key(self, cache_key)
     try:
         obj_bytes = cache_connector.get(cache_conn_cache_key, decode=False)
+        if obj_bytes is None:
+            return None
         obj = pickle.loads(obj_bytes)
     except Exception as e:
         warn(f"Failed to load '{cache_conn_cache_key}' from '{cache_connector}':\n{e}")
