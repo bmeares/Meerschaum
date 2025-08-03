@@ -65,6 +65,7 @@ class Job:
         env: Optional[Dict[str, str]] = None,
         executor_keys: Optional[str] = None,
         delete_after_completion: bool = False,
+        refresh_seconds: Union[int, float, None] = None,
         _properties: Optional[Dict[str, Any]] = None,
         _rotating_log=None,
         _stdin_file=None,
@@ -93,6 +94,10 @@ class Job:
         delete_after_completion: bool, default False
             If `True`, delete this job when it has finished executing.
 
+        refresh_seconds: Union[int, float, None], default None
+            The number of seconds to sleep between refreshes.
+            Defaults to the configured value `system.cli.refresh_seconds`.
+
         _properties: Optional[Dict[str, Any]], default None
             If provided, use this to patch the daemon's properties.
         """
@@ -119,6 +124,11 @@ class Job:
 
         self.executor_keys = executor_keys
         self.name = name
+        self.refresh_seconds = (
+            refresh_seconds
+            if refresh_seconds is not None
+            else mrsm.get_config('system', 'cli', 'refresh_seconds')
+        )
         try:
             self._daemon = (
                 Daemon(daemon_id=name)
@@ -551,7 +561,7 @@ class Job:
             while True:
                 if not emitted_text or not self.is_blocking_on_stdin():
                     try:
-                        await asyncio.sleep(0.01)
+                        await asyncio.sleep(self.refresh_seconds)
                     except asyncio.exceptions.CancelledError:
                         break
                     continue
@@ -573,7 +583,7 @@ class Job:
                     #  data += '\n'
 
                 stdin_file.write(data)
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(self.refresh_seconds)
 
         async def combine_events():
             event_tasks = [

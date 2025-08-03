@@ -12,8 +12,8 @@ import time
 import os
 import selectors
 import traceback
-import sys
 
+import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Union
 from meerschaum.utils.warnings import warn
 
@@ -27,6 +27,7 @@ class StdinFile(io.TextIOBase):
         file_path: Union[pathlib.Path, str],
         lock_file_path: Optional[pathlib.Path] = None,
         decode: bool = True,
+        refresh_seconds: Union[int, float, None] = None,
     ):
         if isinstance(file_path, str):
             file_path = pathlib.Path(file_path)
@@ -42,6 +43,11 @@ class StdinFile(io.TextIOBase):
         self.sel = selectors.DefaultSelector()
         self.decode = decode
         self._write_fp = None
+        self.refresh_seconds = (
+            refresh_seconds
+            if refresh_seconds is not None
+            else mrsm.get_config('system', 'cli', 'refresh_seconds')
+        )
 
     @property
     def file_handler(self):
@@ -99,7 +105,7 @@ class StdinFile(io.TextIOBase):
 
             if not self.blocking_file_path.exists():
                 self.blocking_file_path.touch()
-            time.sleep(0.01)
+            time.sleep(self.refresh_seconds)
 
     def readline(self, size=-1):
         line = '' if self.decode else b''

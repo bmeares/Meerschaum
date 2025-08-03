@@ -64,9 +64,12 @@ def _cache_value(
     """
     Cache a value in-memory and (if `Pipe.cache` is `True`) on-disk or to the cache connector.
     """
-    in_memory_key = _get_in_memory_key(cache_key)
     if value is None:
-        value = 'None'
+        if debug:
+            dprint(f"Skip caching '{cache_key}': received value of `None`")
+        return
+
+    in_memory_key = _get_in_memory_key(cache_key)
     self.__dict__[in_memory_key] = value
     if memory_only:
         return
@@ -496,11 +499,7 @@ def _clear_cache_key(
     Clear a cached value from in-memory and on-disk / from Valkey.
     """
     in_memory_key = _get_in_memory_key(cache_key)
-    if debug:
-        dprint(f"{in_memory_key=}")
     _ = self.__dict__.pop(in_memory_key, None)
-    if debug:
-        mrsm.pprint(self.__dict__)
 
     cache_connector = self._get_cache_connector()
     if cache_connector is None:

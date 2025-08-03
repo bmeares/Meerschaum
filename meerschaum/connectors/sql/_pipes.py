@@ -1679,8 +1679,9 @@ def sync_pipe(
         UPDATE_QUERIES,
         get_reset_autoincrement_queries,
     )
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import get_current_timestamp
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
+    from meerschaum.utils.dataframe import get_special_cols
     from meerschaum import Pipe
     import time
     import copy
@@ -1883,6 +1884,14 @@ def sync_pipe(
             label=('update' if not upsert else 'upsert'),
         )
         self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
+        update_dtypes = {
+            **{
+                col: str(typ)
+                for col, typ in update_df.dtypes.items()
+            },
+            **get_special_cols(update_df)
+        }
+
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
             instance=pipe.instance_keys,
@@ -1891,11 +1900,7 @@ def sync_pipe(
                 for ix_key, ix in pipe.columns.items()
                 if ix and ix in update_df.columns
             },
-            dtypes={
-                col: typ
-                for col, typ in dtypes.items()
-                if col in update_df.columns
-            },
+            dtypes=update_dtypes,
             target=temp_target,
             temporary=True,
             enforce=False,
@@ -1907,15 +1912,12 @@ def sync_pipe(
             },
         )
         _temp_columns_types = {
-            col: get_db_type_from_pd_type(
-                dtypes.get(col, str(typ)),
-                self.flavor,
-            )
-            for col, typ in update_df.dtypes.items()
+            col: get_db_type_from_pd_type(typ, self.flavor)
+            for col, typ in update_dtypes.items()
         }
         temp_pipe._cache_value('_columns_types', _temp_columns_types, memory_only=True, debug=debug)
         temp_pipe._cache_value('_skip_check_indices', True, memory_only=True, debug=debug)
-        now_ts = time.perf_counter()
+        now_ts = get_current_timestamp('ms', as_int=True) / 1000
         temp_pipe._cache_value('_columns_types_timestamp', now_ts, memory_only=True, debug=debug)
         temp_success, temp_msg = temp_pipe.sync(update_df, check_existing=False, debug=debug)
         if not temp_success:
@@ -1943,6 +1945,8 @@ def sync_pipe(
             upsert=upsert,
             schema=self.get_pipe_schema(pipe),
             patch_schema=self.internal_schema,
+            target_cols_types=pipe.get_columns_types(debug=debug),
+            patch_cols_types=_temp_columns_types,
             datetime_col=(dt_col if dt_col in update_df.columns else None),
             identity_insert=(autoincrement and primary_key in update_df.columns),
             null_indices=pipe.null_indices,
@@ -2539,6 +2543,8 @@ def sync_pipe_inplace(
             upsert=upsert,
             schema=self.get_pipe_schema(pipe),
             patch_schema=internal_schema,
+            target_cols_types=pipe.get_columns_types(debug=debug),
+            patch_cols_types=delta_cols_types,
             datetime_col=pipe.columns.get('datetime', None),
             flavor=self.flavor,
             null_indices=pipe.null_indices,
@@ -3328,7 +3334,7 @@ def get_alter_columns_queries(
             debug=debug,
         ).items()
     }
-    pipe_dtypes = pipe.dtypes
+    pipe_dtypes = pipe.get_dtypes(debug=debug)
     pipe_bool_cols = [col for col, typ in pipe_dtypes.items() if are_dtypes_equal(str(typ), 'bool')]
     pd_db_df_aliases = {
         'int': 'bool',
@@ -3350,7 +3356,7 @@ def get_alter_columns_queries(
     }
 
     if debug and altered_cols:
-        dprint(f"Columns to be altered:")
+        dprint("Columns to be altered:")
         mrsm.pprint(altered_cols)
 
     ### NOTE: Sometimes bools are coerced into ints or floats.
@@ -3380,7 +3386,7 @@ def get_alter_columns_queries(
             altered_cols_to_ignore.add(bool_col)
 
     if debug and altered_cols_to_ignore:
-        dprint(f"Ignoring the following altered columns (false positives).")
+        dprint("Ignoring the following altered columns (false positives).")
         mrsm.pprint(altered_cols_to_ignore)
 
     for col in altered_cols_to_ignore:

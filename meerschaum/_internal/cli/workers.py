@@ -64,8 +64,13 @@ class ActionWorker:
     The process loop which will accept commands to be run.
     """
 
-    def __init__(self, ix: int):
+    def __init__(self, ix: int, refresh_seconds: Union[int, float, None] = None):
         self.ix = ix
+        self.refresh_seconds = (
+            refresh_seconds
+            if refresh_seconds is not None
+            else mrsm.get_config('system', 'cli', 'refresh_seconds')
+        )
 
     @property
     def input_file(self) -> StdinFile:
@@ -194,8 +199,8 @@ class ActionWorker:
 
         os.kill(pid, signalnum)
 
-    @staticmethod
     def _read_data(
+        self,
         file_to_read: StdinFile,
         block: bool = False,
         timeout_seconds: Union[int, float, None] = None,
@@ -216,7 +221,7 @@ class ActionWorker:
                 if not block:
                     return {}
 
-                time.sleep(0.01)
+                time.sleep(self.refresh_seconds)
                 expired = (
                     ((time.perf_counter() - start) > timeout_seconds)
                     if timeout_seconds is not None
