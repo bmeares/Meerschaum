@@ -512,14 +512,20 @@ def _register_tokens(
             "To which user should this token be registered? Enter the number.",
             usernames,
         )
-        user_id = instance_connector.get_user_id(
-            User(username, instance=mrsm_instance),
-            debug=debug,
-        )
-        if user_id is None:
-            return False, f"Cannot load ID for user '{username}'."
+    else:
+        username = getattr(instance_connector, 'username')
 
-        user = User(username, user_id=user_id, instance=mrsm_instance)
+    if not username:
+        return False, "Cannot register a token without a user."
+
+    user_id = instance_connector.get_user_id(
+        User(username, instance=mrsm_instance),
+        debug=debug,
+    )
+    if user_id is None:
+        return False, f"Cannot load ID for user '{username}'."
+
+    user = User(username, user_id=user_id, instance=mrsm_instance)
 
     token = Token(
         label=name,

@@ -55,12 +55,10 @@ class PipeModel(BasePipeModel):
 
 class FetchPipesKeysResponseModel(
     RootModel[
-        List[
-            Union[
-                Tuple[ConnectorKeysModel, MetricKeyModel, LocationKeyModel],
-                Tuple[ConnectorKeysModel, MetricKeyModel, LocationKeyModel, List[str]],
-                Tuple[ConnectorKeysModel, MetricKeyModel, LocationKeyModel, Dict[str, Any]],
-            ]
+        Union[
+            List[Tuple[ConnectorKeysModel, MetricKeyModel, LocationKeyModel]],
+            List[Tuple[ConnectorKeysModel, MetricKeyModel, LocationKeyModel, Dict[str, Any]]],
+            List[Tuple[ConnectorKeysModel, MetricKeyModel, LocationKeyModel, List[str]]],
         ]
     ]
 ):

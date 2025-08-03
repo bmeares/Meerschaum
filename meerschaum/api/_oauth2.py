@@ -21,6 +21,7 @@ from meerschaum.core import User, Token
 fastapi, starlette = attempt_import('fastapi', 'starlette', lazy=False, check_update=CHECK_UPDATE)
 fastapi_responses = attempt_import('fastapi.responses', lazy=False, check_update=CHECK_UPDATE)
 fastapi_login = attempt_import('fastapi_login', check_update=CHECK_UPDATE)
+jose_jwt, jose_exceptions = attempt_import('jose.jwt', 'jose.exceptions', lazy=False, check_update=CHECK_UPDATE)
 from fastapi import Depends, HTTPException, Request
 from starlette import status
 
@@ -116,6 +117,7 @@ def ScopedAuth(scopes: List[str]):
     Dependency factory for authenticating with either a user session or a scoped token.
     """
     async def _authenticate(
+        request: Request,
         user_or_token: Union[User, Token, None] = Depends(
             load_user_or_token,
         ),
@@ -130,12 +132,45 @@ def ScopedAuth(scopes: List[str]):
                 headers={"WWW-Authenticate": "Basic"},
             )
 
-        fresh_scopes = user_or_token.get_scopes(refresh=True, debug=debug)
-        if '*' in fresh_scopes:
+        authorization = request.headers.get('authorization', request.headers.get('Authorization', None))
+        is_long_lived = authorization and 'mrsm-key:' in authorization
+
+        current_scopes = []
+        ### For long-lived API tokens, always hit the database.
+        if is_long_lived:
+            current_scopes = user_or_token.get_scopes(refresh=True, debug=debug)
+        
+        ### For JWTs, trust the scopes in the token.
+        else:
+            if not authorization:
+                # This should be caught by `load_user_or_token` but we can be safe.
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Not authenticated.",
+                )
+            
+            scheme, _, token_str = authorization.partition(' ')
+            if not token_str or scheme.lower() != 'bearer':
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Unsupported authentication scheme.",
+                )
+
+            try:
+                payload = jose_jwt.decode(token_str, SECRET, algorithms=['HS256'])
+                current_scopes = payload.get('scopes', [])
+            except jose_exceptions.JWTError:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid access token.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+        if '*' in current_scopes:
             return user_or_token
 
         for scope in scopes:
-            if scope not in fresh_scopes:
+            if scope not in current_scopes:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Missing required scope: '{scope}'",
