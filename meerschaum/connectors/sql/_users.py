@@ -19,9 +19,12 @@ def get_users_pipe(self) -> mrsm.Pipe:
     if '_users_pipe' in self.__dict__:
         return self._users_pipe
 
+    cache_connector = self.__dict__.get('_cache_connector', None)
     self._users_pipe = mrsm.Pipe(
         'mrsm', 'users',
         temporary=True,
+        cache=True,
+        cache_connector_keys=cache_connector,
         static=True,
         null_indices=False,
         enforce=False,

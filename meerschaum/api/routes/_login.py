@@ -38,6 +38,7 @@ from meerschaum.api._oauth2 import CustomOAuth2PasswordRequestForm
 USER_ID_CACHE_EXPIRES_SECONDS: int = mrsm.get_config('system', 'api', 'cache', 'session_expires_minutes') * 60
 _active_user_ids = {}
 
+
 @manager.user_loader()
 def load_user_or_token_from_manager(username_or_token_id: str) -> User:
     """
@@ -49,7 +50,6 @@ def load_user_or_token_from_manager(username_or_token_id: str) -> User:
     is_token = is_uuid(username_or_token_id)
 
     if is_token:
-        print("Returning token.")
         return api_conn.get_token(username_or_token_id)
 
     username = username_or_token_id
@@ -59,8 +59,6 @@ def load_user_or_token_from_manager(username_or_token_id: str) -> User:
         if cache_conn is None
         else cache_conn.get(f'mrsm:users:{username}:id')
     )
-    print(f"{username=}")
-    print(f"{cached_user_id=}")
     if isinstance(cached_user_id, str):
         if is_int(cached_user_id):
             cached_user_id = int(cached_user_id)

@@ -198,7 +198,6 @@ async def get_pipes(
     location_keys: str = "",
     instance_keys: str = "",
     curr_user=fastapi.Security(ScopedAuth(['pipes:read'])),
-    debug: bool = False,
 ) -> PipesWithParametersDictModel:
     """
     Get all registered Pipes with metadata, excluding parameters.
@@ -385,7 +384,6 @@ async def sync_pipe(
     workers: Optional[int] = None,
     columns: Optional[str] = None,
     curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
-    debug: bool = False,
 ) -> mrsm.SuccessTuple:
     """
     Add data to an existing Pipe.
@@ -765,8 +763,7 @@ def get_pipe_id(
     metric_key: str,
     location_key: str,
     instance_keys: Optional[str] = None,
-    #  curr_user = fastapi.Security(ScopedAuth(['pipes:read'])),
-    curr_user = fastapi.Security(ScopedAuth(['pipes:read']), scopes=['pipes:read']),
+    curr_user = fastapi.Security(ScopedAuth(['pipes:read'])),
 ) -> Union[int, str]:
     """
     Get a pipe's ID.

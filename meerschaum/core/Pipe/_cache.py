@@ -223,9 +223,9 @@ def _write_cache_conn_key(
         return False, f"No cache connector is set for {self}."
 
     cache_conn_cache_key = _get_cache_conn_cache_key(self, cache_key)
-    local_cache_timeout_seconds = mrsm.get_config(
+    local_cache_timeout_seconds = int(mrsm.get_config(
         'pipes', 'attributes', 'local_cache_timeout_seconds'
-    )
+    ))
     obj_bytes = pickle.dumps(obj_to_write)
     if debug:
         dprint(f"Setting '{cache_conn_cache_key}' on '{cache_connector}'.")

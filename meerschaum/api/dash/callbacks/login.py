@@ -16,11 +16,14 @@ from meerschaum.utils.typing import Optional
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State
+
 from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes
 from meerschaum.api.dash.sessions import set_session
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.routes._login import login
 from meerschaum.api.dash.components import alert_from_success_tuple
+from meerschaum.api._oauth2 import CustomOAuth2PasswordRequestForm
+from meerschaum._internal.static import STATIC_CONFIG
 from fastapi_login.exceptions import InvalidCredentialsException
 from fastapi.exceptions import HTTPException
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
@@ -73,7 +76,13 @@ def login_button_click(
         raise PreventUpdate
 
     try:
-        _ = login({'username': username, 'password': password})
+        form = CustomOAuth2PasswordRequestForm(
+            grant_type='password',
+            username=username,
+            password=password,
+            scope=' '.join(STATIC_CONFIG['tokens']['scopes'])
+        )
+        _ = login(form)
         session_id = str(uuid.uuid4())
         session_data = {
             'session-id': session_id,
