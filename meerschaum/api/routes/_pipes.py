@@ -149,7 +149,7 @@ def delete_pipe(
     location_key: str,
     instance_keys: Optional[str] = None,
     curr_user = fastapi.Security(ScopedAuth(['pipes:delete'])),
-) -> SuccessTuple:
+) -> mrsm.SuccessTuple:
     """
     Delete a Pipe (without dropping its table).
     """
@@ -188,7 +188,10 @@ async def fetch_pipes_keys(
         tags=json.loads(tags),
         params=json.loads(params),
     )
-    return keys
+    return [
+        (keys_tuple[0], keys_tuple[1], keys_tuple[2])
+        for keys_tuple in keys
+    ]
 
 
 @app.get(pipes_endpoint, tags=['Pipes: Attributes'])
