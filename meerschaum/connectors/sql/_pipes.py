@@ -3180,7 +3180,6 @@ def get_add_columns_queries(
         get_db_type_from_pd_type,
     )
     from meerschaum.utils.misc import flatten_list
-    table_obj = self.get_pipe_table(pipe, debug=debug)
     is_dask = 'dask' in df.__module__ if not isinstance(df, dict) else False
     if is_dask:
         df = df.partitions[0].compute()
@@ -3204,9 +3203,6 @@ def get_add_columns_queries(
             elif isinstance(val, str):
                 df_cols_types[col] = 'str'
     db_cols_types = {
-        col: get_pd_type_from_db_type(str(typ.type))
-        for col, typ in table_obj.columns.items()
-    } if table_obj is not None else {
         col: get_pd_type_from_db_type(typ)
         for col, typ in get_table_cols_types(
             pipe.target,
@@ -3302,7 +3298,6 @@ def get_alter_columns_queries(
         get_db_type_from_pd_type,
     )
     from meerschaum.utils.misc import flatten_list, generate_password, items_str
-    table_obj = self.get_pipe_table(pipe, debug=debug)
     target = pipe.target
     session_id = generate_password(3)
     numeric_cols = (
@@ -3323,9 +3318,6 @@ def get_alter_columns_queries(
         else df
     )
     db_cols_types = {
-        col: get_pd_type_from_db_type(str(typ.type))
-        for col, typ in table_obj.columns.items()
-    } if table_obj is not None else {
         col: get_pd_type_from_db_type(typ)
         for col, typ in get_table_cols_types(
             pipe.target,
@@ -3433,12 +3425,12 @@ def get_alter_columns_queries(
             + sql_item_name(target, self.flavor, self.get_pipe_schema(pipe))
             + " (\n"
         )
-        for col_name, col_obj in table_obj.columns.items():
+        for col_name, col_typ in db_cols_types.items():
             create_query += (
                 sql_item_name(col_name, self.flavor, None)
                 + " "
                 + (
-                    str(col_obj.type)
+                    col_typ
                     if col_name not in altered_cols
                     else altered_cols_types[col_name]
                 )
@@ -3452,12 +3444,12 @@ def get_alter_columns_queries(
             + ' ('
             + ', '.join([
                 sql_item_name(col_name, self.flavor, None)
-                for col_name, _ in table_obj.columns.items()
+                for col_name in db_cols_types
             ])
             + ')'
             + "\nSELECT\n"
         )
-        for col_name, col_obj in table_obj.columns.items():
+        for col_name in db_cols_types:
             new_col_str = (
                 sql_item_name(col_name, self.flavor, None)
                 if col_name not in altered_cols
@@ -3470,6 +3462,7 @@ def get_alter_columns_queries(
                 )
             )
             insert_query += new_col_str + ",\n"
+
         insert_query = insert_query[:-2] + (
             f"\nFROM {sql_item_name(temp_table_name, self.flavor, self.get_pipe_schema(pipe))}"
         )
