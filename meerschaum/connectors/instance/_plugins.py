@@ -16,13 +16,20 @@ def get_plugins_pipe(self) -> 'mrsm.Pipe':
     """
     Return the internal pipe for syncing plugins metadata.
     """
+    if '_plugins_pipe' in self.__dict__:
+        return self._plugins_pipe
+
+    cache_connector = self.__dict__.get('_cache_connector', None)
     users_pipe = self.get_users_pipe()
     user_id_dtype = users_pipe.dtypes.get('user_id', 'uuid')
-    return mrsm.Pipe(
+
+    self._plugins_pipe = mrsm.Pipe(
         'mrsm', 'plugins',
         instance=self,
         target='mrsm_plugins',
         temporary=True,
+        cache=True,
+        cache_connector_keys=cache_connector,
         static=True,
         null_indices=False,
         columns={
@@ -36,6 +43,7 @@ def get_plugins_pipe(self) -> 'mrsm.Pipe':
             'version': 'string',
         },
     )
+    return self._plugins_pipe
 
 
 def register_plugin(self, plugin: Plugin, debug: bool = False) -> mrsm.SuccessTuple:

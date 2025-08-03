@@ -140,7 +140,9 @@ def get_api_connector(instance_keys: Optional[str] = None):
         if _instance_connectors[instance_keys] is None:
             try:
                 is_valid_connector = True
-                _instance_connectors[instance_keys] = parse_instance_keys(instance_keys, debug=debug)
+                instance_connector = parse_instance_keys(instance_keys, debug=debug)
+                instance_connector._cache_connector = get_cache_connector()
+                _instance_connectors[instance_keys] = instance_connector
             except Exception:
                 is_valid_connector = False
 

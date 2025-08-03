@@ -30,12 +30,15 @@ def get_tokens_pipe(self) -> mrsm.Pipe:
         users_pipe._attributes.get('parameters', {}).get('dtypes', {}).get('user_id', 'uuid')
     )
 
+    cache_connector = self.__dict__.get('_cache_connector', None)
+
     self._tokens_pipe = mrsm.Pipe(
         'mrsm', 'tokens',
         instance=self,
         target='mrsm_tokens',
         temporary=True,
         cache=True,
+        cache_connector_keys=cache_connector,
         static=True,
         autotime=True,
         null_indices=False,
