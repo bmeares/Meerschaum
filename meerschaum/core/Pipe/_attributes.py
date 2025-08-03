@@ -655,7 +655,8 @@ def id(self) -> Union[int, str, uuid.UUID, None]:
     _id = self._get_cached_value('_id', debug=self.debug)
     if not _id:
         _id = self.get_id(debug=self.debug)
-        self._cache_value('_id', _id, debug=self.debug)
+        if _id is not None:
+            self._cache_value('_id', _id, debug=self.debug)
     return _id
 
 

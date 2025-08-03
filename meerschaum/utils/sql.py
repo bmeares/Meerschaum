@@ -1586,6 +1586,8 @@ def get_update_queries(
     datetime_col: Optional[str] = None,
     schema: Optional[str] = None,
     patch_schema: Optional[str] = None,
+    target_cols_types: Optional[Dict[str, str]] = None,
+    patch_cols_types: Optional[Dict[str, str]] = None,
     identity_insert: bool = False,
     null_indices: bool = True,
     cast_columns: bool = True,
@@ -1625,6 +1627,14 @@ def get_update_queries(
     patch_schema: Optional[str], default None
         If provided, use this schema when quoting the patch table.
         Defaults to `schema`.
+
+    target_cols_types: Optional[Dict[str, Any]], default None
+        If provided, use these as the columns-types dictionary for the target table.
+        Default will infer from the database context.
+
+    patch_cols_types: Optional[Dict[str, Any]], default None
+        If provided, use these as the columns-types dictionary for the target table.
+        Default will infer from the database context.
 
     identity_insert: bool, default False
         If `True`, include `SET IDENTITY_INSERT` queries before and after the update queries.
@@ -1672,14 +1682,14 @@ def get_update_queries(
         flavor=flavor,
         schema=schema,
         debug=debug,
-    )
+    ) if not target_cols_types else target_cols_types
     patch_table_columns = get_table_cols_types(
         patch,
         connectable,
         flavor=flavor,
         schema=patch_schema,
         debug=debug,
-    )
+    ) if not patch_cols_types else patch_cols_types
 
     patch_cols_str = ', '.join(
         [

@@ -239,6 +239,12 @@ The base SQL query to be run when fetching new rows. Aliased as `sql` or `query`
 
 ---------------
 
+## `hypertable`
+
+If `hypertable` is `False`, then the target table will not be created as a hypertable (TimescaleDB-only).
+
+---------------
+
 ## `indices`
 
 The `indices` dictionary (alias `indexes`) allows you to create additional and multi-column indices. Whereas `columns` is for specifying uniqueness, `indices` is for performance tuning.

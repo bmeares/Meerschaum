@@ -42,6 +42,7 @@ def entry_with_daemon(
     found_unacceptable_prefix = False
     allowed_prefixes = mrsm.get_config('system', 'cli', 'allowed_prefixes')
     disallowed_prefixes = mrsm.get_config('system', 'cli', 'disallowed_prefixes')
+    refresh_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
     sysargs_str = sysargs if isinstance(sysargs, str) else shlex.join(sysargs or [])
     for prefix in allowed_prefixes:
         if sysargs_str.startswith(prefix) or prefix == '*':
@@ -62,7 +63,7 @@ def entry_with_daemon(
         daemon_ix = -1
         daemon_is_ready = False
 
-    worker = ActionWorker(daemon_ix) if daemon_ix != -1 else None
+    worker = ActionWorker(daemon_ix, refresh_seconds=refresh_seconds) if daemon_ix != -1 else None
     if worker and worker.lock_path.exists():
         daemon_is_ready = False
 
@@ -80,12 +81,11 @@ def entry_with_daemon(
         while (time.perf_counter() - start) < 3:
             if worker.is_ready():
                 break
-            time.sleep(0.01)
+            time.sleep(refresh_seconds)
 
     if not daemon_is_ready or worker is None:
         return entry_without_daemon(sysargs, _patch_args=_patch_args)
 
-    refresh_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
     session_id = _session_id or get_cli_session_id()
     action_id = uuid.uuid4().hex
 
@@ -183,16 +183,16 @@ def entry_with_daemon(
     return success, message
 
 
-def touch_cli_logs_loop(ix: int, refresh_seconds: Union[int, float] = 0.01):
+def touch_cli_logs_loop(ix: int, refresh_seconds: Union[int, float, None] = None):
     """
     Touch the CLI daemon's logs to refresh the logs monitoring.
     """
     from meerschaum._internal.cli.workers import ActionWorker
-    worker = ActionWorker(ix)
+    worker = ActionWorker(ix, refresh_seconds=refresh_seconds)
 
     while True:
         worker.job.daemon.rotating_log.touch()
-        time.sleep(refresh_seconds)
+        time.sleep(worker.refresh_seconds)
 
 
 def start_cli_logs_refresh_thread(ix: int):

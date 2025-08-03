@@ -13,6 +13,7 @@ import time
 import traceback
 from datetime import datetime, timezone
 
+import meerschaum as mrsm
 from meerschaum.jobs import get_jobs
 from meerschaum.utils.typing import Optional, Dict, Any
 from meerschaum.api import CHECK_UPDATE
@@ -136,12 +137,12 @@ def manage_job_button_click(
     old_status = job.status
     try:
         success, msg = manage_functions[manage_job_action]()
-    except Exception as e:
+    except Exception:
         success, msg = False, traceback.format_exc()
 
     ### Wait for a status change before building the elements.
     timeout_seconds = 1.0
-    check_interval_seconds = 0.01
+    check_interval_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
     begin = time.perf_counter()
     while (time.perf_counter() - begin) < timeout_seconds:
         if job.status != old_status:
