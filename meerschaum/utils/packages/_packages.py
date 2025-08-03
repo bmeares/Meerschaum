@@ -175,6 +175,7 @@ packages['api'] = {
     'httpx'                          : 'httpx>=0.28.1',
     'httpcore'                       : 'httpcore>=1.0.9',
     'valkey'                         : 'valkey>=6.1.0',
+    'jose'                           : 'python-jose>=3.5.0',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])

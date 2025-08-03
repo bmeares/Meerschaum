@@ -39,18 +39,28 @@ USER_ID_CACHE_EXPIRES_SECONDS: int = mrsm.get_config('system', 'api', 'cache', '
 _active_user_ids = {}
 
 @manager.user_loader()
-def load_user(username: str) -> User:
+def load_user_or_token_from_manager(username_or_token_id: str) -> User:
     """
     Create the `meerschaum.core.User` object from the username.
     """
     cache_conn = get_cache_connector()
     api_conn = get_api_connector()
 
+    is_token = is_uuid(username_or_token_id)
+
+    if is_token:
+        print("Returning token.")
+        return api_conn.get_token(username_or_token_id)
+
+    username = username_or_token_id
+
     cached_user_id = (
         _active_user_ids.get(username)
         if cache_conn is None
         else cache_conn.get(f'mrsm:users:{username}:id')
     )
+    print(f"{username=}")
+    print(f"{cached_user_id=}")
     if isinstance(cached_user_id, str):
         if is_int(cached_user_id):
             cached_user_id = int(cached_user_id)
@@ -102,9 +112,10 @@ def login(
             else 'client_credentials'
         )
 
-    scopes = []
+    allowed_scopes = []
     type_ = None
     expires_dt: Union[datetime, None] = None
+    sub_id = None
     if grant_type == 'password':
         user = User(str(username), str(password), instance=get_api_connector())
         correct_password = no_auth or verify_password(
@@ -114,8 +125,9 @@ def login(
         if not correct_password:
             raise InvalidCredentialsException
 
-        scopes = user.get_scopes(debug=debug)
+        allowed_scopes = user.get_scopes(debug=debug)
         type_ = get_api_connector().get_user_type(user, debug=debug)
+        sub_id = username
 
     elif grant_type == 'client_credentials':
         if not is_uuid(str(client_id)):
@@ -128,18 +140,27 @@ def login(
         if not correct_password:
             raise InvalidCredentialsException
 
-        scopes = get_api_connector().get_token_scopes(token_id, debug=debug)
+        allowed_scopes = get_api_connector().get_token_scopes(token_id, debug=debug)
+        sub_id = client_id
 
     else:
         raise InvalidCredentialsException
+
+    requested_scopes = data.scope.split()
+    if '*' in allowed_scopes:
+        final_scopes = requested_scopes or ['*']
+    else:
+        final_scopes = [
+            s for s in requested_scopes if s in allowed_scopes
+        ] if requested_scopes else allowed_scopes
 
     expires_minutes = STATIC_CONFIG['api']['oauth']['token_expires_minutes']
     expires_delta = timedelta(minutes=expires_minutes)
     expires_dt = datetime.now(timezone.utc).replace(tzinfo=None) + expires_delta
     access_token = manager.create_access_token(
         data={
-            'sub': (username if grant_type == 'password' else client_id),
-            'scopes': scopes,
+            'sub': sub_id,
+            'scopes': final_scopes,
             'type': type_,
         },
         expires=expires_delta
