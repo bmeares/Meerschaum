@@ -304,7 +304,7 @@ def _sync_pipes(
     while run:
         _progress = (
             progress()
-            if (shell and not noninteractive)
+            if (shell and not noninteractive and not running_in_daemon())
             else None
         )
         cm = _progress if _progress is not None else contextlib.nullcontext()
