@@ -884,7 +884,7 @@ class Daemon:
         if self.process is None:
             return 'stopped'
 
-        psutil = attempt_import('psutil')
+        psutil = attempt_import('psutil', lazy=False)
         try:
             if self.process.status() == 'stopped':
                 return 'paused'
