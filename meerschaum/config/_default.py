@@ -177,7 +177,7 @@ default_system_config = {
     },
     'cli': {
         'max_daemons': (multiprocessing.cpu_count() * 3),
-        'refresh_seconds': 0.01,
+        'refresh_seconds': 0.1,
         'allowed_prefixes': ['*'],
         'disallowed_prefixes': [
             'edit',
@@ -187,8 +187,8 @@ default_system_config = {
             'start worker',
             'start job',
             'python',
-            'os',
-            'sh',
+            'os ',
+            'sh ',
             'start api',
             'stack',
             'instance',

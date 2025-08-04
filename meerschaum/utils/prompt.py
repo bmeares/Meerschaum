@@ -71,7 +71,7 @@ def prompt(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.formatting import ANSI, CHARSET, highlight_pipes, fill_ansi
     from meerschaum.config import get_config
-    from meerschaum.utils.misc import filter_keywords
+    from meerschaum.utils.misc import filter_keywords, remove_ansi
     from meerschaum.utils.daemon import running_in_daemon
     noask = check_noask(noask)
     if not noask:
@@ -107,7 +107,9 @@ def prompt(
     question += first_line
     if len(other_lines) > 0:
         question += '\n' + other_lines
-    question += ' '
+
+    if not remove_ansi(question).endswith(' '):
+        question += ' '
 
     if not running_in_daemon():
         answer = (
@@ -120,7 +122,7 @@ def prompt(
         )
     else:
         if not silent:
-            print(question, end='\n', flush=True)
+            print(question, end='', flush=True)
         try:
             answer = input() if not noask else ''
         except EOFError:

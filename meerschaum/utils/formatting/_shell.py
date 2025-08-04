@@ -52,8 +52,12 @@ def clear_screen(debug: bool = False) -> bool:
     from meerschaum.config import get_config
     from meerschaum.utils.daemon import running_in_daemon
     global _tried_clear_command
+    clear_string = '\033[2J'
+    reset_string = '\033[0m'
 
     if running_in_daemon():
+        print(clear_string + reset_string, end="")
+        print("", end="", flush=True)
         return True
 
     if not get_config('shell', 'clear_screen'):
@@ -63,16 +67,17 @@ def clear_screen(debug: bool = False) -> bool:
     if debug:
         dprint("Skipping screen clear.")
         return True
+
     if ANSI and platform.system() != 'Windows':
         if get_console() is not None:
             get_console().clear()
             print("", end="", flush=True)
             return True
-        clear_string = '\033[2J'
-        reset_string = '\033[0m'
+
         print(clear_string + reset_string, end="")
         print("", end="", flush=True)
         return True
+
     ### ANSI support is disabled, try system level instead
     if _tried_clear_command is not None:
         return os.system(_tried_clear_command) == 0
@@ -81,7 +86,7 @@ def clear_screen(debug: bool = False) -> bool:
     command = 'clear' if platform.system() != 'Windows' else 'cls'
     try:
         rc = os.system(command)
-    except Exception as e:
+    except Exception:
         pass
     if rc == 0:
         with _locks['_tried_clear_command']:
@@ -107,9 +112,14 @@ def progress(transient: bool = True, **kw):
     """
     from meerschaum.utils.packages import import_rich, attempt_import
     from meerschaum.utils.formatting import get_console, _init
+    from meerschaum.utils.daemon import running_in_daemon
     _init()
     _ = import_rich()
     rich_progress = attempt_import('rich.progress')
+    console = get_console()
+    if running_in_daemon():
+        console.force_terminal = True
+
     return rich_progress.Progress(
         rich_progress.TextColumn(''),
         rich_progress.SpinnerColumn('clock'),
@@ -117,7 +127,7 @@ def progress(transient: bool = True, **kw):
         rich_progress.TextColumn(''),
         rich_progress.BarColumn(bar_width=None),
         transient=transient,
-        console=get_console(),
+        console=console,
         **kw
     )
 

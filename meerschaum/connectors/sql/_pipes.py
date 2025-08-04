@@ -1763,7 +1763,7 @@ def sync_pipe(
     if 'name' in kw:
         kw.pop('name')
 
-    ### Insert new data into Pipe's table.
+    ### Insert new data into the target table.
     unseen_kw = copy.deepcopy(kw)
     unseen_kw.update({
         'name': pipe.target,
