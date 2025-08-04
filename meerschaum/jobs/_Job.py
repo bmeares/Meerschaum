@@ -622,42 +622,29 @@ class Job:
         async def emit_latest_lines():
             nonlocal emitted_text
             nonlocal stop_event
-            if strip_timestamps:
-                lines = log.readlines()
-                for line in lines[(-1 * lines_to_show):]:
-                    if stop_event is not None and stop_event.is_set():
-                        return
+            lines = log.readlines()
+            for line in lines[(-1 * lines_to_show):]:
+                if stop_event is not None and stop_event.is_set():
+                    return
 
-                    if line.strip() == STOP_TOKEN:
-                        events['stop_token'].set()
-                        return
+                if line.strip() == STOP_TOKEN:
+                    events['stop_token'].set()
+                    return
 
+                if strip_timestamps:
                     line = strip_timestamp_from_line(line)
 
-                    try:
-                        if asyncio.iscoroutinefunction(callback_function):
-                            await callback_function(line)
-                        else:
-                            callback_function(line)
-                        emitted_text = True
-                    except StopMonitoringLogs:
-                        events['stop_exception'].set()
-                        return
-                    except Exception:
-                        warn(f"Error in logs callback:\n{traceback.format_exc()}")
-                return
-
-            try:
-                if asyncio.iscoroutinefunction(callback_function):
-                    await callback_function(log.read())
-                else:
-                    callback_function(log.read())
-                emitted_text = True
-            except StopMonitoringLogs:
-                events['stop_exception'].set()
-                return
-            except Exception:
-                warn(f"Error in logs callback:\n{traceback.format_exc()}")
+                try:
+                    if asyncio.iscoroutinefunction(callback_function):
+                        await callback_function(line)
+                    else:
+                        callback_function(line)
+                    emitted_text = True
+                except StopMonitoringLogs:
+                    events['stop_exception'].set()
+                    return
+                except Exception:
+                    warn(f"Error in logs callback:\n{traceback.format_exc()}")
 
         await emit_latest_lines()
 
