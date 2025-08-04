@@ -289,6 +289,7 @@ def _sync_pipes(
     from meerschaum.utils.formatting import print_pipes_results
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.misc import interval_str
+    from meerschaum.utils.daemon import running_in_daemon
 
     noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)
     noninteractive = str(noninteractive_val).lower() in ('1', 'true', 'yes')
@@ -301,7 +302,11 @@ def _sync_pipes(
     cooldown = 2 * (min_seconds + 1)
     success_pipes, failure_pipes = [], []
     while run:
-        _progress = progress() if shell and not noninteractive else None
+        _progress = (
+            progress()
+            if (shell and not noninteractive and not running_in_daemon())
+            else None
+        )
         cm = _progress if _progress is not None else contextlib.nullcontext()
 
         lap_begin = time.perf_counter()

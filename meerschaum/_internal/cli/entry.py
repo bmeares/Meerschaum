@@ -44,13 +44,16 @@ def entry_with_daemon(
     disallowed_prefixes = mrsm.get_config('system', 'cli', 'disallowed_prefixes')
     refresh_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
     sysargs_str = sysargs if isinstance(sysargs, str) else shlex.join(sysargs or [])
+
     for prefix in allowed_prefixes:
         if sysargs_str.startswith(prefix) or prefix == '*':
             found_acceptable_prefix = True
             break
+
     for prefix in disallowed_prefixes:
         if sysargs_str.startswith(prefix) or prefix == '*':
             found_unacceptable_prefix = True
+            break
 
     if not found_acceptable_prefix or found_unacceptable_prefix:
         daemon_is_ready = False
