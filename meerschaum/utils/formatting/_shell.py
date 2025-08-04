@@ -112,14 +112,9 @@ def progress(transient: bool = True, **kw):
     """
     from meerschaum.utils.packages import import_rich, attempt_import
     from meerschaum.utils.formatting import get_console, _init
-    from meerschaum.utils.daemon import running_in_daemon
     _init()
     _ = import_rich()
     rich_progress = attempt_import('rich.progress')
-    console = get_console()
-    if running_in_daemon():
-        console.force_terminal = True
-
     return rich_progress.Progress(
         rich_progress.TextColumn(''),
         rich_progress.SpinnerColumn('clock'),
@@ -127,7 +122,7 @@ def progress(transient: bool = True, **kw):
         rich_progress.TextColumn(''),
         rich_progress.BarColumn(bar_width=None),
         transient=transient,
-        console=console,
+        console=get_console(),
         **kw
     )
 
