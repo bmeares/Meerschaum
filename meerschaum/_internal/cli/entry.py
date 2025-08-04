@@ -114,7 +114,7 @@ def entry_with_daemon(
     worker_data = None
 
     while not accepted:
-        state = worker.read_output_data(block=True).get('state', None)
+        state = worker.read_output_data().get('state', None)
         if state == 'accepted':
             accepted = True
             break
@@ -131,7 +131,7 @@ def entry_with_daemon(
             _log=log,
             _wait_if_stopped=False,
         )
-        worker_data = worker.read_output_data(block=True)
+        worker_data = worker.read_output_data()
     except KeyboardInterrupt:
         exit_data = {
             'session_id': session_id,

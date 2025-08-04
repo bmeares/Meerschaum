@@ -10,7 +10,7 @@ import pathlib
 import time
 import json
 import asyncio
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, TextIO
 
 import meerschaum as mrsm
 from meerschaum.utils.daemon import StdinFile, RotatingFile
@@ -23,17 +23,10 @@ STOP_TOKEN: str = STATIC_CONFIG['jobs']['stop_token']
 
 def get_worker_input_file_path(ix: int) -> pathlib.Path:
     """
-    Return the file path to the worker's input `StdinFile`.
+    Return the file path to the worker's input named pipe file.
     """
     from meerschaum.config.paths import CLI_RESOURCES_PATH
     return CLI_RESOURCES_PATH / f"worker-{ix}.input"
-
-
-def get_worker_input_file(ix: int) -> StdinFile:
-    """
-    Return the `StdinFile` which will receive input commands to the worker job.
-    """
-    return StdinFile(get_worker_input_file_path(ix))
 
 
 def get_worker_output_file_path(ix: int) -> pathlib.Path:
@@ -42,13 +35,6 @@ def get_worker_output_file_path(ix: int) -> pathlib.Path:
     """
     from meerschaum.config.paths import CLI_RESOURCES_PATH
     return CLI_RESOURCES_PATH / f"worker-{ix}.output"
-
-
-def get_worker_output_file(ix: int) -> StdinFile:
-    """
-    Return the `StdinFile` which will output status payloads.
-    """
-    return StdinFile(get_worker_output_file_path(ix))
 
 
 def get_worker_stop_path(ix: int) -> pathlib.Path:
@@ -73,20 +59,18 @@ class ActionWorker:
         )
 
     @property
-    def input_file(self) -> StdinFile:
-        if '_input_file' in self.__dict__:
-            return self._input_file
-
-        self._input_file = get_worker_input_file(self.ix)
-        return self._input_file
+    def input_file_path(self) -> pathlib.Path:
+        """
+        Return the path to the input file.
+        """
+        return get_worker_input_file_path(self.ix)
 
     @property
-    def output_file(self) -> StdinFile:
-        if '_output_file' in self.__dict__:
-            return self._output_file
-
-        self._output_file = get_worker_output_file(self.ix)
-        return self._output_file
+    def output_file_path(self) -> pathlib.Path:
+        """
+        Return the path to the output file.
+        """
+        return get_worker_output_file_path(self.ix)
 
     @property
     def lock_path(self) -> pathlib.Path:
@@ -201,46 +185,30 @@ class ActionWorker:
 
     def _read_data(
         self,
-        file_to_read: StdinFile,
-        block: bool = False,
-        timeout_seconds: Union[int, float, None] = None,
+        file_to_read: TextIO,
     ) -> Dict[str, Any]:
         """
         Common logic for reading data from a pipe.
         """
-        expired = False
-        start = time.perf_counter()
-        while not expired:
-            try:
-                data_str = file_to_read.readline()
-            except Exception as e:
-                warn(f"Could not read data:\n{e}")
-                return {}
+        try:
+            data_str = file_to_read.readline()
+        except Exception as e:
+            warn(f"Could not read data:\n{e}")
+            return {}
 
-            if not data_str:
-                if not block:
-                    return {}
+        if not data_str:
+            return {}
 
-                time.sleep(self.refresh_seconds)
-                expired = (
-                    ((time.perf_counter() - start) > timeout_seconds)
-                    if timeout_seconds is not None
-                    else False
-                )
-                continue
+        try:
+            data = json.loads(data_str)
+        except Exception as e:
+            return {'error': str(e)}
 
-            try:
-                data = json.loads(data_str)
-            except Exception as e:
-                return {'error': str(e)}
-
-            return data
-
-        return {}
+        return data
 
     @staticmethod
     def _write_data(
-        file_to_write: StdinFile,
+        file_to_write: TextIO,
         data: Dict[str, Any],
     ) -> None:
         """
@@ -251,41 +219,37 @@ class ActionWorker:
         except Exception as e:
             warn(f"Failed to write data:\n{e}")
 
-    def read_input_data(
-        self,
-        block: bool = False,
-        timeout_seconds: Union[int, float, None] = None,
-    ) -> Dict[str, Any]:
+    def read_input_data(self) -> Dict[str, Any]:
         """
         Read input data from the input pipe file.
         This method is called from within the worker's daemon context.
         """
-        return self._read_data(self.input_file, block=block, timeout_seconds=timeout_seconds)
+        with open(self.input_file_path, 'r') as f:
+            return self._read_data(f)
 
     def write_output_data(self, output_data: Dict[str, Any]) -> None:
         """
         Write the output data dictionary to the output pipe file.
         This method is called from within the worker's daemon context.
         """
-        self._write_data(self.output_file, output_data)
+        with open(self.output_file_path, 'w') as f:
+            self._write_data(f, output_data)
 
     def write_input_data(self, input_data: Dict[str, Any]) -> None:
         """
         Write the input data dictionary to the input pipe file.
         This method is called from the client entry context.
         """
-        self._write_data(self.input_file, input_data)
+        with open(self.input_file_path, 'w') as f:
+            self._write_data(f, input_data)
 
-    def read_output_data(
-        self,
-        block: bool = False,
-        timeout_seconds: Union[int, float, None] = None,
-    ) -> Dict[str, Any]:
+    def read_output_data(self) -> Dict[str, Any]:
         """
         Read output data from the output pipe file.
         This method is called from the client entry context.
         """
-        return self._read_data(self.output_file, block=block, timeout_seconds=timeout_seconds)
+        with open(self.output_file_path, 'r') as f:
+            return self._read_data(f)
 
     def increment_log(self) -> None:
         """
@@ -302,7 +266,26 @@ class ActionWorker:
         """
         Return whether the CLI worker is ready to accept input.
         """
-        return (not self.stop_path.exists()) and (self.input_file.blocking_file_path.exists())
+        return (
+            not self.lock_path.exists()
+            and self.input_file_path.exists()
+            and not self.stop_path.exists()
+        )
+
+    def create_fifos(self) -> mrsm.SuccessTuple:
+        """
+        Create the named pipes (FIFO files) for input and output.
+        """
+        paths = [self.input_file_path, self.output_file_path]
+        for path in paths:
+            try:
+                os.mkfifo(path)
+            except FileExistsError:
+                pass
+            except Exception as e:
+                return False, f"Failed to create FIFO file for {self}:\n{e}"
+
+        return True, "Success"
 
     def run(self) -> mrsm.SuccessTuple:
         """
@@ -313,11 +296,13 @@ class ActionWorker:
         from meerschaum.config import replace_config
         from meerschaum.config._environment import apply_environment_uris, apply_environment_patches
 
+        self.create_fifos()
+
         while True:
             self.release_lock()
             self.clear_stop_status()
 
-            input_data = self.read_input_data(block=True)
+            input_data = self.read_input_data()
             self.set_lock()
 
             if 'error' in input_data:
