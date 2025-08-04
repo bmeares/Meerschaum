@@ -1945,8 +1945,8 @@ def sync_pipe(
             upsert=upsert,
             schema=self.get_pipe_schema(pipe),
             patch_schema=self.internal_schema,
-            target_cols_types=(pipe.get_columns_types(debug=debug) if self.flavor != 'oracle' else None),
-            patch_cols_types=(_temp_columns_types if self.flavor != 'oracle' else None),
+            target_cols_types=pipe.get_columns_types(debug=debug),
+            patch_cols_types=_temp_columns_types,
             datetime_col=(dt_col if dt_col in update_df.columns else None),
             identity_insert=(autoincrement and primary_key in update_df.columns),
             null_indices=pipe.null_indices,
@@ -2543,8 +2543,8 @@ def sync_pipe_inplace(
             upsert=upsert,
             schema=self.get_pipe_schema(pipe),
             patch_schema=internal_schema,
-            target_cols_types=(pipe.get_columns_types(debug=debug) if self.flavor != 'oracle' else None),
-            patch_cols_types=(delta_cols_types if self.flavor != 'oracle' else None),
+            target_cols_types=pipe.get_columns_types(debug=debug),
+            patch_cols_types=delta_cols_types,
             datetime_col=pipe.columns.get('datetime', None),
             flavor=self.flavor,
             null_indices=pipe.null_indices,
@@ -3035,6 +3035,7 @@ def get_pipe_table(
     from meerschaum.utils.sql import get_sqlalchemy_table
     if not pipe.exists(debug=debug):
         return None
+
     return get_sqlalchemy_table(
         pipe.target,
         connector=self,
@@ -3092,9 +3093,11 @@ def get_pipe_columns_types(
         pipe_table = self.get_pipe_table(pipe, debug=debug)
         if pipe_table is None:
             return {}
+
         if debug:
-            dprint(f"Found columns:")
+            dprint("Found columns:")
             mrsm.pprint(dict(pipe_table.columns))
+
         for col in pipe_table.columns:
             table_columns[str(col.name)] = str(col.type)
     except Exception as e:
@@ -3338,6 +3341,7 @@ def get_alter_columns_queries(
         pd_db_df_aliases.update({
             'int': 'numeric',
             'date': 'datetime',
+            'numeric': 'int',
         })
 
     altered_cols = {
@@ -3351,11 +3355,29 @@ def get_alter_columns_queries(
         dprint("Columns to be altered:")
         mrsm.pprint(altered_cols)
 
+    ### NOTE: Special columns (numerics, bools, etc.) are captured and cached upon detection.
+    new_special_cols = pipe._get_cached_value('new_special_cols', debug=debug) or {}
+    new_special_db_cols_types = {
+        col: (db_cols_types.get(col, 'object'), typ)
+        for col, typ in new_special_cols.items()
+    }
+    if debug:
+        dprint("Cached new special columns:")
+        mrsm.pprint(new_special_cols)
+        dprint("New special columns db types:")
+        mrsm.pprint(new_special_db_cols_types)
+
+    altered_cols.update(new_special_db_cols_types)
+
     ### NOTE: Sometimes bools are coerced into ints or floats.
     altered_cols_to_ignore = set()
     for col, (db_typ, df_typ) in altered_cols.items():
         for db_alias, df_alias in pd_db_df_aliases.items():
-            if db_alias in db_typ.lower() and df_alias in df_typ.lower():
+            if (
+                db_alias in db_typ.lower()
+                and df_alias in df_typ.lower()
+                and col not in new_special_cols
+            ):
                 altered_cols_to_ignore.add(col)
 
     ### Oracle's bool handling sometimes mixes NUMBER and INT.

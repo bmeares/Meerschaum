@@ -1066,6 +1066,7 @@ def _persist_new_special_columns(
         for col, typ in special_cols.items()
         if col not in existing_special_cols
     }
+    self._cache_value('new_special_cols', new_special_cols, memory_only=True, debug=debug)
     if not new_special_cols:
         return True, "Success"
 
