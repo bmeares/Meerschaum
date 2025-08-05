@@ -121,8 +121,6 @@ def entry_with_daemon(
 
         time.sleep(refresh_seconds)
 
-    start_cli_logs_refresh_thread(daemon_ix)
-
     try:
         log = worker.job.daemon.rotating_log
         worker.job.monitor_logs(
@@ -175,7 +173,7 @@ def entry_with_daemon(
             )
         except (KeyboardInterrupt, SystemExit):
             worker.send_signal(signal.SIGTERM)
-        worker_data = worker.read_output_data(block=True, timeout_seconds=3)
+        worker_data = worker.read_output_data()
 
         if not exit_success:
             print(exit_data['traceback'])
@@ -184,30 +182,3 @@ def entry_with_daemon(
     success = (worker_data or {}).get('success', False)
     message = (worker_data or {}).get('message', "Failed to retrieve message from CLI worker.")
     return success, message
-
-
-def touch_cli_logs_loop(ix: int, refresh_seconds: Union[int, float, None] = None):
-    """
-    Touch the CLI daemon's logs to refresh the logs monitoring.
-    """
-    from meerschaum._internal.cli.workers import ActionWorker
-    worker = ActionWorker(ix, refresh_seconds=refresh_seconds)
-
-    while True:
-        worker.job.daemon.rotating_log.touch()
-        time.sleep(worker.refresh_seconds)
-
-
-def start_cli_logs_refresh_thread(ix: int):
-    """
-    Spin up a daemon thread to refresh the CLI's logs.
-    """
-    from meerschaum.utils.threading import Thread
-    refresh_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
-    thread = Thread(
-        target=touch_cli_logs_loop,
-        args=(ix,),
-        kwargs={'refresh_seconds': refresh_seconds},
-        daemon=True,
-    )
-    thread.start()

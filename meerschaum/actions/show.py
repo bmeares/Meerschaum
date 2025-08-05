@@ -931,7 +931,7 @@ def _show_tokens(
     from meerschaum.utils.packages import import_rich
     from meerschaum.utils.formatting import UNICODE, get_console
     rich = import_rich()
-    rich_table, rich_json = mrsm.attempt_import('rich.table', 'rich.json')
+    rich_table, rich_json, rich_box = mrsm.attempt_import('rich.table', 'rich.json', 'rich.box')
 
     conn = parse_instance_keys(mrsm_instance)
 
@@ -995,7 +995,11 @@ def _show_tokens(
         else "[-]"
     )
 
-    table = rich_table.Table(title=f"Registered Tokens on instance '{conn}'")
+    table = rich_table.Table(
+        title=f"Registered Tokens on instance '{conn}'",
+        box=rich_box.ROUNDED,
+        title_style='bold',
+    )
     table.add_column("ID")
     table.add_column("Label")
     table.add_column("User")

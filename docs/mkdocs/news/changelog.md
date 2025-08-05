@@ -347,13 +347,11 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add the parameter `mixed_numerics`.**  
   Setting `mixed_numerics` to `False` will prevent the behavior of coercing integer to float columns as `numeric`, akin to `static=True` but just for this behavior.
 
-- **Improve caching performance.**  
-  Metadata like pipes' dtypes are now cached more intelligently, drastically cutting down on the calls to the instance connector. The cache timeouts may be customized under the following configuration keys:
+- **Introducing the Meerschaum CLI daemon.**  
+  Actions are now routed through a long-lived daemon process, simplifying the number of active connections and cutting latency for CLI commands. The shell includes the command `daemon` which temporarily toggles between the CLI daemon and executing in-process. Adding the flag `--no-daemon` to any action will disable the CLI daemon routing, and the CLI daemon may be disabled by setting `system.experimental.cli_daemon` to `false`. You may selectively allow or restrict actions prefixes under the configuration `system.cli.allowed_prefixes` (default `*`) and `system.cli.disallowed_prefixes`.
 
-  - `pipes.attributes.local_cache_timeout_seconds`
-  - `pipes.sync.exists_cache_seconds`
-  - `pipes.dtypes.columns_types_cache_seconds`
-  - `pipes.static.static_schema_cache_seconds`
+- **Performance improvements through smarter caching.**  
+  The metadata caching system has been overhauled, drastically reducing redundant work and increasing performance. Pipes' metadata are cached on-disk, and providing `cache_connector_keys` to the Pipe constructor will cache to a Valkey instance instead. Set `cache=False` to disable this behavior.
 
 - **Fix custom actions with spaces in Web Console.**
 
