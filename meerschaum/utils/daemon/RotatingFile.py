@@ -694,6 +694,9 @@ class RotatingFile(io.IOBase):
         subfile_path = self.get_latest_subfile_path()
         subfile_path.touch()
 
+    def isatty(self) -> bool:
+        return True
+
     def __repr__(self) -> str:
         """
         Return basic info for this `RotatingFile`.

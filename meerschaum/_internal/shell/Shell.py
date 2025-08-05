@@ -1165,19 +1165,20 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             connected = False
         last_connected = connected
         connected_str = truncate_text_for_display(
-            ('dis' if not connected else '') + 'connected',
+            ('daemon' if cli_worker is not None else remove_ansi(shell_attrs['instance_keys'])),
             **truncation_kwargs
         )
+        connected_status_str = 'disconnected' if not connected else 'connected'
         connected_icon = get_config(
-            'formatting', connected_str, CHARSET, 'icon', warn=False,
+            'formatting', connected_status_str, CHARSET, 'icon', warn=False,
         ) or ''
         connection_text = (
-            connected_icon + ' ' + (
-                colored(connected_str.capitalize(), 'on ' + (get_config(
-                    'formatting', connected_str, 'ansi', 'rich', 'style',
+            (
+                colored(connected_str, 'on ' + (get_config(
+                    'formatting', connected_status_str, 'ansi', 'rich', 'style',
                     warn=False,
-                ) or '') + '  ') if ANSI else (colored(connected_str.capitalize(), 'on white') + ' ')
-            )
+                ) or '') + '  ') if ANSI else (colored(connected_str, 'on white') + ' ')
+            ) + ' ' + connected_icon
         )
 
         left = (

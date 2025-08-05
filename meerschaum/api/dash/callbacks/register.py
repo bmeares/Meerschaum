@@ -15,6 +15,7 @@ from dash.exceptions import PreventUpdate
 from meerschaum.core import User
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.packages import attempt_import
+from meerschaum.api._oauth2 import CustomOAuth2PasswordRequestForm
 dash = attempt_import('dash', check_update=CHECK_UPDATE)
 from fastapi.exceptions import HTTPException
 
@@ -97,10 +98,16 @@ def register_button_click(
         form_class += ' is-invalid'
         return {}, form_class, dash.no_update
     try:
-        _ = login({'username': username, 'password': password})
+        form = CustomOAuth2PasswordRequestForm(
+            grant_type='password',
+            username=username,
+            password=password,
+            scope=' '.join(STATIC_CONFIG['tokens']['scopes'])
+        )
+        _ = login(form)
         session_data = {'session-id': str(uuid.uuid4())}
         set_session(session_data['session-id'], {'username': username})
-    except HTTPException as e:
+    except HTTPException:
         form_class += ' is-invalid'
         session_data = None
     return session_data, form_class, (dash.no_update if not session_data else endpoints['dash'])

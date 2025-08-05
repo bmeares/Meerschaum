@@ -6,7 +6,6 @@
 Formatting functions for the interactive shell
 """
 
-from re import sub
 from meerschaum.utils.threading import Lock
 _locks = {'_tried_clear_command': Lock()}
 
@@ -51,17 +50,19 @@ def clear_screen(debug: bool = False) -> bool:
     from meerschaum.utils.debug import dprint
     from meerschaum.config import get_config
     from meerschaum.utils.daemon import running_in_daemon
+    from meerschaum._internal.static import STATIC_CONFIG
     global _tried_clear_command
     clear_string = '\033[2J'
     reset_string = '\033[0m'
-
-    if running_in_daemon():
-        print(clear_string + reset_string, end="")
-        print("", end="", flush=True)
-        return True
+    clear_token = STATIC_CONFIG['jobs']['clear_token']
 
     if not get_config('shell', 'clear_screen'):
         return True
+
+    if running_in_daemon():
+        print(clear_token, flush=True)
+        return True
+
 
     print("", end="", flush=True)
     if debug:

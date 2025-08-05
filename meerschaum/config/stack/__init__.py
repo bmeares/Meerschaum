@@ -66,9 +66,9 @@ env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
 
 volumes = {
     'api_root': '/meerschaum',
-    'meerschaum_db_data': '/var/lib/postgresql/data',
+    'meerschaum_db_data': '/home/postgres/pgdata',
     'grafana_storage': '/var/lib/grafana',
-    'valkey_data': '/bitnami/valkey/data',
+    'valkey_data': '/valkey/data',
 }
 networks = {
     'frontend': None,
@@ -122,7 +122,6 @@ default_docker_compose_config = {
                 'POSTGRES_DB': '<DOLLAR>POSTGRES_DB',
                 'POSTGRES_PASSWORD': '<DOLLAR>POSTGRES_PASSWORD',
                 'ALLOW_IP_RANGE': env_dict['ALLOW_IP_RANGE'],
-                #  'POSTGRES_INITDB_ARGS': '-c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100'
             },
             'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100',
             'healthcheck': {
@@ -184,7 +183,7 @@ default_docker_compose_config = {
             ],
         },
         'valkey': {
-            'image': 'bitnami/valkey:latest',
+            'image': 'valkey/valkey:latest',
             'restart': 'always',
             'environment': {
                 'VALKEY_PASSWORD': '<DOLLAR>VALKEY_PASSWORD',

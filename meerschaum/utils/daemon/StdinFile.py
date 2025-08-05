@@ -145,6 +145,9 @@ class StdinFile(io.TextIOBase):
     def is_open(self):
         return self._file_handler is not None
 
+    def isatty(self) -> bool:
+        return True
+
     def __str__(self) -> str:
         return f"StdinFile('{self.file_path}')"
 
