@@ -38,7 +38,7 @@ services:
     ports:
       - "5459:5432"
     volumes:
-      - "timescaledb-ha_volume:/var/lib/postgresql/data"
+      - "timescaledb-ha_volume:/home/postgres/pgdata"
       - "./connector_resources/timescaledb_ha/initdb:/docker-entrypoint-initdb.d:z,ro"
     image: "timescale/timescaledb-ha:pg17"
 
