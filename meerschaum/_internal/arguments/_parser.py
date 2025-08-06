@@ -390,6 +390,10 @@ groups['api'].add_argument(
     help="The host address to bind to for the API server. Defaults to '0.0.0.0'."
 )
 groups['api'].add_argument(
+    '--webterm-port', type=int,
+    help="The port on which to run the webterm server.",
+)
+groups['api'].add_argument(
     '-w', '--workers', type=int,
     help = "How many workers to run a concurrent action (e.g. running the API or syncing pipes)"
 )

@@ -66,8 +66,8 @@ from meerschaum.api._exceptions import APIPermissionError
 uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
 
 uvicorn_config = None
-sys_config = get_config('system', 'api')
-permissions_config = get_config('system', 'api', 'permissions')
+sys_config = get_config('api')
+permissions_config = get_config('api', 'permissions')
 
 def get_uvicorn_config() -> Dict[str, Any]:
     """Read the Uvicorn configuration JSON and return a dictionary."""
@@ -75,7 +75,7 @@ def get_uvicorn_config() -> Dict[str, Any]:
     import json
     runtime = os.environ.get(STATIC_CONFIG['environment']['runtime'], None)
     if runtime == 'api':
-        return get_config('system', 'api', 'uvicorn')
+        return get_config('api', 'uvicorn')
     _uvicorn_config = uvicorn_config
     with _locks['uvicorn_config']:
         if uvicorn_config is None:
@@ -101,6 +101,10 @@ production = get_uvicorn_config().get('production', False)
 _include_dash = (not no_dash)
 _include_webterm = (not no_webterm) and _include_dash
 docs_enabled = not production or sys_config.get('endpoints', {}).get('docs_in_production', True)
+webterm_port = (
+    get_uvicorn_config().get('webterm_port', None)
+    or mrsm.get_config('meerschaum', 'webterm', 'port')
+)
 
 default_instance_keys = None
 _instance_connectors = defaultdict(lambda: None)
@@ -169,7 +173,7 @@ def get_cache_connector(connector_keys: Optional[str] = None):
         return None
 
     connector_keys = connector_keys or get_config(
-        'system', 'api', 'cache', 'connector',
+        'api', 'cache', 'connector',
         warn=False,
     )
     if connector_keys is None:

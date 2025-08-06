@@ -179,15 +179,15 @@ def get_config(
         except Exception:
             import traceback
             traceback.print_exc()
+            _subbed = {keys[0]: config[keys[0]]}
+
         config[keys[0]] = _subbed[keys[0]]
         if symlinks_key in _subbed:
             if symlinks_key not in config:
                 config[symlinks_key] = {}
-            if keys[0] not in config[symlinks_key]:
-                config[symlinks_key][keys[0]] = {}
-            config[symlinks_key][keys[0]] = apply_patch_to_config(
-                _subbed,
-                {symlinks_key: config[symlinks_key][keys[0]]}
+            config[symlinks_key] = apply_patch_to_config(
+                _subbed.get(symlinks_key, {}),
+                config.get(symlinks_key, {}),
             )
 
     from meerschaum.config._sync import sync_files as _sync_files

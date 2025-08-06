@@ -46,6 +46,7 @@ def show(
         'schedules'  : _show_schedules,
         'venvs'      : _show_venvs,
         'tokens'     : _show_tokens,
+        'daemons'    : _show_daemons,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -1017,6 +1018,65 @@ def _show_tokens(
                 else 'Does not expire'
             ),
             (is_valid_true if token.is_valid else is_valid_false),
+        )
+
+    mrsm.pprint(table)
+    return True, "Success"
+
+
+def _show_daemons() -> SuccessTuple:
+    """
+    Print information about the running CLI daemons.
+    """
+    from meerschaum._internal.cli.workers import get_existing_cli_workers
+    workers = get_existing_cli_workers()
+    if not workers:
+        return True, "No CLI daemons are running."
+
+    rich_table, rich_box, rich_text = mrsm.attempt_import('rich.table', 'rich.box', 'rich.text')
+    table = rich_table.Table(
+        rich_table.Column("Index", justify='center'),
+        rich_table.Column("Status"),
+        rich_table.Column("Locked", justify='center'),
+        rich_table.Column("Ready", justify='center'),
+        rich_table.Column("Actions"),
+        title='CLI Daemons',
+        box=rich_box.ROUNDED,
+        title_style='bold',
+    )
+
+    running_icon = mrsm.get_config('formatting', 'emoji', 'running')
+    paused_icon = mrsm.get_config('formatting', 'emoji', 'paused')
+    stopped_icon = mrsm.get_config('formatting', 'emoji', 'stopped')
+    locked_icon = mrsm.get_config('formatting', 'emoji', 'locked')
+    unlocked_icon = mrsm.get_config('formatting', 'emoji', 'unlocked')
+    status_styles = {
+        'running': 'green',
+        'stopped': 'red',
+        'paused': 'yellow',
+    }
+
+    for worker in workers:
+        status = worker.job.status
+        status_text = rich_text.Text(
+            status,
+            style=status_styles[status],
+        )
+        if not worker.is_ready():
+            ready_icon = stopped_icon
+        else:
+            ready_icon = (
+                running_icon
+                if status == 'running'
+                else paused_icon
+            )
+
+        table.add_row(
+            str(worker.ix),
+            status_text,
+            (locked_icon if worker.lock_path.exists() else unlocked_icon),
+            ready_icon,
+            str(worker.job.daemon.rotating_log.get_latest_subfile_index()),
         )
 
     mrsm.pprint(table)

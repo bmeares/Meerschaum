@@ -8,13 +8,13 @@ Declare FastAPI events in this module (startup, shutdown, etc.).
 
 import sys
 import os
-import time
 from meerschaum.api import (
     app,
     get_api_connector,
     get_cache_connector,
     get_uvicorn_config,
     debug,
+    webterm_port,
     no_dash,
     _include_dash,
     _include_webterm,
@@ -75,7 +75,7 @@ async def startup():
     try:
         if _include_webterm:
             from meerschaum.api.dash.webterm import start_webterm
-            start_webterm()
+            start_webterm(webterm_port=webterm_port)
 
         connected = retry_connect(
             get_api_connector(),

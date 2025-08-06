@@ -357,7 +357,7 @@ class Shell(cmd.Cmd):
             shell_attrs['instance'] = instance
             shell_attrs['instance_keys'] = remove_ansi(str(instance))
         if shell_attrs.get('repo_keys', None) is None:
-            shell_attrs['repo_keys'] = get_config('meerschaum', 'default_repository', patch=patch)
+            shell_attrs['repo_keys'] = get_config('meerschaum', 'repository', patch=patch)
         if shell_attrs.get('executor_keys', None) is None:
             shell_attrs['executor_keys'] = get_executor_keys_from_context()
 
@@ -622,7 +622,7 @@ class Shell(cmd.Cmd):
             if key == 'mrsm_instance':
                 default_value = get_config('meerschaum', 'instance')
             elif key == 'repository':
-                default_value = get_config('meerschaum', 'default_repository')
+                default_value = get_config('meerschaum', 'repository')
             elif key == 'executor_keys':
                 default_value = get_executor_keys_from_context()
             else:
@@ -871,7 +871,7 @@ class Shell(cmd.Cmd):
         """
         Temporarily set a default Meerschaum repository for the duration of the shell.
         The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
-          (at keys 'meerschaum:default_repository').
+          (at keys 'meerschaum.repository').
         
         You can change the default repository with `edit config`.
         
@@ -902,7 +902,7 @@ class Shell(cmd.Cmd):
         except (IndexError, AttributeError):
             repo_keys = ''
         if repo_keys == '':
-            repo_keys = get_config('meerschaum', 'default_repository', patch=True)
+            repo_keys = get_config('meerschaum', 'repository', patch=True)
 
         conn = parse_repo_keys(repo_keys, debug=debug)
         if conn is None or not conn:

@@ -8,7 +8,9 @@ Import the config yaml file
 from __future__ import annotations
 import pathlib
 
+import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
+from meerschaum._internal.static import STATIC_CONFIG
 
 
 def read_config(
@@ -53,7 +55,6 @@ def read_config(
     import itertools
     from meerschaum.utils.yaml import yaml, _yaml
     from meerschaum.config._paths import CONFIG_DIR_PATH
-    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.config._patch import apply_patch_to_config
     if directory is None:
         directory = CONFIG_DIR_PATH
@@ -106,20 +107,25 @@ def read_config(
             ### If default config contains symlinks, add them to the config to write.
             try:
                 _default_symlinks = _default_dict[symlinks_key][mk]
-            except Exception:
+            except KeyError:
                 _default_symlinks = {}
+
             config[mk] = _default_dict[mk]
             if _default_symlinks:
                 if symlinks_key not in config:
                     config[symlinks_key] = {}
+                if symlinks_key not in config_to_write:
+                    config_to_write[symlinks_key] = {}
+
                 if mk not in config[symlinks_key]:
                     config[symlinks_key][mk] = {}
+                if mk not in config_to_write[symlinks_key]:
+                    config_to_write[symlinks_key][mk] = {}
+
                 config[symlinks_key][mk] = apply_patch_to_config(
                     config[symlinks_key][mk], 
                     _default_symlinks
                 )
-                if symlinks_key not in config_to_write:
-                    config_to_write[symlinks_key] = {}
                 config_to_write[symlinks_key][mk] = config[symlinks_key][mk]
 
             ### Write the default key.
@@ -387,10 +393,16 @@ def search_and_substitute_config(
             s[_keys[-1]] = _pattern
 
         from meerschaum.config._patch import apply_patch_to_config
-        from meerschaum._internal.static import STATIC_CONFIG
         symlinks_key = STATIC_CONFIG['config']['symlinks_key']
-        if symlinks_key in parsed_config:
-            parsed_config[symlinks_key] = apply_patch_to_config(parsed_config[symlinks_key], symlinks)
+        if symlinks:
+            if symlinks_key not in parsed_config:
+                parsed_config[symlinks_key] = symlinks
+            else:
+                parsed_config[symlinks_key] = apply_patch_to_config(
+                    parsed_config[symlinks_key],
+                    symlinks,
+                    warn=False,
+                )
 
     return parsed_config
 
@@ -410,13 +422,12 @@ def revert_symlinks_config(config: Dict[str, Any]) -> Dict[str, Any]:
     A configuration dictionary with `_symlinks` re-applied.
     """
     from meerschaum.config import apply_patch_to_config
-    from meerschaum._internal.static import STATIC_CONFIG
     symlinks_key = STATIC_CONFIG['config']['symlinks_key']
     if symlinks_key not in config:
         return config
 
     symlinks_config = config[symlinks_key]
-    reverted_config = apply_patch_to_config(config, symlinks_config)
+    reverted_config = apply_patch_to_config(symlinks_config, config, warn=False)
     _ = reverted_config.pop(symlinks_key, None)
     return reverted_config
 
@@ -462,7 +473,6 @@ def get_keyfile_path(
         )
     except IndexError:
         if create_new:
-            from meerschaum._internal.static import STATIC_CONFIG
             default_filetype = STATIC_CONFIG['config']['default_filetype']
             return pathlib.Path(os.path.join(directory, key + '.' + default_filetype))
         return None
