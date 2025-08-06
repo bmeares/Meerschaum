@@ -7,6 +7,8 @@ Start the Meerschaum WebAPI with the `api` action.
 
 from __future__ import annotations
 import os
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
 
@@ -93,6 +95,7 @@ def _api_start(
     action: Optional[List[str]] = None,
     host: Optional[str] = None,
     port: Optional[int] = None,
+    webterm_port: Optional[int] = None,
     workers: Optional[int] = None,
     mrsm_instance: Optional[str] = None,
     no_dash: bool = False,
@@ -118,6 +121,10 @@ def _api_start(
     host: Optional[str], defailt None
         The address to bind to.
         If `None`, use '0.0.0.0'.
+
+    webterm_port: Optional[int], default None
+        Port to bind the webterm server to.
+        If `None`, use 8765.
 
     workers: Optional[int], default None
         How many worker threads to run.
@@ -149,8 +156,6 @@ def _api_start(
 
     from meerschaum.utils.packages import (
         attempt_import,
-        venv_contains_package,
-        pip_install,
         run_python_package,
     )
     from meerschaum.utils.misc import is_int, filter_keywords
@@ -187,9 +192,9 @@ def _api_start(
     uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
     uvicorn_env_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'uvicorn.env'
 
-    api_config = deepcopy(get_config('system', 'api'))
+    api_config = deepcopy(get_config('api'))
     cf = _config()
-    forwarded_allow_ips = get_config('system', 'api', 'uvicorn', 'forwarded_allow_ips')
+    forwarded_allow_ips = get_config('api', 'uvicorn', 'forwarded_allow_ips')
     uvicorn_config = api_config['uvicorn']
     if port is None:
         ### default
@@ -223,7 +228,7 @@ def _api_start(
     instance_connector = parse_instance_keys(mrsm_instance, debug=debug)
     if instance_connector.type == 'api' and instance_connector.protocol != 'https':
         allow_http_parent = get_config(
-            'system', 'api', 'permissions', 'chaining', 'insecure_parent_instance'
+            'api', 'permissions', 'chaining', 'insecure_parent_instance'
         )
         if not allow_http_parent:
             return False, (
@@ -233,7 +238,7 @@ def _api_start(
                 f"  - Ensure that '{instance_connector}' is available over HTTPS, " +
                 "and with `edit config`,\n" +
                 f"    change the `protocol` for '{instance_connector}' to 'https'.\n\n" +
-                "  - Run `edit config system` and search for `permissions`.\n" +
+                "  - Run `edit config api` and search for `permissions`.\n" +
                 "    Under `api:permissions:chaining`, change the value of " +
                 "`insecure_parent_instance` to `true`,\n" +
                 "    then restart the API process."
@@ -244,6 +249,7 @@ def _api_start(
         'host': host,
         'env_file': str(uvicorn_env_path.as_posix()),
         'mrsm_instance': mrsm_instance,
+        'webterm_port': webterm_port,
         'no_dash': no_dash,
         'no_webterm': no_webterm or no_auth,
         'no_auth': no_auth,
@@ -261,9 +267,22 @@ def _api_start(
     uvicorn_config['use_colors'] = (not nopretty) if nopretty else ANSI
 
     api_config['uvicorn'] = uvicorn_config
-    cf['system']['api']['uvicorn'] = uvicorn_config
+    cf['api']['uvicorn'] = uvicorn_config
     if secure:
-        cf['system']['api']['permissions']['actions']['non_admin'] = False
+        cf['api']['permissions']['actions']['non_admin'] = False
+
+    if not uvicorn_config['no_webterm']:
+        from meerschaum._internal.term.tools import is_webterm_running
+        if webterm_port is None:
+            webterm_port = int(mrsm.get_config('api', 'webterm', 'port'))
+        if is_webterm_running(port=webterm_port):
+            return (
+                False,
+                (
+                    f"Webterm is running on port {webterm_port}. "
+                    "Start the API again with `--webterm-port`."
+                )
+            )
 
     custom_keys = [
         'mrsm_instance',
@@ -273,6 +292,7 @@ def _api_start(
         'private',
         'debug',
         'production',
+        'webterm_port',
     ]
 
     ### write config to a temporary file to communicate with uvicorn threads

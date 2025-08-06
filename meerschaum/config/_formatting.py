@@ -28,6 +28,8 @@ default_formatting_config = {
         'connector'        : '🔌',
         'metric'           : '📊',
         'location'         : '📍',
+        'locked'           : '🔒',
+        'unlocked'         : '🔓',
         'key'              : '🔑',
         'idea'             : '💡',
         'connected'        : '🟢',

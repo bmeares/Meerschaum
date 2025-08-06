@@ -42,7 +42,7 @@ class Token:
         from meerschaum._internal.static import STATIC_CONFIG
         now = datetime.now(timezone.utc)
         default_expiration_days = mrsm.get_config(
-            'system', 'api', 'tokens', 'default_expiration_days',
+            'api', 'tokens', 'default_expiration_days',
         ) or 366
         default_expiration = round_time(
             now + timedelta(days=default_expiration_days),

@@ -56,12 +56,15 @@ env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
     {
         'meerschaum': 'MRSM{!meerschaum}',
         'system': 'MRSM{!system}',
+        'api': 'MRSM{!api}',
     },
     indent=4,
 ).replace(
     '"MRSM{!system}"', 'MRSM{!system}'
 ).replace(
-    '"MRSM{!meerschaum}"', 'MRSM{!meerschaum}',
+    '"MRSM{!meerschaum}"', 'MRSM{!meerschaum}'
+).replace(
+    '"MRSM{!api}"', 'MRSM{!api}'
 )
 
 volumes = {

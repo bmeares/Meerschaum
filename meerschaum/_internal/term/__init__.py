@@ -25,6 +25,7 @@ tornado, tornado_ioloop, terminado = attempt_import(
 
 def get_webterm_app_and_manager(
     instance_keys: Optional[str] = None,
+    port: Optional[int] = None,
 ) -> Tuple[
     tornado.web.Application,
     terminado.UniqueTermManager,
@@ -44,11 +45,12 @@ def get_webterm_app_and_manager(
         "from meerschaum._internal.entry import get_shell; "
         f"get_shell({shell_kwargs_str}).cmdloop()"
     ]
-    webterm_cf = mrsm.get_config('system', 'webterm')
+    webterm_cf = mrsm.get_config('api', 'webterm')
     if webterm_cf.get('tmux', {}).get('enabled', False) and is_tmux_available():
-        commands = ['tmux', 'new-session', '-A', '-s', 'MRSM_SESSION'] + commands
+        commands = ['tmux', 'new-session', '-A', '-s', f'MRSM_SESSION--{port}'] + commands
 
     term_manager = terminado.NamedTermManager(shell_command=commands)
+    term_manager._port = port
     handlers = [
         (
             r"/websocket/(.+)/?",

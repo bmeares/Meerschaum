@@ -9,11 +9,12 @@ Functions for patching the configuration dictionary
 import sys
 import copy
 from meerschaum.utils.typing import Dict, Any
-from meerschaum.utils.warnings import warn
+from meerschaum.utils.warnings import warn as _warn
 
 def apply_patch_to_config(
     config: Dict[str, Any],
     patch: Dict[str, Any],
+    warn: bool = True,
 ) -> Dict[str, Any]:
     """Patch the config dict with a new dict (cascade patching)."""
     _base = copy.deepcopy(config) if isinstance(config, dict) else {}
@@ -24,7 +25,8 @@ def apply_patch_to_config(
         if base is None:
             return {}
         if not isinstance(base, dict):
-            warn(f"Overwriting the value {base} with a dictionary:\n{patch}")
+            if warn:
+                _warn(f"Overwriting the value {base} with a dictionary:\n{patch}")
             base = {}
         for key, value in patch.items():
             if isinstance(value, dict):

@@ -729,7 +729,7 @@ class Plugin:
             _d[len('plugin:'):] for _d in _deps
             if _d.startswith('plugin:') and len(_d) > len('plugin:')
         ]
-        default_repo_keys = get_config('meerschaum', 'default_repository')
+        default_repo_keys = get_config('meerschaum', 'repository')
         skipped_repo_keys = set()
 
         for _plugin_name in plugin_names:

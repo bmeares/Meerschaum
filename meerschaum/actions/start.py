@@ -311,6 +311,7 @@ def _start_gui(
     action: Optional[List[str]] = None,
     mrsm_instance: Optional[str] = None,
     port: Optional[int] = None,
+    webterm_port: Optional[int] = None,
     debug: bool = False,
     **kw
 ) -> SuccessTuple:
@@ -324,7 +325,6 @@ def _start_gui(
 
     from meerschaum.utils.venv import venv_exec
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.networking import find_open_ports
     from meerschaum.connectors.parse import parse_instance_keys
@@ -332,9 +332,10 @@ def _start_gui(
     webview, requests = attempt_import('webview', 'requests')
 
     success, msg = True, "Success"
-    host = '127.0.0.1'
-    if port is None:
-        port = 8765
+    host = mrsm.get_config('webterm', 'host')
+    port = port or webterm_port
+    if not port:
+        port = mrsm.get_config('webterm', 'port')
 
     if not is_webterm_running(host, port, session_id='mrsm'):
         port = next(find_open_ports(port, 9000))
@@ -372,7 +373,7 @@ def _start_gui(
                 break
         except Exception as e:
             if debug:
-                dprint(e)
+                dprint(str(e))
             continue
     if starting_up is False:
         return False, f"The webterm failed to start within {timeout} seconds."
@@ -420,7 +421,6 @@ def _start_webterm(
         - `-i`, '--instance'
             The default instance to use for the Webterm shell.
     """
-    import uuid
     from meerschaum._internal.term import get_webterm_app_and_manager, tornado_ioloop
     from meerschaum._internal.term.tools import (
         is_webterm_running,
@@ -431,13 +431,12 @@ def _start_webterm(
     from meerschaum.utils.warnings import info
 
     if host is None:
-        host = '127.0.0.1'
+        host = mrsm.get_config('meerschaum', 'webterm', 'host')
     if port is None:
-        port = 8765
+        port = mrsm.get_config('meerschaum', 'webterm', 'port')
     if sysargs is None:
         sysargs = ['start', 'webterm']
     session_id = 'mrsm'
-    tornado_app, term_manager = get_webterm_app_and_manager(instance_keys=mrsm_instance)
 
     if is_webterm_running(host, port, session_id=session_id):
         if force:
@@ -448,6 +447,8 @@ def _start_webterm(
                 + "    Include `-f` to start another server on a new port\n"
                 + "    or specify a different port with `-p`."
             )
+
+    tornado_app, term_manager = get_webterm_app_and_manager(instance_keys=mrsm_instance, port=port)
     if not nopretty:
         info(
             f"Starting the webterm at http://{host}:{port}/webterm/{session_id} ..."
@@ -465,7 +466,7 @@ def _start_webterm(
         term_manager.shutdown()
         loop.close()
 
-    sessions = get_mrsm_tmux_sessions()
+    sessions = get_mrsm_tmux_sessions(port=port)
     for session in sessions:
         kill_tmux_session(session)
 

@@ -105,12 +105,11 @@ def write_config(
         directory = CONFIG_DIR_PATH
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.config._default import default_header_comment
-    from meerschaum.config._patch import apply_patch_to_config
-    from meerschaum.config._read_config import get_keyfile_path
-    from meerschaum.utils.debug import dprint
+    from meerschaum.config._read_config import get_keyfile_path, revert_symlinks_config
     from meerschaum.utils.yaml import yaml
     from meerschaum.utils.misc import filter_keywords
-    import json, os
+    import json
+    import os
     if config_dict is None:
         from meerschaum.config import _config
         cf = _config()
@@ -123,9 +122,7 @@ def write_config(
         'json' : json.dump,
     }
 
-    symlinks_key = STATIC_CONFIG['config']['symlinks_key']
-    symlinks = config_dict.pop(symlinks_key) if symlinks_key in config_dict else {}
-    config_dict = apply_patch_to_config(config_dict, symlinks)
+    config_dict = revert_symlinks_config(config_dict)
 
     def determine_filetype(k, v):
         if k == 'meerschaum':

@@ -111,7 +111,7 @@ def parse_repo_keys(keys: Optional[str] = None, **kw):
     """Parse the Meerschaum repository value into an APIConnector."""
     from meerschaum.config import get_config
     if keys is None:
-        keys = get_config('meerschaum', 'default_repository', patch=True)
+        keys = get_config('meerschaum', 'repository', patch=True)
     keys = str(keys)
     if ':' not in keys:
         keys = 'api:' + keys

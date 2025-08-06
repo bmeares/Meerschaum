@@ -36,8 +36,7 @@ CONNECTOR_ATTRIBUTES: Dict[str, Dict[str, Any]] = {
 default_meerschaum_config = {
     'instance': 'sql:main',
     'api_instance': 'MRSM{meerschaum:instance}',
-    'web_instance': 'MRSM{meerschaum:instance}',
-    'default_repository': 'api:mrsm',
+    'repository': 'api:mrsm',
     'connectors': {
         'sql': {
             'default': {},
@@ -121,60 +120,8 @@ default_system_config = {
         'api': {
         },
     },
-    ### not to be confused with system_config['connectors']['api'], this is the configuration
-    ### for the API server itself.
-    'api': {
-        'uvicorn': {
-            'app': 'meerschaum.api:app',
-            'port': 8000,
-            'host': '0.0.0.0',
-            'workers': max(int(multiprocessing.cpu_count() / 2), 1),
-            'proxy_headers': True,
-            'forwarded_allow_ips': '*',
-        },
-        'cache': {
-            'connector': 'valkey:main',
-            'session_expires_minutes': 43200,
-        },
-        'data': {
-            'max_response_row_limit': 100_000,
-            'chunks': {
-                'ttl_seconds': 1800,
-            },
-        },
-        'endpoints': {
-            'docs_in_production': True,
-        },
-        'tokens': {
-            'valid_refresh_minutes': 60,
-            'default_expiration_days': 366,
-        },
-        'permissions':       {
-            'registration': {
-                'users': True,
-                'pipes': True,
-                'plugins': True,
-            },
-            'actions': {
-                'non_admin': True,
-            },
-            'chaining': {
-                'insecure_parent_instance': False,
-                'child_apis': False,
-            },
-            'instances': {
-                'allow_multiple_instances': True,
-                'allowed_instance_keys': ['*']
-            },
-        },
-        'protocol': default_meerschaum_config['connectors']['api']['default']['protocol'],
-    },
-    'webterm': {
-        'tmux': {
-            'enabled': True,
-            'session_suffix': '_mrsm',
-        },
-    },
+    'api': 'MRSM{api}',
+    'webterm': 'MRSM{api:webterm}',
     'cli': {
         'max_daemons': (multiprocessing.cpu_count() * 3),
         'refresh_seconds': 0.1,
@@ -183,6 +130,7 @@ default_system_config = {
             'edit',
             'start daemon',
             'stop daemon',
+            'show daemon',
             'restart daemon',
             'start worker',
             'start job',
@@ -190,6 +138,7 @@ default_system_config = {
             'os ',
             'sh ',
             'start api',
+            'start webterm',
             'stack',
             'instance',
             'debug',
@@ -209,6 +158,62 @@ default_system_config = {
         'cli_daemon': True,
     },
 }
+
+default_api_config = {
+    'uvicorn': {
+        'app': 'meerschaum.api:app',
+        'port': 8000,
+        'host': '0.0.0.0',
+        'workers': max(int(multiprocessing.cpu_count() / 2), 1),
+        'proxy_headers': True,
+        'forwarded_allow_ips': '*',
+    },
+    'cache': {
+        'connector': 'valkey:main',
+        'session_expires_minutes': 43200,
+    },
+    'data': {
+        'max_response_row_limit': 100_000,
+        'chunks': {
+            'ttl_seconds': 1800,
+        },
+    },
+    'endpoints': {
+        'docs_in_production': True,
+    },
+    'tokens': {
+        'valid_refresh_minutes': 60,
+        'default_expiration_days': 366,
+    },
+    'permissions':       {
+        'registration': {
+            'users': True,
+            'pipes': True,
+            'plugins': True,
+        },
+        'actions': {
+            'non_admin': True,
+        },
+        'chaining': {
+            'insecure_parent_instance': False,
+            'child_apis': False,
+        },
+        'instances': {
+            'allow_multiple_instances': True,
+            'allowed_instance_keys': ['*']
+        },
+    },
+    'protocol': default_meerschaum_config['connectors']['api']['default']['protocol'],
+    'webterm': {
+        'tmux': {
+            'enabled': True,
+            'session_suffix': '_mrsm',
+        },
+        'host': '127.0.0.1',
+        'port': 8765,
+    },
+}
+
 default_pipes_config = {
     'parameters': {
         'columns': {
@@ -253,6 +258,7 @@ default_experimental_config = {
 default_config = {}
 default_config['meerschaum'] = default_meerschaum_config
 default_config['system'] = default_system_config
+default_config['api'] = default_api_config
 from meerschaum.config._formatting import default_formatting_config
 default_config['formatting'] = default_formatting_config
 from meerschaum.config._shell import default_shell_config
