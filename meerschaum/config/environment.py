@@ -9,6 +9,9 @@ Patch the runtime configuration from environment variables.
 import os
 import re
 import json
+import contextlib
+import copy
+import pathlib
 
 from meerschaum.utils.typing import List, Union, Dict, Any, Optional
 from meerschaum._internal.static import STATIC_CONFIG
@@ -163,3 +166,90 @@ def get_env_vars(env: Optional[Dict[str, Any]] = None) -> List[str]:
     prefix = STATIC_CONFIG['environment']['prefix']
     env = env if env is not None else os.environ
     return sorted([env_var for env_var in env if env_var.startswith(prefix)])
+
+
+@contextlib.contextmanager
+def replace_env(env: Dict[str, Any]):
+    """
+    Temporarily replace environment variables and current configuration.
+
+    Parameters
+    ----------
+    env: Dict[str, Any]
+        The new environment dictionary to be patched on `os.environ`.
+    """
+    from meerschaum.config import _config, set_config
+    from meerschaum.config.paths import (
+        set_root,
+        set_plugins_dir_paths,
+        set_venvs_dir_path,
+        set_config_dir_path,
+        ROOT_DIR_PATH,
+        PLUGINS_DIR_PATHS,
+        VIRTENV_RESOURCES_PATH,
+        CONFIG_DIR_PATH,
+    )
+
+    old_environ = dict(os.environ)
+    old_config = copy.deepcopy(_config())
+    old_root_dir_path = ROOT_DIR_PATH
+    old_plugins_dir_paths = PLUGINS_DIR_PATHS
+    old_venvs_dir_path = VIRTENV_RESOURCES_PATH
+    old_config_dir_path = CONFIG_DIR_PATH
+
+    os.environ.update(env)
+
+    root_dir_env_var = STATIC_CONFIG['environment']['root']
+    plugins_dir_env_var = STATIC_CONFIG['environment']['plugins']
+    config_dir_env_var = STATIC_CONFIG['environment']['config_dir']
+    venvs_dir_env_var = STATIC_CONFIG['environment']['venvs']
+
+    replaced_root = False
+    if root_dir_env_var in env:
+        root_dir_path = pathlib.Path(env[root_dir_env_var])
+        set_root(root_dir_path)
+        replaced_root = True
+
+    replaced_plugins = False
+    if plugins_dir_env_var in env:
+        plugins_dir_paths = env[plugins_dir_env_var]
+        if isinstance(plugins_dir_paths, str):
+            plugins_dir_paths = [plugins_dir_paths]
+            set_plugins_dir_paths(plugins_dir_paths)
+            replaced_plugins = True
+
+    replaced_venvs = False
+    if venvs_dir_env_var in env:
+        venv_dir_path = pathlib.Path(env[venvs_dir_env_var])
+        set_venvs_dir_path(venv_dir_path)
+        replaced_venvs = True
+
+    replaced_config_dir = False
+    if config_dir_env_var in env:
+        config_dir_path = pathlib.Path(env[config_dir_env_var])
+        set_config_dir_path(config_dir_path)
+        replaced_config_dir = True
+
+    apply_environment_patches(env)
+    apply_environment_uris(env)
+
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old_environ)
+
+        if replaced_root:
+            set_root(old_root_dir_path)
+
+        if replaced_plugins:
+            set_plugins_dir_paths(old_plugins_dir_paths)
+
+        if replaced_venvs:
+            set_venvs_dir_path(old_venvs_dir_path)
+
+        if replaced_config_dir:
+            set_config_dir_path(old_config_dir_path)
+
+        _config().clear()
+        set_config(old_config)

@@ -50,6 +50,10 @@ class StdinFile(io.TextIOBase):
         )
 
     @property
+    def encoding(self):
+        return 'utf-8'
+
+    @property
     def file_handler(self):
         """
         Return the read file handler to the provided file path.

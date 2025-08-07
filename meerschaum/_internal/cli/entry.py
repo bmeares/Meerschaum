@@ -30,20 +30,46 @@ def entry_with_daemon(
     -------
     A `SuccessTuple` indicating success.
     """
+    from meerschaum.actions import get_action
+    from meerschaum.plugins import load_plugins, _actions_daemon_enabled
     from meerschaum._internal.entry import entry_without_daemon
     from meerschaum._internal.cli.workers import ActionWorker
     from meerschaum._internal.cli.daemons import (
         get_available_cli_daemon_ix,
         get_cli_session_id,
     )
+    from meerschaum.config import get_possible_keys
+    from meerschaum._internal.arguments import split_pipeline_sysargs, split_chained_sysargs
     daemon_is_ready = True
+
+    load_plugins()
 
     found_acceptable_prefix = False
     found_unacceptable_prefix = False
-    allowed_prefixes = mrsm.get_config('system', 'cli', 'allowed_prefixes')
-    disallowed_prefixes = mrsm.get_config('system', 'cli', 'disallowed_prefixes')
+    found_disabled_action = False
+    allowed_prefixes = (
+        mrsm.get_config('system', 'cli', 'allowed_prefixes')
+    )
+    disallowed_prefixes = (
+        mrsm.get_config('system', 'cli', 'disallowed_prefixes')
+    )
     refresh_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
     sysargs_str = sysargs if isinstance(sysargs, str) else shlex.join(sysargs or [])
+    _sysargs = shlex.split(sysargs_str)
+    _sysargs, _pipeline_args = split_pipeline_sysargs(_sysargs)
+    _chained_sysargs = split_chained_sysargs(_sysargs)
+    _action_functions = {
+        _action_func.__name__: _action_func
+        for _step_sysargs in _chained_sysargs
+        if (_action_func := get_action(_step_sysargs))
+    }
+    for action_name, enabled in _actions_daemon_enabled.items():
+        if action_name not in _action_functions:
+            continue
+        if enabled:
+            continue
+        found_disabled_action = True
+        break
 
     for prefix in allowed_prefixes:
         if sysargs_str.startswith(prefix) or prefix == '*':
@@ -55,7 +81,7 @@ def entry_with_daemon(
             found_unacceptable_prefix = True
             break
 
-    if not found_acceptable_prefix or found_unacceptable_prefix:
+    if not found_acceptable_prefix or found_unacceptable_prefix or found_disabled_action:
         daemon_is_ready = False
 
     try:
@@ -100,6 +126,9 @@ def entry_with_daemon(
         },
         **dict(os.environ),
     }
+    for key in get_possible_keys():
+        _ = mrsm.get_config(key)
+    config = mrsm.get_config()
     
     worker.write_input_data({
         'session_id': session_id,
@@ -107,6 +136,7 @@ def entry_with_daemon(
         'sysargs': sysargs,
         'patch_args': _patch_args,
         'env': env,
+        'config': config,
     })
 
     accepted = False
@@ -121,7 +151,7 @@ def entry_with_daemon(
 
         time.sleep(refresh_seconds)
 
-    start_cli_logs_refresh_thread(daemon_ix, refresh_seconds=1)
+    start_cli_logs_refresh_thread(daemon_ix)
 
     try:
         log = worker.job.daemon.rotating_log
@@ -180,20 +210,28 @@ def entry_with_daemon(
         if not exit_success:
             print(exit_data['traceback'])
 
+    stop_cli_logs_refresh_thread(daemon_ix)
     worker.write_input_data({'increment': True})
     success = (worker_data or {}).get('success', False)
     message = (worker_data or {}).get('message', "Failed to retrieve message from CLI worker.")
     return success, message
 
 
+_ix_events = {}
 def touch_cli_logs_loop(ix: int, refresh_seconds: Union[int, float, None] = None):
     """
     Touch the CLI daemon's logs to refresh the logs monitoring.
     """
     from meerschaum._internal.cli.workers import ActionWorker
-    worker = ActionWorker(ix, refresh_seconds=refresh_seconds)
+    if refresh_seconds is None:
+        refresh_seconds = mrsm.get_config('jobs', 'logs', 'refresh_files_seconds')
 
-    while True:
+    worker = ActionWorker(ix, refresh_seconds=refresh_seconds)
+    stop_event = _ix_events.get(ix, None)
+    if stop_event is None:
+        return
+
+    while not stop_event.is_set():
         worker.job.daemon.rotating_log.touch()
         time.sleep(worker.refresh_seconds)
 
@@ -202,12 +240,25 @@ def start_cli_logs_refresh_thread(ix: int, refresh_seconds: Union[int, float, No
     """
     Spin up a daemon thread to refresh the CLI's logs.
     """
+    import asyncio
     from meerschaum.utils.threading import Thread
-    refresh_seconds = refresh_seconds or mrsm.get_config('system', 'cli', 'refresh_seconds')
+    refresh_seconds = refresh_seconds or mrsm.get_config('jobs', 'logs', 'refresh_files_seconds')
     thread = Thread(
         target=touch_cli_logs_loop,
         args=(ix,),
         kwargs={'refresh_seconds': refresh_seconds},
         daemon=True,
     )
+    _ix_events[ix] = asyncio.Event()
     thread.start()
+
+
+def stop_cli_logs_refresh_thread(ix: int):
+    """
+    Stop the logs refresh thread.
+    """
+    stop_event = _ix_events.get(ix, None)
+    if stop_event is None:
+        return
+
+    stop_event.set()

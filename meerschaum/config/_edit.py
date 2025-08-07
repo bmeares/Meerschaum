@@ -103,6 +103,8 @@ def write_config(
     if directory is None:
         from meerschaum.config._paths import CONFIG_DIR_PATH
         directory = CONFIG_DIR_PATH
+
+    from meerschaum.config import _allow_write_missing
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.config._default import default_header_comment
     from meerschaum.config._read_config import get_keyfile_path, revert_symlinks_config
@@ -112,8 +114,11 @@ def write_config(
     import os
     if config_dict is None:
         from meerschaum.config import _config
-        cf = _config()
+        cf = _config(allow_replaced=False)
         config_dict = cf
+
+    if not _allow_write_missing:
+        return False
 
     default_filetype = STATIC_CONFIG['config']['default_filetype']
     filetype_dumpers = {

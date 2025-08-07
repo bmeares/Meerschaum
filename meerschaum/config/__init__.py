@@ -59,17 +59,23 @@ _locks = {'config': RLock()}
 
 ### apply config preprocessing (e.g. main to meta)
 config = {}
+_backup_config = None
+_allow_write_missing: bool = True
+
+
 def _config(
     *keys: str,
     reload: bool = False,
     substitute: bool = True,
     sync_files: bool = True,
+    allow_replaced: bool = True,
     write_missing: bool = True,
 ) -> Dict[str, Any]:
     """
     Read and process the configuration file.
     """
-    global config
+    global config, _backup_config
+
     if config is None or reload:
         with _locks['config']:
             config = {}
@@ -79,12 +85,16 @@ def _config(
         key_config = read_config(
             keys = [keys[0]],
             substitute = substitute,
-            write_missing = write_missing,
+            write_missing = write_missing and _allow_write_missing,
         )
         if keys[0] in key_config:
             config[keys[0]] = key_config[keys[0]]
-            if sync_files:
+            if sync_files and _allow_write_missing:
                 _sync_files(keys=[keys[0] if keys else None])
+
+    if not allow_replaced:
+        return _backup_config if _backup_config is not None else config
+
     return config
 
 
@@ -160,7 +170,11 @@ def get_config(
         dprint(f"Indexing keys: {keys}", color=False)
 
     if len(keys) == 0:
-        _rc = _config(substitute=substitute, sync_files=sync_files, write_missing=write_missing)
+        _rc = _config(
+            substitute=substitute,
+            sync_files=sync_files,
+            write_missing=(write_missing and _allow_write_missing),
+        )
         if as_tuple:
             return True, _rc 
         return _rc
@@ -324,21 +338,28 @@ def replace_config(config_: Dict[str, Any]):
     config_: Dict[str, Any]
         The new config dictionary to temporarily replace the canonical `config`.
     """
-    old_config = _config()
+    global _backup_config, _allow_write_missing
+
+    _backup_config = _config()
+    _allow_write_missing = False
     set_config(config_)
 
     try:
         yield
     finally:
-        set_config(old_config)
+        set_config(_backup_config)
+        _allow_write_missing = True
 
 ### This need to be below get_config to avoid a circular import.
 from meerschaum.config._read_config import read_config
 
 ### If environment variable MRSM_CONFIG or MRSM_PATCH is set, patch config before anything else.
-from meerschaum.config._environment import apply_environment_patches, apply_environment_uris
-apply_environment_uris()
-apply_environment_patches()
+from meerschaum.config.environment import (
+    apply_environment_patches as _apply_environment_patches,
+    apply_environment_uris as _apply_environment_uris,
+)
+_apply_environment_uris()
+_apply_environment_patches()
 
 
 from meerschaum.config._paths import PATCH_DIR_PATH, PERMANENT_PATCH_DIR_PATH

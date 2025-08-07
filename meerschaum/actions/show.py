@@ -765,7 +765,7 @@ def _show_environment(
     """
     import os
     from meerschaum.utils.formatting import pprint
-    from meerschaum.config._environment import get_env_vars
+    from meerschaum.config.environment import get_env_vars
     pprint(
         {
             env_var: os.environ[env_var]

@@ -112,8 +112,10 @@ class Plugin:
         if '_module' not in self.__dict__ or self.__dict__.get('_module', None) is None:
             if self.__file__ is None:
                 return None
+
             from meerschaum.plugins import import_plugins
             self._module = import_plugins(str(self), warn=False)
+
         return self._module
 
 

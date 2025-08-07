@@ -18,11 +18,13 @@ from meerschaum.core.Plugin import Plugin
 _api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
 _pre_sync_hooks: Dict[str, List[Callable[[Any], Any]]] = {}
 _post_sync_hooks: Dict[str, List[Callable[[Any], Any]]] = {}
+_actions_daemon_enabled: Dict[str, bool] = {}
 _locks = {
     '_api_plugins': RLock(),
     '_dash_plugins': RLock(),
     '_pre_sync_hooks': RLock(),
     '_post_sync_hooks': RLock(),
+    '_actions_daemon_enabled': RLock(),
     '__path__': RLock(),
     'sys.path': RLock(),
     'internal_plugins': RLock(),
@@ -53,11 +55,12 @@ __pdoc__ = {
 
 
 def make_action(
-    function: Callable[[Any], Any],
+    function: Optional[Callable[[Any], Any]] = None,
     shell: bool = False,
     activate: bool = True,
     deactivate: bool = True,
-    debug: bool = False
+    debug: bool = False,
+    daemon: bool = True,
 ) -> Callable[[Any], Any]:
     """
     Make a function a Meerschaum action. Useful for plugins that are adding multiple actions.
@@ -84,25 +87,28 @@ def make_action(
     ...     return True, "Success"
     >>>
     """
-
-    from meerschaum.actions import actions
-    from meerschaum.utils.formatting import pprint
-    package_name = function.__globals__['__name__']
-    plugin_name = (
-        package_name.split('.')[1]
-        if package_name.startswith('plugins.') else None
-    )
-    plugin = Plugin(plugin_name) if plugin_name else None
-
-    if debug:
-        from meerschaum.utils.debug import dprint
-        dprint(
-            f"Adding action '{function.__name__}' from plugin " +
-            f"'{plugin}'..."
+    def _decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
+        from meerschaum.actions import actions
+        package_name = func.__globals__['__name__']
+        plugin_name = (
+            package_name.split('.')[1]
+            if package_name.startswith('plugins.') else None
         )
+        plugin = Plugin(plugin_name) if plugin_name else None
 
-    actions[function.__name__] = function
-    return function
+        if debug:
+            from meerschaum.utils.debug import dprint
+            dprint(
+                f"Adding action '{func.__name__}' from plugin "
+                f"'{plugin}'..."
+            )
+
+        actions[func.__name__] = func
+        if not daemon:
+            _actions_daemon_enabled[func.__name__] = False
+        return func
+
+    return _decorator(function) if callable(function) else _decorator
 
 
 def pre_sync_hook(
@@ -623,7 +629,7 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
     attrs_to_return = []
     with mrsm.Venv(plugin):
         if plugin.module is None:
-            return None
+            raise ImportError(f"Unable to import plugin '{plugin}'.")
 
         try:
             submodule = importlib.import_module(submodule_import_name)
@@ -664,8 +670,6 @@ def load_plugins(debug: bool = False, shell: bool = False) -> None:
     from meerschaum.actions import __all__ as _all, modules
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     from meerschaum.utils.packages import get_modules_from_package
-    if debug:
-        from meerschaum.utils.debug import dprint
 
     _plugins_names, plugins_modules = get_modules_from_package(
         import_plugins(),
@@ -737,7 +741,8 @@ def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugi
     import os
     sync_plugins_symlinks()
     _plugins = [
-        Plugin(name) for name in (
+        Plugin(name)
+        for name in (
             to_load or [
                 (
                     name if (PLUGINS_RESOURCES_PATH / name).is_dir()

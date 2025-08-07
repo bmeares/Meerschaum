@@ -17,7 +17,6 @@ import threading
 import shlex
 
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Dict, Union
-from meerschaum.config._paths import DAEMON_RESOURCES_PATH
 from meerschaum.utils.daemon.StdinFile import StdinFile
 from meerschaum.utils.daemon.Daemon import Daemon
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
@@ -41,7 +40,6 @@ __all__ = (
     'StdinFile',
     'RotatingFile',
     'FileDescriptorInterceptor',
-    'DAEMON_RESOURCES_PATH',
 )
 
 _daemons = {}
@@ -213,6 +211,7 @@ def get_daemon_ids() -> List[str]:
     """
     Return the IDs of all daemons on disk.
     """
+    from meerschaum.config._paths import DAEMON_RESOURCES_PATH
     return [
         daemon_dir
         for daemon_dir in sorted(os.listdir(DAEMON_RESOURCES_PATH))

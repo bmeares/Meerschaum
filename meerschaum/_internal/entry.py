@@ -65,7 +65,7 @@ def entry(
     sysargs_list = shlex.split(sysargs) if isinstance(sysargs, str) else sysargs
     if (
         not _use_cli_daemon
-        or not sysargs
+        or (not sysargs or (sysargs[0] and sysargs[0].startswith('-')))
         or '--no-daemon' in sysargs_list
         or '--daemon' in sysargs_list
         or '-d' in sysargs_list
@@ -357,7 +357,7 @@ def _do_action_wrapper(
         try:
             result = action_function(**filter_keywords(action_function, **kw))
         except Exception as e:
-            if kw.get('debug', False):
+            if kw.get('debug', True):
                 import traceback
                 traceback.print_exception(type(e), e, e.__traceback__)
             result = False, (

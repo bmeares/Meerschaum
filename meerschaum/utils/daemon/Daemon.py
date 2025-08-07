@@ -25,9 +25,6 @@ from meerschaum.utils.typing import (
 )
 from meerschaum.config import get_config
 from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum.config._paths import (
-    DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH, DAEMON_ERROR_LOG_PATH,
-)
 from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
@@ -380,6 +377,7 @@ class Daemon:
 
         except Exception:
             daemon_error = traceback.format_exc()
+            from meerschaum.config.paths import DAEMON_ERROR_LOG_PATH
             with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
                 f.write(
                     f"Error in Daemon '{self}':\n\n"
@@ -905,6 +903,7 @@ class Daemon:
         """
         Return a Daemon's path from its `daemon_id`.
         """
+        from meerschaum.config.paths import DAEMON_RESOURCES_PATH
         return DAEMON_RESOURCES_PATH / daemon_id
 
     @property
@@ -942,6 +941,7 @@ class Daemon:
         """
         logs_cf = self.properties.get('logs', None) or {}
         if 'path' not in logs_cf:
+            from meerschaum.config.paths import LOGS_RESOURCES_PATH
             return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
 
         return pathlib.Path(logs_cf['path'])
@@ -968,6 +968,7 @@ class Daemon:
         """
         Return the log offset file path.
         """
+        from meerschaum.config.paths import LOGS_RESOURCES_PATH
         return LOGS_RESOURCES_PATH / ('.' + self.daemon_id + '.log.offset')
 
     @property

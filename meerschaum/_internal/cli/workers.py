@@ -291,9 +291,8 @@ class ActionWorker:
         Run the worker's process loop.
         """
         from meerschaum._internal.entry import entry
-        from meerschaum.utils.misc import set_env
         from meerschaum.config import replace_config
-        from meerschaum.config._environment import apply_environment_uris, apply_environment_patches
+        from meerschaum.config.environment import replace_env
 
         self.create_fifos()
 
@@ -317,16 +316,15 @@ class ActionWorker:
             action_id = input_data.get('action_id', None)
             patch_args = input_data.get('patch_args', None)
             env = input_data.get('env', {})
+            config = input_data.get('config', {})
             self.write_output_data({
                 'state': 'accepted',
                 'session_id': session_id,
                 'action_id': action_id,
             })
 
-            with set_env(env):
-                with replace_config({}):
-                    apply_environment_patches(env=env)
-                    apply_environment_uris(env=env)
+            with replace_config(config):
+                with replace_env(env):
                     action_success, action_msg = entry(
                         sysargs,
                         _use_cli_daemon=False,

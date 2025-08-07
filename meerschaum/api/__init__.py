@@ -103,7 +103,7 @@ _include_webterm = (not no_webterm) and _include_dash
 docs_enabled = not production or sys_config.get('endpoints', {}).get('docs_in_production', True)
 webterm_port = (
     get_uvicorn_config().get('webterm_port', None)
-    or mrsm.get_config('meerschaum', 'webterm', 'port')
+    or mrsm.get_config('api', 'webterm', 'port')
 )
 
 default_instance_keys = None
