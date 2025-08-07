@@ -8,6 +8,7 @@ Expose plugin management APIs from the `meerschaum.plugins` module.
 
 from __future__ import annotations
 
+import pathlib
 import functools
 
 import meerschaum as mrsm
@@ -97,6 +98,7 @@ def make_action(
         plugin = Plugin(plugin_name) if plugin_name else None
 
         if debug:
+            print(f"{debug=}")
             from meerschaum.utils.debug import dprint
             dprint(
                 f"Adding action '{func.__name__}' from plugin "
@@ -305,6 +307,7 @@ def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
 
 
 _synced_symlinks: bool = False
+_injected_plugin_symlinks = set()
 def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     """
     Update the plugins 
@@ -314,7 +317,9 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
         if _synced_symlinks:
             return
 
-    import sys, os, pathlib, time
+    import os
+    import pathlib
+    import time
     from collections import defaultdict
     import importlib.util
     from meerschaum.utils.misc import flatten_list, make_symlink, is_symlink
@@ -327,6 +332,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
         PLUGINS_INIT_PATH,
         PLUGINS_DIR_PATHS,
         PLUGINS_INTERNAL_LOCK_PATH,
+        PLUGINS_INJECTED_RESOURCES_PATH,
     )
 
     ### If the lock file exists, sleep for up to a second or until it's removed before continuing.
@@ -360,7 +366,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
         try:
             from importlib.metadata import entry_points
         except ImportError:
-            importlib_metadata = attempt_import('importlib_metadata', lazy=False)
+            importlib_metadata = mrsm.attempt_import('importlib_metadata', lazy=False)
             entry_points = importlib_metadata.entry_points
 
         ### NOTE: Allow plugins to be installed via `pip`.
@@ -388,17 +394,23 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
 
         PLUGINS_RESOURCES_PATH.mkdir(exist_ok=True)
 
-        existing_symlinked_paths = [
-            (PLUGINS_RESOURCES_PATH / item) 
+        existing_symlinked_paths = {
+            _existing_symlink: pathlib.Path(os.path.realpath(_existing_symlink))
             for item in os.listdir(PLUGINS_RESOURCES_PATH)
-        ]
+            if is_symlink(_existing_symlink := (PLUGINS_RESOURCES_PATH / item))
+        }
+        injected_symlinked_paths = {
+            _injected_symlink: pathlib.Path(os.path.realpath(_injected_symlink))
+            for item in os.listdir(PLUGINS_INJECTED_RESOURCES_PATH)
+            if is_symlink(_injected_symlink := (PLUGINS_INJECTED_RESOURCES_PATH / item))
+        }
         for plugins_path in PLUGINS_DIR_PATHS:
             if not plugins_path.exists():
                 plugins_path.mkdir(exist_ok=True, parents=True)
         plugins_to_be_symlinked = list(flatten_list(
             [
                 [
-                    (plugins_path / item)
+                    pathlib.Path(os.path.realpath(plugins_path / item))
                     for item in os.listdir(plugins_path)
                     if (
                         not item.startswith('.')
@@ -419,16 +431,21 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 if warn:
                     _warn(f"Found duplicate plugins named '{plugin_name}'.")
 
-        for plugin_symlink_path in existing_symlinked_paths:
-            real_path = pathlib.Path(os.path.realpath(plugin_symlink_path))
+        for plugin_symlink_path, real_path in existing_symlinked_paths.items():
 
             ### Remove invalid symlinks.
             if real_path not in plugins_to_be_symlinked:
-                if not is_symlink(plugin_symlink_path):
+                if plugin_symlink_path in _injected_plugin_symlinks:
+                    continue
+                if plugin_symlink_path in injected_symlinked_paths:
+                    continue
+                if real_path in injected_symlinked_paths.values():
                     continue
                 try:
+                    print(f"{plugins_to_be_symlinked=}")
+                    print(f'unlink {plugin_symlink_path} {real_path=}')
                     plugin_symlink_path.unlink()
-                except Exception as e:
+                except Exception:
                     pass
 
             ### Remove valid plugins from the to-be-symlinked list.
@@ -447,6 +464,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                     not is_symlink(plugin_symlink_path)
                 ):
                     continue
+                print(f"make symlink {plugin_path=} {plugin_symlink_path=}")
                 success, msg = make_symlink(plugin_path, plugin_symlink_path)
             except Exception as e:
                 success, msg = False, str(e)
@@ -505,7 +523,6 @@ def import_plugins(
 
     """
     import sys
-    import os
     import importlib
     from meerschaum.utils.misc import flatten_list
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
@@ -569,7 +586,7 @@ def import_plugins(
                     imported_plugins.append(None)
 
         if imported_plugins is None and warn:
-            _warn(f"Failed to import plugins.", stacklevel=3)
+            _warn("Failed to import plugins.", stacklevel=3)
 
         if str(PLUGINS_RESOURCES_PATH.parent) in sys.path:
             sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))
@@ -662,7 +679,10 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
         return tuple(attrs_to_return)
 
 
-def load_plugins(debug: bool = False, shell: bool = False) -> None:
+def load_plugins(
+    shell: bool = False,
+    debug: bool = False,
+) -> None:
     """
     Import Meerschaum plugins and update the actions dictionary.
     """
@@ -699,6 +719,22 @@ def load_plugins(debug: bool = False, shell: bool = False) -> None:
                 make_action(func, **{'shell': shell, 'debug': debug})
 
 
+def unload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> None:
+    """
+    Unload the specified plugins from memory.
+    """
+    import sys
+    if debug:
+        from meerschaum.utils.warnings import dprint
+
+    plugins = plugins or get_plugins_names()
+    for plugin_name in plugins:
+        if debug:
+            dprint(f"Unloading plugin '{plugin_name}'...")
+        mod_name = f'plugins.{plugin_name}'
+        _ = sys.modules.pop(mod_name, None)
+
+
 def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> None:
     """
     Reload plugins back into memory.
@@ -709,18 +745,7 @@ def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> 
         The plugins to reload. `None` will reload all plugins.
 
     """
-    import sys
-    if debug:
-        from meerschaum.utils.debug import dprint
-
-    if not plugins:
-        plugins = get_plugins_names()
-    for plugin_name in plugins:
-        if debug:
-            dprint(f"Reloading plugin '{plugin_name}'...")
-        mod_name = 'plugins.' + str(plugin_name)
-        if mod_name in sys.modules:
-            del sys.modules[mod_name]
+    unload_plugins(plugins, debug=debug)
     load_plugins(debug=debug)
 
 
@@ -802,7 +827,7 @@ def add_plugin_argument(*args, **kwargs) -> None:
     >>> 
     """
     from meerschaum._internal.arguments._parser import groups, _seen_plugin_args, parser
-    from meerschaum.utils.warnings import warn, error
+    from meerschaum.utils.warnings import warn
     _parent_plugin_name = _get_parent_plugin(2)
     title = f"Plugin '{_parent_plugin_name}' options" if _parent_plugin_name else 'Custom options'
     group_key = 'plugin_' + (_parent_plugin_name or '')
@@ -819,12 +844,50 @@ def add_plugin_argument(*args, **kwargs) -> None:
         warn(e)
 
 
+def inject_plugin_path(
+    plugin_path: pathlib.Path,
+    plugins_resources_path: Optional[pathlib.Path] = None) -> None:
+    """
+    Inject a plugin as a symlink into the internal `plugins` directory.
+
+    Parameters
+    ----------
+    plugin_path: pathlib.Path
+        The path to the plugin's source module.
+    """
+    from meerschaum.utils.misc import make_symlink
+    if plugins_resources_path is None:
+        from meerschaum.config.paths import PLUGINS_RESOURCES_PATH, PLUGINS_INJECTED_RESOURCES_PATH
+        plugins_resources_path = PLUGINS_RESOURCES_PATH
+        plugins_injected_resources_path = PLUGINS_INJECTED_RESOURCES_PATH
+    else:
+        plugins_injected_resources_path = plugins_resources_path / '.injected'
+
+    if plugin_path.is_dir():
+        plugin_name = plugin_path.name
+        dest_path = plugins_resources_path / plugin_name
+        injected_path = plugins_injected_resources_path / plugin_name
+    elif plugin_path.name == '__init__.py':
+        plugin_name = plugin_path.parent.name
+        dest_path = plugins_resources_path / plugin_name
+        injected_path = plugins_injected_resources_path / plugin_name
+    elif plugin_path.name.endswith('.py'):
+        plugin_name = plugin_path.name[:(-1 * len('.py'))]
+        dest_path = plugins_resources_path / plugin_path.name
+        injected_path = plugins_injected_resources_path / plugin_path.name
+    else:
+        raise ValueError(f"Cannot deduce plugin name from path '{plugin_path}'.")
+
+    _injected_plugin_symlinks.add(dest_path)
+    make_symlink(plugin_path, dest_path)
+    make_symlink(plugin_path, injected_path)
+
+
 def _get_parent_plugin(stacklevel: int = 1) -> Union[str, None]:
     """If this function is called from outside a Meerschaum plugin, it will return None."""
-    import inspect, re
+    import inspect
     try:
         parent_globals = inspect.stack()[stacklevel][0].f_globals
-        parent_file = parent_globals.get('__file__', '')
         return parent_globals['__name__'].replace('plugins.', '').split('.')[0]
-    except Exception as e:
+    except Exception:
         return None
