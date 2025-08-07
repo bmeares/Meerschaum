@@ -67,7 +67,12 @@ def _complete_edit(
     return default_action_completer(action=(['edit'] + action), **kw)
 
 
-def _edit_config(action: Optional[List[str]] = None, **kw: Any) -> SuccessTuple:
+def _edit_config(
+    action: Optional[List[str]] = None,
+    noask: bool = False,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Edit Meerschaum configuration files.
 
@@ -87,11 +92,26 @@ def _edit_config(action: Optional[List[str]] = None, **kw: Any) -> SuccessTuple:
         ```
     """
     from meerschaum.config._edit import edit_config
-    if action is None:
-        action = []
-    if len(action) == 0:
-        action.append('meerschaum')
-    return edit_config(keys=action, **kw)
+    from meerschaum.config._read_config import get_possible_keys
+    from meerschaum.actions import actions
+    from meerschaum.utils.prompt import choose
+
+    if not action:
+        action = [
+            choose(
+                "Choose a configuration file to edit:",
+                get_possible_keys(),
+                default='meerschaum',
+                noask=noask,
+            )
+        ]
+
+    edit_success, edit_msg = edit_config(keys=action, debug=debug, **kwargs)
+    if not edit_success:
+        return edit_success, edit_msg
+
+    return actions['reload'](debug=debug)
+
 
 def _complete_edit_config(action: Optional[List[str]] = None, **kw: Any) -> List[str]:
     from meerschaum.config._read_config import get_possible_keys
@@ -343,7 +363,6 @@ def _edit_plugins(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.prompt import prompt, yes_no
     from meerschaum.utils.misc import edit_file
-    from meerschaum.utils.packages import reload_meerschaum
     from meerschaum.actions import actions
 
     if not action:
@@ -376,7 +395,7 @@ def _edit_plugins(
             continue
 
         edit_file(plugin_file_path)
-        reload_meerschaum(debug=debug)
+        actions['reload'](debug=debug)
 
     return True, "Success"
 

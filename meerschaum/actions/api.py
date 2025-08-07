@@ -171,7 +171,7 @@ def _api_start(
         PACKAGE_ROOT_PATH,
     )
     from meerschaum.config._patch import apply_patch_to_config
-    from meerschaum.config._environment import get_env_vars
+    from meerschaum.config.environment import get_env_vars
     from meerschaum._internal.static import STATIC_CONFIG, SERVER_ID
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool

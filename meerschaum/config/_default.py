@@ -50,7 +50,7 @@ default_meerschaum_config = {
             },
             'local': {
                 'flavor': 'sqlite',
-                'database': SQLITE_DB_PATH.as_posix(),
+                'database': "{SQLITE_DB_PATH}",
             },
             'memory': {
                 'flavor': 'sqlite',
@@ -116,7 +116,6 @@ default_system_config = {
                 'connect_args': {},
             },
         },
-
         'api': {
         },
     },
@@ -249,10 +248,6 @@ default_pipes_config = {
     },
 }
 default_plugins_config = {}
-default_experimental_config = {
-    'venv': True,
-}
-
 
 ### build default config dictionary
 default_config = {}
@@ -270,7 +265,7 @@ default_config['jobs'] = default_jobs_config
 ### add configs from other packages
 try:
     import meerschaum.config.stack
-except ImportError as e:
+except ImportError:
     pass
 finally:
     from meerschaum.config.stack import default_stack_config

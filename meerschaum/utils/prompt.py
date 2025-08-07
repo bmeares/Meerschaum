@@ -215,7 +215,7 @@ def yes_no(
 
 def choose(
     question: str,
-    choices: List[Union[str, Tuple[str, str]]],
+    choices: Union[List[str], List[Tuple[str, str]]],
     default: Union[str, List[str], None] = None,
     numeric: bool = True,
     multiple: bool = False,
@@ -287,10 +287,15 @@ def choose(
         multiple = True
 
     choices_indices = {}
-    for i, c in enumerate(choices):
+    for i, c in enumerate(choices, start=1):
         if isinstance(c, tuple):
             i, c = c
         choices_indices[i] = c
+
+    choices_values_indices = {
+        v: k
+        for k, v in choices_indices.items()
+    }
 
     def _enforce_default(d):
         if d is not None and d not in choices and d not in choices_indices and warn:
@@ -328,7 +333,7 @@ def choose(
 
     if multiple:
         ### Check if the defaults have the delimiter.
-        for i, d in enumerate(default if isinstance(default, list) else [default]):
+        for i, d in enumerate(default if isinstance(default, list) else [default], start=1):
             if d is None or delimiter not in d:
                 continue
             new_d = d.replace(delimiter, delim_replacement)
@@ -358,14 +363,14 @@ def choose(
 
     question_options = []
     if numeric:
-        _choices = [str(i + 1) for i, c in enumerate(choices)]
+        _choices = [str(i) for i, c in enumerate(choices, start=1)]
         _default = ''
         if default is not None:
             for d in (default.split(delimiter) if multiple else [default]):
                 if d not in choices and d in choices_indices:
                     d_index = d
                     d_value = choices_indices[d]
-                    for _i, _option in enumerate(choices):
+                    for _i, _option in enumerate(choices, start=1):
                         if (
                             isinstance(_option, tuple) and (
                                 _option[1] == d_value
@@ -380,10 +385,10 @@ def choose(
         _default = _default[:-1 * len(delimiter)]
         #  question += '\n'
         choices_digits = len(str(len(choices)))
-        for i, c in enumerate(choices_indices.values()):
+        for i, c in choices_indices.items():
             question_options.append(
-                f"  {i + 1}. "
-                + (" " * (choices_digits - len(str(i + 1))))
+                f"  {i}. "
+                + (" " * (choices_digits - len(str(i))))
                 + f"{c}\n"
             )
         default_tuple = (_default, default) if default is not None else None
@@ -394,8 +399,11 @@ def choose(
             question_options.append(f"{c}\n")
 
     if 'completer' not in kw:
-        WordCompleter = attempt_import('prompt_toolkit.completion').WordCompleter
-        kw['completer'] = WordCompleter(choices_indices.values(), sentence=True)
+        WordCompleter = attempt_import('prompt_toolkit.completion', lazy=False).WordCompleter
+        kw['completer'] = WordCompleter(
+            choices_indices.values(),
+            sentence=True,
+        )
 
     valid = False
     while not valid:
@@ -420,6 +428,20 @@ def choose(
 
         ### Remove empty strings.
         _answers = [_a for _a in _answers if _a]
+
+        ### Substitute values for indices for numeric.
+        if numeric:
+            _answers = [
+                (
+                    str(choices_values_indices[_a])
+                    if _a in choices_values_indices
+                    else _a
+                )
+                for _a in _answers
+            ]
+
+        if not multiple and _answers:
+            answer = str(_answers[0])
 
         if multiple and len(_answers) == 0:
             _answers = default_tuple if isinstance(default_tuple, list) else [default_tuple]

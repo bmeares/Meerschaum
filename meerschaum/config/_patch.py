@@ -14,7 +14,7 @@ from meerschaum.utils.warnings import warn as _warn
 def apply_patch_to_config(
     config: Dict[str, Any],
     patch: Dict[str, Any],
-    warn: bool = True,
+    warn: bool = False,
 ) -> Dict[str, Any]:
     """Patch the config dict with a new dict (cascade patching)."""
     _base = copy.deepcopy(config) if isinstance(config, dict) else {}

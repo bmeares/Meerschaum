@@ -136,17 +136,17 @@ def get_module_path(
 
 
 def manually_import_module(
-        import_name: str,
-        venv: Optional[str] = 'mrsm',
-        check_update: bool = True,
-        check_pypi: bool = False,
-        install: bool = True,
-        split: bool = True,
-        warn: bool = True,
-        color: bool = True,
-        debug: bool = False,
-        use_sys_modules: bool = True,
-    ) -> Union['ModuleType', None]:
+    import_name: str,
+    venv: Optional[str] = 'mrsm',
+    check_update: bool = True,
+    check_pypi: bool = False,
+    install: bool = True,
+    split: bool = True,
+    warn: bool = True,
+    color: bool = True,
+    debug: bool = False,
+    use_sys_modules: bool = True,
+) -> Union['ModuleType', None]:
     """
     Manually import a module from a virtual environment (or the base environment).
 
@@ -1179,7 +1179,8 @@ def run_python_package(
     Either a return code integer or a `subprocess.Popen` object
     (or `None` if a `KeyboardInterrupt` occurs and as_proc is `True`).
     """
-    import sys, platform
+    import sys
+    import platform
     import subprocess
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.process import run_process
@@ -1206,7 +1207,7 @@ def run_python_package(
             capture_output=capture_output,
             **kw
         )
-    except Exception as e:
+    except Exception:
         msg = f"Failed to execute {command}, will try again:\n{traceback.format_exc()}"
         warn(msg, color=False)
         stdout, stderr = (
@@ -1218,6 +1219,7 @@ def run_python_package(
             command,
             stdout=stdout,
             stderr=stderr,
+            stdin=sys.stdin,
             env=env_dict,
         )
         to_return = proc if as_proc else proc.wait()

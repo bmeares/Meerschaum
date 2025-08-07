@@ -142,7 +142,7 @@ def _get_cache_dir_path(self, create_if_not_exists: bool = False) -> pathlib.Pat
     """
     Return the path to the cache directory.
     """
-    from meerschaum.config.paths import PIPES_CACHE_RESOURCES_PATH
+    from meerschaum.config.paths import PIPES_CACHE_RESOURCES_PATH, ROOT_DIR_PATH
     cache_dir_path = (
         PIPES_CACHE_RESOURCES_PATH
         / self.instance_keys

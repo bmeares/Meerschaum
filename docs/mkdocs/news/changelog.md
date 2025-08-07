@@ -353,6 +353,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Performance improvements through smarter caching.**  
   The metadata caching system has been overhauled, drastically reducing redundant work and increasing performance. Pipes' metadata are cached on-disk, and providing `cache_connector_keys` to the Pipe constructor will cache to a Valkey instance instead. Set `cache=False` to disable this behavior.
 
+- **Restrict Webterms to API processes.**  
+  In previous releases, a single webterm process was shared amongst API processes. Now each API process requires its own Webterm server, and `tmux` sessions are separated by port.
+
 - **Fix custom actions with spaces in Web Console.**
 
 - **Ignore `schema` from pipes' parameters on SQLite.**

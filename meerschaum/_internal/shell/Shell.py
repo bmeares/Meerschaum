@@ -1101,8 +1101,16 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             return None
         if not shell_attrs['_update_bottom_toolbar'] and platform.system() == 'Windows':
             return shell_attrs['_old_bottom_toolbar']
-        size = os.get_terminal_size()
-        num_cols, num_lines = size.columns, size.lines
+        try:
+            size = os.get_terminal_size()
+            num_cols, num_lines = size.columns, size.lines
+        except Exception:
+            from meerschaum.utils.misc import is_int
+            num_cols, num_lines = os.environ.get('COLUMNS', 80), os.environ.get('LINES', 120)
+            if is_int(str(num_cols)):
+                num_cols = int(num_cols)
+            if is_int(str(num_lines)):
+                num_lines = int(num_lines)
         truncation_suffix = (
             '…'
             if UNICODE
