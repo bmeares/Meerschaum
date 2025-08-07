@@ -170,6 +170,7 @@ paths = {
     'PLUGINS_ARCHIVES_RESOURCES_PATH': ('{PLUGINS_RESOURCES_PATH}', '.archives'),
     'PLUGINS_TEMP_RESOURCES_PATH'    : ('{PLUGINS_RESOURCES_PATH}', '.tmp'),
     'PLUGINS_INIT_PATH'              : ('{PLUGINS_RESOURCES_PATH}', '__init__.py'),
+    'PLUGINS_INJECTED_RESOURCES_PATH': ('{PLUGINS_RESOURCES_PATH}', '.injected'),
 
     'DB_RESOURCES_PATH'              : ('{ROOT_DIR_PATH}', 'db'),
     'DB_INIT_RESOURCES_PATH'         : ('{DB_RESOURCES_PATH}', 'initdb'),
