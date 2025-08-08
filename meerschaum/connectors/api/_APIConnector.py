@@ -233,4 +233,4 @@ class APIConnector(InstanceConnector):
         elif 'api_key' in self.__dict__:
             return 'api_key'
 
-        raise ValueError(f"Could not determine the login scheme for '{self}'.")
+        return 'password'

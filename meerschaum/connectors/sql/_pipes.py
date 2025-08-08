@@ -377,6 +377,9 @@ def create_indices(
     """
     Create a pipe's indices.
     """
+    if pipe.__dict__.get('_skip_check_indices', False):
+        return True
+
     if debug:
         dprint(f"Creating indices for {pipe}...")
 
@@ -1906,6 +1909,7 @@ def sync_pipe(
             enforce=False,
             static=True,
             autoincrement=False,
+            cache=False,
             parameters={
                 'schema': self.internal_schema,
                 'hypertable': False,
@@ -3129,6 +3133,7 @@ def get_pipe_columns_indices(
     """
     if pipe.__dict__.get('_skip_check_indices', False):
         return {}
+
     from meerschaum.utils.sql import get_table_cols_indices
     return get_table_cols_indices(
         pipe.target,

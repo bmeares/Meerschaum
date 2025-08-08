@@ -55,6 +55,7 @@ def entry_with_daemon(
     )
     refresh_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
     sysargs_str = sysargs if isinstance(sysargs, str) else shlex.join(sysargs or [])
+    debug = ' --debug' in sysargs_str
     _sysargs = shlex.split(sysargs_str)
     _sysargs, _pipeline_args = split_pipeline_sysargs(_sysargs)
     _chained_sysargs = split_chained_sysargs(_sysargs)
@@ -113,6 +114,8 @@ def entry_with_daemon(
             time.sleep(refresh_seconds)
 
     if not daemon_is_ready or worker is None:
+        if debug:
+            print("Revert to entry without daemon.")
         return entry_without_daemon(sysargs, _patch_args=_patch_args)
 
     session_id = _session_id or get_cli_session_id()
@@ -151,7 +154,7 @@ def entry_with_daemon(
 
         time.sleep(refresh_seconds)
 
-    start_cli_logs_refresh_thread(daemon_ix)
+    worker.start_cli_logs_refresh_thread()
 
     try:
         log = worker.job.daemon.rotating_log
@@ -210,55 +213,8 @@ def entry_with_daemon(
         if not exit_success:
             print(exit_data['traceback'])
 
-    stop_cli_logs_refresh_thread(daemon_ix)
+    worker.stop_cli_logs_refresh_thread()
     worker.write_input_data({'increment': True})
     success = (worker_data or {}).get('success', False)
     message = (worker_data or {}).get('message', "Failed to retrieve message from CLI worker.")
     return success, message
-
-
-_ix_events = {}
-def touch_cli_logs_loop(ix: int, refresh_seconds: Union[int, float, None] = None):
-    """
-    Touch the CLI daemon's logs to refresh the logs monitoring.
-    """
-    from meerschaum._internal.cli.workers import ActionWorker
-    if refresh_seconds is None:
-        refresh_seconds = mrsm.get_config('jobs', 'logs', 'refresh_files_seconds')
-
-    worker = ActionWorker(ix, refresh_seconds=refresh_seconds)
-    stop_event = _ix_events.get(ix, None)
-    if stop_event is None:
-        return
-
-    while not stop_event.is_set():
-        worker.job.daemon.rotating_log.touch()
-        time.sleep(worker.refresh_seconds)
-
-
-def start_cli_logs_refresh_thread(ix: int, refresh_seconds: Union[int, float, None] = None):
-    """
-    Spin up a daemon thread to refresh the CLI's logs.
-    """
-    import asyncio
-    from meerschaum.utils.threading import Thread
-    refresh_seconds = refresh_seconds or mrsm.get_config('jobs', 'logs', 'refresh_files_seconds')
-    thread = Thread(
-        target=touch_cli_logs_loop,
-        args=(ix,),
-        kwargs={'refresh_seconds': refresh_seconds},
-        daemon=True,
-    )
-    _ix_events[ix] = asyncio.Event()
-    thread.start()
-
-
-def stop_cli_logs_refresh_thread(ix: int):
-    """
-    Stop the logs refresh thread.
-    """
-    stop_event = _ix_events.get(ix, None)
-    if stop_event is None:
-        return
-
-    stop_event.set()
