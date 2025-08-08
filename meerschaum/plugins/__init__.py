@@ -62,6 +62,7 @@ def make_action(
     deactivate: bool = True,
     debug: bool = False,
     daemon: bool = True,
+    _plugin_name: Optional[str] = None,
 ) -> Callable[[Any], Any]:
     """
     Make a function a Meerschaum action. Useful for plugins that are adding multiple actions.
@@ -89,16 +90,15 @@ def make_action(
     >>>
     """
     def _decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
-        from meerschaum.actions import actions
+        from meerschaum.actions import actions, _custom_actions_plugins, _plugins_actions
         package_name = func.__globals__['__name__']
-        plugin_name = (
+        plugin_name = _plugin_name or (
             package_name.split('.')[1]
             if package_name.startswith('plugins.') else None
         )
         plugin = Plugin(plugin_name) if plugin_name else None
 
         if debug:
-            print(f"{debug=}")
             from meerschaum.utils.debug import dprint
             dprint(
                 f"Adding action '{func.__name__}' from plugin "
@@ -106,6 +106,10 @@ def make_action(
             )
 
         actions[func.__name__] = func
+        _custom_actions_plugins[func.__name__] = plugin_name
+        if plugin_name not in _plugins_actions:
+            _plugins_actions[plugin_name] = []
+        _plugins_actions[plugin_name].append(func.__name__)
         if not daemon:
             _actions_daemon_enabled[func.__name__] = False
         return func
@@ -442,8 +446,6 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 if real_path in injected_symlinked_paths.values():
                     continue
                 try:
-                    print(f"{plugins_to_be_symlinked=}")
-                    print(f'unlink {plugin_symlink_path} {real_path=}')
                     plugin_symlink_path.unlink()
                 except Exception:
                     pass
@@ -464,7 +466,6 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                     not is_symlink(plugin_symlink_path)
                 ):
                     continue
-                print(f"make symlink {plugin_path=} {plugin_symlink_path=}")
                 success, msg = make_symlink(plugin_path, plugin_symlink_path)
             except Exception as e:
                 success, msg = False, str(e)
@@ -529,6 +530,7 @@ def import_plugins(
     from meerschaum.utils.venv import is_venv_active, activate_venv, deactivate_venv, Venv
     from meerschaum.utils.warnings import warn as _warn
     plugins_to_import = list(plugins_to_import)
+    prepended_sys_path = False
     with _locks['sys.path']:
 
         ### Since plugins may depend on other plugins,
@@ -541,6 +543,7 @@ def import_plugins(
         already_active_venvs = [is_venv_active(plugin_name) for plugin_name in plugins_names]
 
         if not sys.path or sys.path[0] != str(PLUGINS_RESOURCES_PATH.parent):
+            prepended_sys_path = True
             sys.path.insert(0, str(PLUGINS_RESOURCES_PATH.parent))
 
         if not plugins_to_import:
@@ -588,7 +591,7 @@ def import_plugins(
         if imported_plugins is None and warn:
             _warn("Failed to import plugins.", stacklevel=3)
 
-        if str(PLUGINS_RESOURCES_PATH.parent) in sys.path:
+        if prepended_sys_path and str(PLUGINS_RESOURCES_PATH.parent) in sys.path:
             sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))
 
     if isinstance(imported_plugins, list):
@@ -716,23 +719,76 @@ def load_plugins(
             if not isfunction(func):
                 continue
             if name == module.__name__.split('.')[-1]:
-                make_action(func, **{'shell': shell, 'debug': debug})
+                make_action(func, **{'shell': shell, 'debug': debug}, _plugin_name=name)
 
 
-def unload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> None:
+def unload_custom_actions(plugins: Optional[List[str]] = None, debug: bool = False) -> None:
+    """
+    Unload the custom actions added by plugins.
+    """
+    from meerschaum.actions import (
+        actions,
+        _custom_actions_plugins,
+        _plugins_actions,
+    )
+    if debug:
+        from meerschaum.utils.warnings import dprint
+
+    plugins = plugins or list(_plugins_actions.keys())
+
+    for plugin in plugins:
+        action_names = _plugins_actions.get(plugin, [])
+        for action_name in action_names:
+            _ = actions.pop(action_name, None)
+            _ = _custom_actions_plugins.pop(action_name, None)
+            _ = _actions_daemon_enabled.pop(action_name, None)
+        _ = _plugins_actions.pop(plugin, None)
+
+
+def unload_plugins(
+    plugins: Optional[List[str]] = None,
+    remove_symlinks: bool = True,
+    debug: bool = False,
+) -> None:
     """
     Unload the specified plugins from memory.
     """
     import sys
+    from meerschaum.config.paths import PLUGINS_RESOURCES_PATH, PLUGINS_INJECTED_RESOURCES_PATH
     if debug:
         from meerschaum.utils.warnings import dprint
 
+    if debug:
+        dprint(f"Unloading plugins: {plugins}")
+
     plugins = plugins or get_plugins_names()
+    unload_custom_actions(plugins, debug=debug)
+
+    module_prefix = f"{PLUGINS_RESOURCES_PATH.stem}."
+    loaded_modules = [mod_name for mod_name in sys.modules if mod_name.startswith(module_prefix)]
+
     for plugin_name in plugins:
-        if debug:
-            dprint(f"Unloading plugin '{plugin_name}'...")
-        mod_name = f'plugins.{plugin_name}'
-        _ = sys.modules.pop(mod_name, None)
+        for mod_name in loaded_modules:
+            if mod_name[len(PLUGINS_RESOURCES_PATH.stem):].startswith(plugin_name):
+                _ = sys.modules.pop(mod_name, None)
+
+        if remove_symlinks:
+            dir_symlink_path = PLUGINS_RESOURCES_PATH / plugin_name
+            dir_symlink_injected_path = PLUGINS_INJECTED_RESOURCES_PATH / plugin_name
+            file_symlink_path = PLUGINS_RESOURCES_PATH / f"{plugin_name}.py"
+            file_symlink_injected_path = PLUGINS_INJECTED_RESOURCES_PATH / f"{plugin_name}.py"
+
+            try:
+                if dir_symlink_path.exists() and not dir_symlink_injected_path.exists():
+                    dir_symlink_path.unlink()
+            except Exception:
+                pass
+
+            try:
+                if file_symlink_path.exists() and not file_symlink_injected_path.exists():
+                    file_symlink_path.unlink()
+            except Exception:
+                pass
 
 
 def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> None:

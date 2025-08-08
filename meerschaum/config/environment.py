@@ -140,6 +140,9 @@ def apply_connector_uri(env_var: str, env: Optional[Dict[str, Any]] = None) -> N
     matched = re.match(uri_regex, env_var)
     groups = matched.groups()
     typ, label = groups[0].lower(), groups[1].lower()
+    if not typ or not label:
+        return
+
     uri = env[env_var]
 
     if uri.lstrip().startswith('{') and uri.rstrip().endswith('}'):
@@ -213,10 +216,8 @@ def replace_env(env: Dict[str, Any]):
     replaced_plugins = False
     if plugins_dir_env_var in env:
         plugins_dir_paths = env[plugins_dir_env_var]
-        if isinstance(plugins_dir_paths, str):
-            plugins_dir_paths = [plugins_dir_paths]
-            set_plugins_dir_paths(plugins_dir_paths)
-            replaced_plugins = True
+        set_plugins_dir_paths(plugins_dir_paths)
+        replaced_plugins = True
 
     replaced_venvs = False
     if venvs_dir_env_var in env:

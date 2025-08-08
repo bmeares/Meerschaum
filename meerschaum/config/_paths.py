@@ -216,9 +216,18 @@ def set_root(root: Union[Path, str]):
         if isinstance(path_parts, tuple) and path_parts[0] == '{ROOT_DIR_PATH}':
             globals()[path_name] = __getattr__(path_name)
 
-def set_plugins_dir_paths(plugins_dir_paths: List[Path]):
+def set_plugins_dir_paths(plugins_dir_paths: Union[List[Path], Path, str]):
     """Modify the value of `PLUGINS_DIR_PATHS`."""
     global PLUGINS_DIR_PATHS
+    if isinstance(plugins_dir_paths, str):
+        if plugins_dir_paths.strip() and plugins_dir_paths.lstrip()[0] == '[':
+            plugins_dir_paths = json.loads(plugins_dir_paths)
+        else:
+            plugins_dir_paths = plugins_dir_paths.split(':')
+        plugins_dir_paths = [Path(_path).resolve() for _path in plugins_dir_paths]
+    if isinstance(plugins_dir_paths, Path):
+        plugins_dir_paths = [plugins_dir_paths.resolve()]
+
     PLUGINS_DIR_PATHS = plugins_dir_paths
     _process_plugins_dir_paths(plugins_dir_paths)
 

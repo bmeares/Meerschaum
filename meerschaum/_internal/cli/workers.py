@@ -9,12 +9,13 @@ import os
 import pathlib
 import json
 import asyncio
+import time
 from typing import List, Dict, Any, Union, TextIO
 
 import meerschaum as mrsm
-from meerschaum.utils.daemon import StdinFile, RotatingFile
 from meerschaum.utils.warnings import warn
 from meerschaum.jobs import Job
+from meerschaum.utils.threading import Thread
 from meerschaum._internal.static import STATIC_CONFIG
 
 STOP_TOKEN: str = STATIC_CONFIG['jobs']['stop_token']
@@ -56,6 +57,7 @@ class ActionWorker:
             if refresh_seconds is not None
             else mrsm.get_config('system', 'cli', 'refresh_seconds')
         )
+        self.refresh_logs_stop_event = asyncio.Event()
 
     @property
     def input_file_path(self) -> pathlib.Path:
@@ -172,7 +174,7 @@ class ActionWorker:
         except Exception as e:
             warn(f"Failed to release lock for {self}:\n{e}")
 
-    def send_signal(self, signalnum: int):
+    def send_signal(self, signalnum):
         """
         Send a signal to the running job.
         """
@@ -369,6 +371,35 @@ class ActionWorker:
             return False, f"Failed to clean up worker files:\n{e}"
 
         return True, "Success"
+
+    def touch_cli_logs_loop(self):
+        """
+        Touch the CLI daemon's logs to refresh the logs monitoring.
+        """
+        while not self.refresh_logs_stop_event.is_set():
+            self.job.daemon.rotating_log.touch()
+            time.sleep(self.refresh_seconds)
+
+    def start_cli_logs_refresh_thread(self):
+        """
+        Spin up a daemon thread to refresh the CLI's logs.
+        """
+        self._logs_refresh_thread = Thread(
+            target=self.touch_cli_logs_loop,
+            daemon=True,
+        )
+        self._logs_refresh_thread.start()
+
+    def stop_cli_logs_refresh_thread(self):
+        """
+        Stop the logs refresh thread.
+        """
+        self.refresh_logs_stop_event.set()
+        thread = self.__dict__.pop('_logs_refresh_thread', None)
+        if thread is None:
+            return
+
+        thread.join()
 
     def __repr__(self) -> str:
         return self.__str__()
