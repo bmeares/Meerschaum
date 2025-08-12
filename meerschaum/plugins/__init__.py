@@ -91,7 +91,7 @@ def make_action(
     """
     def _decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
         from meerschaum.actions import actions, _custom_actions_plugins, _plugins_actions
-        plugin_name = _get_parent_plugin(2)
+        plugin_name = _get_parent_plugin()
         plugin = Plugin(plugin_name) if plugin_name else None
 
         if debug:
@@ -138,7 +138,7 @@ def pre_sync_hook(
     >>>
     """
     with _locks['_pre_sync_hooks']:
-        plugin_name = _get_parent_plugin(2)
+        plugin_name = _get_parent_plugin()
         try:
             if plugin_name not in _pre_sync_hooks:
                 _pre_sync_hooks[plugin_name] = []
@@ -179,7 +179,7 @@ def post_sync_hook(
     """
     with _locks['_post_sync_hooks']:
         try:
-            plugin_name = _get_parent_plugin(2)
+            plugin_name = _get_parent_plugin()
             if plugin_name not in _post_sync_hooks:
                 _post_sync_hooks[plugin_name] = []
             _post_sync_hooks[plugin_name].append(function)
@@ -237,7 +237,7 @@ def web_page(
             )
         )
  
-        plugin_name = _get_parent_plugin(2)
+        plugin_name = _get_parent_plugin()
         page_group = page_group or plugin_name
         if page_group not in _plugin_endpoints_to_pages:
             _plugin_endpoints_to_pages[page_group] = {}
@@ -268,7 +268,7 @@ def dash_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
     Execute the function when starting the Dash application.
     """
     with _locks['_dash_plugins']:
-        plugin_name = _get_parent_plugin(2)
+        plugin_name = _get_parent_plugin()
         try:
             if plugin_name not in _dash_plugins:
                 _dash_plugins[plugin_name] = []
@@ -906,7 +906,7 @@ def add_plugin_argument(*args, **kwargs) -> None:
     """
     from meerschaum._internal.arguments._parser import groups, _seen_plugin_args, parser
     from meerschaum.utils.warnings import warn
-    _parent_plugin_name = _get_parent_plugin(2)
+    _parent_plugin_name = _get_parent_plugin()
     title = f"Plugin '{_parent_plugin_name}' options" if _parent_plugin_name else 'Custom options'
     group_key = 'plugin_' + (_parent_plugin_name or '')
     if group_key not in groups:
@@ -961,14 +961,23 @@ def inject_plugin_path(
     make_symlink(plugin_path, injected_path)
 
 
-def _get_parent_plugin(stacklevel: int = 1) -> Union[str, None]:
+def _get_parent_plugin(stacklevel: Union[int, Tuple[int, ...]] = (1, 2, 3, 4)) -> Union[str, None]:
     """If this function is called from outside a Meerschaum plugin, it will return None."""
     import inspect
-    try:
-        parent_globals = inspect.stack()[stacklevel][0].f_globals
-        global_name = parent_globals.get('__name__', '')
-        if global_name.startswith('meerschaum.'):
-            return None
-        return global_name.replace('plugins.', '').split('.')[0]
-    except Exception:
-        return None
+    if not isinstance(stacklevel, tuple):
+        stacklevel = (stacklevel,)
+
+    for _level in stacklevel:
+        try:
+            parent_globals = inspect.stack()[_level][0].f_globals
+            global_name = parent_globals.get('__name__', '')
+            if global_name.startswith('meerschaum.'):
+                continue
+            plugin_name = global_name.replace('plugins.', '').split('.')[0]
+            if plugin_name.startswith('_') or plugin_name == 'importlib':
+                continue
+            return plugin_name
+        except Exception:
+            continue
+
+    return None

@@ -169,6 +169,7 @@ def _api_start(
         API_UVICORN_CONFIG_PATH,
         CACHE_RESOURCES_PATH,
         PACKAGE_ROOT_PATH,
+        ROOT_DIR_PATH,
     )
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config.environment import get_env_vars
@@ -319,6 +320,7 @@ def _api_start(
         MRSM_SERVER_ID: SERVER_ID,
         MRSM_RUNTIME: 'api',
         MRSM_CONFIG: json.loads(os.environ.get(MRSM_CONFIG, '{}')),
+        MRSM_ROOT_DIR: ROOT_DIR_PATH.as_posix(),
         'FORWARDED_ALLOW_IPS': forwarded_allow_ips,
         'TERM': os.environ.get('TERM', 'screen-256color'),
         'SHELL': os.environ.get('SHELL', '/bin/bash'),

@@ -53,7 +53,7 @@ def get_mrsm_tmux_sessions(port: Optional[int] = None) -> List[str]:
     if proc.returncode != 0:
         return []
 
-    port = port or mrsm.get_config('meerschaum', 'webterm', 'port')
+    port = port or mrsm.get_config('api', 'webterm', 'port')
 
     sessions = [
         line.split(':', maxsplit=1)[0]

@@ -240,10 +240,16 @@ def set_config_dir_path(config_dir_path: Union[str, Path]):
 
 
 @contextlib.contextmanager
-def replace_root_dir(root_dir_path: Union[str, Path]):
+def replace_root_dir(root_dir_path: Union[str, Path, None]):
     """
     Temporarily replace the root directory path.
     """
+    if root_dir_path is None:
+        try:
+            yield
+        finally:
+            return
+
     old_root = paths.get('ROOT_DIR_PATH', _ROOT_DIR_PATH)
     set_root(root_dir_path)
 
@@ -253,10 +259,16 @@ def replace_root_dir(root_dir_path: Union[str, Path]):
         set_root(old_root)
 
 @contextlib.contextmanager
-def replace_plugins_dir_paths(plugins_dir_paths: List[Path]):
+def replace_plugins_dir_paths(plugins_dir_paths: Union[List[Path], None]):
     """
     Temporarily replace the plugins directory paths.
     """
+    if plugins_dir_paths is None:
+        try:
+            yield
+        finally:
+            return
+
     old_plugins_dir_paths = PLUGINS_DIR_PATHS
     set_plugins_dir_paths(plugins_dir_paths)
 
@@ -266,10 +278,16 @@ def replace_plugins_dir_paths(plugins_dir_paths: List[Path]):
         set_plugins_dir_paths(old_plugins_dir_paths)
 
 @contextlib.contextmanager
-def replace_venvs_dir_path(venvs_dir_path: Path):
+def replace_venvs_dir_path(venvs_dir_path: Union[Path, None]):
     """
     Temporarily replace the virtual environments directory path.
     """
+    if venvs_dir_path is None:
+        try:
+            yield
+        finally:
+            return
+
     old_venvs_dir_path = paths.get('VIRTENV_RESOURCES_PATH', _VENVS_DIR_PATH)
     set_venvs_dir_path(venvs_dir_path)
 
@@ -279,10 +297,16 @@ def replace_venvs_dir_path(venvs_dir_path: Path):
         set_venvs_dir_path(old_venvs_dir_path)
 
 @contextlib.contextmanager
-def replace_config_dir_path(config_dir_path: Path):
+def replace_config_dir_path(config_dir_path: Union[Path, None]):
     """
     Temporarily replace the config directory path.
     """
+    if config_dir_path is None:
+        try:
+            yield
+        finally:
+            return
+
     old_config_dir_path = paths.get('CONFIG_DIR_PATH', _CONFIG_DIR_PATH)
     set_config_dir_path(config_dir_path)
 

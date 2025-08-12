@@ -11,7 +11,10 @@ function make_terminal(element, size, ws_url) {
     useStyle: true,
     scrollback: 9999999,
     cursorBlink: true,
+    allowProposedApi: true
   });
+  term.loadAddon(new Unicode11Addon.Unicode11Addon());
+  term.unicode.activeVersion = '11';
   term.attachCustomKeyEventHandler(copyPasteKeyEventHandler);
   term.open(element);
 
