@@ -73,9 +73,6 @@ def get_uvicorn_config() -> Dict[str, Any]:
     """Read the Uvicorn configuration JSON and return a dictionary."""
     global uvicorn_config
     import json
-    runtime = os.environ.get(STATIC_CONFIG['environment']['runtime'], None)
-    if runtime == 'api':
-        return get_config('api', 'uvicorn')
     _uvicorn_config = uvicorn_config
     with _locks['uvicorn_config']:
         if uvicorn_config is None:
@@ -84,6 +81,8 @@ def get_uvicorn_config() -> Dict[str, Any]:
                     uvicorn_config = json.load(f)
                 _uvicorn_config = uvicorn_config
             except Exception:
+                import traceback
+                traceback.print_exc()
                 _uvicorn_config = sys_config.get('uvicorn', None)
 
             if _uvicorn_config is None:
@@ -132,7 +131,7 @@ def get_api_connector(instance_keys: Optional[str] = None):
     )
     found_match: bool = False
     for allowed_keys_pattern in allowed_instance_keys:
-        if fnmatch(instance_keys, allowed_keys_pattern):
+        if fnmatch(str(instance_keys), allowed_keys_pattern):
             found_match = True
             break
     if not found_match:

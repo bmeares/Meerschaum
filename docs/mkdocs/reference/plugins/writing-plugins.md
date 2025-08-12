@@ -376,9 +376,9 @@ Your plugin may extend Meerschaum by providing additional actions. Actions are r
     def sing_song(**kw):
         return True, "This action is called 'sing song'."
 
-    @make_action
+    @make_action(daemon=False)
     def sing_tune(**kw):
-        return True, "This action is called 'sing tune'."
+        return True, "The action `sing tune` will not be executed in the CLI daemon context."
 
     def sing(**kw):
         """

@@ -17,8 +17,8 @@ from meerschaum.utils.threading import Lock, RLock
 from meerschaum.core.Plugin import Plugin
 
 _api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
-_pre_sync_hooks: Dict[str, List[Callable[[Any], Any]]] = {}
-_post_sync_hooks: Dict[str, List[Callable[[Any], Any]]] = {}
+_pre_sync_hooks: Dict[Union[str, None], List[Callable[[Any], Any]]] = {}
+_post_sync_hooks: Dict[Union[str, None], List[Callable[[Any], Any]]] = {}
 _actions_daemon_enabled: Dict[str, bool] = {}
 _locks = {
     '_api_plugins': RLock(),
@@ -91,11 +91,7 @@ def make_action(
     """
     def _decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
         from meerschaum.actions import actions, _custom_actions_plugins, _plugins_actions
-        package_name = func.__globals__['__name__']
-        plugin_name = _plugin_name or (
-            package_name.split('.')[1]
-            if package_name.startswith('plugins.') else None
-        )
+        plugin_name = _get_parent_plugin(2)
         plugin = Plugin(plugin_name) if plugin_name else None
 
         if debug:
@@ -142,10 +138,11 @@ def pre_sync_hook(
     >>>
     """
     with _locks['_pre_sync_hooks']:
+        plugin_name = _get_parent_plugin(2)
         try:
-            if function.__module__ not in _pre_sync_hooks:
-                _pre_sync_hooks[function.__module__] = []
-            _pre_sync_hooks[function.__module__].append(function)
+            if plugin_name not in _pre_sync_hooks:
+                _pre_sync_hooks[plugin_name] = []
+            _pre_sync_hooks[plugin_name].append(function)
         except Exception as e:
             from meerschaum.utils.warnings import warn
             warn(e)
@@ -182,9 +179,10 @@ def post_sync_hook(
     """
     with _locks['_post_sync_hooks']:
         try:
-            if function.__module__ not in _post_sync_hooks:
-                _post_sync_hooks[function.__module__] = []
-            _post_sync_hooks[function.__module__].append(function)
+            plugin_name = _get_parent_plugin(2)
+            if plugin_name not in _post_sync_hooks:
+                _post_sync_hooks[plugin_name] = []
+            _post_sync_hooks[plugin_name].append(function)
         except Exception as e:
             from meerschaum.utils.warnings import warn
             warn(e)
@@ -192,6 +190,7 @@ def post_sync_hook(
 
 
 _plugin_endpoints_to_pages = {}
+_plugins_web_pages = {}
 def web_page(
     page: Union[str, None, Callable[[Any], Any]] = None,
     login_required: bool = True,
@@ -238,11 +237,7 @@ def web_page(
             )
         )
  
-        package_name = _func.__globals__['__name__']
-        plugin_name = (
-            package_name.split('.')[1]
-            if package_name.startswith('plugins.') else None
-        )
+        plugin_name = _get_parent_plugin(2)
         page_group = page_group or plugin_name
         if page_group not in _plugin_endpoints_to_pages:
             _plugin_endpoints_to_pages[page_group] = {}
@@ -252,6 +247,9 @@ def web_page(
             'skip_navbar': skip_navbar,
             'page_key': page_key,
         }
+        if plugin_name not in _plugins_web_pages:
+            _plugins_web_pages[plugin_name] = []
+        _plugins_web_pages[plugin_name].append(_func)
         return wrapper
 
     if callable(page):
@@ -270,10 +268,11 @@ def dash_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
     Execute the function when starting the Dash application.
     """
     with _locks['_dash_plugins']:
+        plugin_name = _get_parent_plugin(2)
         try:
-            if function.__module__ not in _dash_plugins:
-                _dash_plugins[function.__module__] = []
-            _dash_plugins[function.__module__].append(function)
+            if plugin_name not in _dash_plugins:
+                _dash_plugins[plugin_name] = []
+            _dash_plugins[plugin_name].append(function)
         except Exception as e:
             from meerschaum.utils.warnings import warn
             warn(e)
@@ -731,8 +730,6 @@ def unload_custom_actions(plugins: Optional[List[str]] = None, debug: bool = Fal
         _custom_actions_plugins,
         _plugins_actions,
     )
-    if debug:
-        from meerschaum.utils.warnings import dprint
 
     plugins = plugins or list(_plugins_actions.keys())
 
@@ -755,6 +752,7 @@ def unload_plugins(
     """
     import sys
     from meerschaum.config.paths import PLUGINS_RESOURCES_PATH, PLUGINS_INJECTED_RESOURCES_PATH
+    from meerschaum.connectors import unload_plugin_connectors
     if debug:
         from meerschaum.utils.warnings import dprint
 
@@ -763,6 +761,7 @@ def unload_plugins(
 
     plugins = plugins or get_plugins_names()
     unload_custom_actions(plugins, debug=debug)
+    unload_plugin_connectors(plugins, debug=debug)
 
     module_prefix = f"{PLUGINS_RESOURCES_PATH.stem}."
     loaded_modules = [mod_name for mod_name in sys.modules if mod_name.startswith(module_prefix)]
@@ -772,6 +771,29 @@ def unload_plugins(
             if mod_name[len(PLUGINS_RESOURCES_PATH.stem):].startswith(plugin_name):
                 _ = sys.modules.pop(mod_name, None)
 
+        ### Unload sync hooks.
+        _ = _pre_sync_hooks.pop(plugin_name, None)
+        _ = _post_sync_hooks.pop(plugin_name, None)
+
+        ### Unload API endpoints and pages.
+        _ = _dash_plugins.pop(plugin_name, None)
+        web_page_funcs = _plugins_web_pages.pop(plugin_name, None) or []
+        page_groups_to_pop = []
+        for page_group, page_functions in _plugin_endpoints_to_pages.items():
+            page_functions_to_pop = [
+                page_str
+                for page_str, page_payload in page_functions.items()
+                if page_payload.get('function', None) in web_page_funcs
+            ]
+            for page_str in page_functions_to_pop:
+                page_functions.pop(page_str, None)
+            if not page_functions:
+                page_groups_to_pop.append(page_group)
+        
+        for page_group in page_groups_to_pop:
+            _plugin_endpoints_to_pages.pop(page_group, None)
+
+        ### Remove all but injected symlinks.
         if remove_symlinks:
             dir_symlink_path = PLUGINS_RESOURCES_PATH / plugin_name
             dir_symlink_injected_path = PLUGINS_INJECTED_RESOURCES_PATH / plugin_name
@@ -944,6 +966,9 @@ def _get_parent_plugin(stacklevel: int = 1) -> Union[str, None]:
     import inspect
     try:
         parent_globals = inspect.stack()[stacklevel][0].f_globals
-        return parent_globals['__name__'].replace('plugins.', '').split('.')[0]
+        global_name = parent_globals.get('__name__', '')
+        if global_name.startswith('meerschaum.'):
+            return None
+        return global_name.replace('plugins.', '').split('.')[0]
     except Exception:
         return None

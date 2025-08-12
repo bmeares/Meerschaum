@@ -346,10 +346,10 @@ def _api_start(
     env_text = ''
     for key, val in env_dict.items():
         value = str(
-            json.dumps(val, default=json_serialize_value)
+            json.dumps(val, default=json_serialize_value, separators=(',', ':'))
             if isinstance(val, (dict))
             else val
-        ).replace('\\', '\\\\').replace("'", "'\\''")
+        ).replace('\\', '\\\\').replace("'", "\\'")
         env_text += f"{key}='{value}'\n"
     with open(uvicorn_env_path, 'w+', encoding='utf-8') as f:
         if debug:
