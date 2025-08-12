@@ -431,9 +431,9 @@ def _start_webterm(
     from meerschaum.utils.warnings import info
 
     if host is None:
-        host = mrsm.get_config('meerschaum', 'webterm', 'host')
+        host = mrsm.get_config('api', 'webterm', 'host')
     if port is None:
-        port = mrsm.get_config('meerschaum', 'webterm', 'port')
+        port = mrsm.get_config('api', 'webterm', 'port')
     if sysargs is None:
         sysargs = ['start', 'webterm']
     session_id = 'mrsm'

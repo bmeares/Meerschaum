@@ -15,7 +15,7 @@ import sys
 import copy
 import contextlib
 
-from meerschaum.utils.typing import Any, Dict, Optional
+from meerschaum.utils.typing import Any, Dict, Optional, Union
 from meerschaum.utils.threading import RLock
 
 from meerschaum.config._version import __version__
@@ -329,7 +329,7 @@ def write_plugin_config(
 
 
 @contextlib.contextmanager
-def replace_config(config_: Dict[str, Any]):
+def replace_config(config_: Union[Dict[str, Any], None]):
     """
     Temporarily override the Meerschaum config dictionary.
 
@@ -338,6 +338,12 @@ def replace_config(config_: Dict[str, Any]):
     config_: Dict[str, Any]
         The new config dictionary to temporarily replace the canonical `config`.
     """
+    if config_ is None:
+        try:
+            yield
+        finally:
+            return
+
     global _backup_config, _allow_write_missing
 
     _backup_config = _config()

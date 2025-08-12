@@ -172,7 +172,7 @@ def get_env_vars(env: Optional[Dict[str, Any]] = None) -> List[str]:
 
 
 @contextlib.contextmanager
-def replace_env(env: Dict[str, Any]):
+def replace_env(env: Union[Dict[str, Any], None]):
     """
     Temporarily replace environment variables and current configuration.
 
@@ -181,6 +181,12 @@ def replace_env(env: Dict[str, Any]):
     env: Dict[str, Any]
         The new environment dictionary to be patched on `os.environ`.
     """
+    if env is None:
+        try:
+            yield
+        finally:
+            return
+
     from meerschaum.config import _config, set_config
     from meerschaum.config.paths import (
         set_root,
