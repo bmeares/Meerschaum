@@ -407,9 +407,6 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
             for item in os.listdir(PLUGINS_INJECTED_RESOURCES_PATH)
             if is_symlink(_injected_symlink := (PLUGINS_INJECTED_RESOURCES_PATH / item))
         }
-        for plugins_path in PLUGINS_DIR_PATHS:
-            if not plugins_path.exists():
-                plugins_path.mkdir(exist_ok=True, parents=True)
         plugins_to_be_symlinked = list(flatten_list(
             [
                 [
@@ -420,6 +417,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                     ) and (item not in ('__pycache__', '__init__.py'))
                 ]
                 for plugins_path in PLUGINS_DIR_PATHS
+                if plugins_path.exists()
             ]
         ))
         plugins_to_be_symlinked.extend(packaged_plugin_paths)

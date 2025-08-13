@@ -377,48 +377,48 @@ def accordion_items_from_pipe(
                         html.Th(
                             html.Span(
                                 "Key",
-                                id={'type': 'key-table-header', 'id': pipe_meta_str},
+                                id={'type': 'key-table-header', 'index': pipe_meta_str},
                                 style={"textDecoration": "underline", "cursor": "pointer"},
                             ),
                         ),
                         html.Th(
                             html.Span(
                                 "Column",
-                                id={'type': 'column-table-header', 'id': pipe_meta_str},
+                                id={'type': 'column-table-header', 'index': pipe_meta_str},
                                 style={"textDecoration": "underline", "cursor": "pointer"},
                             ),
                         ),
                         html.Th(
                             html.Span(
                                 "Index",
-                                id={'type': 'index-table-header', 'id': pipe_meta_str},
+                                id={'type': 'index-table-header', 'index': pipe_meta_str},
                                 style={"textDecoration": "underline", "cursor": "pointer"},
                             ),
                         ),
                         html.Th(
                             html.Span(
                                 "Is Composite",
-                                id={'type': 'is-composite-table-header', 'id': pipe_meta_str},
+                                id={'type': 'is-composite-table-header', 'index': pipe_meta_str},
                                 style={"textDecoration": "underline", "cursor": "pointer"},
                             ),
                         ),
                         dbc.Tooltip(
                             "Unique reference name for the index "
                             "(e.g. `datetime` for the range axis)",
-                            target={'type': 'key-table-header', 'id': pipe_meta_str},
+                            target={'type': 'key-table-header', 'index': pipe_meta_str},
                         ),
                         dbc.Tooltip(
                             "The actual column (field name) in the target dataset.",
-                            target={'type': 'column-table-header', 'id': pipe_meta_str},
+                            target={'type': 'column-table-header', 'index': pipe_meta_str},
                         ),
                         dbc.Tooltip(
                             "The name of the index created on the given columns.",
-                            target={'type': 'index-table-header', 'id': pipe_meta_str},
+                            target={'type': 'index-table-header', 'index': pipe_meta_str},
                         ),
                         dbc.Tooltip(
                             "Whether the column is used in the composite primary key "
                             "to determine updates.",
-                            target={'type': 'is-composite-table-header', 'id': pipe_meta_str},
+                            target={'type': 'is-composite-table-header', 'index': pipe_meta_str},
                         ),
                     ]
                 )
@@ -483,9 +483,14 @@ def accordion_items_from_pipe(
                 ])
             )
 
-        items_bodies['overview'] = dbc.Table(
-            overview_header + [html.Tbody(overview_rows)],
-            bordered=False, hover=True, striped=False,
+        items_bodies['overview'] = html.Div(
+            dbc.Table(
+                overview_header + [html.Tbody(overview_rows)],
+                bordered=False,
+                hover=True,
+                striped=False,
+            ),
+            style={'overflowX': 'auto'},
         )
 
     if 'stats' in active_items:
@@ -497,17 +502,13 @@ def accordion_items_from_pipe(
                 (newest_time - oldest_time) if newest_time is not None and oldest_time is not None
                 else None
             )
-            rowcount = pipe.get_rowcount(debug=debug)
         except Exception:
             oldest_time = None
             newest_time = None
             interval = None
-            rowcount = None
 
         stats_rows = []
-        if rowcount is not None:
-            stats_rows.append(html.Tr([html.Td("Row Count"), html.Td(f"{rowcount:,}")]))
-        if interval is not None:
+        if interval is not None and not isinstance(interval, int):
             stats_rows.append(
                 html.Tr([html.Td("Timespan"), html.Td(humanfriendly.format_timespan(interval))])
             )
@@ -516,7 +517,39 @@ def accordion_items_from_pipe(
         if newest_time is not None:
             stats_rows.append(html.Tr([html.Td("Newest time"), html.Td(str(newest_time))]))
 
-        items_bodies['stats'] = dbc.Table(stats_header + [html.Tbody(stats_rows)], hover=True)
+        precision = pipe.precision
+        if precision:
+            stats_rows.append(
+                html.Tr([
+                    html.Td("Precision"),
+                    html.Td(str(precision.get('interval', 1)) + ' ' + str(precision.get('unit', 'unit')))
+                ])
+            )
+
+        stats_rows.append(
+            html.Tr([
+                html.Td("Row count"),
+                html.Td(
+                    html.Div(
+                        dbc.Button(
+                            "Calculate",
+                            color='link',
+                            size='sm',
+                            style={'text-decoration': 'none'},
+                            id={'type': 'calculate-rowcount-button', 'index': pipe_meta_str},
+                        )
+                        if pipe.exists(debug=debug)
+                        else html.Pre('0')
+                    ),
+                    id={'type': 'calculate-rowcount-div', 'index': pipe_meta_str},
+                )
+            ])
+        )
+
+        items_bodies['stats'] = html.Div(
+            dbc.Table(stats_header + [html.Tbody(stats_rows)], hover=True),
+            style={'overflowX': 'auto'},
+        )
 
     if 'columns' in active_items:
         try:
@@ -546,7 +579,7 @@ def accordion_items_from_pipe(
             mode='norm',
             tabSize=4,
             theme='twilight',
-            id={'type': 'parameters-editor', 'index': json.dumps(pipe.meta)},
+            id={'type': 'parameters-editor', 'index': pipe_meta_str},
             width='100%',
             height='500px',
             readOnly=False,
@@ -558,19 +591,19 @@ def accordion_items_from_pipe(
         )
         update_parameters_button = dbc.Button(
             "Update",
-            id={'type': 'update-parameters-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'update-parameters-button', 'index': pipe_meta_str},
         )
 
         as_yaml_button = dbc.Button(
             "YAML",
-            id={'type': 'parameters-as-yaml-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'parameters-as-yaml-button', 'index': pipe_meta_str},
             color='link',
             size='sm',
             style={'text-decoration': 'none'},
         )
         as_json_button = dbc.Button(
             "JSON",
-            id={'type': 'parameters-as-json-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'parameters-as-json-button', 'index': pipe_meta_str},
             color='link',
             size='sm',
             style={'text-decoration': 'none', 'margin-left': '10px'},
@@ -596,7 +629,7 @@ def accordion_items_from_pipe(
                         html.Div(
                             id={
                                 'type': 'update-parameters-success-div',
-                                'index': json.dumps(pipe.meta),
+                                'index': pipe_meta_str,
                             }
                         )
                     ],
@@ -640,7 +673,7 @@ def accordion_items_from_pipe(
             mode='sql',
             tabSize=4,
             theme='twilight',
-            id={'type': 'sql-editor', 'index': json.dumps(pipe.meta)},
+            id={'type': 'sql-editor', 'index': pipe_meta_str},
             width='100%',
             height='500px',
             readOnly=False,
@@ -652,7 +685,7 @@ def accordion_items_from_pipe(
         )
         update_sql_button = dbc.Button(
             "Update",
-            id={'type': 'update-sql-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'update-sql-button', 'index': pipe_meta_str},
         )
         items_bodies['sql'] = html.Div([
             sql_editor,
@@ -661,7 +694,7 @@ def accordion_items_from_pipe(
                 dbc.Col([update_sql_button], width=2),
                 dbc.Col([
                     html.Div(
-                        id={'type': 'update-sql-success-div', 'index': json.dumps(pipe.meta)}
+                        id={'type': 'update-sql-success-div', 'index': pipe_meta_str}
                     )
                 ],
                 width=True,
@@ -683,7 +716,7 @@ def accordion_items_from_pipe(
             mode='norm',
             tabSize=4,
             theme='twilight',
-            id={'type': 'query-editor', 'index': json.dumps(pipe.meta)},
+            id={'type': 'query-editor', 'index': pipe_meta_str},
             width='100%',
             height='200px',
             readOnly=False,
@@ -695,17 +728,17 @@ def accordion_items_from_pipe(
         )
         query_data_button = dbc.Button(
             "Query",
-            id={'type': 'query-data-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'query-data-button', 'index': pipe_meta_str},
         )
 
         begin_end_input_group = dbc.InputGroup(
             [
                 dbc.Input(
-                    id={'type': 'query-data-begin-input', 'index': json.dumps(pipe.meta)},
+                    id={'type': 'query-data-begin-input', 'index': pipe_meta_str},
                     placeholder="Begin",
                 ),
                 dbc.Input(
-                    id={'type': 'query-data-end-input', 'index': json.dumps(pipe.meta)},
+                    id={'type': 'query-data-end-input', 'index': pipe_meta_str},
                     placeholder="End",
                 ),
             ],
@@ -719,9 +752,9 @@ def accordion_items_from_pipe(
             value=10,
             step=1,
             placeholder="Limit",
-            id={'type': 'limit-input', 'index': json.dumps(pipe.meta)},
+            id={'type': 'limit-input', 'index': pipe_meta_str},
         )
-        query_result_div = html.Div(id={'type': 'query-result-div', 'index': json.dumps(pipe.meta)})
+        query_result_div = html.Div(id={'type': 'query-result-div', 'index': pipe_meta_str})
 
         items_bodies['query-data'] = html.Div([
             query_editor,
@@ -746,7 +779,7 @@ def accordion_items_from_pipe(
             mode = 'norm',
             tabSize = 4,
             theme = 'twilight',
-            id = {'type': 'sync-editor', 'index': json.dumps(pipe.meta)},
+            id = {'type': 'sync-editor', 'index': pipe_meta_str},
             width = '100%',
             height = '500px',
             readOnly = False,
@@ -759,14 +792,14 @@ def accordion_items_from_pipe(
 
         sync_as_json_button = dbc.Button(
             "JSON",
-            id={'type': 'sync-as-json-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'sync-as-json-button', 'index': pipe_meta_str},
             color='link',
             size='sm',
             style={'text-decoration': 'none', 'margin-left': '10px'},
         )
         sync_as_lines_button = dbc.Button(
             "Lines",
-            id={'type': 'sync-as-lines-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'sync-as-lines-button', 'index': pipe_meta_str},
             color='link',
             size='sm',
             style={'text-decoration': 'none', 'margin-left': '10px'},
@@ -774,9 +807,9 @@ def accordion_items_from_pipe(
 
         update_sync_button = dbc.Button(
             "Sync",
-            id = {'type': 'update-sync-button', 'index': json.dumps(pipe.meta)},
+            id = {'type': 'update-sync-button', 'index': pipe_meta_str},
         )
-        sync_success_div = html.Div(id={'type': 'sync-success-div', 'index': json.dumps(pipe.meta)})
+        sync_success_div = html.Div(id={'type': 'sync-success-div', 'index': pipe_meta_str})
         items_bodies['sync-data'] = html.Div([
             sync_editor,
             html.Br(),

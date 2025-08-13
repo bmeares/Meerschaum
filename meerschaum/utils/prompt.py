@@ -278,8 +278,9 @@ def choose(
     noask = check_noask(noask)
 
     ### Handle empty choices.
-    if len(choices) == 0:
-        _warn(f"No available choices. Returning default value '{default}'.", stacklevel=3)
+    if not choices:
+        if warn:
+            _warn(f"No available choices. Returning default value '{default}'.", stacklevel=3)
         return default
 
     ### If the default case is to include multiple answers, allow for multiple inputs.
@@ -292,18 +293,20 @@ def choose(
             i, c = c
         choices_indices[i] = c
 
-    choices_values_indices = {
-        v: k
-        for k, v in choices_indices.items()
-    }
+    choices_values_indices = {v: k for k, v in choices_indices.items()}
+    ordered_keys = list(choices_indices.keys())
+    numeric_map = {str(i): key for i, key in enumerate(ordered_keys, 1)}
 
     def _enforce_default(d):
-        if d is not None and d not in choices and d not in choices_indices and warn:
-            _warn(
-                f"Default choice '{default}' is not contained in the choices {choices}. "
-                + "Setting numeric = False.",
-                stacklevel = 3
-            )
+        if d is None:
+            return True
+        if d not in choices_values_indices and d not in choices_indices:
+            if warn:
+                _warn(
+                    f"Default choice '{d}' is not contained in the choices. "
+                    + "Setting numeric = False.",
+                    stacklevel=3
+                )
             return False
         return True
 
@@ -313,180 +316,141 @@ def choose(
             numeric = False
             break
 
-    _default = default
-    _choices = list(choices_indices.values())
+    _choices = (
+        [str(k) for k in choices_indices] if numeric
+        else list(choices_indices.values())
+    )
     if multiple:
         question += f"\n    Enter your choices, separated by '{delimiter}'.\n"
 
     altered_choices = {}
-    altered_indices = {}
-    altered_default_indices = {}
-    delim_replacement = '_' if delimiter != '_' else '-'
-    can_strip_start_spaces, can_strip_end_spaces = True, True
-    for i, c in choices_indices.items():
-        if isinstance(c, tuple):
-            key, c = c
-        if can_strip_start_spaces and c.startswith(' '):
-            can_strip_start_spaces = False
-        if can_strip_end_spaces and c.endswith(' '):
-            can_strip_end_spaces = False
-
-    if multiple:
-        ### Check if the defaults have the delimiter.
-        for i, d in enumerate(default if isinstance(default, list) else [default], start=1):
-            if d is None or delimiter not in d:
-                continue
-            new_d = d.replace(delimiter, delim_replacement)
-            altered_choices[new_d] = d
-            altered_default_indices[i] = new_d
-        for i, new_d in altered_default_indices.items():
-            if not isinstance(default, list):
-                default = new_d
-                break
-            default[i] = new_d
-
+    if multiple and not numeric:
+        delim_replacement = '_' if delimiter != '_' else '-'
         ### Check if the choices have the delimiter.
         for i, c in choices_indices.items():
-            if delimiter in c and not numeric and warn:
+            if delimiter not in c:
+                continue
+            if warn:
                 _warn(
                     f"The delimiter '{delimiter}' is contained within choice '{c}'.\n"
                     + f"Replacing the string '{delimiter}' with '{delim_replacement}' in "
                     + "the choice for correctly parsing input (will be replaced upon returning the prompt).",
-                    stacklevel = 3,
+                    stacklevel=3,
                 )
-                new_c = c.replace(delimiter, delim_replacement)
-                altered_choices[new_c] = c
-                altered_indices[i] = new_c
-        for i, new_c in altered_indices.items():
+            new_c = c.replace(delimiter, delim_replacement)
+            altered_choices[new_c] = c
             choices_indices[i] = new_c
-        default = delimiter.join(default) if isinstance(default, list) else default
 
     question_options = []
+    default_tuple = None
     if numeric:
-        _choices = [str(i) for i, c in enumerate(choices, start=1)]
-        _default = ''
+        _default_prompt_str = ''
         if default is not None:
-            for d in (default.split(delimiter) if multiple else [default]):
-                if d not in choices and d in choices_indices:
-                    d_index = d
-                    d_value = choices_indices[d]
-                    for _i, _option in enumerate(choices, start=1):
-                        if (
-                            isinstance(_option, tuple) and (
-                                _option[1] == d_value
-                                or
-                                _option[0] == d_index
-                            )
-                        ) or d_index == _i:
-                            d = _option
+            default_list = default if isinstance(default, list) else [default]
+            if multiple and isinstance(default, str):
+                default_list = default.split(delimiter)
 
-                _d = str(choices.index(d) + 1)
-                _default += _d + delimiter
-        _default = _default[:-1 * len(delimiter)]
-        #  question += '\n'
+            _default_indices = []
+            for d in default_list:
+                key = None
+                if d in choices_values_indices:  # is a value
+                    key = choices_values_indices[d]
+                elif d in choices_indices:  # is an index
+                    key = d
+
+                if key in ordered_keys:
+                    _default_indices.append(str(ordered_keys.index(key) + 1))
+
+            _default_prompt_str = delimiter.join(_default_indices)
+        
         choices_digits = len(str(len(choices)))
-        for i, c in choices_indices.items():
+        for choice_ix, c in enumerate(choices_indices.values(), start=1):
             question_options.append(
-                f"  {i}. "
-                + (" " * (choices_digits - len(str(i))))
+                f"  {choice_ix}. "
+                + (" " * (choices_digits - len(str(choice_ix))))
                 + f"{c}\n"
             )
-        default_tuple = (_default, default) if default is not None else None
+        default_tuple = (_default_prompt_str, default) if default is not None else None
     else:
         default_tuple = default
-        #  question += '\n'
         for c in choices_indices.values():
-            question_options.append(f"{c}\n")
+            question_options.append(f"  • {c}\n")
 
     if 'completer' not in kw:
         WordCompleter = attempt_import('prompt_toolkit.completion', lazy=False).WordCompleter
         kw['completer'] = WordCompleter(
-            choices_indices.values(),
+            [str(v) for v in choices_indices.values()] + [str(i) for i in choices_indices],
             sentence=True,
         )
 
-    valid = False
-    while not valid:
+    answers = []
+    while not answers:
         print_options(question_options, header='')
         answer = prompt(
             question,
-            icon = icon,
-            default = default_tuple,
-            noask = noask,
+            icon=icon,
+            default=default_tuple,
+            noask=noask,
             **kw
         )
+        if not answer and default is not None:
+            answer = default if isinstance(default, str) else delimiter.join(default)
+
         if not answer:
+            if warn:
+                _warn("Please pick a valid choice.", stack=False)
             continue
-        ### Split along the delimiter.
-        _answers = [answer] if not multiple else [a for a in answer.split(delimiter)]
 
-        ### Remove trailing spaces if possible.
-        _answers = [(_a.rstrip(' ') if can_strip_end_spaces else _a) for _a in _answers]
+        _answers = [answer] if not multiple else [a.strip() for a in answer.split(delimiter)]
+        _answers = [a for a in _answers if a]
 
-        ### Remove leading spaces if possible.
-        _answers = [(_a.lstrip(' ') if can_strip_start_spaces else _a) for _a in _answers]
-
-        ### Remove empty strings.
-        _answers = [_a for _a in _answers if _a]
-
-        ### Substitute values for indices for numeric.
         if numeric:
-            _answers = [
-                (
-                    str(choices_values_indices[_a])
-                    if _a in choices_values_indices
-                    else _a
-                )
-                for _a in _answers
-            ]
+            _raw_answers = list(_answers)
+            _answers = []
+            for _a in _raw_answers:
+                if _a in choices_values_indices:
+                    _answers.append(str(choices_values_indices[_a]))
+                elif _a in numeric_map:
+                    _answers.append(str(numeric_map[_a]))
+                else:
+                    _answers.append(_a)
 
-        if not multiple and _answers:
-            answer = str(_answers[0])
+        _processed_answers = [altered_choices.get(a, a) for a in _answers]
 
-        if multiple and len(_answers) == 0:
-            _answers = default_tuple if isinstance(default_tuple, list) else [default_tuple]
-        answers = [altered_choices.get(a, a) for a in _answers]
+        valid_answers = []
+        for a in _processed_answers:
+            if a in _choices:
+                valid_answers.append(a)
 
-        valid = (len(answers) > 1 or not (len(answers) == 1 and answers[0] is None))
-        for a in answers:
-            if (
-                a not in {_original for _new, _original in altered_choices.items()}
-                and a not in _choices
-                and a != default
-                and not noask
-            ):
-                valid = False
-                break
-        if valid:
-            break
-        if warn:
-            _warn("Please pick a valid choice.", stack=False)
+        if len(valid_answers) != len(_processed_answers):
+            if warn:
+                _warn("Please pick a valid choice.", stack=False)
+            continue
+        answers = valid_answers
+
+    def get_key(key_str):
+        try:
+            return int(key_str)
+        except (ValueError, TypeError):
+            return key_str
 
     if not multiple:
+        answer = answers[0]
         if not numeric:
-            return answer
-        try:
-            _answer = choices[int(answer) - 1]
-            if as_indices and isinstance(_answer, tuple):
-                return _answer[0]
-            return _answer
-        except Exception:
-            _warn(f"Could not cast answer '{answer}' to an integer.", stacklevel=3)
+            return choices_values_indices.get(answer, answer) if as_indices else answer
+        
+        key = get_key(answer)
+        return key if as_indices else choices_indices[key]
 
     if not numeric:
-        return answers
+        return [choices_values_indices.get(a, a) for a in answers] if as_indices else answers
 
-    _answers = []
+    final_answers = []
     for a in answers:
-        try:
-            _answer = choices[int(a) - 1]
-            _answer_to_return = altered_choices.get(_answer, _answer)
-            if isinstance(_answer_to_return, tuple) and as_indices:
-                _answer_to_return = _answer_to_return[0]
-            _answers.append(_answer_to_return)
-        except Exception:
-            _warn(f"Could not cast answer '{a}' to an integer.", stacklevel=3)
-    return _answers
+        key = get_key(a)
+        final_answers.append(key if as_indices else choices_indices[key])
+    return final_answers
+
 
 
 def get_password(

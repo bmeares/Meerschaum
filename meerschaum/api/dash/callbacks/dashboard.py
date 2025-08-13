@@ -1193,3 +1193,32 @@ def toggle_pages_offcanvas(n_clicks: Optional[int], is_open: bool):
     if n_clicks:
         return not is_open, pages_children
     return is_open, pages_children
+
+
+@dash_app.callback(
+    Output({'type': 'calculate-rowcount-div', 'index': MATCH}, 'children'),
+    Input({'type': 'calculate-rowcount-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True,
+)
+def calculate_rowcount_button_click(n_clicks: int):
+    """
+    Calculate the rowcount for the pipe.
+    """
+    if not n_clicks:
+        raise PreventUpdate
+
+    triggered = dash.callback_context.triggered
+    if triggered[0]['value'] is None:
+        raise PreventUpdate
+
+    pipe = pipe_from_ctx(triggered, 'n_clicks')
+    if pipe is None:
+        raise PreventUpdate
+
+    try:
+        rowcount = pipe.get_rowcount(debug=debug)
+        return html.Pre(f"{rowcount:,}")
+    except Exception as e:
+        return (
+            alert_from_success_tuple((False, f"Failed to calculate row count: {e}"))
+        )
