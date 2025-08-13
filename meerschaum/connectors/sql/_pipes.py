@@ -465,7 +465,7 @@ def get_pipe_index_names(self, pipe: mrsm.Pipe) -> Dict[str, str]:
     -------
     A dictionary of index keys to column names.
     """
-    from meerschaum.utils.sql import DEFAULT_SCHEMA_FLAVORS
+    from meerschaum.utils.sql import DEFAULT_SCHEMA_FLAVORS, truncate_item_name
     _parameters = pipe.parameters
     _index_template = _parameters.get('index_template', "IX_{schema_str}{target}_{column_names}")
     _schema = self.get_pipe_schema(pipe)
@@ -506,7 +506,7 @@ def get_pipe_index_names(self, pipe: mrsm.Pipe) -> Dict[str, str]:
             continue
         seen_index_names[index_name] = ix
     return {
-        ix: index_name
+        ix: truncate_item_name(index_name, flavor=self.flavor)
         for index_name, ix in seen_index_names.items()
     }
 
