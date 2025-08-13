@@ -363,4 +363,5 @@ __pdoc__ = {
 }
 for a in actions:
     __pdoc__[a] = False
-meerschaum.plugins.load_plugins()
+
+meerschaum.plugins.load_plugins(skip_if_loaded=True)

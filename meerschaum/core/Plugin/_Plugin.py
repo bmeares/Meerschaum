@@ -365,6 +365,10 @@ class Plugin:
         ### Determine where to permanently store the new plugin.
         plugin_installation_dir_path = PLUGINS_DIR_PATHS[0]
         for path in PLUGINS_DIR_PATHS:
+            if not path.exists():
+                warn(f"Plugins path does not exist: {path}", stack=False)
+                continue
+
             files_in_plugins_dir = os.listdir(path)
             if (
                 self.name in files_in_plugins_dir
