@@ -12,7 +12,7 @@ import shlex
 import shutil
 import traceback
 import signal
-from typing import Optional, Dict, List, Any, Union
+from typing import Optional, Dict, List, Any
 
 import meerschaum as mrsm
 
@@ -42,7 +42,7 @@ def entry_with_daemon(
     from meerschaum._internal.arguments import split_pipeline_sysargs, split_chained_sysargs
     daemon_is_ready = True
 
-    load_plugins()
+    load_plugins(skip_if_loaded=True)
 
     found_acceptable_prefix = False
     found_unacceptable_prefix = False

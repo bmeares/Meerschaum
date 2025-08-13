@@ -8,5 +8,8 @@ Import the Shell class definition
 
 from meerschaum._internal.shell.Shell import Shell
 from meerschaum._internal.shell.Shell import (
-    default_action_completer, _completer_wrapper, _insert_shell_actions,
+    default_action_completer,
+    _completer_wrapper,
+    _insert_shell_actions,
+    _remove_shell_actions,
 )

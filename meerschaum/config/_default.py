@@ -131,6 +131,7 @@ default_system_config = {
             'stop daemon',
             'show daemon',
             'restart daemon',
+            'reload',
             'start worker',
             'start job',
             'python',

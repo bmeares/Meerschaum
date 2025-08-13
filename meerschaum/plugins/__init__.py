@@ -62,6 +62,7 @@ def make_action(
     deactivate: bool = True,
     debug: bool = False,
     daemon: bool = True,
+    skip_if_loaded: bool = True,
     _plugin_name: Optional[str] = None,
 ) -> Callable[[Any], Any]:
     """
@@ -91,7 +92,13 @@ def make_action(
     """
     def _decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
         from meerschaum.actions import actions, _custom_actions_plugins, _plugins_actions
-        plugin_name = _get_parent_plugin()
+        if skip_if_loaded and func.__name__ in actions:
+            return func
+
+        from meerschaum.config.paths import PLUGINS_RESOURCES_PATH
+        plugin_name = (
+            func.__name__.split(f"{PLUGINS_RESOURCES_PATH.stem}.", maxsplit=1)[-1].split('.')[0]
+        )
         plugin = Plugin(plugin_name) if plugin_name else None
 
         if debug:
@@ -110,7 +117,9 @@ def make_action(
             _actions_daemon_enabled[func.__name__] = False
         return func
 
-    return _decorator(function) if callable(function) else _decorator
+    if function is None:
+        return _decorator
+    return _decorator(function)
 
 
 def pre_sync_hook(
@@ -679,13 +688,19 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
         return tuple(attrs_to_return)
 
 
+_loaded_plugins: bool = False
 def load_plugins(
+    skip_if_loaded: bool = True,
     shell: bool = False,
     debug: bool = False,
 ) -> None:
     """
     Import Meerschaum plugins and update the actions dictionary.
     """
+    global _loaded_plugins
+    if skip_if_loaded and _loaded_plugins:
+        return
+
     from inspect import isfunction, getmembers
     from meerschaum.actions import __all__ as _all, modules
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
@@ -716,7 +731,14 @@ def load_plugins(
             if not isfunction(func):
                 continue
             if name == module.__name__.split('.')[-1]:
-                make_action(func, **{'shell': shell, 'debug': debug}, _plugin_name=name)
+                make_action(
+                    func,
+                    **{'shell': shell, 'debug': debug},
+                    _plugin_name=name,
+                    skip_if_loaded=True,
+                )
+
+    _loaded_plugins = True
 
 
 def unload_custom_actions(plugins: Optional[List[str]] = None, debug: bool = False) -> None:
@@ -728,17 +750,28 @@ def unload_custom_actions(plugins: Optional[List[str]] = None, debug: bool = Fal
         _custom_actions_plugins,
         _plugins_actions,
     )
+    from meerschaum._internal.entry import _shell
+    import meerschaum._internal.shell as shell_pkg
 
     plugins = plugins or list(_plugins_actions.keys())
 
     for plugin in plugins:
         action_names = _plugins_actions.get(plugin, [])
+        actions_to_remove = {
+            action_name: actions.get(action_name, None)
+            for action_name in action_names
+        }
         for action_name in action_names:
             _ = actions.pop(action_name, None)
             _ = _custom_actions_plugins.pop(action_name, None)
             _ = _actions_daemon_enabled.pop(action_name, None)
-        _ = _plugins_actions.pop(plugin, None)
 
+        _ = _plugins_actions.pop(plugin, None)
+        shell_pkg._remove_shell_actions(
+            _shell=_shell,
+            actions=actions_to_remove,
+        )
+    
 
 def unload_plugins(
     plugins: Optional[List[str]] = None,
@@ -748,6 +781,7 @@ def unload_plugins(
     """
     Unload the specified plugins from memory.
     """
+    global _loaded_plugins
     import sys
     from meerschaum.config.paths import PLUGINS_RESOURCES_PATH, PLUGINS_INJECTED_RESOURCES_PATH
     from meerschaum.connectors import unload_plugin_connectors
@@ -756,6 +790,8 @@ def unload_plugins(
 
     if debug:
         dprint(f"Unloading plugins: {plugins}")
+
+    _loaded_plugins = False
 
     plugins = plugins or get_plugins_names()
     unload_custom_actions(plugins, debug=debug)

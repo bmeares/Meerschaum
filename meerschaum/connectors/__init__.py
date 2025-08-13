@@ -354,7 +354,7 @@ def unload_plugin_connectors(
     Unload custom connectors added by plugins.
     """
     from meerschaum.plugins import get_plugins_names
-    global custom_types, _known_custom_types, types, plugins_types
+    global custom_types, _known_custom_types, types, plugins_types, connectors
 
     plugin_names = plugin_names or get_plugins_names()
 
@@ -362,6 +362,7 @@ def unload_plugin_connectors(
         plugin_types = plugins_types.get(plugin_name, [])
         for typ in plugin_types:
             _ = types.pop(typ, None)
+            _ = connectors.pop(typ, None)
             if typ in instance_types:
                 instance_types.remove(typ)
 

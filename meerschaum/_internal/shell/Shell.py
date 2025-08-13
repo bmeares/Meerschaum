@@ -82,6 +82,7 @@ ESCAPED_AND_KEY: str = STATIC_CONFIG['system']['arguments']['escaped_and_key']
 PIPELINE_KEY: str = STATIC_CONFIG['system']['arguments']['pipeline_key']
 ESCAPED_PIPELINE_KEY: str = STATIC_CONFIG['system']['arguments']['escaped_pipeline_key']
 
+
 def _insert_shell_actions(
     _shell: Optional['Shell'] = None,
     actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
@@ -100,6 +101,10 @@ def _insert_shell_actions(
     _shell_class = _shell if _shell is not None else shell_pkg.Shell
 
     for a, f in actions.items():
+        existing_method = getattr(_shell_class, 'do_' + a, None)
+        if existing_method == f:
+            continue
+
         add_method_to_class(
             func = f,
             class_def = _shell_class,
@@ -112,6 +117,35 @@ def _insert_shell_actions(
             _completer = shell_pkg.default_action_completer
         completer = _completer_wrapper(_completer)
         setattr(_shell_class, 'complete_' + a, completer)
+
+
+def _remove_shell_actions(
+    _shell: Optional['Shell'] = None,
+    actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+) -> None:
+    """
+    Remove the actions added to the shell.
+    """
+    import meerschaum._internal.shell as shell_pkg
+    if actions is None:
+        from meerschaum.actions import actions as _actions
+        actions = _actions
+
+    _shell_class = _shell if _shell is not None else shell_pkg.Shell
+
+    for a, f in actions.items():
+        try:
+            delattr(_shell_class, 'do_' + a)
+        except AttributeError:
+            pass
+
+        if a in reserved_completers:
+            continue
+
+        try:
+            delattr(_shell_class, 'complete_' + a)
+        except AttributeError:
+            pass
 
 
 def _completer_wrapper(
@@ -985,7 +1019,7 @@ class Shell(cmd.Cmd):
         show pipes -h
         ```
         """
-        from meerschaum.actions import actions
+        from meerschaum.actions import get_action
         from meerschaum._internal.arguments._parser import parse_help
         from meerschaum._internal.arguments._parse_arguments import parse_line
         import textwrap
@@ -994,12 +1028,15 @@ class Shell(cmd.Cmd):
             del args['action']
             shell_attrs['_actions']['show'](['actions'], **args)
             return ""
+
         if args['action'][0] not in shell_attrs['_actions']:
+            action_func = get_action(args['action'])
             try:
-                print(textwrap.dedent(getattr(self, f"do_{args['action'][0]}").__doc__))
+                print(textwrap.dedent(action_func.__doc__))
             except Exception:
-                print(f"No help on '{args['action'][0]}'.")
+                print(f"No help on '{shlex.join(args['action'])}'.")
             return ""
+
         parse_help(args)
         return ""
 

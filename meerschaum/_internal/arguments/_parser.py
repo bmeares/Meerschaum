@@ -140,7 +140,11 @@ def parse_help(sysargs: Union[List[str], Dict[str, Any]]) -> None:
     ### Check for subactions.
     if len(args['action']) > 1:
         try:
-            subaction = get_subactions(args['action'][0])[args['action'][1]]
+            subactions = get_subactions(args['action'][0])
+            subaction_name = args['action'][1]
+            if subaction_name not in subactions:
+                subaction_name = subaction_name + 's'
+            subaction = subactions[subaction_name]
         except Exception:
             subaction = None
         if subaction is not None:
