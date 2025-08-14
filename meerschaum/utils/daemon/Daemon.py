@@ -283,21 +283,6 @@ class Daemon:
 
         self._setup(allow_dirty_run)
 
-        ### NOTE: The SIGINT handler has been removed so that child processes may handle
-        ###       KeyboardInterrupts themselves.
-        ###       The previous aggressive approach was redundant because of the SIGTERM handler.
-        self._daemon_context = daemon.DaemonContext(
-            pidfile=self.pid_lock,
-            stdout=self.rotating_log,
-            stderr=self.rotating_log,
-            working_directory=os.getcwd(),
-            detach_process=True,
-            files_preserve=list(self.rotating_log.subfile_objects.values()),
-            signal_map={
-                signal.SIGTERM: self._handle_sigterm,
-            },
-        )
-
         _daemons.append(self)
 
         logs_cf = self.properties.get('logs', {})
@@ -313,13 +298,32 @@ class Daemon:
             partial(self.rotating_log.refresh_files, start_interception=write_timestamps),
         )
 
-        if sys.stdin is None:
+        capture_stdin = logs_cf.get('stdin', True)
+
+        ### NOTE: The SIGINT handler has been removed so that child processes may handle
+        ###       KeyboardInterrupts themselves.
+        ###       The previous aggressive approach was redundant because of the SIGTERM handler.
+        self._daemon_context = daemon.DaemonContext(
+            pidfile=self.pid_lock,
+            stdout=self.rotating_log,
+            stderr=self.rotating_log,
+            stdin=(self.stdin_file if capture_stdin else None),
+            working_directory=os.getcwd(),
+            detach_process=True,
+            files_preserve=list(self.rotating_log.subfile_objects.values()),
+            signal_map={
+                signal.SIGTERM: self._handle_sigterm,
+            },
+        )
+
+        if capture_stdin and sys.stdin is None:
             raise OSError("Cannot daemonize without stdin.")
 
         try:
             os.environ['LINES'], os.environ['COLUMNS'] = str(int(lines)), str(int(columns))
             with self._daemon_context:
-                sys.stdin = self.stdin_file
+                if capture_stdin:
+                    sys.stdin = self.stdin_file
                 _ = os.environ.pop(STATIC_CONFIG['environment']['systemd_stdin_path'], None)
                 os.environ[STATIC_CONFIG['environment']['daemon_id']] = self.daemon_id
                 os.environ['PYTHONUNBUFFERED'] = '1'

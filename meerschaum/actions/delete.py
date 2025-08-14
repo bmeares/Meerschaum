@@ -18,7 +18,7 @@ def delete(
     Delete an element.
 
     Command:
-        `delete {config, pipes, plugins, users, connectors, jobs}`
+        `delete {config, pipes, plugins, users, connectors, jobs, venvs}`
 
     """
     from meerschaum.actions import choose_subaction
@@ -159,7 +159,9 @@ def _delete_config(
         answer = yes_no(
             "Are you sure you want to delete the following configuration files?" +
             f"{sep + sep.join([str(p) for p in paths])}\n",
-            default='n', noask=noask, yes=yes
+            default='n',
+            noask=noask,
+            yes=yes,
         )
 
     if answer or force:

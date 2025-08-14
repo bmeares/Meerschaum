@@ -128,6 +128,7 @@ default_system_config = {
         'disallowed_prefixes': [
             'edit',
             'start daemon',
+            'start job',
             'stop daemon',
             'show daemon',
             'restart daemon',
@@ -136,6 +137,7 @@ default_system_config = {
             'start job',
             'python',
             'login',
+            'executor',
             'os ',
             'sh ',
             'start api',
