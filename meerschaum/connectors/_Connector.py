@@ -7,9 +7,11 @@ Define the parent `Connector` class.
 """
 
 from __future__ import annotations
+
 import abc
 import copy
 from meerschaum.utils.typing import Iterable, Optional, Any, Union, List, Dict
+
 
 class InvalidAttributesError(Exception):
     """
@@ -20,6 +22,9 @@ class Connector(metaclass=abc.ABCMeta):
     """
     The base connector class to hold connection attributes.
     """
+
+    IS_INSTANCE: bool = False
+
     def __init__(
         self,
         type: Optional[str] = None,
@@ -70,7 +75,7 @@ class Connector(metaclass=abc.ABCMeta):
         inherit_default: bool = True,
         **kw: Any
     ):
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         from meerschaum.utils.warnings import error
 
         self._attributes = {}
@@ -147,11 +152,10 @@ class Connector(metaclass=abc.ABCMeta):
         ------
         An error if any of the required attributes are missing.
         """
-        from meerschaum.utils.warnings import error, warn
-        from meerschaum.utils.debug import dprint
+        from meerschaum.utils.warnings import error
         from meerschaum.utils.misc import items_str
         if required_attributes is None:
-            required_attributes = ['label']
+            required_attributes = ['type', 'label']
 
         missing_attributes = set()
         for a in required_attributes:
@@ -213,6 +217,8 @@ class Connector(metaclass=abc.ABCMeta):
                 else r'executor$'
             )
             _type = re.sub(suffix_regex, '', self.__class__.__name__.lower())
+            if not _type or _type.lower() == 'instance':
+                raise ValueError("No type could be determined for this connector.")
             self.__dict__['type'] = _type
         return _type
 
@@ -224,8 +230,7 @@ class Connector(metaclass=abc.ABCMeta):
         """
         _label = self.__dict__.get('label', None)
         if _label is None:
-            from meerschaum.config.static import STATIC_CONFIG
+            from meerschaum._internal.static import STATIC_CONFIG
             _label = STATIC_CONFIG['connectors']['default_label']
             self.__dict__['label'] = _label
         return _label
-

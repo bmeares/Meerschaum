@@ -21,7 +21,7 @@ def pipe_r_url(
     pipe: mrsm.Pipe
 ) -> str:
     """Return a relative URL path from a Pipe's keys."""
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     location_key = pipe.location_key
     if location_key is None:
         location_key = '[None]'
@@ -87,7 +87,7 @@ def edit_pipe(
     response = self.patch(
         r_url + '/edit',
         params={'patch': patch, 'instance_keys': self.get_pipe_instance_keys(pipe)},
-        json=pipe.parameters,
+        json=pipe.get_parameters(apply_symlinks=False),
         debug=debug,
     )
     if debug:
@@ -112,7 +112,13 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False
-) -> Union[List[Tuple[str, str, Union[str, None]]]]:
+) -> List[
+        Union[
+            Tuple[str, str, Union[str, None]],
+            Tuple[str, str, Union[str, None], List[str]],
+            Tuple[str, str, Union[str, None], Dict[str, Any]]
+        ]
+    ]:
     """
     Fetch registered Pipes' keys from the API.
     
@@ -142,7 +148,7 @@ def fetch_pipes_keys(
     -------
     A list of tuples containing pipes' keys.
     """
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     if connector_keys is None:
         connector_keys = []
     if metric_keys is None:
@@ -167,6 +173,8 @@ def fetch_pipes_keys(
             debug=debug
         ).json()
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         error(str(e))
 
     if 'detail' in j:
@@ -185,10 +193,11 @@ def sync_pipe(
     """Sync a DataFrame into a Pipe."""
     from decimal import Decimal
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.misc import json_serialize_datetime, items_str, interval_str
+    from meerschaum.utils.dtypes import json_serialize_value
+    from meerschaum.utils.misc import items_str, interval_str
     from meerschaum.config import get_config
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.dataframe import get_numeric_cols, to_json
+    from meerschaum.utils.dataframe import get_special_cols, to_json
     begin = time.perf_counter()
     more_itertools = attempt_import('more_itertools')
     if df is None:
@@ -197,8 +206,10 @@ def sync_pipe(
 
     def get_json_str(c):
         ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
-        if isinstance(c, (dict, list)):
-            return json.dumps(c, default=json_serialize_datetime)
+        if isinstance(c, str):
+            return c
+        if isinstance(c, (dict, list, tuple)):
+            return json.dumps(c, default=json_serialize_value)
         return to_json(c, orient='columns')
 
     df = json.loads(df) if isinstance(df, str) else df
@@ -218,26 +229,6 @@ def sync_pipe(
             else [partition.compute() for partition in df.partitions]
         )
 
-        numeric_cols = get_numeric_cols(df)
-        if numeric_cols:
-            for col in numeric_cols:
-                df[col] = df[col].apply(lambda x: f'{x:f}' if isinstance(x, Decimal) else x)
-            pipe_dtypes = pipe.dtypes
-            new_numeric_cols = [
-                col
-                for col in numeric_cols
-                if pipe_dtypes.get(col, None) != 'numeric'
-            ]
-            pipe.dtypes.update({
-                col: 'numeric'
-                for col in new_numeric_cols
-            })
-            edit_success, edit_msg = pipe.edit(debug=debug)
-            if not edit_success:
-                warn(
-                    "Failed to update new numeric columns "
-                    + f"{items_str(new_numeric_cols)}:\n{edit_msg}"
-                )
     elif isinstance(df, dict):
         ### `_chunks` is a dict of lists of dicts.
         ### e.g. {'a' : [ {'a':[1, 2]}, {'a':[3, 4]} ] }
@@ -313,7 +304,7 @@ def sync_pipe(
 
     success_tuple = True, (
         f"It took {interval_str(timedelta(seconds=(time.perf_counter() - begin)))} "
-        + "to sync {rowcount:,} row"
+        + f"to sync {rowcount:,} row"
         + ('s' if rowcount != 1 else '')
         + f" across {num_success_chunks:,} chunk" + ('s' if num_success_chunks != 1 else '') +
         f" to {pipe}."
@@ -324,7 +315,7 @@ def sync_pipe(
 def delete_pipe(
     self,
     pipe: Optional[mrsm.Pipe] = None,
-    debug: bool = None,        
+    debug: bool = False,
 ) -> SuccessTuple:
     """Delete a Pipe and drop its table."""
     if pipe is None:
@@ -576,7 +567,7 @@ def create_metadata(
     A bool indicating success.
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     r_url = STATIC_CONFIG['api']['endpoints']['metadata']
     response = self.post(r_url, debug=debug)
     if debug:
@@ -663,7 +654,7 @@ def drop_pipe(
     from meerschaum.utils.warnings import error
     from meerschaum.utils.debug import dprint
     if pipe is None:
-        error(f"Pipe cannot be None.")
+        error("Pipe cannot be None.")
     r_url = pipe_r_url(pipe)
     response = self.delete(
         r_url + '/drop',

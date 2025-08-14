@@ -1,20 +1,27 @@
 # 🗄️ Instance Connectors
 
-Instance connectors store pipes' registrations and data in addition to the usual `#!python fetch()` functionality of regular connectors, e.g. the [`#!python SQLConnector`](/reference/connectors/sql-connectors/).
+Instance connectors store pipes' metadata (and may also be used as a source connector, e.g. the [`#!python SQLConnector`](/reference/connectors/sql-connectors/)).
 
-To use your custom connector type as an instance connector, implement the following methods, replacing the pseudocode under the `TODO` comments with your connector's equivalent. See the [`MongoDBConnector`](https://github.com/bmeares/mongodb-connector/blob/main/plugins/mongodb-connector/_pipes.py) for  a specific reference.
+To use your custom connector type as an instance connector, inherit from `InstanceConnector` and implement the following methods (replacing the pseudocode under the `TODO` comments with your connector's equivalent). See the [`MongoDBConnector`](https://github.com/bmeares/mongodb-connector/blob/main/plugins/mongodb-connector/_pipes.py) for a specific reference.
 
-!!! note ""
-    The `#!python SuccessTuple` type annotation is an alias for `Tuple[bool, str]` and may be imported:
+
+!!! example "Inherit from `InstanceConnector`"
+    Your connector class inherits from `InstanceConnector`, a subclass of `Connector` which implements the pipes' methods as an interface.
 
     ```python
-    from meerschaum.utils.typing import SuccessTuple
+    from meerschaum.connectors import InstanceConnector, make_connector
+
+    @make_connector
+    class FooConnector(InstanceConnector):
+        def register_pipe(pipe: mrsm.Pipe, **kwargs) -> mrsm.SuccessTuple:
+            ...
+        ...
     ```
 
 ??? tip "Using the `params` Filter"
     Methods which take the `params` argument ([`get_pipe_data()`](#get_pipe_data), [`get_sync_time()`](#get_sync_time), [`get_backtrack_data()`](#get_backtrack_data)) behave similarly to the filters applied to [`fetch_pipes_keys`](#fetch_pipes_keys).
 
-    The easiest way to support `params` is with [meerschaum.utils.dataframe.query_df()](https://docs.meerschaum.io/meerschaum/utils/dataframe.html#query_df):
+    The easiest way to support `params` is with [`meerschaum.utils.dataframe.query_df()`](https://docs.meerschaum.io/meerschaum/utils/dataframe.html#query_df):
 
     ```python
     from meerschaum.utils.dataframe import query_df, parse_df_datetimes
@@ -49,66 +56,6 @@ To use your custom connector type as an instance connector, implement the follow
     >>> 
     >>> build_query({'a': []})
     {}
-    ```
-
-??? warning "`get_backtrack_data()` Deprecation Notice"
-    As of v1.7.0+, `get_backtrack_data()` was replaced with a generic alternative. Your connector may still override this method:
-
-    ```python
-    def get_backtrack_data(
-        self,
-        pipe: mrsm.Pipe,
-        backtrack_minutes: int = 0,
-        begin: datetime | int | None = None,
-        params: dict[str, Any] | None = None,
-        debug: bool = False,
-        **kwargs: Any
-    ) -> 'pd.DataFrame':
-        """
-        Return the most recent interval of data leading up to `begin` (defaults to the sync time).
-
-        Parameters
-        ----------
-        pipe: mrsm.Pipe,
-            The number of minutes leading up to `begin` from which to search.
-            If `begin` is an integer, then subtract this value from `begin`.
-
-        backtrack_minutes: int, default 0
-            The number of minutes leading up to `begin` from which to search.
-            If `begin` is an integer, then subtract this value from `begin`.
-
-        begin: datetime | int | None, default None
-            The point from which to begin backtracking.
-            If `None`, then use the pipe's sync time (most recent datetime value).
-
-        params: dict[str, Any] | None, default None
-            Additional filter parameters.
-
-        Returns
-        -------
-        A Pandas DataFrame for the interval of size `backtrack_minutes` leading up to `begin`.
-        """
-        from datetime import datetime, timedelta
-
-        if begin is None:
-            begin = pipe.get_sync_time(params=params, debug=debug)
-
-        backtrack_interval = (
-            timedelta(minutes=backtrack_minutes)
-            if isinstance(begin, datetime)
-            else backtrack_minutes
-        )
-
-        if begin is not None:
-            begin = begin - backtrack_interval
-
-        return self.get_pipe_data(
-            pipe,
-            begin = begin,
-            params = params,
-            debug = debug,
-            **kwargs
-        )
     ```
 
 ## `#!python register_pipe()`
@@ -204,18 +151,18 @@ Return the ID tied to the pipe's connector, metric, and location keys.
         pipe: mrsm.Pipe,
         debug: bool = False,
         **kwargs: Any
-    ) -> Union[str, int, None]:
+    ) -> str | int | None:
         """
-        Return the `_id` for the pipe if it exists.
+        Return the ID for the pipe if it exists.
 
         Parameters
         ----------
         pipe: mrsm.Pipe
-            The pipe whose `_id` to fetch.
+            The pipe whose ID to return.
 
         Returns
         -------
-        The `_id` for the pipe's document or `None`.
+        The ID for the pipe or `None`.
         """
         query = {
             'connector_keys': str(pipe.connector_keys),
@@ -223,8 +170,7 @@ Return the ID tied to the pipe's connector, metric, and location keys.
             'location_key': str(pipe.location_key),
         }
         ### TODO fetch the ID mapped to this pipe.
-        # oid = (self.pipes_collection.find_one(query, {'_id': 1}) or {}).get('_id', None)
-        # return str(oid) if oid is not None else None
+        return None
     ```
 
 ## `#!python edit_pipe()`
@@ -374,8 +320,8 @@ The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/mis
         ###   AND connector_keys NOT IN ({nin_ck})
         ###   AND metric_key IN ({in_mk})
         ###   AND metric_key NOT IN ({nin_mk})
-        ###   AND location_key IN (in_lk)
-        ###   AND location_key NOT IN (nin_lk)
+        ###   AND location_key IN ({in_lk})
+        ###   AND location_key NOT IN ({nin_lk})
         ###   AND (parameters->'tags')::JSONB ?| ARRAY[{tags}]
         ###   AND NOT (parameters->'tags')::JSONB ?| ARRAY[{nin_tags}]
         return []
@@ -458,38 +404,36 @@ You may use the built-in method [`pipe.filter_existing()`](https://docs.meerscha
     def sync_pipe(
         self,
         pipe: mrsm.Pipe,
-        df: 'pd.DataFrame' = None,
+        df: 'pd.DataFrame',
         debug: bool = False,
         **kwargs: Any
     ) -> mrsm.SuccessTuple:
         """
-        Upsert new documents into the pipe's collection.
+        Upsert new documents into the pipe's target table.
 
         Parameters
         ----------
         pipe: mrsm.Pipe
             The pipe whose collection should receive the new documents.
 
-        df: Union['pd.DataFrame', Iterator['pd.DataFrame']], default None
+        df: pd.DataFrame
             The data to be synced.
 
         Returns
         -------
         A `SuccessTuple` indicating success.
         """
-        if df is None:
-            return False, f"Received `None`, cannot sync {pipe}."
-
         ### TODO Write the upsert logic for the target table.
         ### `pipe.filter_existing()` is provided for your convenience to
         ### remove duplicates and separate inserts from updates.
+
         unseen_df, update_df, delta_df = pipe.filter_existing(df, debug=debug)
         return True, "Success"
     ```
 
 ### `#!python sync_pipe_inplace()` (optional)
 
-For situations where the source and instance connectors are the same, the method `#!python sync_pipe_inplace()` allows you to bypass loading DataFrames into RAM and instead handle the syncs remotely. See the [`#!python SQLConnector.sync_pipe_inplace()`](https://docs.meerschaum.io/connectors/sql/SQLConnector.html#meerschaum.connectors.sql.SQLConnector.SQLConnector.sync_pipe_inplace) method for reference.
+For situations where the source and instance connectors are the same, the method `#!python sync_pipe_inplace()` allows you to bypass loading DataFrames into RAM and instead handle the syncs remotely. See the [`SQLConnector.sync_pipe_inplace()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.sync_pipe_inplace) method for reference.
 
 ### `#!python create_pipe_indices()` (optional)
 
@@ -592,9 +536,6 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
         -------
         The target table's data as a DataFrame.
         """
-        if not pipe.exists(debug=debug):
-            return None
-
         table_name = pipe.target
         dt_col = pipe.columns.get("datetime", None)
 
@@ -648,13 +589,10 @@ Return the largest (or smallest) value in target table, according to the `params
         -------
         The largest `datetime` or `int` value of the `datetime` axis. 
         """
-		dt_col = pipe.columns.get('dt_col', None)
-		if dt_col is None:
-			return None
-
 		### TODO write a query to get the largest value for `dt_col`.
         ### If `newest` is `False`, return the smallest value.
         ### Apply the `params` filter in case of multiplexing.
+        return None
     ```
 
 ## `#!python get_pipe_columns_types()`
@@ -682,9 +620,6 @@ You may take advantage of automatic dtype enforcement by implementing this metho
         -------
         A dictionary mapping columns to data types.
         """
-        if not pipe.exists(debug=debug):
-            return {}
-
         table_name = pipe.target
         ### TODO write a query to fetch the columns contained in `table_name`.
         columns_types = {}
@@ -692,6 +627,8 @@ You may take advantage of automatic dtype enforcement by implementing this metho
         ### Return a dictionary mapping the columns
         ### to their Pandas dtypes, e.g.:
         ### `{'foo': 'int64'`}`
+        ### or SQL-style dtypes, e.g.:
+        ### `{'foo': 'INT'}`
         return columns_types
     ```
 
@@ -703,6 +640,7 @@ You may choose to implement `get_pipe_columns_indices()`, which returns a dictio
 
     ```python
     def get_pipe_columns_indices(
+        self,
         debug: bool = False,
     ) -> dict[str, list[dict[str, str]]]:
         """

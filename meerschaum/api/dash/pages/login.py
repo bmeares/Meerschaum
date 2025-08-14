@@ -49,11 +49,11 @@ registration_div = html.Div(
                         html.Code('mrsm register user newuser -i sql:main', className='codeblock'),
                     ),
                     dcc.Markdown("""
-                        To enable online registration, open the `system` configuration file and""" +
+                        To enable online registration, open the `api` configuration file and""" +
                     """ set the permissions to `true`:"""
                     ),
                     html.Pre(
-                        html.Code('mrsm edit config system', className='codeblock'),
+                        html.Code('mrsm edit config api', className='codeblock'),
                     ),
                     html.Br(),
                     dcc.Markdown('The settings file should look something like this:'),

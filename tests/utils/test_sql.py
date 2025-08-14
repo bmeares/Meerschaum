@@ -87,7 +87,7 @@ def test_build_where(params: Dict[str, Any], expected_subqueries: List[str]):
         ('DATETIME', 'datetime64[ns]'),
         ('NVARCHAR(2000)', 'string[pyarrow]'),
         ('JSON', 'object'),
-        ('DATE', 'datetime64[ns]'),
+        ('DATE', 'date'),
         ('TIMESTAMP', 'datetime64[ns]'),
         ('BOOL', 'bool[pyarrow]'),
         ('BOOLEAN', 'bool[pyarrow]'),

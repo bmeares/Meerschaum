@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from meerschaum.utils.typing import Optional, List, Union
-from meerschaum.connectors import Connector
+from meerschaum.connectors import InstanceConnector
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
 
@@ -18,15 +18,13 @@ required_attributes = {
     'host',
 }
 
-class APIConnector(Connector):
+class APIConnector(InstanceConnector):
     """
     Connect to a Meerschaum API instance.
     """
 
-    IS_INSTANCE: bool = True
     IS_THREAD_SAFE: bool = False
-
-    OPTIONAL_ATTRIBUTES: List[str] = ['port']
+    OPTIONAL_ATTRIBUTES: List[str] = ['port', 'client_secret', 'client_id', 'api_key']
 
     from ._request import (
         make_request,
@@ -81,6 +79,16 @@ class APIConnector(Connector):
         get_user_password_hash,
         get_user_type,
         get_user_attributes,
+    )
+    from ._tokens import (
+        register_token,
+        get_token_model,
+        get_tokens,
+        edit_token,
+        invalidate_token,
+        get_token_scopes,
+        token_exists,
+        delete_token,
     )
     from ._uri import from_uri
     from ._jobs import (
@@ -154,9 +162,15 @@ class APIConnector(Connector):
         """
         Return the fully qualified URI.
         """
+        import urllib.parse
         username = self.__dict__.get('username', None)
         password = self.__dict__.get('password', None)
+        client_id = self.__dict__.get('client_id', None)
+        client_secret = self.__dict__.get('client_secret', None)
+        api_key = self.__dict__.get('api_key', None)
         creds = (username + ':' + password + '@') if username and password else ''
+        params = {}
+        params_str = ('?' + urllib.parse.urlencode(params)) if params else ''
         return (
             self.protocol
             + '://'
@@ -167,8 +181,8 @@ class APIConnector(Connector):
                 if self.__dict__.get('port', None)
                 else ''
             )
+            + params_str
         )
-
 
     @property
     def session(self):
@@ -206,3 +220,17 @@ class APIConnector(Connector):
         Return the instance keys to be sent alongside pipe requests.
         """
         return self._instance_keys
+
+    @property
+    def login_scheme(self) -> str:
+        """
+        Return the login scheme to use based on the configured credentials.
+        """
+        if 'username' in self.__dict__:
+            return 'password'
+        if 'client_id' in self.__dict__:
+            return 'client_credentials'
+        elif 'api_key' in self.__dict__:
+            return 'api_key'
+
+        return 'password'

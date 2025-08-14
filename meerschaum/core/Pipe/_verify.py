@@ -12,7 +12,7 @@ import time
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, Dict
 from meerschaum.utils.warnings import warn, info
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 
 def verify(
@@ -418,7 +418,7 @@ def verify(
             retry_failed_batch = False
 
         batch_msg_to_print = (
-            f"{make_header('Completed batch ' + batch_counter_str + ':')}\n{batch_msg}"
+            f"{make_header('Completed batch ' + batch_counter_str + ':', left_pad=0)}\n{batch_msg}"
         )
         mrsm.pprint((batch_success, batch_msg_to_print))
 
@@ -426,7 +426,7 @@ def verify(
             info(f"Retrying batch {batch_counter_str}...")
             retry_batch_success, retry_batch_msg = process_batch(batch)
             retry_batch_msg_to_print = (
-                f"Retried {make_header('batch ' + batch_label)}\n{retry_batch_msg}"
+                f"Retried {make_header('batch ' + batch_label, left_pad=0)}\n{retry_batch_msg}"
             )
             mrsm.pprint((retry_batch_success, retry_batch_msg_to_print))
 
@@ -587,7 +587,7 @@ def get_bound_interval(self, debug: bool = False) -> Union[timedelta, int, None]
     if not dt_col:
         return bound_time_value
 
-    dt_typ = self.dtypes.get(dt_col, 'datetime64[ns, UTC]')
+    dt_typ = self.dtypes.get(dt_col, 'datetime')
     if 'int' in dt_typ.lower():
         return int(bound_time_value)
 

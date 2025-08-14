@@ -209,6 +209,8 @@ def get_console():
     try:
         console = rich_console.Console(force_terminal=True, color_system='truecolor')
     except Exception:
+        import traceback
+        traceback.print_exc()
         console = None
     return console
 
@@ -247,7 +249,7 @@ def print_tuple(
         If `True`, use the default emoji and color scheme.
 
     """
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     do_print = True
 
     omit_messages = STATIC_CONFIG['system']['success']['ignore']
@@ -488,8 +490,9 @@ def fill_ansi(string: str, style: str = '') -> str:
         msg = Text.from_ansi(string)
     except AttributeError:
         import traceback
-        traceback.print_stack()
+        traceback.print_exc()
         msg = ''
+
     plain_indices = []
     for left_span, right_span in iterate_chunks(msg.spans, 2, fillvalue=len(msg)):
         left = left_span.end

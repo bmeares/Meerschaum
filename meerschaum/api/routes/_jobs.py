@@ -28,11 +28,12 @@ from meerschaum.api import (
     fastapi,
     app,
     endpoints,
-    manager,
+    ScopedAuth,
     no_auth,
+    manager,
     debug,
 )
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.core.User import is_user_allowed_to_execute
 
 
@@ -53,9 +54,7 @@ def _get_job(name: str, sysargs: Union[str, List[str], None] = None):
 
 @app.get(endpoints['jobs'], tags=['Jobs'])
 def get_jobs(
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:read'])),
 ) -> Dict[str, Dict[str, Any]]:
     """
     Return metadata about the current jobs.
@@ -84,9 +83,7 @@ def get_jobs(
 @app.get(endpoints['jobs'] + '/{name}', tags=['Jobs'])
 def get_job(
     name: str,
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:read'])),
 ) -> Dict[str, Any]:
     """
     Return metadata for a single job.
@@ -137,9 +134,7 @@ def clean_sysargs(sysargs: List[str]) -> List[str]:
 def create_job(
     name: str,
     metadata: Union[List[str], Dict[str, Any]],
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:execute', 'jobs:write'])),
 ) -> SuccessTuple:
     """
     Create and start a new job.
@@ -172,9 +167,7 @@ def create_job(
 @app.delete(endpoints['jobs'] + '/{name}', tags=['Jobs'])
 def delete_job(
     name: str,
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:delete'])),
 ) -> SuccessTuple:
     """
     Delete a job.
@@ -189,9 +182,7 @@ def delete_job(
 @app.get(endpoints['jobs'] + '/{name}/exists', tags=['Jobs'])
 def get_job_exists(
     name: str,
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:read'])),
 ) -> bool:
     """
     Return whether a job exists.
@@ -203,9 +194,7 @@ def get_job_exists(
 @app.get(endpoints['logs'] + '/{name}', tags=['Jobs'])
 def get_logs(
     name: str,
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:read', 'logs:read'])),
 ) -> Union[str, None]:
     """
     Return a job's log text.
@@ -224,9 +213,7 @@ def get_logs(
 @app.post(endpoints['jobs'] + '/{name}/start', tags=['Jobs'])
 def start_job(
     name: str,
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:execute'])),
 ) -> SuccessTuple:
     """
     Start a job if stopped.
@@ -247,9 +234,7 @@ def start_job(
 @app.post(endpoints['jobs'] + '/{name}/stop', tags=['Jobs'])
 def stop_job(
     name: str,
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:execute', 'josb:stop'])),
 ) -> SuccessTuple:
     """
     Stop a job if running.
@@ -270,9 +255,7 @@ def stop_job(
 @app.post(endpoints['jobs'] + '/{name}/pause', tags=['Jobs'])
 def pause_job(
     name: str,
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:execute', 'jobs:pause'])),
 ) -> SuccessTuple:
     """
     Pause a job if running.
@@ -293,9 +276,7 @@ def pause_job(
 @app.get(endpoints['jobs'] + '/{name}/stop_time', tags=['Jobs'])
 def get_stop_time(
     name: str,
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:read'])),
 ) -> Union[datetime, None]:
     """
     Get the timestamp when the job was manually stopped.
@@ -307,15 +288,25 @@ def get_stop_time(
 @app.get(endpoints['jobs'] + '/{name}/is_blocking_on_stdin', tags=['Jobs'])
 def get_is_blocking_on_stdin(
     name: str,
-    curr_user=(
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user=fastapi.Security(ScopedAuth(['jobs:read'])),
 ) -> bool:
     """
     Return whether a job is blocking on stdin.
     """
     job = _get_job(name)
     return job.is_blocking_on_stdin()
+
+
+@app.get(endpoints['jobs'] + '{name}/prompt_kwargs', tags=['Jobs'])
+def get_prompt_kwargs(
+    name: str,
+    curr_user=fastapi.Security(ScopedAuth(['jobs:read'])),
+) -> Dict[str, Any]:
+    """
+    Return the kwargs for the blocking `prompt`, if available.
+    """
+    job = _get_job(name)
+    return job.get_prompt_kwargs()
 
 
 _job_clients = defaultdict(lambda: [])

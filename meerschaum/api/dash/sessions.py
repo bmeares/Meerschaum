@@ -86,6 +86,18 @@ def get_username_from_session(session_id: Optional[str]) -> Union[str, None]:
     return session_data.get('username', None)
 
 
+def get_user_from_session(session_id: Optional[str]) -> Union[User, None]:
+    """
+    Return a `User` from the current session.
+    """
+    username = get_username_from_session(session_id)
+    if username is None:
+        return None
+    
+    conn = get_api_connector()
+    return User(username, instance=conn)
+
+
 def is_session_active(session_id: Union[str, None]) -> bool:
     """
     Return whether a given `session_id` has been set.

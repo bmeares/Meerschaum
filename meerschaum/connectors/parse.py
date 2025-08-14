@@ -56,7 +56,7 @@ def parse_connector_keys(
     import copy
     from meerschaum.connectors import get_connector
     from meerschaum.config import get_config
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import error
 
     ### `get_connector()` handles the logic for falling back to 'main',
@@ -111,10 +111,13 @@ def parse_repo_keys(keys: Optional[str] = None, **kw):
     """Parse the Meerschaum repository value into an APIConnector."""
     from meerschaum.config import get_config
     if keys is None:
-        keys = get_config('meerschaum', 'default_repository', patch=True)
+        keys = get_config('meerschaum', 'repository', patch=True)
     keys = str(keys)
     if ':' not in keys:
         keys = 'api:' + keys
+
+    if not keys.startswith('api:'):
+        raise ValueError("Only APIConnectors may be treated as repositories.")
 
     return parse_connector_keys(keys, **kw)
 

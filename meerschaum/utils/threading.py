@@ -10,6 +10,9 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional
 
 import threading
+import ctypes
+import signal
+
 Lock = threading.Lock
 RLock = threading.RLock
 Event = threading.Event
@@ -54,6 +57,45 @@ class Thread(threading.Thread):
         """Set the return to the result of the target."""
         self._return = self._target(*self._args, **self._kwargs)
 
+    def send_signal(self, signalnum):
+        """
+        Send a signal to the thread.
+        """
+        if not self.is_alive():
+            return
+
+        if signalnum == signal.SIGINT:
+            self.raise_exception(KeyboardInterrupt())
+        elif signalnum == signal.SIGTERM:
+            self.raise_exception(SystemExit())
+        else:
+            signal.pthread_kill(self.ident, signalnum)
+
+    def raise_exception(self, exc: BaseException):
+        """
+        Raise an exception in the thread.
+
+        This uses a CPython-specific implementation and is not guaranteed to be stable.
+        It may also be deprecated in future Python versions.
+        """
+        if not self.is_alive():
+            return
+
+        if not hasattr(ctypes.pythonapi, 'PyThreadState_SetAsyncExc'):
+            return
+
+        exc_class = exc if isinstance(exc, type) else type(exc)
+
+        ident = self.ident
+        if ident is None:
+            return
+
+        ret = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+            ctypes.c_ulong(ident),
+            ctypes.py_object(exc_class)
+        )
+        if ret > 1:
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(ident, 0)
 
 class Worker(threading.Thread):
     """Wrapper for `threading.Thread` for working with `queue.Queue` objects."""

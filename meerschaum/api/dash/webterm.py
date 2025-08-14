@@ -7,12 +7,13 @@ Functions for interacting with the Webterm via the dashboard.
 """
 
 import time
+from typing import Optional, Tuple, Any
 
 import meerschaum as mrsm
-from meerschaum.api import CHECK_UPDATE, get_api_connector
+from meerschaum.api import CHECK_UPDATE, get_api_connector, webterm_port
 from meerschaum.api.dash.sessions import is_session_authenticated, get_username_from_session
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div
-from meerschaum.utils.typing import WebState, Tuple, Any
+from meerschaum.utils.typing import WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum._internal.term.tools import is_webterm_running
 from meerschaum.utils.threading import Thread, RLock
@@ -22,7 +23,7 @@ dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK
 
 MAX_WEBTERM_ATTEMPTS: int = 10
 TMUX_IS_ENABLED: bool = (
-    is_tmux_available() and mrsm.get_config('system', 'webterm', 'tmux', 'enabled')
+    is_tmux_available() and mrsm.get_config('api', 'webterm', 'tmux', 'enabled')
 )
 
 _locks = {'webterm_thread': RLock()}
@@ -31,6 +32,10 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
     """
     Start the webterm and return its iframe.
     """
+    from meerschaum.api import _include_webterm
+    if not _include_webterm:
+        return console_div, []
+
     session_id = state['session-store.data'].get('session-id', None)
     username = get_username_from_session(session_id)
     if not is_session_authenticated(session_id):
@@ -47,7 +52,7 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
         )
 
     for i in range(MAX_WEBTERM_ATTEMPTS):
-        if is_webterm_running('localhost', 8765, session_id=(username or session_id)):
+        if is_webterm_running('localhost', webterm_port, session_id=(username or session_id)):
             return (
                 [
                     html.Div(
@@ -87,7 +92,7 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
 
 
 webterm_procs = {}
-def start_webterm() -> None:
+def start_webterm(webterm_port: Optional[int] = None) -> None:
     """
     Start the webterm thread.
     """
@@ -97,7 +102,14 @@ def start_webterm() -> None:
         conn = get_api_connector()
         _ = run_python_package(
             'meerschaum',
-            ['start', 'webterm', '-i', str(conn)],
+            (
+                ['start', 'webterm', '-i', str(conn)]
+                + (
+                    []
+                    if not webterm_port
+                    else ['-p', str(webterm_port)]
+                )
+            ),
             capture_output=True,
             as_proc=True,
             store_proc_dict=webterm_procs,

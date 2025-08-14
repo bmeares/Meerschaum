@@ -8,14 +8,16 @@ Declare FastAPI events in this module (startup, shutdown, etc.).
 
 import sys
 import os
-import time
 from meerschaum.api import (
     app,
     get_api_connector,
     get_cache_connector,
     get_uvicorn_config,
     debug,
+    webterm_port,
     no_dash,
+    _include_dash,
+    _include_webterm,
 )
 from meerschaum.utils.debug import dprint
 from meerschaum.connectors.poll import retry_connect
@@ -25,7 +27,7 @@ from meerschaum.jobs import (
     start_check_jobs_thread,
     stop_check_jobs_thread,
 )
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 TEMP_PREFIX: str = STATIC_CONFIG['api']['jobs']['temp_prefix']
 
@@ -35,10 +37,45 @@ async def startup():
     """
     Connect to the instance database and begin monitoring jobs.
     """
+    app.openapi_schema = app.openapi()
+
+    ### Remove the implicitly added HTTPBearer scheme if it exists.
+    if 'BearerAuth' in app.openapi_schema['components']['securitySchemes']:
+        del app.openapi_schema['components']['securitySchemes']['BearerAuth']
+    elif 'HTTPBearer' in app.openapi_schema['components']['securitySchemes']:
+        del app.openapi_schema['components']['securitySchemes']['HTTPBearer']
+    if 'LoginManager' in app.openapi_schema['components']['securitySchemes']:
+        del app.openapi_schema['components']['securitySchemes']['LoginManager']
+
+    scopes = STATIC_CONFIG['tokens']['scopes']
+    app.openapi_schema['components']['securitySchemes']['OAuth2PasswordBearer'] = {
+        'type': 'oauth2',
+        'flows': {
+            'password': {
+                'tokenUrl': STATIC_CONFIG['api']['endpoints']['login'],
+                'scopes': scopes,
+            },
+        },
+    }
+    app.openapi_schema['components']['securitySchemes']['APIKey'] = {
+        'type': 'http',
+        'scheme': 'bearer',
+        'bearerFormat': 'mrsm-key:{client_id}:{client_secret}',
+        'description': 'Authentication using a Meerschaum API Key.',
+    }
+    app.openapi_schema['security'] = [
+        {
+            'OAuth2PasswordBearer': [],
+        },
+        {
+            'APIKey': [],
+        }
+    ]
+
     try:
-        if not no_dash:
+        if _include_webterm:
             from meerschaum.api.dash.webterm import start_webterm
-            start_webterm()
+            start_webterm(webterm_port=webterm_port)
 
         connected = retry_connect(
             get_api_connector(),
@@ -60,6 +97,11 @@ async def startup():
     if not connected:
         await shutdown()
         os._exit(1)
+
+    conn = get_api_connector()
+    if conn.type == 'sql':
+        from meerschaum.connectors.sql.tables import get_tables
+        _ = get_tables(conn, refresh=True, create=True, debug=debug)
 
     start_check_jobs_thread()
 

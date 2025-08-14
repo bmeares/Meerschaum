@@ -21,13 +21,18 @@ if [ ! -z "$MRSM_TEST_FLAVORS" ]; then
   services=`echo "$MRSM_TEST_FLAVORS" | sed 's/,/ /g'`
   services=`echo "$services" | sed 's/api//g'`
 fi
+if [ -z "$MRSM_DEBUG" ]; then
+  export MRSM_DEBUG='false'
+fi
 
 ### Start the test databases.
 if [ "$1" == "db" ]; then
   cd tests/
-  docker compose up -d $services
+  docker compose up --quiet-pull -d $services
   cd ../
 fi
+
+$mrsm stop daemon
 
 if [ ! -z "$MRSM_INSTALL_PACKAGES" ]; then
   $mrsm install packages setuptools wheel -y

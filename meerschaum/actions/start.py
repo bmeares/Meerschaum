@@ -7,6 +7,8 @@ Start subsystems (API server, logging daemon, etc.).
 """
 
 from __future__ import annotations
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any, Union, Dict
 
 
@@ -25,6 +27,7 @@ def start(
         'webterm': _start_webterm,
         'connectors': _start_connectors,
         'pipeline': _start_pipeline,
+        'daemons': _start_daemons,
     }
     return choose_subaction(action, options, **kw)
 
@@ -91,6 +94,7 @@ def _start_jobs(
     sysargs: Optional[List[str]] = None,
     executor_keys: Optional[str] = None,
     rm: bool = False,
+    line: Optional[str] = None,
     debug: bool = False,
     **kw
 ) -> SuccessTuple:
@@ -122,6 +126,7 @@ def _start_jobs(
           - `start job --name happy_seal`
                 Start the job 'happy_seal' but via the `--name` flag.
     """
+    import shlex
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.daemon._names import get_new_daemon_name
     from meerschaum.jobs import (
@@ -212,7 +217,29 @@ def _start_jobs(
 
     def _run_new_job(name: Optional[str] = None):
         name = name or get_new_daemon_name()
-        job = Job(name, sysargs, executor_keys=executor_keys, delete_after_completion=rm)
+        if len(sysargs or []) >= 2 and sysargs[0] == 'start' and sysargs[1].startswith('job'):
+            return (False, "Create a new job with `-d` / `--daemon`."), name
+
+        job_sysargs = (
+            shlex.join([a for a in sysargs if a not in ('-d', '--daemon')])
+            if not line
+            else line
+        )
+        job = Job(name, job_sysargs, executor_keys=executor_keys, delete_after_completion=rm)
+
+        if not job.exists():
+            try:
+                confirm = yes_no(
+                    f"Create new job '{name}'?\n    {job_sysargs}\n",
+                    default='y',
+                    yes=kw.get('yes', False),
+                    noask=kw.get('noask', False),
+                )
+            except Exception:
+                confirm = True
+            if not confirm:
+                return (False, "Nothing changed."), name
+
         return job.start(debug=debug), name
 
     def _run_existing_job(name: str):
@@ -285,6 +312,7 @@ def _start_jobs(
             if new_job
             else _run_existing_job(_name)
         )
+
         if not kw.get('nopretty', False):
             print_tuple(success_tuple)
 
@@ -300,7 +328,10 @@ def _start_jobs(
         + ("Failed to start job" + ("s" if len(_failures) != 1 else '')
             + f" {items_str(_failures)}." if _failures else '')
     )
-    _install_healthcheck_job()
+    if not msg:
+        msg = "Nothing changed."
+    else:
+        _install_healthcheck_job()
     return len(_failures) == 0, msg
 
 
@@ -308,6 +339,7 @@ def _start_gui(
     action: Optional[List[str]] = None,
     mrsm_instance: Optional[str] = None,
     port: Optional[int] = None,
+    webterm_port: Optional[int] = None,
     debug: bool = False,
     **kw
 ) -> SuccessTuple:
@@ -321,7 +353,6 @@ def _start_gui(
 
     from meerschaum.utils.venv import venv_exec
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.networking import find_open_ports
     from meerschaum.connectors.parse import parse_instance_keys
@@ -329,9 +360,10 @@ def _start_gui(
     webview, requests = attempt_import('webview', 'requests')
 
     success, msg = True, "Success"
-    host = '127.0.0.1'
-    if port is None:
-        port = 8765
+    host = mrsm.get_config('webterm', 'host')
+    port = port or webterm_port
+    if not port:
+        port = mrsm.get_config('webterm', 'port')
 
     if not is_webterm_running(host, port, session_id='mrsm'):
         port = next(find_open_ports(port, 9000))
@@ -369,7 +401,7 @@ def _start_gui(
                 break
         except Exception as e:
             if debug:
-                dprint(e)
+                dprint(str(e))
             continue
     if starting_up is False:
         return False, f"The webterm failed to start within {timeout} seconds."
@@ -417,7 +449,6 @@ def _start_webterm(
         - `-i`, '--instance'
             The default instance to use for the Webterm shell.
     """
-    import uuid
     from meerschaum._internal.term import get_webterm_app_and_manager, tornado_ioloop
     from meerschaum._internal.term.tools import (
         is_webterm_running,
@@ -426,15 +457,17 @@ def _start_webterm(
     )
     from meerschaum.utils.networking import find_open_ports
     from meerschaum.utils.warnings import info
+    from meerschaum.config.paths import WEBTERM_INTERNAL_RESOURCES_PATH
 
     if host is None:
-        host = '127.0.0.1'
+        host = mrsm.get_config('api', 'webterm', 'host')
     if port is None:
-        port = 8765
+        port = mrsm.get_config('api', 'webterm', 'port')
     if sysargs is None:
         sysargs = ['start', 'webterm']
     session_id = 'mrsm'
-    tornado_app, term_manager = get_webterm_app_and_manager(instance_keys=mrsm_instance)
+
+    env_path = WEBTERM_INTERNAL_RESOURCES_PATH / (str(port) + '.json')
 
     if is_webterm_running(host, port, session_id=session_id):
         if force:
@@ -445,11 +478,18 @@ def _start_webterm(
                 + "    Include `-f` to start another server on a new port\n"
                 + "    or specify a different port with `-p`."
             )
+
+    tornado_app, term_manager = get_webterm_app_and_manager(
+        instance_keys=mrsm_instance,
+        port=port,
+        env_path=env_path,
+    )
     if not nopretty:
         info(
             f"Starting the webterm at http://{host}:{port}/webterm/{session_id} ..."
             "\n    Press CTRL+C to quit."
         )
+
     tornado_app.listen(port, host)
     loop = tornado_ioloop.IOLoop.instance()
     try:
@@ -462,9 +502,14 @@ def _start_webterm(
         term_manager.shutdown()
         loop.close()
 
-    sessions = get_mrsm_tmux_sessions()
+    sessions = get_mrsm_tmux_sessions(port=port)
     for session in sessions:
         kill_tmux_session(session)
+
+    try:
+        env_path.unlink()
+    except Exception:
+        pass
 
     return True, "Success"
 
@@ -483,7 +528,6 @@ def _start_connectors(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.formatting import pprint
     from meerschaum.utils.misc import items_str
     if action is None:
         action = []
@@ -575,7 +619,6 @@ def _start_pipeline(
     """
     import json
     import time
-    import sys
     from meerschaum._internal.entry import entry
     from meerschaum.utils.warnings import info, warn
     from meerschaum.utils.misc import is_int
@@ -630,7 +673,7 @@ def _start_pipeline(
     def do_entry() -> None:
         nonlocal success, msg, proc
         if timeout_seconds is None:
-            success, msg = entry(sub_args_line, _patch_args=patch_args)
+            success, msg = entry(sub_args_line, _patch_args=patch_args, _use_cli_daemon=False)
             return
 
         sub_args_line_escaped = sub_args_line.replace("'", "<QUOTE>")
@@ -640,7 +683,7 @@ def _start_pipeline(
             "from meerschaum._internal.entry import entry\n\n"
             f"sub_args_line = '{sub_args_line_escaped}'.replace(\"<QUOTE>\", \"'\")\n"
             f"patch_args = json.loads('{patch_args_escaped_str}'.replace('<QUOTE>', \"'\"))\n"
-            "success, msg = entry(sub_args_line, _patch_args=patch_args)\n"
+            "success, msg = entry(sub_args_line, _patch_args=patch_args, _use_cli_daemon=False)\n"
             f"print('{fence_begin}' + json.dumps((success, msg)) + '{fence_end}')"
         )
         proc = venv_exec(src, venv=None, as_proc=True)
@@ -676,7 +719,7 @@ def _start_pipeline(
 
     try:
         run_loop()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         warn("Cancelled pipeline.", stack=False)
         if proc is not None:
             _stop_process(proc)
@@ -686,6 +729,112 @@ def _start_pipeline(
     if do_n_times != 1:
         info(f"Ran pipeline {ran_n_times} time" + ('s' if ran_n_times != 1 else '') + '.')
     return success, msg
+
+
+def _start_daemons(
+    timeout_seconds: Union[int, float, None] = None,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kwargs
+) -> SuccessTuple:
+    """
+    Start the Meerschaum CLI daemon processes.
+    """
+    from meerschaum.utils.warnings import warn, dprint
+    from meerschaum._internal.cli.daemons import (
+        get_cli_daemon,
+        get_cli_lock_path,
+    )
+    from meerschaum._internal.cli.workers import (
+        get_existing_cli_workers,
+        get_existing_cli_worker_indices,
+    )
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.actions import actions
+
+    workers = get_existing_cli_workers()
+    if not workers:
+        if debug:
+            dprint("No daemons are running, spawning a new process...")
+        workers = [get_cli_daemon()]
+
+    accepted_restart = False
+    any_daemons_are_running = any((worker.job.status == 'running') for worker in workers)
+    lock_paths = [get_cli_lock_path(ix) for ix in get_existing_cli_worker_indices()]
+    any_locks_exist = any(lock_path.exists() for lock_path in lock_paths)
+
+    if any_locks_exist:
+        warn(
+            "Locks are currently held by the CLI daemons.\n"
+            "Run again with `--force` to remove the locks.",
+            stack=False,
+        )
+
+        if not force:
+            return False, "Actions are currently running."
+
+        for lock_path in lock_paths:
+            try:
+                if lock_path.exists():
+                    lock_path.unlink()
+            except Exception as e:
+                warn(f"Failed to release lock:\n{e}")
+
+    if any_daemons_are_running:
+        accepted_restart = force or yes_no(
+            "Restart running CLI daemons?",
+            yes=yes,
+            noask=noask,
+            default='n',
+        )
+
+        if not accepted_restart:
+            return True, "Daemons are already running; nothing to do."
+
+        stop_success, stop_msg = actions['stop'](
+            ['daemons'],
+            timeout_seconds=timeout_seconds,
+            debug=debug,
+        )
+        if not stop_success:
+            return stop_success, stop_msg
+
+    worker = get_cli_daemon()
+
+    if debug:
+        dprint("Cleaning up CLI daemon...")
+    cleanup_success, cleanup_msg = worker.cleanup()
+    if not cleanup_success:
+        return cleanup_success, cleanup_msg
+
+    if debug:
+        dprint("Starting CLI daemon...")
+
+    start_success, start_msg = worker.job.start()
+    if not start_success:
+        return start_success, start_msg
+
+    return True, "Success"
+
+
+def _start_worker(action: Optional[List[str]] = None, **kwargs: Any) -> SuccessTuple:
+    """
+    Start a CLI worker process. This is intended for internal use only.
+    """
+    from meerschaum._internal.cli.workers import ActionWorker
+    from meerschaum.utils.misc import is_int
+
+    if not action:
+        return False, "No worker index is provided."
+
+    if not is_int(action[0]):
+        return False, "Invalid worker index."
+
+    ix = int(action[0])
+    worker = ActionWorker(ix)
+    return worker.run()
 
 
 ### NOTE: This must be the final statement of the module.

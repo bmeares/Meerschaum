@@ -13,7 +13,7 @@ from meerschaum.utils.typing import SuccessTuple, Any, Union, Optional, Dict, Li
 from meerschaum.utils.misc import string_to_dict
 from meerschaum.utils.dtypes import json_serialize_value
 from meerschaum.utils.warnings import warn, dprint
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 PIPES_TABLE: str = 'mrsm_pipes'
 PIPES_COUNTER: str = 'mrsm_pipes:counter'
@@ -276,7 +276,7 @@ def edit_pipe(
         return False, f"{pipe} is not registered."
 
     parameters_key = get_pipe_parameters_key(pipe)
-    parameters_str = json.dumps(pipe.parameters, separators=(',', ':'))
+    parameters_str = json.dumps(pipe.get_parameters(apply_symlinks=False), separators=(',', ':'))
     self.set(parameters_key, parameters_str)
     return True, "Success"
 
@@ -321,14 +321,40 @@ def drop_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
-    for chunk_begin, chunk_end in pipe.get_chunk_bounds(debug=debug):
-        clear_chunk_success, clear_chunk_msg = pipe.clear(
-            begin=chunk_begin,
-            end=chunk_end,
-            debug=debug,
+    if not pipe.exists(debug=debug):
+        return True, f"{pipe} does not exist, so it was not dropped."
+
+    table_name = self.quote_table(pipe.target)
+    dt_col = pipe.columns.get('datetime', None)
+
+    try:
+        members = (
+            self.client.zrange(table_name, 0, -1)
+            if dt_col
+            else self.client.smembers(table_name)
         )
-        if not clear_chunk_success:
-            return clear_chunk_success, clear_chunk_msg
+        
+        keys_to_delete = []
+        for member_bytes in members:
+            member_str = member_bytes.decode('utf-8')
+            member_doc = json.loads(member_str)
+            ix_str = member_doc.get('ix')
+            if not ix_str:
+                continue
+            
+            ix_doc = string_to_dict(ix_str.replace(COLON, ':'))
+            doc_key = self.get_document_key(ix_doc, list(ix_doc.keys()), table_name)
+            keys_to_delete.append(doc_key)
+
+        if keys_to_delete:
+            batch_size = 1000
+            for i in range(0, len(keys_to_delete), batch_size):
+                batch = keys_to_delete[i:i+batch_size]
+                self.client.delete(*batch)
+
+    except Exception as e:
+        return False, f"Failed to delete documents for {pipe}:\n{e}"
+
     try:
         self.drop_table(pipe.target, debug=debug)
     except Exception as e:
@@ -337,7 +363,7 @@ def drop_pipe(
     if 'valkey' not in pipe.parameters:
         return True, "Success"
 
-    pipe.parameters['valkey']['dtypes'] = {}
+    pipe._attributes['parameters']['valkey']['dtypes'] = {}
     if not pipe.temporary:
         edit_success, edit_msg = pipe.edit(debug=debug)
         if not edit_success:
@@ -558,11 +584,7 @@ def sync_pipe(
 
     valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
     new_dtypes = {
-        str(key): (
-            str(val)
-            if not are_dtypes_equal(str(val), 'datetime')
-            else 'datetime64[ns, UTC]'
-        )
+        str(key): str(val)
         for key, val in df.dtypes.items()
         if str(key) not in valkey_dtypes
     }
@@ -571,19 +593,20 @@ def sync_pipe(
             try:
                 df[col] = df[col].astype(typ)
             except Exception:
+                import traceback
+                traceback.print_exc()
                 valkey_dtypes[col] = 'string'
                 new_dtypes[col] = 'string'
                 df[col] = df[col].astype('string')
 
     if new_dtypes and (not static or not valkey_dtypes):
         valkey_dtypes.update(new_dtypes)
-        if 'valkey' not in pipe.parameters:
-            pipe.parameters['valkey'] = {}
-        pipe.parameters['valkey']['dtypes'] = valkey_dtypes
-        if not pipe.temporary:
-            edit_success, edit_msg = pipe.edit(debug=debug)
-            if not edit_success:
-                return edit_success, edit_msg
+        update_success, update_msg = pipe.update_parameters(
+            {'valkey': {'dtypes': valkey_dtypes}},
+            debug=debug,
+        )
+        if not update_success:
+            return False, update_msg
 
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(df, include_unchanged_columns=True, debug=debug)
@@ -781,7 +804,7 @@ def get_sync_time(
     """
     from meerschaum.utils.dtypes import are_dtypes_equal
     dt_col = pipe.columns.get('datetime', None)
-    dt_typ = pipe.dtypes.get(dt_col, 'datetime64[ns, UTC]')
+    dt_typ = pipe.dtypes.get(dt_col, 'datetime')
     if not dt_col:
         return None
 
@@ -789,14 +812,18 @@ def get_sync_time(
     table_name = self.quote_table(pipe.target)
     try:
         vals = (
-            self.client.zrevrange(table_name, 0, 0)
+            self.client.zrevrange(table_name, 0, 0, withscores=True)
             if newest
-            else self.client.zrange(table_name, 0, 0)
+            else self.client.zrange(table_name, 0, 0, withscores=True)
         )
         if not vals:
             return None
-        val = vals[0]
+        val = vals[0][0]
+        if isinstance(val, bytes):
+            val = val.decode('utf-8')
     except Exception:
+        import traceback
+        traceback.print_exc()
         return None
 
     doc = json.loads(val)
@@ -861,7 +888,9 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False
-) -> Optional[List[Tuple[str, str, Optional[str]]]]:
+) -> List[
+        Tuple[str, str, Union[str, None], Dict[str, Any]]
+    ]:
     """
     Return the keys for the registered pipes.
     """
@@ -892,6 +921,7 @@ def fetch_pipes_keys(
             doc['connector_keys'],
             doc['metric_key'],
             doc['location_key'],
+            doc.get('parameters', {})
         )
         for doc in df.to_dict(orient='records')
     ]
@@ -902,9 +932,8 @@ def fetch_pipes_keys(
     in_ex_tag_groups = [separate_negation_values(tag_group) for tag_group in tag_groups]
 
     filtered_keys = []
-    for ck, mk, lk in keys:
-        pipe = mrsm.Pipe(ck, mk, lk, instance=self)
-        pipe_tags = set(pipe.tags)
+    for ck, mk, lk, parameters in keys:
+        pipe_tags = set(parameters.get('tags', []))
         
         include_pipe = True
         for in_tags, ex_tags in in_ex_tag_groups:
@@ -916,6 +945,6 @@ def fetch_pipes_keys(
                 continue
 
         if include_pipe:
-            filtered_keys.append((ck, mk, lk))
+            filtered_keys.append((ck, mk, lk, parameters))
 
     return filtered_keys

@@ -1,8 +1,370 @@
 # 🪵 Changelog
 
-## 2.9.x Releases
+## 3.0.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v3.0.0
+
+- **Inherit another pipe's base parameters with `reference`.**  
+  Pipes may inherit the base parameters of other pipes by setting the key `reference`:
+
+  ```python
+  import meerschaum as mrsm
+
+  base_pipe = mrsm.Pipe(
+      'demo', 'reference', 'parent',
+      instance='sql:memory',
+      columns={
+          'datetime': 'ts',
+          'id': 'id',
+      },
+      parameters={
+          'custom': {
+              'foo': 'bar',
+              'color': 'red',
+          },
+      },
+  )
+  base_pipe.register()
+
+  pipe = mrsm.Pipe(
+      'demo', 'reference', 'child',
+      instance='sql:memory',
+      parameters={
+          'reference': {
+              'connector': 'demo',
+              'metric': 'reference',
+              'location': 'parent',
+              'instance': 'sql:memory',
+          },
+          'custom': {
+              'color': 'blue',
+          },
+      },
+  )
+
+  print(pipe.parameters)
+  # {'custom': {'foo': 'bar', 'color': 'blue'}, 'columns': {'datetime': 'ts', 'id': 'id'}} 
+  ```
+
+- **Dynamically symlink to other pipes' attributes.**  
+  Reference attributes of other pipes using the `{{ Pipe(...) }}` syntax. These references are resolved at run-time when `Pipe.parameters` is accessed:
+
+  ```python
+  import json
+  import meerschaum as mrsm
+
+  some_pipe = mrsm.Pipe(
+      'demo', 'symlink',
+      instance='sql:memory',
+      parameters={
+          'target': 'some_table',
+          'columns': {
+              'datetime': 'id',
+              'id': 'id',
+          },
+          'upsert': True,
+          'custom': {
+              'stations': ['KATL', 'KGMU', 'KCEU'],
+          },
+      },
+  )
+  some_pipe.register()
+
+  pipe = mrsm.Pipe(
+      'demo', 'symlink', 'child',
+      instance='sql:memory',
+      parameters={
+          'target': "{{ Pipe('demo', 'symlink', instance='sql:memory').target }}",
+          'columns': "{{ Pipe('demo', 'symlink', instance='sql:memory').columns }}",
+          'upsert': "{{ Pipe('demo', 'symlink', instance='sql:memory').upsert }}",
+          'custom': "{{ Pipe('demo', 'symlink', instance='sql:memory').parameters['custom'] }}",
+          'parent_pipe_id': "{{ Pipe('demo', 'symlink', instance='sql:memory').id }}",
+      },
+  )
+
+  print(json.dumps(pipe.parameters, indent=4))
+  # {
+  #     "target": "some_table",
+  #     "columns": {
+  #         "datetime": "id",
+  #         "id": "id"
+  #     },
+  #     "upsert": true,
+  #     "custom": {
+  #         "stations": [
+  #             "KATL",
+  #             "KGMU",
+  #             "KCEU"
+  #         ]
+  #     },
+  #     "parent_pipe_id": 1
+  # }  
+  ```
+  
+- **Add `MRSM` config symlinks to pipe parameters.**  
+  Similar to the `{{ Pipe(...) }}` syntax, you can now reference your Meerschaum configuration from within a pipe's parameters:
+
+  ```yaml
+  meerschaum:
+    connectors:
+      sql:
+        main:
+          username: 'user'
+          password: 'password'
+          ...
+  ```
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'demo', 'config_symlinks',
+      parameters = {
+          'username': 'MRSM{meerschaum:connectors:sql:main:username}',
+          'password': 'MRSM{meerschaum:connectors:sql:main:password}',
+      }
+  )
+  print(pipe.parameters['username'])
+  # 'user'
+  ```
+
+- **Add `Pipe.update_parameters()`.**  
+  Due to the symlinking features, the method `Pipe.update_parameters()` will now appropriately handle updating the parameters within the pipe's attributes. Therefore, mutating `Pipe.parameters` no longer affects the state of the pipe directly.
+
+- **Add `InstanceConnector` base class.**  
+  Custom connectors which implement the [instance connectors interface](https://meerschaum.io/reference/connectors/instance-connectors/) should now inherit from `InstanceConnector` as the base class:
+
+  ```python
+  # example.py
+
+  from meerschaum.connectors import InstanceConnector, make_connector
+
+  @make_connector
+  class ExampleConnector(InstanceConnector):
+      
+      def register_pipe(self, pipe: mrsm.Pipe, **kwargs):
+          ...
+
+      def get_pipe_attributes(self, pipe: mrsm.Pipe, **kwargs):
+          ...
+
+      ...
+  ```
+
+- **Add long-lived authentication tokens.**  
+  You may now register [tokens](https://meerschaum.io/reference/api-instance/tokens) to programmatically authenticate your applications to a Meerschaum API instance. This is ideal for use cases such as CI/CD, IoT, and other automated workloads. Tokens are restricted by scopes, may expire or be invalidated, and are owned by a user account. Tokens may be managed via the CLI or web console (at `/dash/tokens`, under `Settings` > `Tokens`).
+
+  ```bash
+  mrsm register token
+  ```
+
+- **Add scopes to user accounts.**  
+  Similar to tokens, users may be restricted by scopes. Run `edit user` to edit the `scopes` attribute for a given user (more comprehensive editing to come). 
+
+- **Set `coerce_types` to `True` in `query_df()` if any exclude parameters are provided.**  
+  Prefacing a value with the negation prefix in `params` for `query_df()` will now force `coerce_types` to be `True`.
+
+  ```python
+  import pandas as pd
+  from meerschaum.utils.dataframe import query_df
+
+  df = pd.DataFrame([
+      {'id': 1, 'color': 'red', 'count': 3},
+      {'id': 2, 'color': 'blue', 'count': 2},
+      {'id': 3, 'color': 'red', 'count': 1},
+      {'id': 4, 'color': 'green', 'count': 3},
+  ])
+  result_df = query_df(df, {'count': '_3'})
+  print(result_df)
+  #    id color  count
+  # 1   2  blue      2
+  # 2   3   red      1
+  ```
+
+- **Project geometry data to WGS84 (EPSG:4326) when serializing as GeoJSON.**  
+  Setting `geometry_format` to `geojson` for `to_json()` (default) (and `serialize_geometry()`, though not default) will project to WGS84 if a CRS is provided (to meet the 2016 GeoJSON specification).
+
+  ```python
+  import meerschaum as mrsm
+  from meerschaum.utils.dataframe import to_json
+
+  pipe = mrsm.Pipe(
+      'demo', 'geojson',
+      instance='sql:memory',
+      temporary=True,
+      columns={'primary': 'id'},
+      dtypes={
+          'geometry': 'geometry[point, 6570]',
+      },
+  )
+  pipe.sync([{
+      'id': 1,
+      'geometry': 'POINT (1583385.033568 1111981.990433)',
+  }])
+
+  df = pipe.get_data()
+  json_data = to_json(df)
+  print(json_data)
+  # [{"id":1,"geometry":{"type":"Point","coordinates":[-82.389048539797542,34.881760860334396]}}] 
+  ```
+
+- **Upgrade `sql:main` to PostgreSQL 17.**  
+  The Meerschaum stack database now ships as `timescale/timescaledb-ha:pg17`, which includes additional extensions such as PostGIS. The flavor for `sql:main` is now `timescaledb-ha` (see below).
+
+- **Add the SQL flavor `timescaledb-ha`.**  
+  The default instance connector `sql:main` now has the flavor `timescaledb-ha`, corresponding to the `timescale/timescaledb-ha` Docker image. This image includes PostGIS, `timescaledb_toolkit`, and `pg_stat_statements`.
+
+- **Add support for sets and Series in `query_df()`.**  
+  Sets and Pandas Series within `params` will now be treated as lists.
+
+- **Allow for spaces and an optional `mrsm.` prefix for templated SQL query definitions.**  
+  The template format `{{Pipe(...)}}` will now match leading and trailing spaces around the `Pipe` declaration, and an optional `mrsm.` prefix is accepted.
+
+- **Add `Pipe.autotime`.**  
+  Similar to `Pipe.autoincrement`, setting `autotime` will capture the current timestamp for the value of the `datetime` axis (as datetimes or integers, depending on the dtype):
+
+  ```python
+  import time 
+  import meerschaum as mrsm
+  
+  pipe = mrsm.Pipe(
+      'demo', 'autotime',
+      instance='sql:local',
+      autotime=True,
+      precision='ms',
+      temporary=True,
+      columns={
+          'datetime': 'ts',
+          'id': 'id',
+      },
+      dtypes={
+          'ts': 'datetime64[ms, UTC]',
+          'id': 'int',
+      },
+  )
+
+  pipe.sync([
+      {'id': 1, 'val': 100.1},
+      {'id': 2, 'val': 200.2},
+  ])
+
+  time.sleep(3)
+
+  pipe.sync([
+      {'id': 1, 'val': 300.3},
+      {'id': 2, 'val': 400.4},
+  ])
+  
+  df = pipe.get_data()
+  print(df)
+
+  #    id    val                               ts
+  # 0   1  100.1 2025-07-22 00:59:19.914000+00:00
+  # 1   2  200.2 2025-07-22 00:59:19.914000+00:00
+  # 2   1  300.3 2025-07-22 00:59:23.674000+00:00
+  # 3   2  400.4 2025-07-22 00:59:23.674000+00:00
+  ```
+
+- **Add `Pipe.precision`.**  
+  The parameter `precision` determines the precision (and therefore the size) of the timestamp captured by `autotime`. Accepted values are `nanosecond`, `microsecond`, `millisecond`, `second`, `minute`, `hour`, and `day`. The default value of `precision` is derived from the dtype of the `datetime` axis (i.e. `datetime64[ns]` is `nanosecond` precision).
+
+  ```python
+  import meerschaum as mrsm
+
+  day_pipe = mrsm.Pipe(
+      'demo', 'precision', 'day',
+      instance='sql:memory',
+      columns={'datetime': 'day'},
+      dtypes={'day': 'date'},
+      autotime=True,
+      precision=True,
+  )
+
+  day_pipe.sync("val:1")
+
+  df = day_pipe.get_data()
+  print(df)
+  #    val         day
+  # 0    1  2025-07-23
+  ```
+
+  The parameter `precision` may either be a string (the unit) or a dictionary with the following keys:
+
+  - `unit` (required)  
+    The precision unit (`microsecond`, `second`, etc.)
+  - `interval` (default 1)  
+    Optionally round to a specific number of units. For example, `precision='minute'` and `interval=15` would round to 15-minute intervals.
+  - `round_to`  
+    To which direction to round the current timestamp. Supported values are `down` (default), `up`, and `closest`. See [`meerschaum.utils.dtypes.round_time()`](https://docs.meerschaum.io/meerschaum/utils/dtypes.html#round_time).
+
+- **Add `Pipe.get_value()`.**  
+  The convenience function `Pipe.get_value()` selects single values from result sets of `Pipe.get_data()`:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'value',
+      instance='sql:memory',
+      temporary=True,
+      autoincrement=True,
+      columns={'primary': 'id'},
+  )
+  pipe.sync([
+      {'species': 'parrot', 'name': 'Polly'},
+      {'species': 'dog', 'name': 'Spot'},
+      {'species': 'rabbit', 'name': 'Peter Cottontail'},
+  ])
+  
+  spot_id = pipe.get_value('id', params={'name': 'Spot'})
+  print(spot_id)
+  # 2
+  ```
+
+- **Add `Pipe.get_doc()`.**  
+  Similar to `Pipe.get_value()`, the method `Pipe.get_doc()` will return a single row as a dictionary:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'doc',
+      instance='sql:memory',
+      columns={'primary': 'id'},
+  )
+  pipe.sync([
+      {'id': 1, 'name': 'Alice', 'fav_color': 'red'},
+      {'id': 2, 'name': 'Bob', 'fav_color': 'green'},
+      {'id': 3, 'name': 'Charlie', 'fav_color': 'blue'},
+  ])
+
+  doc = pipe.get_doc(params={'id': 2})
+  print(doc)
+  # {'id': 2, 'name': 'Bob', 'fav_color': 'green'}
+  ``` 
+
+- **Add the parameter `mixed_numerics`.**  
+  Setting `mixed_numerics` to `False` will prevent the behavior of coercing integer to float columns as `numeric`, akin to `static=True` but just for this behavior.
+
+- **Introducing the Meerschaum CLI daemon.**  
+  Actions are now routed through a long-lived daemon process, simplifying the number of active connections and cutting latency for CLI commands. The shell includes the command `daemon` which temporarily toggles between the CLI daemon and executing in-process. Adding the flag `--no-daemon` to any action will disable the CLI daemon routing, and the CLI daemon may be disabled by setting `system.experimental.cli_daemon` to `false`. You may selectively allow or restrict actions prefixes under the configuration `system.cli.allowed_prefixes` (default `*`) and `system.cli.disallowed_prefixes`.
+
+- **Performance improvements through smarter caching.**  
+  The metadata caching system has been overhauled, drastically reducing redundant work and increasing performance. Pipes' metadata are cached on-disk, and providing `cache_connector_keys` to the Pipe constructor will cache to a Valkey instance instead. Set `cache=False` to disable this behavior.
+
+- **Restrict Webterms to API processes.**  
+  In previous releases, a single webterm process was shared amongst API processes. Now each API process requires its own Webterm server, and `tmux` sessions are separated by port.
+
+- **Fix custom actions with spaces in Web Console.**
+
+- **Ignore `schema` from pipes' parameters on SQLite.**
+
+- **Tweak `begin` and `end` input sizes in the pipes card.**
+
+## 2.9.x Releases
+
+The 2.9 series added support for geometry data and improved the web console development experience.
 
 ### v2.9.5
 

@@ -22,19 +22,13 @@ from meerschaum.utils.typing import (
     Union,
 )
 from meerschaum.utils.warnings import error, warn
-from meerschaum.config import get_config
-from meerschaum.config._paths import (
-    PLUGINS_RESOURCES_PATH,
-    PLUGINS_ARCHIVES_RESOURCES_PATH,
-    PLUGINS_TEMP_RESOURCES_PATH,
-    VIRTENV_RESOURCES_PATH,
-    PLUGINS_DIR_PATHS,
-)
 _tmpversion = None
 _ongoing_installations = set()
 
+
 class Plugin:
     """Handle packaging of Meerschaum plugins."""
+
     def __init__(
         self,
         name: str,
@@ -47,7 +41,8 @@ class Plugin:
         repo_connector: Optional['mrsm.connectors.api.APIConnector'] = None,
         repo: Union['mrsm.connectors.api.APIConnector', str, None] = None,
     ):
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
+        from meerschaum.config.paths import PLUGINS_ARCHIVES_RESOURCES_PATH, VIRTENV_RESOURCES_PATH
         sep = STATIC_CONFIG['plugins']['repo_separator']
         _repo = None
         if sep in name:
@@ -117,8 +112,10 @@ class Plugin:
         if '_module' not in self.__dict__ or self.__dict__.get('_module', None) is None:
             if self.__file__ is None:
                 return None
+
             from meerschaum.plugins import import_plugins
             self._module = import_plugins(str(self), warn=False)
+
         return self._module
 
 
@@ -129,6 +126,8 @@ class Plugin:
         """
         if self.__dict__.get('_module', None) is not None:
             return self.module.__file__
+
+        from meerschaum.config.paths import PLUGINS_RESOURCES_PATH
 
         potential_dir = PLUGINS_RESOURCES_PATH / self.name
         if (
@@ -295,6 +294,7 @@ class Plugin:
         from meerschaum.utils.packages import attempt_import, determine_version, reload_meerschaum
         from meerschaum.utils.venv import init_venv
         from meerschaum.utils.misc import safely_extract_tar
+        from meerschaum.config.paths import PLUGINS_TEMP_RESOURCES_PATH, PLUGINS_DIR_PATHS
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
@@ -365,6 +365,10 @@ class Plugin:
         ### Determine where to permanently store the new plugin.
         plugin_installation_dir_path = PLUGINS_DIR_PATHS[0]
         for path in PLUGINS_DIR_PATHS:
+            if not path.exists():
+                warn(f"Plugins path does not exist: {path}", stack=False)
+                continue
+
             files_in_plugins_dir = os.listdir(path)
             if (
                 self.name in files_in_plugins_dir
@@ -722,7 +726,7 @@ class Plugin:
         """
         from meerschaum.utils.warnings import warn
         from meerschaum.config import get_config
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         from meerschaum.connectors.parse import is_valid_connector_keys
         plugins = []
         _deps = self.get_dependencies(debug=debug)
@@ -731,7 +735,7 @@ class Plugin:
             _d[len('plugin:'):] for _d in _deps
             if _d.startswith('plugin:') and len(_d) > len('plugin:')
         ]
-        default_repo_keys = get_config('meerschaum', 'default_repository')
+        default_repo_keys = get_config('meerschaum', 'repository')
         skipped_repo_keys = set()
 
         for _plugin_name in plugin_names:
@@ -953,7 +957,7 @@ class Plugin:
         """
         Include the repo keys with the plugin's name.
         """
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         sep = STATIC_CONFIG['plugins']['repo_separator']
         return self.name + sep + str(self.repo_connector)
 

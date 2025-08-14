@@ -12,6 +12,8 @@ import shutil
 import pathlib
 import os
 
+import meerschaum as mrsm
+from meerschaum.core import User
 from meerschaum.utils.typing import Optional, List, SuccessTuple, Any, Dict
 
 from meerschaum.api import (
@@ -24,11 +26,14 @@ from meerschaum.api import (
     private,
     no_auth,
     default_instance_keys,
+    ScopedAuth,
 )
+from meerschaum.api.models import SuccessTupleResponseModel
 from meerschaum.api.tables import get_tables
 from fastapi import File, UploadFile
 from meerschaum.utils.packages import attempt_import
 from meerschaum.core import Plugin
+from meerschaum.utils.misc import filter_arguments
 starlette_responses = attempt_import('starlette.responses', warn=False, lazy=False)
 FileResponse = starlette_responses.FileResponse
 
@@ -38,22 +43,24 @@ plugins_endpoint = endpoints['plugins']
 PLUGINS_INSTANCE_KEYS = default_instance_keys
 
 
-@app.post(plugins_endpoint + '/{name}', tags=['Plugins'])
+@app.post(
+    plugins_endpoint + '/{name}',
+    tags=['Plugins'],
+    response_model=SuccessTupleResponseModel,
+)
 def register_plugin(
     name: str,
     version: str = None,
     attributes: str = None,
     archive: UploadFile = File(...),
-    curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user = fastapi.Depends(manager),
 ) -> SuccessTuple:
     """
     Register a plugin and save its archive file.
 
     Parameters
     ----------
-    name: str :
+    name: str
         The name of the plugin.
         
     version: str, default None
@@ -65,7 +72,7 @@ def register_plugin(
     archive: UploadFile :
         The archive file of the plugin.
 
-    curr_user: 'meerschaum.core.User'
+    curr_user: User
         The logged-in user.
 
     Returns
@@ -102,16 +109,15 @@ def register_plugin(
         )
 
     if curr_user is not None:
-        plugin_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_plugin_user_id(plugin)
-        curr_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_user_id(curr_user) if curr_user is not None else -1
+        plugin_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_plugin_user_id(plugin, debug=debug)
+        curr_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_user_id(curr_user, debug=debug) if curr_user is not None else -1
         if plugin_user_id is not None and plugin_user_id != curr_user_id:
             return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'."
         plugin.user_id = curr_user_id
 
-    success, msg = get_api_connector(
-        PLUGINS_INSTANCE_KEYS
-    ).register_plugin(plugin, make_archive=False, debug=debug)
-
+    register_plugin = get_api_connector(PLUGINS_INSTANCE_KEYS).register_plugin
+    args, kwargs = filter_arguments(register_plugin, plugin, make_archive=False, debug=debug)
+    success, msg = register_plugin(*args, **kwargs)
     if success:
         archive_path = plugin.archive_path
         temp_archive_path = pathlib.Path(str(archive_path) + '.tmp')
@@ -122,12 +128,14 @@ def register_plugin(
 
     return success, msg
 
-@app.get(plugins_endpoint + '/{name}', tags=['Plugins'])
+
+@app.get(
+    plugins_endpoint + '/{name}',
+    tags=['Plugins'],
+)
 def get_plugin(
     name: str,
-    curr_user = (
-        fastapi.Depends(manager) if private else None
-    ),
+    curr_user = fastapi.Depends(ScopedAuth(['plugins:read'])) if private else None,
 ) -> Any:
     """
     Download a plugin's archive file.
@@ -141,9 +149,7 @@ def get_plugin(
 @app.get(plugins_endpoint + '/{name}/attributes', tags=['Plugins'])
 def get_plugin_attributes(
     name: str,
-    curr_user = (
-        fastapi.Depends(manager) if private else None
-    ),
+    curr_user = fastapi.Depends(ScopedAuth(['plugins:read'])) if private else None,
 ) -> Dict[str, Any]:
     """
     Get a plugin's attributes.
@@ -155,9 +161,7 @@ def get_plugin_attributes(
 def get_plugins(
     user_id: Optional[int] = None,
     search_term: Optional[str] = None,
-    curr_user = (
-        fastapi.Depends(manager) if private else None
-    ),
+    curr_user = fastapi.Depends(ScopedAuth(['plugins:read'])) if private else None,
 ) -> List[str]:
     """
     Get a list of plugins.
@@ -179,13 +183,15 @@ def get_plugins(
     ).get_plugins(user_id=user_id, search_term=search_term)
 
 
-@app.delete(plugins_endpoint + '/{name}', tags=['Plugins'])
+@app.delete(
+    plugins_endpoint + '/{name}',
+    tags=['Plugins'],
+    response_model=SuccessTupleResponseModel,
+)
 def delete_plugin(
     name: str,
-    curr_user = (
-        fastapi.Depends(manager) if private else None
-    ),
-) -> SuccessTuple:
+    curr_user = fastapi.Depends(manager),
+) -> SuccessTupleResponseModel:
     """
     Delete a plugin and its archive file from the repository.
     """
@@ -196,7 +202,11 @@ def delete_plugin(
         return False, f"Plugin '{plugin}' is not registered."
 
     if curr_user is not None:
-        curr_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_user_id(curr_user)
+        curr_user_id = (
+            get_api_connector(PLUGINS_INSTANCE_KEYS).get_user_id(curr_user)
+            if isinstance(curr_user, User)
+            else get_api_connector(PLUGINS_INSTANCE_KEYS).get_token_user_id(curr_user)
+        )
         if plugin_user_id != curr_user_id:
             return False, f"User '{curr_user.username}' cannot delete plugin '{plugin}'."
     else:

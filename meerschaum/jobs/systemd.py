@@ -12,7 +12,6 @@ import sys
 import asyncio
 import json
 import time
-import traceback
 import shutil
 from datetime import datetime, timezone
 from functools import partial
@@ -21,9 +20,8 @@ import meerschaum as mrsm
 from meerschaum.jobs import Job, Executor, make_executor
 from meerschaum.utils.typing import Dict, Any, List, SuccessTuple, Union, Optional, Callable
 from meerschaum.config import get_config
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn, dprint
-from meerschaum._internal.arguments._parse_arguments import parse_arguments
 
 JOB_METADATA_CACHE_SECONDS: int = STATIC_CONFIG['api']['jobs']['metadata_cache_seconds']
 
@@ -704,6 +702,13 @@ class SystemdExecutor(Executor):
         socket_path = self.get_socket_path(name, debug=debug)
         blocking_path = socket_path.parent / (socket_path.name + '.block')
         return blocking_path.exists()
+
+    def get_job_prompt_kwargs(self, name: str, debug: bool = False) -> Dict[str, Any]:
+        """
+        Return the kwargs to the blocking prompt.
+        """
+        job = self.get_hidden_job(name, debug=debug)
+        return job.get_prompt_kwargs(debug=debug)
 
     def get_job_rotating_file(self, name: str, debug: bool = False):
         """

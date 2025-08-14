@@ -29,6 +29,7 @@ jobs:
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
           MRSM_TEST_FLAVORS: "all"
+          MRSM_DEBUG: "false"
           MRSM_INSTALL_PACKAGES: "api"
         run: ./scripts/test.sh db
       - uses: actions/upload-artifact@v4

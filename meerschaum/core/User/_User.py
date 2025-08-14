@@ -7,14 +7,15 @@ User class definition
 """
 
 from __future__ import annotations
+
 import os
 import hashlib
 import hmac
+import uuid
 from binascii import b2a_base64, a2b_base64, Error as _BinAsciiError
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Optional, Dict, Any, Union
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum.utils.typing import Optional, Dict, Any, Union, List
 from meerschaum.utils.warnings import warn
 
 
@@ -40,7 +41,7 @@ def hash_password(
 
     rounds: Optional[int], default None
         If provided, use this number of rounds to generate the hash.
-        Defaults to 3,000,000.
+        Defaults to 1,000,000.
         
     Returns
     -------
@@ -48,6 +49,7 @@ def hash_password(
     See the `passlib` documentation on the string format:
     https://passlib.readthedocs.io/en/stable/lib/passlib.hash.pbkdf2_digest.html#format-algorithm
     """
+    from meerschaum._internal.static import STATIC_CONFIG
     hash_config = STATIC_CONFIG['users']['password_hash']
     if password is None:
         password = ''
@@ -64,7 +66,7 @@ def hash_password(
     ) 
     return (
         f"$pbkdf2-{hash_config['algorithm_name']}"
-        + f"${hash_config['pbkdf2_sha256__default_rounds']}"
+        + f"${rounds}"
         + '$' + ab64_encode(salt).decode('utf-8')
         + '$' + ab64_encode(pw_hash).decode('utf-8')
     )
@@ -89,16 +91,16 @@ def verify_password(
     -------
     A `bool` indicating whether `password` matches `password_hash`.
     """
+    from meerschaum._internal.static import STATIC_CONFIG
     if password is None or password_hash is None:
         return False
-    hash_config = STATIC_CONFIG['users']['password_hash']
     try:
         digest, rounds_str, encoded_salt, encoded_checksum = password_hash.split('$')[1:]
         algorithm_name = digest.split('-')[-1]
         salt = ab64_decode(encoded_salt)
         checksum = ab64_decode(encoded_checksum)
         rounds = int(rounds_str)
-    except Exception as e:
+    except Exception:
         warn(f"Failed to extract context from password hash '{password_hash}'. Is it corrupted?")
         return False
 
@@ -177,7 +179,7 @@ class User:
         type: Optional[str] = None,
         email: Optional[str] = None,
         attributes: Optional[Dict[str, Any]] = None,
-        user_id: Optional[int] = None,
+        user_id: Union[int, str, uuid.UUID, None] = None,
         instance: Optional[str] = None
     ):
         if password is None:
@@ -188,7 +190,7 @@ class User:
         self.type = type
         self._attributes = attributes
         self._user_id = user_id
-        self._instance_keys = str(instance)
+        self._instance_keys = str(instance) if instance is not None else None
 
     def __repr__(self):
         return str(self)
@@ -203,14 +205,14 @@ class User:
         return self._attributes
 
     @property
-    def instance_connector(self) -> 'mrsm.connectors.Connector':
+    def instance_connector(self) -> mrsm.connectors.InstanceConnector:
         from meerschaum.connectors.parse import parse_instance_keys
         if '_instance_connector' not in self.__dict__:
             self._instance_connector = parse_instance_keys(self._instance_keys)
         return self._instance_connector
 
     @property
-    def user_id(self) -> Union[int, str, None]:
+    def user_id(self) -> Union[int, str, uuid.UUID, None]:
         """NOTE: This causes recursion with the API,
               so don't try to get fancy with read-only attributes.
         """
@@ -231,3 +233,26 @@ class User:
 
         self._password_hash = hash_password(self.password)
         return self._password_hash
+
+    def get_attributes(self, refresh: bool = False, debug: bool = False) -> Dict[str, Any]:
+        """
+        Return the user's attributes.
+        """
+        if not refresh:
+            return self.attributes
+        self._attributes = self.instance_connector.get_user_attributes(self, debug=debug) or {}
+        return self._attributes
+
+    def get_scopes(self, refresh: bool = False, debug: bool = False) -> List[str]:
+        """
+        Return the scopes for this user.
+        """
+        from meerschaum._internal.static import STATIC_CONFIG
+        _attributes = self.get_attributes(refresh=refresh, debug=debug)
+        return _attributes.get('scopes', None) or list(STATIC_CONFIG['tokens']['scopes'])
+
+    def register(self, debug: bool = False, **kwargs: Any) -> mrsm.SuccessTuple:
+        """
+        Register a user to the instance connector.
+        """
+        return self.instance_connector.register_user(self, debug=debug, **kwargs)

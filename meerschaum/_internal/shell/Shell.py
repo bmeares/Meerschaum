@@ -31,11 +31,13 @@ prompt_toolkit = attempt_import('prompt_toolkit', lazy=False, warn=False, instal
 )
 from meerschaum._internal.shell.ValidAutoSuggest import ValidAutoSuggest
 from meerschaum._internal.shell.ShellCompleter import ShellCompleter
+from meerschaum._internal.cli.daemons import get_cli_daemon, get_cli_session_id
 _clear_screen = get_config('shell', 'clear_screen', patch=True)
 from meerschaum.utils.misc import string_width, remove_ansi
 from meerschaum.utils.warnings import warn
 from meerschaum.jobs import get_executor_keys_from_context
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
+from meerschaum.utils.formatting._shell import clear_screen, flush_stdout
 from meerschaum._internal.arguments._parse_arguments import (
     split_chained_sysargs,
     split_pipeline_sysargs,
@@ -81,6 +83,7 @@ ESCAPED_AND_KEY: str = STATIC_CONFIG['system']['arguments']['escaped_and_key']
 PIPELINE_KEY: str = STATIC_CONFIG['system']['arguments']['pipeline_key']
 ESCAPED_PIPELINE_KEY: str = STATIC_CONFIG['system']['arguments']['escaped_pipeline_key']
 
+
 def _insert_shell_actions(
     _shell: Optional['Shell'] = None,
     actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
@@ -99,6 +102,10 @@ def _insert_shell_actions(
     _shell_class = _shell if _shell is not None else shell_pkg.Shell
 
     for a, f in actions.items():
+        existing_method = getattr(_shell_class, 'do_' + a, None)
+        if existing_method == f:
+            continue
+
         add_method_to_class(
             func = f,
             class_def = _shell_class,
@@ -111,6 +118,35 @@ def _insert_shell_actions(
             _completer = shell_pkg.default_action_completer
         completer = _completer_wrapper(_completer)
         setattr(_shell_class, 'complete_' + a, completer)
+
+
+def _remove_shell_actions(
+    _shell: Optional['Shell'] = None,
+    actions: Optional[Dict[str, Callable[[Any], SuccessTuple]]] = None,
+) -> None:
+    """
+    Remove the actions added to the shell.
+    """
+    import meerschaum._internal.shell as shell_pkg
+    if actions is None:
+        from meerschaum.actions import actions as _actions
+        actions = _actions
+
+    _shell_class = _shell if _shell is not None else shell_pkg.Shell
+
+    for a, f in actions.items():
+        try:
+            delattr(_shell_class, 'do_' + a)
+        except AttributeError:
+            pass
+
+        if a in reserved_completers:
+            continue
+
+        try:
+            delattr(_shell_class, 'complete_' + a)
+        except AttributeError:
+            pass
 
 
 def _completer_wrapper(
@@ -294,16 +330,19 @@ class Shell(cmd.Cmd):
                 pass
 
         ### NOTE: custom actions must be added to the self._actions dictionary
+        shell_attrs['_session_id'] = get_cli_session_id()
         shell_attrs['_actions'] = actions
         shell_attrs['_sysargs'] = sysargs
         shell_attrs['_actions']['instance'] = self.do_instance
         shell_attrs['_actions']['repo'] = self.do_repo
         shell_attrs['_actions']['executor'] = self.do_executor
         shell_attrs['_actions']['debug'] = self.do_debug
+        shell_attrs['_actions']['daemon'] = self.do_daemon
         shell_attrs['_update_bottom_toolbar'] = True
         shell_attrs['_old_bottom_toolbar'] = ''
         shell_attrs['debug'] = False
         shell_attrs['_reload'] = True
+        shell_attrs['daemon'] = get_config('system', 'experimental', 'cli_daemon')
         self.load_config(instance=instance_keys)
         self.hidden_commands = []
         ### update hidden commands list (cmd2 only)
@@ -353,7 +392,7 @@ class Shell(cmd.Cmd):
             shell_attrs['instance'] = instance
             shell_attrs['instance_keys'] = remove_ansi(str(instance))
         if shell_attrs.get('repo_keys', None) is None:
-            shell_attrs['repo_keys'] = get_config('meerschaum', 'default_repository', patch=patch)
+            shell_attrs['repo_keys'] = get_config('meerschaum', 'repository', patch=patch)
         if shell_attrs.get('executor_keys', None) is None:
             shell_attrs['executor_keys'] = get_executor_keys_from_context()
 
@@ -496,8 +535,7 @@ class Shell(cmd.Cmd):
             )
         )
         shell_attrs['prompt'] = self.prompt
-        ### flush stdout
-        print("", end="", flush=True)
+        flush_stdout()
 
 
     def precmd(self, line: str):
@@ -530,7 +568,6 @@ class Shell(cmd.Cmd):
 
         ### if the user specifies, clear the screen before executing any commands
         if _clear_screen:
-            from meerschaum.utils.formatting._shell import clear_screen
             clear_screen(debug=shell_attrs['debug'])
 
         ### return blank commands (spaces break argparse)
@@ -618,7 +655,7 @@ class Shell(cmd.Cmd):
             if key == 'mrsm_instance':
                 default_value = get_config('meerschaum', 'instance')
             elif key == 'repository':
-                default_value = get_config('meerschaum', 'default_repository')
+                default_value = get_config('meerschaum', 'repository')
             elif key == 'executor_keys':
                 default_value = get_executor_keys_from_context()
             else:
@@ -672,7 +709,12 @@ class Shell(cmd.Cmd):
             ([':'] + pipeline_args) if pipeline_args else []
         )
         try:
-            success_tuple = entry(sysargs_to_execute, _patch_args=patch_args)
+            success_tuple = entry(
+                sysargs_to_execute,
+                _patch_args=patch_args,
+                _session_id=shell_attrs.get('session_id', None),
+                _use_cli_daemon=shell_attrs.get('daemon', False),
+            )
         except Exception as e:
             success_tuple = False, str(e)
 
@@ -732,6 +774,35 @@ class Shell(cmd.Cmd):
 
         info(f"Debug mode is {'on' if shell_attrs['debug'] else 'off'}.")
 
+    def do_daemon(self, action: Optional[List[str]] = None, executor_keys=None, **kw):
+        """
+        Toggle whether to route commands through the CLI daemon.
+        
+        Command:
+            `debug {on/true | off/false}`
+            Ommitting on / off will toggle the existing value.
+        """
+        from meerschaum.utils.warnings import info
+        on_commands = {'on', 'true', 'True'}
+        off_commands = {'off', 'false', 'False'}
+        if action is None:
+            action = []
+        try:
+            state = action[0]
+        except (IndexError, AttributeError):
+            state = ''
+        if state == '':
+            shell_attrs['daemon'] = not shell_attrs['daemon']
+        elif state.lower() in on_commands:
+            shell_attrs['daemon'] = True
+        elif state.lower() in off_commands:
+            shell_attrs['daemon'] = False
+        else:
+            info(f"Unknown state '{state}'. Ignoring...")
+
+        info(f"CLI daemon mode is {'on' if shell_attrs['daemon'] else 'off'}.")
+        return True, "Success"
+
     def do_instance(
         self,
         action: Optional[List[str]] = None,
@@ -781,10 +852,11 @@ class Shell(cmd.Cmd):
             instance_keys += ':main'
 
         conn_attrs = parse_instance_keys(instance_keys, construct=False, debug=debug)
-        if conn_attrs is None or not conn_attrs:
-            conn_keys = str(get_connector(debug=debug))
-        else:
-            conn_keys = instance_keys
+        conn_keys = (
+            str(get_connector(debug=debug))
+            if conn_attrs is None
+            else instance_keys
+        )
 
         shell_attrs['instance_keys'] = conn_keys
 
@@ -832,7 +904,7 @@ class Shell(cmd.Cmd):
         """
         Temporarily set a default Meerschaum repository for the duration of the shell.
         The default repository (mrsm.io) is loaded from the Meerschaum configuraton file
-          (at keys 'meerschaum:default_repository').
+          (at keys 'meerschaum.repository').
         
         You can change the default repository with `edit config`.
         
@@ -863,7 +935,7 @@ class Shell(cmd.Cmd):
         except (IndexError, AttributeError):
             repo_keys = ''
         if repo_keys == '':
-            repo_keys = get_config('meerschaum', 'default_repository', patch=True)
+            repo_keys = get_config('meerschaum', 'repository', patch=True)
 
         conn = parse_repo_keys(repo_keys, debug=debug)
         if conn is None or not conn:
@@ -946,7 +1018,7 @@ class Shell(cmd.Cmd):
         show pipes -h
         ```
         """
-        from meerschaum.actions import actions
+        from meerschaum.actions import get_action
         from meerschaum._internal.arguments._parser import parse_help
         from meerschaum._internal.arguments._parse_arguments import parse_line
         import textwrap
@@ -955,12 +1027,15 @@ class Shell(cmd.Cmd):
             del args['action']
             shell_attrs['_actions']['show'](['actions'], **args)
             return ""
+
         if args['action'][0] not in shell_attrs['_actions']:
+            action_func = get_action(args['action'])
             try:
-                print(textwrap.dedent(getattr(self, f"do_{args['action'][0]}").__doc__))
+                print(textwrap.dedent(action_func.__doc__))
             except Exception:
-                print(f"No help on '{args['action'][0]}'.")
+                print(f"No help on '{shlex.join(args['action'])}'.")
             return ""
+
         parse_help(args)
         return ""
 
@@ -1028,7 +1103,6 @@ class Shell(cmd.Cmd):
 
         ### if the user specifies, clear the screen before initializing the shell
         if _clear_screen:
-            from meerschaum.utils.formatting._shell import clear_screen
             clear_screen(debug=shell_attrs['debug'])
 
         ### if sysargs are provided, skip printing the intro and execute instead
@@ -1044,9 +1118,10 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     Replace built-in `input()` with prompt_toolkit.prompt.
     """
     from meerschaum.utils.formatting import CHARSET, ANSI, colored, UNICODE
-    from meerschaum.connectors import is_connected, connectors
+    from meerschaum.connectors import connectors
     from meerschaum.utils.misc import remove_ansi, truncate_text_for_display
     from meerschaum.config import get_config
+
     import platform
     if shell is None:
         from meerschaum.actions import get_shell
@@ -1061,8 +1136,16 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             return None
         if not shell_attrs['_update_bottom_toolbar'] and platform.system() == 'Windows':
             return shell_attrs['_old_bottom_toolbar']
-        size = os.get_terminal_size()
-        num_cols, num_lines = size.columns, size.lines
+        try:
+            size = os.get_terminal_size()
+            num_cols, num_lines = size.columns, size.lines
+        except Exception:
+            from meerschaum.utils.misc import is_int
+            num_cols, num_lines = os.environ.get('COLUMNS', 80), os.environ.get('LINES', 120)
+            if is_int(str(num_cols)):
+                num_cols = int(num_cols)
+            if is_int(str(num_lines)):
+                num_lines = int(num_lines)
         truncation_suffix = (
             '…'
             if UNICODE
@@ -1111,24 +1194,34 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
 
         try:
             typ, label = shell_attrs['instance_keys'].split(':', maxsplit=1)
-            connected = typ in connectors and label in connectors[typ]
+            cli_worker = (
+                get_cli_daemon()
+                if shell_attrs.get('daemon', False)
+                else None
+            )
+            connected = (
+                cli_worker.job.status == 'running'
+                if cli_worker is not None
+                else (typ in connectors and label in connectors[typ])
+            )
         except Exception:
             connected = False
         last_connected = connected
         connected_str = truncate_text_for_display(
-            ('dis' if not connected else '') + 'connected',
+            ('daemon' if cli_worker is not None else remove_ansi(shell_attrs['instance_keys'])),
             **truncation_kwargs
         )
+        connected_status_str = 'disconnected' if not connected else 'connected'
         connected_icon = get_config(
-            'formatting', connected_str, CHARSET, 'icon', warn=False,
+            'formatting', connected_status_str, CHARSET, 'icon', warn=False,
         ) or ''
         connection_text = (
-            connected_icon + ' ' + (
-                colored(connected_str.capitalize(), 'on ' + (get_config(
-                    'formatting', connected_str, 'ansi', 'rich', 'style',
+            (
+                colored(connected_str, 'on ' + (get_config(
+                    'formatting', connected_status_str, 'ansi', 'rich', 'style',
                     warn=False,
-                ) or '') + '  ') if ANSI else (colored(connected_str.capitalize(), 'on white') + ' ')
-            )
+                ) or '') + '  ') if ANSI else (colored(connected_str, 'on white') + ' ')
+            ) + ' ' + connected_icon
         )
 
         left = (
@@ -1163,7 +1256,6 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             ### NOTE: would it be better to do nothing instead?
             if len(parsed.strip()) == 0:
                 if _clear_screen:
-                    from meerschaum.utils.formatting._shell import clear_screen
                     clear_screen()
         except KeyboardInterrupt:
             print("^C")

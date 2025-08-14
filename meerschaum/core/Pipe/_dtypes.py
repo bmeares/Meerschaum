@@ -22,6 +22,7 @@ def enforce_dtypes(
     chunksize: Optional[int] = -1,
     enforce: bool = True,
     safe_copy: bool = True,
+    dtypes: Optional[Dict[str, str]] = None,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -31,7 +32,11 @@ def enforce_dtypes(
     import traceback
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.dataframe import parse_df_datetimes, enforce_dtypes as _enforce_dtypes
+    from meerschaum.utils.dataframe import (
+        parse_df_datetimes,
+        enforce_dtypes as _enforce_dtypes,
+        parse_simple_lines,
+    )
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.packages import import_pandas
     pd = import_pandas(debug=debug)
@@ -45,23 +50,35 @@ def enforce_dtypes(
 
     if not self.enforce:
         enforce = False
-    pipe_dtypes = self.dtypes if enforce else {}
+
+    explicit_dtypes = self.get_dtypes(infer=False, debug=debug) if enforce else {}
+    pipe_dtypes = self.get_dtypes(infer=True, debug=debug) if not dtypes else dtypes
 
     try:
         if isinstance(df, str):
-            df = parse_df_datetimes(
-                pd.read_json(StringIO(df)),
-                ignore_cols=[
-                    col
-                    for col, dtype in pipe_dtypes.items()
-                    if (not enforce or not are_dtypes_equal(dtype, 'datetime'))
-                ],
-                ignore_all=(not enforce),
-                strip_timezone=(self.tzinfo is None),
-                chunksize=chunksize,
-                debug=debug,
-            )
-        elif isinstance(df, (dict, list)):
+            if df.strip() and df.strip()[0] not in ('{', '['):
+                df = parse_df_datetimes(
+                    parse_simple_lines(df),
+                    ignore_cols=[
+                        col
+                        for col, dtype in pipe_dtypes.items()
+                        if (not enforce or not are_dtypes_equal(dtype, 'datetime'))
+                    ],
+                )
+            else:
+                df = parse_df_datetimes(
+                    pd.read_json(StringIO(df)),
+                    ignore_cols=[
+                        col
+                        for col, dtype in pipe_dtypes.items()
+                        if (not enforce or not are_dtypes_equal(dtype, 'datetime'))
+                    ],
+                    ignore_all=(not enforce),
+                    strip_timezone=(self.tzinfo is None),
+                    chunksize=chunksize,
+                    debug=debug,
+                )
+        elif isinstance(df, (dict, list, tuple)):
             df = parse_df_datetimes(
                 df,
                 ignore_cols=[
@@ -81,21 +98,28 @@ def enforce_dtypes(
         if debug:
             dprint(
                 f"Could not find dtypes for {self}.\n"
-                + "    Skipping dtype enforcement..."
+                + "Skipping dtype enforcement..."
             )
         return df
 
     return _enforce_dtypes(
         df,
         pipe_dtypes,
+        explicit_dtypes=explicit_dtypes,
         safe_copy=safe_copy,
         strip_timezone=(self.tzinfo is None),
+        coerce_numeric=self.mixed_numerics,
         coerce_timezone=enforce,
         debug=debug,
     )
 
 
-def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, Any]:
+def infer_dtypes(
+    self,
+    persist: bool = False,
+    refresh: bool = False,
+    debug: bool = False,
+) -> Dict[str, Any]:
     """
     If `dtypes` is not set in `meerschaum.Pipe.parameters`,
     infer the data types from the underlying table if it exists.
@@ -104,6 +128,11 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
     ----------
     persist: bool, default False
         If `True`, persist the inferred data types to `meerschaum.Pipe.parameters`.
+        NOTE: Use with caution! Generally `dtypes` is meant to be user-configurable only.
+
+    refresh: bool, default False
+        If `True`, retrieve the latest columns-types for the pipe.
+        See `Pipe.get_columns.types()`.
 
     Returns
     -------
@@ -117,7 +146,7 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
 
     ### NOTE: get_columns_types() may return either the types as
     ###       PostgreSQL- or Pandas-style.
-    columns_types = self.get_columns_types(debug=debug)
+    columns_types = self.get_columns_types(refresh=refresh, debug=debug)
 
     remote_pd_dtypes = {
         c: (
@@ -130,7 +159,8 @@ def infer_dtypes(self, persist: bool = False, debug: bool = False) -> Dict[str, 
     if not persist:
         return remote_pd_dtypes
 
-    dtypes = self.parameters.get('dtypes', {})
+    parameters = self.get_parameters(refresh=refresh, debug=debug)
+    dtypes = parameters.get('dtypes', {})
     dtypes.update({
         col: typ
         for col, typ in remote_pd_dtypes.items()

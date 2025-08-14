@@ -40,7 +40,8 @@ class ArgumentParser(argparse.ArgumentParser):
 
 def parse_datetime(dt_str: str) -> Union[datetime, int, str]:
     """Parse a string into a datetime."""
-    from meerschaum.utils.misc import is_int, round_time
+    from meerschaum.utils.dtypes import round_time
+    from meerschaum.utils.misc import is_int
     if is_int(dt_str):
         return int(dt_str)
 
@@ -139,7 +140,11 @@ def parse_help(sysargs: Union[List[str], Dict[str, Any]]) -> None:
     ### Check for subactions.
     if len(args['action']) > 1:
         try:
-            subaction = get_subactions(args['action'][0])[args['action'][1]]
+            subactions = get_subactions(args['action'][0])
+            subaction_name = args['action'][1]
+            if subaction_name not in subactions:
+                subaction_name = subaction_name + 's'
+            subaction = subactions[subaction_name]
         except Exception:
             subaction = None
         if subaction is not None:
@@ -195,6 +200,7 @@ groups['pipes'] = parser.add_argument_group(title='Pipes options')
 groups['sync'] = parser.add_argument_group(title='Sync options')
 groups['api'] = parser.add_argument_group(title='API options')
 groups['plugins'] = parser.add_argument_group(title='Plugins options')
+groups['tokens'] = parser.add_argument_group(title='Tokens options')
 groups['packages'] = parser.add_argument_group(title='Packages options')
 groups['debug'] = parser.add_argument_group(title='Debugging options')
 groups['misc'] = parser.add_argument_group(title='Miscellaneous options')
@@ -375,7 +381,7 @@ groups['sync'].add_argument(
 groups['sync'].add_argument(
     '--cache', action='store_true',
     help=(
-        "When syncing or viewing a pipe's data, sync to a local database for later analysis."
+        "Sync pipes' metadata to disk."
     )
 )
 
@@ -388,12 +394,20 @@ groups['api'].add_argument(
     help="The host address to bind to for the API server. Defaults to '0.0.0.0'."
 )
 groups['api'].add_argument(
+    '--webterm-port', type=int,
+    help="The port on which to run the webterm server.",
+)
+groups['api'].add_argument(
     '-w', '--workers', type=int,
     help = "How many workers to run a concurrent action (e.g. running the API or syncing pipes)"
 )
 groups['api'].add_argument(
     '--no-dash', '--nodash', action='store_true',
-    help = 'When starting the API, do not start the Web interface.',
+    help = 'When starting the API, do not start the Web Console dashboard.',
+)
+groups['api'].add_argument(
+    '--no-webterm', '--nowebterm', action='store_true',
+    help="When starting the API, do not start the Webterm.",
 )
 groups['api'].add_argument(
     '--private', '--private-mode', action='store_true',
@@ -419,10 +433,21 @@ groups['api'].add_argument(
     '--certfile', type=str,
     help = "Start the API server with this certfile (requires --keyfile).",
 )
+
 ### Plugins options
 groups['plugins'].add_argument(
     '-r', '--repository', '--repo', type=str,
     help="Meerschaum plugins repository to connect to. Specify an API label (default: 'mrsm')"
+)
+
+### Tokens options
+groups['tokens'].add_argument(
+    '--ttl-days', type=int,
+    help="For how many days should a token be valid.",
+)
+groups['tokens'].add_argument(
+    '--scopes', '--scope', nargs='+',
+    help="Which scope permissions to grant to a token.",
 )
 
 ### Packages options
@@ -490,4 +515,8 @@ groups['misc'].add_argument(
         "Allow shell commands to be run as background jobs. "
         + "Default behavior is to only allow recognized actions."
     )
+)
+groups['misc'].add_argument(
+    '--no-daemon', action='store_true',
+    help="Do not use the Meerschaum CLI daemon to execute the action.",
 )

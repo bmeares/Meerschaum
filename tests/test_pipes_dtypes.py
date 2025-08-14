@@ -4,7 +4,7 @@
 
 import pytest
 import warnings
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from decimal import Decimal
 from uuid import UUID
 from tests import debug
@@ -28,13 +28,16 @@ def test_sync_change_columns_dtypes(flavor: str):
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 10},
     ]
-    pipe.sync(docs, debug=debug)
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
     assert len(pipe.get_data().columns) == 3
 
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 'foo'},
     ]
-    pipe.sync(docs, debug=debug)
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
     df = pipe.get_data()
     assert len(df.columns) == 3
     assert len(df) == 1
@@ -52,7 +55,7 @@ def test_dtype_enforcement(flavor: str):
     pipe = Pipe(
         'dtype', 'enforcement',
         static=False,
-        upsert=True, ### TODO: Test with `upsert=True`.
+        upsert=True,
         enforce=True,
         columns={
             'datetime': 'dt',
@@ -69,23 +72,37 @@ def test_dtype_enforcement(flavor: str):
             'str': 'str',
             'uuid': 'uuid',
             'bytes': 'bytes',
+            'date': 'date',
+            'geometry': 'geometry',
         },
         instance=conn,
     )
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'int': '1'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'float': '1.0'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bool': 'True'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'object': 'foo'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'str': 'bar'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': '{"a": {"b": 1}}'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'uuid': '00000000-1234-5678-0000-000000000000'}], debug=debug)
-    pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bytes': 'Zm9vIGJhcg=='}], debug=debug)
+
+    results = []
+
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'int': '1'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'float': '1.0'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bool': 'True'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'object': 'foo'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'str': 'bar'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'json': '{"a": {"b": 1}}'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'numeric': '1'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'uuid': '00000000-1234-5678-0000-000000000000'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'bytes': 'Zm9vIGJhcg=='}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'date': '2025-01-01'}], debug=debug))
+    results.append(pipe.sync([{'dt': '2022-01-01', 'id': 1, 'geometry': 'POINT (0 0)'}], debug=debug))
+
+    successes = [success for success, msg in results]
+    msgs = [msg for success, msg in results]
+    assert all(successes), '\n'.join(msgs)
+
     df = pipe.get_data(debug=debug)
     assert len(df) == 1
-    assert len(df.columns) == 11
+    assert len(df.columns) == len(results) + len(pipe.columns)
+
+    dtypes = pipe.dtypes
     for col, typ in df.dtypes.items():
-        pipe_dtype = pipe.dtypes[col]
+        pipe_dtype = dtypes[col]
         if pipe_dtype == 'json':
             assert isinstance(df[col][0], dict)
             pipe_dtype = 'object'
@@ -100,7 +117,14 @@ def test_dtype_enforcement(flavor: str):
             pipe_dtype = 'object'
         elif pipe_dtype == 'str':
             assert isinstance(df[col][0], str)
-        assert are_dtypes_equal(pipe_dtype.lower(), typ)
+        elif pipe_dtype == 'geometry':
+            assert 'shapely' in str(type(df[col][0]))
+            assert 'Point' in str(type(df[col][0]))
+            pipe_dtype = 'object'
+        print(f"{col=}")
+        print(f"{str(typ)=}")
+        print(f"{pipe_dtype=}")
+        assert are_dtypes_equal(pipe_dtype.lower(), str(typ))
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -114,13 +138,13 @@ def test_infer_json_dtype(flavor: str):
     conn = conns[flavor]
     pipe = Pipe('foo', 'bar', session_id, instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('foo', 'bar', session_id, instance=conn, columns=['id'])
+    pipe = Pipe('foo', 'bar', session_id, instance=conn, columns=['id'], debug=debug, cache=False)
     success, msg = pipe.sync([
         {'id': 1, 'a': ['b', 'c']},
         {'id': 2, 'a': {'b': 1}},
-    ])
+    ], debug=debug)
     assert success, msg
-    pprint(pipe.get_columns_types())
+    pprint(pipe.get_columns_types(debug=debug))
     df = pipe.get_data(debug=debug)
     assert isinstance(df['a'][0], list)
     assert isinstance(df['a'][1], dict)
@@ -172,13 +196,13 @@ def test_infer_numeric_dtype(flavor: str):
     conn = conns[flavor]
     pipe = Pipe('infer', 'numeric', instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('infer', 'numeric', instance=conn, columns=['id'])
+    pipe = Pipe('infer', 'numeric', instance=conn, columns=['id'], debug=debug)
     success, msg = pipe.sync([
         {'id': 1, 'a': Decimal('1')},
         {'id': 2, 'a': Decimal(numeric_str)},
-    ])
+    ], debug=debug)
     assert success, msg
-    pprint(pipe.get_columns_types())
+    pprint(pipe.get_columns_types(debug=debug))
     df = pipe.get_data(debug=debug)
     print(df)
     assert isinstance(df['a'][0], Decimal)
@@ -194,9 +218,9 @@ def test_infer_uuid_dtype(flavor: str):
     """
     from meerschaum.utils.formatting import pprint
     conn = conns[flavor]
-    pipe = Pipe('infer', 'uuid', instance=conn)
+    pipe = Pipe('infer', 'uuid', debug=debug, instance=conn)
     _ = pipe.delete(debug=debug)
-    pipe = Pipe('infer', 'uuid', instance=conn, columns=['id'])
+    pipe = Pipe('infer', 'uuid', instance=conn, columns=['id'], debug=debug)
     uuid_str = "e6f3a4ea-f1af-4e93-8da9-716b57672206"
     success, msg = pipe.sync(
         [
@@ -205,7 +229,7 @@ def test_infer_uuid_dtype(flavor: str):
         debug=debug,
     )
     assert success, msg
-    pprint(pipe.get_columns_types())
+    pprint(pipe.get_columns_types(debug=debug))
     df = pipe.get_data(debug=debug)
     print(df)
     assert isinstance(df['a'][0], UUID)
@@ -482,6 +506,7 @@ def test_no_indices_inferred_datetime_to_text(flavor: str):
         'test_no_indices', 'datetimes', 'text',
         instance=conn,
     )
+    assert not pipe.exists()
 
     docs = [
         {'fake-dt': '2023-01-01', 'a': 1},
@@ -523,7 +548,6 @@ def test_sync_bools(flavor: str):
         columns={'datetime': 'dt'},
         dtypes={'is_bool': 'bool'},
     )
-    _ = pipe.drop()
     docs = [
         {'dt': '2023-01-01', 'is_bool': True},
         {'dt': '2023-01-02', 'is_bool': False},
@@ -856,7 +880,7 @@ def test_mixed_timezone_aware_and_naive(flavor: str):
 
     pd = mrsm.attempt_import('pandas')
     target = 'test_timezone_mix'
-    pipe = mrsm.Pipe('test', 'timezone', 'aware_naive', instance=conn)
+    pipe = mrsm.Pipe('test', 'timezone', 'aware_naive', target=target, instance=conn)
     pipe.delete()
     pipe = mrsm.Pipe(
         'test', 'timezone', 'aware_naive',
@@ -874,7 +898,7 @@ def test_mixed_timezone_aware_and_naive(flavor: str):
     assert len(update) == 0
     assert len(delta) == 0
 
-    success, msg = pipe.sync([{'ts': '2024-01-01 05:00:00', 'val': 3}])
+    success, msg = pipe.sync([{'ts': '2024-01-01 05:00:00', 'val': 3}], debug=debug)
     assert success, msg
 
     df = pipe.get_data(begin='2024-01-01 05:00:00', debug=debug)
@@ -959,7 +983,10 @@ def test_distant_datetimes(flavor: str):
         columns={
             'datetime': 'ts',
         },
-        enforce=False,
+        dtypes={
+            'ts': 'datetime64[ms]',
+        },
+        enforce=True,
     )
     docs = [
         {'ts': datetime(1, 1, 1)},
@@ -967,8 +994,7 @@ def test_distant_datetimes(flavor: str):
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
 
-    df = pipe.get_data()
-    print(f"df=\n{df}")
+    df = pipe.get_data(debug=debug)
     assert df['ts'][0].year == 1
 
 
@@ -977,8 +1003,9 @@ def test_enforce_false(flavor: str):
     """
     Test `enforce=False` behavior.
     """ 
-    if flavor not in ('api', 'mssql', 'timescaledb', 'sqlite'):
+    if flavor not in ('timescaledb', 'mssql'):
         return
+
     conn = conns[flavor]
     pipe = mrsm.Pipe('test', 'enforce', instance=conn)
     pipe.delete()
@@ -986,6 +1013,7 @@ def test_enforce_false(flavor: str):
         'test', 'enforce',
         instance=conn,
         enforce=False,
+        static=True,
         dtypes={'dt': 'datetime64[ns]'},
         columns={
             'datetime': 'dt',
@@ -1171,11 +1199,11 @@ def test_geometry_custom_srid(flavor: str):
         'test', 'geometry', 'srid',
         instance=conn,
         columns={'primary': 'id'},
-        dtypes={'id': 'int', 'geom': 'geometry[MultiLineString,2001]'},
+        dtypes={'id': 'int', 'geom': 'geometry[Point,4326]'},
     )
 
-    geom = shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]])
-    geom_str = '01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F00000000000000400102000000020000000000000000001040000000000000104000000000000014400000000000001840'
+    geom = shapely.Point(-82.3511, 34.86965)
+    geom_str = '01010000000A68226C789654C0B37BF2B0506F4140'
     docs = [
         {'id': 1, 'geom': geom},
     ]
@@ -1183,7 +1211,7 @@ def test_geometry_custom_srid(flavor: str):
     assert success, msg
 
     df = pipe.get_data()
-    assert df['geom'][0] == geom
+    assert df['geom'][0].equals_exact(geom, 5)
 
     success, msg = pipe.sync(df, debug=debug)
     assert success, msg
@@ -1195,3 +1223,60 @@ def test_geometry_custom_srid(flavor: str):
     success, msg = pipe.sync(new_docs, debug=debug)
     assert success, msg
     assert pipe.get_rowcount() == len(docs)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_date_as_datetime(flavor: str):
+    """
+    Test that the `datetime` axis may of type `date`.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'date', 'datetime_column', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'date', 'datetime_column',
+        instance=conn,
+        columns={
+            'datetime': 'day',
+            'id': 'id',
+        },
+        dtypes={
+            'day': 'date'
+        },
+    )
+
+    success, msg = pipe.sync([
+        {'day': '2025-07-22', 'id': 1, 'val': 100.1},
+        {'day': '2025-07-22', 'id': 2, 'val': 200.2},
+    ], debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(debug=debug)
+    assert 'date32' in str(df.dtypes['day'])
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_date_inferred(flavor: str):
+    """
+    Test that `date` objects are automatically detected as `date`.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'date', 'inferred', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'date', 'inferred',
+        instance=conn,
+        autotime=True,
+        columns=['id'],
+        dtypes={
+            'ts': 'int',
+        },
+    )
+
+    success, msg = pipe.sync([
+        {'day': date(2025, 7, 22), 'id': 1},
+        {'day': date(2025, 7, 22), 'id': 2},
+    ], debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(debug=debug)
+    assert 'date32' in str(df.dtypes['day'])

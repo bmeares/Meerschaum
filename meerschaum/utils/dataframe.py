@@ -8,14 +8,13 @@ Utility functions for working with DataFrames.
 
 from __future__ import annotations
 
-import pathlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from collections import defaultdict
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
     Optional, Dict, Any, List, Hashable, Generator,
-    Iterator, Iterable, Union, TYPE_CHECKING,
+    Iterator, Iterable, Union, TYPE_CHECKING, Tuple,
 )
 
 if TYPE_CHECKING:
@@ -249,8 +248,10 @@ def filter_unseen_df(
     cast_dt_cols = True
     try:
         for col, typ in dt_dtypes.items():
+            _dtypes_col_dtype = str((dtypes or {}).get(col, 'datetime'))
             strip_utc = (
-                (dtypes or {}).get(col, 'datetime') == 'datetime64[ns]'
+                _dtypes_col_dtype.startswith('datetime64')
+                and 'utc' not in _dtypes_col_dtype.lower()
             )
             if col in old_df.columns:
                 old_df[col] = coerce_timezone(old_df[col], strip_utc=strip_utc)
@@ -327,8 +328,10 @@ def filter_unseen_df(
         if are_dtypes_equal(str(typ), 'datetime')
     ]
     for col in old_dt_cols:
+        _dtypes_col_dtype = str((dtypes or {}).get(col, 'datetime'))
         strip_utc = (
-            (dtypes or {}).get(col, 'datetime') == 'datetime64[ns]'
+            _dtypes_col_dtype.startswith('datetime64')
+            and 'utc' not in _dtypes_col_dtype.lower()
         )
         old_df[col] = coerce_timezone(old_df[col], strip_utc=strip_utc)
 
@@ -338,8 +341,10 @@ def filter_unseen_df(
         if are_dtypes_equal(str(typ), 'datetime')
     ]
     for col in new_dt_cols:
+        _dtypes_col_dtype = str((dtypes or {}).get(col, 'datetime'))
         strip_utc = (
-            (dtypes or {}).get(col, 'datetime') == 'datetime64[ns]'
+            _dtypes_col_dtype.startswith('datetime64')
+            and 'utc' not in _dtypes_col_dtype.lower()
         )
         new_df[col] = coerce_timezone(new_df[col], strip_utc=strip_utc)
 
@@ -423,6 +428,8 @@ def parse_df_datetimes(
     chunksize: Optional[int] = None,
     dtype_backend: str = 'numpy_nullable',
     ignore_all: bool = False,
+    precision_unit: Optional[str] = None,
+    coerce_utc: bool = True,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -450,6 +457,12 @@ def parse_df_datetimes(
     ignore_all: bool, default False
         If `True`, do not attempt to cast any columns to datetimes.
 
+    precision_unit: Optional[str], default None
+        If provided, enforce the given precision on the coerced datetime columns.
+
+    coerce_utc: bool, default True
+        Coerce the datetime columns to UTC (see `meerschaum.utils.dtypes.to_datetime()`).
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -466,9 +479,9 @@ def parse_df_datetimes(
     >>> df.dtypes
     a    object
     dtype: object
-    >>> df = parse_df_datetimes(df)
-    >>> df.dtypes
-    a    datetime64[ns]
+    >>> df2 = parse_df_datetimes(df)
+    >>> df2.dtypes
+    a    datetime64[us, UTC]
     dtype: object
 
     ```
@@ -478,8 +491,9 @@ def parse_df_datetimes(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.misc import items_str
-    from meerschaum.utils.dtypes import to_datetime
+    from meerschaum.utils.dtypes import to_datetime, MRSM_PD_DTYPES
     import traceback
+
     pd = import_pandas()
     pandas = attempt_import('pandas')
     pd_name = pd.__name__
@@ -567,22 +581,25 @@ def parse_df_datetimes(
     if debug:
         dprint("Converting columns to datetimes: " + str(datetime_cols))
 
+    def _parse_to_datetime(x):
+        return to_datetime(x, precision_unit=precision_unit, coerce_utc=coerce_utc)
+
     try:
         if not using_dask:
-            df[datetime_cols] = df[datetime_cols].apply(to_datetime)
+            df[datetime_cols] = df[datetime_cols].apply(_parse_to_datetime)
         else:
             df[datetime_cols] = df[datetime_cols].apply(
-                to_datetime,
+                _parse_to_datetime,
                 utc=True,
                 axis=1,
                 meta={
-                    col: 'datetime64[ns, UTC]'
+                    col: MRSM_PD_DTYPES['datetime']
                     for col in datetime_cols
                 }
             )
     except Exception:
         warn(
-            f"Unable to apply `pd.to_datetime` to {items_str(datetime_cols)}:\n"
+            f"Unable to apply `to_datetime()` to {items_str(datetime_cols)}:\n"
             + f"{traceback.format_exc()}"
         )
 
@@ -660,8 +677,7 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
         for col, ix in cols_indices.items()
         if (
             ix is not None
-            and
-            not isinstance(df.loc[ix][col], Hashable)
+            and isinstance(df.loc[ix][col], (dict, list))
         )
     ]
 
@@ -701,6 +717,38 @@ def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
             and
             isinstance(df.loc[ix][col], Decimal)
         )
+    ]
+
+
+def get_bool_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the columns which contain `bool` objects from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain bools.
+
+    Returns
+    -------
+    A list of columns to treat as bools.
+    """
+    if df is None:
+        return []
+
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+
+    if len(df) == 0:
+        return []
+
+    from meerschaum.utils.dtypes import are_dtypes_equal
+
+    return [
+        col
+        for col, typ in df.dtypes.items()
+        if are_dtypes_equal(str(typ), 'bool')
     ]
 
 
@@ -746,7 +794,8 @@ def get_datetime_cols(
     df: 'pd.DataFrame',
     timezone_aware: bool = True,
     timezone_naive: bool = True,
-) -> List[str]:
+    with_tz_precision: bool = False,
+) -> Union[List[str], Dict[str, Tuple[Union[str, None], str]]]:
     """
     Get the columns which contain `datetime` or `Timestamp` objects from a Pandas DataFrame.
 
@@ -761,76 +810,233 @@ def get_datetime_cols(
     timezone_naive: bool, default True
         If `True`, include timezone-naive datetime columns.
 
+    with_tz_precision: bool, default False
+        If `True`, return a dictionary mapping column names to tuples in the form
+        `(timezone, precision)`.
+
     Returns
     -------
-    A list of columns to treat as datetimes.
+    A list of columns to treat as datetimes, or a dictionary of columns to tz+precision tuples
+    (if `with_tz_precision` is `True`).
     """
     if not timezone_aware and not timezone_naive:
         raise ValueError("`timezone_aware` and `timezone_naive` cannot both be `False`.")
 
     if df is None:
-        return []
+        return [] if not with_tz_precision else {}
 
     from datetime import datetime
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PRECISION_UNITS_ALIASES
     is_dask = 'dask' in df.__module__
     if is_dask:
         df = get_first_valid_dask_partition(df)
+   
+    def get_tz_precision_from_dtype(dtype: str) -> Tuple[Union[str, None], str]:
+        """
+        Extract the tz + precision tuple from a dtype string.
+        """
+        meta_str = dtype.split('[', maxsplit=1)[-1].rstrip(']').replace(' ', '')
+        tz = (
+            None
+            if ',' not in meta_str
+            else meta_str.split(',', maxsplit=1)[-1]
+        )
+        precision_abbreviation = (
+            meta_str
+            if ',' not in meta_str
+            else meta_str.split(',')[0]
+        )
+        precision = MRSM_PRECISION_UNITS_ALIASES[precision_abbreviation]
+        return tz, precision
 
-    known_dt_cols = [
-        col
+    def get_tz_precision_from_datetime(dt: datetime) -> Tuple[Union[str, None], str]:
+        """
+        Return the tz + precision tuple from a Python datetime object.
+        """
+        return dt.tzname(), 'microsecond'
+
+    known_dt_cols_types = {
+        col: str(typ)
         for col, typ in df.dtypes.items()
         if are_dtypes_equal('datetime', str(typ))
-    ]
+    }
+ 
+    known_dt_cols_tuples = {
+        col: get_tz_precision_from_dtype(typ)
+        for col, typ in known_dt_cols_types.items()
+    }
 
     if len(df) == 0:
-        return known_dt_cols
+        return (
+            list(known_dt_cols_types)
+            if not with_tz_precision
+            else known_dt_cols_tuples
+        )
 
     cols_indices = {
         col: df[col].first_valid_index()
         for col in df.columns
-        if col not in known_dt_cols
+        if col not in known_dt_cols_types
     }
-    pydt_cols = [
-        col
+    pydt_cols_tuples = {
+        col: get_tz_precision_from_datetime(sample_val)
         for col, ix in cols_indices.items()
         if (
             ix is not None
             and
-            isinstance(df.loc[ix][col], datetime)
+            isinstance((sample_val := df.loc[ix][col]), datetime)
         )
-    ]
-    dt_cols_set = set(known_dt_cols + pydt_cols)
-    all_dt_cols = [
-        col
+    }
+
+    dt_cols_tuples = {
+        **known_dt_cols_tuples,
+        **pydt_cols_tuples
+    }
+
+    all_dt_cols_tuples = {
+        col: dt_cols_tuples[col]
         for col in df.columns
-        if col in dt_cols_set
-    ]
+        if col in dt_cols_tuples
+    }
     if timezone_aware and timezone_naive:
-        return all_dt_cols
+        return (
+            list(all_dt_cols_tuples)
+            if not with_tz_precision
+            else all_dt_cols_tuples
+        )
 
     known_timezone_aware_dt_cols = [
         col
-        for col in known_dt_cols
+        for col in known_dt_cols_types
         if getattr(df[col], 'tz', None) is not None
     ]
-    timezone_aware_pydt_cols = [
-        col
-        for col in pydt_cols
+    timezone_aware_pydt_cols_tuples = {
+        col: (tz, precision)
+        for col, (tz, precision) in pydt_cols_tuples.items()
         if df.loc[cols_indices[col]][col].tzinfo is not None
-    ]
-    timezone_aware_dt_cols_set = set(known_timezone_aware_dt_cols + timezone_aware_pydt_cols)
+    }
+    timezone_aware_dt_cols_set = set(
+        known_timezone_aware_dt_cols + list(timezone_aware_pydt_cols_tuples)
+    )
+    timezone_aware_cols_tuples = {
+        col: (tz, precision)
+        for col, (tz, precision) in all_dt_cols_tuples.items()
+        if col in timezone_aware_dt_cols_set
+    }
+    timezone_naive_cols_tuples = {
+        col: (tz, precision)
+        for col, (tz, precision) in all_dt_cols_tuples.items()
+        if col not in timezone_aware_dt_cols_set
+    }
+
     if timezone_aware:
-        return [
-            col
-            for col in all_dt_cols
-            if col in timezone_aware_pydt_cols
-        ]
+        return (
+            list(timezone_aware_cols_tuples)
+            if not with_tz_precision
+            else timezone_aware_cols_tuples
+        )
+
+    return (
+        list(timezone_naive_cols_tuples)
+        if not with_tz_precision
+        else timezone_naive_cols_tuples
+    )
+
+
+def get_datetime_cols_types(df: 'pd.DataFrame') -> Dict[str, str]:
+    """
+    Return a dictionary mapping datetime columns to specific types strings.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain datetime columns.
+
+    Returns
+    -------
+    A dictionary mapping the datetime columns' names to dtype strings
+    (containing timezone and precision metadata).
+
+    Examples
+    --------
+    >>> from datetime import datetime, timezone
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({'dt_tz_aware': [datetime(2025, 1, 1, tzinfo=timezone.utc)]})
+    >>> get_datetime_cols_types(df)
+    {'dt_tz_aware': 'datetime64[us, UTC]'}
+    >>> df = pd.DataFrame({'distant_dt': [datetime(1, 1, 1)]})
+    >>> get_datetime_cols_types(df)
+    {'distant_dt': 'datetime64[us]'}
+    >>> df = pd.DataFrame({'dt_second': datetime(2025, 1, 1)})
+    >>> df['dt_second'] = df['dt_second'].astype('datetime64[s]')
+    >>> get_datetime_cols_types(df)
+    {'dt_second': 'datetime64[s]'}
+    """
+    from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_ABBREVIATIONS
+    dt_cols_tuples = get_datetime_cols(df, with_tz_precision=True)
+    if not dt_cols_tuples:
+        return {}
+
+    return {
+        col: (
+            f"datetime64[{MRSM_PRECISION_UNITS_ABBREVIATIONS[precision]}]"
+            if tz is None
+            else f"datetime64[{MRSM_PRECISION_UNITS_ABBREVIATIONS[precision]}, {tz}]"
+        )
+        for col, (tz, precision) in dt_cols_tuples.items()
+    }
+
+
+def get_date_cols(df: 'pd.DataFrame') -> List[str]:
+    """
+    Get the `date` columns from a Pandas DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame which may contain dates.
+
+    Returns
+    -------
+    A list of columns to treat as dates.
+    """
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    if df is None:
+        return []
+
+    is_dask = 'dask' in df.__module__
+    if is_dask:
+        df = get_first_valid_dask_partition(df)
+
+    known_date_cols = [
+        col
+        for col, typ in df.dtypes.items()
+        if are_dtypes_equal(typ, 'date')
+    ]
+
+    if len(df) == 0:
+        return known_date_cols
+
+    cols_indices = {
+        col: df[col].first_valid_index()
+        for col in df.columns
+        if col not in known_date_cols
+    }
+    object_date_cols = [
+        col
+        for col, ix in cols_indices.items()
+        if (
+            ix is not None
+            and isinstance(df.loc[ix][col], date)
+        )
+    ]
+
+    all_date_cols = set(known_date_cols + object_date_cols)
 
     return [
         col
-        for col in all_dt_cols
-        if col not in timezone_aware_dt_cols_set
+        for col in df.columns
+        if col in all_date_cols
     ]
 
 
@@ -849,25 +1055,40 @@ def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
     """
     if df is None:
         return []
+
     is_dask = 'dask' in df.__module__
     if is_dask:
         df = get_first_valid_dask_partition(df)
 
+    known_bytes_cols = [
+        col
+        for col, typ in df.dtypes.items()
+        if str(typ) == 'binary[pyarrow]'
+    ]
+
     if len(df) == 0:
-        return []
+        return known_bytes_cols
 
     cols_indices = {
         col: df[col].first_valid_index()
         for col in df.columns
+        if col not in known_bytes_cols
     }
-    return [
+    object_bytes_cols = [
         col
         for col, ix in cols_indices.items()
         if (
             ix is not None
-            and
-            isinstance(df.loc[ix][col], bytes)
+            and isinstance(df.loc[ix][col], bytes)
         )
+    ]
+
+    all_bytes_cols = set(known_bytes_cols + object_bytes_cols)
+
+    return [
+        col
+        for col in df.columns
+        if col in all_bytes_cols
     ]
 
 
@@ -892,14 +1113,14 @@ def get_geometry_cols(
     If `with_types_srids`, return a dictionary mapping columns to tuples in the form (type, SRID).
     """
     if df is None:
-        return []
+        return [] if not with_types_srids else {}
 
     is_dask = 'dask' in df.__module__
     if is_dask:
         df = get_first_valid_dask_partition(df)
 
     if len(df) == 0:
-        return []
+        return [] if not with_types_srids else {}
 
     cols_indices = {
         col: df[col].first_valid_index()
@@ -948,11 +1169,54 @@ def get_geometry_cols(
     return geo_cols_types_srids
 
 
+def get_geometry_cols_types(df: 'pd.DataFrame') -> Dict[str, str]:
+    """
+    Return a dtypes dictionary mapping columns to specific geometry types (type, srid).
+    """
+    geometry_cols_types_srids = get_geometry_cols(df, with_types_srids=True)
+    new_cols_types = {}
+    for col, (geometry_type, srid) in geometry_cols_types_srids.items():
+        new_dtype = "geometry"
+        modifier = ""
+        if not srid and geometry_type.lower() == 'geometry':
+            new_cols_types[col] = new_dtype
+            continue
+
+        modifier = "["
+        if geometry_type.lower() != 'geometry':
+            modifier += f"{geometry_type}"
+
+        if srid:
+            if modifier != '[':
+                modifier += ", "
+            modifier += f"{srid}"
+        modifier += "]"
+        new_cols_types[col] = f"{new_dtype}{modifier}"
+    return new_cols_types
+
+
+def get_special_cols(df: 'pd.DataFrame') -> Dict[str, str]:
+    """
+    Return a dtypes dictionary mapping special columns to their dtypes.
+    """
+    return {
+        **{col: 'json' for col in get_json_cols(df)},
+        **{col: 'uuid' for col in get_uuid_cols(df)},
+        **{col: 'bytes' for col in get_bytes_cols(df)},
+        **{col: 'bool' for col in get_bool_cols(df)},
+        **{col: 'numeric' for col in get_numeric_cols(df)},
+        **{col: 'date' for col in get_date_cols(df)},
+        **get_datetime_cols_types(df),
+        **get_geometry_cols_types(df),
+    }
+
+
 def enforce_dtypes(
     df: 'pd.DataFrame',
     dtypes: Dict[str, str],
+    explicit_dtypes: Optional[Dict[str, str]] = None,
     safe_copy: bool = True,
-    coerce_numeric: bool = True,
+    coerce_numeric: bool = False,
     coerce_timezone: bool = True,
     strip_timezone: bool = False,
     debug: bool = False,
@@ -968,12 +1232,16 @@ def enforce_dtypes(
     dtypes: Dict[str, str]
         The data types to attempt to enforce on the DataFrame.
 
+    explicit_dtypes: Optional[Dict[str, str]], default None
+        If provided, automatic dtype coersion will respect explicitly configured
+        dtypes (`int`, `float`, `numeric`).
+
     safe_copy: bool, default True
         If `True`, create a copy before comparing and modifying the dataframes.
         Setting to `False` may mutate the DataFrames.
         See `meerschaum.utils.dataframe.filter_unseen_df`.
 
-    coerce_numeric: bool, default True
+    coerce_numeric: bool, default False
         If `True`, convert float and int collisions to numeric.
 
     coerce_timezone: bool, default True
@@ -1003,6 +1271,7 @@ def enforce_dtypes(
         attempt_cast_to_bytes,
         attempt_cast_to_geometry,
         coerce_timezone as _coerce_timezone,
+        get_geometry_type_srid,
     )
     from meerschaum.utils.dtypes.sql import get_numeric_precision_scale
     pandas = mrsm.attempt_import('pandas')
@@ -1014,6 +1283,7 @@ def enforce_dtypes(
             dprint("Incoming DataFrame has no columns. Skipping enforcement...")
         return df
 
+    explicit_dtypes = explicit_dtypes or {}
     pipe_pandas_dtypes = {
         col: to_pandas_dtype(typ)
         for col, typ in dtypes.items()
@@ -1028,11 +1298,11 @@ def enforce_dtypes(
         for col, typ in dtypes.items()
         if typ.startswith('numeric')
     ]
-    geometry_cols = [
-        col
+    geometry_cols_types_srids = {
+        col: get_geometry_type_srid(typ, default_srid=0)
         for col, typ in dtypes.items()
         if typ.startswith('geometry') or typ.startswith('geography')
-    ]
+    }
     uuid_cols = [
         col
         for col, typ in dtypes.items()
@@ -1120,14 +1390,37 @@ def enforce_dtypes(
             dprint(f"Checking for datetime conversion: {datetime_cols}")
         for col in datetime_cols:
             if col in df.columns:
-                df[col] = _coerce_timezone(df[col], strip_utc=strip_timezone)
+                if not strip_timezone and 'utc' in str(df.dtypes[col]).lower():
+                    if debug:
+                        dprint(f"Skip UTC coersion for column '{col}' ({str(df[col].dtype)}).")
+                    continue
+                if strip_timezone and ',' not in str(df.dtypes[col]):
+                    if debug:
+                        dprint(
+                            f"Skip UTC coersion (stripped) for column '{col}' "
+                            f"({str(df[col].dtype)})."
+                        )
+                        continue
 
-    if geometry_cols:
+                if debug:
+                    dprint(
+                        f"Data type for column '{col}' before timezone coersion: "
+                        f"{str(df[col].dtype)}"
+                    )
+
+                df[col] = _coerce_timezone(df[col], strip_utc=strip_timezone)
+                if debug:
+                    dprint(
+                        f"Data type for column '{col}' after timezone coersion: "
+                        f"{str(df[col].dtype)}"
+                    )
+
+    if geometry_cols_types_srids:
         geopandas = mrsm.attempt_import('geopandas')
         if debug:
-            dprint(f"Checking for geometry: {geometry_cols}")
+            dprint(f"Checking for geometry: {list(geometry_cols_types_srids)}")
         parsed_geom_cols = []
-        for col in geometry_cols:
+        for col in geometry_cols_types_srids:
             try:
                 df[col] = df[col].apply(attempt_cast_to_geometry)
                 parsed_geom_cols.append(col)
@@ -1139,10 +1432,19 @@ def enforce_dtypes(
             if debug:
                 dprint(f"Converting to GeoDataFrame (geometry column: '{parsed_geom_cols[0]}')...")
             try:
-                df = geopandas.GeoDataFrame(df, geometry=parsed_geom_cols[0])
-                df.rename_geometry(parsed_geom_cols[0], inplace=True)
+                _, default_srid = geometry_cols_types_srids[parsed_geom_cols[0]]
+                df = geopandas.GeoDataFrame(df, geometry=parsed_geom_cols[0], crs=default_srid)
+                for col, (_, srid) in geometry_cols_types_srids.items():
+                    if srid:
+                        if debug:
+                            dprint(f"Setting '{col}' to SRID '{srid}'...")
+                        _ = df[col].set_crs(srid)
+                if parsed_geom_cols[0] not in df.columns:
+                    df.rename_geometry(parsed_geom_cols[0], inplace=True)
             except (ValueError, TypeError):
-                pass
+                if debug:
+                    import traceback
+                    dprint(f"Failed to cast to GeoDataFrame:\n{traceback.format_exc()}")
 
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):
@@ -1186,13 +1488,45 @@ def enforce_dtypes(
     for col, typ in {k: v for k, v in common_diff_dtypes.items()}.items():
         previous_typ = common_dtypes[col]
         mixed_numeric_types = (is_dtype_numeric(typ) and is_dtype_numeric(previous_typ))
-        explicitly_float = are_dtypes_equal(dtypes.get(col, 'object'), 'float')
-        explicitly_numeric = dtypes.get(col, 'numeric').startswith('numeric')
-        cast_to_numeric = (
-            explicitly_numeric
-            or col in df_numeric_cols
-            or (mixed_numeric_types and not explicitly_float)
-        ) and coerce_numeric
+        explicitly_float = are_dtypes_equal(explicit_dtypes.get(col, 'object'), 'float')
+        explicitly_int = are_dtypes_equal(explicit_dtypes.get(col, 'object'), 'int')
+        explicitly_numeric = explicit_dtypes.get(col, 'object').startswith('numeric')
+        all_nan = (
+            df[col].isnull().all()
+            if mixed_numeric_types and coerce_numeric and not (explicitly_float or explicitly_int)
+            else None
+        )
+        cast_to_numeric = explicitly_numeric or (
+            (
+                col in df_numeric_cols
+                or (
+                    mixed_numeric_types
+                    and not (explicitly_float or explicitly_int)
+                    and not all_nan
+                    and coerce_numeric
+                )
+            )
+        )
+
+        if debug and (explicitly_numeric or df_numeric_cols or mixed_numeric_types):
+            from meerschaum.utils.formatting import make_header
+            msg = (
+                make_header(f"Coercing column '{col}' to numeric:", left_pad=0)
+                + "\n"
+                + f"  Previous type: {previous_typ}\n"
+                + f"  Current type: {typ if col not in df_numeric_cols else 'Decimal'}"
+                + ("\n  Column is explicitly numeric." if explicitly_numeric else "")
+            ) if cast_to_numeric else (
+                f"Will not coerce column '{col}' to numeric.\n"
+                f"  Numeric columns in dataframe: {df_numeric_cols}\n"
+                f"  Mixed numeric types: {mixed_numeric_types}\n"
+                f"  Explicitly float: {explicitly_float}\n"
+                f"  Explicitly int: {explicitly_int}\n"
+                f"  All NaN: {all_nan}\n"
+                f"  Coerce numeric: {coerce_numeric}"
+            )
+            dprint(msg)
+
         if cast_to_numeric:
             common_dtypes[col] = attempt_cast_to_numeric
             common_diff_dtypes[col] = attempt_cast_to_numeric
@@ -1209,7 +1543,7 @@ def enforce_dtypes(
             )
         except Exception as e:
             if debug:
-                dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}")
+                dprint(f"Encountered an error when casting column {d} to type {t}:\n{e}\ndf:\n{df}")
             if 'int' in str(t).lower():
                 try:
                     df[d] = df[d].astype('float64').astype(t)
@@ -1386,7 +1720,7 @@ def chunksize_to_npartitions(chunksize: Optional[int]) -> int:
 
 def df_from_literal(
     pipe: Optional[mrsm.Pipe] = None,
-    literal: str = None,
+    literal: Optional[str] = None,
     debug: bool = False
 ) -> 'pd.DataFrame':
     """
@@ -1405,11 +1739,16 @@ def df_from_literal(
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.warnings import error, warn
     from meerschaum.utils.debug import dprint
+    from meerschaum.utils.dtypes import get_current_timestamp
 
     if pipe is None or literal is None:
         error("Please provide a Pipe and a literal value")
-    ### this will raise an error if the columns are undefined
-    dt_name, val_name = pipe.get_columns('datetime', 'value')
+
+    dt_col = pipe.columns.get(
+        'datetime',
+        mrsm.get_config('pipes', 'autotime', 'column_name_if_datetime_missing')
+    )
+    val_col = pipe.get_val_column(debug=debug)
 
     val = literal
     if isinstance(literal, str):
@@ -1425,11 +1764,9 @@ def df_from_literal(
             )
             val = literal
 
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-
+    now = get_current_timestamp(pipe.precision)
     pd = import_pandas()
-    return pd.DataFrame({dt_name: [now], val_name: [val]})
+    return pd.DataFrame({dt_col: [now], val_col: [val]})
 
 
 def get_first_valid_dask_partition(ddf: 'dask.dataframe.DataFrame') -> Union['pd.DataFrame', None]:
@@ -1533,9 +1870,14 @@ def query_df(
     NA = pandas.NA
 
     if params:
+        proto_in_ex_params = get_in_ex_params(params)
+        for key, (proto_in_vals, proto_ex_vals) in proto_in_ex_params.items():
+            if proto_ex_vals:
+                coerce_types = True
+                break
         params = params.copy()
         for key, val in {k: v for k, v in params.items()}.items():
-            if isinstance(val, (list, tuple)):
+            if isinstance(val, (list, tuple, set)) or hasattr(val, 'astype'):
                 if None in val:
                     val = [item for item in val if item is not None] + [NA]
                     params[key] = val
@@ -1742,6 +2084,10 @@ def to_json(
     bytes_cols = get_bytes_cols(df)
     numeric_cols = get_numeric_cols(df)
     geometry_cols = get_geometry_cols(df)
+    geometry_cols_srids = {
+        col: int((getattr(df[col].crs, 'srs', '') or '').split(':', maxsplit=1)[-1] or '0')
+        for col in geometry_cols
+    } if 'geodataframe' in str(type(df)).lower() else {}
     if safe_copy and bool(uuid_cols or bytes_cols or geometry_cols or numeric_cols):
         df = df.copy()
     for col in uuid_cols:
@@ -1753,10 +2099,12 @@ def to_json(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for col in geometry_cols:
+            srid = geometry_cols_srids.get(col, None) or None
             df[col] = df[col].apply(
                 functools.partial(
                     serialize_geometry,
                     geometry_format=geometry_format,
+                    srid=srid,
                 )
             )
     return df.infer_objects(copy=False).fillna(pd.NA).to_json(
@@ -1766,3 +2114,53 @@ def to_json(
         orient=orient,
         **kwargs
     )
+
+
+def to_simple_lines(df: 'pd.DataFrame') -> str:
+    """
+    Serialize a Pandas Dataframe as lines of simple dictionaries.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The dataframe to serialize into simple lines text.
+
+    Returns
+    -------
+    A string of simple line dictionaries joined by newlines.
+    """
+    from meerschaum.utils.misc import to_simple_dict
+    if df is None or len(df) == 0:
+        return ''
+
+    docs = df.to_dict(orient='records')
+    return '\n'.join(to_simple_dict(doc) for doc in docs)
+
+
+def parse_simple_lines(data: str) -> 'pd.DataFrame':
+    """
+    Parse simple lines text into a DataFrame.
+
+    Parameters
+    ----------
+    data: str
+        The simple lines text to parse into a DataFrame.
+
+    Returns
+    -------
+    A dataframe containing the rows serialized in `data`.
+    """
+    from meerschaum.utils.misc import string_to_dict
+    from meerschaum.utils.packages import import_pandas
+    pd = import_pandas()
+    lines = data.splitlines()
+    try:
+        docs = [string_to_dict(line) for line in lines]
+        df = pd.DataFrame(docs)
+    except Exception:
+        df = None
+
+    if df is None:
+        raise ValueError("Cannot parse simple lines into a dataframe.")
+
+    return df

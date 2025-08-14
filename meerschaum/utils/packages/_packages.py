@@ -13,8 +13,7 @@ packages dictionary is structured in the following schema:
     }
 """
 
-from __future__ import annotations
-from meerschaum.utils.typing import Dict
+from typing import Dict
 
 _MRSM_PACKAGE_ARCHIVES_PREFIX: str = "https://meerschaum.io/files/archives/wheels/"
 
@@ -54,23 +53,25 @@ packages: Dict[str, Dict[str, str]] = {
         'virtualenv'                 : 'virtualenv>=20.1.0',
         'attrs'                      : 'attrs>=24.2.0',
         'uv'                         : 'uv>=0.2.11',
+        'pydantic'                   : 'pydantic>=2.11.7',
+        'annotated-types'            : 'annotated-types>=0.7.0',
     },
     '_internal'                      : {
         'apscheduler'                : (
                                        f"{_MRSM_PACKAGE_ARCHIVES_PREFIX}"
-                                       "APScheduler-4.0.0a5.post87+mrsm-py3-none-any.whl>=4.0.0a5"
+                                       "apscheduler-4.0.0a6.post8+mrsm-py3-none-any.whl>=4.0.0a6"
         ),
-        'dataclass_wizard'           : 'dataclass-wizard>=0.28.0',
+        'dataclass_wizard'           : 'dataclass-wizard>=0.35.0',
     },
     'jobs': {
-        'dill'                       : 'dill>=0.3.3',
-        'daemon'                     : 'python-daemon>=0.2.3',
-        'watchfiles'                 : 'watchfiles>=0.21.0',
-        'psutil'                     : 'psutil>=5.8.0',
+        'dill'                       : 'dill>=0.4.0',
+        'daemon'                     : 'python-daemon>=3.1.2',
+        'watchfiles'                 : 'watchfiles>=1.1.0',
+        'psutil'                     : 'psutil>=7.0.0',
     },
     'drivers': {
         'cryptography'               : 'cryptography>=38.0.1',
-        'psycopg'                    : 'psycopg[binary]>=3.2.1',
+        'psycopg'                    : 'psycopg[binary]>=3.2.9',
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
@@ -122,7 +123,7 @@ packages: Dict[str, Dict[str, str]] = {
         'mkdocs_section_index'       : 'mkdocs-section-index>=0.3.3',
         'mkdocs_linkcheck'           : 'mkdocs-linkcheck>=1.0.6',
         'mkdocs_redirects'           : 'mkdocs-redirects>=1.0.4',
-        'jinja2'                     : 'jinja2==3.0.3',
+        'jinja2'                     : 'jinja2>=3.1.6',
     },
     'gui': {
         'webview'                    : 'pywebview>=3.6.3',
@@ -137,43 +138,44 @@ packages: Dict[str, Dict[str, str]] = {
     },
 }
 packages['sql'] = {
-    'numpy'                          : 'numpy>=1.18.5',
-    'pandas'                         : 'pandas[parquet]>=2.0.1',
-    'pyarrow'                        : 'pyarrow>=16.1.0',
+    'numpy'                          : 'numpy>=2.3.1',
+    'pandas'                         : 'pandas[parquet]>=2.3.1',
+    'pyarrow'                        : 'pyarrow>=20.0.0',
     'dask'                           : 'dask[complete]>=2024.12.1',
     'partd'                          : 'partd>=1.4.2',
     'pytz'                           : 'pytz',
-    'joblib'                         : 'joblib>=0.17.0',
-    'sqlalchemy'                     : 'SQLAlchemy>=2.0.5',
+    'joblib'                         : 'joblib>=1.5.1',
+    'sqlalchemy'                     : 'SQLAlchemy>=2.0.41',
     'geoalchemy'                     : 'GeoAlchemy2>=0.17.1',
-    'databases'                      : 'databases>=0.4.0',
-    'aiosqlite'                      : 'aiosqlite>=0.16.0',
-    'asyncpg'                        : 'asyncpg>=0.21.0',
+    'databases'                      : 'databases>=0.9.0',
+    'aiosqlite'                      : 'aiosqlite>=0.21.0',
+    'asyncpg'                        : 'asyncpg>=0.30.0',
 }
 packages['sql'].update(packages['drivers'])
 packages['sql'].update(packages['core'])
 packages['sql'].update(packages['gis'])
 packages['dash'] = {
-    'flask_compress'                 : 'Flask-Compress>=1.10.1',
-    'dash'                           : 'dash>=2.6.2',
+    'flask_compress'                 : 'Flask-Compress>=1.17.0',
+    'dash'                           : 'dash>=3.1.1',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.7.1',
     'dash_ace'                       : 'dash-ace>=0.2.1',
-    'dash_extensions'                : 'dash-extensions>=1.0.4',
-    'dash_daq'                       : 'dash-daq>=0.5.0',
-    'terminado'                      : 'terminado>=0.12.1',
-    'tornado'                        : 'tornado>=6.1.0',
+    'dash_extensions'                : 'dash-extensions>=2.0.4',
+    'dash_daq'                       : 'dash-daq>=0.6.0',
+    'terminado'                      : 'terminado>=0.18.1',
+    'tornado'                        : 'tornado>=6.5.1',
 }
 packages['api'] = {
-    'uvicorn'                        : 'uvicorn[standard]>=0.29.0',
-    'gunicorn'                       : 'gunicorn>=22.0.0',
-    'dotenv'                         : 'python-dotenv>=0.20.0',
-    'websockets'                     : 'websockets>=11.0.3',
-    'fastapi'                        : 'fastapi>=0.111.0',
-    'fastapi_login'                  : 'fastapi-login>=1.7.2',
-    'multipart'                      : 'python-multipart>=0.0.9',
-    'httpx'                          : 'httpx>=0.27.2',
-    'httpcore'                       : 'httpcore>=1.0.6',
-    'valkey'                         : 'valkey>=6.0.0',
+    'uvicorn'                        : 'uvicorn[standard]>=0.35.0',
+    'gunicorn'                       : 'gunicorn>=23.0.0',
+    'dotenv'                         : 'python-dotenv>=1.1.1',
+    'websockets'                     : 'websockets>=15.0.1',
+    'fastapi'                        : 'fastapi>=0.116.0',
+    'fastapi_login'                  : 'fastapi-login>=1.10.3',
+    'multipart'                      : 'python-multipart>=0.0.20',
+    'httpx'                          : 'httpx>=0.28.1',
+    'httpcore'                       : 'httpcore>=1.0.9',
+    'valkey'                         : 'valkey>=6.1.0',
+    'jose'                           : 'python-jose>=3.5.0',
 }
 packages['api'].update(packages['sql'])
 packages['api'].update(packages['formatting'])
@@ -216,3 +218,9 @@ for group, import_names in packages.items():
     for import_name, install_name in import_names.items():
         _full[import_name] = install_name
 packages['full'] = _full
+
+extras = {
+    group: list(import_names_install_names_map.values())
+    for group, import_names_install_names_map in packages.items()
+    if not group.startswith('_')
+}

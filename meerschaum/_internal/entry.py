@@ -12,10 +12,13 @@ from __future__ import annotations
 import os
 import sys
 import pathlib
+import shlex
+import json
+import time
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any
-from meerschaum.config.static import STATIC_CONFIG as _STATIC_CONFIG
+from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any, Union
+from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
 
 _systemd_result_path = None
 if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
@@ -46,7 +49,44 @@ if (_STATIC_CONFIG['environment']['systemd_log_path']) in os.environ:
 
 
 def entry(
-    sysargs: Optional[List[str]] = None,
+    sysargs: Union[List[str], str, None] = None,
+    _patch_args: Optional[Dict[str, Any]] = None,
+    _use_cli_daemon: bool = True,
+    _session_id: Optional[str] = None,
+) -> SuccessTuple:
+    """
+    Parse arguments and launch a Meerschaum action.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    start = time.perf_counter()
+    sysargs_list = shlex.split(sysargs) if isinstance(sysargs, str) else sysargs
+    if (
+        not _use_cli_daemon
+        or (not sysargs or (sysargs[0] and sysargs[0].startswith('-')))
+        or '--no-daemon' in sysargs_list
+        or '--daemon' in sysargs_list
+        or '-d' in sysargs_list
+        or not mrsm.get_config('system', 'experimental', 'cli_daemon')
+    ):
+        success, msg = entry_without_daemon(sysargs, _patch_args=_patch_args)
+        end = time.perf_counter()
+        if '--debug' in sysargs_list:
+            print(f"Duration without daemon: {round(end - start, 3)}")
+        return success, msg
+
+    from meerschaum._internal.cli.entry import entry_with_daemon
+    success, msg = entry_with_daemon(sysargs, _patch_args=_patch_args)
+    end = time.perf_counter()
+    if '--debug' in sysargs_list:
+        print(f"Duration with daemon: {round(end - start, 3)}")
+    return success, msg
+
+
+def entry_without_daemon(
+    sysargs: Union[List[str], str, None] = None,
     _patch_args: Optional[Dict[str, Any]] = None,
 ) -> SuccessTuple:
     """
@@ -56,8 +96,6 @@ def entry(
     -------
     A `SuccessTuple` indicating success.
     """
-    import shlex
-    import json
     from meerschaum.utils.formatting import make_header
     from meerschaum._internal.arguments import (
         parse_arguments,
@@ -66,7 +104,7 @@ def entry(
         sysargs_has_api_executor_keys,
         get_pipeline_sysargs,
     )
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     if sysargs is None:
         sysargs = []
     if not isinstance(sysargs, list):
@@ -174,7 +212,6 @@ def entry(
     ).rstrip() if len(chained_sysargs) > 1 else results[0][1]
 
     if _systemd_result_path:
-        import json
         from meerschaum.utils.warnings import warn
         import meerschaum as mrsm
 
@@ -206,7 +243,7 @@ def entry_with_args(
     from meerschaum.actions import get_action
     from meerschaum._internal.arguments import remove_leading_action
     from meerschaum.utils.venv import active_venvs, deactivate_venv
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.typing import is_success_tuple
 
     if _patch_args:
@@ -217,7 +254,7 @@ def entry_with_args(
     if and_key in (sysargs := kw.get('sysargs', [])):
         if '-d' in sysargs or '--daemon' in sysargs:
             sysargs = [(arg if arg != and_key else escaped_and_key) for arg in sysargs]
-        return entry(sysargs, _patch_args=_patch_args)
+        return entry(sysargs, _patch_args=_patch_args, _use_cli_daemon=False)
 
     if kw.get('trace', None):
         from meerschaum.utils.misc import debug_trace
@@ -287,7 +324,6 @@ def entry_with_args(
     if kw.get('schedule', None) and not _skip_schedule:
         from meerschaum.utils.schedule import schedule_function
         from meerschaum.utils.misc import interval_str
-        import time
         from datetime import timedelta
         start_time = time.perf_counter()
         schedule_function(do_action, **kw)
@@ -321,13 +357,13 @@ def _do_action_wrapper(
         try:
             result = action_function(**filter_keywords(action_function, **kw))
         except Exception as e:
-            if kw.get('debug', False):
+            if kw.get('debug', True):
                 import traceback
                 traceback.print_exception(type(e), e, e.__traceback__)
             result = False, (
-                f"Failed to execute `{action_name}` "
-                + "with exception:\n\n" +
-                f"{e}."
+                f"Failed to execute `{action_name.strip()}` "
+                + f"with `{type(e).__name__}`"
+                + (f':\n\n{e}' if str(e) else '.')
                 + (
                     "\n\nRun again with '--debug' to see a full stacktrace."
                     if not kw.get('debug', False) else ''

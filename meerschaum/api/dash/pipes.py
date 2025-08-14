@@ -12,18 +12,26 @@ import shlex
 from textwrap import dedent
 from urllib.parse import urlencode
 
+from meerschaum.utils import fetch_pipes_keys
 from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
-from meerschaum.utils.misc import string_to_dict
+from meerschaum.utils.misc import get_connector_labels
+from meerschaum.connectors import instance_types
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
 from meerschaum.utils.sql import get_pd_type
 from meerschaum.utils.yaml import yaml
 from meerschaum.utils.warnings import warn
-from meerschaum.utils.dataframe import to_json
+from meerschaum.utils.dataframe import to_json, to_simple_lines
 from meerschaum.connectors.sql._fetch import get_pipe_query
-from meerschaum.api import CHECK_UPDATE
+from meerschaum.api import CHECK_UPDATE, get_api_connector
 from meerschaum.api.dash import debug, _get_pipes
 from meerschaum.api.dash.connectors import get_web_connector
-from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
+from meerschaum.api.dash.components import (
+    alert_from_success_tuple,
+    build_cards_grid,
+    sign_out_button,
+    logo_row,
+    pages_offcanvas,
+)
 from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.config import get_config
 import meerschaum as mrsm
@@ -58,28 +66,20 @@ def pipe_from_ctx(ctx, trigger_property: str = 'n_clicks') -> Union[mrsm.Pipe, N
 
 def keys_from_state(
     state: Dict[str, Any],
-    with_params: bool = False
+    with_tags: bool = False,
 ) -> Union[
     Tuple[List[str], List[str], List[str]],
-    Tuple[List[str], List[str], List[str], str],
+    Tuple[List[str], List[str], List[str], List[str]],
 ]:
     """
     Read the current state and return the selected keys lists.
     """
     _filters = {
-        'ck' : state.get(f"connector-keys-{state['pipes-filter-tabs.active_tab']}.value", None),
-        'mk' : state.get(f"metric-keys-{state['pipes-filter-tabs.active_tab']}.value", None),
-        'lk' : state.get(f"location-keys-{state['pipes-filter-tabs.active_tab']}.value", None),
+        'ck': state.get("connector-keys-dropdown.value", None),
+        'mk': state.get("metric-keys-dropdown.value", None),
+        'lk': state.get("location-keys-dropdown.value", None),
+        'tags': state.get("tags-dropdown.value", None),
     }
-    if state['pipes-filter-tabs.active_tab'] == 'input':
-        try:
-            #  params = string_to_dict(state['params-textarea.value'])
-            params = string_to_dict(state['search-parameters-editor.value'])
-        except Exception:
-            params = None
-    else:
-        params = None
-
     for k in _filters:
         _filters[k] = [] if _filters[k] is None else _filters[k]
         if not isinstance(_filters[k], list):
@@ -89,8 +89,8 @@ def keys_from_state(
                 print(e)
                 _filters[k] = []
     keys = [_filters['ck'], _filters['mk'], _filters['lk']]
-    if with_params:
-        keys.append(params)
+    if with_tags:
+        keys.append(_filters['tags'])
     return tuple(keys)
 
 
@@ -98,12 +98,12 @@ def pipes_from_state(
     state: Dict[str, Any],
     **kw
 ):
-    _ck, _mk, _lk, _params = keys_from_state(state, with_params=True)
+    _ck, _mk, _lk, _tags = keys_from_state(state, with_tags=True)
     try:
         _pipes = _get_pipes(
             _ck, _mk, _lk,
-            params = _params,
-            mrsm_instance = get_web_connector(state), 
+            tags=(_tags or []),
+            mrsm_instance=get_web_connector(state), 
             **kw
         )
     except Exception as e:
@@ -377,48 +377,48 @@ def accordion_items_from_pipe(
                         html.Th(
                             html.Span(
                                 "Key",
-                                id={'type': 'key-table-header', 'id': pipe_meta_str},
+                                id={'type': 'key-table-header', 'index': pipe_meta_str},
                                 style={"textDecoration": "underline", "cursor": "pointer"},
                             ),
                         ),
                         html.Th(
                             html.Span(
                                 "Column",
-                                id={'type': 'column-table-header', 'id': pipe_meta_str},
+                                id={'type': 'column-table-header', 'index': pipe_meta_str},
                                 style={"textDecoration": "underline", "cursor": "pointer"},
                             ),
                         ),
                         html.Th(
                             html.Span(
                                 "Index",
-                                id={'type': 'index-table-header', 'id': pipe_meta_str},
+                                id={'type': 'index-table-header', 'index': pipe_meta_str},
                                 style={"textDecoration": "underline", "cursor": "pointer"},
                             ),
                         ),
                         html.Th(
                             html.Span(
                                 "Is Composite",
-                                id={'type': 'is-composite-table-header', 'id': pipe_meta_str},
+                                id={'type': 'is-composite-table-header', 'index': pipe_meta_str},
                                 style={"textDecoration": "underline", "cursor": "pointer"},
                             ),
                         ),
                         dbc.Tooltip(
                             "Unique reference name for the index "
                             "(e.g. `datetime` for the range axis)",
-                            target={'type': 'key-table-header', 'id': pipe_meta_str},
+                            target={'type': 'key-table-header', 'index': pipe_meta_str},
                         ),
                         dbc.Tooltip(
                             "The actual column (field name) in the target dataset.",
-                            target={'type': 'column-table-header', 'id': pipe_meta_str},
+                            target={'type': 'column-table-header', 'index': pipe_meta_str},
                         ),
                         dbc.Tooltip(
                             "The name of the index created on the given columns.",
-                            target={'type': 'index-table-header', 'id': pipe_meta_str},
+                            target={'type': 'index-table-header', 'index': pipe_meta_str},
                         ),
                         dbc.Tooltip(
                             "Whether the column is used in the composite primary key "
                             "to determine updates.",
-                            target={'type': 'is-composite-table-header', 'id': pipe_meta_str},
+                            target={'type': 'is-composite-table-header', 'index': pipe_meta_str},
                         ),
                     ]
                 )
@@ -466,7 +466,7 @@ def accordion_items_from_pipe(
             overview_rows.append(
                 html.Tr([
                     html.Td("Indices" if len(indices_rows) != 1 else "Index"),
-                    html.Td(indices_table),
+                    html.Td(html.Div(indices_table, style={'overflowX': 'auto'})),
                 ])
             )
 
@@ -483,9 +483,14 @@ def accordion_items_from_pipe(
                 ])
             )
 
-        items_bodies['overview'] = dbc.Table(
-            overview_header + [html.Tbody(overview_rows)],
-            bordered=False, hover=True, striped=False,
+        items_bodies['overview'] = html.Div(
+            dbc.Table(
+                overview_header + [html.Tbody(overview_rows)],
+                bordered=False,
+                hover=True,
+                striped=False,
+            ),
+            style={'overflowX': 'auto'},
         )
 
     if 'stats' in active_items:
@@ -497,17 +502,13 @@ def accordion_items_from_pipe(
                 (newest_time - oldest_time) if newest_time is not None and oldest_time is not None
                 else None
             )
-            rowcount = pipe.get_rowcount(debug=debug)
         except Exception:
             oldest_time = None
             newest_time = None
             interval = None
-            rowcount = None
 
         stats_rows = []
-        if rowcount is not None:
-            stats_rows.append(html.Tr([html.Td("Row Count"), html.Td(f"{rowcount:,}")]))
-        if interval is not None:
+        if interval is not None and not isinstance(interval, int):
             stats_rows.append(
                 html.Tr([html.Td("Timespan"), html.Td(humanfriendly.format_timespan(interval))])
             )
@@ -516,7 +517,39 @@ def accordion_items_from_pipe(
         if newest_time is not None:
             stats_rows.append(html.Tr([html.Td("Newest time"), html.Td(str(newest_time))]))
 
-        items_bodies['stats'] = dbc.Table(stats_header + [html.Tbody(stats_rows)], hover=True)
+        precision = pipe.precision
+        if precision:
+            stats_rows.append(
+                html.Tr([
+                    html.Td("Precision"),
+                    html.Td(str(precision.get('interval', 1)) + ' ' + str(precision.get('unit', 'unit')))
+                ])
+            )
+
+        stats_rows.append(
+            html.Tr([
+                html.Td("Row count"),
+                html.Td(
+                    html.Div(
+                        dbc.Button(
+                            "Calculate",
+                            color='link',
+                            size='sm',
+                            style={'text-decoration': 'none'},
+                            id={'type': 'calculate-rowcount-button', 'index': pipe_meta_str},
+                        )
+                        if pipe.exists(debug=debug)
+                        else '0'
+                    ),
+                    id={'type': 'calculate-rowcount-div', 'index': pipe_meta_str},
+                )
+            ])
+        )
+
+        items_bodies['stats'] = html.Div(
+            dbc.Table(stats_header + [html.Tbody(stats_rows)], hover=True),
+            style={'overflowX': 'auto'},
+        )
 
     if 'columns' in active_items:
         try:
@@ -536,9 +569,9 @@ def accordion_items_from_pipe(
             ]
             columns_body = [html.Tbody(columns_rows)]
             columns_table = dbc.Table(columns_header + columns_body, bordered=False, hover=True)
+            items_bodies['columns'] = html.Div(columns_table, style={'overflowX': 'auto'})
         except Exception:
-            columns_table = html.P("Could not retrieve columns ― please try again.")
-        items_bodies['columns'] = columns_table
+            items_bodies['columns'] = html.P("Could not retrieve columns ― please try again.")
 
     if 'parameters' in active_items:
         parameters_editor = dash_ace.DashAceEditor(
@@ -546,7 +579,7 @@ def accordion_items_from_pipe(
             mode='norm',
             tabSize=4,
             theme='twilight',
-            id={'type': 'parameters-editor', 'index': json.dumps(pipe.meta)},
+            id={'type': 'parameters-editor', 'index': pipe_meta_str},
             width='100%',
             height='500px',
             readOnly=False,
@@ -558,19 +591,19 @@ def accordion_items_from_pipe(
         )
         update_parameters_button = dbc.Button(
             "Update",
-            id={'type': 'update-parameters-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'update-parameters-button', 'index': pipe_meta_str},
         )
 
         as_yaml_button = dbc.Button(
             "YAML",
-            id={'type': 'parameters-as-yaml-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'parameters-as-yaml-button', 'index': pipe_meta_str},
             color='link',
             size='sm',
             style={'text-decoration': 'none'},
         )
         as_json_button = dbc.Button(
             "JSON",
-            id={'type': 'parameters-as-json-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'parameters-as-json-button', 'index': pipe_meta_str},
             color='link',
             size='sm',
             style={'text-decoration': 'none', 'margin-left': '10px'},
@@ -579,21 +612,28 @@ def accordion_items_from_pipe(
             parameters_editor,
             html.Br(),
             dbc.Row([
-                dbc.Col(html.Span(
-                    (
-                        ([update_parameters_button] if authenticated else []) +
-                        [
-                            as_json_button,
-                            as_yaml_button,
-                        ]
-                    )
-                ), width=4),
-                dbc.Col([
-                    html.Div(
-                        id={'type': 'update-parameters-success-div', 'index': json.dumps(pipe.meta)}
-                    )
-                ],
-                width=True,
+                dbc.Col(
+                    html.Span(
+                        (
+                            ([update_parameters_button] if authenticated else []) +
+                            [
+                                as_json_button,
+                                as_yaml_button,
+                            ]
+                        )
+                    ),
+                    width=4,
+                ),
+                dbc.Col(
+                    [
+                        html.Div(
+                            id={
+                                'type': 'update-parameters-success-div',
+                                'index': pipe_meta_str,
+                            }
+                        )
+                    ],
+                    width=True,
                 )
             ]),
         ]
@@ -633,7 +673,7 @@ def accordion_items_from_pipe(
             mode='sql',
             tabSize=4,
             theme='twilight',
-            id={'type': 'sql-editor', 'index': json.dumps(pipe.meta)},
+            id={'type': 'sql-editor', 'index': pipe_meta_str},
             width='100%',
             height='500px',
             readOnly=False,
@@ -645,7 +685,7 @@ def accordion_items_from_pipe(
         )
         update_sql_button = dbc.Button(
             "Update",
-            id={'type': 'update-sql-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'update-sql-button', 'index': pipe_meta_str},
         )
         items_bodies['sql'] = html.Div([
             sql_editor,
@@ -654,7 +694,7 @@ def accordion_items_from_pipe(
                 dbc.Col([update_sql_button], width=2),
                 dbc.Col([
                     html.Div(
-                        id={'type': 'update-sql-success-div', 'index': json.dumps(pipe.meta)}
+                        id={'type': 'update-sql-success-div', 'index': pipe_meta_str}
                     )
                 ],
                 width=True,
@@ -665,10 +705,10 @@ def accordion_items_from_pipe(
     if 'recent-data' in active_items:
         try:
             df = pipe.get_backtrack_data(backtrack_minutes=10, limit=10, debug=debug).astype(str)
-            table = dbc.Table.from_dataframe(df, bordered=False, hover=True) 
+            table = dbc.Table.from_dataframe(df, bordered=False, hover=True)
+            items_bodies['recent-data'] = html.Div(table, style={'overflowX': 'auto'})
         except Exception:
-            table = html.P("Could not retrieve recent data.")
-        items_bodies['recent-data'] = table
+            items_bodies['recent-data'] = html.P("Could not retrieve recent data.")
 
     if 'query-data' in active_items:
         query_editor = dash_ace.DashAceEditor(
@@ -676,7 +716,7 @@ def accordion_items_from_pipe(
             mode='norm',
             tabSize=4,
             theme='twilight',
-            id={'type': 'query-editor', 'index': json.dumps(pipe.meta)},
+            id={'type': 'query-editor', 'index': pipe_meta_str},
             width='100%',
             height='200px',
             readOnly=False,
@@ -688,17 +728,17 @@ def accordion_items_from_pipe(
         )
         query_data_button = dbc.Button(
             "Query",
-            id={'type': 'query-data-button', 'index': json.dumps(pipe.meta)},
+            id={'type': 'query-data-button', 'index': pipe_meta_str},
         )
 
         begin_end_input_group = dbc.InputGroup(
             [
                 dbc.Input(
-                    id={'type': 'query-data-begin-input', 'index': json.dumps(pipe.meta)},
+                    id={'type': 'query-data-begin-input', 'index': pipe_meta_str},
                     placeholder="Begin",
                 ),
                 dbc.Input(
-                    id={'type': 'query-data-end-input', 'index': json.dumps(pipe.meta)},
+                    id={'type': 'query-data-end-input', 'index': pipe_meta_str},
                     placeholder="End",
                 ),
             ],
@@ -712,9 +752,12 @@ def accordion_items_from_pipe(
             value=10,
             step=1,
             placeholder="Limit",
-            id={'type': 'limit-input', 'index': json.dumps(pipe.meta)},
+            id={'type': 'limit-input', 'index': pipe_meta_str},
         )
-        query_result_div = html.Div(id={'type': 'query-result-div', 'index': json.dumps(pipe.meta)})
+        query_result_div = html.Div(
+            id={'type': 'query-result-div', 'index': pipe_meta_str},
+            style={'overflowX': 'auto'},
+        )
 
         items_bodies['query-data'] = html.Div([
             query_editor,
@@ -722,7 +765,7 @@ def accordion_items_from_pipe(
             dbc.Row(
                 [
                     dbc.Col([query_data_button], lg=2, md=3, sm=4, xs=6, width=2),
-                    dbc.Col([begin_end_input_group], lg=3, md=3, sm=4, width=4),
+                    dbc.Col([begin_end_input_group], lg=6, md=6, sm=4, width=6),
                     dbc.Col(html.Div([limit_input, dbc.FormText("Row Limit")]), lg=2, md=3, sm=4, xs=6, width=2),
                 ],
                 justify="between",
@@ -733,27 +776,13 @@ def accordion_items_from_pipe(
         ])
 
     if 'sync-data' in active_items:
-        backtrack_df = pipe.get_backtrack_data(debug=debug, limit=1)
-        try:
-            json_text = to_json(
-                backtrack_df,
-                orient='records',
-                date_format='iso',
-                force_ascii=False,
-                indent=4,
-                date_unit='us',
-            ) if backtrack_df is not None else '[]'
-        except Exception as e:
-            warn(e)
-            json_text = '[]'
-
-        json_text = json.dumps(json.loads(json_text), indent=4, separators=(',', ': '))
+        backtrack_text = get_backtrack_text(pipe)
         sync_editor = dash_ace.DashAceEditor(
-            value = json_text,
+            value = backtrack_text,
             mode = 'norm',
             tabSize = 4,
             theme = 'twilight',
-            id = {'type': 'sync-editor', 'index': json.dumps(pipe.meta)},
+            id = {'type': 'sync-editor', 'index': pipe_meta_str},
             width = '100%',
             height = '500px',
             readOnly = False,
@@ -763,16 +792,40 @@ def accordion_items_from_pipe(
             wrapEnabled = True,
             style = {'min-height': '120px'},
         )
+
+        sync_as_json_button = dbc.Button(
+            "JSON",
+            id={'type': 'sync-as-json-button', 'index': pipe_meta_str},
+            color='link',
+            size='sm',
+            style={'text-decoration': 'none', 'margin-left': '10px'},
+        )
+        sync_as_lines_button = dbc.Button(
+            "Lines",
+            id={'type': 'sync-as-lines-button', 'index': pipe_meta_str},
+            color='link',
+            size='sm',
+            style={'text-decoration': 'none', 'margin-left': '10px'},
+        )
+
         update_sync_button = dbc.Button(
             "Sync",
-            id = {'type': 'update-sync-button', 'index': json.dumps(pipe.meta)},
+            id = {'type': 'update-sync-button', 'index': pipe_meta_str},
         )
-        sync_success_div = html.Div(id={'type': 'sync-success-div', 'index': json.dumps(pipe.meta)})
+        sync_success_div = html.Div(id={'type': 'sync-success-div', 'index': pipe_meta_str})
         items_bodies['sync-data'] = html.Div([
             sync_editor,
             html.Br(),
             dbc.Row([
-                dbc.Col([update_sync_button], width=1),
+                dbc.Col(html.Span(
+                    (
+                        ([update_sync_button] if authenticated else []) +
+                        [
+                            sync_as_json_button,
+                            sync_as_lines_button,
+                        ]
+                    )
+                ), width=4),
                 dbc.Col([sync_success_div], width=True),
             ]),
         ])
@@ -782,3 +835,237 @@ def accordion_items_from_pipe(
         for item_id, title in items_titles.items()
     ]
 
+
+def get_backtrack_text(
+    pipe: mrsm.Pipe,
+    lines: bool = False,
+    limit: int = 5,
+) -> str:
+    """
+    Return the backtrack documents as text for the sync editor.
+    """
+    backtrack_df = pipe.get_backtrack_data(debug=debug, limit=limit)
+    if lines:
+        return to_simple_lines(backtrack_df)
+    try:
+        json_text = to_json(
+            backtrack_df,
+            orient='records',
+            date_format='iso',
+            force_ascii=False,
+            indent=4,
+            date_unit='us',
+        ) if backtrack_df is not None else '[]'
+    except Exception as e:
+        warn(e)
+        json_text = '[]'
+
+    return json.dumps(json.loads(json_text), indent=4, separators=(',', ': '))
+
+
+def build_pipes_dropdown_keys_row(
+    connector_keys: List[str],
+    metric_keys: List[str],
+    location_keys: List[str],
+    tags: List[str],
+    pipes: List[mrsm.Pipe],
+    instance_connector: mrsm.connectors.InstanceConnector,
+) -> dbc.Row:
+    """
+    Return the dropdown keys row for the dedicated pipes page.
+    """
+    ck_alone = connector_keys and not any([str(x) for x in (tags + metric_keys + location_keys)])
+    mk_alone = metric_keys and not any([str(x) for x in (connector_keys + tags + location_keys)])
+    lk_alone = location_keys and not any([str(x) for x in (connector_keys + metric_keys + tags)])
+    all_keys = fetch_pipes_keys('registered', instance_connector)
+
+    ck_options_source = (
+        {keys_tuple[0] for keys_tuple in all_keys}
+        if ck_alone
+        else {p.connector_keys for p in pipes}
+    )
+    ck_options = sorted(ck_options_source.union(connector_keys))
+
+    mk_options_source = (
+        {keys_tuple[1] for keys_tuple in all_keys}
+        if mk_alone
+        else {p.metric_key for p in pipes}
+    )
+    mk_options = sorted(mk_options_source.union(metric_keys))
+
+    lk_options_source = (
+        {str(keys_tuple[2]) for keys_tuple in all_keys}
+        if lk_alone
+        else {str(p.location_key) for p in pipes}
+    )
+    lk_options = sorted(lk_options_source.union({str(lk) for lk in location_keys}))
+
+    return dbc.Row(
+        [
+            dbc.Col(
+                html.Div(
+                    [
+                        dcc.Dropdown(
+                            id='pipes-connector-keys-dropdown',
+                            options=ck_options,
+                            value=[str(ck) for ck in connector_keys],
+                            placeholder='Connectors',
+                            multi=True,
+                        ),
+                    ],
+                    className='dbc_dark',
+                ),
+                lg=4,
+                md=12,
+                sm=12,
+            ),
+            dbc.Col(
+                html.Div(
+                    [
+                        dcc.Dropdown(
+                            id='pipes-metric-keys-dropdown',
+                            options=mk_options,
+                            value=[str(mk) for mk in metric_keys],
+                            placeholder='Metrics',
+                            multi=True,
+                        ),
+                    ],
+                    className='dbc_dark'
+                ),
+                lg=4,
+                md=12,
+                sm=12,
+            ),
+            dbc.Col(
+                html.Div(
+                    [
+                        dcc.Dropdown(
+                            id='pipes-location-keys-dropdown',
+                            options=lk_options,
+                            value=[str(lk) for lk in location_keys],
+                            placeholder='Locations',
+                            multi=True,
+                        ),
+                    ],
+                    className='dbc_dark'
+                ),
+                lg=4,
+                md=12,
+                sm=12,
+            ),
+        ] ### end of filters row children
+    )
+
+
+def build_pipes_tags_dropdown(
+    connector_keys: List[str],
+    metric_keys: List[str],
+    location_keys: List[str],
+    tags: List[str],
+    instance: str,
+) -> dbc.Row:
+    """
+    Build the tags dropdown for the dedicated pipes page.
+    """
+    _tags_alone = tags and not any([str(x) for x in (connector_keys + metric_keys + location_keys)])
+    _tags_pipes = mrsm.get_pipes(
+        connector_keys=connector_keys,
+        metric_keys=metric_keys,
+        location_keys=location_keys,
+        tags=tags,
+        instance=instance,
+        as_tags_dict=True,
+    )
+
+    _all_tags = list(
+        mrsm.get_pipes(
+            instance=instance,
+            as_tags_dict=True,
+        )
+    ) if _tags_alone else []
+
+    tags_options = [
+        str(tag)
+        for tag in (_all_tags if _tags_alone else _tags_pipes)
+    ]
+    if tags:
+        tags_options += [tag for tag in tags if tag not in tags_options]
+
+    return dbc.Row(
+        [
+            dbc.Col(
+                html.Div(
+                    dcc.Dropdown(
+                        id='pipes-tags-dropdown',
+                        options=tags_options,
+                        value=tags,
+                        placeholder='Tags',
+                        multi=True,
+                        searchable=True,
+                    ),
+                    className="dbc_dark",
+                    id="pipes-tags-dropdown-div",
+                ),
+                width=True,
+            ),
+            dbc.Col(
+                dbc.Button(
+                    "Clear all",
+                    color='link',
+                    size='sm',
+                    style={'text-decoration': 'none'},
+                    id='pipes-clear-all-button',
+                ),
+                width='auto',
+            ),
+        ],
+        className='g-0',
+        align='center',
+    )
+
+
+def build_pipes_navbar(instance_keys: Optional[str] = None, with_instance_select: bool = True):
+    """
+    Build the navbar from the selected instance keys.
+    """
+    instance_select = dbc.Select(
+        id='instance-select',
+        size='sm',
+        value=instance_keys or str(get_api_connector()),
+        options=[
+            {'label': (i[:32] + '…') if len(i) > 32 else i, 'value': i}
+            for i in get_connector_labels(*instance_types)
+        ],
+        class_name='dbc_dark custom-select custom-select-sm',
+    )
+    instance_select_div_style = {} if with_instance_select else {'visibility': 'hidden'}
+    instance_select_div = html.Div(instance_select, style=instance_select_div_style)
+    return html.Div(
+        [
+            pages_offcanvas,
+            dbc.Navbar(
+                dbc.Container(
+                    [
+                        logo_row,
+                        dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
+                        dbc.Collapse(
+                            dbc.Row(
+                                [
+                                    dbc.Col(instance_select_div, width='auto'),
+                                    dbc.Col(sign_out_button, width='auto'),
+                                ],
+                                className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
+                                align='center',
+                            ),
+                            id='navbar-collapse',
+                            is_open=False,
+                            navbar=True,
+                        ),
+                    ]
+                ),
+                dark=True,
+                color='dark'
+            ),
+        ],
+        id='pages-navbar-div',
+    )

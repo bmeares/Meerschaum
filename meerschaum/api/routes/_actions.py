@@ -18,6 +18,7 @@ from meerschaum.api import (
     manager,
     private,
     no_auth,
+    ScopedAuth,
 )
 from meerschaum.actions import actions
 from meerschaum.core.User import is_user_allowed_to_execute
@@ -28,7 +29,7 @@ actions_endpoint = endpoints['actions']
 @app.get(actions_endpoint, tags=['Actions'])
 def get_actions(
     curr_user = (
-        fastapi.Depends(manager) if private else None
+        fastapi.Depends(ScopedAuth(['actions:execute'])) if private else None
     ),
 ) -> List[str]:
     """
@@ -41,9 +42,7 @@ def get_actions(
 def do_action_legacy(
     action: str,
     keywords: Dict[str, Any] = fastapi.Body(...),
-    curr_user = (
-        fastapi.Depends(manager) if not no_auth else None
-    ),
+    curr_user = fastapi.Depends(ScopedAuth(['actions:execute'])),
 ) -> SuccessTuple:
     """
     Perform a Meerschaum action (if permissions allow).

@@ -12,6 +12,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import PipesDict, Dict, Union, Optional, SuccessTuple, Any, List
 from meerschaum.config import get_config
 
+
 def pprint_pipes(pipes: PipesDict) -> None:
     """Print a stylized tree of a Pipes dictionary.
     Supports ANSI and UNICODE global settings."""
@@ -276,17 +277,30 @@ def pprint_pipe_columns(
 
 
 def pipe_repr(
-    pipe: mrsm.Pipe,
+    pipe: Union[mrsm.Pipe, Dict[str, Any]],
     as_rich_text: bool = False,
     ansi: Optional[bool] = None,
 ) -> Union[str, 'rich.text.Text']:
     """
     Return a formatted string for representing a `meerschaum.Pipe`.
     """
-    from meerschaum.utils.formatting import UNICODE, ANSI, CHARSET, colored, rich_text_to_str
+    from meerschaum.utils.formatting import ANSI, colored, rich_text_to_str
     from meerschaum.utils.packages import import_rich, attempt_import
-    rich = import_rich()
+    import meerschaum as mrsm
+
+    _ = import_rich()
     Text = attempt_import('rich.text').Text
+
+    if isinstance(pipe, mrsm.Pipe):
+        connector_keys = pipe.connector_keys
+        metric_key = pipe.metric_key
+        location_key = pipe.location_key
+        instance_keys = pipe.instance_keys
+    else:
+        connector_keys = pipe.get('connector_keys')
+        metric_key = pipe.get('metric_key')
+        location_key = pipe.get('location_key')
+        instance_keys = pipe.get('instance_keys', get_config('meerschaum', 'instance'))
 
     styles = get_config('formatting', 'pipes', '__repr__', 'ansi', 'styles')
     if not ANSI or (ansi is False):
@@ -297,26 +311,26 @@ def pipe_repr(
     )
     text_obj = (
         Text.from_markup(_pipe_style_prefix + "Pipe(" + _pipe_style_suffix)
-        + colored(("'" + pipe.connector_keys + "'"), style=styles['connector'], as_rich_text=True)
+        + colored(("'" + connector_keys + "'"), style=styles['connector'], as_rich_text=True)
         + Text.from_markup(_pipe_style_prefix + ", " + _pipe_style_suffix)
-        + colored(("'" + pipe.metric_key + "'"), style=styles['metric'], as_rich_text=True)
+        + colored(("'" + metric_key + "'"), style=styles['metric'], as_rich_text=True)
         + (
             (
                 colored(', ', style=styles['punctuation'], as_rich_text=True)
                 + colored(
-                    ("'" + pipe.location_key + "'"),
+                    ("'" + location_key + "'"),
                     style=styles['location'], as_rich_text=True
                 )
-            ) if pipe.location_key is not None
+            ) if location_key is not None
             else colored('', style='', as_rich_text=True)
         ) + (
             ( ### Add the `instance=` argument.
                 colored(', instance=', style=styles['punctuation'], as_rich_text=True)
                 + colored(
-                    ("'" + pipe.instance_keys + "'"),
+                    ("'" + instance_keys + "'"),
                     style=styles['instance'], as_rich_text=True
                 )
-            ) if pipe.instance_keys != get_config('meerschaum', 'instance')
+            ) if instance_keys != get_config('meerschaum', 'instance')
             else colored('', style='', as_rich_text=True)
         )
         + Text.from_markup(_pipe_style_prefix + ")" + _pipe_style_suffix)
@@ -326,6 +340,7 @@ def pipe_repr(
     return rich_text_to_str(text_obj).replace('\n', '')
 
 
+
 def highlight_pipes(message: str) -> str:
     """
     Add syntax highlighting to an info message containing stringified `meerschaum.Pipe` objects.
@@ -333,56 +348,43 @@ def highlight_pipes(message: str) -> str:
     if 'Pipe(' not in message:
         return message
 
-    from meerschaum import Pipe
+    from meerschaum.utils.misc import parse_arguments_str
     segments = message.split('Pipe(')
     msg = ''
-    _d = {}
     for i, segment in enumerate(segments):
-        comma_index = segment.find(',')
-        paren_index = segment.find(')')
-        single_quote_index = segment.find("'")
-        double_quote_index = segment.find('"')
-
-        has_comma = comma_index != -1
-        has_paren = paren_index != -1
-        has_single_quote = single_quote_index != -1
-        has_double_quote = double_quote_index != -1
-        has_quote = has_single_quote or has_double_quote
-        quote_index = (
-            min(single_quote_index, double_quote_index)
-            if has_double_quote and has_single_quote
-            else (single_quote_index if has_single_quote else double_quote_index)
-        )
-
-        has_pipe = (
-            has_comma
-            and
-            has_paren
-            and
-            has_quote
-            and not
-            (comma_index > paren_index or quote_index > paren_index)
-        )
-
-        if has_pipe:
-            code = "_d['pipe'] = Pipe(" + segment[:paren_index + 1]
-            try:
-                exec(code)
-                _to_add = pipe_repr(_d['pipe']) + segment[paren_index + 1:]
-                _ = _d.pop('pipe', None)
-            except Exception as e:
-                _to_add = 'Pipe(' + segment
-            msg += _to_add
+        if i == 0:
+            msg += segment
             continue
-        msg += segment
+
+        paren_index = segment.find(')')
+        if paren_index == -1:
+            msg += 'Pipe(' + segment
+            continue
+        
+        pipe_args_str = segment[:paren_index]
+        try:
+            args, kwargs = parse_arguments_str(pipe_args_str)
+            pipe_dict = {
+                'connector_keys': args[0],
+                'metric_key': args[1],
+            }
+            if len(args) > 2:
+                pipe_dict['location_key'] = args[2]
+            if 'instance' in kwargs:
+                pipe_dict['instance_keys'] = kwargs['instance']
+            
+            _to_add = pipe_repr(pipe_dict) + segment[paren_index + 1:]
+        except Exception:
+            _to_add = 'Pipe(' + segment
+        msg += _to_add
     return msg
 
 
 def format_pipe_success_tuple(
-        pipe: mrsm.Pipe,
-        success_tuple: SuccessTuple,
-        nopretty: bool = False,
-    ) -> str:
+    pipe: mrsm.Pipe,
+    success_tuple: SuccessTuple,
+    nopretty: bool = False,
+) -> str:
     """
     Return a formatted string of a pipe and its resulting SuccessTuple.
 

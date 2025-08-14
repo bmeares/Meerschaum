@@ -8,7 +8,7 @@ Functions for interacting via WebSockets.
 
 import asyncio, sys
 from meerschaum.api._websockets import websockets
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 def ws_url_from_href(href: str) -> str:
     """

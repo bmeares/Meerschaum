@@ -8,8 +8,9 @@ Import the config yaml file
 from __future__ import annotations
 import pathlib
 
+import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
-from meerschaum.config import get_config
+from meerschaum._internal.static import STATIC_CONFIG
 
 
 def read_config(
@@ -49,11 +50,11 @@ def read_config(
     >>> read_config(keys=['meerschaum'], with_filename=True)
     >>> ({...}, ['meerschaum.yaml'])
     """
-    import sys, shutil, os, json, itertools
-    from meerschaum.utils.packages import attempt_import
+    import os
+    import json
+    import itertools
     from meerschaum.utils.yaml import yaml, _yaml
     from meerschaum.config._paths import CONFIG_DIR_PATH
-    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.config._patch import apply_patch_to_config
     if directory is None:
         directory = CONFIG_DIR_PATH
@@ -106,20 +107,25 @@ def read_config(
             ### If default config contains symlinks, add them to the config to write.
             try:
                 _default_symlinks = _default_dict[symlinks_key][mk]
-            except Exception as e:
+            except KeyError:
                 _default_symlinks = {}
+
             config[mk] = _default_dict[mk]
             if _default_symlinks:
                 if symlinks_key not in config:
                     config[symlinks_key] = {}
+                if symlinks_key not in config_to_write:
+                    config_to_write[symlinks_key] = {}
+
                 if mk not in config[symlinks_key]:
                     config[symlinks_key][mk] = {}
+                if mk not in config_to_write[symlinks_key]:
+                    config_to_write[symlinks_key][mk] = {}
+
                 config[symlinks_key][mk] = apply_patch_to_config(
                     config[symlinks_key][mk], 
                     _default_symlinks
                 )
-                if symlinks_key not in config_to_write:
-                    config_to_write[symlinks_key] = {}
                 config_to_write[symlinks_key][mk] = config[symlinks_key][mk]
 
             ### Write the default key.
@@ -179,6 +185,7 @@ def read_config(
                         import traceback
                         traceback.print_exc()
                         _config_key = {}
+                substitute = False
                 _single_key_config = (
                     search_and_substitute_config({key: _config_key}) if substitute
                     else {key: _config_key}
@@ -208,15 +215,16 @@ def read_config(
 
 
 def search_and_substitute_config(
-        config: Dict[str, Any],
-        leading_key: str = "MRSM",
-        delimiter: str = ":",
-        begin_key: str = "{",
-        end_key: str = "}",
-        literal_key: str = '!',
-        keep_symlinks: bool = True,
-    ) -> Dict[str, Any]:
-    """Search the config for Meerschaum substitution syntax and substite with value of keys.
+    config: Dict[str, Any],
+    leading_key: str = "MRSM",
+    delimiter: str = ":",
+    begin_key: str = "{",
+    end_key: str = "}",
+    literal_key: str = '!',
+    keep_symlinks: bool = True,
+) -> Dict[str, Any]:
+    """
+    Search the config for Meerschaum substitution syntax and substite with value of keys.
 
     Parameters
     ----------
@@ -242,7 +250,7 @@ def search_and_substitute_config(
         - ' MRSM{a:b:c} '  => ' "{\'d\': 1}"' : not isolated
         - ' MRSM{!a:b:c} ' => ' {"d": 1}'     : literal
 
-    keep_symlinks :
+    keep_symlinks: bool, default True
         If True, include the symlinks under the top-level key '_symlinks' (never written to a file).
         Defaults to True.
         
@@ -251,7 +259,13 @@ def search_and_substitute_config(
         ```
         MRSM{meerschaum:connectors:main:host} => cf['meerschaum']['connectors']['main']['host']
         ``` 
+
+    Returns
+    -------
+    The configuration dictionary with `MRSM{}` symlinks replaced with
+    the values from the current configuration.
     """
+    from meerschaum.config import get_config
 
     _links = []
     def _find_symlinks(d, _keys: Optional[List[str]] = None):
@@ -270,9 +284,6 @@ def search_and_substitute_config(
     import json
     needle = leading_key + begin_key
     haystack = json.dumps(config, separators=(',', ':'))
-    mod_haystack = list(str(haystack))
-    buff = str(needle)
-    max_index = len(haystack) - len(buff)
 
     patterns = {}
     isolated_patterns = {}
@@ -329,7 +340,7 @@ def search_and_substitute_config(
                 write_missing=False,
                 sync_files=False,
             )
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             valid = False
@@ -382,13 +393,53 @@ def search_and_substitute_config(
             s[_keys[-1]] = _pattern
 
         from meerschaum.config._patch import apply_patch_to_config
-        from meerschaum.config.static import STATIC_CONFIG
         symlinks_key = STATIC_CONFIG['config']['symlinks_key']
-        if symlinks_key not in parsed_config:
-            parsed_config[symlinks_key] = {}
-        parsed_config[symlinks_key] = apply_patch_to_config(parsed_config[symlinks_key], symlinks)
+        if symlinks:
+            if symlinks_key not in parsed_config:
+                parsed_config[symlinks_key] = symlinks
+            else:
+                parsed_config[symlinks_key] = apply_patch_to_config(
+                    parsed_config[symlinks_key],
+                    symlinks,
+                    warn=False,
+                )
 
     return parsed_config
+
+
+def revert_symlinks_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Given a configuration dictionary, re-apply the values from the
+    accompanying `_symlinks` dictionary.
+
+    Parameters
+    ----------
+    config: Dict[str, Any]
+        The configuration dictionary containing a `_symlinks` dictionary.
+
+    Returns
+    -------
+    A configuration dictionary with `_symlinks` re-applied.
+    """
+    import copy
+    from meerschaum._internal.static import STATIC_CONFIG
+
+    symlinks_key = STATIC_CONFIG['config']['symlinks_key']
+    if symlinks_key not in config:
+        return config
+
+    reverted_config = copy.deepcopy(config)
+    symlinks_config = reverted_config.pop(symlinks_key)
+
+    def deep_patch(target_dict, patch_dict):
+        for key, value in patch_dict.items():
+            if isinstance(value, dict) and key in target_dict and isinstance(target_dict[key], dict):
+                deep_patch(target_dict[key], value)
+            else:
+                target_dict[key] = value
+
+    deep_patch(reverted_config, symlinks_config)
+    return reverted_config
 
 
 def get_possible_keys() -> List[str]:
@@ -407,12 +458,13 @@ def get_possible_keys() -> List[str]:
 
 
 def get_keyfile_path(
-        key: str,
-        create_new: bool = False,
-        directory: Union[pathlib.Path, str, None] = None,
-    ) -> Union[pathlib.Path, None]:
+    key: str,
+    create_new: bool = False,
+    directory: Union[pathlib.Path, str, None] = None,
+) -> Union[pathlib.Path, None]:
     """Determine a key's file path."""
-    import os, pathlib
+    import os
+    import pathlib
     if directory is None:
         from meerschaum.config._paths import CONFIG_DIR_PATH
         directory = CONFIG_DIR_PATH
@@ -422,16 +474,15 @@ def get_keyfile_path(
             os.path.join(
                 directory,
                 read_config(
-                    keys = [key],
-                    with_filenames = True,
-                    write_missing = False,
-                    substitute = False,
+                    keys=[key],
+                    with_filenames=True,
+                    write_missing=False,
+                    substitute=False,
                 )[1][0]
             )
         )
-    except IndexError as e:
+    except IndexError:
         if create_new:
-            from meerschaum.config.static import STATIC_CONFIG
             default_filetype = STATIC_CONFIG['config']['default_filetype']
             return pathlib.Path(os.path.join(directory, key + '.' + default_filetype))
         return None

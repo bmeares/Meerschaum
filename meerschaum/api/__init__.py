@@ -14,14 +14,13 @@ from fnmatch import fnmatch
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Any, Optional, PipesDict
 from meerschaum.config import get_config
-from meerschaum.config.static import STATIC_CONFIG, SERVER_ID
+from meerschaum._internal.static import STATIC_CONFIG, SERVER_ID
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils import get_pipes as _get_pipes
 from meerschaum.config._paths import API_UVICORN_CONFIG_PATH, API_UVICORN_RESOURCES_PATH
 from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn, dprint
 from meerschaum.utils.threading import RLock
-from meerschaum.utils.misc import is_pipe_registered
 from meerschaum.connectors.parse import parse_instance_keys
 
 from meerschaum import __version__ as version
@@ -67,16 +66,13 @@ from meerschaum.api._exceptions import APIPermissionError
 uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
 
 uvicorn_config = None
-sys_config = get_config('system', 'api')
-permissions_config = get_config('system', 'api', 'permissions')
+sys_config = get_config('api')
+permissions_config = get_config('api', 'permissions')
 
 def get_uvicorn_config() -> Dict[str, Any]:
     """Read the Uvicorn configuration JSON and return a dictionary."""
     global uvicorn_config
     import json
-    runtime = os.environ.get(STATIC_CONFIG['environment']['runtime'], None)
-    if runtime == 'api':
-        return get_config('system', 'api', 'uvicorn')
     _uvicorn_config = uvicorn_config
     with _locks['uvicorn_config']:
         if uvicorn_config is None:
@@ -85,6 +81,8 @@ def get_uvicorn_config() -> Dict[str, Any]:
                     uvicorn_config = json.load(f)
                 _uvicorn_config = uvicorn_config
             except Exception:
+                import traceback
+                traceback.print_exc()
                 _uvicorn_config = sys_config.get('uvicorn', None)
 
             if _uvicorn_config is None:
@@ -95,11 +93,17 @@ def get_uvicorn_config() -> Dict[str, Any]:
 
 debug = get_uvicorn_config().get('debug', False)
 no_dash = get_uvicorn_config().get('no_dash', False)
+no_webterm = get_uvicorn_config().get('no_webterm', False)
 no_auth = get_uvicorn_config().get('no_auth', False)
 private = get_uvicorn_config().get('private', False)
 production = get_uvicorn_config().get('production', False)
 _include_dash = (not no_dash)
+_include_webterm = (not no_webterm) and _include_dash
 docs_enabled = not production or sys_config.get('endpoints', {}).get('docs_in_production', True)
+webterm_port = (
+    get_uvicorn_config().get('webterm_port', None)
+    or mrsm.get_config('api', 'webterm', 'port')
+)
 
 default_instance_keys = None
 _instance_connectors = defaultdict(lambda: None)
@@ -127,7 +131,7 @@ def get_api_connector(instance_keys: Optional[str] = None):
     )
     found_match: bool = False
     for allowed_keys_pattern in allowed_instance_keys:
-        if fnmatch(instance_keys, allowed_keys_pattern):
+        if fnmatch(str(instance_keys), allowed_keys_pattern):
             found_match = True
             break
     if not found_match:
@@ -139,7 +143,9 @@ def get_api_connector(instance_keys: Optional[str] = None):
         if _instance_connectors[instance_keys] is None:
             try:
                 is_valid_connector = True
-                _instance_connectors[instance_keys] = parse_instance_keys(instance_keys, debug=debug)
+                instance_connector = parse_instance_keys(instance_keys, debug=debug)
+                instance_connector._cache_connector = get_cache_connector()
+                _instance_connectors[instance_keys] = instance_connector
             except Exception:
                 is_valid_connector = False
 
@@ -166,7 +172,7 @@ def get_cache_connector(connector_keys: Optional[str] = None):
         return None
 
     connector_keys = connector_keys or get_config(
-        'system', 'api', 'cache', 'connector',
+        'api', 'cache', 'connector',
         warn=False,
     )
     if connector_keys is None:
@@ -194,7 +200,11 @@ def pipes(instance_keys: Optional[str] = None, refresh: bool = False) -> PipesDi
     with _locks['pipes-' + instance_keys]:
         pipes = _instance_pipes[instance_keys]
         if pipes is None or refresh:
-            pipes = _get_pipes(mrsm_instance=instance_keys)
+            pipes = _get_pipes(
+                mrsm_instance=instance_keys,
+                cache=True,
+                cache_connector_keys=get_cache_connector(),
+            )
             _instance_pipes[instance_keys] = pipes
     return pipes
 
@@ -210,9 +220,29 @@ def get_pipe(
     if location_key in ('[None]', 'None', 'null'):
         location_key = None
     instance_keys = str(get_api_connector(instance_keys))
-    pipe = mrsm.Pipe(connector_keys, metric_key, location_key, mrsm_instance=instance_keys)
-    if is_pipe_registered(pipe, pipes(instance_keys)):
-        return pipes(instance_keys, refresh=refresh)[connector_keys][metric_key][location_key]
+    if connector_keys == 'mrsm':
+        raise fastapi.HTTPException(
+            status_code=403,
+            detail="Unable to serve any pipes with connector keys `mrsm` over the API.",
+        )
+
+    pipes_dict = pipes(instance_keys)
+    if (
+        not refresh
+        and connector_keys in pipes_dict
+        and metric_key in pipes_dict[connector_keys]
+        and location_key in pipes_dict[connector_keys][metric_key]
+    ):
+        return pipes_dict[connector_keys][metric_key][location_key]
+
+    pipe = mrsm.Pipe(
+        connector_keys,
+        metric_key,
+        location_key,
+        mrsm_instance=instance_keys,
+        cache=True,
+        cache_connector_keys=get_cache_connector(),
+    )
     return pipe
 
 
@@ -291,7 +321,7 @@ def __getattr__(name: str):
     raise AttributeError(f"Could not import '{name}'.")
 
 ### Import everything else within the API.
-from meerschaum.api._oauth2 import manager
+from meerschaum.api._oauth2 import manager, ScopedAuth
 import meerschaum.api.routes as routes
 import meerschaum.api._events
 import meerschaum.api._websockets

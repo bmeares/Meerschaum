@@ -9,9 +9,16 @@ Define file paths
 from __future__ import annotations
 
 from pathlib import Path
-import os, platform, sys, json
-from meerschaum.utils.typing import Union
-from meerschaum.config.static import STATIC_CONFIG
+import contextlib
+import os
+import platform
+import sys
+import json
+
+from typing import Union, List
+
+from meerschaum._internal.static import STATIC_CONFIG
+
 
 DOT_CONFIG_DIR_PATH = Path(
     os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')
@@ -71,7 +78,7 @@ if ENVIRONMENT_PLUGINS_DIR in os.environ:
                 if path_str
             ]
         )
-    except Exception as e:
+    except Exception:
         PLUGINS_DIR_PATHS = []
 
     if not PLUGINS_DIR_PATHS:
@@ -82,20 +89,23 @@ if ENVIRONMENT_PLUGINS_DIR in os.environ:
             f"`export {ENVIRONMENT_PLUGINS_DIR}=./plugins:/another/path/to/plugins`\n\n"
             "or a JSON-encoded path list:\n\n"
             f"`export {ENVIRONMENT_PLUGINS_DIR}=" + "'[\"./plugins\", \"/another/path/to/plugins\"]'`"
-            f"",
+            "",
         )
         sys.exit(1)
 else:
     PLUGINS_DIR_PATHS = [_ROOT_DIR_PATH / 'plugins']
 
 ### Remove duplicate plugins paths.
-_seen_plugins_paths, _plugins_paths_to_remove = set(), set()
-for _plugin_path in PLUGINS_DIR_PATHS:
-    if _plugin_path in _seen_plugins_paths:
-        _plugins_paths_to_remove.add(_plugin_path)
-    _seen_plugins_paths.add(_plugin_path)
-for _plugin_path in _plugins_paths_to_remove:
-    PLUGINS_DIR_PATHS.remove(_plugin_path)
+def _process_plugins_dir_paths(plugins_dir_paths: List[Path]):
+    _seen_plugins_paths, _plugins_paths_to_remove = set(), set()
+    for _plugin_path in plugins_dir_paths:
+        if _plugin_path in _seen_plugins_paths:
+            _plugins_paths_to_remove.add(_plugin_path)
+        _seen_plugins_paths.add(_plugin_path)
+    for _plugin_path in _plugins_paths_to_remove:
+        plugins_dir_paths.remove(_plugin_path)
+_process_plugins_dir_paths(PLUGINS_DIR_PATHS)
+
 
 ENVIRONMENT_VENVS_DIR = STATIC_CONFIG['environment']['venvs']
 if ENVIRONMENT_VENVS_DIR in os.environ:
@@ -144,11 +154,17 @@ paths = {
     'API_SECRET_KEY_PATH'            : ('{API_CONFIG_RESOURCES_PATH}', '.api_secret_key'),
     'API_UVICORN_RESOURCES_PATH'     : ('{API_CONFIG_RESOURCES_PATH}', 'uvicorn'),
     'API_UVICORN_CONFIG_PATH'        : ('{API_UVICORN_RESOURCES_PATH}', '.thread_config.json'),
+    
+    'WEBTERM_INTERNAL_RESOURCES_PATH': ('{INTERNAL_RESOURCES_PATH}', 'webterm'),
 
     'CACHE_RESOURCES_PATH'           : ('{ROOT_DIR_PATH}', '.cache'),
     'PIPES_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'pipes'),
     'USERS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'users'),
     'VENVS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'venvs'),
+    'SQL_CONN_CACHE_RESOURCES_PATH'  : ('{CACHE_RESOURCES_PATH}', 'sql'),
+
+    'CLI_RESOURCES_PATH'             : ('{INTERNAL_RESOURCES_PATH}', 'cli'),
+    'CLI_LOGS_RESOURCES_PATH'        : ('{CLI_RESOURCES_PATH}', 'logs'),
 
     'PLUGINS_RESOURCES_PATH'         : ('{INTERNAL_RESOURCES_PATH}', 'plugins'),
     'PLUGINS_INTERNAL_LOCK_PATH'     : ('{INTERNAL_RESOURCES_PATH}', 'plugins.lock'),
@@ -156,6 +172,11 @@ paths = {
     'PLUGINS_ARCHIVES_RESOURCES_PATH': ('{PLUGINS_RESOURCES_PATH}', '.archives'),
     'PLUGINS_TEMP_RESOURCES_PATH'    : ('{PLUGINS_RESOURCES_PATH}', '.tmp'),
     'PLUGINS_INIT_PATH'              : ('{PLUGINS_RESOURCES_PATH}', '__init__.py'),
+    'PLUGINS_INJECTED_RESOURCES_PATH': ('{PLUGINS_RESOURCES_PATH}', '.injected'),
+
+    'DB_RESOURCES_PATH'              : ('{ROOT_DIR_PATH}', 'db'),
+    'DB_INIT_RESOURCES_PATH'         : ('{DB_RESOURCES_PATH}', 'initdb'),
+    'DB_CREATE_EXTENSIONS_PATH'      : ('{DB_INIT_RESOURCES_PATH}', 'create-extensions.sql'),
 
     'SQLITE_RESOURCES_PATH'          : ('{ROOT_DIR_PATH}', 'sqlite'),
     'SQLITE_DB_PATH'                 : ('{SQLITE_RESOURCES_PATH}', 'mrsm_local.db'),
@@ -192,10 +213,109 @@ paths = {
 
 def set_root(root: Union[Path, str]):
     """Modify the value of `ROOT_DIR_PATH`."""
-    paths['ROOT_DIR_PATH'] = Path(root).resolve()
+    paths['ROOT_DIR_PATH'] = Path(root).resolve().as_posix()
     for path_name, path_parts in paths.items():
         if isinstance(path_parts, tuple) and path_parts[0] == '{ROOT_DIR_PATH}':
             globals()[path_name] = __getattr__(path_name)
+
+def set_plugins_dir_paths(plugins_dir_paths: Union[List[Path], Path, str]):
+    """Modify the value of `PLUGINS_DIR_PATHS`."""
+    global PLUGINS_DIR_PATHS
+    if isinstance(plugins_dir_paths, str):
+        if plugins_dir_paths.strip() and plugins_dir_paths.lstrip()[0] == '[':
+            plugins_dir_paths = json.loads(plugins_dir_paths)
+        else:
+            plugins_dir_paths = plugins_dir_paths.split(':')
+        plugins_dir_paths = [Path(_path).resolve() for _path in plugins_dir_paths]
+    if isinstance(plugins_dir_paths, Path):
+        plugins_dir_paths = [plugins_dir_paths.resolve()]
+
+    PLUGINS_DIR_PATHS = plugins_dir_paths
+    _process_plugins_dir_paths(plugins_dir_paths)
+
+def set_venvs_dir_path(venvs_dir_path: Union[str, Path]):
+    """Modify the value of `VIRTENV_RESOURCES_PATH`."""
+    paths['VIRTENV_RESOURCES_PATH'] = Path(venvs_dir_path).resolve().as_posix()
+
+def set_config_dir_path(config_dir_path: Union[str, Path]):
+    paths['CONFIG_DIR_PATH'] = Path(config_dir_path).resolve().as_posix()
+
+
+@contextlib.contextmanager
+def replace_root_dir(root_dir_path: Union[str, Path, None]):
+    """
+    Temporarily replace the root directory path.
+    """
+    if root_dir_path is None:
+        try:
+            yield
+        finally:
+            return
+
+    old_root = paths.get('ROOT_DIR_PATH', _ROOT_DIR_PATH)
+    set_root(root_dir_path)
+
+    try:
+        yield
+    finally:
+        set_root(old_root)
+
+@contextlib.contextmanager
+def replace_plugins_dir_paths(plugins_dir_paths: Union[List[Path], None]):
+    """
+    Temporarily replace the plugins directory paths.
+    """
+    if plugins_dir_paths is None:
+        try:
+            yield
+        finally:
+            return
+
+    old_plugins_dir_paths = PLUGINS_DIR_PATHS
+    set_plugins_dir_paths(plugins_dir_paths)
+
+    try:
+        yield
+    finally:
+        set_plugins_dir_paths(old_plugins_dir_paths)
+
+@contextlib.contextmanager
+def replace_venvs_dir_path(venvs_dir_path: Union[Path, None]):
+    """
+    Temporarily replace the virtual environments directory path.
+    """
+    if venvs_dir_path is None:
+        try:
+            yield
+        finally:
+            return
+
+    old_venvs_dir_path = paths.get('VIRTENV_RESOURCES_PATH', _VENVS_DIR_PATH)
+    set_venvs_dir_path(venvs_dir_path)
+
+    try:
+        yield
+    finally:
+        set_venvs_dir_path(old_venvs_dir_path)
+
+@contextlib.contextmanager
+def replace_config_dir_path(config_dir_path: Union[Path, None]):
+    """
+    Temporarily replace the config directory path.
+    """
+    if config_dir_path is None:
+        try:
+            yield
+        finally:
+            return
+
+    old_config_dir_path = paths.get('CONFIG_DIR_PATH', _CONFIG_DIR_PATH)
+    set_config_dir_path(config_dir_path)
+
+    try:
+        yield
+    finally:
+        set_config_dir_path(old_config_dir_path)
 
 
 def __getattr__(name: str) -> Path:

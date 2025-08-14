@@ -161,6 +161,8 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
   Configuration keys to be patched on top of your host configuration, see [`MRSM_CONFIG`](/reference/environment/#mrsm_config). Custom connectors should be defined here.
 - **`environment`**  
   Additional environment variables to pass to subprocesses.
+- **`isolation`**  
+  If `isolation` is set to `subprocess`, then `compose` will execute commands as subprocesses, ensuring the truest level of isolation. By default, commands are executed within the host Meerschaum process, with isolated configuration and plugins and root directories. This behavior may be temporarily enabled with the flag `--isolated`.
 
 !!! tip "Accessing the host configuration"
 

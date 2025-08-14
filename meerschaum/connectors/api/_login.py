@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import datetime
 from meerschaum.utils.typing import SuccessTuple, Any, Union
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn as _warn
 
 
@@ -22,13 +22,39 @@ def login(
     **kw: Any
 ) -> SuccessTuple:
     """Log in and set the session token."""
+    if self.login_scheme == 'api_key':
+        validate_response = self.post(
+            STATIC_CONFIG['api']['endpoints']['tokens'] + '/validate',
+            headers={'Authorization': f'Bearer {self.api_key}'},
+            use_token=False,
+            debug=debug,
+        )
+        if not validate_response:
+            return False, "API key is not valid."
+        return True, "API key is valid."
+
     try:
-        login_data = {
-            'username': self.username,
-            'password': self.password,
-        }
+        if self.login_scheme == 'password':
+            login_data = {
+                'username': self.username,
+                'password': self.password,
+            }
+        elif self.login_scheme == 'client_credentials':
+            login_data = {
+                'client_id': self.client_id,
+                'client_secret': self.client_secret,
+            }
     except AttributeError:
+        login_data = {}
+
+    if not login_data:
         return False, f"Please login with the command `login {self}`."
+
+    login_scheme_msg = (
+        f" as user '{login_data['username']}'"
+        if self.login_scheme == 'username'
+        else ''
+    )
 
     response = self.post(
         STATIC_CONFIG['api']['endpoints']['login'],
@@ -37,7 +63,7 @@ def login(
         debug=debug,
     )
     if response:
-        msg = f"Successfully logged into '{self}' as user '{login_data['username']}'."
+        msg = f"Successfully logged into '{self}'{login_scheme_msg}'."
         self._token = json.loads(response.text)['access_token']
         self._expires = datetime.datetime.strptime(
             json.loads(response.text)['expires'], 
@@ -45,7 +71,7 @@ def login(
         )
     else:
         msg = (
-            f"Failed to log into '{self}' as user '{login_data['username']}'.\n" +
+            f"Failed to log into '{self}'{login_scheme_msg}.\n" +
             f"    Please verify login details for connector '{self}'."
         )
         if warn and not self.__dict__.get('_emitted_warning', False):

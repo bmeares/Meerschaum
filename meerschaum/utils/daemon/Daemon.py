@@ -24,10 +24,7 @@ from meerschaum.utils.typing import (
     is_success_tuple, Tuple,
 )
 from meerschaum.config import get_config
-from meerschaum.config.static import STATIC_CONFIG
-from meerschaum.config._paths import (
-    DAEMON_RESOURCES_PATH, LOGS_RESOURCES_PATH, DAEMON_ERROR_LOG_PATH,
-)
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.config._patch import apply_patch_to_config
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
@@ -144,6 +141,7 @@ class Daemon:
         daemon_id: Optional[str] = None,
         label: Optional[str] = None,
         properties: Optional[Dict[str, Any]] = None,
+        pickle: bool = True,
     ):
         """
         Parameters
@@ -211,6 +209,8 @@ class Daemon:
                 error("Cannot create a Daemon without a target.")
             self.target = target
 
+        self.pickle = pickle
+
         ### NOTE: We have to check self.__dict__ in case we un-pickling.
         if '_target_args' not in self.__dict__:
             self._target_args = target_args
@@ -224,10 +224,17 @@ class Daemon:
                         else str(self.target)
                 )
             self.label = label
+        elif label is not None:
+            self.label = label
+
         if 'daemon_id' not in self.__dict__:
             self.daemon_id = get_new_daemon_name()
         if '_properties' not in self.__dict__:
             self._properties = properties
+        elif properties:
+            if self._properties is None:
+                self._properties = {}
+            self._properties.update(properties)
         if self._properties is None:
             self._properties = {}
 
@@ -276,6 +283,24 @@ class Daemon:
 
         self._setup(allow_dirty_run)
 
+        _daemons.append(self)
+
+        logs_cf = self.properties.get('logs', {})
+        log_refresh_seconds = logs_cf.get('refresh_files_seconds', None)
+        if log_refresh_seconds is None:
+            log_refresh_seconds = get_config('jobs', 'logs', 'refresh_files_seconds')
+        write_timestamps = logs_cf.get('write_timestamps', None)
+        if write_timestamps is None:
+            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
+
+        self._log_refresh_timer = RepeatTimer(
+            log_refresh_seconds,
+            partial(self.rotating_log.refresh_files, start_interception=write_timestamps),
+        )
+
+        capture_stdin = logs_cf.get('stdin', True)
+        cwd = self.properties.get('cwd', os.getcwd())
+
         ### NOTE: The SIGINT handler has been removed so that child processes may handle
         ###       KeyboardInterrupts themselves.
         ###       The previous aggressive approach was redundant because of the SIGTERM handler.
@@ -283,7 +308,8 @@ class Daemon:
             pidfile=self.pid_lock,
             stdout=self.rotating_log,
             stderr=self.rotating_log,
-            working_directory=os.getcwd(),
+            stdin=(self.stdin_file if capture_stdin else None),
+            working_directory=cwd,
             detach_process=True,
             files_preserve=list(self.rotating_log.subfile_objects.values()),
             signal_map={
@@ -291,18 +317,14 @@ class Daemon:
             },
         )
 
-        _daemons.append(self)
-
-        log_refresh_seconds = get_config('jobs', 'logs', 'refresh_files_seconds')
-        self._log_refresh_timer = RepeatTimer(
-            log_refresh_seconds,
-            partial(self.rotating_log.refresh_files, start_interception=True),
-        )
+        if capture_stdin and sys.stdin is None:
+            raise OSError("Cannot daemonize without stdin.")
 
         try:
             os.environ['LINES'], os.environ['COLUMNS'] = str(int(lines)), str(int(columns))
             with self._daemon_context:
-                sys.stdin = self.stdin_file
+                if capture_stdin:
+                    sys.stdin = self.stdin_file
                 _ = os.environ.pop(STATIC_CONFIG['environment']['systemd_stdin_path'], None)
                 os.environ[STATIC_CONFIG['environment']['daemon_id']] = self.daemon_id
                 os.environ['PYTHONUNBUFFERED'] = '1'
@@ -338,6 +360,7 @@ class Daemon:
                     result = False, str(e)
                 finally:
                     _results[self.daemon_id] = result
+                    self.properties['result'] = result
 
                     if keep_daemon_output:
                         self._capture_process_timestamp('ended')
@@ -359,8 +382,15 @@ class Daemon:
 
         except Exception:
             daemon_error = traceback.format_exc()
+            from meerschaum.config.paths import DAEMON_ERROR_LOG_PATH
             with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
-                f.write(daemon_error)
+                f.write(
+                    f"Error in Daemon '{self}':\n\n"
+                    f"{sys.stdin=}\n"
+                    f"{self.stdin_file_path=}\n"
+                    f"{self.stdin_file_path.exists()=}\n\n"
+                    f"{daemon_error}\n\n"
+                )
             warn(f"Encountered an error while running the daemon '{self}':\n{daemon_error}")
 
     def _capture_process_timestamp(
@@ -395,6 +425,8 @@ class Daemon:
         self,
         keep_daemon_output: bool = True,
         allow_dirty_run: bool = False,
+        wait: bool = False,
+        timeout: Union[int, float] = 4,
         debug: bool = False,
     ) -> SuccessTuple:
         """Run the daemon as a child process and continue executing the parent.
@@ -408,6 +440,12 @@ class Daemon:
             If `True`, run the daemon, even if the `daemon_id` directory exists.
             This option is dangerous because if the same `daemon_id` runs concurrently,
             the last to finish will overwrite the output of the first.
+
+        wait: bool, default True
+            If `True`, block until `Daemon.status` is running (or the timeout expires).
+
+        timeout: Union[int, float], default 4
+            If `wait` is `True`, block for up to `timeout` seconds before returning a failure.
 
         Returns
         -------
@@ -432,20 +470,44 @@ class Daemon:
             return _write_pickle_success_tuple
 
         _launch_daemon_code = (
-            "from meerschaum.utils.daemon import Daemon; "
-            + f"daemon = Daemon(daemon_id='{self.daemon_id}'); "
-            + f"daemon._run_exit(keep_daemon_output={keep_daemon_output}, "
-            + "allow_dirty_run=True)"
+            "from meerschaum.utils.daemon import Daemon, _daemons; "
+            f"daemon = Daemon(daemon_id='{self.daemon_id}'); "
+            f"_daemons['{self.daemon_id}'] = daemon; "
+            f"daemon._run_exit(keep_daemon_output={keep_daemon_output}, "
+            "allow_dirty_run=True)"
         )
         env = dict(os.environ)
-        env[STATIC_CONFIG['environment']['noninteractive']] = 'true'
         _launch_success_bool = venv_exec(_launch_daemon_code, debug=debug, venv=None, env=env)
         msg = (
             "Success"
             if _launch_success_bool
             else f"Failed to start daemon '{self.daemon_id}'."
         )
-        return _launch_success_bool, msg
+        if not wait or not _launch_success_bool:
+            return _launch_success_bool, msg
+
+        timeout = self.get_timeout_seconds(timeout)
+        check_timeout_interval = self.get_check_timeout_interval_seconds()
+
+        if not timeout:
+            success = self.status == 'running'
+            msg = "Success" if success else f"Failed to run daemon '{self.daemon_id}'."
+            if success:
+                self._capture_process_timestamp('began')
+            return success, msg
+
+        begin = time.perf_counter()
+        while (time.perf_counter() - begin) < timeout:
+            if self.status == 'running':
+                self._capture_process_timestamp('began')
+                return True, "Success"
+            time.sleep(check_timeout_interval)
+
+        return False, (
+            f"Failed to start daemon '{self.daemon_id}' within {timeout} second"
+            + ('s' if timeout != 1 else '') + '.'
+        )
+
 
     def kill(self, timeout: Union[int, float, None] = 8) -> SuccessTuple:
         """
@@ -465,10 +527,14 @@ class Daemon:
             success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
             if success:
                 self._write_stop_file('kill')
+                self.stdin_file.close()
+                self._remove_blocking_stdin_file()
                 return success, msg
 
         if self.status == 'stopped':
             self._write_stop_file('kill')
+            self.stdin_file.close()
+            self._remove_blocking_stdin_file()
             return True, "Process has already stopped."
 
         psutil = attempt_import('psutil')
@@ -493,6 +559,8 @@ class Daemon:
                 pass
 
         self._write_stop_file('kill')
+        self.stdin_file.close()
+        self._remove_blocking_stdin_file()
         return True, "Success"
 
     def quit(self, timeout: Union[int, float, None] = None) -> SuccessTuple:
@@ -503,6 +571,8 @@ class Daemon:
         signal_success, signal_msg = self._send_signal(signal.SIGINT, timeout=timeout)
         if signal_success:
             self._write_stop_file('quit')
+            self.stdin_file.close()
+            self._remove_blocking_stdin_file()
         return signal_success, signal_msg
 
     def pause(
@@ -525,6 +595,8 @@ class Daemon:
         -------
         A `SuccessTuple` indicating whether the `Daemon` process was successfully suspended.
         """
+        self._remove_blocking_stdin_file()
+
         if self.process is None:
             return False, f"Daemon '{self.daemon_id}' is not running and cannot be paused."
 
@@ -532,6 +604,8 @@ class Daemon:
             return True, f"Daemon '{self.daemon_id}' is already paused."
 
         self._write_stop_file('pause')
+        self.stdin_file.close()
+        self._remove_blocking_stdin_file()
         try:
             self.process.suspend()
         except Exception as e:
@@ -597,6 +671,9 @@ class Daemon:
 
         self._remove_stop_file()
         try:
+            if self.process is None:
+                return False, f"Cannot resume daemon '{self.daemon_id}'."
+
             self.process.resume()
         except Exception as e:
             return False, f"Failed to resume daemon '{self.daemon_id}':\n{e}"
@@ -669,6 +746,18 @@ class Daemon:
             return data
         except Exception:
             return {}
+
+    def _remove_blocking_stdin_file(self) -> mrsm.SuccessTuple:
+        """
+        Remove the blocking STDIN file if it exists.
+        """
+        try:
+            if self.blocking_stdin_file_path.exists():
+                self.blocking_stdin_file_path.unlink()
+        except Exception as e:
+            return False, str(e)
+
+        return True, "Success"
 
     def _handle_sigterm(self, signal_number: int, stack_frame: 'frame') -> None:
         """
@@ -798,7 +887,7 @@ class Daemon:
         if self.process is None:
             return 'stopped'
 
-        psutil = attempt_import('psutil')
+        psutil = attempt_import('psutil', lazy=False)
         try:
             if self.process.status() == 'stopped':
                 return 'paused'
@@ -819,6 +908,7 @@ class Daemon:
         """
         Return a Daemon's path from its `daemon_id`.
         """
+        from meerschaum.config.paths import DAEMON_RESOURCES_PATH
         return DAEMON_RESOURCES_PATH / daemon_id
 
     @property
@@ -854,7 +944,12 @@ class Daemon:
         """
         Return the log path.
         """
-        return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
+        logs_cf = self.properties.get('logs', None) or {}
+        if 'path' not in logs_cf:
+            from meerschaum.config.paths import LOGS_RESOURCES_PATH
+            return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
+
+        return pathlib.Path(logs_cf['path'])
 
     @property
     def stdin_file_path(self) -> pathlib.Path:
@@ -874,11 +969,31 @@ class Daemon:
         return self.path / 'input.stdin.block'
 
     @property
+    def prompt_kwargs_file_path(self) -> pathlib.Path:
+        """
+        Return the file path to the kwargs for the invoking `prompt()`.
+        """
+        return self.path / 'prompt_kwargs.json'
+
+    @property
     def log_offset_path(self) -> pathlib.Path:
         """
         Return the log offset file path.
         """
+        from meerschaum.config.paths import LOGS_RESOURCES_PATH
         return LOGS_RESOURCES_PATH / ('.' + self.daemon_id + '.log.offset')
+
+    @property
+    def log_offset_lock(self) -> 'fasteners.InterProcessLock':
+        """
+        Return the process lock context manager.
+        """
+        if '_log_offset_lock' in self.__dict__:
+            return self._log_offset_lock
+
+        fasteners = attempt_import('fasteners')
+        self._log_offset_lock = fasteners.InterProcessLock(self.log_offset_path)
+        return self._log_offset_lock
 
     @property
     def rotating_log(self) -> RotatingFile:
@@ -888,17 +1003,32 @@ class Daemon:
         if '_rotating_log' in self.__dict__:
             return self._rotating_log
 
-        write_timestamps = (
-            self.properties.get('logs', {}).get('write_timestamps', None)
-        )
+        logs_cf = self.properties.get('logs', None) or {}
+        write_timestamps = logs_cf.get('write_timestamps', None)
         if write_timestamps is None:
             write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
 
+        timestamp_format = logs_cf.get('timestamp_format', None)
+        if timestamp_format is None:
+            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
+
+        num_files_to_keep = logs_cf.get('num_files_to_keep', None)
+        if num_files_to_keep is None:
+            num_files_to_keep = get_config('jobs', 'logs', 'num_files_to_keep')
+
+        max_file_size = logs_cf.get('max_file_size', None)
+        if max_file_size is None:
+            max_file_size = get_config('jobs', 'logs', 'max_file_size')
+
+        redirect_streams = logs_cf.get('redirect_streams', True)
+
         self._rotating_log = RotatingFile(
             self.log_path,
-            redirect_streams=True,
+            redirect_streams=redirect_streams,
             write_timestamps=write_timestamps,
-            timestamp_format=get_config('jobs', 'logs', 'timestamps', 'format'),
+            timestamp_format=timestamp_format,
+            num_files_to_keep=num_files_to_keep,
+            max_file_size=max_file_size,
         )
         return self._rotating_log
 
@@ -907,8 +1037,8 @@ class Daemon:
         """
         Return the file handler for the stdin file.
         """
-        if (stdin_file := self.__dict__.get('_stdin_file', None)):
-            return stdin_file
+        if (_stdin_file := self.__dict__.get('_stdin_file', None)):
+            return _stdin_file
 
         self._stdin_file = StdinFile(
             self.stdin_file_path,
@@ -917,17 +1047,34 @@ class Daemon:
         return self._stdin_file
 
     @property
-    def log_text(self) -> Optional[str]:
+    def log_text(self) -> Union[str, None]:
         """
         Read the log files and return their contents.
         Returns `None` if the log file does not exist.
         """
+        logs_cf = self.properties.get('logs', None) or {}
+        write_timestamps = logs_cf.get('write_timestamps', None)
+        if write_timestamps is None:
+            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled')
+
+        timestamp_format = logs_cf.get('timestamp_format', None)
+        if timestamp_format is None:
+            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
+
+        num_files_to_keep = logs_cf.get('num_files_to_keep', None)
+        if num_files_to_keep is None:
+            num_files_to_keep = get_config('jobs', 'logs', 'num_files_to_keep')
+
+        max_file_size = logs_cf.get('max_file_size', None)
+        if max_file_size is None:
+            max_file_size = get_config('jobs', 'logs', 'max_file_size')
+
         new_rotating_log = RotatingFile(
             self.rotating_log.file_path,
-            num_files_to_keep = self.rotating_log.num_files_to_keep,
-            max_file_size = self.rotating_log.max_file_size,
-            write_timestamps = get_config('jobs', 'logs', 'timestamps', 'enabled'),
-            timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format'),
+            num_files_to_keep=num_files_to_keep,
+            max_file_size=max_file_size,
+            write_timestamps=write_timestamps,
+            timestamp_format=timestamp_format,
         )
         return new_rotating_log.read()
 
@@ -952,20 +1099,25 @@ class Daemon:
         if not self.log_offset_path.exists():
             return 0, 0
 
-        with open(self.log_offset_path, 'r', encoding='utf-8') as f:
-            cursor_text = f.read()
-        cursor_parts = cursor_text.split(' ')
-        subfile_index, subfile_position = int(cursor_parts[0]), int(cursor_parts[1])
-        return subfile_index, subfile_position
+        try:
+            with open(self.log_offset_path, 'r', encoding='utf-8') as f:
+                cursor_text = f.read()
+            cursor_parts = cursor_text.split(' ')
+            subfile_index, subfile_position = int(cursor_parts[0]), int(cursor_parts[1])
+            return subfile_index, subfile_position
+        except Exception as e:
+            warn(f"Failed to read cursor:\n{e}")
+        return 0, 0
 
     def _write_log_offset(self) -> None:
         """
         Write the current log offset file.
         """
-        with open(self.log_offset_path, 'w+', encoding='utf-8') as f:
-            subfile_index = self.rotating_log._cursor[0]
-            subfile_position = self.rotating_log._cursor[1]
-            f.write(f"{subfile_index} {subfile_position}")
+        with self.log_offset_lock:
+            with open(self.log_offset_path, 'w+', encoding='utf-8') as f:
+                subfile_index = self.rotating_log._cursor[0]
+                subfile_position = self.rotating_log._cursor[1]
+                f.write(f"{subfile_index} {subfile_position}")
 
     @property
     def pid(self) -> Union[int, None]:
@@ -1123,6 +1275,10 @@ class Daemon:
         import pickle
         import traceback
         from meerschaum.utils.misc import generate_password
+
+        if not self.pickle:
+            return True, "Success"
+
         backup_path = self.pickle_path.parent / (generate_password(7) + '.pkl')
         try:
             self.path.mkdir(parents=True, exist_ok=True)

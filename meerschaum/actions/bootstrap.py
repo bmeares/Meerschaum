@@ -10,7 +10,7 @@ Functions for bootstrapping elements
 from __future__ import annotations
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Union, Any, Sequence, SuccessTuple, Optional, Tuple, List
+from meerschaum.utils.typing import Union, Any, SuccessTuple, Optional, Tuple, List
 
 
 def bootstrap(
@@ -249,7 +249,7 @@ def _bootstrap_connectors(
     from meerschaum.config._edit import write_config
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.formatting._shell import clear_screen
-    from meerschaum.connectors import attributes as connector_attributes
+    from meerschaum.config._default import CONNECTOR_ATTRIBUTES
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.misc import is_int
 
@@ -314,7 +314,7 @@ def _bootstrap_connectors(
     cls_required_attrs = getattr(cls, 'REQUIRED_ATTRIBUTES', [])
     cls_optional_attrs = getattr(cls, 'OPTIONAL_ATTRIBUTES', [])
     cls_default_attrs = getattr(cls, 'DEFAULT_ATTRIBUTES', {})
-    type_attributes = connector_attributes.get(
+    type_attributes = CONNECTOR_ATTRIBUTES.get(
         _type,
         {
             'required': cls_required_attrs,
@@ -330,16 +330,16 @@ def _bootstrap_connectors(
                 f"Flavor for connector '{_type}:{_label}':",
                 sorted(list(type_attributes['flavors'])),
                 default = (
-                    'timescaledb'
-                    if 'timescaledb' in type_attributes['flavors']
+                    'postgresql'
+                    if 'postgresql' in type_attributes['flavors']
                     else None
                 )
             )
         except KeyboardInterrupt:
             return abort_tuple
         new_attributes['flavor'] = flavor
-        required = sorted(list(connector_attributes[_type]['flavors'][flavor]['requirements']))
-        optional = sorted(list(connector_attributes[_type]['flavors'][flavor].get('optional', {})))
+        required = sorted(list(CONNECTOR_ATTRIBUTES[_type]['flavors'][flavor]['requirements']))
+        optional = sorted(list(CONNECTOR_ATTRIBUTES[_type]['flavors'][flavor].get('optional', {})))
         default = type_attributes['flavors'][flavor].get('defaults', {})
     else:
         required = sorted(list(type_attributes.get('required', {})))
@@ -429,7 +429,7 @@ def _bootstrap_plugins(
         action = [prompt("Enter the name of your new plugin:")]
 
     for plugin_name in action:
-        bootstrap_success, bootstrap_msg = bootstrap_plugin(plugin_name)
+        bootstrap_success, bootstrap_msg = bootstrap_plugin(plugin_name, debug=debug)
         if not bootstrap_success:
             return bootstrap_success, bootstrap_msg
 

@@ -18,7 +18,7 @@ import platform
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Union, Optional, Any, Callable, Dict, Tuple
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 _child_processes = []
 def signal_handler(sig, frame):
@@ -178,7 +178,7 @@ def run_process(
             # make us tty's foreground again
             try:
                 os.tcsetpgrp(sys.stdin.fileno(), old_pgrp)
-            except Exception as e:
+            except Exception:
                 pass
             # now restore the handler
             signal.signal(signal.SIGTTOU, hdlr)

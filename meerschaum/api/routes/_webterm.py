@@ -8,7 +8,7 @@ Routes to the Webterm proxy.
 
 import asyncio
 from meerschaum.utils.typing import Optional
-from meerschaum.api import app, endpoints
+from meerschaum.api import app, endpoints, webterm_port
 from meerschaum.utils.packages import attempt_import
 from meerschaum.api.dash.sessions import is_session_authenticated, get_username_from_session
 fastapi, fastapi_responses = attempt_import('fastapi', 'fastapi.responses')
@@ -71,7 +71,7 @@ async def get_webterm(
 
     username = get_username_from_session(session_id)
     async with httpx.AsyncClient() as client:
-        webterm_url = f"http://localhost:8765/webterm/{username or session_id}"
+        webterm_url = f"http://localhost:{webterm_port}/webterm/{username or session_id}"
         response = await client.get(webterm_url)
         text = response.text
         if request.url.scheme == 'https':
@@ -100,7 +100,7 @@ async def webterm_websocket(websocket: WebSocket, session_id: str):
 
     username = get_username_from_session(session_id)
 
-    ws_url = f"ws://localhost:8765/websocket/{username or session_id}"
+    ws_url = f"ws://localhost:{webterm_port}/websocket/{username or session_id}"
     async with websockets.connect(ws_url) as ws:
         async def forward_messages():
             try:

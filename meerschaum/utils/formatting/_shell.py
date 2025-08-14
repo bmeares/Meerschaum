@@ -6,20 +6,19 @@
 Formatting functions for the interactive shell
 """
 
-from re import sub
 from meerschaum.utils.threading import Lock
 _locks = {'_tried_clear_command': Lock()}
 
+from meerschaum._internal.static import STATIC_CONFIG
+FLUSH_TOKEN: str = STATIC_CONFIG['jobs']['flush_token']
 
-def make_header(
-    message: str,
-    ruler: str = '─',
-) -> str:
+
+def make_header(message: str, ruler: str = '─', left_pad: int = 2) -> str:
     """Format a message string with a ruler.
     Length of the ruler is the length of the longest word.
     
     Example:
-        'My\nheader' -> 'My\nheader\n──────'
+        'My\nheader' -> '  My\n  header\n  ──────'
     """
 
     from meerschaum.utils.formatting import ANSI, UNICODE, colored
@@ -32,10 +31,15 @@ def make_header(
         if length > max_length:
             max_length = length
 
-    s = message + "\n"
-    for i in range(max_length):
-        s += ruler
-    return s
+    left_buffer = left_pad * ' '
+
+    return (
+        left_buffer
+        + message.replace('\n', '\n' + left_buffer)
+        + "\n"
+        + left_buffer
+        + (ruler * max_length)
+    )
 
 
 _tried_clear_command = None
@@ -49,28 +53,40 @@ def clear_screen(debug: bool = False) -> bool:
     from meerschaum.utils.debug import dprint
     from meerschaum.config import get_config
     from meerschaum.utils.daemon import running_in_daemon
+    from meerschaum._internal.static import STATIC_CONFIG
     global _tried_clear_command
-
-    if running_in_daemon():
-        return True
+    clear_string = '\033[2J'
+    reset_string = '\033[0m'
+    clear_token = STATIC_CONFIG['jobs']['clear_token']
 
     if not get_config('shell', 'clear_screen'):
         return True
 
-    print("", end="", flush=True)
+    if running_in_daemon():
+        if debug:
+            dprint("Skip printing clear token.")
+            flush_stdout()
+            return True
+
+        print(clear_token, flush=True)
+        return True
+
+
+    flush_stdout()
     if debug:
         dprint("Skipping screen clear.")
         return True
+
     if ANSI and platform.system() != 'Windows':
         if get_console() is not None:
             get_console().clear()
-            print("", end="", flush=True)
+            flush_stdout()
             return True
-        clear_string = '\033[2J'
-        reset_string = '\033[0m'
+
         print(clear_string + reset_string, end="")
-        print("", end="", flush=True)
+        flush_stdout()
         return True
+
     ### ANSI support is disabled, try system level instead
     if _tried_clear_command is not None:
         return os.system(_tried_clear_command) == 0
@@ -79,12 +95,22 @@ def clear_screen(debug: bool = False) -> bool:
     command = 'clear' if platform.system() != 'Windows' else 'cls'
     try:
         rc = os.system(command)
-    except Exception as e:
+    except Exception:
         pass
     if rc == 0:
         with _locks['_tried_clear_command']:
             _tried_clear_command = command
     return rc == 0
+
+
+def flush_stdout():
+    """
+    Flush stdout, including printing the flush token for daemons.
+    """
+    from meerschaum.utils.daemon import running_in_daemon
+    print('', end='', flush=True)
+    if running_in_daemon():
+        print(FLUSH_TOKEN, end='', flush=True)
 
 
 def flush_with_newlines(debug: bool = False) -> None:

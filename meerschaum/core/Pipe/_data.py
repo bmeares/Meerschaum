@@ -29,6 +29,7 @@ def get_data(
     as_iterator: bool = False,
     as_chunks: bool = False,
     as_dask: bool = False,
+    add_missing_columns: bool = False,
     chunk_interval: Union[timedelta, int, None] = None,
     order: Optional[str] = 'asc',
     limit: Optional[int] = None,
@@ -72,6 +73,9 @@ def get_data(
         If `True`, return a `dask.DataFrame`
         (which may be loaded into a Pandas DataFrame with `df.compute()`).
 
+    add_missing_columns: bool, default False
+        If `True`, add any missing columns from `Pipe.dtypes` to the dataframe.
+
     chunk_interval: Union[timedelta, int, None], default None
         If `as_iterator`, then return chunks with `begin` and `end` separated by this interval.
         This may be set under `pipe.parameters['chunk_minutes']`.
@@ -103,13 +107,13 @@ def get_data(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import iterate_chunks, items_str
-    from meerschaum.utils.dtypes import to_pandas_dtype, coerce_timezone
+    from meerschaum.utils.dtypes import to_pandas_dtype
     from meerschaum.utils.dataframe import add_missing_cols_to_df, df_is_chunk_generator
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.warnings import dprint
     dd = attempt_import('dask.dataframe') if as_dask else None
     dask = attempt_import('dask') if as_dask else None
-    dateutil_parser = attempt_import('dateutil.parser')
+    _ = attempt_import('partd', lazy=False) if as_dask else None
 
     if select_columns == '*':
         select_columns = None
@@ -188,47 +192,21 @@ def get_data(
                 order=order,
                 limit=limit,
                 fresh=fresh,
+                add_missing_columns=True,
                 debug=debug,
             )
             for (chunk_begin, chunk_end) in bounds
         ]
         dask_meta = {
             col: to_pandas_dtype(typ)
-            for col, typ in self.dtypes.items()
+            for col, typ in self.get_dtypes(refresh=True, infer=True, debug=debug).items()
         }
+        if debug:
+            dprint(f"Dask meta:\n{dask_meta}")
         return _sort_df(dd.from_delayed(dask_chunks, meta=dask_meta))
 
     if not self.exists(debug=debug):
         return None
-
-    if self.cache_pipe is not None:
-        if not fresh:
-            _sync_cache_tuple = self.cache_pipe.sync(
-                begin=begin,
-                end=end,
-                params=params,
-                debug=debug,
-                **kw
-            )
-            if not _sync_cache_tuple[0]:
-                warn(f"Failed to sync cache for {self}:\n" + _sync_cache_tuple[1])
-                fresh = True
-            else: ### Successfully synced cache.
-                return self.enforce_dtypes(
-                    self.cache_pipe.get_data(
-                        select_columns=select_columns,
-                        omit_columns=omit_columns,
-                        begin=begin,
-                        end=end,
-                        params=params,
-                        order=order,
-                        limit=limit,
-                        debug=debug,
-                        fresh=True,
-                        **kw
-                    ),
-                    debug=debug,
-                )
 
     with Venv(get_connector_plugin(self.instance_connector)):
         df = self.instance_connector.get_pipe_data(
@@ -249,6 +227,7 @@ def get_data(
         if not select_columns:
             select_columns = [col for col in df.columns]
 
+        pipe_dtypes = self.get_dtypes(refresh=False, debug=debug)
         cols_to_omit = [
             col
             for col in df.columns
@@ -262,7 +241,11 @@ def get_data(
             col
             for col in select_columns
             if col not in df.columns
-        ]
+        ] + ([
+            col
+            for col in pipe_dtypes
+            if col not in df.columns
+        ] if add_missing_columns else [])
         if cols_to_omit:
             warn(
                 (
@@ -278,16 +261,26 @@ def get_data(
             df = df[_cols_to_select]
 
         if cols_to_add:
-            warn(
-                (
-                    f"Specified columns {items_str(cols_to_add)} were not found on {self}. "
-                    + "Adding these to the DataFrame as null columns."
-                ),
-                stack=False,
-            )
-            df = add_missing_cols_to_df(df, {col: 'string' for col in cols_to_add})
+            if not add_missing_columns:
+                from meerschaum.utils.misc import items_str
+                warn(
+                    f"Will add columns {items_str(cols_to_add)} as nulls to dataframe.",
+                    stack=False,
+                )
 
-        enforced_df = self.enforce_dtypes(df, debug=debug)
+            df = add_missing_cols_to_df(
+                df,
+                {
+                    col: pipe_dtypes.get(col, 'string')
+                    for col in cols_to_add
+                },
+            )
+
+        enforced_df = self.enforce_dtypes(
+            df,
+            dtypes=pipe_dtypes,
+            debug=debug,
+        )
 
         if order:
             return _sort_df(enforced_df)
@@ -311,7 +304,7 @@ def _get_data_as_iterator(
     """
     Return a pipe's data as a generator.
     """
-    from meerschaum.utils.misc import round_time
+    from meerschaum.utils.dtypes import round_time
     begin, end = self.parse_date_bounds(begin, end)
     if not self.exists(debug=debug):
         return
@@ -451,27 +444,6 @@ def get_backtrack_data(
             if isinstance(backtrack_interval, timedelta)
             else backtrack_interval
         )
-
-    if self.cache_pipe is not None:
-        if not fresh:
-            _sync_cache_tuple = self.cache_pipe.sync(begin=begin, params=params, debug=debug, **kw)
-            if not _sync_cache_tuple[0]:
-                warn(f"Failed to sync cache for {self}:\n" + _sync_cache_tuple[1])
-                fresh = True
-            else: ### Successfully synced cache.
-                return self.enforce_dtypes(
-                    self.cache_pipe.get_backtrack_data(
-                        fresh=True,
-                        begin=begin,
-                        backtrack_minutes=backtrack_minutes,
-                        params=params,
-                        limit=limit,
-                        order=kw.get('order', 'desc'),
-                        debug=debug,
-                        **kw
-                    ),
-                    debug=debug,
-                )
 
     if hasattr(self.instance_connector, 'get_backtrack_data'):
         with Venv(get_connector_plugin(self.instance_connector)):
@@ -624,7 +596,7 @@ def get_chunk_interval(
     if dt_col is None:
         return timedelta(minutes=chunk_minutes)
 
-    dt_dtype = self.dtypes.get(dt_col, 'datetime64[ns, UTC]')
+    dt_dtype = self.dtypes.get(dt_col, 'datetime')
     if 'int' in dt_dtype.lower():
         return chunk_minutes
     return timedelta(minutes=chunk_minutes)
@@ -688,10 +660,25 @@ def get_chunk_bounds(
         elif are_dtypes_equal(str(type(end)), 'int'):
             end += 1
             consolidate_end_chunk = True
+
     if begin is None and end is None:
         return [(None, None)]
 
     begin, end = self.parse_date_bounds(begin, end)
+
+    if begin and end:
+        if begin >= end:
+            return (
+                [(begin, begin)]
+                if bounded
+                else [(begin, None)]
+            )
+        if end <= begin:
+            return (
+                [(end, end)]
+                if bounded
+                else [(None, begin)]
+            )
 
     ### Set the chunk interval under `pipe.parameters['verify']['chunk_minutes']`.
     chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
@@ -799,7 +786,7 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
     Given a date bound (begin, end), coerce a timezone if necessary.
     """
     from meerschaum.utils.misc import is_int
-    from meerschaum.utils.dtypes import coerce_timezone
+    from meerschaum.utils.dtypes import coerce_timezone, MRSM_PD_DTYPES
     from meerschaum.utils.warnings import warn
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
@@ -824,12 +811,53 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
                 return None
 
         dt_col = self.columns.get('datetime', None)
-        dt_typ = str(self.dtypes.get(dt_col, 'datetime64[ns, UTC]'))
+        dt_typ = str(self.dtypes.get(dt_col, 'datetime'))
         if dt_typ == 'datetime':
-            dt_typ = 'datetime64[ns, UTC]'
+            dt_typ = MRSM_PD_DTYPES['datetime']
         return coerce_timezone(dt_val, strip_utc=('utc' not in dt_typ.lower()))
 
     bounds = tuple(_parse_date_bound(dt_val) for dt_val in dt_vals)
     if len(bounds) == 1:
         return bounds[0]
     return bounds
+
+
+def get_doc(self, **kwargs) -> Union[Dict[str, Any], None]:
+    """
+    Convenience function to return a single row as a dictionary (or `None`) from `Pipe.get_data().
+    Keywords arguments are passed to `Pipe.get_data()`.
+    """
+    from meerschaum.utils.warnings import warn
+    kwargs['limit'] = 1
+    try:
+        result_df = self.get_data(**kwargs)
+        if result_df is None or len(result_df) == 0:
+            return None
+        return result_df.reset_index(drop=True).iloc[0].to_dict()
+    except Exception as e:
+        warn(f"Failed to read value from {self}:\n{e}", stack=False)
+        return None
+
+def get_value(
+    self,
+    column: str,
+    params: Optional[Dict[str, Any]] = None,
+    **kwargs: Any
+) -> Any:
+    """
+    Convenience function to return a single value (or `None`) from `Pipe.get_data()`.
+    Keywords arguments are passed to `Pipe.get_data()`.
+    """
+    from meerschaum.utils.warnings import warn
+    kwargs['select_columns'] = [column]
+    kwargs['limit'] = 1
+    try:
+        result_df = self.get_data(params=params, **kwargs)
+        if result_df is None or len(result_df) == 0:
+            return None
+        if column not in result_df.columns:
+            raise ValueError(f"Column '{column}' was not included in the result set.")
+        return result_df[column][0]
+    except Exception as e:
+        warn(f"Failed to read value from {self}:\n{e}", stack=False)
+        return None

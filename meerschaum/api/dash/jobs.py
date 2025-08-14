@@ -98,7 +98,7 @@ def build_job_card(
             html.B(
                 html.A(
                     "🔗 " + job.name,
-                    href=f"/dash/job/{job.name}",
+                    href=f"/dash/jobs/{job.name}",
                     target="_blank",
                     style={
                         'color': 'white',

@@ -14,7 +14,7 @@ from datetime import datetime
 import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Any, SuccessTuple, List, Union, Callable, Optional
 from meerschaum.jobs import Job
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn, dprint
 
 JOBS_ENDPOINT: str = STATIC_CONFIG['api']['endpoints']['jobs']
@@ -378,5 +378,16 @@ def get_job_is_blocking_on_stdin(self, name: str, debug: bool = False) -> bool:
     response = self.get(JOBS_ENDPOINT + f'/{name}/is_blocking_on_stdin', debug=debug)
     if not response:
         return False
+
+    return response.json()
+
+
+def get_job_prompt_kwargs(self, name: str, debug: bool = False) -> Dict[str, Any]:
+    """
+    Return the kwargs to the blocking `prompt()`, if available.
+    """
+    response = self.get(JOBS_ENDPOINT + f'/{name}/prompt_kwargs', debug=debug)
+    if not response:
+        return {}
 
     return response.json()

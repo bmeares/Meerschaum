@@ -10,11 +10,10 @@ from __future__ import annotations
 from typing import Any
 
 import meerschaum as mrsm
-from meerschaum.utils.warnings import warn
 tornado_web = mrsm.attempt_import('tornado.web', lazy=False)
 terminado = mrsm.attempt_import('terminado', lazy=False)
 
-tmux_suffix = mrsm.get_config('system', 'webterm', 'tmux', 'session_suffix')
+tmux_suffix = mrsm.get_config('api', 'webterm', 'tmux', 'session_suffix')
 
 
 class TermPageHandler(tornado_web.RequestHandler):

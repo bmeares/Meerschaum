@@ -14,18 +14,19 @@ For ease of use, you can also import from the root `meerschaum` module:
 from __future__ import annotations
 
 import meerschaum as mrsm
-from meerschaum.utils.typing import Any, Union, List, Dict
+from meerschaum.utils.typing import Any, Union, List, Dict, Optional
 from meerschaum.utils.threading import RLock
 from meerschaum.utils.warnings import warn
 
 from meerschaum.connectors._Connector import Connector, InvalidAttributesError
+from meerschaum.connectors.instance._InstanceConnector import InstanceConnector
 from meerschaum.connectors.sql._SQLConnector import SQLConnector
 from meerschaum.connectors.api._APIConnector import APIConnector
-from meerschaum.connectors.sql._create_engine import flavor_configs as sql_flavor_configs
 
 __all__ = (
     "make_connector",
     "Connector",
+    "InstanceConnector",
     "SQLConnector",
     "APIConnector",
     "get_connector",
@@ -50,30 +51,16 @@ _locks: Dict[str, RLock] = {
     'connectors'               : RLock(),
     'types'                    : RLock(),
     'custom_types'             : RLock(),
+    'plugins_types'            : RLock(),
     '_loaded_plugin_connectors': RLock(),
     'instance_types'           : RLock(),
 }
-attributes: Dict[str, Dict[str, Any]] = {
-    'api': {
-        'required': [
-            'host',
-            'username',
-            'password',
-        ],
-        'optional': [
-            'port',
-        ],
-        'default': {
-            'protocol': 'http',
-        },
-    },
-    'sql': {
-        'flavors': sql_flavor_configs,
-    },
-}
+
 ### Fill this with objects only when connectors are first referenced.
 types: Dict[str, Any] = {}
 custom_types: set = set()
+plugins_types: Dict[str, List[str]] = {}
+_known_custom_types: set = set()
 _loaded_plugin_connectors: bool = False
 
 
@@ -88,7 +75,6 @@ def get_connector(
     Return existing connector or create new connection and store for reuse.
     
     You can create new connectors if enough parameters are provided for the given type and flavor.
-    
 
     Parameters
     ----------
@@ -130,7 +116,7 @@ def get_connector(
     """
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.config import get_config
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
     global _loaded_plugin_connectors
     if isinstance(type, str) and not label and ':' in type:
@@ -313,16 +299,23 @@ def make_connector(cls, _is_executor: bool = False):
     >>> 
     """
     import re
+    from meerschaum.plugins import _get_parent_plugin
     suffix_regex = (
         r'connector$'
         if not _is_executor
         else r'executor$'
     )
+    plugin_name = _get_parent_plugin(2)
     typ = re.sub(suffix_regex, '', cls.__name__.lower())
     with _locks['types']:
         types[typ] = cls
     with _locks['custom_types']:
         custom_types.add(typ)
+    if plugin_name:
+        with _locks['plugins_types']:
+            if plugin_name not in plugins_types:
+                plugins_types[plugin_name] = []
+            plugins_types[plugin_name].append(typ)
     with _locks['connectors']:
         if typ not in connectors:
             connectors[typ] = {}
@@ -351,6 +344,30 @@ def load_plugin_connectors():
     if not to_import:
         return
     import_plugins(*to_import)
+
+
+def unload_plugin_connectors(
+    plugin_names: Optional[List[str]] = None,
+    debug: bool = False,
+) -> None:
+    """
+    Unload custom connectors added by plugins.
+    """
+    from meerschaum.plugins import get_plugins_names
+    global custom_types, _known_custom_types, types, plugins_types, connectors
+
+    plugin_names = plugin_names or get_plugins_names()
+
+    for plugin_name in plugin_names:
+        plugin_types = plugins_types.get(plugin_name, [])
+        for typ in plugin_types:
+            _ = types.pop(typ, None)
+            _ = connectors.pop(typ, None)
+            if typ in instance_types:
+                instance_types.remove(typ)
+
+    custom_types.clear()
+    custom_types.update(_known_custom_types)
 
 
 def get_connector_plugin(
@@ -389,3 +406,5 @@ def _load_builtin_custom_connectors():
     """
     import meerschaum.jobs.systemd
     import meerschaum.connectors.valkey
+    _known_custom_types.add('valkey')
+    _known_custom_types.add('systemd')
