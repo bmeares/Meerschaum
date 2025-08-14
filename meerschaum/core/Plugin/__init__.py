@@ -6,4 +6,4 @@
 Import the Plugin class.
 """
 
-from meerschaum.plugins import Plugin
+from meerschaum.core.Plugin._Plugin import Plugin

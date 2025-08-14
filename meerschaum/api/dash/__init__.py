@@ -12,14 +12,11 @@ from meerschaum.utils.packages import (
     attempt_import,
     import_dcc,
     import_html,
-    _monkey_patch_get_distribution,
 )
 flask_compress = attempt_import('flask_compress', lazy=False)
-_monkey_patch_get_distribution('flask-compress', flask_compress.__version__)
 dash = attempt_import('dash', lazy=False)
 
 from meerschaum.utils.typing import List, Optional
-from meerschaum.config.static import _static_config
 from meerschaum.api import (
     app as fastapi_app,
     debug,

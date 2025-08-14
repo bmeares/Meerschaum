@@ -7,7 +7,6 @@ Import custom callbacks created by plugins.
 """
 
 import traceback
-from typing import Any, Dict
 
 from meerschaum.api.dash import dash_app
 from meerschaum.plugins import _dash_plugins, _plugin_endpoints_to_pages
@@ -36,9 +35,9 @@ def add_plugin_pages(debug: bool = False):
     """
     Allow users to add pages via the `@web_page` decorator.
     """
-    for plugin_name, pages_dicts in _plugin_endpoints_to_pages.items():
+    for page_group, pages_dicts in _plugin_endpoints_to_pages.items():
         if debug:
-            dprint(f"Adding pages from plugin '{plugin_name}'...")
+            dprint(f"Adding pages for group '{page_group}'...")
         for _endpoint, _page_dict in pages_dicts.items():
             page_layout = _page_dict['function']()
             if not _page_dict['skip_navbar']:
@@ -47,6 +46,8 @@ def add_plugin_pages(debug: bool = False):
                 else:
                     page_layout = [pages_navbar, page_layout]
             _pages[_page_dict['page_key']] = _endpoint
+            if not _endpoint.lstrip('/').startswith('dash'):
+                _endpoint = '/dash/' + _endpoint.lstrip('/')
             _paths[_endpoint] = page_layout
             if _page_dict['login_required']:
                 _required_login.add(_endpoint)

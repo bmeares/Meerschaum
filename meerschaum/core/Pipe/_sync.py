@@ -13,7 +13,7 @@ import time
 import threading
 import multiprocessing
 import functools
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import meerschaum as mrsm
@@ -28,6 +28,7 @@ from meerschaum.utils.typing import (
     List,
 )
 from meerschaum.utils.warnings import warn, error
+from meerschaum._internal.static import STATIC_CONFIG
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
@@ -42,6 +43,7 @@ def sync(
         pd.DataFrame,
         Dict[str, List[Any]],
         List[Dict[str, Any]],
+        str,
         InferFetch
     ] = InferFetch,
     begin: Union[datetime, int, str, None] = '',
@@ -71,6 +73,7 @@ def sync(
     ----------
     df: Union[None, pd.DataFrame, Dict[str, List[Any]]], default None
         An optional DataFrame to sync into the pipe. Defaults to `None`.
+        If `df` is a string, it will be parsed via `meerschaum.utils.dataframe.parse_simple_lines()`.
 
     begin: Union[datetime, int, str, None], default ''
         Optionally specify the earliest datetime to search for data.
@@ -134,6 +137,7 @@ def sync(
     from meerschaum.utils.misc import df_is_chunk_generator, filter_keywords, filter_arguments
     from meerschaum.utils.pool import get_pool
     from meerschaum.config import get_config
+    from meerschaum.utils.dtypes import are_dtypes_equal, get_current_timestamp
 
     if (callback is not None or error_callback is not None) and blocking:
         warn("Callback functions are only executed when blocking = False. Ignoring...")
@@ -161,8 +165,8 @@ def sync(
         'safe_copy': True,
     })
 
-    ### NOTE: Invalidate `_exists` cache before and after syncing.
-    self._exists = None
+    self._invalidate_cache(debug=debug)
+    self._cache_value('sync_ts', get_current_timestamp('ms'), debug=debug)
 
     def _sync(
         p: mrsm.Pipe,
@@ -170,11 +174,12 @@ def sync(
             'pd.DataFrame',
             Dict[str, List[Any]],
             List[Dict[str, Any]],
+            str,
             InferFetch
         ] = InferFetch,
     ) -> SuccessTuple:
         if df is None:
-            p._exists = None
+            p._invalidate_cache(debug=debug)
             return (
                 False,
                 f"You passed `None` instead of data into `sync()` for {p}.\n"
@@ -186,8 +191,12 @@ def sync(
             register_success, register_msg = p.register(debug=debug)
             if not register_success:
                 if 'already' not in register_msg:
-                    p._exists = None
+                    p._invalidate_cache(debug=debug)
                     return register_success, register_msg
+
+        if isinstance(df, str):
+            from meerschaum.utils.dataframe import parse_simple_lines
+            df = parse_simple_lines(df)
 
         ### If connector is a plugin with a `sync()` method, return that instead.
         ### If the plugin does not have a `sync()` method but does have a `fetch()` method,
@@ -203,13 +212,13 @@ def sync(
                     msg = f"{p} does not have a valid connector."
                     if p.connector_keys.startswith('plugin:'):
                         msg += f"\n    Perhaps {p.connector_keys} has a syntax error?"
-                    p._exists = None
+                    p._invalidate_cache(debug=debug)
                     return False, msg
             except Exception:
-                p._exists = None
+                p._invalidate_cache(debug=debug)
                 return False, f"Unable to create the connector for {p}."
 
-            ### Sync in place if this is a SQL pipe.
+            ### Sync in place if possible.
             if (
                 str(self.connector) == str(self.instance_connector)
                 and 
@@ -220,7 +229,7 @@ def sync(
                 get_config('system', 'experimental', 'inplace_sync')
             ):
                 with Venv(get_connector_plugin(self.instance_connector)):
-                    p._exists = None
+                    p._invalidate_cache(debug=debug)
                     _args, _kwargs = filter_arguments(
                         p.instance_connector.sync_pipe_inplace,
                         p,
@@ -243,7 +252,7 @@ def sync(
                             **kw
                         )
                         return_tuple = p.connector.sync(*_args, **_kwargs)
-                    p._exists = None
+                    p._invalidate_cache(debug=debug)
                     if not isinstance(return_tuple, tuple):
                         return_tuple = (
                             False,
@@ -256,7 +265,7 @@ def sync(
                 msg = f"Failed to sync {p} with exception: '" + str(e) + "'"
                 if debug:
                     error(msg, silent=False)
-                p._exists = None
+                p._invalidate_cache(debug=debug)
                 return False, msg
 
             ### Fetch the dataframe from the connector's `fetch()` method.
@@ -281,7 +290,7 @@ def sync(
                 df = None
 
             if df is None:
-                p._exists = None
+                p._invalidate_cache(debug=debug)
                 return False, f"No data were fetched for {p}."
 
             if isinstance(df, list):
@@ -295,7 +304,7 @@ def sync(
                     return success, message
 
             if df is True:
-                p._exists = None
+                p._invalidate_cache(debug=debug)
                 return True, f"{p} is being synced in parallel."
 
         ### CHECKPOINT: Retrieved the DataFrame.
@@ -339,7 +348,7 @@ def sync(
                             + f"(attempt {_chunk_attempts} / {_max_chunk_attempts}).\n"
                             + f"Sleeping for {_sleep_seconds} second"
                             + ('s' if _sleep_seconds != 1 else '')
-                            + ":\n{_chunk_msg}"
+                            + f":\n{_chunk_msg}"
                         ),
                         stack=False,
                     )
@@ -392,19 +401,45 @@ def sync(
             return success, msg
 
         ### Cast to a dataframe and ensure datatypes are what we expect.
-        df = self.enforce_dtypes(
+        dtypes = p.get_dtypes(debug=debug)
+        df = p.enforce_dtypes(
             df,
             chunksize=chunksize,
             enforce=enforce_dtypes,
+            dtypes=dtypes,
             debug=debug,
         )
+        if p.autotime:
+            dt_col = p.columns.get('datetime', None)
+            ts_col = dt_col or mrsm.get_config(
+                'pipes', 'autotime', 'column_name_if_datetime_missing'
+            )
+            ts_typ = dtypes.get(ts_col, 'datetime') if ts_col else 'datetime'
+            if ts_col and hasattr(df, 'columns') and ts_col not in df.columns:
+                precision = p.get_precision(debug=debug)
+                now = get_current_timestamp(
+                    precision_unit=precision.get(
+                        'unit',
+                        STATIC_CONFIG['dtypes']['datetime']['default_precision_unit']
+                    ),
+                    precision_interval=precision.get('interval', 1),
+                    round_to=(precision.get('round_to', 'down')),
+                    as_int=(are_dtypes_equal(ts_typ, 'int')),
+                )
+                if debug:
+                    dprint(f"Adding current timestamp to dataframe synced to {p}: {now}")
 
-        ### Capture `numeric`, `uuid`, `json`, and `bytes` columns.
-        self._persist_new_json_columns(df, debug=debug)
-        self._persist_new_numeric_columns(df, debug=debug)
-        self._persist_new_uuid_columns(df, debug=debug)
-        self._persist_new_bytes_columns(df, debug=debug)
-        self._persist_new_geometry_columns(df, debug=debug)
+                df[ts_col] = now
+                kw['check_existing'] = dt_col is not None
+
+        ### Capture special columns.
+        capture_success, capture_msg = self._persist_new_special_columns(
+            df,
+            dtypes=dtypes,
+            debug=debug,
+        )
+        if not capture_success:
+            warn(f"Failed to capture new special columns for {self}:\n{capture_msg}")
 
         if debug:
             dprint(
@@ -442,20 +477,12 @@ def sync(
                         ("s" if retries != 1 else "") + "!"
                 )
 
-        ### CHECKPOINT: Finished syncing. Handle caching.
+        ### CHECKPOINT: Finished syncing.
         _checkpoint(**kw)
-        if self.cache_pipe is not None:
-            if debug:
-                dprint("Caching retrieved dataframe.", **kw)
-                _sync_cache_tuple = self.cache_pipe.sync(df, debug=debug, **kw)
-                if not _sync_cache_tuple[0]:
-                    warn(f"Failed to sync local cache for {self}.")
-
-        self._exists = None
+        p._invalidate_cache(debug=debug)
         return return_tuple
 
     if blocking:
-        self._exists = None
         return _sync(self, df=df)
 
     from meerschaum.utils.threading import Thread
@@ -480,10 +507,10 @@ def sync(
         )
         thread.start()
     except Exception as e:
-        self._exists = None
+        self._invalidate_cache(debug=debug)
         return False, str(e)
 
-    self._exists = None
+    self._invalidate_cache(debug=debug)
     return True, f"Spawned asyncronous sync for {self}."
 
 
@@ -529,7 +556,8 @@ def get_sync_time(
     """
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.utils.misc import round_time, filter_keywords
+    from meerschaum.utils.misc import filter_keywords
+    from meerschaum.utils.dtypes import round_time
     from meerschaum.utils.warnings import warn
 
     if not self.columns.get('datetime', None):
@@ -585,20 +613,19 @@ def exists(
     A `bool` corresponding to whether a pipe's underlying table exists.
 
     """
-    import time
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
-    from meerschaum.config import STATIC_CONFIG
     from meerschaum.utils.debug import dprint
-    now = time.perf_counter()
-    exists_timeout_seconds = STATIC_CONFIG['pipes']['exists_timeout_seconds']
+    from meerschaum.utils.dtypes import get_current_timestamp
+    now = get_current_timestamp('ms', as_int=True) / 1000
+    cache_seconds = mrsm.get_config('pipes', 'sync', 'exists_cache_seconds')
 
-    _exists = self.__dict__.get('_exists', None)
+    _exists = self._get_cached_value('_exists', debug=debug)
     if _exists:
-        exists_timestamp = self.__dict__.get('_exists_timestamp', None)
+        exists_timestamp = self._get_cached_value('_exists_timestamp', debug=debug)
         if exists_timestamp is not None:
             delta = now - exists_timestamp
-            if delta < exists_timeout_seconds:
+            if delta < cache_seconds:
                 if debug:
                     dprint(f"Returning cached `exists` for {self} ({round(delta, 2)} seconds old).")
                 return _exists
@@ -610,8 +637,8 @@ def exists(
             else False
         )
 
-    self.__dict__['_exists'] = _exists
-    self.__dict__['_exists_timestamp'] = now
+    self._cache_value('_exists', _exists, debug=debug)
+    self._cache_value('_exists_timestamp', now, debug=debug)
     return _exists
 
 
@@ -663,7 +690,6 @@ def filter_existing(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import, import_pandas
-    from meerschaum.utils.misc import round_time
     from meerschaum.utils.dataframe import (
         filter_unseen_df,
         add_missing_cols_to_df,
@@ -675,6 +701,7 @@ def filter_existing(
         to_datetime,
         are_dtypes_equal,
         value_is_null,
+        round_time,
     )
     from meerschaum.config import get_config
     pd = import_pandas()
@@ -690,9 +717,13 @@ def filter_existing(
         merge = pd.merge
         NA = pd.NA
 
-    primary_key = self.columns.get('primary', None)
-    autoincrement = self.parameters.get('autoincrement', False)
-    pipe_columns = self.columns.copy()
+    parameters = self.parameters
+    pipe_columns = parameters.get('columns', {})
+    primary_key = pipe_columns.get('primary', None)
+    dt_col = pipe_columns.get('datetime', None)
+    dt_type = parameters.get('dtypes', {}).get(dt_col, 'datetime') if dt_col else None
+    autoincrement = parameters.get('autoincrement', False)
+    autotime = parameters.get('autotime', False)
 
     if primary_key and autoincrement and df is not None and primary_key in df.columns:
         if safe_copy:
@@ -702,10 +733,18 @@ def filter_existing(
             del df[primary_key]
             _ = self.columns.pop(primary_key, None)
 
+    if dt_col and autotime and df is not None and dt_col in df.columns:
+        if safe_copy:
+            df = df.copy()
+            safe_copy = False
+        if df[dt_col].isnull().all():
+            del df[dt_col]
+            _ = self.columns.pop(dt_col, None)
+
     def get_empty_df():
         empty_df = pd.DataFrame([])
         dtypes = dict(df.dtypes) if df is not None else {}
-        dtypes.update(self.dtypes)
+        dtypes.update(self.dtypes) if self.enforce else {}
         pd_dtypes = {
             col: to_pandas_dtype(str(typ))
             for col, typ in dtypes.items()
@@ -721,11 +760,13 @@ def filter_existing(
 
     ### begin is the oldest data in the new dataframe
     begin, end = None, None
-    dt_col = pipe_columns.get('datetime', None)
-    primary_key = pipe_columns.get('primary', None)
-    dt_type = self.dtypes.get(dt_col, 'datetime64[ns, UTC]') if dt_col else None
 
     if autoincrement and primary_key == dt_col and dt_col not in df.columns:
+        if enforce_dtypes:
+            df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
+        return df, get_empty_df(), df
+
+    if autotime and dt_col and dt_col not in df.columns:
         if enforce_dtypes:
             df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
         return df, get_empty_df(), df
@@ -846,7 +887,8 @@ def filter_existing(
             and col in backtrack_df.columns
         )
     ] if not primary_key else [primary_key]
-    self_dtypes = self.dtypes
+
+    self_dtypes = self.get_dtypes(debug=debug) if self.enforce else {}
     on_cols_dtypes = {
         col: to_pandas_dtype(typ)
         for col, typ in self_dtypes.items()
@@ -999,160 +1041,37 @@ def get_num_workers(self, workers: Optional[int] = None) -> int:
     )
 
 
-def _persist_new_numeric_columns(self, df, debug: bool = False) -> SuccessTuple:
+def _persist_new_special_columns(
+    self,
+    df: 'pd.DataFrame',
+    dtypes: Optional[Dict[str, str]] = None,
+    debug: bool = False,
+) -> mrsm.SuccessTuple:
     """
-    Check for new numeric columns and update the parameters.
+    Check for new special columns and update the parameters accordingly.
     """
-    from meerschaum.utils.dataframe import get_numeric_cols
-    numeric_cols = get_numeric_cols(df)
-    existing_numeric_cols = [col for col, typ in self.dtypes.items() if typ.startswith('numeric')]
-    new_numeric_cols = [col for col in numeric_cols if col not in existing_numeric_cols]
-    if not new_numeric_cols:
+    from meerschaum.utils.dataframe import get_special_cols
+    from meerschaum.utils.dtypes import is_dtype_special
+    from meerschaum.utils.warnings import dprint
+
+    special_cols = get_special_cols(df)
+    dtypes = dtypes or self.get_dtypes(debug=debug)
+    existing_special_cols = {
+        col: typ
+        for col, typ in dtypes.items()
+        if is_dtype_special(typ)
+    }
+    new_special_cols = {
+        col: typ
+        for col, typ in special_cols.items()
+        if col not in existing_special_cols
+    }
+    self._cache_value('new_special_cols', new_special_cols, memory_only=True, debug=debug)
+    if not new_special_cols:
         return True, "Success"
 
-    self._attributes_sync_time = None
-    dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'numeric' for col in new_numeric_cols})
-    self.parameters['dtypes'] = dtypes
-    if not self.temporary:
-        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update NUMERIC dtypes for {self}:\n{edit_msg}")
+    if debug:
+        dprint(f"New special columns:\n{new_special_cols}")
 
-        return edit_success, edit_msg
-
-    return True, "Success"
-
-
-def _persist_new_uuid_columns(self, df, debug: bool = False) -> SuccessTuple:
-    """
-    Check for new numeric columns and update the parameters.
-    """
-    from meerschaum.utils.dataframe import get_uuid_cols
-    uuid_cols = get_uuid_cols(df)
-    existing_uuid_cols = [col for col, typ in self.dtypes.items() if typ == 'uuid']
-    new_uuid_cols = [col for col in uuid_cols if col not in existing_uuid_cols]
-    if not new_uuid_cols:
-        return True, "Success"
-
-    self._attributes_sync_time = None
-    dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'uuid' for col in new_uuid_cols})
-    self.parameters['dtypes'] = dtypes
-    if not self.temporary:
-        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update UUID dtypes for {self}:\n{edit_msg}")
-
-        return edit_success, edit_msg
-
-    return True, "Success"
-
-
-def _persist_new_json_columns(self, df, debug: bool = False) -> SuccessTuple:
-    """
-    Check for new JSON columns and update the parameters.
-    """
-    from meerschaum.utils.dataframe import get_json_cols
-    json_cols = get_json_cols(df)
-    existing_json_cols = [col for col, typ in self.dtypes.items() if typ == 'json']
-    new_json_cols = [col for col in json_cols if col not in existing_json_cols]
-    if not new_json_cols:
-        return True, "Success"
-
-    self._attributes_sync_time = None
-    dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'json' for col in new_json_cols})
-    self.parameters['dtypes'] = dtypes
-
-    if not self.temporary:
-        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update JSON dtypes for {self}:\n{edit_msg}")
-
-        return edit_success, edit_msg
-
-    return True, "Success"
-
-
-def _persist_new_bytes_columns(self, df, debug: bool = False) -> SuccessTuple:
-    """
-    Check for new `bytes` columns and update the parameters.
-    """
-    from meerschaum.utils.dataframe import get_bytes_cols
-    bytes_cols = get_bytes_cols(df)
-    existing_bytes_cols = [col for col, typ in self.dtypes.items() if typ == 'bytes']
-    new_bytes_cols = [col for col in bytes_cols if col not in existing_bytes_cols]
-    if not new_bytes_cols:
-        return True, "Success"
-
-    self._attributes_sync_time = None
-    dtypes = self.parameters.get('dtypes', {})
-    dtypes.update({col: 'bytes' for col in new_bytes_cols})
-    self.parameters['dtypes'] = dtypes
-
-    if not self.temporary:
-        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update bytes dtypes for {self}:\n{edit_msg}")
-
-        return edit_success, edit_msg
-
-    return True, "Success"
-
-
-def _persist_new_geometry_columns(self, df, debug: bool = False) -> SuccessTuple:
-    """
-    Check for new `geometry` columns and update the parameters.
-    """
-    from meerschaum.utils.dataframe import get_geometry_cols
-    geometry_cols_types_srids = get_geometry_cols(df, with_types_srids=True)
-    existing_geometry_cols = [
-        col
-        for col, typ in self.dtypes.items()
-        if typ.startswith('geometry') or typ.startswith('geography')
-    ]
-    new_geometry_cols = [
-        col
-        for col in geometry_cols_types_srids
-        if col not in existing_geometry_cols
-    ]
-    if not new_geometry_cols:
-        return True, "Success"
-
-    self._attributes_sync_time = None
-    dtypes = self.parameters.get('dtypes', {})
-
-    new_cols_types = {}
-    for col, (geometry_type, srid) in geometry_cols_types_srids.items():
-        if col not in new_geometry_cols:
-            continue
-
-        new_dtype = "geometry"
-        modifier = ""
-        if not srid and geometry_type.lower() == 'geometry':
-            new_cols_types[col] = new_dtype
-            continue
-
-        modifier = "["
-        if geometry_type.lower() != 'geometry':
-            modifier += f"{geometry_type}"
-
-        if srid:
-            if modifier != '[':
-                modifier += ", "
-            modifier += f"{srid}"
-        modifier += "]"
-        new_cols_types[col] = f"{new_dtype}{modifier}"
-
-    dtypes.update(new_cols_types)
-    self.parameters['dtypes'] = dtypes
-
-    if not self.temporary:
-        edit_success, edit_msg = self.edit(interactive=False, debug=debug)
-        if not edit_success:
-            warn(f"Unable to update bytes dtypes for {self}:\n{edit_msg}")
-
-        return edit_success, edit_msg
-
-    return True, "Success"
+    self._clear_cache_key('_attributes_sync_time', debug=debug)
+    return self.update_parameters({'dtypes': new_special_cols}, debug=debug)

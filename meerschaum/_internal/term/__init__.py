@@ -8,6 +8,9 @@ Build the web console virtual terminal using Tornado and xterm.js.
 
 from __future__ import annotations
 
+import os
+import json
+import pathlib
 from typing import Optional, Tuple
 
 import meerschaum as mrsm
@@ -16,7 +19,6 @@ from meerschaum._internal.term.TermPageHandler import TermPageHandler, CustomTer
 from meerschaum.config._paths import API_TEMPLATES_PATH, API_STATIC_PATH
 from meerschaum.utils.venv import venv_executable
 from meerschaum.utils.misc import is_tmux_available
-from meerschaum.utils.daemon._names import get_new_daemon_name
 
 tornado, tornado_ioloop, terminado = attempt_import(
     'tornado', 'tornado.ioloop', 'terminado', lazy=False,
@@ -25,6 +27,8 @@ tornado, tornado_ioloop, terminado = attempt_import(
 
 def get_webterm_app_and_manager(
     instance_keys: Optional[str] = None,
+    port: Optional[int] = None,
+    env_path: Optional[pathlib.Path] = None,
 ) -> Tuple[
     tornado.web.Application,
     terminado.UniqueTermManager,
@@ -36,19 +40,49 @@ def get_webterm_app_and_manager(
     -------
     A tuple of the Tornado web application and term manager.
     """
+    from meerschaum.config.environment import get_env_vars
+    from meerschaum._internal.static import STATIC_CONFIG
+    if env_path is None:
+        from meerschaum.config.paths import WEBTERM_INTERNAL_RESOURCES_PATH
+        env_path = WEBTERM_INTERNAL_RESOURCES_PATH / (str(port) + '.json')
+
+    env_vars = get_env_vars()
+    env_dict = {
+        env_var: os.environ[env_var]
+        for env_var in env_vars
+        if env_var not in (
+            STATIC_CONFIG['environment']['systemd_log_path'],
+            STATIC_CONFIG['environment']['systemd_result_path'],
+            STATIC_CONFIG['environment']['systemd_delete_job'],
+            STATIC_CONFIG['environment']['systemd_stdin_path'],
+            STATIC_CONFIG['environment']['daemon_id'],
+        )
+    }
+    with open(env_path, 'w+', encoding='utf-8') as f:
+        json.dump(env_dict, f)
+
     shell_kwargs_str = f"mrsm_instance='{instance_keys}'" if instance_keys else ""
     commands = [
         venv_executable(None),
         '-c',
-        "import os; _ = os.environ.pop('COLUMNS', None); _ = os.environ.pop('LINES', None); "
-        "from meerschaum._internal.entry import get_shell; "
+        "import os\n"
+        "import pathlib\n"
+        "import json\n"
+        f"env_path = pathlib.Path('{env_path.as_posix()}')\n"
+        "with open(env_path, 'r', encoding='utf-8') as f:\n"
+        "    env_dict = json.load(f)\n"
+        "os.environ.update(env_dict)\n"
+        "_ = os.environ.pop('COLUMNS', None)\n"
+        "_ = os.environ.pop('LINES', None)\n"
+        "from meerschaum._internal.entry import get_shell\n"
         f"get_shell({shell_kwargs_str}).cmdloop()"
     ]
-    webterm_cf = mrsm.get_config('system', 'webterm')
+    webterm_cf = mrsm.get_config('api', 'webterm')
     if webterm_cf.get('tmux', {}).get('enabled', False) and is_tmux_available():
-        commands = ['tmux', 'new-session', '-A', '-s', 'MRSM_SESSION'] + commands
+        commands = ['tmux', 'new-session', '-A', '-s', f'MRSM_SESSION--{port}'] + commands
 
-    term_manager = terminado.NamedTermManager(shell_command=commands)
+    term_manager = terminado.NamedTermManager(shell_command=commands, extra_env=env_dict)
+    term_manager._port = port
     handlers = [
         (
             r"/websocket/(.+)/?",

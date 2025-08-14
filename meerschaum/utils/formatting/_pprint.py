@@ -66,6 +66,7 @@ def pprint(
     except Exception:
         args_copy = args
         modify = False
+
     _args = []
     for a in args:
         c = a

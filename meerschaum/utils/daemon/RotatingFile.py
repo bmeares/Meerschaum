@@ -14,12 +14,13 @@ import traceback
 import sys
 import atexit
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Callable
 from meerschaum.config import get_config
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.daemon.FileDescriptorInterceptor import FileDescriptorInterceptor
 from meerschaum.utils.threading import Thread
 import meerschaum as mrsm
+import threading
 daemon = mrsm.attempt_import('daemon')
 
 class RotatingFile(io.IOBase):
@@ -38,6 +39,7 @@ class RotatingFile(io.IOBase):
         redirect_streams: bool = False,
         write_timestamps: bool = False,
         timestamp_format: Optional[str] = None,
+        write_callback: Optional[Callable[[str], None]] = None,
     ):
         """
         Create a file-like object which manages other files.
@@ -66,6 +68,9 @@ class RotatingFile(io.IOBase):
         timestamp_format: str, default None
             If `write_timestamps` is `True`, use this format for the timestamps.
             Defaults to `'%Y-%m-%d %H:%M'`.
+
+        write_callback: Optional[Callable[[str], None]], default None
+            If provided, execute this callback with the data to be written.
         """
         self.file_path = pathlib.Path(file_path)
         if num_files_to_keep is None:
@@ -74,17 +79,18 @@ class RotatingFile(io.IOBase):
             max_file_size = get_config('jobs', 'logs', 'max_file_size')
         if timestamp_format is None:
             timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
-        if num_files_to_keep < 2:
-            raise ValueError("At least 2 files must be kept.")
-        if max_file_size < 1:
-            raise ValueError("Subfiles must contain at least one byte.")
+        if num_files_to_keep < 1:
+            raise ValueError("At least 1 file must be kept.")
+        if max_file_size < 100:
+            raise ValueError("Subfiles must contain at least 100 bytes.")
 
         self.num_files_to_keep = num_files_to_keep
         self.max_file_size = max_file_size
         self.redirect_streams = redirect_streams
         self.write_timestamps = write_timestamps
         self.timestamp_format = timestamp_format
-        self.subfile_regex_pattern = re.compile(r'(.*)\.log(?:\.\d+)?$')
+        self.write_callback = write_callback
+        self.subfile_regex_pattern = re.compile(r'(.*)\.log(?:\.\d+)?')
 
         ### When subfiles are opened, map from their index to the file objects.
         self.subfile_objects = {}
@@ -186,7 +192,7 @@ class RotatingFile(io.IOBase):
         """
         try:
             return int(subfile_name.replace(self.file_path.name + '.', ''))
-        except Exception as e:
+        except Exception:
             return -1
 
 
@@ -272,7 +278,7 @@ class RotatingFile(io.IOBase):
                 try:
                     daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
                     daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
-                except OSError as e:
+                except OSError:
                     warn(
                         f"Encountered an issue when redirecting streams:\n{traceback.format_exc()}"
                     )
@@ -287,30 +293,36 @@ class RotatingFile(io.IOBase):
             self.is_subfile_too_large(latest_subfile_index, potential_new_len)
         )
         if create_new_file:
-            old_subfile_index = latest_subfile_index
-            new_subfile_index = old_subfile_index + 1
-            new_file_path = self.get_subfile_path_from_index(new_subfile_index)
-            self._previous_file_obj = self._current_file_obj
-            self._current_file_obj = open(new_file_path, 'a+', encoding='utf-8')
-            self.subfile_objects[new_subfile_index] = self._current_file_obj
-            self.flush()
-
-            if self._previous_file_obj is not None:
-                if self.redirect_streams:
-                    self._redirected_subfile_objects[old_subfile_index] = self._previous_file_obj
-                    daemon.daemon.redirect_stream(self._previous_file_obj, self._current_file_obj)
-                    daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
-                    daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
-                self.close(unused_only=True)
-
-            ### Sanity check in case writing somehow fails.
-            if self._previous_file_obj is self._current_file_obj:
-                self._previous_file_obj = None
-
-            self.delete(unused_only=True)
+            self.increment_subfiles()
 
         return self._current_file_obj
 
+    def increment_subfiles(self, increment_by: int = 1):
+        """
+        Create a new subfile and switch the file pointer over.
+        """
+        latest_subfile_index = self.get_latest_subfile_index()
+        old_subfile_index = latest_subfile_index
+        new_subfile_index = old_subfile_index + increment_by
+        new_file_path = self.get_subfile_path_from_index(new_subfile_index)
+        self._previous_file_obj = self._current_file_obj
+        self._current_file_obj = open(new_file_path, 'a+', encoding='utf-8')
+        self.subfile_objects[new_subfile_index] = self._current_file_obj
+        self.flush()
+
+        if self.redirect_streams:
+            if self._previous_file_obj is not None:
+                self._redirected_subfile_objects[old_subfile_index] = self._previous_file_obj
+                daemon.daemon.redirect_stream(self._previous_file_obj, self._current_file_obj)
+            daemon.daemon.redirect_stream(sys.stdout, self._current_file_obj)
+            daemon.daemon.redirect_stream(sys.stderr, self._current_file_obj)
+        self.close(unused_only=True)
+
+        ### Sanity check in case writing somehow fails.
+        if self._previous_file_obj is self._current_file_obj:
+            self._previous_file_obj = None
+
+        self.delete(unused_only=True)
 
     def close(self, unused_only: bool = False) -> None:
         """
@@ -330,7 +342,7 @@ class RotatingFile(io.IOBase):
             try:
                 if not subfile_object.closed:
                     subfile_object.close()
-            except Exception as e:
+            except Exception:
                 warn(f"Failed to close an open subfile:\n{traceback.format_exc()}")
 
             _ = self.subfile_objects.pop(subfile_index, None)
@@ -360,6 +372,12 @@ class RotatingFile(io.IOBase):
         may exceed this limit.
         """
         try:
+            if callable(self.write_callback):
+                self.write_callback(data)
+        except Exception:
+            warn(f"Failed to execute write callback:\n{traceback.format_exc()}")
+
+        try:
             self.file_path.parent.mkdir(exist_ok=True, parents=True)
             if isinstance(data, bytes):
                 data = data.decode('utf-8')
@@ -379,7 +397,7 @@ class RotatingFile(io.IOBase):
             except BrokenPipeError:
                 warn("BrokenPipeError encountered. The daemon may have been terminated.")
                 return
-            except Exception as e:
+            except Exception:
                 warn(f"Failed to write to subfile:\n{traceback.format_exc()}")
             self.flush()
             self.delete(unused_only=True)
@@ -410,11 +428,10 @@ class RotatingFile(io.IOBase):
         )
         for subfile_path_to_delete in existing_subfile_paths[0:end_ix]:
             subfile_index = self.get_index_from_subfile_name(subfile_path_to_delete.name)
-            subfile_object = self.subfile_objects.get(subfile_index, None)
 
             try:
                 subfile_path_to_delete.unlink()
-            except Exception as e:
+            except Exception:
                 warn(
                     f"Unable to delete subfile '{subfile_path_to_delete}':\n"
                     + f"{traceback.format_exc()}"
@@ -586,20 +603,21 @@ class RotatingFile(io.IOBase):
             if not subfile_object.closed:
                 try:
                     subfile_object.flush()
-                except Exception as e:
+                except Exception:
                     warn(f"Failed to flush subfile {subfile_index}:\n{traceback.format_exc()}")
+
         if self.redirect_streams:
             try:
                 sys.stdout.flush()
             except BrokenPipeError:
                 pass
-            except Exception as e:
+            except Exception:
                 warn(f"Failed to flush STDOUT:\n{traceback.format_exc()}")
             try:
                 sys.stderr.flush()
             except BrokenPipeError:
                 pass
-            except Exception as e:
+            except Exception:
                 warn(f"Failed to flush STDERR:\n{traceback.format_exc()}")
 
 
@@ -665,10 +683,19 @@ class RotatingFile(io.IOBase):
         for thread in interceptor_threads[:end_ix]:
             try:
                 thread.join()
-            except Exception as e:
+            except Exception:
                 warn(f"Failed to join interceptor threads:\n{traceback.format_exc()}")
         del interceptor_threads[:end_ix]
 
+    def touch(self):
+        """
+        Touch the latest subfile.
+        """
+        subfile_path = self.get_latest_subfile_path()
+        subfile_path.touch()
+
+    def isatty(self) -> bool:
+        return True
 
     def __repr__(self) -> str:
         """

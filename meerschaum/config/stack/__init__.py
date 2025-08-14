@@ -14,6 +14,8 @@ import json
 from meerschaum.config._paths import (
     GRAFANA_DATASOURCE_PATH,
     GRAFANA_DASHBOARD_PATH,
+    DB_INIT_RESOURCES_PATH,
+    DB_CREATE_EXTENSIONS_PATH,
     ROOT_DIR_PATH,
 )
 from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
@@ -39,7 +41,7 @@ valkey_password = 'MRSM{meerschaum:connectors:valkey:main:password}'
 
 env_dict = {
     'COMPOSE_PROJECT_NAME': 'mrsm',
-    'TIMESCALEDB_VERSION': 'latest-pg16',
+    'TIMESCALEDB_VERSION': 'pg17',
     'POSTGRES_USER': db_user,
     'POSTGRES_PASSWORD': db_pass,
     'POSTGRES_DB': db_base,
@@ -54,19 +56,22 @@ env_dict['MEERSCHAUM_API_CONFIG'] = json.dumps(
     {
         'meerschaum': 'MRSM{!meerschaum}',
         'system': 'MRSM{!system}',
+        'api': 'MRSM{!api}',
     },
     indent=4,
 ).replace(
     '"MRSM{!system}"', 'MRSM{!system}'
 ).replace(
-    '"MRSM{!meerschaum}"', 'MRSM{!meerschaum}',
+    '"MRSM{!meerschaum}"', 'MRSM{!meerschaum}'
+).replace(
+    '"MRSM{!api}"', 'MRSM{!api}'
 )
 
 volumes = {
     'api_root': '/meerschaum',
-    'meerschaum_db_data': '/var/lib/postgresql/data',
+    'meerschaum_db_data': '/home/postgres/pgdata',
     'grafana_storage': '/var/lib/grafana',
-    'valkey_data': '/bitnami/valkey/data',
+    'valkey_data': '/valkey/data',
 }
 networks = {
     'frontend': None,
@@ -121,7 +126,7 @@ default_docker_compose_config = {
                 'POSTGRES_PASSWORD': '<DOLLAR>POSTGRES_PASSWORD',
                 'ALLOW_IP_RANGE': env_dict['ALLOW_IP_RANGE'],
             },
-            'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB',
+            'command': 'postgres -c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100',
             'healthcheck': {
                 'test': [
                     'CMD-SHELL', 'pg_isready -d <DOLLAR>POSTGRES_DB -U <DOLLAR>POSTGRES_USER',
@@ -131,13 +136,14 @@ default_docker_compose_config = {
                 'retries': 5
             },
             'restart': 'always',
-            'image': 'timescale/timescaledb:' + env_dict['TIMESCALEDB_VERSION'],
+            'image': 'timescale/timescaledb-ha:' + env_dict['TIMESCALEDB_VERSION'],
             'ports': [
                 f'{db_port}:5432',
             ],
             'hostname': db_hostname,
             'volumes': [
                 'meerschaum_db_data:' + volumes['meerschaum_db_data'],
+                f'{DB_INIT_RESOURCES_PATH.as_posix()}:/docker-entrypoint-initdb.d:z,ro',
             ],
             'shm_size': '1024m',
             'networks': [
@@ -180,7 +186,7 @@ default_docker_compose_config = {
             ],
         },
         'valkey': {
-            'image': 'bitnami/valkey:latest',
+            'image': 'valkey/valkey:latest',
             'restart': 'always',
             'environment': {
                 'VALKEY_PASSWORD': '<DOLLAR>VALKEY_PASSWORD',
@@ -224,8 +230,8 @@ default_docker_compose_config = {
             'volumes': [
                 'grafana_storage' + ':' + volumes['grafana_storage'],
                 ### NOTE: Mount with the 'z' option for SELinux.
-                f'{GRAFANA_DATASOURCE_PATH.parent}:/etc/grafana/provisioning/datasources:z,ro',
-                f'{GRAFANA_DASHBOARD_PATH.parent}:/etc/grafana/provisioning/dashboards:z,ro',
+                f'{GRAFANA_DATASOURCE_PATH.parent.as_posix()}:/etc/grafana/provisioning/datasources:z,ro',
+                f'{GRAFANA_DASHBOARD_PATH.parent.as_posix()}:/etc/grafana/provisioning/dashboards:z,ro',
             ],
             'environment': {
                 'GF_SECURITY_ALLOW_EMBEDDING': 'true',
@@ -273,6 +279,21 @@ def _sync_stack_files():
         substitute = True,
     )
 
+    _write_initdb()
+
+def _write_initdb():
+    create_postgis_text = (
+        "CREATE EXTENSION IF NOT EXISTS timescaledb;\n"
+        "CREATE EXTENSION IF NOT EXISTS postgis;\n"
+        "CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit;\n"
+        "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;\n"
+    )
+    if DB_CREATE_EXTENSIONS_PATH.exists():
+        return
+
+    with open(DB_CREATE_EXTENSIONS_PATH, 'w+', encoding='utf-8') as f:
+        f.write(create_postgis_text)
+
 NECESSARY_FILES = [STACK_COMPOSE_PATH, GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH]
 def get_necessary_files():
     from meerschaum.config import get_config
@@ -286,19 +307,20 @@ def get_necessary_files():
 
 
 def write_stack(
-        debug: bool = False 
-    ):
+    debug: bool = False 
+):
     """Write Docker Compose configuration files."""
     from meerschaum.config._edit import general_write_yaml_config
     from meerschaum.config._sync import sync_files
     general_write_yaml_config(get_necessary_files(), debug=debug)
     return sync_files(['stack'])
    
+
 def edit_stack(
-        action: Optional[List[str]] = None,
-        debug: bool = False,
-        **kw
-    ):
+    action: Optional[List[str]] = None,
+    debug: bool = False,
+    **kw
+):
     """Open docker-compose.yaml or .env for editing."""
     from meerschaum.config._edit import general_edit_config
     if action is None:

@@ -41,13 +41,33 @@ version_queries = {
 }
 SKIP_IF_EXISTS_FLAVORS = {'mssql', 'oracle'}
 DROP_IF_EXISTS_FLAVORS = {
-    'timescaledb', 'postgresql', 'postgis', 'citus', 'mssql', 'mysql', 'mariadb', 'sqlite',
+    'timescaledb',
+    'timescaledb-ha',
+    'postgresql',
+    'postgis',
+    'citus',
+    'mssql',
+    'mysql',
+    'mariadb',
+    'sqlite',
 }
 DROP_INDEX_IF_EXISTS_FLAVORS = {
-    'mssql', 'timescaledb', 'postgresql', 'postgis', 'sqlite', 'citus',
+    'mssql',
+    'timescaledb',
+    'timescaledb-ha',
+    'postgresql',
+    'postgis',
+    'sqlite',
+    'citus',
 }
 SKIP_AUTO_INCREMENT_FLAVORS = {'citus', 'duckdb'}
-COALESCE_UNIQUE_INDEX_FLAVORS = {'timescaledb', 'postgresql', 'postgis', 'citus'}
+COALESCE_UNIQUE_INDEX_FLAVORS = {
+    'timescaledb',
+    'timescaledb-ha',
+    'postgresql',
+    'postgis',
+    'citus',
+}
 UPDATE_QUERIES = {
     'default': """
         UPDATE {target_table_name} AS f
@@ -62,6 +82,12 @@ UPDATE_QUERIES = {
             {date_bounds_subquery}
     """,
     'timescaledb-upsert': """
+        INSERT INTO {target_table_name} ({patch_cols_str})
+        SELECT {patch_cols_str}
+        FROM {patch_table_name}
+        ON CONFLICT ({join_cols_str}) DO {update_or_nothing} {sets_subquery_none_excluded}
+    """,
+    'timescaledb-ha-upsert': """
         INSERT INTO {target_table_name} ({patch_cols_str})
         SELECT {patch_cols_str}
         FROM {patch_table_name}
@@ -233,7 +259,7 @@ columns_types_queries = {
             DATA_TYPE AS [type],
             NUMERIC_PRECISION AS [numeric_precision],
             NUMERIC_SCALE AS [numeric_scale]
-        FROM {db_prefix}INFORMATION_SCHEMA.COLUMNS
+        FROM {db_prefix}INFORMATION_SCHEMA.COLUMNS WITH (NOLOCK)
         WHERE TABLE_NAME IN (
             '{table}',
             '{table_trunc}'
@@ -286,6 +312,7 @@ columns_types_queries = {
 }
 hypertable_queries = {
     'timescaledb': 'SELECT hypertable_size(\'{table_name}\')',
+    'timescaledb-ha': 'SELECT hypertable_size(\'{table_name}\')',
     'citus': 'SELECT citus_table_size(\'{table_name}\')',
 }
 columns_indices_queries = {
@@ -377,18 +404,18 @@ columns_indices_queries = {
                 ELSE CAST(0 AS BIT)
             END AS [clustered]
         FROM
-            sys.schemas s
-        INNER JOIN sys.tables t
+            sys.schemas s WITH (NOLOCK)
+        INNER JOIN sys.tables t WITH (NOLOCK)
             ON s.schema_id = t.schema_id
-        INNER JOIN sys.indexes i
+        INNER JOIN sys.indexes i WITH (NOLOCK)
             ON t.object_id = i.object_id
-        INNER JOIN sys.index_columns ic
+        INNER JOIN sys.index_columns ic WITH (NOLOCK)
             ON i.object_id = ic.object_id
             AND i.index_id = ic.index_id
-        INNER JOIN sys.columns c
+        INNER JOIN sys.columns c WITH (NOLOCK)
             ON ic.object_id = c.object_id
             AND ic.column_id = c.column_id
-        LEFT JOIN sys.key_constraints kc
+        LEFT JOIN sys.key_constraints kc WITH (NOLOCK)
             ON kc.parent_object_id = i.object_id
             AND kc.type = 'PK'
             AND kc.name = i.name
@@ -483,49 +510,83 @@ reset_autoincrement_queries: Dict[str, Union[str, List[str]]] = {
     ),
 }
 table_wrappers = {
-    'default'    : ('"', '"'),
-    'timescaledb': ('"', '"'),
-    'citus'      : ('"', '"'),
-    'duckdb'     : ('"', '"'),
-    'postgresql' : ('"', '"'),
-    'postgis'    : ('"', '"'),
-    'sqlite'     : ('"', '"'),
-    'mysql'      : ('`', '`'),
-    'mariadb'    : ('`', '`'),
-    'mssql'      : ('[', ']'),
-    'cockroachdb': ('"', '"'),
-    'oracle'     : ('"', '"'),
+    'default'       : ('"', '"'),
+    'timescaledb'   : ('"', '"'),
+    'timescaledb-ha': ('"', '"'),
+    'citus'         : ('"', '"'),
+    'duckdb'        : ('"', '"'),
+    'postgresql'    : ('"', '"'),
+    'postgis'       : ('"', '"'),
+    'sqlite'        : ('"', '"'),
+    'mysql'         : ('`', '`'),
+    'mariadb'       : ('`', '`'),
+    'mssql'         : ('[', ']'),
+    'cockroachdb'   : ('"', '"'),
+    'oracle'        : ('"', '"'),
 }
 max_name_lens = {
-    'default'    : 64,
-    'mssql'      : 128,
-    'oracle'     : 30,
-    'postgresql' : 64,
-    'postgis'    : 64,
-    'timescaledb': 64,
-    'citus'      : 64,
-    'cockroachdb': 64,
-    'sqlite'     : 1024, ### Probably more, but 1024 seems more than reasonable.
-    'mysql'      : 64,
-    'mariadb'    : 64,
+    'default'       : 64,
+    'mssql'         : 128,
+    'oracle'        : 30,
+    'postgresql'    : 64,
+    'postgis'       : 64,
+    'timescaledb'   : 64,
+    'timescaledb-ha': 64,
+    'citus'         : 64,
+    'cockroachdb'   : 64,
+    'sqlite'        : 1024, ### Probably more, but 1024 seems more than reasonable.
+    'mysql'         : 64,
+    'mariadb'       : 64,
 }
-json_flavors = {'postgresql', 'postgis', 'timescaledb', 'citus', 'cockroachdb'}
-NO_SCHEMA_FLAVORS = {'oracle', 'sqlite', 'mysql', 'mariadb', 'duckdb'}
+json_flavors = {
+    'postgresql',
+    'postgis',
+    'timescaledb',
+    'timescaledb-ha',
+    'citus',
+    'cockroachdb',
+}
+NO_SCHEMA_FLAVORS = {
+    'oracle',
+    'sqlite',
+    'mysql',
+    'mariadb',
+    'duckdb',
+}
 DEFAULT_SCHEMA_FLAVORS = {
     'postgresql': 'public',
     'postgis': 'public',
     'timescaledb': 'public',
+    'timescaledb-ha': 'public',
     'citus': 'public',
     'cockroachdb': 'public',
     'mysql': 'mysql',
     'mariadb': 'mysql',
     'mssql': 'dbo',
 }
-OMIT_NULLSFIRST_FLAVORS = {'mariadb', 'mysql', 'mssql'}
+OMIT_NULLSFIRST_FLAVORS = {
+    'mariadb',
+    'mysql',
+    'mssql',
+}
 
-SINGLE_ALTER_TABLE_FLAVORS = {'duckdb', 'sqlite', 'mssql', 'oracle'}
-NO_CTE_FLAVORS = {'mysql', 'mariadb'}
-NO_SELECT_INTO_FLAVORS = {'sqlite', 'oracle', 'mysql', 'mariadb', 'duckdb'}
+SINGLE_ALTER_TABLE_FLAVORS = {
+    'duckdb',
+    'sqlite',
+    'mssql',
+    'oracle',
+}
+NO_CTE_FLAVORS = {
+    'mysql',
+    'mariadb',
+}
+NO_SELECT_INTO_FLAVORS = {
+    'sqlite',
+    'oracle',
+    'mysql',
+    'mariadb',
+    'duckdb',
+}
 
 
 def clean(substring: str) -> None:
@@ -560,6 +621,7 @@ def dateadd_str(
         - `'postgresql'`
         - `'postgis'`
         - `'timescaledb'`
+        - `'timescaledb-ha'`
         - `'citus'`
         - `'cockroachdb'`
         - `'duckdb'`
@@ -663,7 +725,14 @@ def dateadd_str(
     )
 
     da = ""
-    if flavor in ('postgresql', 'postgis', 'timescaledb', 'cockroachdb', 'citus'):
+    if flavor in (
+        'postgresql',
+        'postgis',
+        'timescaledb',
+        'timescaledb-ha',
+        'cockroachdb',
+        'citus',
+    ):
         begin = (
             f"CAST({begin} AS {db_type})" if begin != 'now'
             else f"CAST(NOW() AT TIME ZONE 'utc' AS {db_type})"
@@ -831,7 +900,7 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
         ### NOTE: System-reserved words must be quoted.
         if truncated_item.lower() in (
             'float', 'varchar', 'nvarchar', 'clob',
-            'boolean', 'integer', 'table', 'row',
+            'boolean', 'integer', 'table', 'row', 'date',
         ):
             wrappers = ('"', '"')
         else:
@@ -969,7 +1038,7 @@ def build_where(
     ```
     """
     import json
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.dtypes import value_is_null, none_if_null
     negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
@@ -1517,6 +1586,8 @@ def get_update_queries(
     datetime_col: Optional[str] = None,
     schema: Optional[str] = None,
     patch_schema: Optional[str] = None,
+    target_cols_types: Optional[Dict[str, str]] = None,
+    patch_cols_types: Optional[Dict[str, str]] = None,
     identity_insert: bool = False,
     null_indices: bool = True,
     cast_columns: bool = True,
@@ -1556,6 +1627,14 @@ def get_update_queries(
     patch_schema: Optional[str], default None
         If provided, use this schema when quoting the patch table.
         Defaults to `schema`.
+
+    target_cols_types: Optional[Dict[str, Any]], default None
+        If provided, use these as the columns-types dictionary for the target table.
+        Default will infer from the database context.
+
+    patch_cols_types: Optional[Dict[str, Any]], default None
+        If provided, use these as the columns-types dictionary for the target table.
+        Default will infer from the database context.
 
     identity_insert: bool, default False
         If `True`, include `SET IDENTITY_INSERT` queries before and after the update queries.
@@ -1603,14 +1682,14 @@ def get_update_queries(
         flavor=flavor,
         schema=schema,
         debug=debug,
-    )
+    ) if not target_cols_types else target_cols_types
     patch_table_columns = get_table_cols_types(
         patch,
         connectable,
         flavor=flavor,
         schema=patch_schema,
         debug=debug,
-    )
+    ) if not patch_cols_types else patch_cols_types
 
     patch_cols_str = ', '.join(
         [
@@ -2112,7 +2191,11 @@ def _get_create_table_query_from_dtypes(
             )
         elif flavor == 'oracle':
             query += f"\n    {col_name} {col_db_type} {auto_increment_str} PRIMARY KEY,"
-        elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
+        elif (
+            flavor in ('timescaledb', 'timescaledb-ha')
+            and datetime_column
+            and datetime_column != primary_key
+        ):
             query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
         elif flavor == 'mssql':
             query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
@@ -2125,7 +2208,7 @@ def _get_create_table_query_from_dtypes(
         col_name = sql_item_name(col, schema=None, flavor=flavor)
         query += f"\n    {col_name} {db_type},"
     if (
-        flavor == 'timescaledb'
+        flavor in ('timescaledb', 'timescaledb-ha')
         and datetime_column
         and primary_key
         and datetime_column != primary_key
@@ -2248,7 +2331,11 @@ def _get_create_table_query_from_cte(
                 "ADD PRIMARY KEY ({primary_key_name})"
             ),
         ]
-    elif flavor == 'timescaledb' and datetime_column and datetime_column != primary_key:
+    elif (
+        flavor in ('timescaledb', 'timescaledb-ha')
+        and datetime_column
+        and datetime_column != primary_key
+    ):
         create_table_queries = [
             (
                 "SELECT *\n"

@@ -45,6 +45,8 @@ def show(
         'tags'       : _show_tags,
         'schedules'  : _show_schedules,
         'venvs'      : _show_venvs,
+        'tokens'     : _show_tokens,
+        'daemons'    : _show_daemons,
     }
     return choose_subaction(action, show_options, **kw)
 
@@ -113,11 +115,11 @@ def _show_help(**kw: Any) -> SuccessTuple:
 
 
 def _show_config(
-        action: Optional[List[str]] = None,
-        debug: bool = False,
-        nopretty: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    debug: bool = False,
+    nopretty: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Show the configuration dictionary.
     Sub-actions defined in the action list are recursive indices in the config dictionary.
@@ -204,7 +206,7 @@ def _show_version(nopretty: bool = False, **kw : Any) -> SuccessTuple:
         msg = "Meerschaum v" + version
         _print = info
     _print(msg)
-    return (True, "Success")
+    return True, "Success"
 
 
 def _show_connectors(
@@ -562,6 +564,7 @@ def _complete_show_packages(
 
     return possibilities
 
+
 def _show_jobs(
     action: Optional[List[str]] = None,
     executor_keys: Optional[str] = None,
@@ -762,7 +765,7 @@ def _show_environment(
     """
     import os
     from meerschaum.utils.formatting import pprint
-    from meerschaum.config._environment import get_env_vars
+    from meerschaum.config.environment import get_env_vars
     pprint(
         {
             env_var: os.environ[env_var]
@@ -789,34 +792,22 @@ def _show_tags(
     from meerschaum.utils.formatting import pipe_repr, UNICODE, ANSI
     from meerschaum.utils.pool import get_pool
     from meerschaum.config import get_config
+    from meerschaum.connectors.parse import parse_instance_keys
     rich_tree, rich_panel, rich_text, rich_console, rich_columns = (
         mrsm.attempt_import('rich.tree', 'rich.panel', 'rich.text', 'rich.console', 'rich.columns')
     )
-    panel = rich_panel.Panel.fit('Tags')
-    tree = rich_tree.Tree(panel)
     action = action or []
     tags = action + (tags or [])
-    pipes = mrsm.get_pipes(as_list=True, tags=tags, **kwargs)
-    if not pipes:
-        return False, f"No pipes were found with the given tags."
 
-    pool = get_pool(workers=workers)
     tag_prefix = get_config('formatting', 'pipes', 'unicode', 'icons', 'tag') if UNICODE else ''
     tag_style = get_config('formatting', 'pipes', 'ansi', 'styles', 'tags') if ANSI else None
 
-    tags_pipes = defaultdict(lambda: [])
-    gather_pipe_tags = lambda pipe: (pipe, (pipe.tags or []))
-
-    pipes_tags = dict(pool.map(gather_pipe_tags, pipes))
-
-    for pipe, tags in pipes_tags.items():
-        for tag in tags:
-            if action and tag not in action:
-                continue
-            tags_pipes[tag].append(pipe)
+    tags_pipes = mrsm.get_pipes(as_tags_dict=True, tags=tags, **kwargs)
+    if action:
+        tags_pipes = {tag: pipes for tag, pipes in tags_pipes.items() if tag in action}
 
     columns = []
-    sorted_tags = sorted([tag for tag in tags_pipes])
+    sorted_tags = sorted(list(tags_pipes))
     for tag in sorted_tags:
         _pipes = tags_pipes[tag]
         tag_text = (
@@ -904,9 +895,7 @@ def _show_schedules(
     return True, "Success"
         
 
-def _show_venvs(
-    **kwargs: Any    
-):
+def _show_venvs(**kwargs: Any) -> SuccessTuple:
     """
     Print the available virtual environments in the current MRSM_ROOT_DIR.
     """
@@ -921,12 +910,176 @@ def _show_venvs(
         for _venv in os.listdir(VIRTENV_RESOURCES_PATH)
         if venv_exists(_venv)
     ]
-    print_options(
-        venvs,
-        name = 'Venvs:',
-        **kwargs
+    print_options(venvs, name='Virtual Environments:', **kwargs)
+    return True, "Success"
+
+
+def _show_tokens(
+    action: Optional[List[str]] = None,
+    mrsm_instance: Optional[str] = None,
+    nopretty: bool = False,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
+    """
+    Print a table of the registered tokens on the instance.
+    """
+    import json
+    import uuid
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils.dtypes import value_is_null, json_serialize_value
+    from meerschaum.utils.misc import is_uuid
+    from meerschaum.utils.packages import import_rich
+    from meerschaum.utils.formatting import UNICODE, get_console
+    rich = import_rich()
+    rich_table, rich_json, rich_box = mrsm.attempt_import('rich.table', 'rich.json', 'rich.box')
+
+    conn = parse_instance_keys(mrsm_instance)
+
+    labels = [
+        label
+        for label in (action or [])
+        if not is_uuid(label)
+    ]
+    potential_token_ids = [
+        uuid.UUID(potential_id)
+        for potential_id in (action or [])
+        if is_uuid(potential_id)
+    ]
+
+    tokens = conn.get_tokens(
+        labels=(labels or None),
+        ids=(potential_token_ids or None),
+        debug=debug,
     )
 
+    if nopretty:
+        for token in tokens:
+            print(json.dumps({
+                'id': str(token.id),
+                'label': token.label,
+                'scopes': token.scopes,
+                'expiration': (
+                    token.expiration.isoformat()
+                    if not value_is_null(token.expiration)
+                    else None
+                ),
+                'creation': (token.creation.isoformat() if not value_is_null(token.creation) else None),
+                'user': (token.user.username if token.user is not None else None),
+                'is_valid': token.is_valid,
+            }))
+        return True, "Success"
+
+    if len(tokens) == 1:
+        token = tokens[0]
+        tokens_json = json.dumps({
+            'id': str(token.id),
+            'label': token.label,
+            'scopes': token.scopes,
+            'creation': (token.creation.isoformat() if not value_is_null(token.creation) else None),
+            'expiration': (token.expiration.isoformat() if not value_is_null(token.expiration) else None),
+            'user': (token.user.username if token.user is not None else None),
+            'is_valid': token.is_valid,
+        }, default=json_serialize_value, indent=4)
+        get_console().print(rich_json.JSON(tokens_json))
+        
+        return True, "Success"
+
+    is_valid_true = (
+        "🟢"
+        if UNICODE
+        else "[+]"
+    )
+    is_valid_false = (
+        "🔴"
+        if UNICODE
+        else "[-]"
+    )
+
+    table = rich_table.Table(
+        title=f"Registered Tokens on instance '{conn}'",
+        box=rich_box.ROUNDED,
+        title_style='bold',
+    )
+    table.add_column("ID")
+    table.add_column("Label")
+    table.add_column("User")
+    table.add_column("Expiration")
+    table.add_column("Valid")
+
+    for token in tokens:
+        table.add_row(
+            str(token.id),
+            token.label,
+            (token.user.username if token.user is not None else ""),
+            (
+                token.expiration.isoformat()
+                if not value_is_null(token.expiration)
+                else 'Does not expire'
+            ),
+            (is_valid_true if token.is_valid else is_valid_false),
+        )
+
+    mrsm.pprint(table)
+    return True, "Success"
+
+
+def _show_daemons() -> SuccessTuple:
+    """
+    Print information about the running CLI daemons.
+    """
+    from meerschaum._internal.cli.workers import get_existing_cli_workers
+    workers = get_existing_cli_workers()
+    if not workers:
+        return True, "No CLI daemons are running."
+
+    rich_table, rich_box, rich_text = mrsm.attempt_import('rich.table', 'rich.box', 'rich.text')
+    table = rich_table.Table(
+        rich_table.Column("Index", justify='center'),
+        rich_table.Column("Status"),
+        rich_table.Column("Locked", justify='center'),
+        rich_table.Column("Ready", justify='center'),
+        rich_table.Column("Actions"),
+        title='CLI Daemons',
+        box=rich_box.ROUNDED,
+        title_style='bold',
+    )
+
+    running_icon = mrsm.get_config('formatting', 'emoji', 'running')
+    paused_icon = mrsm.get_config('formatting', 'emoji', 'paused')
+    stopped_icon = mrsm.get_config('formatting', 'emoji', 'stopped')
+    locked_icon = mrsm.get_config('formatting', 'emoji', 'locked')
+    unlocked_icon = mrsm.get_config('formatting', 'emoji', 'unlocked')
+    status_styles = {
+        'running': 'green',
+        'stopped': 'red',
+        'paused': 'yellow',
+    }
+
+    for worker in workers:
+        status = worker.job.status
+        status_text = rich_text.Text(
+            status,
+            style=status_styles[status],
+        )
+        if not worker.is_ready():
+            ready_icon = stopped_icon
+        else:
+            ready_icon = (
+                running_icon
+                if status == 'running'
+                else paused_icon
+            )
+
+        table.add_row(
+            str(worker.ix),
+            status_text,
+            (locked_icon if worker.lock_path.exists() else unlocked_icon),
+            ready_icon,
+            str(worker.job.daemon.rotating_log.get_latest_subfile_index()),
+        )
+
+    mrsm.pprint(table)
     return True, "Success"
 
 

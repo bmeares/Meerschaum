@@ -27,6 +27,7 @@ def edit(
         'users'     : _edit_users,
         'plugins'   : _edit_plugins,
         'jobs'      : _edit_jobs,
+        'tokens'    : _edit_tokens,
     }
     return choose_subaction(action, options, **kw)
 
@@ -66,7 +67,12 @@ def _complete_edit(
     return default_action_completer(action=(['edit'] + action), **kw)
 
 
-def _edit_config(action: Optional[List[str]] = None, **kw : Any) -> SuccessTuple:
+def _edit_config(
+    action: Optional[List[str]] = None,
+    noask: bool = False,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Edit Meerschaum configuration files.
 
@@ -86,11 +92,26 @@ def _edit_config(action: Optional[List[str]] = None, **kw : Any) -> SuccessTuple
         ```
     """
     from meerschaum.config._edit import edit_config
-    if action is None:
-        action = []
-    if len(action) == 0:
-        action.append('meerschaum')
-    return edit_config(keys=action, **kw)
+    from meerschaum.config._read_config import get_possible_keys
+    from meerschaum.actions import actions
+    from meerschaum.utils.prompt import choose
+
+    if not action:
+        action = [
+            choose(
+                "Choose a configuration file to edit:",
+                get_possible_keys(),
+                default='meerschaum',
+                noask=noask,
+            )
+        ]
+
+    edit_success, edit_msg = edit_config(keys=action, debug=debug, **kwargs)
+    if not edit_success:
+        return edit_success, edit_msg
+
+    return actions['reload'](debug=debug)
+
 
 def _complete_edit_config(action: Optional[List[str]] = None, **kw: Any) -> List[str]:
     from meerschaum.config._read_config import get_possible_keys
@@ -104,14 +125,14 @@ def _complete_edit_config(action: Optional[List[str]] = None, **kw: Any) -> List
     return possibilities
 
 def _edit_pipes(
-        action: Optional[List[str]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        yes: bool = False,
-        force: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    yes: bool = False,
+    force: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Open and edit pipes' configuration files.
     
@@ -218,7 +239,7 @@ def _edit_users(
     from meerschaum.utils.prompt import prompt, yes_no, get_password, get_email
     from meerschaum.utils.misc import edit_file
     from meerschaum.config._paths import USERS_CACHE_RESOURCES_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.yaml import yaml
     import os, pathlib
     instance_connector = parse_instance_keys(mrsm_instance)
@@ -235,7 +256,7 @@ def _edit_users(
                 minimum_length = STATIC_CONFIG['users']['min_password_length'],
             )
 
-        ## Make an admin
+        ### Make an admin
         _type = ''
         if yes_no(f"Change the user type for user '{username}'?", default='n', yes=yes, noask=noask):
             is_admin = yes_no(
@@ -248,15 +269,34 @@ def _edit_users(
         if yes_no(f"Change the email for user '{username}'?", default='n', yes=yes, noask=noask):
             email = get_email(username)
 
+        attributes = {}
+        ### Change the scopes.
+        attributes['scopes'] = prompt(
+            f"Scopes for user '{username}' (`*` to grant all scopes):",
+            default_editable=' '.join(User(
+                username,
+                instance=instance_connector,
+            ).get_scopes(refresh=True, debug=debug)),
+        ).split()
+        if attributes['scopes'] == ['*']:
+            attributes['scopes'] = list(STATIC_CONFIG['tokens']['scopes'])
+
         ### Change the attributes
-        attributes = None
         if yes_no(
-                f"Edit the attributes YAML file for user '{username}'?",
-                default='n', yes=yes, noask=noask
+            f"Edit the attributes YAML file for user '{username}'?",
+            default='n',
+            yes=yes,
+            noask=noask,
         ):
             attr_path = pathlib.Path(os.path.join(USERS_CACHE_RESOURCES_PATH, f'{username}.yaml'))
             try:
-                existing_attrs = instance_connector.get_user_attributes(User(username), debug=debug)
+                existing_attrs = instance_connector.get_user_attributes(
+                    User(
+                        username,
+                        instance=instance_connector,
+                    ),
+                    debug=debug,
+                )
                 with open(attr_path, 'w+') as f:
                     yaml.dump(existing_attrs, stream=f, sort_keys=False)
                 edit_file(attr_path)
@@ -271,7 +311,14 @@ def _edit_users(
                 attributes = None
 
         ### Submit changes
-        return User(username, password, email=email, type=_type, attributes=attributes)
+        return User(
+            username,
+            password,
+            email=email,
+            type=_type,
+            attributes=attributes,
+            instance=instance_connector,
+        )
 
     if not action:
         return False, "No users to edit."
@@ -301,14 +348,14 @@ def _edit_users(
         f"    ({succeeded} succeeded, {failed} failed)."
     )
     info(msg)
-    return True, msg
+    return succeeded > 0, msg
 
 
 def _edit_plugins(
     action: Optional[List[str]] = None,
     debug: bool = False,
     **kwargs: Any
-):
+) -> mrsm.SuccessTuple:
     """
     Edit a plugin's source code.
     """
@@ -316,7 +363,6 @@ def _edit_plugins(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.prompt import prompt, yes_no
     from meerschaum.utils.misc import edit_file
-    from meerschaum.utils.packages import reload_meerschaum
     from meerschaum.actions import actions
 
     if not action:
@@ -349,7 +395,7 @@ def _edit_plugins(
             continue
 
         edit_file(plugin_file_path)
-        reload_meerschaum(debug=debug)
+        actions['reload'](debug=debug)
 
     return True, "Success"
 
@@ -504,6 +550,106 @@ def _edit_jobs(
         + items_str(list(jobs.keys()))
         + '.'
         ) if num_edited > 0 else "Nothing was edited."
+    return True, msg
+
+
+def _edit_tokens(
+    action: Optional[List[str]] = None,
+    mrsm_instance: Optional[str] = None,
+    debug: bool = False,
+) -> mrsm.SuccessTuple:
+    """
+    Edit tokens registered to an instance.
+    """
+    import uuid
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import is_uuid
+    from meerschaum.core import Token
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils.prompt import prompt, yes_no
+    from meerschaum._internal.static import STATIC_CONFIG
+    dateutil_parser = mrsm.attempt_import('dateutil.parser')
+
+    if not action:
+        return (
+            False, (
+                "Provide token labels or IDs for the tokens to edit\n"
+                "    (run `show tokens` to see registered tokens)."
+            )
+        )
+
+    conn = parse_instance_keys(mrsm_instance)
+
+    labels = [
+        label
+        for label in (action or [])
+        if not is_uuid(label)
+    ]
+    potential_token_ids = [
+        uuid.UUID(potential_id)
+        for potential_id in (action or [])
+        if is_uuid(potential_id)
+    ]
+
+    tokens = conn.get_tokens(
+        labels=(labels or None),
+        ids=(potential_token_ids or None),
+        debug=debug,
+    )
+
+    num_edited = 0
+    for token in tokens:
+        token_model = token.to_model(refresh=True)
+        if token_model is None:
+            warn(f"Token '{token.id}' does not exist.", stack=False)
+            continue
+
+        new_attrs = {}
+
+        new_attrs['label'] = prompt("Label:", default_editable=token_model.label)
+        new_expiration_str = prompt(
+            "Expiration (empty for no expiration):",
+            default_editable=('' if token.expiration is None else str(token_model.expiration)),
+        )
+        new_attrs['expiration'] = (
+            dateutil_parser.parse(new_expiration_str)
+            if new_expiration_str
+            else None
+        )
+        new_scopes_str = prompt(
+            "Scope (`*` to grant all permissions):",
+            default_editable=' '.join(token_model.scopes),
+        )
+        new_attrs['scopes'] = (
+            new_scopes_str.split(' ')
+            if new_scopes_str != '*'
+            else list(STATIC_CONFIG['tokens']['scopes'])
+        )
+        invalidate = (
+            yes_no("Do you want to invalidate this token?", default='n')
+            if token_model.is_valid
+            else True
+        )
+        new_attrs['is_valid'] = token_model.is_valid and not invalidate
+
+        new_token = Token(**{**dict(token_model), **new_attrs})
+        edit_success, edit_msg = new_token.edit(debug=debug)
+        if not edit_success:
+            return False, edit_msg
+
+        if invalidate:
+            invalidate_success, invalidate_msg = new_token.invalidate(debug=debug)
+            if not invalidate_success:
+                return False, invalidate_msg
+
+        num_edited += 1
+
+    msg = (
+        f"Successfully edited {num_edited} token"
+        + ('s' if num_edited != 1 else '')
+        + '.'
+    )
+
     return True, msg
 
 

@@ -11,7 +11,7 @@ import urllib.parse
 import pathlib
 from meerschaum.utils.typing import Any, Optional, Dict, Union
 from meerschaum.utils.debug import dprint
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 
 METHODS = {
     'GET',

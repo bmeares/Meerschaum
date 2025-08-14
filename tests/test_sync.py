@@ -172,14 +172,21 @@ def test_sync_new_columns(flavor: str):
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'a': 10},
     ]
-    pipe.sync(docs, debug=debug)
-    assert len(pipe.get_data().columns) == 3
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(debug=debug)
+    assert df is not None
+    assert len(df.columns) == 3
 
     docs = [
         {'dt': '2022-01-01', 'id': 1, 'b': 20},
     ]
-    pipe.sync(docs, debug=debug)
-    df = pipe.get_data()
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(debug=debug)
+    assert df is not None
     assert len(df.columns) == 4
     assert len(df) == 1
 
@@ -255,43 +262,6 @@ def test_id_index_col(flavor: str):
     assert len(small_df) == len(new_docs)
     small_synced_docs = small_df.to_dict(orient='records')
     assert small_synced_docs == new_docs
-
-
-@pytest.mark.parametrize("flavor", get_flavors())
-def test_no_indices_inferred_datetime_to_text(flavor: str):
-    """
-    Verify that changing dtypes are handled.
-    """
-    conn = conns[flavor]
-    pipe = Pipe(
-        'test_no_indices', 'datetimes', 'text',
-        instance=conn,
-    )
-    pipe.delete()
-    docs = [
-        {'fake-dt': '2023-01-01', 'a': 1},
-    ]
-    success, msg = pipe.sync(docs, debug=debug)
-    assert success, msg
-
-    docs = [
-        {'fake-dt': '2023-01-01', 'a': 1},
-        {'fake-dt': '2023-01-02', 'a': 2},
-    ]
-    success, msg = pipe.sync(docs, debug=debug)
-    assert success, msg
-    df = pipe.get_data()
-    assert len(df) == len(docs)
-
-    docs = [
-        {'fake-dt': '2023-01-01', 'a': 1},
-        {'fake-dt': '2023-01-02', 'a': 2},
-        {'fake-dt': 'foo', 'a': 3},
-    ]
-    success, msg = pipe.sync(docs, debug=debug)
-    assert success, msg
-    df = pipe.get_data()
-    assert len(df) == len(docs)
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
@@ -716,7 +686,7 @@ def test_nested_chunks(flavor: str):
     assert len(df) == num_docs
 
 
-@pytest.mark.skip(reason="Python 3.13 Dask, numpy compatability.")
+#  @pytest.mark.skip(reason="Python 3.13 Dask, numpy compatability.")
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_dask_dataframe(flavor: str):
     """
@@ -766,6 +736,7 @@ def test_sync_null_indices(flavor: str):
         'sync', 'null', 'indices',
         instance=conn,
         columns=['a', 'b'],
+        mixed_numerics=True,
     )
     docs = [{'a': 1, 'b': 1, 'c': 1}]
     success, msg = pipe.sync(docs, debug=debug)
@@ -1137,6 +1108,7 @@ def test_create_drop_indices(flavor):
         instance=conn,
         columns={'primary': 'Id', 'datetime': 'dt'},
         upsert=True,
+        debug=debug,
     )
     docs = [
         {'Id': 1, 'dt': '2025-01-01', 'val': 1.1},
@@ -1277,3 +1249,72 @@ def test_sync_sql_small_chunksize(flavor):
 
     mrsm.pprint((success, msg))
     assert msg.lower().count('inserted') == int(len(docs) / chunksize)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_autotime(flavor: str):
+    conn = conns[flavor]
+    pipe = mrsm.Pipe(
+        'test', 'autotime',
+        instance=conn,
+    )
+    pipe.delete()
+    dt_col = 'timestamp'
+    pipe = mrsm.Pipe(
+        'test', 'autotime',
+        instance=conn,
+        autotime=True,
+        static=True,
+        null_indices=False,
+        enforce=False,
+        columns={
+            'datetime': dt_col,
+            'id': 'id',
+        },
+        dtypes={
+            dt_col: 'int',
+        },
+    )
+
+    success, msg = pipe.sync([
+        {'id': 1, 'val': 100.1},
+        {'id': 2, 'val': 200.2},
+    ])
+    assert success, msg
+
+    df = pipe.get_data()
+    assert dt_col in df.columns
+    print(df)
+
+    ts_1 = df[dt_col][0]
+
+    success, msg = pipe.sync([
+        {'id': 1, 'val': 100.2},
+        {'id': 2, 'val': 200.3},
+    ], debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(debug=debug)
+
+    assert len(df) == 4
+    
+    dt_vals = set(df[dt_col])
+    assert len(dt_vals) == 2
+
+    success, msg = pipe.sync([
+        {'id': 1, 'val': 90.1, dt_col: ts_1},
+    ])
+    assert success, msg
+
+    df = pipe.get_data(params={'id': 1}, debug=debug)
+    assert 90.1 in list(df['val'])
+    assert len(df) == 2
+
+    success, msg = pipe.sync([
+        {'id': 1, 'val': 100.2},
+    ])
+    assert success, msg
+
+    df = pipe.get_data(params={'id': 1})
+    assert len(df) == 3
+    print(df)

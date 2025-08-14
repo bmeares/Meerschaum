@@ -230,11 +230,9 @@ def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
     - query
     - sql
     """
-    import re
     import textwrap
     from meerschaum.utils.warnings import warn as _warn
-    from meerschaum.utils.misc import parse_arguments_str
-    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.pipes import replace_pipes_syntax
     if pipe.parameters.get('fetch', {}).get('definition', None):
         definition = pipe.parameters['fetch']['definition']
     elif pipe.parameters.get('definition', None):
@@ -251,21 +249,7 @@ def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
             )
         return None
 
-    def replace_pipe_match(pipe_match):
-        try:
-            args_str = pipe_match.group(1)
-            args, kwargs = parse_arguments_str(args_str)
-            pipe = mrsm.Pipe(*args, **kwargs)
-        except Exception as e:
-            if warn:
-                _warn(f"Failed to parse pipe from SQL definition:\n{e}")
-            raise e
-
-        target = pipe.target
-        schema = pipe.instance_connector.get_pipe_schema(pipe)
-        return sql_item_name(target, pipe.instance_connector.flavor, schema)
-
-    definition = re.sub(r'\{\{Pipe\((.*?)\)\}\}', replace_pipe_match, definition)
+    definition = replace_pipes_syntax(definition)
     return textwrap.dedent(definition.lstrip().rstrip())
 
 

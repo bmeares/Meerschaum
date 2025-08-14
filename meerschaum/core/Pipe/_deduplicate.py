@@ -67,19 +67,6 @@ def deduplicate(
 
     begin, end = self.parse_date_bounds(begin, end)
 
-    if self.cache_pipe is not None:
-        success, msg = self.cache_pipe.deduplicate(
-            begin=begin,
-            end=end,
-            params=params,
-            bounded=bounded,
-            debug=debug,
-            _use_instance_method=_use_instance_method,
-            **kwargs
-        )
-        if not success:
-            warn(msg)
-
     workers = self.get_num_workers(workers=workers)
     pool = get_pool(workers=workers)
 

@@ -9,7 +9,6 @@ Default actions available to the mrsm CLI.
 from __future__ import annotations
 from meerschaum.utils.typing import Callable, Any, Optional, Union, List, Dict, SuccessTuple
 from meerschaum.utils.packages import get_modules_from_package
-_custom_actions = []
 
 __all__ = (
     'get_action',
@@ -307,6 +306,8 @@ __all__ = ['actions', 'get_subactions', 'get_action', 'get_main_action_name', 'g
 ### functions that do not begin with '_' from all submodules.
 from inspect import getmembers, isfunction
 actions = {}
+_custom_actions_plugins: Dict[str, str] = {}
+_plugins_actions: Dict[str, List[str]] = {}
 
 for module in modules:
     ### A couple important things happening here:
@@ -329,8 +330,8 @@ for module in modules:
                         if isfunction(ob[1])
                             ### check that the function belongs to the module
                             and ob[0] == module.__name__.replace('_', '').split('.')[-1]
-                            ### skip functions that start with '_'
-                            and ob[0][0] != '_'
+                            ### skip functions that start with '__'
+                            and ob[0][0] != '__'
             ]
         )
     )
@@ -362,4 +363,5 @@ __pdoc__ = {
 }
 for a in actions:
     __pdoc__[a] = False
-meerschaum.plugins.load_plugins()
+
+meerschaum.plugins.load_plugins(skip_if_loaded=True)

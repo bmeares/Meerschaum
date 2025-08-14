@@ -7,7 +7,8 @@ Stop running jobs that were started with `-d` or `start job`.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, List, Dict, SuccessTuple, Any
+from meerschaum.utils.typing import Optional, List, SuccessTuple, Any, Union
+
 
 def stop(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
     """
@@ -16,6 +17,7 @@ def stop(action: Optional[List[str]] = None, **kw) -> SuccessTuple:
     from meerschaum.actions import choose_subaction
     options = {
         'jobs': _stop_jobs,
+        'daemons': _stop_daemons,
     }
     return choose_subaction(action, options, **kw)
 
@@ -52,7 +54,7 @@ def _complete_stop(
         return options[sub](action=action, **kw)
 
     from meerschaum._internal.shell import default_action_completer
-    return default_action_completer(action=(['start'] + action), **kw)
+    return default_action_completer(action=(['stop'] + action), **kw)
 
 
 def _stop_jobs(
@@ -111,6 +113,8 @@ def _stop_jobs(
         )
 
     if not jobs_to_stop:
+        if jobs:
+            return True, "The selected jobs are currently stopped."
         return False, "No running, paused or restarting jobs to stop."
 
     if not action:
@@ -158,6 +162,38 @@ def _stop_jobs(
         )
 
     return success, msg
+
+
+def _stop_daemons(
+    timeout_seconds: Union[int, float, None] = None,
+    debug: bool = False,
+    **kwargs
+) -> SuccessTuple:
+    """
+    Stop the Meerschaum CLI daemon.
+    """
+    import shutil
+    from meerschaum._internal.cli.workers import get_existing_cli_workers
+    from meerschaum.config.paths import CLI_RESOURCES_PATH
+    workers = get_existing_cli_workers()
+
+    for worker in workers:
+        stop_success, stop_msg = worker.job.stop(timeout_seconds=timeout_seconds, debug=debug)
+        if not stop_success:
+            return stop_success, stop_msg
+
+        cleanup_success, cleanup_msg = worker.cleanup(debug=debug)
+        if not cleanup_success:
+            return cleanup_success, cleanup_msg
+
+    try:
+        if CLI_RESOURCES_PATH.exists():
+            shutil.rmtree(CLI_RESOURCES_PATH)
+        CLI_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return False, f"Failed to clean up CLI resources directory.\n{e}"
+
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.

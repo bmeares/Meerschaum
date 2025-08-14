@@ -20,6 +20,7 @@ from meerschaum.utils.dtypes import (
     json_serialize_value,
     get_geometry_type_srid,
     attempt_cast_to_geometry,
+    get_next_precision_unit,
 )
 DEBUG: bool = True
 pd = import_pandas(debug=DEBUG)
@@ -34,7 +35,7 @@ shapely = mrsm.attempt_import('shapely')
         ('str', 'string', True),
         ('str', 'object', True),
         ('int', 'int32', True),
-        ('datetime64[ns, UTC]', 'Timestamp', True),
+        ('datetime64[ns, UTC]', 'datetime', True),
         ('float', 'float64', True),
         ('bool', 'bool[pyarrow]', True),
         ('Int64', 'int', True),
@@ -146,3 +147,115 @@ def test_parse_geometry_formats(input_data, expected_output):
     """
     output = attempt_cast_to_geometry(input_data)
     assert output == expected_output
+
+
+@pytest.mark.parametrize(
+    "input_dt_val,expected_output,kwargs",
+    [
+        (
+            "2026-01-01T12:00:00Z",
+            datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            {'as_pydatetime': True, 'coerce_utc': True},
+        ),
+        (
+            pd.Series(["2026-01-01T12:00:00Z"]),
+            pd.Series([pd.Timestamp("2026-01-01T12:00:00Z")]),
+            {},
+        ),
+        (
+            pd.Timestamp("2026-02-10"),
+            datetime(2026, 2, 10, tzinfo=timezone.utc),
+            {'as_pydatetime': True, 'coerce_utc': True},
+        ),
+        (
+            pd.Series([pd.Timestamp("2026-03-03")]),
+            pd.Series([pd.Timestamp("2026-03-03 00:00:00+0000", tz='UTC')]),
+            {'coerce_utc': True},
+        ),
+        (
+            pd.Series([pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02", tz='US/Eastern')]),
+            pd.Series([
+                pd.Timestamp("2026-01-01 00:00:00+0000", tz='UTC'),
+                pd.Timestamp("2026-01-02 05:00:00+0000", tz='UTC')
+            ]),
+            {'coerce_utc': True},
+        ),
+        (
+            pd.Series([datetime(2026, 1, 1), datetime(2026, 1, 2, tzinfo=timezone.utc)]),
+            pd.Series([
+                pd.Timestamp("2026-01-01 00:00:00+0000", tz='UTC'),
+                pd.Timestamp("2026-01-02 00:00:00+0000", tz='UTC'),
+            ]),
+            {'coerce_utc': True},
+        ),
+    ],
+)
+def test_to_datetime(input_dt_val, expected_output, kwargs):
+    """
+    Test the `to_datetime()` parsing.
+    """
+    from meerschaum.utils.dtypes import to_datetime
+    output_dt_val = to_datetime(input_dt_val, **kwargs)
+    if isinstance(output_dt_val, pd.Series):
+        assert output_dt_val.to_dict() == expected_output.to_dict()
+    else:
+        assert output_dt_val == expected_output
+
+
+@pytest.mark.parametrize(
+    "precision_unit,decrease,expected",
+    [
+        ('nanosecond', True, 'microsecond'),
+        ('ns', True, 'microsecond'),
+        ('microsecond', True, 'millisecond'),
+        ('us', True, 'millisecond'),
+        ('millisecond', True, 'second'),
+        ('ms', True, 'second'),
+        ('second', True, 'minute'),
+        ('s', True, 'minute'),
+        ('minute', True, 'hour'),
+        ('min', True, 'hour'),
+        ('hour', True, 'day'),
+        ('hr', True, 'day'),
+        ('day', False, 'hour'),
+        ('d', False, 'hour'),
+        ('hour', False, 'minute'),
+        ('h', False, 'minute'),
+        ('minute', False, 'second'),
+        ('m', False, 'second'),
+        ('second', False, 'millisecond'),
+        ('sec', False, 'millisecond'),
+        ('millisecond', False, 'microsecond'),
+        ('microsecond', False, 'nanosecond'),
+    ]
+)
+def test_get_next_precision(precision_unit, decrease, expected):
+    """
+    Test the `get_next_precision_unit()` function.
+    """
+    assert get_next_precision_unit(precision_unit, decrease=decrease) == expected
+
+
+@pytest.mark.parametrize(
+    "precision_unit,decrease",
+    [
+        ('day', True),
+        ('d', True),
+        ('nanosecond', False),
+        ('ns', False),
+    ]
+)
+def test_get_next_precision_unit_raises_value_error_at_bounds(precision_unit: str, decrease: bool):
+    """
+    Test that `get_next_precision_unit()` raises a `ValueError` at the bounds of the list.
+    """
+    with pytest.raises(ValueError):
+        get_next_precision_unit(precision_unit, decrease=decrease)
+
+
+def test_get_next_precision_unit_raises_value_error_for_invalid_precision():
+    """
+    Test that `get_next_precision_unit()` raises a `ValueError` for an invalid precision string.
+    """
+    with pytest.raises(ValueError):
+        get_next_precision_unit('invalid_precision')

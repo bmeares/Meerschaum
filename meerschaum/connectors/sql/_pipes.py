@@ -25,7 +25,6 @@ def register_pipe(
     Register a new pipe.
     A pipe's attributes must be set before registering.
     """
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import json_flavors
 
@@ -45,7 +44,7 @@ def register_pipe(
     ###    (which shouldn't be able to be registered anyway but that's an issue for later).
     parameters = None
     try:
-        parameters = pipe.parameters
+        parameters = pipe.get_parameters(apply_symlinks=False)
     except Exception as e:
         if debug:
             dprint(str(e))
@@ -76,7 +75,7 @@ def register_pipe(
 
 def edit_pipe(
     self,
-    pipe : mrsm.Pipe = None,
+    pipe: mrsm.Pipe,
     patch: bool = False,
     debug: bool = False,
     **kw : Any
@@ -108,10 +107,10 @@ def edit_pipe(
         original_parameters = Pipe(
             pipe.connector_keys, pipe.metric_key, pipe.location_key,
             mrsm_instance=pipe.instance_keys
-        ).parameters
+        ).get_parameters(apply_symlinks=False)
         parameters = apply_patch_to_config(
             original_parameters,
-            pipe.parameters
+            pipe._attributes['parameters']
         )
 
     ### ensure pipes table exists
@@ -147,8 +146,10 @@ def fetch_pipes_keys(
     location_keys: Optional[List[str]] = None,
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
-    debug: bool = False
-) -> Optional[List[Tuple[str, str, Optional[str]]]]:
+    debug: bool = False,
+) -> List[
+        Tuple[str, str, Union[str, None], Dict[str, Any]]
+    ]:
     """
     Return a list of tuples corresponding to the parameters provided.
 
@@ -163,18 +164,28 @@ def fetch_pipes_keys(
     location_keys: Optional[List[str]], default None
         List of location_keys to search by.
 
+    tags: Optional[List[str]], default None
+        List of pipes to search by.
+
     params: Optional[Dict[str, Any]], default None
         Dictionary of additional parameters to search by.
         E.g. `--params pipe_id:1`
 
     debug: bool, default False
         Verbosity toggle.
+
+    Returns
+    -------
+    A list of tuples of pipes' keys and parameters (connector_keys, metric_key, location_key, parameters).
     """
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.misc import separate_negation_values
-    from meerschaum.utils.sql import OMIT_NULLSFIRST_FLAVORS, table_exists
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum.utils.sql import (
+        OMIT_NULLSFIRST_FLAVORS,
+        table_exists,
+        json_flavors,
+    )
+    from meerschaum._internal.static import STATIC_CONFIG
     import json
     from copy import deepcopy
     sqlalchemy, sqlalchemy_sql_functions = attempt_import(
@@ -240,11 +251,18 @@ def fetch_pipes_keys(
         ) for key, val in _params.items()
         if not isinstance(val, (list, tuple)) and key in pipes_tbl.c
     ]
+    if self.flavor in json_flavors:
+        sqlalchemy_dialects = mrsm.attempt_import('sqlalchemy.dialects', lazy=False)
+        JSONB = sqlalchemy_dialects.postgresql.JSONB
+    else:
+        JSONB = sqlalchemy.String
+
     select_cols = (
         [
             pipes_tbl.c.connector_keys,
             pipes_tbl.c.metric_key,
             pipes_tbl.c.location_key,
+            pipes_tbl.c.parameters,
         ]
     )
 
@@ -261,25 +279,43 @@ def fetch_pipes_keys(
     in_ex_tag_groups = [separate_negation_values(tag_group) for tag_group in tag_groups]
 
     ors, nands = [], []
-    for _in_tags, _ex_tags in in_ex_tag_groups:
-        sub_ands = []
-        for nt in _in_tags:
-            sub_ands.append(
-                sqlalchemy.cast(
-                    pipes_tbl.c['parameters'],
-                    sqlalchemy.String,
-                ).like(f'%"tags":%"{nt}"%')
-            )
-        if sub_ands:
-            ors.append(sqlalchemy.and_(*sub_ands))
+    if self.flavor in json_flavors:
+        tags_jsonb = pipes_tbl.c['parameters'].cast(JSONB).op('->')('tags').cast(JSONB)
+        for _in_tags, _ex_tags in in_ex_tag_groups:
+            if _in_tags:
+                ors.append(
+                    sqlalchemy.and_(
+                        tags_jsonb.contains(_in_tags)
+                    )
+                )
+            for xt in _ex_tags:
+                nands.append(
+                    sqlalchemy.not_(
+                        sqlalchemy.and_(
+                            tags_jsonb.contains([xt])
+                        )
+                    )
+                )
+    else:
+        for _in_tags, _ex_tags in in_ex_tag_groups:
+            sub_ands = []
+            for nt in _in_tags:
+                sub_ands.append(
+                    sqlalchemy.cast(
+                        pipes_tbl.c['parameters'],
+                        sqlalchemy.String,
+                    ).like(f'%"tags":%"{nt}"%')
+                )
+            if sub_ands:
+                ors.append(sqlalchemy.and_(*sub_ands))
 
-        for xt in _ex_tags:
-            nands.append(
-                sqlalchemy.cast(
-                    pipes_tbl.c['parameters'],
-                    sqlalchemy.String,
-                ).not_like(f'%"tags":%"{xt}"%')
-            )
+            for xt in _ex_tags:
+                nands.append(
+                    sqlalchemy.cast(
+                        pipes_tbl.c['parameters'],
+                        sqlalchemy.String,
+                    ).not_like(f'%"tags":%"{xt}"%')
+                )
 
     q = q.where(sqlalchemy.and_(*nands)) if nands else q
     q = q.where(sqlalchemy.or_(*ors)) if ors else q
@@ -294,7 +330,7 @@ def fetch_pipes_keys(
 
     ### execute the query and return a list of tuples
     if debug:
-        dprint(q.compile(compile_kwargs={'literal_binds': True}))
+        dprint(q)
     try:
         rows = (
             self.execute(q).fetchall()
@@ -307,7 +343,7 @@ def fetch_pipes_keys(
     except Exception as e:
         error(str(e))
 
-    return [(row[0], row[1], row[2]) for row in rows]
+    return rows
 
 
 def create_pipe_indices(
@@ -338,7 +374,9 @@ def create_indices(
     """
     Create a pipe's indices.
     """
-    from meerschaum.utils.debug import dprint
+    if pipe.__dict__.get('_skip_check_indices', False):
+        return True
+
     if debug:
         dprint(f"Creating indices for {pipe}...")
 
@@ -348,7 +386,7 @@ def create_indices(
 
     cols_to_include = set((columns or []) + (indices or [])) or None
 
-    _ = pipe.__dict__.pop('_columns_indices', None)
+    pipe._clear_cache_key('_columns_indices', debug=debug)
     ix_queries = {
         col: queries
         for col, queries in self.get_create_index_queries(pipe, debug=debug).items()
@@ -392,7 +430,6 @@ def drop_indices(
     """
     Drop a pipe's indices.
     """
-    from meerschaum.utils.debug import dprint
     if debug:
         dprint(f"Dropping indices for {pipe}...")
 
@@ -425,7 +462,7 @@ def get_pipe_index_names(self, pipe: mrsm.Pipe) -> Dict[str, str]:
     -------
     A dictionary of index keys to column names.
     """
-    from meerschaum.utils.sql import DEFAULT_SCHEMA_FLAVORS
+    from meerschaum.utils.sql import DEFAULT_SCHEMA_FLAVORS, truncate_item_name
     _parameters = pipe.parameters
     _index_template = _parameters.get('index_template', "IX_{schema_str}{target}_{column_names}")
     _schema = self.get_pipe_schema(pipe)
@@ -466,7 +503,7 @@ def get_pipe_index_names(self, pipe: mrsm.Pipe) -> Dict[str, str]:
             continue
         seen_index_names[index_name] = ix
     return {
-        ix: index_name
+        ix: truncate_item_name(index_name, flavor=self.flavor)
         for index_name, ix in seen_index_names.items()
     }
 
@@ -603,7 +640,10 @@ def get_create_index_queries(
     ### create datetime index
     dt_query = None
     if _datetime is not None:
-        if self.flavor == 'timescaledb' and pipe.parameters.get('hypertable', True):
+        if (
+            self.flavor in ('timescaledb', 'timescaledb-ha')
+            and pipe.parameters.get('hypertable', True)
+        ):
             _id_count = (
                 get_distinct_col_count(_id, f"SELECT {_id_name} FROM {_pipe_name}", self)
                 if (_id is not None and _create_space_partition) else None
@@ -719,7 +759,7 @@ def get_create_index_queries(
                         f"ADD CONSTRAINT {primary_key_constraint_name} PRIMARY KEY ({primary_key_name})"
                     )
                 ])
-            elif self.flavor == 'timescaledb':
+            elif self.flavor in ('timescaledb', 'timescaledb-ha'):
                 primary_queries.extend([
                     (
                         f"ALTER TABLE {_pipe_name}\n"
@@ -758,7 +798,7 @@ def get_create_index_queries(
 
     ### create id index
     if _id_name is not None:
-        if self.flavor == 'timescaledb':
+        if self.flavor in ('timescaledb', 'timescaledb-ha'):
             ### Already created indices via create_hypertable.
             id_query = (
                 None if (_id is not None and _create_space_partition)
@@ -797,7 +837,7 @@ def get_create_index_queries(
 
         cols_names_str = ", ".join(cols_names)
         index_query_params_clause = f" ({cols_names_str})"
-        if self.flavor == 'postgis':
+        if self.flavor in ('postgis', 'timescaledb-ha'):
             for col in cols:
                 col_typ = existing_cols_pd_types.get(cols[0], 'object')
                 if col_typ != 'object' and are_dtypes_equal(col_typ, 'geometry'):
@@ -1005,6 +1045,8 @@ def get_pipe_data(
     limit: Optional[int] = None,
     begin_add_minutes: int = 0,
     end_add_minutes: int = 0,
+    chunksize: Optional[int] = -1,
+    as_iterator: bool = False,
     debug: bool = False,
     **kw: Any
 ) -> Union[pd.DataFrame, None]:
@@ -1041,13 +1083,16 @@ def get_pipe_data(
         If specified, limit the number of rows retrieved to this value.
 
     begin_add_minutes: int, default 0
-        The number of minutes to add to the `begin` datetime (i.e. `DATEADD`.
+        The number of minutes to add to the `begin` datetime (i.e. `DATEADD`).
 
     end_add_minutes: int, default 0
-        The number of minutes to add to the `end` datetime (i.e. `DATEADD`.
+        The number of minutes to add to the `end` datetime (i.e. `DATEADD`).
 
     chunksize: Optional[int], default -1
         The size of dataframe chunks to load into memory.
+
+    as_iterator: bool, default False
+        If `True`, return the chunks iterator directly.
 
     debug: bool, default False
         Verbosity toggle.
@@ -1057,43 +1102,58 @@ def get_pipe_data(
     A `pd.DataFrame` of the pipe's data.
 
     """
-    import json
-    from meerschaum.utils.misc import parse_df_datetimes, to_pandas_dtype
+    import functools
     from meerschaum.utils.packages import import_pandas
-    from meerschaum.utils.dtypes import (
-        attempt_cast_to_numeric,
-        attempt_cast_to_uuid,
-        attempt_cast_to_bytes,
-        attempt_cast_to_geometry,
-        are_dtypes_equal,
-    )
+    from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     pd = import_pandas()
     is_dask = 'dask' in pd.__name__
 
     cols_types = pipe.get_columns_types(debug=debug) if pipe.enforce else {}
-    dtypes = {
-        **{
-            p_col: to_pandas_dtype(p_typ)
-            for p_col, p_typ in pipe.dtypes.items()
-        },
-        **{
-            col: get_pd_type_from_db_type(typ)
-            for col, typ in cols_types.items()
-        }
-    } if pipe.enforce else {}
-    if dtypes:
-        if self.flavor == 'sqlite':
-            if not pipe.columns.get('datetime', None):
-                _dt = pipe.guess_datetime()
-            else:
-                _dt = pipe.get_columns('datetime')
+    pipe_dtypes = pipe.get_dtypes(infer=False, debug=debug) if pipe.enforce else {}
 
-            if _dt:
-                dt_type = dtypes.get(_dt, 'object').lower()
-                if 'datetime' not in dt_type:
-                    if 'int' not in dt_type:
-                        dtypes[_dt] = 'datetime64[ns, UTC]'
+    remote_pandas_types = {
+        col: to_pandas_dtype(get_pd_type_from_db_type(typ))
+        for col, typ in cols_types.items()
+    }
+    remote_dt_cols_types = {
+        col: typ
+        for col, typ in remote_pandas_types.items()
+        if are_dtypes_equal(typ, 'datetime')
+    }
+    remote_dt_tz_aware_cols_types = {
+        col: typ
+        for col, typ in remote_dt_cols_types.items()
+        if ',' in typ or typ == 'datetime'
+    }
+    remote_dt_tz_naive_cols_types = {
+        col: typ
+        for col, typ in remote_dt_cols_types.items()
+        if col not in remote_dt_tz_aware_cols_types
+    }
+
+    configured_pandas_types = {
+        col: to_pandas_dtype(typ)
+        for col, typ in pipe_dtypes.items()
+    }
+    configured_lower_precision_dt_cols_types = {
+        col: typ
+        for col, typ in pipe_dtypes.items()
+        if (
+            are_dtypes_equal('datetime', typ)
+            and '[' in typ
+            and 'ns' not in typ
+        )
+        
+    }
+
+    dtypes = {
+        **remote_pandas_types,
+        **configured_pandas_types,
+        **remote_dt_tz_aware_cols_types,
+        **remote_dt_tz_naive_cols_types,
+        **configured_lower_precision_dt_cols_types
+    } if pipe.enforce else {}
 
     existing_cols = cols_types.keys()
     select_columns = (
@@ -1110,13 +1170,20 @@ def get_pipe_data(
             and col not in (omit_columns or [])
         ]
     ) if pipe.enforce else select_columns
+
     if select_columns:
         dtypes = {col: typ for col, typ in dtypes.items() if col in select_columns}
+
     dtypes = {
-        col: to_pandas_dtype(typ)
+        col: typ
         for col, typ in dtypes.items()
-        if col in select_columns and col not in (omit_columns or [])
+        if col in (select_columns or [col]) and col not in (omit_columns or [])
     } if pipe.enforce else {}
+
+    if debug:
+        dprint(f"[{self}] `read()` dtypes:")
+        mrsm.pprint(dtypes)
+
     query = self.get_pipe_data_query(
         pipe,
         select_columns=select_columns,
@@ -1132,91 +1199,25 @@ def get_pipe_data(
         **kw
     )
 
+    read_kwargs = {}
     if is_dask:
         index_col = pipe.columns.get('datetime', None)
-        kw['index_col'] = index_col
+        read_kwargs['index_col'] = index_col
 
-    numeric_columns = [
-        col
-        for col, typ in pipe.dtypes.items()
-        if typ.startswith('numeric') and col in dtypes
-    ]
-    uuid_columns = [
-        col
-        for col, typ in pipe.dtypes.items()
-        if typ == 'uuid' and col in dtypes
-    ]
-    bytes_columns = [
-        col
-        for col, typ in pipe.dtypes.items()
-        if typ == 'bytes' and col in dtypes
-    ]
-    geometry_columns = [
-        col
-        for col, typ in pipe.dtypes.items()
-        if typ.startswith('geometry') and col in dtypes
-    ]
-
-    kw['coerce_float'] = kw.get('coerce_float', (len(numeric_columns) == 0))
-
-    df = self.read(
+    chunks = self.read(
         query,
+        chunksize=chunksize,
+        as_iterator=True,
+        coerce_float=False,
         dtype=dtypes,
         debug=debug,
-        **kw
+        **read_kwargs
     )
-    for col in numeric_columns:
-        if col not in df.columns:
-            continue
-        df[col] = df[col].apply(attempt_cast_to_numeric)
 
-    for col in uuid_columns:
-        if col not in df.columns:
-            continue
-        df[col] = df[col].apply(attempt_cast_to_uuid)
+    if as_iterator:
+        return chunks
 
-    for col in bytes_columns:
-        if col not in df.columns:
-            continue
-        df[col] = df[col].apply(attempt_cast_to_bytes)
-
-    for col in geometry_columns:
-        if col not in df.columns:
-            continue
-        df[col] = df[col].apply(attempt_cast_to_geometry)
-
-    if self.flavor == 'sqlite':
-        ignore_dt_cols = [
-            col
-            for col, dtype in pipe.dtypes.items()
-            if not are_dtypes_equal(str(dtype), 'datetime')
-        ]
-        ### NOTE: We have to consume the iterator here to ensure that datetimes are parsed correctly
-        df = (
-            parse_df_datetimes(
-                df,
-                ignore_cols=ignore_dt_cols,
-                chunksize=kw.get('chunksize', None),
-                strip_timezone=(pipe.tzinfo is None),
-                debug=debug,
-            ) if isinstance(df, pd.DataFrame) else (
-                [
-                    parse_df_datetimes(
-                        c,
-                        ignore_cols=ignore_dt_cols,
-                        chunksize=kw.get('chunksize', None),
-                        strip_timezone=(pipe.tzinfo is None),
-                        debug=debug,
-                    )
-                    for c in df
-                ]
-            )
-        )
-        for col, typ in dtypes.items():
-            if typ != 'json':
-                continue
-            df[col] = df[col].apply(lambda x: json.loads(x) if x is not None else x)
-    return df
+    return pd.concat(chunks)
 
 
 def get_pipe_data_query(
@@ -1419,7 +1420,7 @@ def get_pipe_data_query(
             if k in existing_cols or skip_existing_cols_check
         }
         if valid_params:
-            where += build_where(valid_params, self).replace(
+            where += '    ' + build_where(valid_params, self).lstrip().replace(
                 'WHERE', ('    AND' if is_dt_bound else "    ")
             )
 
@@ -1503,7 +1504,7 @@ def get_pipe_attributes(
     """
     from meerschaum.connectors.sql.tables import get_tables
     from meerschaum.utils.packages import attempt_import
-    sqlalchemy = attempt_import('sqlalchemy')
+    sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
     if pipe.get_id(debug=debug) is None:
         return {}
@@ -1514,16 +1515,16 @@ def get_pipe_attributes(
         q = sqlalchemy.select(pipes_tbl).where(pipes_tbl.c.pipe_id == pipe.id)
         if debug:
             dprint(q)
-        attributes = (
-            dict(self.exec(q, silent=True, debug=debug).first()._mapping)
+        rows = (
+            self.exec(q, silent=True, debug=debug).mappings().all()
             if self.flavor != 'duckdb'
-            else self.read(q, debug=debug).to_dict(orient='records')[0]
+            else self.read(q, debug=debug).to_dict(orient='records')
         )
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        warn(e)
-        print(pipe)
+        if not rows:
+            return {}
+        attributes = dict(rows[0])
+    except Exception:
+        warn(traceback.format_exc())
         return {}
 
     ### handle non-PostgreSQL databases (text vs JSON)
@@ -1549,13 +1550,7 @@ def create_pipe_table_from_df(
     """
     Create a pipe's table from its configured dtypes and an incoming dataframe.
     """
-    from meerschaum.utils.dataframe import (
-        get_json_cols,
-        get_numeric_cols,
-        get_uuid_cols,
-        get_datetime_cols,
-        get_bytes_cols,
-    )
+    from meerschaum.utils.dataframe import get_special_cols
     from meerschaum.utils.sql import (
         get_create_table_queries,
         sql_item_name,
@@ -1584,30 +1579,7 @@ def create_pipe_table_from_df(
             for col_ix, col in pipe.columns.items()
             if col and col_ix != 'primary'
         },
-        **{
-            col: 'uuid'
-            for col in get_uuid_cols(df)
-        },
-        **{
-            col: 'json'
-            for col in get_json_cols(df)
-        },
-        **{
-            col: 'numeric'
-            for col in get_numeric_cols(df)
-        },
-        **{
-            col: 'bytes'
-            for col in get_bytes_cols(df)
-        },
-        **{
-            col: 'datetime64[ns, UTC]'
-            for col in get_datetime_cols(df, timezone_aware=True, timezone_naive=False)
-        },
-        **{
-            col: 'datetime64[ns]'
-            for col in get_datetime_cols(df, timezone_aware=False, timezone_naive=True)
-        },
+        **get_special_cols(df),
         **pipe.dtypes
     }
     autoincrement = (
@@ -1648,8 +1620,8 @@ def sync_pipe(
     self,
     pipe: mrsm.Pipe,
     df: Union[pd.DataFrame, str, Dict[Any, Any], None] = None,
-    begin: Optional[datetime] = None,
-    end: Optional[datetime] = None,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
     chunksize: Optional[int] = -1,
     check_existing: bool = True,
     blocking: bool = True,
@@ -1669,11 +1641,11 @@ def sync_pipe(
         An optional DataFrame or equivalent to sync into the pipe.
         Defaults to `None`.
 
-    begin: Optional[datetime], default None
+    begin: Union[datetime, int, None], default None
         Optionally specify the earliest datetime to search for data.
         Defaults to `None`.
 
-    end: Optional[datetime], default None
+    end: Union[datetime, int, None], default None
         Optionally specify the latest datetime to search for data.
         Defaults to `None`.
 
@@ -1707,8 +1679,9 @@ def sync_pipe(
         UPDATE_QUERIES,
         get_reset_autoincrement_queries,
     )
-    from meerschaum.utils.dtypes import are_dtypes_equal
+    from meerschaum.utils.dtypes import get_current_timestamp
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
+    from meerschaum.utils.dataframe import get_special_cols
     from meerschaum import Pipe
     import time
     import copy
@@ -1720,6 +1693,7 @@ def sync_pipe(
 
     start = time.perf_counter()
     pipe_name = sql_item_name(pipe.target, self.flavor, schema=self.get_pipe_schema(pipe))
+    dtypes = pipe.get_dtypes(debug=debug)
 
     if not pipe.temporary and not pipe.get_id(debug=debug):
         register_tuple = pipe.register(debug=debug)
@@ -1736,6 +1710,7 @@ def sync_pipe(
             df,
             chunksize=chunksize,
             safe_copy=kw.get('safe_copy', False),
+            dtypes=dtypes,
             debug=debug,
         )
 
@@ -1748,36 +1723,17 @@ def sync_pipe(
         ### Check for new columns.
         add_cols_queries = self.get_add_columns_queries(pipe, df, debug=debug)
         if add_cols_queries:
-            _ = pipe.__dict__.pop('_columns_indices', None)
-            _ = pipe.__dict__.pop('_columns_types', None)
+            pipe._clear_cache_key('_columns_types', debug=debug)
+            pipe._clear_cache_key('_columns_indices', debug=debug)
             if not self.exec_queries(add_cols_queries, debug=debug):
                 warn(f"Failed to add new columns to {pipe}.")
 
         alter_cols_queries = self.get_alter_columns_queries(pipe, df, debug=debug)
         if alter_cols_queries:
-            _ = pipe.__dict__.pop('_columns_indices', None)
-            _ = pipe.__dict__.pop('_columns_types', None)
+            pipe._clear_cache_key('_columns_types', debug=debug)
+            pipe._clear_cache_key('_columns_types', debug=debug)
             if not self.exec_queries(alter_cols_queries, debug=debug):
                 warn(f"Failed to alter columns for {pipe}.")
-            else:
-                _ = pipe.infer_dtypes(persist=True)
-
-    ### NOTE: Oracle SQL < 23c (2023) and SQLite does not support booleans,
-    ### so infer bools and persist them to `dtypes`.
-    if self.flavor in ('oracle', 'sqlite', 'mysql', 'mariadb'):
-        pipe_dtypes = pipe.dtypes
-        new_bool_cols = {
-            col: 'bool[pyarrow]'
-            for col, typ in df.dtypes.items()
-            if col not in pipe_dtypes
-            and are_dtypes_equal(str(typ), 'bool')
-        }
-        pipe_dtypes.update(new_bool_cols)
-        pipe.dtypes = pipe_dtypes
-        if new_bool_cols and not pipe.temporary:
-            infer_bool_success, infer_bool_msg = pipe.edit(debug=debug)
-            if not infer_bool_success:
-                return infer_bool_success, infer_bool_msg
 
     upsert = pipe.parameters.get('upsert', False) and (self.flavor + '-upsert') in UPDATE_QUERIES
     if upsert:
@@ -1807,7 +1763,7 @@ def sync_pipe(
     if 'name' in kw:
         kw.pop('name')
 
-    ### Insert new data into Pipe's table.
+    ### Insert new data into the target table.
     unseen_kw = copy.deepcopy(kw)
     unseen_kw.update({
         'name': pipe.target,
@@ -1828,15 +1784,17 @@ def sync_pipe(
             is_new
             and primary_key
             and primary_key
-            not in pipe.dtypes
+            not in dtypes
             and primary_key not in unseen_df.columns
         )
     )
     if autoincrement and autoincrement not in pipe.parameters:
-        pipe.parameters['autoincrement'] = autoincrement
-        edit_success, edit_msg = pipe.edit(debug=debug)
-        if not edit_success:
-            return edit_success, edit_msg
+        update_success, update_msg = pipe.update_parameters(
+            {'autoincrement': autoincrement},
+            debug=debug,
+        )
+        if not update_success:
+            return update_success, update_msg
 
     def _check_pk(_df_to_clear):
         if _df_to_clear is None:
@@ -1926,6 +1884,14 @@ def sync_pipe(
             label=('update' if not upsert else 'upsert'),
         )
         self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
+        update_dtypes = {
+            **{
+                col: str(typ)
+                for col, typ in update_df.dtypes.items()
+            },
+            **get_special_cols(update_df)
+        }
+
         temp_pipe = Pipe(
             pipe.connector_keys.replace(':', '_') + '_', pipe.metric_key, pipe.location_key,
             instance=pipe.instance_keys,
@@ -1934,34 +1900,30 @@ def sync_pipe(
                 for ix_key, ix in pipe.columns.items()
                 if ix and ix in update_df.columns
             },
-            dtypes={
-                col: typ
-                for col, typ in pipe.dtypes.items()
-                if col in update_df.columns
-            },
+            dtypes=update_dtypes,
             target=temp_target,
             temporary=True,
             enforce=False,
             static=True,
             autoincrement=False,
+            cache=False,
             parameters={
                 'schema': self.internal_schema,
                 'hypertable': False,
             },
         )
-        temp_pipe.__dict__['_columns_types'] = {
-            col: get_db_type_from_pd_type(
-                pipe.dtypes.get(col, str(typ)),
-                self.flavor,
-            )
-            for col, typ in update_df.dtypes.items()
+        _temp_columns_types = {
+            col: get_db_type_from_pd_type(typ, self.flavor)
+            for col, typ in update_dtypes.items()
         }
-        now_ts = time.perf_counter()
-        temp_pipe.__dict__['_columns_types_timestamp'] = now_ts
-        temp_pipe.__dict__['_skip_check_indices'] = True
+        temp_pipe._cache_value('_columns_types', _temp_columns_types, memory_only=True, debug=debug)
+        temp_pipe._cache_value('_skip_check_indices', True, memory_only=True, debug=debug)
+        now_ts = get_current_timestamp('ms', as_int=True) / 1000
+        temp_pipe._cache_value('_columns_types_timestamp', now_ts, memory_only=True, debug=debug)
         temp_success, temp_msg = temp_pipe.sync(update_df, check_existing=False, debug=debug)
         if not temp_success:
             return temp_success, temp_msg
+
         existing_cols = pipe.get_columns_types(debug=debug)
         join_cols = [
             col
@@ -1969,7 +1931,11 @@ def sync_pipe(
             if col and col in existing_cols
         ] if not primary_key or self.flavor == 'oracle' else (
             [dt_col, primary_key]
-            if self.flavor == 'timescaledb' and dt_col and dt_col in update_df.columns
+            if (
+                self.flavor in ('timescaledb', 'timescaledb-ha')
+                and dt_col
+                and dt_col in update_df.columns
+            )
             else [primary_key]
         )
         update_queries = get_update_queries(
@@ -1980,6 +1946,8 @@ def sync_pipe(
             upsert=upsert,
             schema=self.get_pipe_schema(pipe),
             patch_schema=self.internal_schema,
+            target_cols_types=pipe.get_columns_types(debug=debug),
+            patch_cols_types=_temp_columns_types,
             datetime_col=(dt_col if dt_col in update_df.columns else None),
             identity_insert=(autoincrement and primary_key in update_df.columns),
             null_indices=pipe.null_indices,
@@ -2267,13 +2235,13 @@ def sync_pipe_inplace(
 
     add_cols_queries = self.get_add_columns_queries(pipe, new_cols, debug=debug)
     if add_cols_queries:
-        _ = pipe.__dict__.pop('_columns_types', None)
-        _ = pipe.__dict__.pop('_columns_indices', None)
+        pipe._clear_cache_key('_columns_types', debug=debug)
+        pipe._clear_cache_key('_columns_indices', debug=debug)
         self.exec_queries(add_cols_queries, debug=debug)
 
     alter_cols_queries = self.get_alter_columns_queries(pipe, new_cols, debug=debug)
     if alter_cols_queries:
-        _ = pipe.__dict__.pop('_columns_types', None)
+        pipe._clear_cache_key('_columns_types', debug=debug)
         self.exec_queries(alter_cols_queries, debug=debug)
 
     insert_queries = [
@@ -2576,6 +2544,8 @@ def sync_pipe_inplace(
             upsert=upsert,
             schema=self.get_pipe_schema(pipe),
             patch_schema=internal_schema,
+            target_cols_types=pipe.get_columns_types(debug=debug),
+            patch_cols_types=delta_cols_types,
             datetime_col=pipe.columns.get('datetime', None),
             flavor=self.flavor,
             null_indices=pipe.null_indices,
@@ -2779,7 +2749,6 @@ def pipe_exists(
         debug=debug,
     )
     if debug:
-        from meerschaum.utils.debug import dprint
         dprint(f"{pipe} " + ('exists.' if exists else 'does not exist.'))
     return exists
 
@@ -2832,7 +2801,6 @@ def get_pipe_rowcount(
         if 'definition' not in pipe.parameters['fetch']:
             error(msg)
             return None
-
 
     flavor = self.flavor if not remote else pipe.connector.flavor
     conn = self if not remote else pipe.connector
@@ -3068,6 +3036,7 @@ def get_pipe_table(
     from meerschaum.utils.sql import get_sqlalchemy_table
     if not pipe.exists(debug=debug):
         return None
+
     return get_sqlalchemy_table(
         pipe.target,
         connector=self,
@@ -3117,11 +3086,19 @@ def get_pipe_columns_types(
             debug=debug,
         )
 
+    if debug:
+        dprint(f"Fetching columns_types for {pipe} with via SQLAlchemy table.")
+
     table_columns = {}
     try:
         pipe_table = self.get_pipe_table(pipe, debug=debug)
         if pipe_table is None:
             return {}
+
+        if debug:
+            dprint("Found columns:")
+            mrsm.pprint(dict(pipe_table.columns))
+
         for col in pipe_table.columns:
             table_columns[str(col.name)] = str(col.type)
     except Exception as e:
@@ -3153,6 +3130,7 @@ def get_pipe_columns_indices(
     """
     if pipe.__dict__.get('_skip_check_indices', False):
         return {}
+
     from meerschaum.utils.sql import get_table_cols_indices
     return get_table_cols_indices(
         pipe.target,
@@ -3207,7 +3185,6 @@ def get_add_columns_queries(
         get_db_type_from_pd_type,
     )
     from meerschaum.utils.misc import flatten_list
-    table_obj = self.get_pipe_table(pipe, debug=debug)
     is_dask = 'dask' in df.__module__ if not isinstance(df, dict) else False
     if is_dask:
         df = df.partitions[0].compute()
@@ -3231,9 +3208,6 @@ def get_add_columns_queries(
             elif isinstance(val, str):
                 df_cols_types[col] = 'str'
     db_cols_types = {
-        col: get_pd_type_from_db_type(str(typ.type))
-        for col, typ in table_obj.columns.items()
-    } if table_obj is not None else {
         col: get_pd_type_from_db_type(typ)
         for col, typ in get_table_cols_types(
             pipe.target,
@@ -3313,10 +3287,9 @@ def get_alter_columns_queries(
     -------
     A list of the `ALTER TABLE` SQL query or queries to be executed on the provided connector.
     """
-    if not pipe.exists(debug=debug):
+    if not pipe.exists(debug=debug) or pipe.static:
         return []
-    if pipe.static:
-        return
+
     from meerschaum.utils.sql import (
         sql_item_name,
         get_table_cols_types,
@@ -3330,7 +3303,6 @@ def get_alter_columns_queries(
         get_db_type_from_pd_type,
     )
     from meerschaum.utils.misc import flatten_list, generate_password, items_str
-    table_obj = self.get_pipe_table(pipe, debug=debug)
     target = pipe.target
     session_id = generate_password(3)
     numeric_cols = (
@@ -3351,9 +3323,6 @@ def get_alter_columns_queries(
         else df
     )
     db_cols_types = {
-        col: get_pd_type_from_db_type(str(typ.type))
-        for col, typ in table_obj.columns.items()
-    } if table_obj is not None else {
         col: get_pd_type_from_db_type(typ)
         for col, typ in get_table_cols_types(
             pipe.target,
@@ -3362,7 +3331,8 @@ def get_alter_columns_queries(
             debug=debug,
         ).items()
     }
-    pipe_bool_cols = [col for col, typ in pipe.dtypes.items() if are_dtypes_equal(str(typ), 'bool')]
+    pipe_dtypes = pipe.get_dtypes(debug=debug)
+    pipe_bool_cols = [col for col, typ in pipe_dtypes.items() if are_dtypes_equal(str(typ), 'bool')]
     pd_db_df_aliases = {
         'int': 'bool',
         'float': 'bool',
@@ -3370,7 +3340,11 @@ def get_alter_columns_queries(
         'guid': 'object',
     }
     if self.flavor == 'oracle':
-        pd_db_df_aliases['int'] = 'numeric'
+        pd_db_df_aliases.update({
+            'int': 'numeric',
+            'date': 'datetime',
+            'numeric': 'int',
+        })
 
     altered_cols = {
         col: (db_cols_types.get(col, 'object'), typ)
@@ -3379,11 +3353,33 @@ def get_alter_columns_queries(
         and not are_dtypes_equal(db_cols_types.get(col, 'object'), 'string')
     }
 
+    if debug and altered_cols:
+        dprint("Columns to be altered:")
+        mrsm.pprint(altered_cols)
+
+    ### NOTE: Special columns (numerics, bools, etc.) are captured and cached upon detection.
+    new_special_cols = pipe._get_cached_value('new_special_cols', debug=debug) or {}
+    new_special_db_cols_types = {
+        col: (db_cols_types.get(col, 'object'), typ)
+        for col, typ in new_special_cols.items()
+    }
+    if debug:
+        dprint("Cached new special columns:")
+        mrsm.pprint(new_special_cols)
+        dprint("New special columns db types:")
+        mrsm.pprint(new_special_db_cols_types)
+
+    altered_cols.update(new_special_db_cols_types)
+
     ### NOTE: Sometimes bools are coerced into ints or floats.
     altered_cols_to_ignore = set()
     for col, (db_typ, df_typ) in altered_cols.items():
         for db_alias, df_alias in pd_db_df_aliases.items():
-            if db_alias in db_typ.lower() and df_alias in df_typ.lower():
+            if (
+                db_alias in db_typ.lower()
+                and df_alias in df_typ.lower()
+                and col not in new_special_cols
+            ):
                 altered_cols_to_ignore.add(col)
 
     ### Oracle's bool handling sometimes mixes NUMBER and INT.
@@ -3405,21 +3401,29 @@ def get_alter_columns_queries(
         if db_is_bool_compatible and df_is_bool_compatible:
             altered_cols_to_ignore.add(bool_col)
 
+    if debug and altered_cols_to_ignore:
+        dprint("Ignoring the following altered columns (false positives).")
+        mrsm.pprint(altered_cols_to_ignore)
+
     for col in altered_cols_to_ignore:
         _ = altered_cols.pop(col, None)
+
     if not altered_cols:
         return []
 
     if numeric_cols:
-        pipe.dtypes.update({col: 'numeric' for col in numeric_cols})
-        edit_success, edit_msg = pipe.edit(debug=debug)
-        if not edit_success:
-            warn(
-                f"Failed to update dtypes for numeric columns {items_str(numeric_cols)}:\n"
-                + f"{edit_msg}"
-            )
+        explicit_pipe_dtypes = pipe.get_dtypes(infer=False, debug=debug)
+        explicit_pipe_dtypes.update({col: 'numeric' for col in numeric_cols})
+        pipe.dtypes = explicit_pipe_dtypes
+        if not pipe.temporary:
+            edit_success, edit_msg = pipe.edit(debug=debug)
+            if not edit_success:
+                warn(
+                    f"Failed to update dtypes for numeric columns {items_str(numeric_cols)}:\n"
+                    + f"{edit_msg}"
+                )
     else:
-        numeric_cols.extend([col for col, typ in pipe.dtypes.items() if typ.startswith('numeric')])
+        numeric_cols.extend([col for col, typ in pipe_dtypes.items() if typ.startswith('numeric')])
 
     numeric_type = get_db_type_from_pd_type('numeric', self.flavor, as_sqlalchemy=False)
     text_type = get_db_type_from_pd_type('str', self.flavor, as_sqlalchemy=False)
@@ -3445,12 +3449,12 @@ def get_alter_columns_queries(
             + sql_item_name(target, self.flavor, self.get_pipe_schema(pipe))
             + " (\n"
         )
-        for col_name, col_obj in table_obj.columns.items():
+        for col_name, col_typ in db_cols_types.items():
             create_query += (
                 sql_item_name(col_name, self.flavor, None)
                 + " "
                 + (
-                    str(col_obj.type)
+                    col_typ
                     if col_name not in altered_cols
                     else altered_cols_types[col_name]
                 )
@@ -3464,12 +3468,12 @@ def get_alter_columns_queries(
             + ' ('
             + ', '.join([
                 sql_item_name(col_name, self.flavor, None)
-                for col_name, _ in table_obj.columns.items()
+                for col_name in db_cols_types
             ])
             + ')'
             + "\nSELECT\n"
         )
-        for col_name, col_obj in table_obj.columns.items():
+        for col_name in db_cols_types:
             new_col_str = (
                 sql_item_name(col_name, self.flavor, None)
                 if col_name not in altered_cols
@@ -3482,6 +3486,7 @@ def get_alter_columns_queries(
                 )
             )
             insert_query += new_col_str + ",\n"
+
         insert_query = insert_query[:-2] + (
             f"\nFROM {sql_item_name(temp_table_name, self.flavor, self.get_pipe_schema(pipe))}"
         )
@@ -3627,20 +3632,18 @@ def get_to_sql_dtype(
     >>> get_to_sql_dtype(pipe, df)
     {'a': <class 'sqlalchemy.sql.sqltypes.JSON'>}
     """
-    from meerschaum.utils.dataframe import get_json_cols, get_numeric_cols, get_uuid_cols
+    from meerschaum.utils.dataframe import get_special_cols
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     df_dtypes = {
         col: str(typ)
         for col, typ in df.dtypes.items()
     }
-    json_cols = get_json_cols(df)
-    numeric_cols = get_numeric_cols(df)
-    uuid_cols = get_uuid_cols(df)
-    df_dtypes.update({col: 'json' for col in json_cols})
-    df_dtypes.update({col: 'numeric' for col in numeric_cols})
-    df_dtypes.update({col: 'uuid' for col in uuid_cols})
+    special_cols = get_special_cols(df)
+    df_dtypes.update(special_cols)
+
     if update_dtypes:
         df_dtypes.update(pipe.dtypes)
+
     return {
         col: get_db_type_from_pd_type(typ, self.flavor, as_sqlalchemy=True)
         for col, typ in df_dtypes.items()
@@ -3881,13 +3884,15 @@ def get_pipe_schema(self, pipe: mrsm.Pipe) -> Union[str, None]:
     -------
     A schema string or `None` if nothing is configured.
     """
+    if self.flavor == 'sqlite':
+        return self.schema
     return pipe.parameters.get('schema', self.schema)
 
 
 @staticmethod
 def get_temporary_target(
     target: str,
-    transact_id: Optional[str, None] = None,
+    transact_id: Optional[str] = None,
     label: Optional[str] = None,
     separator: Optional[str] = None,
 ) -> str:
@@ -3909,3 +3914,15 @@ def get_temporary_target(
         + transact_id
         + ((separator + label) if label else '')
     )
+
+
+def _enforce_pipe_dtypes_chunks_hook(
+    pipe: mrsm.Pipe,
+    chunk_df: 'pd.DataFrame',
+    debug: bool = False,
+    **kwargs
+) -> 'pd.DataFrame':
+    """
+    Enforce a pipe's dtypes on each chunk.
+    """
+    return pipe.enforce_dtypes(chunk_df, debug=debug)

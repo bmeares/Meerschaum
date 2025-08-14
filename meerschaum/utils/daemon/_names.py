@@ -7,9 +7,11 @@ Generate random names for jobs.
 """
 
 from __future__ import annotations
-import os, random
-from meerschaum.utils.typing import Dict, List, Tuple
-from meerschaum.config._paths import DAEMON_RESOURCES_PATH
+
+import os
+import random
+
+from meerschaum.utils.typing import Dict, List
 
 _bank: Dict[str, Dict[str, List[str]]] = {
     'adjectives': {
@@ -116,6 +118,7 @@ def get_new_daemon_name() -> str:
     Generate a new random name until a unique one is found
     (up to ~6000 maximum possibilities).
     """
+    from meerschaum.config._paths import DAEMON_RESOURCES_PATH
     existing_names = (
         os.listdir(DAEMON_RESOURCES_PATH)
         if DAEMON_RESOURCES_PATH.exists()

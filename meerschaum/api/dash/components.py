@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
 from meerschaum.utils.typing import SuccessTuple, List
-from meerschaum.config.static import STATIC_CONFIG
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.misc import remove_ansi
 from meerschaum._internal.shell.Shell import get_shell_intro
-from meerschaum.api import endpoints, CHECK_UPDATE, docs_enabled
+from meerschaum.api import endpoints, CHECK_UPDATE, docs_enabled, get_api_connector
 from meerschaum.connectors import instance_types, _load_builtin_custom_connectors
 from meerschaum.utils.misc import get_connector_labels
 from meerschaum.config import __doc__ as doc
@@ -104,7 +104,7 @@ instance_select = dbc.Select(
     id='instance-select',
     size='sm',
     options=[
-        {'label': i, 'value': i}
+        {'label': (i[:32] + '…') if len(i) > 32 else i, 'value': i}
         for i in get_connector_labels(*instance_types)
     ],
     class_name='dbc_dark custom-select custom-select-sm',
@@ -163,6 +163,7 @@ pages_navbar = html.Div(
     id='pages-navbar-div',
 )
 
+
 navbar = dbc.Navbar(
     dbc.Container(
         [
@@ -171,13 +172,11 @@ navbar = dbc.Navbar(
             dbc.Collapse(
                 dbc.Row(
                     [
-                        dbc.Col(instance_select),
-                        dbc.Col(
-                            sign_out_button,
-                            className="ms-auto",
-                        ),
+                        dbc.Col(instance_select, width="auto"),
+                        dbc.Col(sign_out_button, width="auto"),
                     ],
                     className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
+                    align="center",
                 ),
                 id='navbar-collapse',
                 is_open=False,
@@ -267,6 +266,26 @@ def build_pages_offcanvas_children():
 
     plugins_accordion_items = []
     for page_group, pages_dicts in _plugin_endpoints_to_pages.items():
+        if len(pages_dicts) == 1:
+            page_href, page_dict = list(pages_dicts.items())[0]
+            if page_dict['page_key'].lower() == page_group.lower():
+                pages_listgroup_items.append(
+                    dbc.ListGroupItem(
+                        dbc.Button(
+                            ' '.join([word.capitalize() for word in page_dict['page_key'].split(' ')]),
+                            style={
+                                'width': '100%',
+                                'text-align': 'left',
+                                'text-decoration': 'none',
+                                'padding-left': '0',
+                            },
+                            href=page_href,
+                            color='dark',
+                        )
+                    )
+                )
+                continue
+
         plugin_listgroup_items = [
             dbc.ListGroupItem(
                 dbc.Button(
@@ -294,13 +313,15 @@ def build_pages_offcanvas_children():
             class_name='pages-offcanvas-accordion',
         )
         plugins_accordion_items.append(plugin_accordion_item)
-    plugins_accordion = dbc.Accordion(
-        plugins_accordion_items,
-        start_collapsed=True,
-        flush=True,
-        always_open=True,
-    )
-    pages_listgroup_items.append(plugins_accordion)
+
+    if plugins_accordion_items:
+        plugins_accordion = dbc.Accordion(
+            plugins_accordion_items,
+            start_collapsed=True,
+            flush=True,
+            always_open=True,
+        )
+        pages_listgroup_items.append(plugins_accordion)
 
     pages_children = dbc.Card(
         dbc.ListGroup(

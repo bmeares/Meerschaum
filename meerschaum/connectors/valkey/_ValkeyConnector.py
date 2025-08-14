@@ -10,19 +10,18 @@ import json
 from datetime import datetime, timezone
 
 import meerschaum as mrsm
-from meerschaum.connectors import Connector, make_connector
+from meerschaum.connectors import InstanceConnector, make_connector
 from meerschaum.utils.typing import List, Dict, Any, Optional, Union
 from meerschaum.utils.warnings import dprint
 
 
 @make_connector
-class ValkeyConnector(Connector):
+class ValkeyConnector(InstanceConnector):
     """
     Manage a Valkey instance.
 
     Build a `ValkeyConnector` from connection attributes or a URI string.
     """
-    IS_INSTANCE: bool = True
     REQUIRED_ATTRIBUTES: List[str] = ['host']
     OPTIONAL_ATTRIBUTES: List[str] = [
         'port', 'username', 'password', 'db', 'socket_timeout',
@@ -80,7 +79,6 @@ class ValkeyConnector(Connector):
         get_plugin_user_id,
         get_plugin_username,
         get_plugin_attributes,
-        get_plugins,
         delete_plugin,
     )
 
@@ -142,13 +140,13 @@ class ValkeyConnector(Connector):
 
         return uri
 
-    def set(self, key: str, value: Any, **kwargs: Any) -> None:
+    def set(self, key: str, value: Any, **kwargs: Any) -> bool:
         """
         Set the `key` to `value`.
         """
         return self.client.set(key, value, **kwargs)
 
-    def get(self, key: str) -> Union[str, None]:
+    def get(self, key: str, decode: bool = True) -> Union[str, None]:
         """
         Get the value for `key`.
         """
@@ -156,7 +154,7 @@ class ValkeyConnector(Connector):
         if val is None:
             return None
 
-        return val.decode('utf-8')
+        return val.decode('utf-8') if decode else val
 
     def test_connection(self) -> bool:
         """

@@ -12,6 +12,39 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Optional, Any, Dict, List, Union
 
 
+def get_users_pipe(self) -> mrsm.Pipe:
+    """
+    Return the internal metadata pipe for users management.
+    """
+    if '_users_pipe' in self.__dict__:
+        return self._users_pipe
+
+    cache_connector = self.__dict__.get('_cache_connector', None)
+    self._users_pipe = mrsm.Pipe(
+        'mrsm', 'users',
+        temporary=True,
+        cache=True,
+        cache_connector_keys=cache_connector,
+        static=True,
+        null_indices=False,
+        enforce=False,
+        autoincrement=True,
+        columns={
+            'primary': 'user_id',
+        },
+        dtypes={
+            'user_id': 'int',
+            'username': 'string',
+            'attributes': 'json',
+            'user_type': 'string',
+        },
+        indices={
+            'unique': 'username',
+        },
+    )
+    return self._users_pipe
+
+
 def register_user(
     self,
     user: mrsm.core.User,
@@ -64,7 +97,7 @@ def register_user(
 
 def valid_username(username: str) -> SuccessTuple:
     """Verify that a given username is valid."""
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     fail_reasons = []
 
     min_length = STATIC_CONFIG['users']['min_username_length']
@@ -104,6 +137,7 @@ def edit_user(
 ) -> SuccessTuple:
     """Update an existing user's metadata."""
     from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.sql import json_flavors
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
@@ -131,7 +165,7 @@ def edit_user(
         bind_variables['email'] = user.email
     if user.attributes is not None and user.attributes != {}:
         bind_variables['attributes'] = (
-            json.dumps(user.attributes) if self.flavor in ('duckdb',)
+            json.dumps(user.attributes) if self.flavor not in json_flavors
             else user.attributes
         )
     if user.type != '':

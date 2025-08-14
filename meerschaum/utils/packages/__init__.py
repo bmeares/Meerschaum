@@ -75,7 +75,9 @@ def get_module_path(
 
     venv_target_candidate_paths = [vtp]
     if venv is None:
-        site_user_packages_dirs = [pathlib.Path(site.getusersitepackages())]
+        site_user_packages_dirs = [
+            pathlib.Path(site.getusersitepackages())
+        ] if not inside_venv() else []
         site_packages_dirs = [pathlib.Path(path) for path in site.getsitepackages()]
 
         paths_to_add = [
@@ -134,17 +136,17 @@ def get_module_path(
 
 
 def manually_import_module(
-        import_name: str,
-        venv: Optional[str] = 'mrsm',
-        check_update: bool = True,
-        check_pypi: bool = False,
-        install: bool = True,
-        split: bool = True,
-        warn: bool = True,
-        color: bool = True,
-        debug: bool = False,
-        use_sys_modules: bool = True,
-    ) -> Union['ModuleType', None]:
+    import_name: str,
+    venv: Optional[str] = 'mrsm',
+    check_update: bool = True,
+    check_pypi: bool = False,
+    install: bool = True,
+    split: bool = True,
+    warn: bool = True,
+    color: bool = True,
+    debug: bool = False,
+    use_sys_modules: bool = True,
+) -> Union['ModuleType', None]:
     """
     Manually import a module from a virtual environment (or the base environment).
 
@@ -755,7 +757,7 @@ def get_pip(
     import subprocess
     from meerschaum.utils.misc import wget
     from meerschaum.config._paths import CACHE_RESOURCES_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     url = STATIC_CONFIG['system']['urls']['get-pip.py']
     dest = CACHE_RESOURCES_PATH / 'get-pip.py'
     try:
@@ -837,7 +839,7 @@ def pip_install(
 
     """
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
@@ -1177,7 +1179,8 @@ def run_python_package(
     Either a return code integer or a `subprocess.Popen` object
     (or `None` if a `KeyboardInterrupt` occurs and as_proc is `True`).
     """
-    import sys, platform
+    import sys
+    import platform
     import subprocess
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.process import run_process
@@ -1204,7 +1207,7 @@ def run_python_package(
             capture_output=capture_output,
             **kw
         )
-    except Exception as e:
+    except Exception:
         msg = f"Failed to execute {command}, will try again:\n{traceback.format_exc()}"
         warn(msg, color=False)
         stdout, stderr = (
@@ -1216,6 +1219,7 @@ def run_python_package(
             command,
             stdout=stdout,
             stderr=stderr,
+            stdin=sys.stdin,
             env=env_dict,
         )
         to_return = proc if as_proc else proc.wait()
@@ -1500,15 +1504,12 @@ def import_pandas(
 def import_rich(
     lazy: bool = True,
     debug: bool = False,
-    **kw : Any
+    **kw: Any
 ) -> 'ModuleType':
     """
     Quality of life function for importing `rich`.
     """
     from meerschaum.utils.formatting import ANSI, UNICODE
-    if not ANSI and not UNICODE:
-        return None
-
     ## need typing_extensions for `from rich import box`
     typing_extensions = attempt_import(
         'typing_extensions', lazy=False, debug=debug
@@ -1773,6 +1774,10 @@ def is_installed(
     allow_outside_venv: bool, default True
         If `True`, search outside of the specified virtual environment
         if the package cannot be found.
+
+    Returns
+    -------
+    A bool indicating whether a package may be imported.
     """
     if debug:
         from meerschaum.utils.debug import dprint
@@ -1863,26 +1868,6 @@ def ensure_readline() -> 'ModuleType':
 
     sys.modules['readline'] = readline
     return readline
-
-_pkg_resources_get_distribution = None
-_custom_distributions = {}
-def _monkey_patch_get_distribution(_dist: str, _version: str) -> None:
-    """
-    Monkey patch `pkg_resources.get_distribution` to allow for importing `flask_compress`.
-    """
-    import pkg_resources
-    from collections import namedtuple
-    global _pkg_resources_get_distribution
-    with _locks['_pkg_resources_get_distribution']:
-        _pkg_resources_get_distribution = pkg_resources.get_distribution
-    _custom_distributions[_dist] = _version
-    _Dist = namedtuple('_Dist', ['version'])
-    def _get_distribution(dist):
-        """Hack for flask-compress."""
-        if dist in _custom_distributions:
-            return _Dist(_custom_distributions[dist])
-        return _pkg_resources_get_distribution(dist)
-    pkg_resources.get_distribution = _get_distribution
 
 
 def _get_pip_os_env(color: bool = True):

@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Edit a Pipe's parameters here.
+Edit a Pipe's parameters.
 """
 
 from __future__ import annotations
@@ -47,6 +47,15 @@ def edit(
     if self.temporary:
         return False, "Cannot edit pipes created with `temporary=True` (read-only)."
 
+    self._invalidate_cache(hard=True, debug=debug)
+
+    if hasattr(self, '_symlinks'):
+        from meerschaum.utils.misc import get_val_from_dict_path, set_val_in_dict_path
+        for path, vals in self._symlinks.items():
+            current_val = get_val_from_dict_path(self.parameters, path)
+            if current_val == vals['substituted']:
+                set_val_in_dict_path(self.parameters, path, vals['original'])
+
     if not interactive:
         with Venv(get_connector_plugin(self.instance_connector)):
             return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
@@ -65,7 +74,8 @@ def edit(
     from meerschaum.config import get_config
     parameters = dict(get_config('pipes', 'parameters', patch=True))
     from meerschaum.config._patch import apply_patch_to_config
-    parameters = apply_patch_to_config(parameters, self.parameters)
+    raw_parameters = self.attributes.get('parameters', {})
+    parameters = apply_patch_to_config(parameters, raw_parameters)
 
     ### write parameters to yaml file
     with open(parameters_path, 'w+') as f:
@@ -194,7 +204,7 @@ def edit_definition(
         return True, "Success"
 
     def _edit_sql():
-        import pathlib, os, textwrap
+        import textwrap
         from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
         from meerschaum.utils.misc import edit_file
         definition_filename = str(self) + '.sql'
@@ -214,7 +224,7 @@ def edit_definition(
 
         edit_file(definition_path)
         try:
-            with open(definition_path, 'r') as f:
+            with open(definition_path, 'r', encoding='utf-8') as f:
                 file_definition = f.read()
         except Exception as e:
             return False, f"Failed reading file '{definition_path}':\n" + str(e)

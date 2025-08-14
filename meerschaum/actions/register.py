@@ -7,6 +7,9 @@ Register new Pipes. Requires the API to be running.
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, List, Optional, Dict
 
@@ -26,6 +29,7 @@ def register(
         'plugins'   : _register_plugins,
         'users'     : _register_users,
         'connectors': _register_connectors,
+        'tokens'    : _register_tokens,
     }
     return choose_subaction(action, options, **kw)
 
@@ -175,11 +179,11 @@ def _register_plugins(
     reload_plugins(debug=debug)
 
     repo_connector = parse_repo_keys(repository)
-    if repo_connector.__dict__.get('type', None) != 'api':
+    if repo_connector.type != 'api':
         return False, (
             "Can only upload plugins to the Meerschaum API." +
-            f"Connector '{repo_connector}' is of type " +
-            f"'{repo_connector.get('type', type(repo_connector))}'."
+            f"Connector '{repo_connector}' is " +
+            f"'{type(repo_connector)}'."
         )
 
     if len(action) == 0 or action == ['']:
@@ -272,6 +276,7 @@ def _complete_register_plugins(*args, **kw):
 def _register_users(
     action: Optional[List[str]] = None,
     mrsm_instance: Optional[str] = None,
+    scopes: Optional[List[str]] = None,
     shell: bool = False,
     debug: bool = False,
     **kw: Any
@@ -280,7 +285,7 @@ def _register_users(
     Register a new user to a Meerschaum instance.
     """
     from meerschaum.config import get_config
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.warnings import warn, info
     from meerschaum.core import User
@@ -333,9 +338,17 @@ def _register_users(
             )
         if len(email) == 0:
             email = None
-        user = User(username, password, email=email)
+        user = User(
+            username,
+            password,
+            email=email,
+            attributes={
+                'scopes': scopes or list(STATIC_CONFIG['tokens']['scopes']),
+            },
+            instance=instance_connector,
+        )
         info(f"Registering user '{user}' to Meerschaum instance '{instance_connector}'...")
-        result_tuple = instance_connector.register_user(user, debug=debug)
+        result_tuple = user.register(debug=debug)
         print_tuple(result_tuple)
         success[username] = result_tuple[0]
         if success[username]:
@@ -441,6 +454,130 @@ def _complete_register_connectors(
 ) -> List[str]:
     from meerschaum.actions.show import _complete_show_connectors
     return _complete_show_connectors(action)
+
+
+def _register_tokens(
+    mrsm_instance: Optional[str] = None,
+    name: Optional[str] = None,
+    ttl_days: Optional[int] = None,
+    scopes: Optional[List[str]] = None,
+    end: Optional[datetime] = None,
+    force: bool = False,
+    yes: bool = False,
+    noask: bool = False,
+    nopretty: bool = False,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Register a new long-lived access token for API access.
+    Note that omitting and end time or TTL will generate token which does not expire.
+
+    Examples:
+
+    mrsm register token --end 2032-01-01
+
+    mrsm register token --ttl-days 1000
+
+    mrsm register token --name weather-sensor
+
+    """
+    import json
+    from meerschaum.utils.schedule import parse_start_time
+    from meerschaum.core import User
+    from meerschaum.core.Token._Token import Token, _PLACEHOLDER_EXPIRATION
+    from meerschaum.connectors.parse import parse_instance_keys
+    from meerschaum.utils.prompt import yes_no, choose
+    from meerschaum.utils.formatting import make_header, print_tuple
+    from meerschaum.utils.dtypes import value_is_null
+
+    expiration = (
+        end
+        if end is not None
+        else (
+            parse_start_time(f"starting in {ttl_days} days")
+            if ttl_days
+            else _PLACEHOLDER_EXPIRATION
+        )
+    )
+
+    instance_connector = parse_instance_keys(mrsm_instance)
+    user = None
+    if instance_connector.type != 'api':
+        usernames = instance_connector.get_users(debug=debug)
+        if not usernames:
+            return False, f"No users are registered to '{instance_connector}'."
+
+        username = choose(
+            "To which user should this token be registered? Enter the number.",
+            usernames,
+        )
+    else:
+        username = getattr(instance_connector, 'username')
+
+    if not username:
+        return False, "Cannot register a token without a user."
+
+    user_id = instance_connector.get_user_id(
+        User(username, instance=mrsm_instance),
+        debug=debug,
+    )
+    if user_id is None:
+        return False, f"Cannot load ID for user '{username}'."
+
+    user = User(username, user_id=user_id, instance=mrsm_instance)
+
+    token = Token(
+        label=name,
+        expiration=expiration,
+        scopes=scopes,
+        user=user,
+        instance=mrsm_instance,
+    )
+
+    register_success, register_msg = token.register(debug=debug)
+    token_id = token.id
+    token_secret = token.secret
+    if not register_success:
+        return False, f"Failed to register token '{token.label}':\n{register_msg}"
+
+    token_model = token.to_model(refresh=True)
+    token_kwargs = dict(token_model)
+    token_kwargs['id'] = token_id
+    token_kwargs['secret'] = token_secret
+    token = Token(**token_kwargs)
+
+    if not nopretty:
+        print_tuple(
+            (
+                True,
+                (
+                    f"Registered token '{token}'.\n    "
+                    "Write down the client secret, because it won't be shown again."
+                )
+            ),
+            calm=True
+        )
+
+    msg_to_print = (
+        (
+            make_header(f"Attributes for token '{token}':") + "\n"
+            + f"    - Client ID: {token_model.id}\n"
+            + f"    - Client Secret: {token_secret}\n"
+            + "    - Expiration: "
+            + (
+                token.expiration.isoformat()
+                if not value_is_null(token.expiration)
+                else 'Does not expire.'
+            )
+            + "\n"
+            + f"    - API Key: {token.get_api_key()}\n"
+        )
+        if not nopretty
+        else json.dumps({'secret': token_secret, **dict(token_model)})
+    ) 
+    print(msg_to_print)
+    return True, f"Successfully registered token '{token.label}'."
 
 
 ### NOTE: This must be the final statement of the module.

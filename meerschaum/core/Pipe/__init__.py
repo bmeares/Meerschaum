@@ -50,11 +50,15 @@ with correct credentials, as well as a network connection and valid permissions.
 """
 
 from __future__ import annotations
+
 import sys
 import copy
-from meerschaum.utils.typing import Optional, Dict, Any, Union, InstanceConnector, List
+
+import meerschaum as mrsm
+from meerschaum.utils.typing import Optional, Dict, Any, Union, List, InstanceConnector
 from meerschaum.utils.formatting._pipes import pipe_repr
 from meerschaum.config import get_config
+
 
 class Pipe:
     """
@@ -89,6 +93,9 @@ class Pipe:
         get_data,
         get_backtrack_data,
         get_rowcount,
+        get_data,
+        get_doc,
+        get_value,
         _get_data_as_iterator,
         get_chunk_interval,
         get_chunk_bounds,
@@ -104,15 +111,20 @@ class Pipe:
         indexes,
         dtypes,
         autoincrement,
+        autotime,
         upsert,
         static,
         tzinfo,
         enforce,
         null_indices,
+        mixed_numerics,
         get_columns,
         get_columns_types,
         get_columns_indices,
         get_indices,
+        get_parameters,
+        get_dtypes,
+        update_parameters,
         tags,
         get_id,
         id,
@@ -123,6 +135,30 @@ class Pipe:
         target,
         _target_legacy,
         guess_datetime,
+        precision,
+        get_precision,
+    )
+    from ._cache import (
+        _get_cache_connector,
+        _cache_value,
+        _get_cached_value,
+        _invalidate_cache,
+        _get_cache_dir_path,
+        _write_cache_key,
+        _write_cache_file,
+        _write_cache_conn_key,
+        _read_cache_key,
+        _read_cache_file,
+        _read_cache_conn_key,
+        _load_cache_keys,
+        _load_cache_files,
+        _load_cache_conn_keys,
+        _get_cache_keys,
+        _get_cache_file_keys,
+        _get_cache_conn_keys,
+        _clear_cache_key,
+        _clear_cache_file,
+        _clear_cache_conn_key,
     )
     from ._show import show
     from ._edit import edit, edit_definition, update
@@ -133,11 +169,7 @@ class Pipe:
         filter_existing,
         _get_chunk_label,
         get_num_workers,
-        _persist_new_json_columns,
-        _persist_new_numeric_columns,
-        _persist_new_uuid_columns,
-        _persist_new_bytes_columns,
-        _persist_new_geometry_columns,
+        _persist_new_special_columns,
     )
     from ._verify import (
         verify,
@@ -165,20 +197,24 @@ class Pipe:
         target: Optional[str] = None,
         dtypes: Optional[Dict[str, str]] = None,
         instance: Optional[Union[str, InstanceConnector]] = None,
-        temporary: bool = False,
         upsert: Optional[bool] = None,
         autoincrement: Optional[bool] = None,
+        autotime: Optional[bool] = None,
+        precision: Union[str, Dict[str, Union[str, int]], None] = None,
         static: Optional[bool] = None,
         enforce: Optional[bool] = None,
         null_indices: Optional[bool] = None,
+        mixed_numerics: Optional[bool] = None,
+        temporary: bool = False,
+        cache: Optional[bool] = None,
+        cache_connector_keys: Optional[str] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
-        cache: bool = False,
-        debug: bool = False,
         connector_keys: Optional[str] = None,
         metric_key: Optional[str] = None,
         location_key: Optional[str] = None,
         instance_keys: Optional[str] = None,
         indexes: Union[Dict[str, str], List[str], None] = None,
+        debug: bool = False,
     ):
         """
         Parameters
@@ -226,6 +262,16 @@ class Pipe:
         autoincrement: Optional[bool], default None
             If `True`, set `autoincrement` in the parameters.
 
+        autotime: Optional[bool], default None
+            If `True`, set `autotime` in the parameters.
+
+        precision: Union[str, Dict[str, Union[str, int]], None], default None
+            If provided, set `precision` in the parameters.
+            This may be either a string (the precision unit) or a dictionary of in the form
+            `{'unit': <unit>, 'interval': <interval>}`.
+            Default is determined by the `datetime` column dtype
+            (e.g. `datetime64[us]` is `microsecond` precision).
+
         static: Optional[bool], default None
             If `True`, set `static` in the parameters.
 
@@ -237,12 +283,21 @@ class Pipe:
             Set to `False` if there will be no null values in the index columns.
             Defaults to `True`.
 
+        mixed_numerics: bool, default None
+            If `True`, integer columns will be converted to `numeric` when floats are synced.
+            Set to `False` to disable this behavior.
+            Defaults to `True`.
+
         temporary: bool, default False
             If `True`, prevent instance tables (pipes, users, plugins) from being created.
 
-        cache: bool, default False
-            If `True`, cache fetched data into a local database file.
-            Defaults to `False`.
+        cache: Optional[bool], default None
+            If `True`, cache the pipe's metadata to disk (in addition to in-memory caching).
+            If `cache` is not explicitly `True`, it is set to `False` if `temporary` is `True`.
+            Defaults to `True` (from `None`).
+
+        cache_connector_keys: Optional[str], default None
+            If provided, use the keys to a Valkey connector (e.g. `valkey:main`).
         """
         from meerschaum.utils.warnings import error, warn
         if (not connector and not connector_keys) or (not metric and not metric_key):
@@ -264,7 +319,7 @@ class Pipe:
         if location in ('[None]', 'None'):
             location = None
 
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
         for k in (connector, metric, location, *(tags or [])):
             if str(k).startswith(negation_prefix):
@@ -275,8 +330,15 @@ class Pipe:
         self.metric_key = metric
         self.location_key = location
         self.temporary = temporary
+        self.cache = cache if cache is not None else (not temporary)
+        self.cache_connector_keys = (
+            str(cache_connector_keys)
+            if cache_connector_keys is not None
+            else None
+        )
+        self.debug = debug
 
-        self._attributes = {
+        self._attributes: Dict[str, Any] = {
             'connector_keys': self.connector_keys,
             'metric_key': self.metric_key,
             'location_key': self.location_key,
@@ -291,11 +353,13 @@ class Pipe:
                 warn(f"The provided parameters are of invalid type '{type(parameters)}'.")
             self._attributes['parameters'] = {}
 
-        columns = columns or self._attributes.get('parameters', {}).get('columns', {})
-        if isinstance(columns, list):
+        columns = columns or self._attributes.get('parameters', {}).get('columns', None)
+        if isinstance(columns, (list, tuple)):
             columns = {str(col): str(col) for col in columns}
         if isinstance(columns, dict):
             self._attributes['parameters']['columns'] = columns
+        elif isinstance(columns, str) and 'Pipe(' in columns:
+            pass
         elif columns is not None:
             warn(f"The provided columns are of invalid type '{type(columns)}'.")
 
@@ -334,14 +398,26 @@ class Pipe:
         if isinstance(autoincrement, bool):
             self._attributes['parameters']['autoincrement'] = autoincrement
 
+        if isinstance(autotime, bool):
+            self._attributes['parameters']['autotime'] = autotime
+
+        if isinstance(precision, dict):
+            self._attributes['parameters']['precision'] = precision
+        elif isinstance(precision, str):
+            self._attributes['parameters']['precision'] = {'unit': precision}
+
         if isinstance(static, bool):
             self._attributes['parameters']['static'] = static
+            self._static = static
 
         if isinstance(enforce, bool):
             self._attributes['parameters']['enforce'] = enforce
 
         if isinstance(null_indices, bool):
             self._attributes['parameters']['null_indices'] = null_indices
+
+        if isinstance(mixed_numerics, bool):
+            self._attributes['parameters']['mixed_numerics'] = mixed_numerics
 
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,
@@ -353,10 +429,12 @@ class Pipe:
         if not isinstance(_mrsm_instance, str):
             self._instance_connector = _mrsm_instance
             self.instance_keys = str(_mrsm_instance)
-        else: ### NOTE: must be SQL or API Connector for this work
+        else:
             self.instance_keys = _mrsm_instance
 
-        self._cache = cache and get_config('system', 'experimental', 'cache')
+        if self.instance_keys == 'sql:memory':
+            self.cache = False
+
 
     @property
     def meta(self):
@@ -383,9 +461,7 @@ class Pipe:
     @property
     def instance_connector(self) -> Union[InstanceConnector, None]:
         """
-        The connector to where this pipe resides.
-        May either be of type `meerschaum.connectors.sql.SQLConnector` or
-        `meerschaum.connectors.api.APIConnector`.
+        The instance connector on which this pipe resides.
         """
         if '_instance_connector' not in self.__dict__:
             from meerschaum.connectors.parse import parse_instance_keys
@@ -397,7 +473,7 @@ class Pipe:
         return self._instance_connector
 
     @property
-    def connector(self) -> Union[meerschaum.connectors.Connector, None]:
+    def connector(self) -> Union['Connector', None]:
         """
         The connector to the data source.
         """
@@ -415,68 +491,6 @@ class Pipe:
             else:
                 return None
         return self._connector
-
-    @property
-    def cache_connector(self) -> Union[meerschaum.connectors.sql.SQLConnector, None]:
-        """
-        If the pipe was created with `cache=True`, return the connector to the pipe's
-        SQLite database for caching.
-        """
-        if not self._cache:
-            return None
-
-        if '_cache_connector' not in self.__dict__:
-            from meerschaum.connectors import get_connector
-            from meerschaum.config._paths import DUCKDB_RESOURCES_PATH, SQLITE_RESOURCES_PATH
-            _resources_path = SQLITE_RESOURCES_PATH
-            self._cache_connector = get_connector(
-                'sql', '_cache_' + str(self),
-                flavor='sqlite',
-                database=str(_resources_path / ('_cache_' + str(self) + '.db')),
-            )
-
-        return self._cache_connector
-
-    @property
-    def cache_pipe(self) -> Union['meerschaum.Pipe', None]:
-        """
-        If the pipe was created with `cache=True`, return another `meerschaum.Pipe` used to
-        manage the local data.
-        """
-        if self.cache_connector is None:
-            return None
-        if '_cache_pipe' not in self.__dict__:
-            from meerschaum.config._patch import apply_patch_to_config
-            from meerschaum.utils.sql import sql_item_name
-            _parameters = copy.deepcopy(self.parameters)
-            _fetch_patch = {
-                'fetch': ({
-                    'definition': (
-                        "SELECT * FROM "
-                        + sql_item_name(
-                            str(self.target),
-                            self.instance_connector.flavor,
-                            self.instance_connector.get_pipe_schema(self),
-                        )
-                    ),
-                }) if self.instance_connector.type == 'sql' else ({
-                    'connector_keys': self.connector_keys,
-                    'metric_key': self.metric_key,
-                    'location_key': self.location_key,
-                })
-            }
-            _parameters = apply_patch_to_config(_parameters, _fetch_patch)
-            self._cache_pipe = Pipe(
-                self.instance_keys,
-                (self.connector_keys + '_' + self.metric_key + '_cache'),
-                self.location_key,
-                mrsm_instance = self.cache_connector,
-                parameters = _parameters,
-                cache = False,
-                temporary = True,
-            )
-
-        return self._cache_pipe
 
     def __str__(self, ansi: bool=False):
         return pipe_repr(self, ansi=ansi)
@@ -522,7 +536,7 @@ class Pipe:
             'connector_keys': self.connector_keys,
             'metric_key': self.metric_key,
             'location_key': self.location_key,
-            'parameters': self.parameters,
+            'parameters': self._attributes.get('parameters', None),
             'instance_keys': self.instance_keys,
         }
 
@@ -558,3 +572,19 @@ class Pipe:
         if aliased_key is not None:
             key = aliased_key
         return getattr(self, key, None)
+
+    def __copy__(self):
+        """
+        Return a shallow copy of the current pipe.
+        """
+        return mrsm.Pipe(
+            self.connector_keys, self.metric_key, self.location_key,
+            instance=self.instance_keys,
+            parameters=self._attributes.get('parameters', None),
+        )
+
+    def __deepcopy__(self, memo):
+        """
+        Return a deep copy of the current pipe.
+        """
+        return self.__copy__()

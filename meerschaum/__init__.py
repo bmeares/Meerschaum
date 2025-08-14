@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Copyright 2023 Bennett Meares
+Copyright 2025 Bennett Meares
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,13 +19,14 @@ limitations under the License.
 """
 
 import atexit
+
 from meerschaum.utils.typing import SuccessTuple
 from meerschaum.utils.packages import attempt_import
 from meerschaum.core.Pipe import Pipe
 from meerschaum.plugins import Plugin
 from meerschaum.utils.venv import Venv
 from meerschaum.jobs import Job, make_executor
-from meerschaum.connectors import get_connector, Connector, make_connector
+from meerschaum.connectors import get_connector, Connector, InstanceConnector, make_connector
 from meerschaum.utils import get_pipes
 from meerschaum.utils.formatting import pprint
 from meerschaum._internal.docs import index as __doc__
@@ -42,6 +43,7 @@ __all__ = (
     "get_config",
     "Pipe",
     "Plugin",
+    "SuccessTuple",
     "Venv",
     "Plugin",
     "Job",
@@ -55,6 +57,7 @@ __all__ = (
     "utils",
     "SuccessTuple",
     "Connector",
+    "InstanceConnector",
     "make_connector",
     "entry",
 )

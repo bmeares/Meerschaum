@@ -7,171 +7,23 @@ This module contains the logic that builds the sqlalchemy engine string.
 """
 
 import traceback
+
 import meerschaum as mrsm
 from meerschaum.utils.debug import dprint
+from meerschaum._internal.static import STATIC_CONFIG
 
-### determine driver and requirements from flavor
-default_requirements = {
-    'username',
-    'password',
-    'host',
-    'database',
-}
 
 ### NOTE: These are defined in the `system.json` config file and so this dictionary's values
 ### will all be overwritten if applicable.
-default_create_engine_args = {
-    #  'method': 'multi',
-    'pool_size': 5,
-    'max_overflow': 10,
-    'pool_recycle': 3600,
-    'connect_args': {},
-}
-flavor_configs = {
-    'timescaledb': {
-        'engine': 'postgresql+psycopg',
-        'create_engine': default_create_engine_args,
-        'omit_create_engine': {'method',},
-        'to_sql': {},
-        'requirements': default_requirements,
-        'defaults': {
-            'port': 5432,
-        },
-    },
-    'postgresql': {
-        'engine': 'postgresql+psycopg',
-        'create_engine': default_create_engine_args,
-        'omit_create_engine': {'method',},
-        'to_sql': {},
-        'requirements': default_requirements,
-        'defaults': {
-            'port': 5432,
-        },
-    },
-    'postgis': {
-        'engine': 'postgresql+psycopg',
-        'create_engine': default_create_engine_args,
-        'omit_create_engine': {'method',},
-        'to_sql': {},
-        'requirements': default_requirements,
-        'defaults': {
-            'port': 5432,
-        },
-    },
-    'citus': {
-        'engine': 'postgresql+psycopg',
-        'create_engine': default_create_engine_args,
-        'omit_create_engine': {'method',},
-        'to_sql': {},
-        'requirements': default_requirements,
-        'defaults': {
-            'port': 5432,
-        },
-    },
-    'mssql': {
-        'engine': 'mssql+pyodbc',
-        'create_engine': {
-            'fast_executemany': True,
-            'use_insertmanyvalues': False,
-            'isolation_level': 'AUTOCOMMIT',
-            'use_setinputsizes': False,
-            'pool_pre_ping': True,
-            'ignore_no_transaction_on_rollback': True,
-        },
-        'omit_create_engine': {'method',},
-        'to_sql': {
-            'method': None,
-        },
-        'requirements': default_requirements,
-        'defaults': {
-            'port': 1433,
-            'options': (
-                "driver=ODBC Driver 18 for SQL Server"
-                "&UseFMTONLY=Yes"
-                "&TrustServerCertificate=yes"
-                "&Encrypt=no"
-                "&MARS_Connection=yes"
-            ),
-        },
-    },
-    'mysql': {
-        'engine': 'mysql+pymysql',
-        'create_engine': default_create_engine_args,
-        'omit_create_engine': {'method',},
-        'to_sql': {
-            'method': 'multi',
-        },
-        'requirements': default_requirements,
-        'defaults': {
-            'port': 3306,
-        },
-    },
-    'mariadb': {
-        'engine': 'mysql+pymysql',
-        'create_engine': default_create_engine_args,
-        'omit_create_engine': {'method',},
-        'to_sql': {
-            'method': 'multi',
-        },
-        'requirements': default_requirements,
-        'defaults': {
-            'port': 3306,
-        },
-    },
-    'oracle': {
-        'engine': 'oracle+oracledb',
-        'create_engine': default_create_engine_args,
-        'omit_create_engine': {'method',},
-        'to_sql': {
-            'method': None,
-        },
-        'requirements': default_requirements,
-        'defaults': {
-            'port': 1521,
-        },
-    },
-    'sqlite': {
-        'engine': 'sqlite',
-        'create_engine': default_create_engine_args,
-        'omit_create_engine': {'method',},
-        'to_sql': {
-            'method': 'multi',
-        },
-        'requirements': {'database'},
-        'defaults': {},
-    },
-    'duckdb': {
-        'engine': 'duckdb',
-        'create_engine': {},
-        'omit_create_engine': {'ALL',},
-        'to_sql': {
-            'method': 'multi',
-        },
-        'requirements': '',
-        'defaults': {},
-    },
-    'cockroachdb': {
-        'engine': 'cockroachdb',
-        'omit_create_engine': {'method',},
-        'create_engine': default_create_engine_args,
-        'to_sql': {
-            'method': 'multi',
-        },
-        'requirements': {'host'},
-        'defaults': {
-            'port': 26257,
-            'database': 'defaultdb',
-            'username': 'root',
-            'password': 'admin',
-        },
-    },
-}
+
+flavor_configs = STATIC_CONFIG['sql']['create_engine_flavors']
 install_flavor_drivers = {
     'sqlite': ['aiosqlite'],
     'duckdb': ['duckdb', 'duckdb_engine'],
     'mysql': ['pymysql'],
     'mariadb': ['pymysql'],
     'timescaledb': ['psycopg'],
+    'timescaledb-ha': ['psycopg', 'geoalchemy'],
     'postgresql': ['psycopg'],
     'postgis': ['psycopg', 'geoalchemy'],
     'citus': ['psycopg'],
@@ -179,7 +31,6 @@ install_flavor_drivers = {
     'mssql': ['pyodbc'],
     'oracle': ['oracledb'],
 }
-require_patching_flavors = {'cockroachdb': [('sqlalchemy-cockroachdb', 'sqlalchemy_cockroachdb')]}
 
 flavor_dialects = {
     'cockroachdb': (
@@ -211,19 +62,6 @@ def create_engine(
         )
         if self.flavor == 'mssql':
             _init_mssql_sqlalchemy()
-    if self.flavor in require_patching_flavors:
-        from meerschaum.utils.packages import determine_version, _monkey_patch_get_distribution
-        import pathlib
-        for install_name, import_name in require_patching_flavors[self.flavor]:
-            pkg = attempt_import(
-                import_name,
-                debug=debug,
-                lazy=False,
-                warn=False
-            )
-            _monkey_patch_get_distribution(
-                install_name, determine_version(pathlib.Path(pkg.__file__), venv='mrsm')
-            )
 
     ### supplement missing values with defaults (e.g. port number)
     for a, value in flavor_configs[self.flavor]['defaults'].items():
@@ -240,6 +78,9 @@ def create_engine(
     _host = self.__dict__.get('host', None)
     _port = self.__dict__.get('port', None)
     _database = self.__dict__.get('database', None)
+    if _database == '{SQLITE_DB_PATH}':
+        from meerschaum.config.paths import SQLITE_DB_PATH
+        _database = SQLITE_DB_PATH.as_posix()
     _options = self.__dict__.get('options', {})
     if isinstance(_options, str):
         _options = dict(urllib.parse.parse_qsl(_options))
@@ -268,7 +109,7 @@ def create_engine(
 
         ### Sometimes the timescaledb:// flavor can slip in.
         if _uri and self.flavor in _uri:
-            if self.flavor in ('timescaledb', 'postgis'):
+            if self.flavor in ('timescaledb', 'timescaledb-ha', 'postgis'):
                 engine_str = engine_str.replace(self.flavor, 'postgresql', 1)
             elif _uri.startswith('postgresql://'):
                 engine_str = engine_str.replace('postgresql://', 'postgresql+psycopg2://')
@@ -337,6 +178,9 @@ def _init_mssql_sqlalchemy():
         lazy=False,
         warn=False,
     )
+    if pyodbc is None:
+        raise EnvironmentError("Cannot import pyodbc. Is the MSSQL driver installed?")
+
     pyodbc.pooling = False
 
     MSDialect_pyodbc = sqlalchemy_dialects_mssql_pyodbc.MSDialect_pyodbc

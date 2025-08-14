@@ -8,6 +8,9 @@ Manage virtual environments.
 
 from __future__ import annotations
 
+import sys
+import pathlib
+
 from meerschaum.utils.typing import Optional, Union, Dict, List, Tuple
 from meerschaum.utils.threading import RLock, get_ident
 
@@ -229,7 +232,6 @@ def verify_venv(
     """
     Verify that the virtual environment matches the expected state.
     """
-    import pathlib
     import platform
     import os
     import shutil
@@ -382,11 +384,10 @@ def init_venv(
     import sys
     import platform
     import os
-    import pathlib
     import shutil
     import time
 
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.config._paths import (
         VIRTENV_RESOURCES_PATH,
         VENVS_CACHE_RESOURCES_PATH,
@@ -659,6 +660,7 @@ def venv_exec(
         cmd_list,
         stdout=stdout,
         stderr=stderr,
+        stdin=sys.stdin,
         env=env,
         **group_kwargs
     )
@@ -682,7 +684,7 @@ def venv_target_path(
     venv: Union[str, None],
     allow_nonexistent: bool = False,
     debug: bool = False,
-) -> 'pathlib.Path':
+) -> pathlib.Path:
     """
     Return a virtual environment's site-package path.
 
@@ -702,10 +704,9 @@ def venv_target_path(
     import os
     import sys
     import platform
-    import pathlib
     import site
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
 
     ### Check sys.path for a user-writable site-packages directory.
     if venv is None:
@@ -839,7 +840,6 @@ def get_module_venv(module) -> Union[str, None]:
     -------
     The name of a venv or `None`.
     """
-    import pathlib
     from meerschaum.config.paths import VIRTENV_RESOURCES_PATH
     module_path = pathlib.Path(module.__file__).resolve()
     try:

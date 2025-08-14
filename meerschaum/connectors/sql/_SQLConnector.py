@@ -7,14 +7,16 @@ Interface with SQL servers using sqlalchemy.
 """
 
 from __future__ import annotations
+
+import pathlib
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Any, Union
 
-from meerschaum.connectors import Connector
+from meerschaum.connectors import InstanceConnector
 from meerschaum.utils.warnings import error, warn
 
 
-class SQLConnector(Connector):
+class SQLConnector(InstanceConnector):
     """
     Connect to SQL databases via `sqlalchemy`.
     
@@ -23,8 +25,6 @@ class SQLConnector(Connector):
     https://meerschaum.io/reference/connectors/
 
     """
-
-    IS_INSTANCE: bool = True
 
     from ._create_engine import flavor_configs, create_engine
     from ._sql import (
@@ -75,6 +75,7 @@ class SQLConnector(Connector):
         get_pipe_index_names,
     )
     from ._plugins import (
+        get_plugins_pipe,
         register_plugin,
         delete_plugin,
         get_plugin_id,
@@ -85,6 +86,7 @@ class SQLConnector(Connector):
         get_plugin_attributes,
     )
     from ._users import (
+        get_users_pipe,
         register_user,
         get_user_id,
         get_users,
@@ -151,6 +153,9 @@ class SQLConnector(Connector):
             if uri.startswith('timescaledb://'):
                 uri = uri.replace('timescaledb://', 'postgresql+psycopg://', 1)
                 flavor = 'timescaledb'
+            if uri.startswith('timescaledb-ha://'):
+                uri = uri.replace('timescaledb-ha://', 'postgresql+psycopg://', 1)
+                flavor = 'timescaledb-ha'
             if uri.startswith('postgis://'):
                 uri = uri.replace('postgis://', 'postgresql+psycopg://', 1)
                 flavor = 'postgis'
@@ -313,7 +318,7 @@ class SQLConnector(Connector):
         """
         Return the schema name for internal tables. 
         """
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         from meerschaum.utils.sql import NO_SCHEMA_FLAVORS
         schema_name = self.__dict__.get('internal_schema', None) or (
             STATIC_CONFIG['sql']['internal_schema']
@@ -372,6 +377,18 @@ class SQLConnector(Connector):
         _schema = sqlalchemy.inspect(self.engine).default_schema_name
         self.__dict__['schema'] = _schema
         return _schema
+
+    def get_metadata_cache_path(self, kind: str = 'json') -> pathlib.Path:
+        """
+        Return the path to the file to which to write metadata cache.
+        """
+        from meerschaum.config.paths import SQL_CONN_CACHE_RESOURCES_PATH
+        filename = (
+            f'{self.label}-metadata.pkl'
+            if kind == 'pkl'
+            else f'{self.label}.json'
+        )
+        return SQL_CONN_CACHE_RESOURCES_PATH / filename
 
     def __getstate__(self):
         return self.__dict__

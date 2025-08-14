@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meerschaum"
+description = "Sync Time-Series Pipes with Meerschaum"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [
+    { name = "Bennett Meares", email = "bennett.meares@gmail.com" },
+]
+maintainers = [
+    { name = "Bennett Meares", email = "bennett.meares@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Programming Language :: SQL",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Natural Language :: English",
+]
+
+dynamic = ["version", "dependencies", "optional-dependencies"]
+
+[project.urls]
+Documentation = "https://docs.meerschaum.io"
+Changelog = "https://meerschaum.io/news/changelog"
+GitHub = "https://github.com/bmeares/Meerschaum"
+Homepage = "https://meerschaum.io"
+Donate = "https://github.com/sponsors/bmeares"
+Discord = "https://discord.gg/8U8qMUjvcc"
+
+[project.scripts]
+mrsm = "meerschaum.__main__:main"
+meerschaum = "meerschaum.__main__:main"
+
+[tool.setuptools]
+zip-safe = true
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "meerschaum.config._version.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["meerschaum*"]
+exclude = ["docs*", "tests*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.html", "*.css", "*.js", "*.png", "*.ico"]

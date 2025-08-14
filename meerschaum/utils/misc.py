@@ -6,8 +6,11 @@ Miscellaneous functions go here
 """
 
 from __future__ import annotations
+
 import sys
-from datetime import timedelta, datetime, timezone
+import functools
+from datetime import timedelta, datetime
+
 from meerschaum.utils.typing import (
     Union,
     Any,
@@ -19,13 +22,8 @@ from meerschaum.utils.typing import (
     Iterable,
     PipesDict,
     Tuple,
-    InstanceConnector,
-    Hashable,
-    Generator,
-    Iterator,
     TYPE_CHECKING,
 )
-import meerschaum as mrsm
 if TYPE_CHECKING:
     import collections
 
@@ -42,15 +40,18 @@ __pdoc__: Dict[str, bool] = {
     'df_is_chunk_generator': False,
     'choices_docstring': False,
     '_get_subaction_names': False,
+    'is_pipe_registered': False,
+    'replace_pipes_in_dict': False,
+    'round_time': False,
 }
 
 
 def add_method_to_class(
-        func: Callable[[Any], Any],
-        class_def: 'Class',
-        method_name: Optional[str] = None,
-        keep_self: Optional[bool] = None,
-    ) -> Callable[[Any], Any]:
+    func: Callable[[Any], Any],
+    class_def: 'Class',
+    method_name: Optional[str] = None,
+    keep_self: Optional[bool] = None,
+) -> Callable[[Any], Any]:
     """
     Add function `func` to class `class_def`.
 
@@ -122,16 +123,33 @@ def is_int(s: str) -> bool:
 
     """
     try:
-        float(s)
+        return float(s).is_integer()
     except Exception:
         return False
-    
-    return float(s).is_integer()
 
 
-def string_to_dict(
-    params_string: str
-) -> Dict[str, Any]:
+def is_uuid(s: str) -> bool:
+    """
+    Check if a string is a valid UUID.
+
+    Parameters
+    ----------
+    s: str
+        The string to be checked.
+
+    Returns
+    -------
+    A bool indicating whether the string is a valid UUID.
+    """
+    import uuid
+    try:
+        uuid.UUID(str(s))
+        return True
+    except Exception:
+        return False
+
+
+def string_to_dict(params_string: str) -> Dict[str, Any]:
     """
     Parse a string into a dictionary.
     
@@ -154,7 +172,7 @@ def string_to_dict(
     {'a': 1, 'b': 2}
 
     """
-    if params_string == "":
+    if not params_string:
         return {}
 
     import json
@@ -169,13 +187,60 @@ def string_to_dict(
         and params_string[-2] == "}"
     ):
         return json.loads(params_string[1:-1])
+
     if str(params_string).startswith('{'):
         return json.loads(params_string)
 
     import ast
     params_dict = {}
-    for param in params_string.split(","):
+    
+    items = []
+    bracket_level = 0
+    brace_level = 0
+    current_item = ''
+    in_quotes = False
+    quote_char = ''
+    
+    i = 0
+    while i < len(params_string):
+        char = params_string[i]
+        
+        if in_quotes:
+            if char == quote_char and (i == 0 or params_string[i-1] != '\\'):
+                in_quotes = False
+        else:
+            if char in ('"', "'"):
+                in_quotes = True
+                quote_char = char
+            elif char == '[':
+                bracket_level += 1
+            elif char == ']':
+                bracket_level -= 1
+            elif char == '{':
+                brace_level += 1
+            elif char == '}':
+                brace_level -= 1
+            elif char == ',' and bracket_level == 0 and brace_level == 0:
+                items.append(current_item)
+                current_item = ''
+                i += 1
+                continue
+        
+        current_item += char
+        i += 1
+        
+    if current_item:
+        items.append(current_item)
+
+    for param in items:
+        param = param.strip()
+        if not param:
+            continue
+
         _keys = param.split(":", maxsplit=1)
+        if len(_keys) != 2:
+            continue
+
         keys = _keys[:-1]
         try:
             val = ast.literal_eval(_keys[-1])
@@ -197,12 +262,35 @@ def string_to_dict(
     return params_dict
 
 
+def to_simple_dict(doc: Dict[str, Any]) -> str:
+    """
+    Serialize a document dictionary in simple-dict format.
+    """
+    import json
+    import ast
+    from meerschaum.utils.dtypes import json_serialize_value
+
+    def serialize_value(value):
+        if isinstance(value, str):
+            try:
+                evaluated = ast.literal_eval(value)
+                if not isinstance(evaluated, str):
+                    return json.dumps(value, separators=(',', ':'), default=json_serialize_value)
+                return value
+            except (ValueError, SyntaxError, TypeError, MemoryError):
+                return value
+        
+        return json.dumps(value, separators=(',', ':'), default=json_serialize_value)
+
+    return ','.join(f"{key}:{serialize_value(val)}" for key, val in doc.items())
+
+
 def parse_config_substitution(
     value: str,
     leading_key: str = 'MRSM',
     begin_key: str = '{',
     end_key: str = '}',
-    delimeter: str = ':'
+    delimeter: str = ':',
 ) -> List[Any]:
     """
     Parse Meerschaum substitution syntax
@@ -259,37 +347,6 @@ def edit_file(
     return rc == 0
 
 
-def is_pipe_registered(
-    pipe: mrsm.Pipe,
-    pipes: PipesDict,
-    debug: bool = False
-) -> bool:
-    """
-    Check if a Pipe is inside the pipes dictionary.
-
-    Parameters
-    ----------
-    pipe: meerschaum.Pipe
-        The pipe to see if it's in the dictionary.
-
-    pipes: PipesDict
-        The dictionary to search inside.
-
-    debug: bool, default False
-        Verbosity toggle.
-
-    Returns
-    -------
-    A bool indicating whether the pipe is inside the dictionary.
-    """
-    from meerschaum.utils.debug import dprint
-    ck, mk, lk = pipe.connector_keys, pipe.metric_key, pipe.location_key
-    if debug:
-        dprint(f'{ck}, {mk}, {lk}')
-        dprint(f'{pipe}, {pipes}')
-    return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
-
-
 def get_cols_lines(default_cols: int = 100, default_lines: int = 120) -> Tuple[int, int]:
     """
     Determine the columns and lines in the terminal.
@@ -311,7 +368,7 @@ def get_cols_lines(default_cols: int = 100, default_lines: int = 120) -> Tuple[i
     try:
         size = os.get_terminal_size()
         _cols, _lines = size.columns, size.lines
-    except Exception as e:
+    except Exception:
         _cols, _lines = (
             int(os.environ.get('COLUMNS', str(default_cols))),
             int(os.environ.get('LINES', str(default_lines))),
@@ -367,7 +424,7 @@ def sorted_dict(d: Dict[Any, Any]) -> Dict[Any, Any]:
     """
     try:
         return {key: value for key, value in sorted(d.items(), key=lambda item: item[1])}
-    except Exception as e:
+    except Exception:
         return d
 
 def flatten_pipes_dict(pipes_dict: PipesDict) -> List[Pipe]:
@@ -391,81 +448,13 @@ def flatten_pipes_dict(pipes_dict: PipesDict) -> List[Pipe]:
     return pipes_list
 
 
-def round_time(
-    dt: Optional[datetime] = None,
-    date_delta: Optional[timedelta] = None,
-    to: 'str' = 'down'
-) -> datetime:
-    """
-    Round a datetime object to a multiple of a timedelta.
-    http://stackoverflow.com/questions/3463930/how-to-round-the-minute-of-a-datetime-object-python
-
-    NOTE: This function strips timezone information!
-
-    Parameters
-    ----------
-    dt: Optional[datetime], default None
-        If `None`, grab the current UTC datetime.
-
-    date_delta: Optional[timedelta], default None
-        If `None`, use a delta of 1 minute.
-
-    to: 'str', default 'down'
-        Available options are `'up'`, `'down'`, and `'closest'`.
-
-    Returns
-    -------
-    A rounded `datetime` object.
-
-    Examples
-    --------
-    >>> round_time(datetime(2022, 1, 1, 12, 15, 57, 200))
-    datetime.datetime(2022, 1, 1, 12, 15)
-    >>> round_time(datetime(2022, 1, 1, 12, 15, 57, 200), to='up')
-    datetime.datetime(2022, 1, 1, 12, 16)
-    >>> round_time(datetime(2022, 1, 1, 12, 15, 57, 200), timedelta(hours=1))
-    datetime.datetime(2022, 1, 1, 12, 0)
-    >>> round_time(
-    ...   datetime(2022, 1, 1, 12, 15, 57, 200),
-    ...   timedelta(hours=1),
-    ...   to = 'closest'
-    ... )
-    datetime.datetime(2022, 1, 1, 12, 0)
-    >>> round_time(
-    ...   datetime(2022, 1, 1, 12, 45, 57, 200),
-    ...   datetime.timedelta(hours=1),
-    ...   to = 'closest'
-    ... )
-    datetime.datetime(2022, 1, 1, 13, 0)
-
-    """
-    if date_delta is None:
-        date_delta = timedelta(minutes=1)
-    round_to = date_delta.total_seconds()
-    if dt is None:
-        dt = datetime.now(timezone.utc).replace(tzinfo=None)
-    seconds = (dt.replace(tzinfo=None) - dt.min.replace(tzinfo=None)).seconds
-
-    if seconds % round_to == 0 and dt.microsecond == 0:
-        rounding = (seconds + round_to / 2) // round_to * round_to
-    else:
-        if to == 'up':
-            rounding = (seconds + dt.microsecond/1000000 + round_to) // round_to * round_to
-        elif to == 'down':
-            rounding = seconds // round_to * round_to
-        else:
-            rounding = (seconds + round_to / 2) // round_to * round_to
-
-    return dt + timedelta(0, rounding - seconds, - dt.microsecond)
-
-
 def timed_input(
-        seconds: int = 10,
-        timeout_message: str = "",
-        prompt: str = "",
-        icon: bool = False,
-        **kw
-    ) -> Union[str, None]:
+    seconds: int = 10,
+    timeout_message: str = "",
+    prompt: str = "",
+    icon: bool = False,
+    **kw
+) -> Union[str, None]:
     """
     Accept user input only for a brief period of time.
 
@@ -514,52 +503,6 @@ def timed_input(
     finally:
         signal.alarm(0) # cancel alarm
 
-
-
-
-
-def replace_pipes_in_dict(
-        pipes : Optional[PipesDict] = None,
-        func: 'function' = str,
-        debug: bool = False,
-        **kw
-    ) -> PipesDict:
-    """
-    Replace the Pipes in a Pipes dict with the result of another function.
-
-    Parameters
-    ----------
-    pipes: Optional[PipesDict], default None
-        The pipes dict to be processed.
-
-    func: Callable[[Any], Any], default str
-        The function to be applied to every pipe.
-        Defaults to the string constructor.
-
-    debug: bool, default False
-        Verbosity toggle.
-    
-
-    Returns
-    -------
-    A dictionary where every pipe is replaced with the output of a function.
-
-    """
-    import copy
-    def change_dict(d : Dict[Any, Any], func : 'function') -> None:
-        for k, v in d.items():
-            if isinstance(v, dict):
-                change_dict(v, func)
-            else:
-                d[k] = func(v)
-
-    if pipes is None:
-        from meerschaum import get_pipes
-        pipes = get_pipes(debug=debug, **kw)
-
-    result = copy.deepcopy(pipes)
-    change_dict(result, func)
-    return result
 
 def enforce_gevent_monkey_patch():
     """
@@ -634,10 +577,10 @@ def string_width(string: str, widest: bool = True) -> int:
     return _widest()
 
 def _pyinstaller_traverse_dir(
-        directory: str,
-        ignore_patterns: Iterable[str] = ('.pyc', 'dist', 'build', '.git', '.log'),
-        include_dotfiles: bool = False
-    ) -> list:
+    directory: str,
+    ignore_patterns: Iterable[str] = ('.pyc', 'dist', 'build', '.git', '.log'),
+    include_dotfiles: bool = False
+) -> list:
     """
     Recursively traverse a directory and return a list of its contents.
     """
@@ -675,6 +618,43 @@ def _pyinstaller_traverse_dir(
 
             paths.append((path, _path))
     return paths
+
+
+def get_val_from_dict_path(d: Dict[Any, Any], path: Tuple[Any, ...]) -> Any:
+    """
+    Get a value from a dictionary with a tuple of keys.
+
+    Parameters
+    ----------
+    d: Dict[Any, Any]
+        The dictionary to search.
+
+    path: Tuple[Any, ...]
+        The path of keys to traverse.
+
+    Returns
+    -------
+    The value from the end of the path.
+    """
+    return functools.reduce(lambda di, key: di[key], path, d)
+
+
+def set_val_in_dict_path(d: Dict[Any, Any], path: Tuple[Any, ...], val: Any) -> None:
+    """
+    Set a value in a dictionary with a tuple of keys.
+
+    Parameters
+    ----------
+    d: Dict[Any, Any]
+        The dictionary to search.
+
+    path: Tuple[Any, ...]
+        The path of keys to traverse.
+
+    val: Any
+        The value to set at the end of the path.
+    """
+    get_val_from_dict_path(d, path[:-1])[path[-1]] = val
 
 
 def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, Any]:
@@ -717,7 +697,7 @@ def replace_password(d: Dict[str, Any], replace_with: str = '*') -> Dict[str, An
             from meerschaum.connectors.sql import SQLConnector
             try:
                 uri_params = SQLConnector.parse_uri(v)
-            except Exception as e:
+            except Exception:
                 uri_params = None
             if not uri_params:
                 continue
@@ -876,6 +856,7 @@ def dict_from_od(od: collections.OrderedDict) -> Dict[Any, Any]:
         ):
             _d[k] = dict_from_od(v)
     return _d
+
 
 def remove_ansi(s: str) -> str:
     """
@@ -1153,7 +1134,7 @@ def items_str(
     return output
 
 
-def interval_str(delta: Union[timedelta, int]) -> str:
+def interval_str(delta: Union[timedelta, int], round_unit: bool = False) -> str:
     """
     Return a human-readable string for a `timedelta` (or `int` minutes).
 
@@ -1162,20 +1143,57 @@ def interval_str(delta: Union[timedelta, int]) -> str:
     delta: Union[timedelta, int]
         The interval to print. If `delta` is an integer, assume it corresponds to minutes.
 
+    round_unit: bool, default False
+        If `True`, round the output to a single unit.
+
     Returns
     -------
     A formatted string, fit for human eyes.
     """
     from meerschaum.utils.packages import attempt_import
-    if is_int(delta):
+    if is_int(str(delta)) and not round_unit:
         return str(delta)
-    humanfriendly = attempt_import('humanfriendly')
+
+    humanfriendly = attempt_import('humanfriendly', lazy=False)
     delta_seconds = (
         delta.total_seconds()
-        if isinstance(delta, timedelta)
+        if hasattr(delta, 'total_seconds')
         else (delta * 60)
     )
-    return humanfriendly.format_timespan(delta_seconds)
+
+    is_negative = delta_seconds < 0
+    delta_seconds = abs(delta_seconds)
+    replace_units = {}
+
+    if round_unit:
+        if delta_seconds < 1:
+            delta_seconds = round(delta_seconds, 2)
+        elif delta_seconds < 60:
+            delta_seconds = int(delta_seconds)
+        elif delta_seconds < 3600:
+            delta_seconds = int(delta_seconds / 60) * 60
+        elif delta_seconds < 86400:
+            delta_seconds = int(delta_seconds / 3600) * 3600
+        elif delta_seconds < (86400 * 7):
+            delta_seconds = int(delta_seconds / 86400) * 86400
+        elif delta_seconds < (86400 * 7 * 4):
+            delta_seconds = int(delta_seconds / (86400 * 7)) * (86400 * 7)
+        elif delta_seconds < (86400 * 7 * 4 * 13):
+            delta_seconds = int(delta_seconds / (86400 * 7 * 4)) * (86400 * 7)
+            replace_units['weeks'] = 'months'
+        else:
+            delta_seconds = int(delta_seconds / (86400 * 364)) * (86400 * 364)
+
+    delta_str = humanfriendly.format_timespan(delta_seconds)
+    if ',' in delta_str and round_unit:
+        delta_str = delta_str.split(',')[0]
+    elif ' and ' in delta_str and round_unit:
+        delta_str = delta_str.split(' and ')[0]
+
+    for parsed_unit, replacement_unit in replace_units.items():
+        delta_str = delta_str.replace(parsed_unit, replacement_unit)
+
+    return delta_str + (' ago' if is_negative else '')
 
 
 def is_docker_available() -> bool:
@@ -1214,11 +1232,15 @@ def is_systemd_available() -> bool:
     import subprocess
     try:
         has_systemctl = subprocess.call(
-            ['systemctl', '-h'],
+            ['systemctl', 'whoami'],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
         ) == 0
+    except FileNotFoundError:
+        has_systemctl = False
     except Exception:
+        import traceback
+        traceback.print_exc()
         has_systemctl = False
     return has_systemctl
 
@@ -1234,6 +1256,8 @@ def is_tmux_available() -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT
         ) == 0
+    except FileNotFoundError:
+        has_tmux = False
     except Exception:
         has_tmux = False
     return has_tmux
@@ -1406,7 +1430,7 @@ def separate_negation_values(
         If `None`, use the system default (`_`).
     """
     if negation_prefix is None:
-        from meerschaum.config.static import STATIC_CONFIG
+        from meerschaum._internal.static import STATIC_CONFIG
         negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
     _in_vals, _ex_vals = [], []
     for v in vals:
@@ -1442,7 +1466,7 @@ def get_in_ex_params(params: Optional[Dict[str, Any]]) -> Dict[str, Tuple[List[A
         col: separate_negation_values(
             (
                 val
-                if isinstance(val, (list, tuple))
+                if isinstance(val, (list, tuple, set)) or hasattr(val, 'astype')
                 else [val]
             )
         )
@@ -1610,6 +1634,36 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
     return safe_extract(tarf, output_dir)
 
 
+def to_snake_case(name: str) -> str:
+    """
+    Return the given string in snake-case-style.
+
+    Parameters
+    ----------
+    name: str
+        The input text to convert to snake case.
+
+    Returns
+    -------
+    A snake-case version of `name`.
+
+    Examples
+    --------
+    >>> to_snake_case("HelloWorld!")
+    'hello_world'
+    >>> to_snake_case("This has spaces in it.")
+    'this_has_spaces_in_it'
+    >>> to_snake_case("already_in_snake_case")
+    'already_in_snake_case'
+    """
+    import re
+    name = re.sub(r'(.)([A-Z][a-z]+)', r'\1_\2', name)
+    name = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', name)
+    name = re.sub(r'[^\w\s]', '', name)
+    name = re.sub(r'\s+', '_', name)
+    return name.lower()
+
+
 ##################
 # Legacy imports #
 ##################
@@ -1756,6 +1810,33 @@ def json_serialize_datetime(dt: datetime) -> Union[str, None]:
     return serialize_datetime(dt)
 
 
+def replace_pipes_in_dict(*args, **kwargs):
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.pipes.replace_pipes_in_dict`.
+    """
+    from meerschaum.utils.pipes import replace_pipes_in_dict
+    return replace_pipes_in_dict(*args, **kwargs)
+
+
+def is_pipe_registered(*args, **kwargs):
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.pipes.is_pipe_registered`.
+    """
+    from meerschaum.utils.pipes import is_pipe_registered
+    return is_pipe_registered(*args, **kwargs)
+
+
+def round_time(*args, **kwargs):
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.dtypes.round_time`.
+    """
+    from meerschaum.utils.dtypes import round_time
+    return round_time(*args, **kwargs)
+
+
 _current_module = sys.modules[__name__]
 __all__ = tuple(
     name
@@ -1763,4 +1844,5 @@ __all__ = tuple(
     if callable(obj)
         and name not in __pdoc__
         and getattr(obj, '__module__', None) == _current_module.__name__
+        and not name.startswith('_')
 )

@@ -11,10 +11,11 @@ from __future__ import annotations
 import textwrap
 import json
 import uuid
-from datetime import datetime, timezone
 
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.exceptions import PreventUpdate
+
+import meerschaum as mrsm
 from meerschaum.utils.typing import List, Optional, Any, Tuple
 from meerschaum.api import get_api_connector, endpoints, no_auth, CHECK_UPDATE
 from meerschaum.api.dash import dash_app, debug
@@ -26,7 +27,12 @@ from meerschaum.api.dash.sessions import (
 from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.connectors.parse import parse_instance_keys
-from meerschaum.api.dash.pipes import get_pipes_cards, pipe_from_ctx, accordion_items_from_pipe
+from meerschaum.api.dash.pipes import (
+    get_pipes_cards,
+    pipe_from_ctx,
+    accordion_items_from_pipe,
+    get_backtrack_text,
+)
 from meerschaum.api.dash.jobs import get_jobs_cards
 from meerschaum.api.dash.plugins import get_plugins_cards
 from meerschaum.api.dash.users import get_users_cards
@@ -41,7 +47,7 @@ from meerschaum.api.dash.components import (
 from meerschaum.api.dash import pages
 from meerschaum.utils.typing import Dict
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
-from meerschaum.utils.misc import filter_keywords, flatten_list
+from meerschaum.utils.misc import filter_keywords, flatten_list, string_to_dict
 from meerschaum.utils.yaml import yaml
 from meerschaum.actions import get_subactions, actions
 from meerschaum._internal.arguments._parser import parser
@@ -55,11 +61,8 @@ keys_state = (
     State('connector-keys-dropdown', 'value'),
     State('metric-keys-dropdown', 'value'),
     State('location-keys-dropdown', 'value'),
-    State('connector-keys-input', 'value'),
-    State('metric-keys-input', 'value'),
-    State('location-keys-input', 'value'),
-    State('search-parameters-editor', 'value'),
-    State('pipes-filter-tabs', 'active_tab'),
+    State('tags-dropdown', 'value'),
+    State('tags-dropdown-div', 'style'),
     State('action-dropdown', 'value'),
     State('subaction-dropdown', 'value'),
     State('subaction-dropdown', 'options'),
@@ -69,8 +72,6 @@ keys_state = (
     State({'type': 'input-flags-dropdown', 'index': ALL}, 'value'),
     State({'type': 'input-flags-dropdown-text', 'index': ALL}, 'value'),
     State('instance-select', 'value'),
-    State('content-div-right', 'children'),
-    State('success-alert-div', 'children'),
     State('session-store', 'data'),
 )
 
@@ -98,17 +99,21 @@ omit_actions = {
 
 ### Map endpoints to page layouts.
 _paths = {
-    'login'   : pages.login.layout,
-    ''        : pages.dashboard.layout,
-    'plugins' : pages.plugins.layout,
-    'register': pages.register.layout,
-    'pipes'   : pages.pipes.layout,
-    'job'     : pages.job.layout,
+    '/dash/login'   : pages.login.layout,
+    '/dash'         : pages.dashboard.layout,
+    '/dash/plugins' : pages.plugins.layout,
+    '/dash/tokens'  : pages.tokens.layout,
+    '/dash/register': pages.register.layout,
+    '/dash/pipes'   : pages.pipes.layout,
+    '/dash/jobs'    : pages.jobs.layout,
 }
-_required_login = {''}
+_required_login = {'', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes'}
 _pages = {
     'Web Console': '/dash/',
+    'Pipes': '/dash/pipes',
     'Plugins': '/dash/plugins',
+    'Tokens': '/dash/tokens',
+    'Jobs': '/dash/jobs',
 }
 
 
@@ -139,7 +144,6 @@ def update_page_layout_div(
     -------
     A tuple of the page layout and new session store data.
     """
-    dash_endpoint = endpoints['dash']
     try:
         session_id = session_store_data.get('session-id', None)
     except AttributeError:
@@ -156,18 +160,9 @@ def update_page_layout_div(
     else:
         session_store_to_return = dash.no_update
 
-    base_path = (
-        pathname.rstrip('/') + '/'
-    ).replace(
-        (dash_endpoint + '/'),
-        ''
-    ).rstrip('/').split('/')[0]
-
+    base_path = '/'.join(pathname.split('/')[:2])
     complete_path = (
         pathname.rstrip('/') + '/'
-    ).replace(
-        dash_endpoint + '/',
-        ''
     ).rstrip('/')
 
     if complete_path in _paths:
@@ -175,14 +170,14 @@ def update_page_layout_div(
     elif base_path in _paths:
         path_str = base_path
     else:
-        path_str = ''
+        path_str = '/dash'
 
     path = (
         path_str
         if no_auth or path_str not in _required_login else (
             path_str
             if is_session_active(session_id)
-            else 'login'
+            else '/dash/login'
         )
     )
     layout = _paths.get(path, pages.error.layout)
@@ -295,6 +290,7 @@ dash_app.clientside_callback(
         connector_keys,
         metric_keys,
         location_keys,
+        tags,
         flags,
         input_flags,
         input_flags_texts,
@@ -317,6 +313,7 @@ dash_app.clientside_callback(
                 connector_keys: connector_keys,
                 metric_keys: metric_keys,
                 location_keys: location_keys,
+                tags: tags,
                 flags: flags,
                 input_flags: input_flags,
                 input_flags_texts: input_flags_texts,
@@ -333,6 +330,7 @@ dash_app.clientside_callback(
     State('connector-keys-dropdown', 'value'),
     State('metric-keys-dropdown', 'value'),
     State('location-keys-dropdown', 'value'),
+    State('tags-dropdown', 'value'),
     State('flags-dropdown', 'value'),
     State({'type': 'input-flags-dropdown', 'index': ALL}, 'value'),
     State({'type': 'input-flags-dropdown-text', 'index': ALL}, 'value'),
@@ -358,7 +356,7 @@ def update_actions(action: str, subaction: str):
     _actions_options = sorted([
         {
             'label': a.replace('_', ' '),
-            'value': a,
+            'value': a.replace('_', ' '),
             'title': (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
         }
         for a, f in actions.items() if a not in omit_actions
@@ -366,7 +364,7 @@ def update_actions(action: str, subaction: str):
     _subactions_options = sorted([
         {
             'label': sa.replace('_', ' '),
-            'value': sa,
+            'value': sa.replace('_', ' '),
             'title': (textwrap.dedent(f.__doc__).lstrip() if f.__doc__ else 'No help available.'),
         }
         for sa, f in get_subactions(action).items()
@@ -489,19 +487,15 @@ def update_flags(input_flags_dropdown_values, n_clicks, input_flags_texts):
 
 @dash_app.callback(
     Output('connector-keys-dropdown', 'options'),
-    Output('connector-keys-list', 'children'),
-    Output('connector-keys-dropdown', 'value'),
     Output('metric-keys-dropdown', 'options'),
-    Output('metric-keys-list', 'children'),
-    Output('metric-keys-dropdown', 'value'),
     Output('location-keys-dropdown', 'options'),
-    Output('location-keys-list', 'children'),
-    Output('location-keys-dropdown', 'value'),
+    Output('tags-dropdown', 'options'),
     Output('instance-select', 'value'),
     Output('instance-alert-div', 'children'),
     Input('connector-keys-dropdown', 'value'),
     Input('metric-keys-dropdown', 'value'),
     Input('location-keys-dropdown', 'value'),
+    Input('tags-dropdown', 'value'),
     Input('instance-select', 'value'),
     *keys_state  ### NOTE: Necessary for `ctx.states`.
 )
@@ -509,6 +503,7 @@ def update_keys_options(
     connector_keys: Optional[List[str]],
     metric_keys: Optional[List[str]],
     location_keys: Optional[List[str]],
+    tags: Optional[List[str]],
     instance_keys: Optional[str],
     *keys
 ):
@@ -536,13 +531,6 @@ def update_keys_options(
     except Exception as e:
         instance_alerts += [alert_from_success_tuple((False, str(e)))]
 
-    ### Update the keys filters.
-    if connector_keys is None:
-        connector_keys = []
-    if metric_keys is None:
-        metric_keys = []
-    if location_keys is None:
-        location_keys = []
     num_filter = 0
     if connector_keys:
         num_filter += 1
@@ -550,13 +538,13 @@ def update_keys_options(
         num_filter += 1
     if location_keys:
         num_filter += 1
+    if tags:
+        num_filter += 1
 
-    _ck_filter = connector_keys
-    _mk_filter = metric_keys
-    _lk_filter = location_keys
     _ck_alone = (connector_keys and num_filter == 1) or instance_click
     _mk_alone = (metric_keys and num_filter == 1) or instance_click
     _lk_alone = (location_keys and num_filter == 1) or instance_click
+    _tags_alone = (tags and num_filter == 1) or instance_click
 
     from meerschaum.utils import fetch_pipes_keys
 
@@ -565,73 +553,94 @@ def update_keys_options(
         _keys = fetch_pipes_keys(
             'registered',
             get_web_connector(ctx.states),
-            connector_keys=_ck_filter,
-            metric_keys=_mk_filter,
-            location_keys=_lk_filter,
+            connector_keys=connector_keys,
+            metric_keys=metric_keys,
+            location_keys=location_keys,
+            tags=tags,
         )
+        _tags_pipes = mrsm.get_pipes(
+            connector_keys=connector_keys,
+            metric_keys=metric_keys,
+            location_keys=location_keys,
+            tags=tags,
+            instance=get_web_connector(ctx.states),
+            as_tags_dict=True,
+        )
+        _all_tags = list(
+            set(
+                mrsm.get_pipes(
+                    instance=get_web_connector(ctx.states),
+                    as_tags_dict=True,
+                )
+            ).union(tags or [])
+        ) if _tags_alone else []
     except Exception as e:
         instance_alerts += [alert_from_success_tuple((False, str(e)))]
-        _all_keys, _keys = [], []
-    _connectors_options = []
-    _metrics_options = []
-    _locations_options = []
+        _all_keys, _all_tags, _keys = [], [], []
 
-    _seen_keys = {'ck' : set(), 'mk' : set(), 'lk' : set()}
+    connectors_options = sorted(
+        list(
+            set(
+                keys_tuple[0] for keys_tuple in (_all_keys if _ck_alone else _keys)
+            ).union(set(connector_keys or []))
+        ),
+        key=(lambda x: str(x).lower()),
+    )
+    metrics_options = sorted(
+        list(
+            set(
+                keys_tuple[1] for keys_tuple in (_all_keys if _mk_alone else _keys)
+            ).union(set(metric_keys or []))
+        ),
+        key=(lambda x: str(x).lower()),
+    )
+    locations_options = sorted(
+        list(
+            set(
+                (
+                    str(keys_tuple[2])
+                    for keys_tuple in (_all_keys if _lk_alone else _keys)
+                )
+            ).union(set((str(_lk) for _lk in (location_keys or []))))
+        ),
+        key=(lambda x: str(x).lower()),
+    )
 
-    def add_options(options, keys, key_type):
-        for ck, mk, lk in keys:
-            k = locals()[key_type]
-            if k not in _seen_keys[key_type]:
-                _k = 'None' if k in (None, '[None]', 'None', 'null') else k
-                options.append({'label': _k, 'value': _k})
-                _seen_keys[key_type].add(k)
+    tags_options = sorted(
+        list(
+            set(
+                (_all_tags if _tags_alone else _tags_pipes)
+            ).union(set(tags or []))
+        ),
+        key=(lambda x: str(x).lower()),
+    )
 
-    add_options(_connectors_options, _all_keys if _ck_alone else _keys, 'ck')
-    add_options(_metrics_options, _all_keys if _mk_alone else _keys, 'mk')
-    add_options(_locations_options, _all_keys if _lk_alone else _keys, 'lk')
-    _connectors_options.sort(key=lambda x: str(x).lower())
-    _metrics_options.sort(key=lambda x: str(x).lower())
-    _locations_options.sort(key=lambda x: str(x).lower())
-    connector_keys = [
-        ck
-        for ck in connector_keys
-        if ck in [
-            _ck['value']
-            for _ck in _connectors_options
-        ]
-    ]
-    metric_keys = [
-        mk
-        for mk in metric_keys
-        if mk in [
-            _mk['value']
-            for _mk in _metrics_options
-        ]
-    ]
-    location_keys = [
-        lk
-        for lk in location_keys
-        if lk in [
-            _lk['value']
-            for _lk in _locations_options
-        ]
-    ]
-    _connectors_datalist = [html.Option(value=o['value']) for o in _connectors_options]
-    _metrics_datalist = [html.Option(value=o['value']) for o in _metrics_options]
-    _locations_datalist = [html.Option(value=o['value']) for o in _locations_options]
     return (
-        _connectors_options,
-        _connectors_datalist,
-        connector_keys,
-        _metrics_options,
-        _metrics_datalist,
-        metric_keys,
-        _locations_options,
-        _locations_datalist,
-        location_keys,
+        connectors_options,
+        metrics_options,
+        locations_options,
+        tags_options,
         (instance_keys if update_instance_keys else dash.no_update),
         instance_alerts,
     )
+
+
+@dash_app.callback(
+    Output('connector-keys-dropdown', 'value'),
+    Output('metric-keys-dropdown', 'value'),
+    Output('location-keys-dropdown', 'value'),
+    Output('tags-dropdown', 'value'),
+    Input('clear-all-keys-button', 'n_clicks'),
+    prevent_initial_call=True,
+)
+def clear_all_keys_button_click(n_clicks):
+    """
+    Clear the keys dropdowns when the `Clear all` button is clicked.
+    """
+    if not n_clicks:
+        raise PreventUpdate
+
+    return [], [], [], []
 
 dash_app.clientside_callback(
     """
@@ -804,6 +813,7 @@ dash_app.clientside_callback(
 @dash_app.callback(
     Output("download-dataframe-csv", "data"),
     Input({'type': 'pipe-download-csv-button', 'index': ALL}, 'n_clicks'),
+    prevent_initial_call=True,
 )
 def download_pipe_csv(n_clicks):
     """
@@ -833,6 +843,7 @@ def download_pipe_csv(n_clicks):
     Output({'type': 'pipe-accordion', 'index': MATCH}, 'children'),
     Input({'type': 'pipe-accordion', 'index': MATCH}, 'active_item'),
     State('session-store', 'data'),
+    prevent_initial_call=True,
 )
 def update_pipe_accordion(item, session_store_data):
     """
@@ -856,12 +867,12 @@ def update_pipe_accordion(item, session_store_data):
 @dash_app.callback(
     Output({'type': 'update-parameters-success-div', 'index': MATCH}, 'children'),
     Input({'type': 'update-parameters-button', 'index': MATCH}, 'n_clicks'),
-    State({'type': 'parameters-editor', 'index': MATCH}, 'value')
+    State({'type': 'parameters-editor', 'index': MATCH}, 'value'),
+    prevent_initial_call=True,
 )
 def update_pipe_parameters_click(n_clicks, parameters_editor_text):
     if not n_clicks:
         raise PreventUpdate
-    ctx = dash.callback_context
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -890,12 +901,12 @@ def update_pipe_parameters_click(n_clicks, parameters_editor_text):
 @dash_app.callback(
     Output({'type': 'update-sql-success-div', 'index': MATCH}, 'children'),
     Input({'type': 'update-sql-button', 'index': MATCH}, 'n_clicks'),
-    State({'type': 'sql-editor', 'index': MATCH}, 'value')
+    State({'type': 'sql-editor', 'index': MATCH}, 'value'),
+    prevent_initial_call=True,
 )
 def update_pipe_sql_click(n_clicks, sql_editor_text):
     if not n_clicks:
         raise PreventUpdate
-    ctx = dash.callback_context
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -918,12 +929,12 @@ def update_pipe_sql_click(n_clicks, sql_editor_text):
 @dash_app.callback(
     Output({'type': 'sync-success-div', 'index': MATCH}, 'children'),
     Input({'type': 'update-sync-button', 'index': MATCH}, 'n_clicks'),
-    State({'type': 'sync-editor', 'index': MATCH}, 'value')
+    State({'type': 'sync-editor', 'index': MATCH}, 'value'),
+    prevent_initial_call=True,
 )
 def sync_documents_click(n_clicks, sync_editor_text):
     if not n_clicks:
         raise PreventUpdate
-    ctx = dash.callback_context
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -937,6 +948,15 @@ def sync_documents_click(n_clicks, sync_editor_text):
     except Exception as e:
         docs = None
         msg = str(e)
+
+    if docs is None:
+        try:
+            lines = sync_editor_text.splitlines()
+            docs = [string_to_dict(line) for line in lines]
+            msg = '... '
+        except Exception:
+            docs = None
+
     if docs is None:
         success, msg = False, (msg + f"Unable to sync documents to {pipe}.")
     else:
@@ -956,6 +976,7 @@ def sync_documents_click(n_clicks, sync_editor_text):
     State({'type': 'limit-input', 'index': MATCH}, 'value'),
     State({'type': 'query-data-begin-input', 'index': MATCH}, 'value'),
     State({'type': 'query-data-end-input', 'index': MATCH}, 'value'),
+    prevent_initial_call=True,
 )
 def query_data_click(n_clicks, query_editor_text, limit_value, begin, end):
     triggered = dash.callback_context.triggered
@@ -966,7 +987,7 @@ def query_data_click(n_clicks, query_editor_text, limit_value, begin, end):
         raise PreventUpdate
 
     try:
-        params_query = json.loads(query_editor_text)
+        params_query = string_to_dict(query_editor_text)
     except Exception as e:
         return alert_from_success_tuple((False, f"Invalid query:\n{e}"))
 
@@ -1043,8 +1064,8 @@ dash_app.clientside_callback(
 
 @dash_app.callback(
     Output("navbar-collapse", "is_open"),
-    [Input("navbar-toggler", "n_clicks")],
-    [State("navbar-collapse", "is_open")],
+    Input("navbar-toggler", "n_clicks"),
+    State("navbar-collapse", "is_open"),
 )
 def toggle_navbar_collapse(n_clicks: Optional[int], is_open: bool) -> bool:
     """
@@ -1072,6 +1093,7 @@ def toggle_navbar_collapse(n_clicks: Optional[int], is_open: bool) -> bool:
     Output('session-store', 'data'),
     Input("sign-out-button", "n_clicks"),
     State('session-store', 'data'),
+    prevent_initial_call=True,
 )
 def sign_out_button_click(
     n_clicks: Optional[int],
@@ -1092,6 +1114,7 @@ def sign_out_button_click(
     Output({'type': 'parameters-editor', 'index': MATCH}, 'value'),
     Input({'type': 'parameters-as-yaml-button', 'index': MATCH}, 'n_clicks'),
     Input({'type': 'parameters-as-json-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True,
 )
 def parameters_as_yaml_or_json_click(
     yaml_n_clicks: Optional[int],
@@ -1103,7 +1126,6 @@ def parameters_as_yaml_or_json_click(
     if not yaml_n_clicks and not json_n_clicks:
         raise PreventUpdate
 
-    ctx = dash.callback_context
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -1118,10 +1140,39 @@ def parameters_as_yaml_or_json_click(
 
 
 @dash_app.callback(
+    Output({'type': 'sync-editor', 'index': MATCH}, 'value'),
+    Input({'type': 'sync-as-json-button', 'index': MATCH}, 'n_clicks'),
+    Input({'type': 'sync-as-lines-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True,
+)
+def sync_as_json_or_lines_click(
+    json_n_clicks: Optional[int],
+    lines_n_clicks: Optional[int],
+):
+    """
+    When the `YAML` button is clicked under the parameters editor, switch the content to YAML.
+    """
+    if not json_n_clicks and not lines_n_clicks:
+        raise PreventUpdate
+
+    triggered = dash.callback_context.triggered
+    if triggered[0]['value'] is None:
+        raise PreventUpdate
+
+    as_lines = 'lines' in triggered[0]['prop_id']
+    pipe = pipe_from_ctx(triggered, 'n_clicks')
+    if pipe is None:
+        raise PreventUpdate
+
+    return get_backtrack_text(pipe, lines=as_lines)
+
+
+@dash_app.callback(
     Output('pages-offcanvas', 'is_open'),
     Output('pages-offcanvas', 'children'),
     Input('logo-img', 'n_clicks'),
     State('pages-offcanvas', 'is_open'),
+    prevent_initial_call=True,
 )
 def toggle_pages_offcanvas(n_clicks: Optional[int], is_open: bool):
     """
@@ -1131,3 +1182,32 @@ def toggle_pages_offcanvas(n_clicks: Optional[int], is_open: bool):
     if n_clicks:
         return not is_open, pages_children
     return is_open, pages_children
+
+
+@dash_app.callback(
+    Output({'type': 'calculate-rowcount-div', 'index': MATCH}, 'children'),
+    Input({'type': 'calculate-rowcount-button', 'index': MATCH}, 'n_clicks'),
+    prevent_initial_call=True,
+)
+def calculate_rowcount_button_click(n_clicks: int):
+    """
+    Calculate the rowcount for the pipe.
+    """
+    if not n_clicks:
+        raise PreventUpdate
+
+    triggered = dash.callback_context.triggered
+    if triggered[0]['value'] is None:
+        raise PreventUpdate
+
+    pipe = pipe_from_ctx(triggered, 'n_clicks')
+    if pipe is None:
+        raise PreventUpdate
+
+    try:
+        rowcount = pipe.get_rowcount(debug=debug)
+        return f"{rowcount:,}"
+    except Exception as e:
+        return (
+            alert_from_success_tuple((False, f"Failed to calculate row count: {e}"))
+        )

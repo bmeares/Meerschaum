@@ -79,7 +79,8 @@ def get_jobs(
         }
 
     def _get_systemd_jobs():
-        conn = mrsm.get_connector('systemd')
+        from meerschaum.jobs.systemd import SystemdExecutor
+        conn = SystemdExecutor('systemd')
         jobs = conn.get_jobs(debug=debug)
         return {
             name: job
@@ -369,7 +370,7 @@ def start_check_jobs_thread():
     import atexit
     from functools import partial
     from meerschaum.utils.threading import RepeatTimer
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
 
     global _check_loop_stop_thread
     sleep_seconds = STATIC_CONFIG['jobs']['check_restart_seconds']

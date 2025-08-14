@@ -16,13 +16,10 @@ dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 
 placeholders = {
-    'ck' : 'Connectors',
-    'mk' : 'Metrics',
-    'lk' : 'Locations',
-    'params' : (
-        'Additional search parameters. ' +
-        'Simple dictionary format or JSON accepted.'
-    ),
+    'ck': 'Connectors',
+    'mk': 'Metrics',
+    'lk': 'Locations',
+    'tags': 'Tags',
 }
 widths = {
     'flags' : {'size' : 12},
@@ -212,11 +209,41 @@ dropdown_keys_row = dbc.Row(
         ),
     ] ### end of filters row children
 )
+tags_dropdown = html.Div(
+    dcc.Dropdown(
+        id='tags-dropdown',
+        options=[],
+        placeholder=placeholders['tags'],
+        multi=True,
+        searchable=True,
+    ),
+    className="dbc_dark",
+    id="tags-dropdown-div",
+)
+
 dropdown_tab_content = html.Div([
     dbc.Card(
         dbc.CardBody(
             [
                 dropdown_keys_row,
+                html.Br(),
+                dbc.Row(
+                    [
+                        dbc.Col(tags_dropdown, width=True),
+                        dbc.Col(
+                            dbc.Button(
+                                "Clear all",
+                                id='clear-all-keys-button',
+                                color='link',
+                                size='sm',
+                                style={'text-decoration': 'none'},
+                            ),
+                            width='auto',
+                        ),
+                    ],
+                    className='g-0',
+                    align='center',
+                ),
             ], ### end of card children
             className='card-text',
         )
@@ -232,94 +259,9 @@ dropdown_tab_content = html.Div([
     ),
 ])
 
-text_tab_content = dbc.Card(
-    dbc.CardBody(
-        [
-            dbc.Row(
-                [
-                    dbc.Col(html.Div(className='dbc_dark', children=[
-                        dbc.InputGroup(
-                            [
-                                    dbc.Button(
-                                        'Clear',
-                                        id='clear-connector-keys-input-button',
-                                        color='link',
-                                        size='sm',
-                                    ),
-                                dbc.Input(
-                                    id='connector-keys-input',
-                                    placeholder=placeholders['ck'],
-                                    type='text',
-                                    value='',
-                                    list='connector-keys-list',
-                                    className='dbc_dark'
-                                ),
-                            ],
-                            size=input_group_sizes['ck'],
-                        )]),
-                        width=4,
-                    ),
-                    dbc.Col(
-                        dbc.InputGroup(
-                            [
-                                    dbc.Button(
-                                        'Clear',
-                                        id='clear-metric-keys-input-button',
-                                        color='link',
-                                        size='sm',
-                                    ),
-                                dbc.Input(
-                                    id='metric-keys-input',
-                                    placeholder=placeholders['mk'],
-                                    type='text',
-                                    value='',
-                                    list='metric-keys-list',
-                                ),
-                            ],
-                            size=input_group_sizes['mk'],
-                        ),
-                        width=4,
-                    ),
-                    dbc.Col(
-                        dbc.InputGroup(
-                            [
-                                    dbc.Button(
-                                        'Clear',
-                                        id='clear-location-keys-input-button',
-                                        color='link',
-                                        size='sm',
-                                    ),
-                                dbc.Input(
-                                    id='location-keys-input',
-                                    placeholder=placeholders['lk'],
-                                    type='text',
-                                    value='',
-                                    list='location-keys-list',
-                                ),
-                            ],
-                            size=input_group_sizes['lk'],
-                        ),
-                        width=4,
-                    ),
-                ]
-            ),
-            html.Br(),
-            dbc.Row(
-                dbc.Col(
-                    dbc.InputGroup(
-                        [
-                            search_parameters_editor,
-                        ],
-                        size=input_group_sizes['params'],
-                    )
-                )
-            ),
-        ]
-    )
-)
-
 keys_lists_content = html.Div([
     html.Datalist(id='connector-keys-list'),
     html.Datalist(id='metric-keys-list'),
     html.Datalist(id='location-keys-list'),
+    html.Datalist(id='tags-list'),
 ], hidden=True)

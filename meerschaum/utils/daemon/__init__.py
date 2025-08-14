@@ -7,14 +7,42 @@ Manage Daemons via the `Daemon` class.
 """
 
 from __future__ import annotations
-import os, pathlib, shutil, json, datetime, threading, shlex
-from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Dict
-from meerschaum.config._paths import DAEMON_RESOURCES_PATH
+
+import os
+import pathlib
+import shutil
+import json
+import datetime
+import threading
+import shlex
+
+from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Dict, Union
 from meerschaum.utils.daemon.StdinFile import StdinFile
 from meerschaum.utils.daemon.Daemon import Daemon
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
 from meerschaum.utils.daemon.FileDescriptorInterceptor import FileDescriptorInterceptor
 from meerschaum.utils.daemon._names import get_new_daemon_name
+
+
+__all__ = (
+    'daemon_action',
+    'daemon_entry',
+    'get_daemons',
+    'get_daemon_ids',
+    'get_running_daemons',
+    'get_stopped_daemons',
+    'get_paused_daemons',
+    'get_filtered_daemons',
+    'get_new_daemon_name',
+    'run_daemon',
+    'running_in_daemon',
+    'Daemon',
+    'StdinFile',
+    'RotatingFile',
+    'FileDescriptorInterceptor',
+)
+
+_daemons = {}
 
 
 def daemon_entry(sysargs: Optional[List[str]] = None) -> SuccessTuple:
@@ -183,6 +211,7 @@ def get_daemon_ids() -> List[str]:
     """
     Return the IDs of all daemons on disk.
     """
+    from meerschaum.config._paths import DAEMON_RESOURCES_PATH
     return [
         daemon_dir
         for daemon_dir in sorted(os.listdir(DAEMON_RESOURCES_PATH))
@@ -270,8 +299,6 @@ def get_filtered_daemons(
             if warn:
                 _warn(f"Daemon '{d_id}' does not exist.", stack=False)
             continue
-        if d.hidden:
-            pass
         daemons.append(d)
     return daemons
 
@@ -280,6 +307,20 @@ def running_in_daemon() -> bool:
     """
     Return whether the current thread is running in a Daemon context.
     """
-    from meerschaum.config.static import STATIC_CONFIG
+    from meerschaum._internal.static import STATIC_CONFIG
     daemon_env_var = STATIC_CONFIG['environment']['daemon_id']
     return daemon_env_var in os.environ
+
+
+def get_current_daemon() -> Union[Daemon, None]:
+    """
+    If running withing a daemon context, return the corresponding `Daemon`.
+    Otherwise return `None`.
+    """
+    from meerschaum._internal.static import STATIC_CONFIG
+    daemon_env_var = STATIC_CONFIG['environment']['daemon_id']
+    daemon_id = os.environ.get(daemon_env_var, None)
+    if daemon_id is None:
+        return None
+
+    return _daemons.get(daemon_id, Daemon(daemon_id=daemon_id))
