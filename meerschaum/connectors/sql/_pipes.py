@@ -280,18 +280,19 @@ def fetch_pipes_keys(
 
     ors, nands = [], []
     if self.flavor in json_flavors:
+        tags_jsonb = pipes_tbl.c['parameters'].cast(JSONB).op('->')('tags').cast(JSONB)
         for _in_tags, _ex_tags in in_ex_tag_groups:
             if _in_tags:
                 ors.append(
                     sqlalchemy.and_(
-                        pipes_tbl.c['parameters'].cast(JSONB)['tags'].contains(_in_tags)
+                        tags_jsonb.contains(_in_tags)
                     )
                 )
             for xt in _ex_tags:
                 nands.append(
                     sqlalchemy.not_(
                         sqlalchemy.and_(
-                            pipes_tbl.c['parameters'].cast(JSONB)['tags'].contains([xt])
+                            tags_jsonb.contains([xt])
                         )
                     )
                 )
