@@ -335,6 +335,8 @@ def _api_start(
             )
         ),
         'HOSTNAME': os.environ.get('HOSTNAME', 'api'),
+        'XDG_RUNTIME_DIR': os.environ.get('XDG_RUNTIME_DIR', ''),
+        'DBUS_SESSION_BUS_ADDRESS': os.environ.get('DBUS_SESSION_BUS_ADDRESS', ''),
     })
     for env_var in get_env_vars():
         if env_var in env_dict:
