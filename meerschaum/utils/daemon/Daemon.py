@@ -964,6 +964,13 @@ class Daemon:
         return self.path / 'input.stdin.block'
 
     @property
+    def prompt_kwargs_file_path(self) -> pathlib.Path:
+        """
+        Return the file path to the kwargs for the invoking `prompt()`.
+        """
+        return self.path / 'prompt_kwargs.json'
+
+    @property
     def log_offset_path(self) -> pathlib.Path:
         """
         Return the log offset file path.

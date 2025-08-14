@@ -10,13 +10,13 @@ from __future__ import annotations
 from meerschaum.utils.typing import SuccessTuple, Optional, List, Any
 
 def login(
-        action: Optional[List[str]] = None,
-        connector_keys: Optional[List[str]] = None,
-        yes: bool = False,
-        noask: bool = False,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    connector_keys: Optional[List[str]] = None,
+    yes: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Log into a Meerschaum API instance.
     """
@@ -56,7 +56,7 @@ def login(
     for k in _keys:
         try:
             _connectors.append(parse_instance_keys(k))
-        except Exception as e:
+        except Exception:
             warn(f"Unable to build connector '{k}'. Is it registered?", stack=False)
 
     meerschaum_config = get_config('meerschaum')

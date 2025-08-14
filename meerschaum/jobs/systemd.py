@@ -703,6 +703,13 @@ class SystemdExecutor(Executor):
         blocking_path = socket_path.parent / (socket_path.name + '.block')
         return blocking_path.exists()
 
+    def get_job_prompt_kwargs(self, name: str, debug: bool = False) -> Dict[str, Any]:
+        """
+        Return the kwargs to the blocking prompt.
+        """
+        job = self.get_hidden_job(name, debug=debug)
+        return job.get_prompt_kwargs(debug=debug)
+
     def get_job_rotating_file(self, name: str, debug: bool = False):
         """
         Return a `RotatingFile` for the job's log output.

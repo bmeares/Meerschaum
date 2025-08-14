@@ -6,6 +6,7 @@ Start the Meerschaum WebAPI with the `api` action.
 """
 
 from __future__ import annotations
+
 import os
 
 import meerschaum as mrsm
@@ -416,10 +417,15 @@ def _api_start(
         except KeyboardInterrupt:
             pass
 
+    old_stdin = sys.stdin
+    sys.stdin = None
+
     if production:
         _run_gunicorn()
     else:
         _run_uvicorn()
+
+    sys.stdin = old_stdin
 
     ### Cleanup
     if uvicorn_config_path.parent.exists():

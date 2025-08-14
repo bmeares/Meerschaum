@@ -60,6 +60,10 @@ def clear_screen(debug: bool = False) -> bool:
         return True
 
     if running_in_daemon():
+        if debug:
+            dprint("Skip printing clear token.")
+            print('\n', end='', flush=True)
+            return True
         print(clear_token, flush=True)
         return True
 

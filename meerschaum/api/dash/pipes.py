@@ -539,7 +539,7 @@ def accordion_items_from_pipe(
                             id={'type': 'calculate-rowcount-button', 'index': pipe_meta_str},
                         )
                         if pipe.exists(debug=debug)
-                        else html.Pre('0')
+                        else '0'
                     ),
                     id={'type': 'calculate-rowcount-div', 'index': pipe_meta_str},
                 )
@@ -754,7 +754,10 @@ def accordion_items_from_pipe(
             placeholder="Limit",
             id={'type': 'limit-input', 'index': pipe_meta_str},
         )
-        query_result_div = html.Div(id={'type': 'query-result-div', 'index': pipe_meta_str})
+        query_result_div = html.Div(
+            id={'type': 'query-result-div', 'index': pipe_meta_str},
+            style={'overflowX': 'auto'},
+        )
 
         items_bodies['query-data'] = html.Div([
             query_editor,

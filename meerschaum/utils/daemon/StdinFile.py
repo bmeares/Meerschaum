@@ -43,11 +43,7 @@ class StdinFile(io.TextIOBase):
         self.sel = selectors.DefaultSelector()
         self.decode = decode
         self._write_fp = None
-        self.refresh_seconds = (
-            refresh_seconds
-            if refresh_seconds is not None
-            else mrsm.get_config('system', 'cli', 'refresh_seconds')
-        )
+        self._refresh_seconds = refresh_seconds
 
     @property
     def encoding(self):
@@ -150,7 +146,16 @@ class StdinFile(io.TextIOBase):
         return self._file_handler is not None
 
     def isatty(self) -> bool:
-        return True
+        return False
+
+    @property
+    def refresh_seconds(self) -> Union[int, float]:
+        """
+        How many seconds between checking for blocking functions.
+        """
+        if not self._refresh_seconds:
+            self._refresh_seconds = mrsm.get_config('system', 'cli', 'refresh_seconds')
+        return self._refresh_seconds
 
     def __str__(self) -> str:
         return f"StdinFile('{self.file_path}')"
