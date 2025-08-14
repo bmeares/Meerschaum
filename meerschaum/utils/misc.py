@@ -1236,6 +1236,8 @@ def is_systemd_available() -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
         ) == 0
+    except FileNotFoundError:
+        has_systemctl = False
     except Exception:
         import traceback
         traceback.print_exc()
@@ -1254,6 +1256,8 @@ def is_tmux_available() -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT
         ) == 0
+    except FileNotFoundError:
+        has_tmux = False
     except Exception:
         has_tmux = False
     return has_tmux

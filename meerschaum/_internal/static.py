@@ -325,6 +325,7 @@ STATIC_CONFIG: Dict[str, Any] = {
         'check_restart_seconds': 1.0,
         'stop_token': '<------- MRSM_STOP_TOKEN ------->',
         'clear_token': '<------- MRSM_CLEAR_TOKEN ------->',
+        'flush_token': '<------- MRSM_FLUSH_TOKEN ------->\n',
     },
     'tokens': {
         'minimum_length': 24,

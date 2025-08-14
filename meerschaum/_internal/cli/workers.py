@@ -90,7 +90,7 @@ class ActionWorker:
         """
         Return the job associated with this worker.
         """
-        from meerschaum.config.paths import CLI_LOGS_RESOURCES_PATH
+        from meerschaum.config.paths import CLI_LOGS_RESOURCES_PATH, CLI_RESOURCES_PATH
         log_path = CLI_LOGS_RESOURCES_PATH / f'cli.{self.ix}.worker.log'
 
         return Job(
@@ -108,6 +108,7 @@ class ActionWorker:
                     'redirect_streams': True,
                     'lines_to_show': 0,
                 },
+                'cwd': CLI_RESOURCES_PATH.as_posix(),
             },
         )
 

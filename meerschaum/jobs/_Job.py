@@ -25,7 +25,7 @@ from meerschaum.utils.warnings import warn
 from meerschaum.config.paths import LOGS_RESOURCES_PATH
 from meerschaum.config import get_config
 from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum.utils.formatting._shell import clear_screen
+from meerschaum.utils.formatting._shell import clear_screen, flush_stdout
 
 if TYPE_CHECKING:
     from meerschaum.jobs._Executor import Executor
@@ -42,6 +42,8 @@ RESTART_FLAGS: List[str] = [
 ]
 STOP_TOKEN: str = STATIC_CONFIG['jobs']['stop_token']
 CLEAR_TOKEN: str = STATIC_CONFIG['jobs']['clear_token']
+FLUSH_TOKEN: str = STATIC_CONFIG['jobs']['flush_token']
+
 
 class StopMonitoringLogs(Exception):
     """
@@ -50,8 +52,8 @@ class StopMonitoringLogs(Exception):
 
 
 def _default_stdout_callback(line: str):
-    if line == '\n':
-        print('', end='', flush=True)
+    if line == '\n' or line.startswith(FLUSH_TOKEN):
+        flush_stdout()
         return
 
     if CLEAR_TOKEN in line:
@@ -62,6 +64,7 @@ def _default_stdout_callback(line: str):
         return
 
     print(line, end='', flush=True)
+
 
 class Job:
     """
@@ -638,16 +641,23 @@ class Job:
                 if stop_event is not None and stop_event.is_set():
                     return
 
-                if strip_timestamp_from_line(line.strip()) == STOP_TOKEN:
+                line_stripped_extra = strip_timestamp_from_line(line.strip())
+                line_stripped = strip_timestamp_from_line(line)
+
+                if line_stripped_extra == STOP_TOKEN:
                     events['stop_token'].set()
                     return
 
-                if strip_timestamp_from_line(line.strip()) == CLEAR_TOKEN:
+                if line_stripped_extra == CLEAR_TOKEN:
                     clear_screen(debug=debug)
                     continue
 
+                if line_stripped_extra == FLUSH_TOKEN.strip():
+                    line_stripped = ''
+                    line = ''
+
                 if strip_timestamps:
-                    line = strip_timestamp_from_line(line)
+                    line = line_stripped
 
                 try:
                     if asyncio.iscoroutinefunction(callback_function):

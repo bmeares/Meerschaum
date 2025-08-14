@@ -37,6 +37,7 @@ from meerschaum.utils.misc import string_width, remove_ansi
 from meerschaum.utils.warnings import warn
 from meerschaum.jobs import get_executor_keys_from_context
 from meerschaum._internal.static import STATIC_CONFIG
+from meerschaum.utils.formatting._shell import clear_screen, flush_stdout
 from meerschaum._internal.arguments._parse_arguments import (
     split_chained_sysargs,
     split_pipeline_sysargs,
@@ -534,8 +535,7 @@ class Shell(cmd.Cmd):
             )
         )
         shell_attrs['prompt'] = self.prompt
-        ### flush stdout
-        print("", end="", flush=True)
+        flush_stdout()
 
 
     def precmd(self, line: str):
@@ -568,7 +568,6 @@ class Shell(cmd.Cmd):
 
         ### if the user specifies, clear the screen before executing any commands
         if _clear_screen:
-            from meerschaum.utils.formatting._shell import clear_screen
             clear_screen(debug=shell_attrs['debug'])
 
         ### return blank commands (spaces break argparse)
@@ -1104,7 +1103,6 @@ class Shell(cmd.Cmd):
 
         ### if the user specifies, clear the screen before initializing the shell
         if _clear_screen:
-            from meerschaum.utils.formatting._shell import clear_screen
             clear_screen(debug=shell_attrs['debug'])
 
         ### if sysargs are provided, skip printing the intro and execute instead
@@ -1258,7 +1256,6 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             ### NOTE: would it be better to do nothing instead?
             if len(parsed.strip()) == 0:
                 if _clear_screen:
-                    from meerschaum.utils.formatting._shell import clear_screen
                     clear_screen()
         except KeyboardInterrupt:
             print("^C")

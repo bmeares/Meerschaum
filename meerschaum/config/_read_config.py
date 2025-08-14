@@ -421,14 +421,24 @@ def revert_symlinks_config(config: Dict[str, Any]) -> Dict[str, Any]:
     -------
     A configuration dictionary with `_symlinks` re-applied.
     """
-    from meerschaum.config import apply_patch_to_config
+    import copy
+    from meerschaum._internal.static import STATIC_CONFIG
+
     symlinks_key = STATIC_CONFIG['config']['symlinks_key']
     if symlinks_key not in config:
         return config
 
-    symlinks_config = config[symlinks_key]
-    reverted_config = apply_patch_to_config(symlinks_config, config, warn=False)
-    _ = reverted_config.pop(symlinks_key, None)
+    reverted_config = copy.deepcopy(config)
+    symlinks_config = reverted_config.pop(symlinks_key)
+
+    def deep_patch(target_dict, patch_dict):
+        for key, value in patch_dict.items():
+            if isinstance(value, dict) and key in target_dict and isinstance(target_dict[key], dict):
+                deep_patch(target_dict[key], value)
+            else:
+                target_dict[key] = value
+
+    deep_patch(reverted_config, symlinks_config)
     return reverted_config
 
 

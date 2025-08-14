@@ -299,6 +299,7 @@ class Daemon:
         )
 
         capture_stdin = logs_cf.get('stdin', True)
+        cwd = self.properties.get('cwd', os.getcwd())
 
         ### NOTE: The SIGINT handler has been removed so that child processes may handle
         ###       KeyboardInterrupts themselves.
@@ -308,7 +309,7 @@ class Daemon:
             stdout=self.rotating_log,
             stderr=self.rotating_log,
             stdin=(self.stdin_file if capture_stdin else None),
-            working_directory=os.getcwd(),
+            working_directory=cwd,
             detach_process=True,
             files_preserve=list(self.rotating_log.subfile_objects.values()),
             signal_map={

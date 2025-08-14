@@ -74,6 +74,7 @@ def prompt(
     from meerschaum.config import get_config
     from meerschaum.utils.misc import filter_keywords, remove_ansi
     from meerschaum.utils.daemon import running_in_daemon, get_current_daemon
+    from meerschaum._internal.static import STATIC_CONFIG
 
     original_kwargs = {
         'question': question,
@@ -140,7 +141,7 @@ def prompt(
     else:
         import json
         daemon = get_current_daemon()
-        print('', end='', flush=True)
+        print(STATIC_CONFIG['jobs']['flush_token'], end='', flush=True)
         wrote_file = False
         try:
             with open(daemon.prompt_kwargs_file_path, 'w+', encoding='utf-8') as f:
@@ -151,6 +152,7 @@ def prompt(
 
         if not silent and not wrote_file:
             print(question, end='', flush=True)
+            print(STATIC_CONFIG['jobs']['flush_token'], end='', flush=True)
             printed_question = True
 
         try:
@@ -159,7 +161,7 @@ def prompt(
             answer = ''
 
     if noask and not silent and not printed_question:
-        print(question, flush=True)
+        print(question)
 
     if answer == '' and default is not None:
         return default_answer
