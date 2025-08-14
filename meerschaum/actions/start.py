@@ -94,6 +94,7 @@ def _start_jobs(
     sysargs: Optional[List[str]] = None,
     executor_keys: Optional[str] = None,
     rm: bool = False,
+    line: Optional[str] = None,
     debug: bool = False,
     **kw
 ) -> SuccessTuple:
@@ -125,6 +126,7 @@ def _start_jobs(
           - `start job --name happy_seal`
                 Start the job 'happy_seal' but via the `--name` flag.
     """
+    import shlex
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.daemon._names import get_new_daemon_name
     from meerschaum.jobs import (
@@ -216,12 +218,28 @@ def _start_jobs(
     def _run_new_job(name: Optional[str] = None):
         name = name or get_new_daemon_name()
         if len(sysargs or []) >= 2 and sysargs[0] == 'start' and sysargs[1].startswith('job'):
-            return (False, "Cannot nest action `start jobs`."), name
+            return (False, "Create a new job with `-d` / `--daemon`."), name
 
-        if not yes_no(f"Create new job '{name}' with sysargs {sysargs}?"):
-            return (False, "Nothing changed."), name
+        job_sysargs = (
+            shlex.join([a for a in sysargs if a not in ('-d', '--daemon')])
+            if not line
+            else line
+        )
+        job = Job(name, job_sysargs, executor_keys=executor_keys, delete_after_completion=rm)
 
-        job = Job(name, sysargs, executor_keys=executor_keys, delete_after_completion=rm)
+        if not job.exists():
+            try:
+                confirm = yes_no(
+                    f"Create new job '{name}'?\n    {job_sysargs}\n",
+                    default='y',
+                    yes=kw.get('yes', False),
+                    noask=kw.get('noask', False),
+                )
+            except Exception:
+                confirm = True
+            if not confirm:
+                return (False, "Nothing changed."), name
+
         return job.start(debug=debug), name
 
     def _run_existing_job(name: str):

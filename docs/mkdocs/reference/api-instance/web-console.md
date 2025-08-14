@@ -40,7 +40,14 @@ Expand the accordion items to view and edit parameters and other metadata about 
 
 Visit the `/dash/plugins` page to see and download the plugins registered to the API instance as a [repository](/reference/connectors/#-instances-and-repositories).
 
+![Plugins page](/assets/screenshots/web-console-plugins.png)
+
 ## Jobs
+
+
 
 ## Tokens
 
+Create manage long-lived [tokens](/reference/api-instance/tokens/) on the page `/dash/tokens`.
+
+![Register token popup](/assets/screenshots/web-console-tokens-register.png)
