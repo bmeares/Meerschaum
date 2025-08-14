@@ -154,6 +154,8 @@ paths = {
     'API_SECRET_KEY_PATH'            : ('{API_CONFIG_RESOURCES_PATH}', '.api_secret_key'),
     'API_UVICORN_RESOURCES_PATH'     : ('{API_CONFIG_RESOURCES_PATH}', 'uvicorn'),
     'API_UVICORN_CONFIG_PATH'        : ('{API_UVICORN_RESOURCES_PATH}', '.thread_config.json'),
+    
+    'WEBTERM_INTERNAL_RESOURCES_PATH': ('{INTERNAL_RESOURCES_PATH}', 'webterm'),
 
     'CACHE_RESOURCES_PATH'           : ('{ROOT_DIR_PATH}', '.cache'),
     'PIPES_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'pipes'),

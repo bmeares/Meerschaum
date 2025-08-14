@@ -21,6 +21,7 @@ def reload(
     """
     from meerschaum.utils.packages import reload_meerschaum
     from meerschaum.actions import actions
+
     if _stop_daemons:
         from meerschaum._internal.cli.workers import get_existing_cli_worker_indices
         indices = get_existing_cli_worker_indices()
@@ -30,4 +31,8 @@ def reload(
         if not stop_daemon_success:
             return stop_daemon_success, stop_daemon_msg
 
-    return reload_meerschaum(debug=debug)
+    reload_success, reload_msg = reload_meerschaum(debug=debug)
+    if not reload_success:
+        return reload_success, reload_msg
+
+    return True, "Success"

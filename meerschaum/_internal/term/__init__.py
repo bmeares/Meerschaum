@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import json
+import pathlib
 from typing import Optional, Tuple
 
 import meerschaum as mrsm
@@ -27,6 +28,7 @@ tornado, tornado_ioloop, terminado = attempt_import(
 def get_webterm_app_and_manager(
     instance_keys: Optional[str] = None,
     port: Optional[int] = None,
+    env_path: Optional[pathlib.Path] = None,
 ) -> Tuple[
     tornado.web.Application,
     terminado.UniqueTermManager,
@@ -39,23 +41,32 @@ def get_webterm_app_and_manager(
     A tuple of the Tornado web application and term manager.
     """
     from meerschaum.config.environment import get_env_vars
+    if env_path is None:
+        from meerschaum.config.paths import WEBTERM_INTERNAL_RESOURCES_PATH
+        env_path = WEBTERM_INTERNAL_RESOURCES_PATH / (str(port) + '.json')
+
     env_vars = get_env_vars()
     env_dict = {
-        env_var: os.environ[env_var].replace('"', '\\"')
+        env_var: os.environ[env_var]
         for env_var in env_vars
     }
-    quote_str = "__QUOTE__"
-    env_str = json.dumps(env_dict, separators=(',', ':')).replace("'", quote_str)
+    with open(env_path, 'w+', encoding='utf-8') as f:
+        json.dump(env_dict, f)
+
     shell_kwargs_str = f"mrsm_instance='{instance_keys}'" if instance_keys else ""
     commands = [
         venv_executable(None),
         '-c',
-        "import os; import json; "
-        f"env_str = '{env_str}'.replace('{quote_str}', \"'\"); "
-        "env_dict = json.loads(env_str); "
-        "os.environ.update(env_dict); "
-        "_ = os.environ.pop('COLUMNS', None); _ = os.environ.pop('LINES', None); "
-        "from meerschaum._internal.entry import get_shell; "
+        "import os\n"
+        "import pathlib\n"
+        "import json\n"
+        f"env_path = pathlib.Path('{env_path.as_posix()}')\n"
+        "with open(env_path, 'r', encoding='utf-8') as f:\n"
+        "    env_dict = json.load(f)\n"
+        "os.environ.update(env_dict)\n"
+        "_ = os.environ.pop('COLUMNS', None)\n"
+        "_ = os.environ.pop('LINES', None)\n"
+        "from meerschaum._internal.entry import get_shell\n"
         f"get_shell({shell_kwargs_str}).cmdloop()"
     ]
     webterm_cf = mrsm.get_config('api', 'webterm')

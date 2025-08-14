@@ -380,3 +380,14 @@ def get_job_is_blocking_on_stdin(self, name: str, debug: bool = False) -> bool:
         return False
 
     return response.json()
+
+
+def get_job_prompt_kwargs(self, name: str, debug: bool = False) -> Dict[str, Any]:
+    """
+    Return the kwargs to the blocking `prompt()`, if available.
+    """
+    response = self.get(JOBS_ENDPOINT + f'/{name}/prompt_kwargs', debug=debug)
+    if not response:
+        return {}
+
+    return response.json()

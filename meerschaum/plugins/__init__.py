@@ -322,7 +322,7 @@ _synced_symlinks: bool = False
 _injected_plugin_symlinks = set()
 def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     """
-    Update the plugins 
+    Update the plugins' internal symlinks. 
     """
     global _synced_symlinks
     with _locks['_synced_symlinks']:
@@ -715,7 +715,8 @@ def load_plugins(
     ### I'm appending here to keep from redefining the modules list.
     new_modules = (
         [
-            mod for mod in modules
+            mod
+            for mod in modules
             if not mod.__name__.startswith(PLUGINS_RESOURCES_PATH.stem + '.')
         ]
         + plugins_modules
@@ -788,12 +789,12 @@ def unload_plugins(
     if debug:
         from meerschaum.utils.warnings import dprint
 
-    if debug:
-        dprint(f"Unloading plugins: {plugins}")
-
     _loaded_plugins = False
 
     plugins = plugins or get_plugins_names()
+    if debug:
+        dprint(f"Unloading plugins: {plugins}")
+
     unload_custom_actions(plugins, debug=debug)
     unload_plugin_connectors(plugins, debug=debug)
 
@@ -857,8 +858,11 @@ def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> 
         The plugins to reload. `None` will reload all plugins.
 
     """
+    global _synced_symlinks
     unload_plugins(plugins, debug=debug)
-    load_plugins(debug=debug)
+    _synced_symlinks = False
+    sync_plugins_symlinks(debug=debug)
+    load_plugins(skip_if_loaded=False, debug=debug)
 
 
 def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugin]:

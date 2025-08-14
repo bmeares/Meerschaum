@@ -114,7 +114,7 @@ def _stop_jobs(
 
     if not jobs_to_stop:
         if jobs:
-            return True, "The selected jobs are currently running."
+            return True, "The selected jobs are currently stopped."
         return False, "No running, paused or restarting jobs to stop."
 
     if not action:

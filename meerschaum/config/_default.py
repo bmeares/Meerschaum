@@ -135,6 +135,7 @@ default_system_config = {
             'start worker',
             'start job',
             'python',
+            'login',
             'os ',
             'sh ',
             'start api',

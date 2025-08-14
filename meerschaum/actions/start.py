@@ -429,6 +429,7 @@ def _start_webterm(
     )
     from meerschaum.utils.networking import find_open_ports
     from meerschaum.utils.warnings import info
+    from meerschaum.config.paths import WEBTERM_INTERNAL_RESOURCES_PATH
 
     if host is None:
         host = mrsm.get_config('api', 'webterm', 'host')
@@ -437,6 +438,8 @@ def _start_webterm(
     if sysargs is None:
         sysargs = ['start', 'webterm']
     session_id = 'mrsm'
+
+    env_path = WEBTERM_INTERNAL_RESOURCES_PATH / (str(port) + '.json')
 
     if is_webterm_running(host, port, session_id=session_id):
         if force:
@@ -448,12 +451,17 @@ def _start_webterm(
                 + "    or specify a different port with `-p`."
             )
 
-    tornado_app, term_manager = get_webterm_app_and_manager(instance_keys=mrsm_instance, port=port)
+    tornado_app, term_manager = get_webterm_app_and_manager(
+        instance_keys=mrsm_instance,
+        port=port,
+        env_path=env_path,
+    )
     if not nopretty:
         info(
             f"Starting the webterm at http://{host}:{port}/webterm/{session_id} ..."
             "\n    Press CTRL+C to quit."
         )
+
     tornado_app.listen(port, host)
     loop = tornado_ioloop.IOLoop.instance()
     try:
@@ -469,6 +477,11 @@ def _start_webterm(
     sessions = get_mrsm_tmux_sessions(port=port)
     for session in sessions:
         kill_tmux_session(session)
+
+    try:
+        env_path.unlink()
+    except Exception:
+        pass
 
     return True, "Success"
 

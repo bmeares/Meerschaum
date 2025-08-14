@@ -1217,7 +1217,7 @@ def calculate_rowcount_button_click(n_clicks: int):
 
     try:
         rowcount = pipe.get_rowcount(debug=debug)
-        return html.Pre(f"{rowcount:,}")
+        return f"{rowcount:,}"
     except Exception as e:
         return (
             alert_from_success_tuple((False, f"Failed to calculate row count: {e}"))

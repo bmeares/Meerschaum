@@ -12,6 +12,7 @@ import shlex
 import asyncio
 import pathlib
 import sys
+import json
 import traceback
 from datetime import datetime, timezone
 
@@ -420,12 +421,6 @@ class Job:
         accept_input: bool, default True
             If `True`, accept input when the daemon blocks on stdin.
         """
-        def default_input_callback_function():
-            return sys.stdin.readline()
-
-        if input_callback_function is None:
-            input_callback_function = default_input_callback_function
-
         if self.executor is not None:
             self.executor.monitor_logs(
                 self.name,
@@ -501,7 +496,13 @@ class Job:
         accept_input: bool, default True
             If `True`, accept input when the daemon blocks on stdin.
         """
+        from meerschaum.utils.prompt import prompt
+
         def default_input_callback_function():
+            prompt_kwargs = self.get_prompt_kwargs(debug=debug)
+            if prompt_kwargs:
+                answer = prompt(**prompt_kwargs)
+                return answer + '\n'
             return sys.stdin.readline()
 
         if input_callback_function is None:
@@ -585,7 +586,8 @@ class Job:
                     if asyncio.iscoroutinefunction(input_callback_function):
                         data = await input_callback_function()
                     else:
-                        data = input_callback_function()
+                        loop = asyncio.get_running_loop()
+                        data = await loop.run_in_executor(None, input_callback_function)
                 except KeyboardInterrupt:
                     break
                 #  if not data.endswith('\n'):
@@ -702,6 +704,27 @@ class Job:
             return self.executor.get_job_is_blocking_on_stdin(self.name, debug=debug)
 
         return self.is_running() and self.daemon.blocking_stdin_file_path.exists()
+
+    def get_prompt_kwargs(self, debug: bool = False) -> Dict[str, Any]:
+        """
+        Return the kwargs to the blocking `prompt()`, if available.
+        """
+        if self.executor is not None:
+            return self.executor.get_job_prompt_kwargs(self.name, debug=debug)
+
+        if not self.daemon.prompt_kwargs_file_path.exists():
+            return {}
+
+        try:
+            with open(self.daemon.prompt_kwargs_file_path, 'r', encoding='utf-8') as f:
+                prompt_kwargs = json.load(f)
+
+            return prompt_kwargs
+        
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            return {}
 
     def write_stdin(self, data):
         """

@@ -14,7 +14,8 @@ from meerschaum.utils.typing import Any, Union, Optional, Tuple, List
 
 
 def prompt(
-    question: str,
+    question: str = '',
+    *,
     icon: bool = True,
     default: Union[str, Tuple[str, str], None] = None,
     default_editable: Optional[str] = None,
@@ -72,10 +73,23 @@ def prompt(
     from meerschaum.utils.formatting import ANSI, CHARSET, highlight_pipes, fill_ansi
     from meerschaum.config import get_config
     from meerschaum.utils.misc import filter_keywords, remove_ansi
-    from meerschaum.utils.daemon import running_in_daemon
+    from meerschaum.utils.daemon import running_in_daemon, get_current_daemon
+
+    original_kwargs = {
+        'question': question,
+        'icon': icon,
+        'default': default,
+        'default_editable': default_editable,
+        'detect_password': detect_password,
+        'is_password': is_password,
+        'wrap_lines': wrap_lines,
+        'noask': noask,
+        'silent': silent,
+        **kw
+    }
+
     noask = check_noask(noask)
-    if not noask:
-        prompt_toolkit = attempt_import('prompt_toolkit')
+    prompt_toolkit = attempt_import('prompt_toolkit')
     question_config = get_config('formatting', 'question', patch=True)
 
     ### if a default is provided, append it to the question.
@@ -111,27 +125,45 @@ def prompt(
     if not remove_ansi(question).endswith(' '):
         question += ' '
 
+    prompt_kwargs = {
+        'message': prompt_toolkit.formatted_text.ANSI(question) if not silent else '',
+        'wrap_lines': wrap_lines,
+        'default': default_editable or '',
+        **filter_keywords(prompt_toolkit.prompt, **kw)
+    }
+
+    printed_question = False
+
     if not running_in_daemon():
-        answer = (
-            prompt_toolkit.prompt(
-                prompt_toolkit.formatted_text.ANSI(question) if not silent else '',
-                wrap_lines=wrap_lines,
-                default=default_editable or '',
-                **filter_keywords(prompt_toolkit.prompt, **kw)
-            ) if not noask else ''
-        )
+        answer = prompt_toolkit.prompt(**prompt_kwargs) if not noask else ''
+        printed_question = True
     else:
-        if not silent:
+        import json
+        daemon = get_current_daemon()
+        print('', end='', flush=True)
+        wrote_file = False
+        try:
+            with open(daemon.prompt_kwargs_file_path, 'w+', encoding='utf-8') as f:
+                json.dump(original_kwargs, f, separators=(',', ':'))
+            wrote_file = True
+        except Exception:
+            pass
+
+        if not silent and not wrote_file:
             print(question, end='', flush=True)
+            printed_question = True
+
         try:
             answer = input() if not noask else ''
         except EOFError:
             answer = ''
 
-    if noask and not silent:
-        print(question)
+    if noask and not silent and not printed_question:
+        print(question, flush=True)
+
     if answer == '' and default is not None:
         return default_answer
+
     return answer
 
 
@@ -564,6 +596,7 @@ def check_noask(noask: bool = False) -> bool:
     NOASK = STATIC_CONFIG['environment']['noask']
     if noask:
         return True
+
     return (
         os.environ.get(NOASK, 'false').lower()
         in ('1', 'true')
