@@ -107,7 +107,7 @@ _paths = {
     '/dash/pipes'   : pages.pipes.layout,
     '/dash/jobs'    : pages.jobs.layout,
 }
-_required_login = {'', 'tokens', 'jobs', 'pipes'}
+_required_login = {'', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes'}
 _pages = {
     'Web Console': '/dash/',
     'Pipes': '/dash/pipes',
@@ -144,7 +144,6 @@ def update_page_layout_div(
     -------
     A tuple of the page layout and new session store data.
     """
-    dash_endpoint = endpoints['dash']
     try:
         session_id = session_store_data.get('session-id', None)
     except AttributeError:
@@ -171,14 +170,14 @@ def update_page_layout_div(
     elif base_path in _paths:
         path_str = base_path
     else:
-        path_str = ''
+        path_str = '/dash'
 
     path = (
         path_str
         if no_auth or path_str not in _required_login else (
             path_str
             if is_session_active(session_id)
-            else 'login'
+            else '/dash/login'
         )
     )
     layout = _paths.get(path, pages.error.layout)
