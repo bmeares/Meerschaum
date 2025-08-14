@@ -215,6 +215,12 @@ def _start_jobs(
 
     def _run_new_job(name: Optional[str] = None):
         name = name or get_new_daemon_name()
+        if len(sysargs or []) >= 2 and sysargs[0] == 'start' and sysargs[1].startswith('job'):
+            return (False, "Cannot nest action `start jobs`."), name
+
+        if not yes_no(f"Create new job '{name}' with sysargs {sysargs}?"):
+            return (False, "Nothing changed."), name
+
         job = Job(name, sysargs, executor_keys=executor_keys, delete_after_completion=rm)
         return job.start(debug=debug), name
 
@@ -288,6 +294,7 @@ def _start_jobs(
             if new_job
             else _run_existing_job(_name)
         )
+
         if not kw.get('nopretty', False):
             print_tuple(success_tuple)
 
@@ -303,7 +310,10 @@ def _start_jobs(
         + ("Failed to start job" + ("s" if len(_failures) != 1 else '')
             + f" {items_str(_failures)}." if _failures else '')
     )
-    _install_healthcheck_job()
+    if not msg:
+        msg = "Nothing changed."
+    else:
+        _install_healthcheck_job()
     return len(_failures) == 0, msg
 
 

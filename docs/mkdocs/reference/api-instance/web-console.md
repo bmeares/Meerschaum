@@ -38,6 +38,8 @@ Expand the accordion items to view and edit parameters and other metadata about 
 
 ## Plugins
 
+Visit the `/dash/plugins` page to see and download the plugins registered to the API instance as a [repository](/reference/connectors/#-instances-and-repositories).
+
 ## Jobs
 
 ## Tokens
