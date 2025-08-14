@@ -99,14 +99,13 @@ omit_actions = {
 
 ### Map endpoints to page layouts.
 _paths = {
-    'login'   : pages.login.layout,
-    ''        : pages.dashboard.layout,
-    'pipes'   : pages.pipes.layout,
-    'plugins' : pages.plugins.layout,
-    'tokens'  : pages.tokens.layout,
-    'register': pages.register.layout,
-    'pipes'   : pages.pipes.layout,
-    'jobs'    : pages.jobs.layout,
+    '/dash/login'   : pages.login.layout,
+    '/dash'         : pages.dashboard.layout,
+    '/dash/plugins' : pages.plugins.layout,
+    '/dash/tokens'  : pages.tokens.layout,
+    '/dash/register': pages.register.layout,
+    '/dash/pipes'   : pages.pipes.layout,
+    '/dash/jobs'    : pages.jobs.layout,
 }
 _required_login = {'', 'tokens', 'jobs', 'pipes'}
 _pages = {
@@ -162,18 +161,9 @@ def update_page_layout_div(
     else:
         session_store_to_return = dash.no_update
 
-    base_path = (
-        pathname.rstrip('/') + '/'
-    ).replace(
-        (dash_endpoint + '/'),
-        ''
-    ).rstrip('/').split('/')[0]
-
+    base_path = '/'.join(pathname.split('/')[:2])
     complete_path = (
         pathname.rstrip('/') + '/'
-    ).replace(
-        dash_endpoint + '/',
-        ''
     ).rstrip('/')
 
     if complete_path in _paths:

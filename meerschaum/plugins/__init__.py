@@ -234,6 +234,8 @@ def web_page(
             page_str = _func.__name__
 
         page_str = page_str.lstrip('/').rstrip('/').strip()
+        if not page_str.startswith('dash'):
+            page_str = f'/dash/{page_str}'
         page_key = (
             ' '.join(
                 [

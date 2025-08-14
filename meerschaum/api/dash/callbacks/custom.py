@@ -7,7 +7,6 @@ Import custom callbacks created by plugins.
 """
 
 import traceback
-from typing import Any, Dict
 
 from meerschaum.api.dash import dash_app
 from meerschaum.plugins import _dash_plugins, _plugin_endpoints_to_pages
@@ -47,6 +46,8 @@ def add_plugin_pages(debug: bool = False):
                 else:
                     page_layout = [pages_navbar, page_layout]
             _pages[_page_dict['page_key']] = _endpoint
+            if not _endpoint.lstrip('/').startswith('dash'):
+                _endpoint = '/dash/' + _endpoint.lstrip('/')
             _paths[_endpoint] = page_layout
             if _page_dict['login_required']:
                 _required_login.add(_endpoint)
