@@ -162,13 +162,37 @@ def apply_connector_uri(env_var: str, env: Optional[Dict[str, Any]] = None) -> N
     )
 
 
-def get_env_vars(env: Optional[Dict[str, Any]] = None) -> List[str]:
+def get_env_vars(env: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Return all environment variables which begin with `'MRSM_'`.
     """
     prefix = STATIC_CONFIG['environment']['prefix']
     env = env if env is not None else os.environ
-    return sorted([env_var for env_var in env if env_var.startswith(prefix)])
+    return {
+        env_var: env_val
+        for env_var, env_val in env.items()
+        if env_var.startswith(prefix)
+    }
+
+
+def get_daemon_env_vars(env: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    """
+    Return the daemon-specific environment vars in the current environment.
+    """
+    env = env if env is not None else os.environ
+
+    daemon_env_var_names = (
+        STATIC_CONFIG['environment']['systemd_log_path'],
+        STATIC_CONFIG['environment']['systemd_result_path'],
+        STATIC_CONFIG['environment']['systemd_delete_job'],
+        STATIC_CONFIG['environment']['systemd_stdin_path'],
+        STATIC_CONFIG['environment']['daemon_id'],
+    )
+    return {
+        env_var: env.get(env_var, '')
+        for env_var in daemon_env_var_names
+        if env_var in env
+    }
 
 
 @contextlib.contextmanager

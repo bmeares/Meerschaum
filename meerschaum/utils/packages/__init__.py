@@ -652,7 +652,9 @@ def need_update(
     if required_version:
         semver_path = get_module_path('semver', debug=debug)
         if semver_path is None:
-            pip_install(_import_to_install_name('semver'), debug=debug)
+            no_venv_semver_path = get_module_path('semver', venv=None, debug=debug)
+            if no_venv_semver_path is None:
+                pip_install(_import_to_install_name('semver'), debug=debug)
         semver = attempt_import('semver', check_update=False, lazy=False, debug=debug)
     if check_pypi:
         ### Check PyPI for updates
