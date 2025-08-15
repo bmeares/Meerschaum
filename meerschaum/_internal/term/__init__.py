@@ -40,23 +40,16 @@ def get_webterm_app_and_manager(
     -------
     A tuple of the Tornado web application and term manager.
     """
-    from meerschaum.config.environment import get_env_vars
-    from meerschaum._internal.static import STATIC_CONFIG
+    from meerschaum.config.environment import get_env_vars, get_daemon_env_vars
     if env_path is None:
         from meerschaum.config.paths import WEBTERM_INTERNAL_RESOURCES_PATH
         env_path = WEBTERM_INTERNAL_RESOURCES_PATH / (str(port) + '.json')
 
-    env_vars = get_env_vars()
+    daemon_env_vars = get_daemon_env_vars()
     env_dict = {
-        env_var: os.environ[env_var]
-        for env_var in env_vars
-        if env_var not in (
-            STATIC_CONFIG['environment']['systemd_log_path'],
-            STATIC_CONFIG['environment']['systemd_result_path'],
-            STATIC_CONFIG['environment']['systemd_delete_job'],
-            STATIC_CONFIG['environment']['systemd_stdin_path'],
-            STATIC_CONFIG['environment']['daemon_id'],
-        )
+        env_var: env_val
+        for env_var, env_val in get_env_vars().items()
+        if env_var not in daemon_env_vars
     }
     with open(env_path, 'w+', encoding='utf-8') as f:
         json.dump(env_dict, f)

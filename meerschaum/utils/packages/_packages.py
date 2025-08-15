@@ -146,7 +146,7 @@ packages['sql'] = {
     'pytz'                           : 'pytz',
     'joblib'                         : 'joblib>=1.5.1',
     'sqlalchemy'                     : 'SQLAlchemy>=2.0.41',
-    'geoalchemy'                     : 'GeoAlchemy2>=0.17.1',
+    'geoalchemy2'                    : 'GeoAlchemy2>=0.18.0',
     'databases'                      : 'databases>=0.9.0',
     'aiosqlite'                      : 'aiosqlite>=0.21.0',
     'asyncpg'                        : 'asyncpg>=0.30.0',

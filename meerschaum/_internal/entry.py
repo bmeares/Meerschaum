@@ -62,6 +62,7 @@ def entry(
     A `SuccessTuple` indicating success.
     """
     start = time.perf_counter()
+    from meerschaum.config.environment import get_daemon_env_vars
     sysargs_list = shlex.split(sysargs) if isinstance(sysargs, str) else sysargs
     if (
         not _use_cli_daemon
@@ -69,6 +70,7 @@ def entry(
         or '--no-daemon' in sysargs_list
         or '--daemon' in sysargs_list
         or '-d' in sysargs_list
+        or get_daemon_env_vars()
         or not mrsm.get_config('system', 'experimental', 'cli_daemon')
     ):
         success, msg = entry_without_daemon(sysargs, _patch_args=_patch_args)
