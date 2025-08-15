@@ -173,7 +173,7 @@ def _api_start(
         ROOT_DIR_PATH,
     )
     from meerschaum.config._patch import apply_patch_to_config
-    from meerschaum.config.environment import get_env_vars
+    from meerschaum.config.environment import get_env_vars, get_daemon_env_vars
     from meerschaum._internal.static import STATIC_CONFIG, SERVER_ID
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.pool import get_pool
@@ -338,10 +338,14 @@ def _api_start(
         'XDG_RUNTIME_DIR': os.environ.get('XDG_RUNTIME_DIR', ''),
         'DBUS_SESSION_BUS_ADDRESS': os.environ.get('DBUS_SESSION_BUS_ADDRESS', ''),
     })
-    for env_var in get_env_vars():
-        if env_var in env_dict:
-            continue
-        env_dict[env_var] = os.environ[env_var]
+
+    daemon_env_vars = get_daemon_env_vars()
+    env_vars = {
+        env_var: env_val
+        for env_var, env_val in get_env_vars().items()
+        if env_var not in daemon_env_vars and env_var not in env_dict
+    }
+    env_dict.update(env_vars)
 
     env_dict[MRSM_CONFIG] = apply_patch_to_config(
         env_dict.get(MRSM_CONFIG, {}),
