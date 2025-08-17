@@ -134,6 +134,8 @@ default_system_config = {
             'stop daemon',
             'show daemon',
             'restart daemon',
+            'install',
+            'upgrade',
             'reload',
             'start worker',
             'show log',

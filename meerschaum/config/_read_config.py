@@ -185,7 +185,6 @@ def read_config(
                         import traceback
                         traceback.print_exc()
                         _config_key = {}
-                substitute = False
                 _single_key_config = (
                     search_and_substitute_config({key: _config_key}) if substitute
                     else {key: _config_key}

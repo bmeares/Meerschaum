@@ -8,9 +8,9 @@ cd "$PARENT"
 
 [ -z "$PYTHON_BIN" ] && export PYTHON_BIN=python
 reqs_file="/tmp/mrsm_dev_setup_reqs.txt"
-$PYTHON_BIN -m meerschaum install package wheel --venv None --debug
-$PYTHON_BIN -m meerschaum show packages dev-tools --nopretty > "$reqs_file"
-$PYTHON_BIN -m meerschaum show packages docs --nopretty >> "$reqs_file"
+$PYTHON_BIN -m meerschaum install package wheel --venv None --debug --no-daemon
+$PYTHON_BIN -m meerschaum show packages dev-tools --nopretty --no-daemon > "$reqs_file"
+$PYTHON_BIN -m meerschaum show packages docs --nopretty --no-daemon >> "$reqs_file"
 PIP_BREAK_SYSTEM_PACKAGES=true $PYTHON_BIN -m pip install --upgrade -r "$reqs_file" || exit 1
 ### Install pdoc outside of the declared docs dependencies.
 PIP_BREAK_SYSTEM_PACKAGES=true $PYTHON_BIN -m pip install --upgrade pdoc || exit 1

@@ -51,19 +51,16 @@ def _upgrade_meerschaum(
         - `upgrade meerschaum full`
 
     """
-    import subprocess
-    import json
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import info
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import yes_no
-    from meerschaum.utils.packages import pip_install, attempt_import
+    from meerschaum.utils.packages import pip_install
     from meerschaum.utils.misc import is_docker_available
 
     if action is None:
         action = []
 
-    is_stack_running = False
     try:
         success, msg = actions['stack'](
             ['ps', '-q'], _capture_output=True, debug=debug
@@ -71,7 +68,7 @@ def _upgrade_meerschaum(
         if msg.endswith('\n'):
             msg = msg[:-1]
         containers = msg.split('\n')
-    except Exception as e:
+    except Exception:
         containers = []
 
     if containers:
@@ -103,7 +100,7 @@ def _upgrade_meerschaum(
     if is_docker_available():
         actions['stack'](['pull'], debug=debug)
 
-    return True, "Success"
+    return actions['reload'](debug=debug)
 
 
 class NoVenv:
@@ -128,10 +125,10 @@ def _upgrade_packages(
         upgrade packages full
     """
     from meerschaum.utils.packages import packages, pip_install, get_prerelease_dependencies
-    from meerschaum.utils.warnings import info, warn
+    from meerschaum.utils.warnings import warn
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.formatting import make_header, pprint
-    from meerschaum.utils.misc import print_options
+    from meerschaum.actions import actions
     if action is None:
         action = []
     if venv is NoVenv:
@@ -164,7 +161,7 @@ def _upgrade_packages(
         if (install_name not in prereleases_to_install) or group == '_internal'
     ]
 
-    success, msg = False, f"Nothing installed."
+    success, msg = False, "Nothing installed."
     if force or yes_no(question, noask=noask, yes=yes):
         success = pip_install(*to_install, debug=debug)
         if success and prereleases_to_install:
@@ -173,6 +170,14 @@ def _upgrade_packages(
             f"Successfully installed {len(packages[group])} packages." if success
             else f"Failed to install packages in dependency group '{group}'."
         )
+
+    if not success:
+        return success, msg
+
+    reload_success, reload_msg = actions['reload'](debug=debug)
+    if not reload_success:
+        return reload_success, reload_msg
+
     return success, msg
 
 
@@ -205,11 +210,20 @@ def _upgrade_plugins(
     to_install = get_plugins_names() if len(action) == 0 else action
     if len(to_install) == 0:
         return False, "No plugins to upgrade."
+
     print_options(to_install, header="Plugins to Upgrade:")
     if force or yes_no(f"Upgrade {len(to_install)} plugins?", yes=yes, noask=noask):
-        return actions['install'](
-            action=['plugins'] + to_install, debug=debug, force=force, noask=noask, yes=yes, **kw
+        install_success, install_msg = actions['install'](
+            action=['plugins'] + to_install,
+            debug=debug,
+            force=force,
+            noask=noask,
+            yes=yes,
+            **kw
         )
+
+        return install_success, install_msg
+
     return False, "No plugins upgraded."
 
 ### NOTE: This must be the final statement of the module.
