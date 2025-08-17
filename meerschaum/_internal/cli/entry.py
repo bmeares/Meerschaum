@@ -140,6 +140,7 @@ def entry_with_daemon(
         'patch_args': _patch_args,
         'env': env,
         'config': config,
+        'cwd': os.getcwd(),
     })
 
     accepted = False

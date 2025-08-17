@@ -319,6 +319,9 @@ class ActionWorker:
             action_id = input_data.get('action_id', None)
             patch_args = input_data.get('patch_args', None)
             env = input_data.get('env', {})
+            old_cwd = os.getcwd()
+            cwd = input_data.get('cwd', os.getcwd())
+            os.chdir(cwd)
             config = input_data.get('config', {})
             self.write_output_data({
                 'state': 'accepted',
@@ -334,6 +337,8 @@ class ActionWorker:
                         _patch_args=patch_args,
                     )
                     print(STOP_TOKEN, flush=True, end='\n')
+
+            os.chdir(old_cwd)
 
             self.write_output_data({
                 'state': 'completed',

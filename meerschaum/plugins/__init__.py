@@ -431,8 +431,6 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
             ]
         ))
         plugins_to_be_symlinked.extend(packaged_plugin_paths)
-        if debug:
-            dprint(f"{plugins_to_be_symlinked=}")
 
         ### Check for duplicates.
         seen_plugins = defaultdict(lambda: 0)
