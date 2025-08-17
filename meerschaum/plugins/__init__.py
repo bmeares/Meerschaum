@@ -326,23 +326,22 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     """
     Update the plugins' internal symlinks. 
     """
+    from meerschaum.utils.warnings import error, warn as _warn, dprint
     global _synced_symlinks
     with _locks['_synced_symlinks']:
         if _synced_symlinks:
+            if debug:
+                dprint("Skip syncing symlinks...")
             return
 
     import os
     import pathlib
     import time
     from collections import defaultdict
-    import importlib.util
     from meerschaum.utils.misc import flatten_list, make_symlink, is_symlink
-    from meerschaum.utils.warnings import error, warn as _warn
     from meerschaum._internal.static import STATIC_CONFIG
-    from meerschaum.utils.venv import Venv, activate_venv, deactivate_venv, is_venv_active
     from meerschaum.config._paths import (
         PLUGINS_RESOURCES_PATH,
-        PLUGINS_ARCHIVES_RESOURCES_PATH,
         PLUGINS_INIT_PATH,
         PLUGINS_DIR_PATHS,
         PLUGINS_INTERNAL_LOCK_PATH,
@@ -700,7 +699,11 @@ def load_plugins(
     Import Meerschaum plugins and update the actions dictionary.
     """
     global _loaded_plugins
+    from meerschaum.utils.warnings import dprint
+
     if skip_if_loaded and _loaded_plugins:
+        if debug:
+            dprint("Skip loading plugins...")
         return
 
     from inspect import isfunction, getmembers
@@ -714,6 +717,7 @@ def load_plugins(
         recursive = True,
         modules_venvs = True
     )
+
     ### I'm appending here to keep from redefining the modules list.
     new_modules = (
         [
@@ -784,7 +788,7 @@ def unload_plugins(
     """
     Unload the specified plugins from memory.
     """
-    global _loaded_plugins
+    global _loaded_plugins, _synced_symlinks
     import sys
     from meerschaum.config.paths import PLUGINS_RESOURCES_PATH, PLUGINS_INJECTED_RESOURCES_PATH
     from meerschaum.connectors import unload_plugin_connectors
@@ -792,6 +796,7 @@ def unload_plugins(
         from meerschaum.utils.warnings import dprint
 
     _loaded_plugins = False
+    _synced_symlinks = False
 
     plugins = plugins or get_plugins_names()
     if debug:
@@ -803,6 +808,7 @@ def unload_plugins(
     module_prefix = f"{PLUGINS_RESOURCES_PATH.stem}."
     loaded_modules = [mod_name for mod_name in sys.modules if mod_name.startswith(module_prefix)]
 
+    _ = sys.modules.pop(PLUGINS_RESOURCES_PATH.stem, None)
     for plugin_name in plugins:
         for mod_name in loaded_modules:
             if mod_name[len(PLUGINS_RESOURCES_PATH.stem):].startswith(plugin_name):

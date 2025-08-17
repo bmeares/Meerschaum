@@ -74,14 +74,10 @@ def _install_plugins(
         - install plugins noaa --repo mrsm  (mrsm is the default instance)
         - install plugins noaa --repo mycustominstance
     """
-    from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import info
-    from meerschaum.plugins import reload_plugins
     from meerschaum.connectors.parse import parse_repo_keys
-    import meerschaum.actions
+    from meerschaum.actions import actions
     from meerschaum.utils.formatting import print_tuple
-    from meerschaum.core import Plugin
-    from meerschaum.connectors.api import APIConnector
 
     if not action:
         return False, "No plugins to install."
@@ -98,8 +94,7 @@ def _install_plugins(
         )
         print_tuple((success, msg))
 
-    reload_plugins(debug=debug)
-    return True, "Success"
+    return actions['reload'](debug=debug)
 
 
 def _complete_install_plugins(
@@ -132,8 +127,9 @@ def _complete_install_plugins(
     from meerschaum.connectors.parse import parse_repo_keys
     try:
         repo_connector = parse_repo_keys(repository)
-    except Exception as e:
+    except Exception:
         return []
+
     results = repo_connector.get_plugins(search_term=search_term)
     if len(results) == 1 and results[0] == search_term:
         return []
@@ -156,10 +152,11 @@ def _install_packages(
         `install packages pandas numpy`
     """
     if not action:
-        return False, f"No packages to install."
-    from meerschaum.utils.warnings import info
+        return False, "No packages to install."
+
     from meerschaum.utils.packages import pip_install
     from meerschaum.utils.misc import items_str
+    from meerschaum.actions import actions
     if venv is NoVenv:
         venv = 'mrsm'
 
@@ -169,11 +166,16 @@ def _install_packages(
         venv = venv,
         debug = debug,
     ):
+        reload_success, reload_msg = actions['reload'](debug=debug)
+        if not reload_success:
+            return reload_success, reload_msg
+
         return True, (
             "Successfully installed package" + ("s" if len(action) != 1 else '')
             + f" {items_str(action)}"
             + f" into the virtual environment '{venv}'."
         )
+
     return False, (
         "Failed to install package" + ("s" if len(action) != 1 else '') + f" {items_str(action)}."
     )
@@ -201,6 +203,7 @@ def _install_required(
     from meerschaum.utils.warnings import warn, info
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.plugins import get_plugins_names
+    from meerschaum.actions import actions
     repo_connector = parse_repo_keys(repository)
 
     plugins_names = action or get_plugins_names()
@@ -221,6 +224,10 @@ def _install_required(
         else:
             success_count += 1
 
+    reload_success, reload_msg = actions['reload'](debug=debug)
+    if not reload_success:
+        return reload_success, reload_msg
+
     success = fail_count == 0
     msg = (
         f"Installed packages for {success_count + fail_count} plugins\n    "
@@ -233,15 +240,6 @@ def _complete_install_required(*args, **kw) -> List[str]:
     from meerschaum.actions.uninstall import _complete_uninstall_plugins
     return _complete_uninstall_plugins(*args, **kw)
 
-
-def _install_systemd(
-    action: Optional[List[str]] = None,
-    **kwargs: Any
-) -> SuccessTuple:
-    """
-    Install the Meerschaum job monitor as a systemd service.
-    """
-    import sys
 
 
 ### NOTE: This must be the final statement of the module.

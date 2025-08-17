@@ -4,6 +4,23 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.0.1 – v3.0.2
+
+- **Change the working directory for each action exected by the CLI daemon.**  
+  The CLI daemon now changes working directory to match the context of the calling client. This handles relative file paths in environment variables (e.g. `MRSM_PLUGINS_DIR`).
+
+- **Fix environment variables handling within the CLI daemon.**  
+  Certain environment variables interfered with the shell and the Daemon, and this case has been handled.
+
+- **Reload the CLI daemon after upgrading packages.**  
+  Installing or upgrading packages now reloads the CLI daemon.
+
+- **Invalidate symlinks check cache when unloading plugins.**  
+  Unloading plugins now reverts the internal `_synced_symlinks` check.
+
+- **Unload the root `plugins` package when unloading plugins.**  
+  The root `plugins` package is now unloaded when `unload_plugins()` is called. This invalidates lingering cache from previously loaded plugins.
+
 ### v3.0.0
 
 - **Inherit another pipe's base parameters with `reference`.**  
