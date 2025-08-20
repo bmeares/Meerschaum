@@ -23,9 +23,9 @@ def _get_in_memory_key(cache_key: str) -> str:
     Return the in-memory version of a cache key.
     """
     return (
-        ('_' + cache_key)
-        if not cache_key.startswith('_')
-        else cache_key
+        f"_{cache_key}"
+        if not str(cache_key).startswith('_')
+        else str(cache_key)
     )
 
 
@@ -33,7 +33,7 @@ def _get_cache_conn_cache_key(pipe: mrsm.Pipe, cache_key: str) -> str:
     """
     Return the cache key to use in the cache connector.
     """
-    return f'.cache:pipes:{pipe.connector_keys}:{pipe.metric_key}:{pipe.location_key}:{cache_key}'
+    return f'.cache:pipes:{pipe.connector_keys.replace(':', '_')}:{pipe.metric_key}:{pipe.location_key}:{cache_key}'
 
 
 def _get_cache_connector(self) -> 'Union[None, ValkeyConnector]':
@@ -485,7 +485,10 @@ def _get_cache_conn_keys(self, debug: bool = False) -> List[str]:
     keys_prefix = _get_cache_conn_cache_key(self, '')
 
     try:
-        return cache_connector.client.keys(keys_prefix + '*')
+        return [
+            key.decode('utf-8').split(':')[-1]
+            for key in cache_connector.client.keys(keys_prefix + '*')
+        ]
     except Exception as e:
         warn(f"Failed to get cache keys for {self} from '{cache_connector}':\n{e}")
         return []

@@ -107,7 +107,7 @@ instance_select = dbc.Select(
         {'label': (i[:32] + '…') if len(i) > 32 else i, 'value': i}
         for i in get_connector_labels(*instance_types)
     ],
-    class_name='dbc_dark custom-select custom-select-sm',
+    class_name='dbc_dark custom-select custom-select-sm instance-select',
 )
 
 sign_out_button = dbc.Button(

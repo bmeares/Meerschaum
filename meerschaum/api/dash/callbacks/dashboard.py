@@ -160,7 +160,8 @@ def update_page_layout_div(
     else:
         session_store_to_return = dash.no_update
 
-    base_path = '/'.join(pathname.split('/')[:2])
+    dashless_pathname = pathname[len('/dash'):] if pathname.startswith('/dash') else pathname
+    base_path = ('/dash/' + dashless_pathname.lstrip('/').split('/', maxsplit=1)[0]).rstrip('/')
     complete_path = (
         pathname.rstrip('/') + '/'
     ).rstrip('/')

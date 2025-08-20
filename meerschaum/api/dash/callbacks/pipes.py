@@ -10,7 +10,6 @@ from typing import List, Optional, Dict, Any
 
 import dash
 from dash.dependencies import Input, Output, State
-from dash import no_update
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
@@ -172,8 +171,9 @@ def render_pipe_page_from_url(
     Input('pipes-metric-keys-dropdown', 'value'),
     Input('pipes-location-keys-dropdown', 'value'),
     Input('pipes-tags-dropdown', 'value'),
-    Input('instance-select', 'value'),
+    Input('pipes-instance-select', 'value'),
     Input('pipes-clear-all-button', 'n_clicks'),
+    prevent_initial_call=True,
 )
 def update_location_on_pipes_filter_change(
     connector_keys: Optional[List[str]],

@@ -65,7 +65,7 @@ a {
 #get-items-menu {
   width: 100%;
 }
-#instance-select {
+.instance-select {
   background-color : var(--bs-secondary) !important;
   color: white;
   margin-top: 5px;
