@@ -4,6 +4,14 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.0.3
+
+- **Fix pipe page routing.**  
+  Links to specific pipes in the dashboard are now routed correctly.
+
+- **Fix cache invalidation for pipes using Valkey connectors.**  
+  Pipes using a `valkey` connector to store cache (rather than on-disk) will now correctly invalidate cache on demand.
+
 ### v3.0.1 – v3.0.2
 
 - **Change the working directory for each action exected by the CLI daemon.**  

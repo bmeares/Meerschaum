@@ -210,4 +210,7 @@ def is_pipe_registered(
     if debug:
         dprint(f'{ck}, {mk}, {lk}')
         dprint(f'{pipe}, {pipes}')
-    return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
+    try:
+        return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
+    except Exception:
+        return False

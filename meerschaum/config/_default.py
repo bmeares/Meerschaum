@@ -151,6 +151,7 @@ default_system_config = {
             'debug',
             'bootstrap',
             'daemon',
+            'sql',
         ],
     },
     'experimental': {

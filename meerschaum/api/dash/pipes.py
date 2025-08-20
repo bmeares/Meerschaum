@@ -1029,14 +1029,14 @@ def build_pipes_navbar(instance_keys: Optional[str] = None, with_instance_select
     Build the navbar from the selected instance keys.
     """
     instance_select = dbc.Select(
-        id='instance-select',
+        id='pipes-instance-select',
         size='sm',
         value=instance_keys or str(get_api_connector()),
         options=[
             {'label': (i[:32] + '…') if len(i) > 32 else i, 'value': i}
             for i in get_connector_labels(*instance_types)
         ],
-        class_name='dbc_dark custom-select custom-select-sm',
+        class_name='dbc_dark custom-select custom-select-sm instance-select',
     )
     instance_select_div_style = {} if with_instance_select else {'visibility': 'hidden'}
     instance_select_div = html.Div(instance_select, style=instance_select_div_style)
