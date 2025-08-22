@@ -755,7 +755,8 @@ def venv_target_path(
 
     venv_root_path = (
         (VIRTENV_RESOURCES_PATH / venv)
-        if venv is not None else pathlib.Path(sys.prefix)
+        if venv is not None
+        else pathlib.Path(sys.prefix)
     )
     target_path = venv_root_path
 
@@ -773,12 +774,14 @@ def venv_target_path(
     python_folder = 'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)
     if target_path.exists():
         target_path = (
-            (target_path / python_folder) if python_folder in os.listdir(target_path)
+            (target_path / python_folder)
+            if python_folder in os.listdir(target_path)
             else target_path
         )
     else:
         target_path = (
-            (target_path / python_folder) if platform.system() != 'Windows'
+            (target_path / python_folder)
+            if platform.system() != 'Windows'
             else target_path
         )
 

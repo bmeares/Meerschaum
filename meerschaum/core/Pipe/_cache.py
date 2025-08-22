@@ -33,7 +33,10 @@ def _get_cache_conn_cache_key(pipe: mrsm.Pipe, cache_key: str) -> str:
     """
     Return the cache key to use in the cache connector.
     """
-    return f'.cache:pipes:{pipe.connector_keys.replace(':', '_')}:{pipe.metric_key}:{pipe.location_key}:{cache_key}'
+    ck = pipe.connector_keys.replace(':', '_')
+    mk = pipe.metric_key
+    lk = str(pipe.location_key)
+    return f'.cache:pipes:{ck}:{mk}:{lk}:{cache_key}'
 
 
 def _get_cache_connector(self) -> 'Union[None, ValkeyConnector]':
