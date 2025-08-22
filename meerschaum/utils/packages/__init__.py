@@ -1924,6 +1924,11 @@ def is_uv_enabled() -> bool:
     if is_android():
         return False
 
+    from meerschaum.utils.venv import inside_venv
+
+    if inside_venv():
+        return False
+
     try:
         import yaml
     except ImportError:

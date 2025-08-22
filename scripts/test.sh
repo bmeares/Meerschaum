@@ -116,8 +116,8 @@ $PYTHON_BIN -m pytest \
   --ignore=test_root/ \
   --ignore=tests/data/ \
   --ignore=docs/ \
-  -n=auto \
   --ff \
+  -n=auto \
   -v; rc="$?"
 
 ### Cleanup

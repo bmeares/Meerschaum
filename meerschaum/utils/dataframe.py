@@ -375,7 +375,9 @@ def filter_unseen_df(
         if json_col not in delta_df.columns:
             continue
         try:
-            delta_df[json_col] = delta_df[json_col].apply(json.loads)
+            delta_df[json_col] = delta_df[json_col].apply(
+                lambda x: (json.loads(x) if isinstance(x, str) else x)
+            )
         except Exception:
             warn(f"Unable to deserialize JSON column '{json_col}':\n{traceback.format_exc()}")
 

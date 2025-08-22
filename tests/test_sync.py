@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
+import sys
 import warnings
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -686,7 +687,7 @@ def test_nested_chunks(flavor: str):
     assert len(df) == num_docs
 
 
-#  @pytest.mark.skip(reason="Python 3.13 Dask, numpy compatability.")
+@pytest.mark.skipif(sys.version_info < (3, 10), reason="requires python3.10 or higher")
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_dask_dataframe(flavor: str):
     """

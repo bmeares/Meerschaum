@@ -152,6 +152,7 @@ default_system_config = {
             'bootstrap',
             'daemon',
             'sql',
+            'register plugin',
         ],
     },
     'experimental': {

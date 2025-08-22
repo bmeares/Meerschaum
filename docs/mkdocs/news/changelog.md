@@ -4,13 +4,24 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.0.3
+### v3.0.3 – v3.0.4
 
 - **Fix pipe page routing.**  
   Links to specific pipes in the dashboard are now routed correctly.
 
 - **Fix cache invalidation for pipes using Valkey connectors.**  
   Pipes using a `valkey` connector to store cache (rather than on-disk) will now correctly invalidate cache on demand.
+
+- **Fix Python 3.9 compatability.**  
+  An issue breaking Python 3.9 has been fixed.
+
+- **Prevent resolving symlinks for pipe's parameters card.**  
+  The pipe card in dash will no longer resolve symlinks.
+
+- **Handle `pd.NA` values in JSON columns for `filter_unseen_df()`.**  
+  Non-string values (e.g. `pd.NA`) are now correctly handled for JSON columns in `filter_unseen_df()`. 
+
+- **Disable `uv` when running inside a virtual environment.**
 
 ### v3.0.1 – v3.0.2
 
