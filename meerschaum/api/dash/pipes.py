@@ -575,7 +575,7 @@ def accordion_items_from_pipe(
 
     if 'parameters' in active_items:
         parameters_editor = dash_ace.DashAceEditor(
-            value=yaml.dump(pipe.parameters),
+            value=yaml.dump(pipe.get_parameters(apply_symlinks=False, refresh=True, debug=debug)),
             mode='norm',
             tabSize=4,
             theme='twilight',
