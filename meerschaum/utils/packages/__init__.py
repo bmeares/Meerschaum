@@ -192,8 +192,7 @@ def manually_import_module(
     _previously_imported = import_name in sys.modules
     if _previously_imported and use_sys_modules:
         return sys.modules[import_name]
-    if debug:
-        from meerschaum.utils.debug import dprint
+
     from meerschaum.utils.warnings import warn as warn_function
     import warnings
     root_name = import_name.split('.')[0] if split else import_name
@@ -202,6 +201,7 @@ def manually_import_module(
     root_path = get_module_path(root_name, venv=venv)
     if root_path is None:
         return None
+
     mod_path = root_path
     if mod_path.is_dir():
         for _dir in import_name.split('.')[:-1]:
@@ -215,15 +215,17 @@ def manually_import_module(
                         mod_path / import_name.split('.')[-1] / '__init__.py'
                     )
                 )
-            except Exception as e:
+            except Exception:
                 mod_path = None
 
     spec = (
-        importlib.util.find_spec(import_name) if mod_path is None or not mod_path.exists()
+        importlib.util.find_spec(import_name)
+        if mod_path is None or not mod_path.exists()
         else importlib.util.spec_from_file_location(import_name, str(mod_path))
     )
     root_spec = (
-        importlib.util.find_spec(root_name) if not root_path.exists()
+        importlib.util.find_spec(root_name)
+        if not root_path.exists()
         else importlib.util.spec_from_file_location(root_name, str(root_path))
     )
 
@@ -277,7 +279,7 @@ def manually_import_module(
     if spec is None:
         try:
             mod = _import_module(import_name)
-        except Exception as e:
+        except Exception:
             mod = None
         return mod
 
@@ -290,7 +292,7 @@ def manually_import_module(
             with warnings.catch_warnings():
                 warnings.filterwarnings('ignore', 'The NumPy')
                 spec.loader.exec_module(mod)
-        except Exception as e:
+        except Exception:
             pass
         mod = _import_module(import_name)
         if old_sys_mod is not None:
@@ -1412,7 +1414,7 @@ def attempt_import(
                 warn_function(
                     (f"\n\nMissing package '{name}' from virtual environment '{venv}'; "
                      + "some features will not work correctly."
-                     + f"\n\nSet install=True when calling attempt_import.\n"),
+                     + "\n\nSet install=True when calling attempt_import.\n"),
                     ImportWarning,
                     stacklevel = 3,
                     color = False,

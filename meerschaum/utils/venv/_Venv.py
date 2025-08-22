@@ -11,7 +11,8 @@ from __future__ import annotations
 import copy
 import pathlib
 from meerschaum.utils.typing import Union
-from meerschaum.utils.threading import RLock
+
+import meerschaum as mrsm
 
 
 class Venv:
@@ -35,7 +36,8 @@ class Venv:
 
     def __init__(
         self,
-        venv: Union[str, 'meerschaum.core.Plugin', None] = 'mrsm',
+        venv: Union[str, 'mrsm.core.Plugin', None] = 'mrsm',
+        init_if_not_exists: bool = True,
         debug: bool = False,
     ) -> None:
         from meerschaum.utils.venv import activate_venv, deactivate_venv, active_venvs
@@ -52,6 +54,7 @@ class Venv:
             self._deactivate = deactivate_venv
             self._kwargs = {'venv': venv}
         self._debug = debug
+        self._init_if_not_exists = init_if_not_exists
         ### In case someone calls `deactivate()` before `activate()`.
         self._kwargs['previously_active_venvs'] = copy.deepcopy(active_venvs)
 
@@ -65,11 +68,20 @@ class Venv:
         from meerschaum.utils.venv import active_venvs, init_venv
         self._kwargs['previously_active_venvs'] = copy.deepcopy(active_venvs)
         try:
-            return self._activate(debug=(debug or self._debug), **self._kwargs)
+            return self._activate(
+                debug=(debug or self._debug),
+                init_if_not_exists=self._init_if_not_exists,
+                **self._kwargs
+            )
         except OSError as e:
-            if not init_venv(self._venv, force=True):
-                raise e
-        return self._activate(debug=(debug or self._debug), **self._kwargs)
+            if self._init_if_not_exists:
+                if not init_venv(self._venv, force=True):
+                    raise e
+        return self._activate(
+            debug=(debug or self._debug),
+            init_if_not_exists=self._init_if_not_exists,
+            **self._kwargs
+        )
 
 
     def deactivate(self, debug: bool = False) -> bool:
