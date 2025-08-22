@@ -39,6 +39,7 @@ def activate_venv(
     venv: Optional[str] = 'mrsm',
     color: bool = True,
     force: bool = False,
+    init_if_not_exists: bool = True,
     debug: bool = False,
     **kw
 ) -> bool:
@@ -52,6 +53,9 @@ def activate_venv(
 
     color: bool, default True
         If `True`, include color in debug text.
+
+    init_if_not_exists: bool, default True
+        If `True`, create the virtual environment if it does not exist.
 
     force: bool, default False
         If `True`, do not exit early even if the venv is currently active.
@@ -68,10 +72,12 @@ def activate_venv(
     if active_venvs_order and active_venvs_order[0] == venv:
         if not force:
             return True
+
     import sys
     import os
-    if venv is not None:
+    if venv is not None and init_if_not_exists:
         init_venv(venv=venv, debug=debug)
+
     with LOCKS['active_venvs']:
         if thread_id not in threads_active_venvs:
             threads_active_venvs[thread_id] = {}
@@ -82,10 +88,14 @@ def activate_venv(
             threads_active_venvs[thread_id][venv] += 1
 
         target_path = venv_target_path(venv, debug=debug, allow_nonexistent=True)
-        if not target_path.exists():
+        if not target_path.exists() and venv is not None and init_if_not_exists:
             init_venv(venv=venv, force=True, debug=debug)
+
         if not target_path.exists():
+            if init_if_not_exists:
+                return False
             raise EnvironmentError(f"Could not activate virtual environment '{venv}'.")
+
         target = target_path.as_posix()
 
         if venv in active_venvs_order:
@@ -97,6 +107,7 @@ def activate_venv(
                 active_venvs_order.remove(venv)
             except Exception:
                 pass
+
         if venv is not None:
             sys.path.insert(0, target)
         else:

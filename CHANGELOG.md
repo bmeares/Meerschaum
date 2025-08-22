@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.0.3 – v3.0.4
+### v3.0.3 – v3.0.5
 
 - **Fix pipe page routing.**  
   Links to specific pipes in the dashboard are now routed correctly.
@@ -20,6 +20,12 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Handle `pd.NA` values in JSON columns for `filter_unseen_df()`.**  
   Non-string values (e.g. `pd.NA`) are now correctly handled for JSON columns in `filter_unseen_df()`. 
+
+- **Resolve dependencies when running the `sql` CLI.**  
+  Running with `sql` action will now resolve expected dependencies.
+
+- **Refine unloading plugins.**  
+  Rather than always popping the root `plugins` package from `sys.modules`, unloaded plugins are instead deleted directly from the root package. The root `plugins` package is popped only if all plugins are unloaded at once.
 
 - **Disable `uv` when running inside a virtual environment.**
 

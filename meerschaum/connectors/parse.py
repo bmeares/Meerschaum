@@ -119,11 +119,11 @@ def parse_repo_keys(keys: Optional[str] = None, **kw):
     if not keys.startswith('api:'):
         raise ValueError("Only APIConnectors may be treated as repositories.")
 
-    return parse_connector_keys(keys, **kw)
+    return parse_connector_keys(keys, _load_plugins=kw.pop('_load_plugins', False), **kw)
 
 
 def parse_executor_keys(keys: Optional[str] = None, **kw):
-    """Parse the executor keys into an APIConnector or string."""
+    """Parse the executor keys into an APIConnector, SystemdConnector, or string."""
     from meerschaum.jobs import get_executor_keys_from_context
     if keys is None:
         keys = get_executor_keys_from_context()
