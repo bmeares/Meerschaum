@@ -43,6 +43,10 @@ def cli(
     """
     from meerschaum.utils.warnings import dprint
     from meerschaum.utils.venv import venv_exec
+
+    ### Initialize the engine so that dependencies are resolved.
+    _ = self.engine
+
     env = copy.deepcopy(dict(os.environ))
     env_key = f"MRSM_SQL_{self.label.upper()}"
     env_val = json.dumps(self.meta)

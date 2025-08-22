@@ -776,7 +776,13 @@ class Plugin:
         return [_d for _d in _deps if not _d.startswith('plugin:')]
 
 
-    def activate_venv(self, dependencies: bool=True, debug: bool=False, **kw) -> bool:
+    def activate_venv(
+        self,
+        dependencies: bool = True,
+        init_if_not_exists: bool = True,
+        debug: bool = False,
+        **kw
+    ) -> bool:
         """
         Activate the virtual environments for the plugin and its dependencies.
 
@@ -796,7 +802,7 @@ class Plugin:
 
         if dependencies:
             for plugin in self.get_required_plugins(debug=debug):
-                plugin.activate_venv(debug=debug, **kw)
+                plugin.activate_venv(debug=debug, init_if_not_exists=init_if_not_exists, **kw)
 
         vtp = venv_target_path(self.name, debug=debug, allow_nonexistent=True)
         venv_meerschaum_path = vtp / 'meerschaum'
@@ -812,7 +818,7 @@ class Plugin:
         if not success:
             warn(f"Unable to create symlink {venv_meerschaum_path} to {PACKAGE_ROOT_PATH}:\n{msg}")
 
-        return activate_venv(self.name, debug=debug, **kw)
+        return activate_venv(self.name, init_if_not_exists=init_if_not_exists, debug=debug, **kw)
 
 
     def deactivate_venv(self, dependencies: bool=True, debug: bool = False, **kw) -> bool:

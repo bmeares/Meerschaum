@@ -69,6 +69,7 @@ def get_connector(
     label: str = None,
     refresh: bool = False,
     debug: bool = False,
+    _load_plugins: bool = True,
     **kw: Any
 ) -> Connector:
     """
@@ -122,11 +123,12 @@ def get_connector(
     if isinstance(type, str) and not label and ':' in type:
         type, label = type.split(':', maxsplit=1)
 
-    with _locks['_loaded_plugin_connectors']:
-        if not _loaded_plugin_connectors:
-            load_plugin_connectors()
-            _load_builtin_custom_connectors()
-            _loaded_plugin_connectors = True
+    if _load_plugins:
+        with _locks['_loaded_plugin_connectors']:
+            if not _loaded_plugin_connectors:
+                load_plugin_connectors()
+                _load_builtin_custom_connectors()
+                _loaded_plugin_connectors = True
 
     if type is None and label is None:
         default_instance_keys = get_config('meerschaum', 'instance', patch=True)
@@ -337,12 +339,16 @@ def load_plugin_connectors():
     for plugin in get_plugins():
         if plugin is None:
             continue
+
         with open(plugin.__file__, encoding='utf-8') as f:
             text = f.read()
+
         if 'make_connector' in text or 'Connector' in text:
             to_import.append(plugin.name)
+
     if not to_import:
         return
+
     import_plugins(*to_import)
 
 
@@ -354,7 +360,7 @@ def unload_plugin_connectors(
     Unload custom connectors added by plugins.
     """
     from meerschaum.plugins import get_plugins_names
-    global custom_types, _known_custom_types, types, plugins_types, connectors
+    global custom_types, _known_custom_types, types, plugins_types, connectors, _loaded_plugin_connectors
 
     plugin_names = plugin_names or get_plugins_names()
 
@@ -368,6 +374,7 @@ def unload_plugin_connectors(
 
     custom_types.clear()
     custom_types.update(_known_custom_types)
+    _loaded_plugin_connectors = False
 
 
 def get_connector_plugin(

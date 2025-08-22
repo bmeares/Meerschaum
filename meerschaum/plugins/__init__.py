@@ -573,7 +573,7 @@ def import_plugins(
             for plugin_name in flatten_list(plugins_to_import):
                 plugin = Plugin(plugin_name)
                 try:
-                    with Venv(plugin):
+                    with Venv(plugin, init_if_not_exists=False):
                         imported_plugins.append(
                             importlib.import_module(
                                 f'{PLUGINS_RESOURCES_PATH.stem}.{plugin_name}'
@@ -798,7 +798,8 @@ def unload_plugins(
     _loaded_plugins = False
     _synced_symlinks = False
 
-    plugins = plugins or get_plugins_names()
+    all_plugins = get_plugins_names()
+    plugins = plugins or all_plugins
     if debug:
         dprint(f"Unloading plugins: {plugins}")
 
@@ -808,11 +809,25 @@ def unload_plugins(
     module_prefix = f"{PLUGINS_RESOURCES_PATH.stem}."
     loaded_modules = [mod_name for mod_name in sys.modules if mod_name.startswith(module_prefix)]
 
-    _ = sys.modules.pop(PLUGINS_RESOURCES_PATH.stem, None)
+    root_plugins_mod = (
+        sys.modules.get(PLUGINS_RESOURCES_PATH.stem, None)
+        if sorted(plugins) != sorted(all_plugins)
+        else sys.modules.pop(PLUGINS_RESOURCES_PATH, None)
+    )
+
     for plugin_name in plugins:
         for mod_name in loaded_modules:
-            if mod_name[len(PLUGINS_RESOURCES_PATH.stem):].startswith(plugin_name):
+            if (
+                mod_name[len(PLUGINS_RESOURCES_PATH.stem):].startswith(plugin_name + '.')
+                or mod_name[len(PLUGINS_RESOURCES_PATH.stem):] == plugin_name
+            ):
                 _ = sys.modules.pop(mod_name, None)
+
+        if root_plugins_mod is not None and plugin_name in root_plugins_mod.__dict__:
+            try:
+                delattr(root_plugins_mod, plugin_name)
+            except Exception:
+                pass
 
         ### Unload sync hooks.
         _ = _pre_sync_hooks.pop(plugin_name, None)
@@ -896,7 +911,9 @@ def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugi
                 (
                     name if (PLUGINS_RESOURCES_PATH / name).is_dir()
                     else name[:-3]
-                ) for name in os.listdir(PLUGINS_RESOURCES_PATH) if name != '__init__.py'
+                )
+                for name in os.listdir(PLUGINS_RESOURCES_PATH)
+                if name != '__init__.py'
             ]
         )
     ]
