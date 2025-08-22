@@ -6,6 +6,7 @@
 Interact with Pipes metadata via SQLConnector.
 """
 from __future__ import annotations
+import traceback
 from datetime import datetime, date, timedelta
 
 import meerschaum as mrsm
@@ -3102,7 +3103,6 @@ def get_pipe_columns_types(
         for col in pipe_table.columns:
             table_columns[str(col.name)] = str(col.type)
     except Exception as e:
-        import traceback
         traceback.print_exc()
         warn(e)
         table_columns = {}
