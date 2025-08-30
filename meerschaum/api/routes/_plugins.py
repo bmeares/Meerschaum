@@ -81,12 +81,12 @@ def register_plugin(
 
     """
     from meerschaum.config import get_config
-    allow_plugins = get_config('system', 'api', 'permissions', 'registration', 'plugins')
+    allow_plugins = get_config('api', 'permissions', 'registration', 'plugins')
     if not allow_plugins:
         return False, (
             "The administrator for this server has not allowed plugin registration.\n\n" +
             "Please contact the system administrator, or if you are running this server, " +
-            "open the configuration file with `edit config system` and search for 'permissions'. " +
+            "open the configuration file with `edit config api` and search for 'permissions'. " +
             " Under the keys `api:permissions:registration`, " +
             "you can toggle various registration types."
         )

@@ -58,7 +58,7 @@ StreamingResponse = fastapi_responses.StreamingResponse
 pipes_endpoint = endpoints['pipes']
 pd = attempt_import('pandas', lazy=False)
 
-MAX_RESPONSE_ROW_LIMIT: int = mrsm.get_config('system', 'api', 'data', 'max_response_row_limit')
+MAX_RESPONSE_ROW_LIMIT: int = mrsm.get_config('api', 'data', 'max_response_row_limit')
 
 
 @app.post(
@@ -77,12 +77,12 @@ def register_pipe(
     """
     Register a new pipe.
     """
-    allow_pipes = mrsm.get_config('system', 'api', 'permissions', 'registration', 'pipes')
+    allow_pipes = mrsm.get_config('api', 'permissions', 'registration', 'pipes')
     if not allow_pipes:
         return False, (
             "The administrator for this server has not allowed pipe registration.\n\n"
             "Please contact the system administrator, or if you are running this server, "
-            "open the configuration file with `edit config system` and search for 'permissions'."
+            "open the configuration file with `edit config api` and search for 'permissions'."
             " Under the keys `api:permissions:registration`, " + 
             "you can toggle various registration types."
         )
@@ -116,12 +116,12 @@ def edit_pipe(
     """
     Edit an existing pipe's parameters.
     """
-    allow_actions = mrsm.get_config('system', 'api', 'permissions', 'actions', 'non_admin')
+    allow_actions = mrsm.get_config('api', 'permissions', 'actions', 'non_admin')
     if not allow_actions:
         return False, (
             "The administrator for this server has not allowed actions.\n\n"
             "Please contact the system administrator, or if you are running this server, "
-            "open the configuration file with `edit config system` and search for 'permissions'."
+            "open the configuration file with `edit config api` and search for 'permissions'."
             " Under the keys `api:permissions:actions`, "
             "you can toggle non-admin actions."
         )

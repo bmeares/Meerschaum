@@ -15,7 +15,7 @@ from meerschaum.config import get_config
 from meerschaum.utils.warnings import dprint
 
 SESSION_KEY_TEMPLATE: str = 'mrsm_session_id:{session_id}'
-EXPIRES_SECONDS: int = get_config('system', 'api', 'cache', 'session_expires_minutes') * 60
+EXPIRES_SECONDS: int = get_config('api', 'cache', 'session_expires_minutes') * 60
 _active_sessions: Dict[str, Dict[str, Any]] = {}
 
 
@@ -155,7 +155,7 @@ def is_session_authenticated(session_id: Optional[str]) -> bool:
     if cached_auth is not None:
         return cached_auth
 
-    permissions = get_config('system', 'api', 'permissions')
+    permissions = get_config('api', 'permissions')
     allow_non_admin = permissions.get('actions', {}).get('non_admin', False)
 
     is_auth = True if allow_non_admin else session_is_admin(session_id)
