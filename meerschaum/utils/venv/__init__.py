@@ -326,8 +326,13 @@ def verify_venv(
 
         ### E.g. python3.10 actually links to Python 3.10.
         if filename == python_versioned_name:
-            real_path = pathlib.Path(os.path.realpath(python_path))
-            if not real_path.exists():
+            try:
+                real_path = pathlib.Path(os.path.realpath(python_path))
+                real_path_exists = real_path.exists()
+            except Exception:
+                real_path_exists = False
+
+            if not real_path_exists:
                 try:
                     python_path.unlink()
                 except Exception:

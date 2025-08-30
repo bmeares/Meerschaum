@@ -24,6 +24,7 @@ flavor_clis = {
     'mariadb'        : 'mycli',
     'percona'        : 'mycli',
     'sqlite'         : 'litecli',
+    'geopackage'     : 'litecli',
     'mssql'          : 'mssqlcli',
     'duckdb'         : 'gadwall',
 }
@@ -105,7 +106,7 @@ def _cli_exit(
     ### NOTE: The `DATABASE_URL` property must be initialized first in case the database is not
     ### yet defined (e.g. 'sql:local').
     cli_arg_str = self.DATABASE_URL
-    if self.flavor in ('sqlite', 'duckdb'):
+    if self.flavor in ('sqlite', 'duckdb', 'geopackage'):
         cli_arg_str = (
             str(self.database)
             if 'database' in self.__dict__

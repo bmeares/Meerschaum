@@ -36,6 +36,7 @@ class SQLConnector(InstanceConnector):
         exec_queries,
         get_connection,
         _cleanup_connections,
+        _init_geopackage_table,
     )
     from meerschaum.utils.sql import test_connection
     from ._fetch import fetch, get_pipe_metadef
@@ -176,7 +177,7 @@ class SQLConnector(InstanceConnector):
             **kw
         )
 
-        if self.__dict__.get('flavor', None) == 'sqlite':
+        if self.__dict__.get('flavor', None) in ('sqlite', 'geopackage'):
             self._reset_attributes()
             self._set_attributes(
                 'sql',
@@ -187,7 +188,7 @@ class SQLConnector(InstanceConnector):
             ### For backwards compatability reasons, set the path for sql:local if its missing.
             if self.label == 'local' and not self.__dict__.get('database', None):
                 from meerschaum.config._paths import SQLITE_DB_PATH
-                self.database = str(SQLITE_DB_PATH)
+                self.database = SQLITE_DB_PATH.as_posix()
 
         ### ensure flavor and label are set accordingly
         if 'flavor' not in self.__dict__:
@@ -291,7 +292,7 @@ class SQLConnector(InstanceConnector):
         """
         if self.flavor in ('duckdb', 'oracle'):
             return False
-        if self.flavor == 'sqlite':
+        if self.flavor in ('sqlite', 'geopackage'):
             return ':memory:' not in self.URI
         return True
 

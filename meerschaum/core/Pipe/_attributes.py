@@ -155,7 +155,7 @@ def columns(self) -> Union[Dict[str, str], None]:
     cols = self.parameters.get('columns', {})
     if not isinstance(cols, dict):
         return {}
-    return {col_ix: col for col_ix, col in cols.items() if col}
+    return {col_ix: col for col_ix, col in cols.items() if col and col_ix}
 
 
 @columns.setter
