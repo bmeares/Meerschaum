@@ -192,6 +192,16 @@ STATIC_CONFIG: Dict[str, Any] = {
                 'requirements': {'database'},
                 'defaults': {},
             },
+            'geopackage': {
+                'engine': 'sqlite',
+                'create_engine': _default_create_engine_args,
+                'omit_create_engine': {'method',},
+                'to_sql': {
+                    'method': 'multi',
+                },
+                'requirements': {'database'},
+                'defaults': {},
+            },
             'duckdb': {
                 'engine': 'duckdb',
                 'create_engine': {},

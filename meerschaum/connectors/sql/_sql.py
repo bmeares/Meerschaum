@@ -27,7 +27,7 @@ _bulk_flavors = {
 }
 ### flavors that do not support chunks
 _disallow_chunks_flavors = ['duckdb']
-_max_chunks_flavors = {'sqlite': 1000}
+_max_chunks_flavors = {'sqlite': 1000, 'geopackage': 1000}
 SKIP_READ_TRANSACTION_FLAVORS: list[str] = ['mssql']
 
 
@@ -1347,3 +1347,33 @@ def _cleanup_connections(self) -> None:
             connection.close()
         except Exception:
             pass
+
+
+def _init_geopackage_table(
+    self,
+    df: 'pd.DataFrame',
+    table: str,
+    debug: bool = False,
+) -> SuccessTuple:
+    """
+    Initialize the geopackage schema tables from a DataFrame.
+    """
+    import pathlib
+    database = self.__dict__.get('database', self.parse_uri(self.URI).get('database', None))
+    if not database:
+        return False, f"Could not determine database for '{self}'."
+
+    database_path = pathlib.Path(database)
+    mode = 'w' if not database_path.exists() else 'a'
+
+    try:
+        df.head(0).to_file(
+            database_path.as_posix(),
+            layer=table,
+            driver='GPKG',
+            index=False,
+            mode=mode,
+        )
+    except Exception as e:
+        return False, f"Failed to init table '{table}':\n{e}"
+    return True, "Success"

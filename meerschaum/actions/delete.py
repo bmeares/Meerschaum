@@ -349,7 +349,7 @@ def _delete_connectors(
     for c in to_delete:
         try:
             ### Remove database files.
-            if c.flavor in ('sqlite', 'duckdb'):
+            if c.flavor in ('sqlite', 'duckdb', 'geopackage'):
                 if ':memory:' not in c.database and pathlib.Path(c.database).exists():
                     if force or yes_no(
                         f"Detected '{c.flavor}' database '{c.database}'. "

@@ -4,6 +4,23 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.0.6
+
+- **Fix web dashboard SQL editor.**  
+  The SQL editor on the web dashboard now correctly updates SQL queries.
+
+- **Add "Resolve symlinks" to web dashboard SQL Editor.**  
+  The SQL Editor on the pipes cards now includes a toggle to resolve symlinks in the SQL query, allowing you to make changes to the query without overwriting the symlinks.
+
+- **Improve performance when fetching pipes' tags on the web dashboard.**  
+  Cache misses are now better handled when fetching tags and other keys on the web dashboard.
+
+- **Preserve symlinks when copying pipes.**  
+  The action `copy pipes` now preserves symlinks for new pipes.
+
+- **Fix edge case for `unload_plugins()`.**  
+  When an empty list is explicitly provided, the behavior now does not unload all plugins.
+
 ### v3.0.3 – v3.0.5
 
 - **Fix pipe page routing.**  
