@@ -706,7 +706,7 @@ def get_create_index_queries(
                 ),
             ])
         elif not autoincrement and primary_key in existing_cols_pd_types:
-            if self.flavor == 'sqlite':
+            if self.flavor in ('sqlite', 'geopackage'):
                 new_table_name = sql_item_name(
                     f'_new_{pipe.target}',
                     self.flavor,
@@ -888,7 +888,7 @@ def get_create_index_queries(
         f"CREATE UNIQUE INDEX {unique_index_name} ON {_pipe_name} ({unique_index_cols_str})"
     )
     constraint_queries = [create_unique_index_query]
-    if self.flavor != 'sqlite':
+    if self.flavor not in ('sqlite', 'geopackage'):
         constraint_queries.append(add_constraint_query)
     if upsert and indices_cols_str:
         index_queries[unique_index_name] = constraint_queries
@@ -977,7 +977,12 @@ def get_drop_index_queries(
         if ix_unquoted.lower() not in existing_indices:
             continue
 
-        if ix_key == 'unique' and upsert and self.flavor not in ('sqlite',) and not is_hypertable:
+        if (
+            ix_key == 'unique'
+            and upsert
+            and self.flavor not in ('sqlite', 'geopackage')
+            and not is_hypertable
+        ):
             constraint_name_unquoted = ix_unquoted.replace('IX_', 'UQ_')
             constraint_name = sql_item_name(constraint_name_unquoted, self.flavor)
             constraint_or_index = (
@@ -1558,6 +1563,11 @@ def create_pipe_table_from_df(
         get_create_schema_if_not_exists_queries,
     )
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
+    if self.flavor == 'geopackage':
+        init_success, init_msg = self._init_geopackage_table(df, pipe.target, debug=debug)
+        if not init_success:
+            return init_success, init_msg
+
     primary_key = pipe.columns.get('primary', None)
     primary_key_typ = (
         pipe.dtypes.get(primary_key, str(df.dtypes.get(primary_key, 'int')))
@@ -1614,6 +1624,9 @@ def create_pipe_table_from_df(
         if success
         else f"Failed to create {target_name}."
     )
+    if success and self.flavor == 'geopackage':
+        return self._init_geopackage_table(df, target, debug=debug)
+
     return success, msg
 
 
@@ -3078,7 +3091,7 @@ def get_pipe_columns_types(
     if not pipe.exists(debug=debug):
         return {}
 
-    if self.flavor not in ('oracle', 'mysql', 'mariadb', 'sqlite'):
+    if self.flavor not in ('oracle', 'mysql', 'mariadb', 'sqlite', 'geopackage'):
         return get_table_cols_types(
             pipe.target,
             self,
@@ -3436,7 +3449,7 @@ def get_alter_columns_queries(
         for col, (db_typ, typ) in altered_cols.items()
     }
 
-    if self.flavor == 'sqlite':
+    if self.flavor in ('sqlite', 'geopackage'):
         temp_table_name = '-' + session_id + '_' + target
         rename_query = (
             "ALTER TABLE "
@@ -3884,7 +3897,7 @@ def get_pipe_schema(self, pipe: mrsm.Pipe) -> Union[str, None]:
     -------
     A schema string or `None` if nothing is configured.
     """
-    if self.flavor == 'sqlite':
+    if self.flavor in ('sqlite', 'geopackage'):
         return self.schema
     return pipe.parameters.get('schema', self.schema)
 

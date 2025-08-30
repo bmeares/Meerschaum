@@ -690,16 +690,32 @@ def accordion_items_from_pipe(
         items_bodies['sql'] = html.Div([
             sql_editor,
             html.Br(),
-            dbc.Row([
-                dbc.Col([update_sql_button], width=2),
-                dbc.Col([
-                    html.Div(
-                        id={'type': 'update-sql-success-div', 'index': pipe_meta_str}
-                    )
+            dbc.Row(
+                [
+                    dbc.Col(update_sql_button, width='auto'),
+                    dbc.Col(
+                        dbc.Switch(
+                            label="Resolve symlinks",
+                            value=True,
+                            id={'type': 'resolve-symlinks-switch', 'index': pipe_meta_str},
+                        ),
+                        width='auto',
+                    ),
                 ],
-                width=True,
-                )
-            ]),
+                justify='between',
+                align='center',
+            ),
+            dbc.Row(
+                dbc.Col(
+                    html.Div(
+                        id={
+                            'type': 'update-sql-success-div',
+                            'index': pipe_meta_str,
+                        },
+                    ),
+                    width=True,
+                ),
+            ),
         ])
 
     if 'recent-data' in active_items:
