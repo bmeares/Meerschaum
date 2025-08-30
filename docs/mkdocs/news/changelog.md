@@ -18,6 +18,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Preserve symlinks when copying pipes.**  
   The action `copy pipes` now preserves symlinks for new pipes.
 
+- **Fix edge case for `unload_plugins()`.**  
+  When an empty list is explicitly provided, the behavior now does not unload all plugins.
+
 ### v3.0.3 – v3.0.5
 
 - **Fix pipe page routing.**  
