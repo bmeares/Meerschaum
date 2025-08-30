@@ -4,7 +4,13 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.0.6
+### v3.0.6 – v3.0.7
+
+- **Fix stack config for new deployments.**  
+  New stack deployments behave as expected when symlinks fail to resolve.
+
+- **Handle other null-like values when syncing to PostgreSQL.**  
+  The null detection has been improved when syncing in bulk to PostgreSQL.
 
 - **Fix web dashboard SQL editor.**  
   The SQL editor on the web dashboard now correctly updates SQL queries.

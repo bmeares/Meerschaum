@@ -14,7 +14,7 @@ from meerschaum.api import get_cache_connector
 from meerschaum.utils.misc import generate_password
 
 CHUNKS_TOKENS_GENERATORS: Dict[str, Dict[str, Union[Generator[Any, None, None], datetime, int]]]
-DEFAULT_TTL_SECONDS = mrsm.get_config('system', 'api', 'data', 'chunks', 'ttl_seconds')
+DEFAULT_TTL_SECONDS = mrsm.get_config('api', 'data', 'chunks', 'ttl_seconds')
 
 
 def generate_chunks_cursor_token(

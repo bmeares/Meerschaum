@@ -35,7 +35,7 @@ from meerschaum.utils.warnings import warn
 from meerschaum.api._oauth2 import CustomOAuth2PasswordRequestForm
 
 
-USER_ID_CACHE_EXPIRES_SECONDS: int = mrsm.get_config('system', 'api', 'cache', 'session_expires_minutes') * 60
+USER_ID_CACHE_EXPIRES_SECONDS: int = mrsm.get_config('api', 'cache', 'session_expires_minutes') * 60
 _active_user_ids = {}
 
 

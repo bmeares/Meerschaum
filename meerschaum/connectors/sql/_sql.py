@@ -1134,7 +1134,7 @@ def psql_insert_copy(
 
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.warnings import dprint
-    from meerschaum.utils.dtypes import json_serialize_value
+    from meerschaum.utils.dtypes import json_serialize_value, value_is_null
 
     ### NOTE: PostgreSQL doesn't support NUL chars in text, so they're removed from strings.
     data_iter = (
@@ -1152,7 +1152,7 @@ def psql_insert_copy(
                         else item.replace('\0', '').replace('\\u0000', '')
                     )
                 )
-            ) if item is not None
+            ) if not value_is_null(item)
             else r'\N'
             for item in row
         ) for row in data_iter

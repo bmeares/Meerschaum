@@ -163,6 +163,8 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
   Additional environment variables to pass to subprocesses.
 - **`isolation`**  
   If `isolation` is set to `subprocess`, then `compose` will execute commands as subprocesses, ensuring the truest level of isolation. By default, commands are executed within the host Meerschaum process, with isolated configuration and plugins and root directories. This behavior may be temporarily enabled with the flag `--isolated`.
+ - **`daemon`**  
+   If `daemon` is `false`, then `compose` will not use a persistent CLI daemon but will instead execute all commands in-process (i.e. appends `--no-daemon` to each command). 
 
 !!! tip "Accessing the host configuration"
 
