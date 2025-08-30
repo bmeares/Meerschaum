@@ -109,12 +109,12 @@ def register_user(
         except Exception:
             return False, "Invalid dictionary string received for attributes."
 
-    allow_users = get_config('system', 'api', 'permissions', 'registration', 'users')
+    allow_users = get_config('api', 'permissions', 'registration', 'users')
     if not allow_users:
         return False, (
             "The administrator for this server has not allowed user registration.\n\n"
             "Please contact the system administrator, or if you are running this server, "
-            "open the configuration file with `edit config system` and search for 'permissions'. "
+            "open the configuration file with `edit config api` and search for 'permissions'. "
             " Under the keys api:permissions:registration, "
             "you can toggle various registration types."
         )

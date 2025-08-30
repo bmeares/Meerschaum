@@ -153,6 +153,7 @@ default_system_config = {
             'daemon',
             'sql',
             'register plugin',
+            'copy ',
         ],
     },
     'experimental': {
