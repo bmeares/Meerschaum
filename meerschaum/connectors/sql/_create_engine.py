@@ -19,6 +19,7 @@ from meerschaum._internal.static import STATIC_CONFIG
 flavor_configs = STATIC_CONFIG['sql']['create_engine_flavors']
 install_flavor_drivers = {
     'sqlite': ['aiosqlite'],
+    'geopackage': ['aiosqlite'],
     'duckdb': ['duckdb', 'duckdb_engine'],
     'mysql': ['pymysql'],
     'mariadb': ['pymysql'],
@@ -91,7 +92,7 @@ def create_engine(
         sqlalchemy.dialects.registry.register(*flavor_dialects[self.flavor])
 
     ### self._sys_config was deepcopied and can be updated safely
-    if self.flavor in ("sqlite", "duckdb"):
+    if self.flavor in ("sqlite", "duckdb", "geopackage"):
         engine_str = f"{_engine}:///{_database}" if not _uri else _uri
         if 'create_engine' not in self._sys_config:
             self._sys_config['create_engine'] = {}

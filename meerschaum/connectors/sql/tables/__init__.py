@@ -74,7 +74,7 @@ def get_tables(
     cache_expired = refresh or (
         (
             _check_create_cache(conn, debug=debug)
-            if conn.flavor != 'sqlite'
+            if conn.flavor not in ('sqlite', 'duckdb', 'geopackage')
             else True
         )
         if conn.type == 'sql'
@@ -264,7 +264,7 @@ def get_tables(
 
                 _write_create_cache(mrsm.get_connector(str(mrsm_instance)), debug=debug)
 
-        if conn.flavor != 'sqlite':
+        if conn.flavor not in ('sqlite', 'duckdb', 'geopackage'):
             with open(pickle_path, 'wb') as f:
                 pickle.dump(conn.metadata, f)
 

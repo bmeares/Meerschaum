@@ -13,7 +13,7 @@ import functools
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List, Tuple
-from meerschaum.utils.threading import Lock, RLock
+from meerschaum.utils.threading import RLock
 from meerschaum.core.Plugin import Plugin
 
 _api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
@@ -760,7 +760,7 @@ def unload_custom_actions(plugins: Optional[List[str]] = None, debug: bool = Fal
     from meerschaum._internal.entry import _shell
     import meerschaum._internal.shell as shell_pkg
 
-    plugins = plugins or list(_plugins_actions.keys())
+    plugins = plugins if plugins is not None else list(_plugins_actions)
 
     for plugin in plugins:
         action_names = _plugins_actions.get(plugin, [])
@@ -799,7 +799,7 @@ def unload_plugins(
     _synced_symlinks = False
 
     all_plugins = get_plugins_names()
-    plugins = plugins or all_plugins
+    plugins = plugins if plugins is not None else all_plugins
     if debug:
         dprint(f"Unloading plugins: {plugins}")
 

@@ -51,7 +51,7 @@ from meerschaum.utils.misc import filter_keywords, flatten_list, string_to_dict
 from meerschaum.utils.yaml import yaml
 from meerschaum.actions import get_subactions, actions
 from meerschaum._internal.arguments._parser import parser
-from meerschaum.connectors.sql._fetch import set_pipe_query
+from meerschaum.connectors.sql._fetch import set_pipe_query, get_pipe_query
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHECK_UPDATE)
@@ -919,12 +919,29 @@ def update_pipe_sql_click(n_clicks, sql_editor_text):
         success, msg = False, f"Unable to update SQL definition for {pipe}."
     else:
         try:
-            set_pipe_query(pipe, sql_editor_text)
-            success, msg = pipe.edit(debug=debug)
+            success, msg = set_pipe_query(pipe, sql_editor_text)
         except Exception as e:
             success, msg = False, f"Invalid SQL query:\n{e}"
 
     return alert_from_success_tuple((success, msg))
+
+
+@dash_app.callback(
+    Output({'type': 'sql-editor', 'index': MATCH}, 'value'),
+    Input({'type': 'resolve-symlinks-switch', 'index': MATCH}, 'value'),
+    prevent_initial_call=True,
+)
+def toggle_sql_symlinks(value):
+    triggered = dash.callback_context.triggered
+    if triggered[0]['value'] is None:
+        raise PreventUpdate
+
+    pipe = pipe_from_ctx(triggered, 'value')
+    if pipe is None:
+        raise PreventUpdate
+
+    query = get_pipe_query(pipe, apply_symlinks=value)
+    return query
 
 
 @dash_app.callback(

@@ -51,7 +51,7 @@ def from_uri(
     if 'database' not in params:
         error("Unable to determine the database from the provided URI.")
 
-    if flavor in ('sqlite', 'duckdb'):
+    if flavor in ('sqlite', 'duckdb', 'geopackage'):
         if params['database'] == ':memory:':
             params['label'] = label or f'memory_{flavor}'
         else:

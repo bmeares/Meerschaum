@@ -38,6 +38,7 @@ def get_pipes(
     method: str = 'registered',
     workers: Optional[int] = None,
     debug: bool = False,
+    _cache_parameters: bool = True,
     **kw: Any
 ) -> Union[PipesDict, List[mrsm.Pipe], Dict[str, mrsm.Pipe]]:
     """
@@ -94,7 +95,6 @@ def get_pipes(
 
     **kw: Any:
         Keyword arguments to pass to the `meerschaum.Pipe` constructor.
-        
 
     Returns
     -------
@@ -209,7 +209,7 @@ def get_pipes(
             pipe_tags_or_parameters
             if isinstance(pipe_tags_or_parameters, list)
             else (
-                pipe_tags_or_parameters.get('tags', None)
+                pipe_tags_or_parameters.get('tags', [])
                 if isinstance(pipe_tags_or_parameters, dict)
                 else None
             )

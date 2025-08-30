@@ -99,7 +99,7 @@ def _copy_pipes(
         new_pipe = Pipe(
             ck, mk, lk,
             instance=instance_keys,
-            parameters=pipe.parameters.copy(),
+            parameters=pipe.get_parameters(apply_symlinks=False),
         )
 
         if new_pipe.get_id(debug=debug) is not None:

@@ -221,7 +221,11 @@ def get_pipe_metadef(
     return meta_def.rstrip()
 
 
-def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
+def get_pipe_query(
+    pipe: mrsm.Pipe,
+    apply_symlinks: bool = True,
+    warn: bool = True,
+) -> Union[str, None]:
     """
     Run through the possible keys for a pipe's query and return the first match.
 
@@ -233,14 +237,17 @@ def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
     import textwrap
     from meerschaum.utils.warnings import warn as _warn
     from meerschaum.utils.pipes import replace_pipes_syntax
-    if pipe.parameters.get('fetch', {}).get('definition', None):
-        definition = pipe.parameters['fetch']['definition']
+
+    parameters = pipe.get_parameters(apply_symlinks=apply_symlinks)
+
+    if parameters.get('fetch', {}).get('definition', None):
+        definition = parameters['fetch']['definition']
     elif pipe.parameters.get('definition', None):
-        definition = pipe.parameters['definition']
+        definition = parameters['definition']
     elif pipe.parameters.get('query', None):
-        definition = pipe.parameters['query']
+        definition = parameters['query']
     elif pipe.parameters.get('sql', None):
-        definition = pipe.parameters['sql']
+        definition = parameters['sql']
     else:
         if warn:
             _warn(
@@ -249,11 +256,12 @@ def get_pipe_query(pipe: mrsm.Pipe, warn: bool = True) -> Union[str, None]:
             )
         return None
 
-    definition = replace_pipes_syntax(definition)
+    if apply_symlinks:
+        definition = replace_pipes_syntax(definition)
     return textwrap.dedent(definition.lstrip().rstrip())
 
 
-def set_pipe_query(pipe: mrsm.Pipe, query: str) -> None:
+def set_pipe_query(pipe: mrsm.Pipe, query: str) -> mrsm.SuccessTuple:
     """
     Run through the possible keys for a pipe's query and set the first match.
 
@@ -262,22 +270,17 @@ def set_pipe_query(pipe: mrsm.Pipe, query: str) -> None:
     - query
     - sql
     """
-    if 'fetch' in pipe.parameters and 'definition' in pipe.parameters['fetch']:
-        if pipe.parameters.get('fetch', None) is None:
-            pipe.parameters['fetch'] = {}
-        dict_to_set = pipe.parameters['fetch']
-        key_to_set = 'definition'
-    elif 'definition' in pipe.parameters:
-        dict_to_set = pipe.parameters
-        key_to_set = 'definition'
-    elif 'query' in pipe.parameters:
-        dict_to_set = pipe.parameters
-        key_to_set = 'query'
+    parameters = pipe.get_parameters()
+    if 'fetch' in parameters and 'definition' in parameters['fetch']:
+        patch_dict = {'fetch': {'defintion': query}}
+    elif 'definition' in parameters:
+        patch_dict = {'definition': query}
+    elif 'query' in parameters:
+        patch_dict = {'query': query}
     else:
-        dict_to_set = pipe.parameters
-        key_to_set = 'sql'
+        patch_dict = {'sql': query}
 
-    dict_to_set[key_to_set] = query
+    return pipe.update_parameters(patch_dict)
 
 
 def _simple_fetch_query(
