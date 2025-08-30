@@ -119,8 +119,6 @@ default_system_config = {
         'api': {
         },
     },
-    'api': 'MRSM{api}',
-    'webterm': 'MRSM{api:webterm}',
     'cli': {
         'max_daemons': (multiprocessing.cpu_count() * 3),
         'refresh_seconds': 0.1,
