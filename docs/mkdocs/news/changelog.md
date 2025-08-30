@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.0.6 – v3.0.7
+### v3.0.6 – v3.0.8
 
 - **Fix stack config for new deployments.**  
   New stack deployments behave as expected when symlinks fail to resolve.
