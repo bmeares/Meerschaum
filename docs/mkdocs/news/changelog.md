@@ -15,6 +15,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Improve performance when fetching pipes' tags on the web dashboard.**  
   Cache misses are now better handled when fetching tags and other keys on the web dashboard.
 
+- **Preserve symlinks when copying pipes.**  
+  The action `copy pipes` now preserves symlinks for new pipes.
+
 ### v3.0.3 – v3.0.5
 
 - **Fix pipe page routing.**  
