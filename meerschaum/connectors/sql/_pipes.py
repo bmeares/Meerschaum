@@ -1564,7 +1564,7 @@ def create_pipe_table_from_df(
     )
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     if self.flavor == 'geopackage':
-        init_success, init_msg = self._init_geopackage_table(df, pipe.target, debug=debug)
+        init_success, init_msg = self._init_geopackage_pipe(df, pipe, debug=debug)
         if not init_success:
             return init_success, init_msg
 
@@ -1625,7 +1625,7 @@ def create_pipe_table_from_df(
         else f"Failed to create {target_name}."
     )
     if success and self.flavor == 'geopackage':
-        return self._init_geopackage_table(df, target, debug=debug)
+        return self._init_geopackage_pipe(df, pipe, debug=debug)
 
     return success, msg
 
@@ -3092,6 +3092,7 @@ def get_pipe_columns_types(
         return {}
 
     if self.flavor not in ('oracle', 'mysql', 'mariadb', 'sqlite', 'geopackage'):
+    #  if self.flavor not in ('oracle', 'mysql', 'mariadb'):
         return get_table_cols_types(
             pipe.target,
             self,
@@ -3357,6 +3358,11 @@ def get_alter_columns_queries(
             'int': 'numeric',
             'date': 'datetime',
             'numeric': 'int',
+        })
+    elif self.flavor == 'geopackage':
+        pd_db_df_aliases.update({
+            'geometry': 'bytes',
+            'bytes': 'geometry',
         })
 
     altered_cols = {
@@ -3939,3 +3945,234 @@ def _enforce_pipe_dtypes_chunks_hook(
     Enforce a pipe's dtypes on each chunk.
     """
     return pipe.enforce_dtypes(chunk_df, debug=debug)
+
+
+def _init_geopackage_pipe(
+    self,
+    df: 'pd.DataFrame',
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> SuccessTuple:
+    """
+    Initialize the geopackage schema tables from a DataFrame.
+    """
+    import pathlib
+    import shutil
+    from meerschaum.utils.sql import (
+        get_table_cols_types,
+        get_table_cols_indices,
+        get_create_table_queries,
+        table_exists,
+    )
+    from meerschaum.utils.dtypes import get_geometry_type_srid
+    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
+    from meerschaum.utils.misc import generate_password
+    from meerschaum.config.paths import SQL_CONN_CACHE_RESOURCES_PATH
+    from meerschaum.connectors import connectors
+    database = self.__dict__.get('database', self.parse_uri(self.URI).get('database', None))
+    if not database:
+        return False, f"Could not determine database for '{self}'."
+
+    table = pipe.target
+
+    tmp_id = generate_password(8)
+    self_sqlite = mrsm.get_connector(
+        f"sql:{self.label}_{tmp_id}",
+        flavor='sqlite',
+        database=database,
+    )
+    database_path = pathlib.Path(database)
+    create_new = False
+    failed = False
+    mode = 'w' if not database_path.exists() else 'a'
+    table_is_fresh = not table_exists(table, self_sqlite, debug=debug)
+    geom_cols_types = {
+        col: get_geometry_type_srid(typ)
+        for col, typ in pipe.dtypes.items()
+        if col and 'geometry' in col.lower() or 'geography' in col.lower()
+    }
+
+    try:
+        df.head(0).to_file(
+            database_path.as_posix(),
+            layer=table,
+            driver='GPKG',
+            index=False,
+            mode=mode,
+            spatial_index=False,
+        )
+    except Exception as e:
+        failed = True
+        create_new = 'at least' in str(e).lower()
+        if not create_new:
+            return False, f"Failed to init table '{table}':\n{e}"
+
+    rename_queries = [
+        (
+            "UPDATE gpkg_geometry_columns\n"
+            f"SET column_name = '{df.active_geometry_name}'\n"
+            f"WHERE table_name = '{table}'\n"
+            "  AND column_name = 'geom'"
+        ),
+    ]
+    for col, (geom_typ, srid) in geom_cols_types.items():
+        rename_queries.extend([
+            (
+                "UPDATE gpkg_geometry_columns\n"
+                f"SET geometry_type_name = '{geom_typ.upper()}'\n"
+                f"WHERE table_name = '{table}'\n"
+                f"  AND column_name = '{col}'"
+            ),
+        ])
+
+    if table_is_fresh:
+        rename_queries.append(f"DROP TABLE IF EXISTS \"{table}\"")
+
+    if not failed and not create_new:
+        self_sqlite.exec_queries(rename_queries, debug=debug)
+
+    if not create_new:
+        return (
+            True, "Success"   
+        ) if not failed else (
+            False, f"Failed to init {self}."
+        )
+
+    tmp_dir_path = SQL_CONN_CACHE_RESOURCES_PATH / tmp_id
+    tmp_dir_path.mkdir(parents=True, exist_ok=False)
+    temp_database_path = tmp_dir_path / f'{tmp_id}.gpkg'
+    tmp_conn = mrsm.get_connector(
+        f"sql:{tmp_id}",
+        flavor='sqlite',
+        database=temp_database_path.as_posix(),
+    )
+    df.head(0).to_file(
+        temp_database_path.as_posix(),
+        layer=table,
+        driver='GPKG',
+        mode='w',
+        spatial_index=False,
+    )
+    tmp_conn.exec_queries(rename_queries, debug=debug)
+    if not table_exists('geometry_columns', self_sqlite, debug=debug):
+        self.exec(
+            "CREATE VIEW geometry_columns AS\n"
+            "SELECT\n"
+            "    table_name AS f_table_name,\n"
+            "    column_name AS f_geometry_column,\n"
+            "    geometry_type_name AS \"type\",\n"
+            "    CASE\n"
+            "        WHEN z = 0 THEN 'XY'\n"
+            "        WHEN z = 1 THEN 'XYZ'\n"
+            "        WHEN z = 2 THEN 'XYZ'\n"
+            "    END AS coord_dimension,\n"
+            "    srs_id AS srid,\n"
+            "    0 AS spatial_index_enabled\n"
+            "FROM gpkg_geometry_columns"
+        )
+
+    tables_definitions = tmp_conn.read(
+        "SELECT name, sql\n"
+        "FROM sqlite_master\n"
+        "WHERE type = 'table'\n"
+        r"  AND name LIKE 'gpkg_%' "
+        f"AND name != '{table}'"
+    )
+    tables = tables_definitions['name']
+    tables_cols_types = {
+        tbl: get_table_cols_types(tbl, tmp_conn, flavor='sqlite', debug=debug)
+        for tbl in tables
+    }
+    tables_cols_indices = {
+        tbl: get_table_cols_indices(tbl, tmp_conn, flavor='sqlite', debug=debug)
+        for tbl in tables
+    }
+    tables_pks = {}
+    for tbl, cols_indices in tables_cols_indices.items():
+        for col, indices in cols_indices.items():
+            for ix_dict in indices:
+                if ix_dict.get('type') == 'PRIMARY KEY':
+                    tables_pks[tbl] = col
+                    break
+
+            if tbl in tables_pks:
+                break
+
+        if tbl in tables_pks:
+            break
+
+    tables_create_queries = {
+        tbl: get_create_table_queries(
+            tables_cols_types[tbl],
+            tbl,
+            flavor='sqlite',
+            primary_key=tables_pks.get(tbl, None),
+            primary_key_db_type=tables_cols_types[tbl].get(tables_pks.get(tbl, None)),
+            _parse_dtypes=False,
+        )
+        for tbl in tables
+    }
+    tables_pipes = {
+        tbl: mrsm.Pipe(
+            f'{tmp_conn}', tbl,
+            temporary=True,
+            instance=str(self_sqlite),
+            target=tbl,
+            static=True,
+            enforce=True,
+            null_indices=False,
+            upsert=False,
+            columns={
+                (col if tables_pks.get(tbl) != col else 'primary'): col
+                for col in tables_cols_indices[tbl]
+            },
+            dtypes={
+                col: (
+                    get_pd_type_from_db_type(
+                        db_typ
+                        if 'datetime' not in db_typ.lower()
+                        else 'TIMESTAMPTZ'
+                    )
+                )
+                for col, db_typ in tables_cols_types[tbl].items()
+            },
+            parameters={
+                'sql': f"SELECT * FROM \"{tbl}\"",
+            },
+        )
+        for tbl, cols_types in tables_cols_types.items()
+    }
+
+    init_success = True
+
+    for tbl, create_queries in tables_create_queries.items():
+        result = self_sqlite.exec_queries(create_queries, debug=debug)
+        if not result:
+            warn(f"Failed to create '{table}'.")
+            init_success = False
+
+        pipe = tables_pipes[tbl]
+        sync_success, sync_message = pipe.sync(debug=debug)
+        if not sync_success:
+            warn(f"Failed to migrate table '{tbl}':\n{sync_message}")
+            init_success = False
+
+        if not pipe.indices:
+            continue
+
+        index_success, index_message = pipe.create_indices(debug=debug)
+        if not index_success:
+            warn(f"Failed to create indices for '{tbl}':\n{index_message}")
+            init_success = False
+
+    failed = not init_success
+    _ = connectors.get('sql', {}).pop(tmp_id, None)
+    shutil.rmtree(tmp_dir_path)
+
+    _ = connectors.get('sql', {}).pop(self_sqlite.label, None)
+
+
+    if failed:
+        return False, f"Failed to init {table}."
+
+    return True, "Success"

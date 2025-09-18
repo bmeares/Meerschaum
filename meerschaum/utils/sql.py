@@ -2146,6 +2146,7 @@ def get_create_table_queries(
     primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
+    _parse_dtypes: bool = True,
 ) -> List[str]:
     """
     Return a query to create a new table from a `SELECT` query or a `dtypes` dictionary.
@@ -2179,6 +2180,10 @@ def get_create_table_queries(
         If provided, include this column in the primary key.
         Applicable to TimescaleDB only.
 
+    _parse_dtypes: bool, default True
+        If `True`, cast Pandas dtypes to SQL dtypes.
+        Otherwise pass through the given value directly.
+
     Returns
     -------
     A `CREATE TABLE` (or `SELECT INTO`) query for the database flavor.
@@ -2200,6 +2205,7 @@ def get_create_table_queries(
         primary_key_db_type=primary_key_db_type,
         autoincrement=(autoincrement and flavor not in SKIP_AUTO_INCREMENT_FLAVORS),
         datetime_column=datetime_column,
+        _parse_dtypes=_parse_dtypes,
     )
 
 
@@ -2212,6 +2218,7 @@ def _get_create_table_query_from_dtypes(
     primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
+    _parse_dtypes: bool = True,
 ) -> List[str]:
     """
     Create a new table from a `dtypes` dictionary.
@@ -2228,12 +2235,22 @@ def _get_create_table_query_from_dtypes(
             (
                 primary_key,
                 get_db_type_from_pd_type(dtypes.get(primary_key, 'int') or 'int', flavor=flavor)
+            ) if _parse_dtypes else (
+                primary_key,
+                dtypes.get(primary_key, 'INT') or 'INT'
             )
         ]
         if primary_key
         else []
     ) + [
-        (col, get_db_type_from_pd_type(typ, flavor=flavor))
+        (
+            col,
+            (
+                get_db_type_from_pd_type(typ, flavor=flavor)
+                if _parse_dtypes
+                else typ
+            )
+        )
         for col, typ in dtypes.items()
         if col != primary_key
     ]
@@ -2311,6 +2328,7 @@ def _get_create_table_query_from_cte(
     primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
+    _parse_dtypes=None,
 ) -> List[str]:
     """
     Create a new table from a CTE query.
