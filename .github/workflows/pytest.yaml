@@ -15,37 +15,17 @@ on:
       - staging
 
 jobs:
-  build_and_test:
-    runs-on: ubuntu-latest
+  tests:
+    runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup dev tools
-        env:
-          MRSM_SKIP_DOCKER_EXPERIMENTAL: 1
-        run: ./scripts/setup.sh
-      - name: Install db drivers
-        run: sudo ./scripts/drivers.sh
-      - name: Integration tests
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Integration Tests
+        run: ./scripts/test.sh db
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
           MRSM_TEST_FLAVORS: "all"
           MRSM_DEBUG: "false"
           MRSM_INSTALL_PACKAGES: "api"
-        run: ./scripts/test.sh db
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: logs
-          path: test_root/logs/
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: daemon_errors.log
-          path: test_root/daemon_errors.log
-          if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: jobs
-          path: test_root/jobs/
-          if-no-files-found: ignore

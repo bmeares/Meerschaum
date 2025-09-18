@@ -4,6 +4,17 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.0.9
+
+- **Disable CLI daemon by default.**  
+  New installations will now disable the CLI daemon, which may be enabled by setting `system.experimental.cli_daemon` to `true`.
+
+- **Support `geopackage` SQLConnectors.**  
+  The flavor `geopackage` (extension of `sqlite`) enables syncing geometry data as GeoPackage-WKB (as well as the necessary `gpkg` tables if missing).
+
+- **Check for missing plugins paths for `bootstrap plugin`.**  
+  The `bootstrap plugin` wizard now ensures that configured plugins paths (i.e. `MRSM_PLUGINS_DIR`) exist before proceeding.
+
 ### v3.0.6 – v3.0.8
 
 - **Fix stack config for new deployments.**  
