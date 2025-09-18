@@ -36,7 +36,6 @@ class SQLConnector(InstanceConnector):
         exec_queries,
         get_connection,
         _cleanup_connections,
-        _init_geopackage_table,
     )
     from meerschaum.utils.sql import test_connection
     from ._fetch import fetch, get_pipe_metadef
@@ -74,6 +73,7 @@ class SQLConnector(InstanceConnector):
         create_pipe_indices,
         drop_pipe_indices,
         get_pipe_index_names,
+        _init_geopackage_pipe,
     )
     from ._plugins import (
         get_plugins_pipe,

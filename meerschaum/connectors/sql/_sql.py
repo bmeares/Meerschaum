@@ -946,6 +946,11 @@ def to_sql(
             )
         )
 
+    geometry_format = 'wkt' if self.flavor == 'mssql' else (
+        'gpkg_wkb'
+        if self.flavor == 'geopackage'
+        else 'wkb_hex'
+    )
     for col in geometry_cols:
         geometry_type, srid = geometry_cols_types_srids.get(col, get_geometry_type_srid())
         with warnings.catch_warnings():
@@ -953,7 +958,7 @@ def to_sql(
             df[col] = df[col].apply(
                 functools.partial(
                     serialize_geometry,
-                    geometry_format=('wkt' if self.flavor == 'mssql' else 'wkb_hex'),
+                    geometry_format=geometry_format,
                 )
             )
 
@@ -1347,33 +1352,3 @@ def _cleanup_connections(self) -> None:
             connection.close()
         except Exception:
             pass
-
-
-def _init_geopackage_table(
-    self,
-    df: 'pd.DataFrame',
-    table: str,
-    debug: bool = False,
-) -> SuccessTuple:
-    """
-    Initialize the geopackage schema tables from a DataFrame.
-    """
-    import pathlib
-    database = self.__dict__.get('database', self.parse_uri(self.URI).get('database', None))
-    if not database:
-        return False, f"Could not determine database for '{self}'."
-
-    database_path = pathlib.Path(database)
-    mode = 'w' if not database_path.exists() else 'a'
-
-    try:
-        df.head(0).to_file(
-            database_path.as_posix(),
-            layer=table,
-            driver='GPKG',
-            index=False,
-            mode=mode,
-        )
-    except Exception as e:
-        return False, f"Failed to init table '{table}':\n{e}"
-    return True, "Success"

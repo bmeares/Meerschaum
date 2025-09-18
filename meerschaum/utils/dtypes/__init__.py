@@ -10,6 +10,7 @@ import traceback
 import json
 import uuid
 import time
+import struct
 from datetime import timezone, datetime, date, timedelta
 from decimal import Decimal, Context, InvalidOperation, ROUND_HALF_UP
 
@@ -360,6 +361,14 @@ def attempt_cast_to_geometry(value: Any) -> Any:
         except Exception:
             return value
 
+    value_is_gpkg = geometry_is_gpkg(value)
+    if value_is_gpkg:
+        try:
+            wkb_data, _, _ = gpkg_wkb_to_wkb(value)
+            return shapely_wkb.loads(wkb_data)
+        except Exception:
+            return value
+
     value_is_wkt = geometry_is_wkt(value)
     if value_is_wkt is None:
         return value
@@ -403,6 +412,56 @@ def geometry_is_wkt(value: Union[str, bytes]) -> Union[bool, None]:
         return False
     
     return None
+
+
+def geometry_is_gpkg(value: bytes) -> bool:
+    """
+    Return whether the input `value` is formatted as GeoPackage WKB.
+    """
+    if not isinstance(value, bytes) or len(value) < 2:
+        return False
+
+    return value[0:2] == b'GP'
+
+def gpkg_wkb_to_wkb(gpkg_wkb_bytes: bytes) -> Tuple[bytes, int, bytes]:
+    """
+    Converts GeoPackage WKB to standard WKB by removing the header.
+    
+    Parameters
+    ----------
+    gpkg_wkb_bytes: bytes
+        The GeoPackage WKB byte string.
+        
+    Returns
+    -------
+    A tuple containing the standard WKB bytes, SRID, and flags.
+    """
+    magic_number = gpkg_wkb_bytes[0:2]
+    if magic_number != b'GP':
+        raise ValueError("Invalid GeoPackage WKB header: missing magic number.")
+    
+    try:
+        header = gpkg_wkb_bytes[0:8]
+        header_vals = struct.unpack('<ccBBi', header)
+        flags = header_vals[-2]
+        srid = header_vals[-1]
+    except struct.error:
+        header = gpkg_wkb_bytes[0:6]
+        header_vals = struct.unpack('<ccBBh', header)
+        flags = header_vals[-2]
+        srid = header_vals[-1]
+
+    envelope_type = (flags >> 1) & 0x07
+    envelope_sizes = {
+        0: 0,
+        1: 32,
+        2: 48,
+        3: 48,
+        4: 64,
+    }
+    header_length = 8 + envelope_sizes.get(envelope_type, 0)
+    standard_wkb_bytes = gpkg_wkb_bytes[header_length:]
+    return standard_wkb_bytes, srid, flags
 
 
 def value_is_null(value: Any) -> bool:
@@ -690,9 +749,9 @@ def serialize_geometry(
     geom: Any,
     geometry_format: str = 'wkb_hex',
     srid: Optional[int] = None,
-) -> Union[str, Dict[str, Any], None]:
+) -> Union[str, Dict[str, Any], bytes, None]:
     """
-    Serialize geometry data as a hex-encoded well-known-binary string. 
+    Serialize geometry data as WKB, WKB (hex), GPKG-WKB, WKT, or GeoJSON. 
 
     Parameters
     ----------
@@ -701,20 +760,20 @@ def serialize_geometry(
 
     geometry_format: str, default 'wkb_hex'
         The serialization format for geometry data.
-        Accepted formats are `wkb_hex` (well-known binary hex string),
-        `wkt` (well-known text), and `geojson`.
+        Accepted formats are `wkb`, `wkb_hex`, `wkt`, `geojson`, and `gpkg_wkb`.
 
     srid: Optional[int], default None
         If provided, use this as the source CRS when serializing to GeoJSON.
 
     Returns
     -------
-    A string containing the geometry data.
+    A string containing the geometry data, or bytes, or a dictionary, or None.
     """
     if value_is_null(geom):
         return None
-    shapely, shapely_ops, pyproj = mrsm.attempt_import(
-        'shapely', 'shapely.ops', 'pyproj',
+
+    shapely, shapely_ops, pyproj, np = mrsm.attempt_import(
+        'shapely', 'shapely.ops', 'pyproj', 'numpy',
         lazy=False,
     )
     if geometry_format == 'geojson':
@@ -724,12 +783,31 @@ def serialize_geometry(
         geojson_str = shapely.to_geojson(geom)
         return json.loads(geojson_str)
 
-    if hasattr(geom, 'wkb_hex'):
-        if geometry_format == "wkb_hex":
-            return shapely.to_wkb(geom, hex=True, include_srid=True)
-        return shapely.to_wkt(geom)
+    if not hasattr(geom, 'wkb_hex'):
+        return str(geom)
 
-    return str(geom)
+    byte_order = 1 if np.little_endian else 0
+
+    if geometry_format.startswith("wkb"):
+        return shapely.to_wkb(geom, hex=(geometry_format=="wkb_hex"), include_srid=True)
+    elif geometry_format == 'gpkg_wkb':
+        wkb_data = shapely.to_wkb(geom, hex=False, byte_order=byte_order)
+        flags = (
+            ((byte_order & 0x01) | (0x20))
+            if geom.is_empty
+            else (byte_order & 0x01)
+        )
+        srid_val = srid or -1
+        header = struct.pack(
+            '<ccBBi',
+            b'G', b'P',
+            0,
+            flags,
+            srid_val
+        )
+        return header + wkb_data
+
+    return shapely.to_wkt(geom)
 
 
 def deserialize_geometry(geom_wkb: Union[str, bytes]):
