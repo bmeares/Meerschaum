@@ -18,8 +18,11 @@ jobs:
   tests:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
-        name: Integration Tests
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Integration Tests
         run: ./scripts/test.sh db
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
