@@ -133,10 +133,10 @@ services:
     environment: *CITUS_AUTH
 
   valkey:
-    image: "bitnami/valkey"
+    image: "valkey/valkey"
     environment:
       ALLOW_EMPTY_PASSWORD: "yes"
     volumes:
-      - "valkey_volume:/bitnami/valkey/data"
+      - "valkey_volume:/data"
     ports:
       - "6399:6379"
