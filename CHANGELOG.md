@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.0.9
+### v3.0.9 – v3.0.10
 
 - **Disable CLI daemon by default.**  
   New installations will now disable the CLI daemon, which may be enabled by setting `system.experimental.cli_daemon` to `true`.
@@ -14,6 +14,12 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Check for missing plugins paths for `bootstrap plugin`.**  
   The `bootstrap plugin` wizard now ensures that configured plugins paths (i.e. `MRSM_PLUGINS_DIR`) exist before proceeding.
+
+- **Add FontAwesome icons to the Dash app.**  
+  Plugins using the `@web_page` feature will now have access to FontAwesome icons, which are now statically hosted.
+
+- **Fix the Valkey stack data directory.**  
+  The move from `bitnami/valkey` to `valkey/valkey` incorrectly pointed the Valkey volume to `/valkey/data` instead of `/data`. This error has been rectified.
 
 ### v3.0.6 – v3.0.8
 

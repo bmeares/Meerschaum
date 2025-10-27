@@ -57,4 +57,4 @@ include = ["meerschaum*"]
 exclude = ["docs*", "tests*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.html", "*.css", "*.js", "*.png", "*.ico"]
+"*" = ["*.html", "*.css", "*.js", "*.png", "*.ico", "api/resources/**"]
