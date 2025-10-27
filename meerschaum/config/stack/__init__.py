@@ -71,7 +71,7 @@ volumes = {
     'api_root': '/meerschaum',
     'meerschaum_db_data': '/home/postgres/pgdata',
     'grafana_storage': '/var/lib/grafana',
-    'valkey_data': '/valkey/data',
+    'valkey_data': '/data',
 }
 networks = {
     'frontend': None,
@@ -186,7 +186,7 @@ default_docker_compose_config = {
             ],
         },
         'valkey': {
-            'image': 'valkey/valkey:latest',
+            'image': 'valkey/valkey-bundle:latest',
             'restart': 'always',
             'environment': {
                 'VALKEY_PASSWORD': '<DOLLAR>VALKEY_PASSWORD',
