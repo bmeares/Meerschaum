@@ -1754,6 +1754,8 @@ def sync_pipe(
         check_existing = False
     kw['safe_copy'] = kw.get('safe_copy', False)
 
+    print('BEFORE FILTER')
+    print(df)
     unseen_df, update_df, delta_df = (
         pipe.filter_existing(
             df,
@@ -1762,6 +1764,10 @@ def sync_pipe(
             **kw
         ) if check_existing else (df, None, df)
     )
+    print(f"{check_existing=}")
+    print(f"{upsert=}")
+    print('AFTER FILTER')
+    print(df)
     if upsert:
         unseen_df, update_df, delta_df = (df.head(0), df, df)
 
@@ -1829,6 +1835,7 @@ def sync_pipe(
             _check_pk(_df_to_clear)
 
     if is_new:
+        print("CREATE PIPE TABLE FROM DF")
         create_success, create_msg = self.create_pipe_table_from_df(
             pipe,
             unseen_df,
@@ -1934,6 +1941,7 @@ def sync_pipe(
         temp_pipe._cache_value('_skip_check_indices', True, memory_only=True, debug=debug)
         now_ts = get_current_timestamp('ms', as_int=True) / 1000
         temp_pipe._cache_value('_columns_types_timestamp', now_ts, memory_only=True, debug=debug)
+        print("TEMP PIPE SYNC")
         temp_success, temp_msg = temp_pipe.sync(update_df, check_existing=False, debug=debug)
         if not temp_success:
             return temp_success, temp_msg

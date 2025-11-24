@@ -398,6 +398,8 @@ async def sync_pipe(
     except (json.JSONDecodeError, UnicodeDecodeError):
         data = body.decode('utf-8', errors='replace')
 
+    print(f"{data=}")
+
     if not data:
         return True, "No data to sync."
 
@@ -426,7 +428,7 @@ async def sync_pipe(
 
     success, msg = pipe.sync(
         data,
-        debug=debug,
+        debug=True,
         check_existing=check_existing,
         blocking=blocking,
         force=force,
@@ -559,6 +561,7 @@ def get_pipe_data(
         order=order,
         debug=debug,
     )
+    print(f"{df=}")
     if df is None:
         raise fastapi.HTTPException(
             status_code=400,
@@ -572,6 +575,7 @@ def get_pipe_data(
         geometry_format=geometry_format,
         double_precision=double_precision,
     )
+    print(f"{json_content=}")
     return fastapi.Response(
         json_content,
         media_type='application/json',
