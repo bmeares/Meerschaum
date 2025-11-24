@@ -30,6 +30,7 @@ def delete(
         'connectors' : _delete_connectors,
         'jobs'       : _delete_jobs,
         'venvs'      : _delete_venvs,
+        'cache'      : _delete_cache,
     }
     return choose_subaction(action, options, **kw)
 
@@ -610,6 +611,28 @@ def _delete_venvs(
 
     msg = f"Removed {len(venvs)} venv" + ('s' if len(venvs) != 1 else '') + '.'
     return True, msg
+
+
+def _delete_cache(action: Optional[List[str]] = None, **kwargs) -> SuccessTuple:
+    """
+    Delete local cache.
+    """
+    import shutil
+    from meerschaum.config.paths import CACHE_RESOURCES_PATH
+    from meerschaum.utils.prompt import yes_no
+
+    if not yes_no(
+        f"Are you sure you want to remove the cache directory?\n    {CACHE_RESOURCES_PATH}"
+    ):
+        return False, "Nothing was deleted."
+
+    try:
+        shutil.rmtree(CACHE_RESOURCES_PATH)
+        CACHE_RESOURCES_PATH.mkdir(exist_ok=True, parents=True)
+    except Exception as e:
+        return False, f"Failed to clean up cache:\n{e}"
+
+    return True, "Success"
 
 
 ### NOTE: This must be the final statement of the module.
