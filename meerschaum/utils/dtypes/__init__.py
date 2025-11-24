@@ -357,7 +357,7 @@ def attempt_cast_to_geometry(value: Any) -> Any:
             try:
                 return gpd.GeoSeries(value)
             except Exception as e:
-                return value
+                return gpd.GeoSeries(attempt_cast_to_geometry(val) for val in value)
         sample_val = value[ix]
 
         sample_is_gpkg = geometry_is_gpkg(sample_val)
@@ -365,7 +365,7 @@ def attempt_cast_to_geometry(value: Any) -> Any:
             try:
                 value = value.apply(lambda x: gpkg_wkb_to_wkb(x)[0])
             except Exception:
-                return value
+                return gpd.GeoSeries(attempt_cast_to_geometry(val) for val in value)
 
         sample_is_wkt = geometry_is_wkt(sample_val) if not sample_is_gpkg else False
         try:
@@ -375,7 +375,7 @@ def attempt_cast_to_geometry(value: Any) -> Any:
                 else gpd.GeoSeries.from_wkb(value)
             )
         except Exception:
-            return value
+            return gpd.GeoSeries(attempt_cast_to_geometry(val) for val in value)
 
     if 'shapely' in typ:
         return value
