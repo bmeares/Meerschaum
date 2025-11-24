@@ -143,9 +143,11 @@ def _invalidate_cache(
 
     if cache_conn is None:
         try:
-            shutil.rmtree(cache_dir_path)
+            if cache_dir_path.exists():
+                shutil.rmtree(cache_dir_path)
+            _ = self.__dict__.pop('_checked_if_cache_dir_exists', None)
         except Exception:
-            warn(f"Failed to clear cache for {self}:\n{e}")
+            pass
 
     return True, "Success"
 
