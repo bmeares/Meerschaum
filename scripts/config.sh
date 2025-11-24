@@ -11,7 +11,7 @@ export tags=( "api" "minimal" "full" )
 
 export base_name="meerschaum"
 export image="$dockerhub_user/$base_name"
-export python_image="fedora:42"
+export python_image="fedora:43"
 export platforms="linux/amd64"
 # export platforms="linux/amd64,linux/arm64"
 # export platforms="linux/amd64,linux/arm64,linux/arm/v7"

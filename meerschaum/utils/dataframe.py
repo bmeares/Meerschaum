@@ -371,8 +371,12 @@ def filter_unseen_df(
     new_cols = list(new_df_dtypes)
     delta_df = joined_df[new_cols][changed_rows_mask].reset_index(drop=True)
 
+    delta_json_cols = get_json_cols(delta_df)
     for json_col in json_cols:
-        if json_col not in delta_df.columns:
+        if (
+            json_col in delta_json_cols
+            or json_col not in delta_df.columns
+        ):
             continue
         try:
             delta_df[json_col] = delta_df[json_col].apply(
@@ -381,8 +385,12 @@ def filter_unseen_df(
         except Exception:
             warn(f"Unable to deserialize JSON column '{json_col}':\n{traceback.format_exc()}")
 
+    delta_numeric_cols = get_numeric_cols(delta_df)
     for numeric_col in numeric_cols:
-        if numeric_col not in delta_df.columns:
+        if (
+            numeric_col in delta_numeric_cols
+            or numeric_col not in delta_df.columns
+        ):
             continue
         try:
             delta_df[numeric_col] = delta_df[numeric_col].apply(
@@ -396,29 +404,41 @@ def filter_unseen_df(
         except Exception:
             warn(f"Unable to parse numeric column '{numeric_col}':\n{traceback.format_exc()}")
 
+    delta_uuid_cols = get_uuid_cols(delta_df)
     for uuid_col in uuid_cols:
-        if uuid_col not in delta_df.columns:
+        if (
+            uuid_col in delta_uuid_cols
+            or uuid_col not in delta_df.columns
+        ):
             continue
         try:
             delta_df[uuid_col] = delta_df[uuid_col].apply(attempt_cast_to_uuid)
         except Exception:
             warn(f"Unable to parse numeric column '{uuid_col}':\n{traceback.format_exc()}")
 
+    delta_bytes_cols = get_bytes_cols(delta_df)
     for bytes_col in bytes_cols:
-        if bytes_col not in delta_df.columns:
+        if (
+            bytes_col in delta_bytes_cols
+            or bytes_col not in delta_df.columns
+        ):
             continue
         try:
             delta_df[bytes_col] = delta_df[bytes_col].apply(attempt_cast_to_bytes)
         except Exception:
             warn(f"Unable to parse bytes column '{bytes_col}':\n{traceback.format_exc()}")
 
+    delta_geometry_cols = get_geometry_cols(delta_df)
     for geometry_col in geometry_cols:
-        if geometry_col not in delta_df.columns:
+        if (
+            geometry_col in delta_geometry_cols
+            or geometry_col not in delta_df.columns
+        ):
             continue
         try:
-            delta_df[geometry_col] = delta_df[geometry_col].apply(attempt_cast_to_geometry)
+            delta_df[geometry_col] = attempt_cast_to_geometry(delta_df[geometry_col])
         except Exception:
-            warn(f"Unable to parse bytes column '{bytes_col}':\n{traceback.format_exc()}")
+            warn(f"Unable to parse geometry column '{geometry_col}':\n{traceback.format_exc()}")
 
     return delta_df
 
@@ -1424,7 +1444,7 @@ def enforce_dtypes(
         parsed_geom_cols = []
         for col in geometry_cols_types_srids:
             try:
-                df[col] = df[col].apply(attempt_cast_to_geometry)
+                df[col] = attempt_cast_to_geometry(df[col])
                 parsed_geom_cols.append(col)
             except Exception as e:
                 if debug:

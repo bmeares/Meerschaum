@@ -2143,6 +2143,8 @@ def sync_pipe_inplace(
         if primary_key_typ
         else None
     )
+    if not {col_key: col for col_key, col in pipe.columns.items() if col_key and col}:
+        raise ValueError(f"Cannot sync without index columns.")
     autoincrement = pipe.parameters.get('autoincrement', False)
     dt_col = pipe.columns.get('datetime', None)
     dt_col_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
@@ -2357,7 +2359,9 @@ def sync_pipe_inplace(
             and col in backtrack_cols_types
             and col in new_cols
         )
-    } if not primary_key or self.flavor == 'oracle' else {primary_key: new_cols.get(primary_key)}
+    } if not primary_key else {primary_key: new_cols.get(primary_key)}
+    if not on_cols:
+        raise ValueError(f"Cannot sync without common index columns.")
 
     null_replace_new_cols_str = (
         '\n    ' + ',\n    '.join([

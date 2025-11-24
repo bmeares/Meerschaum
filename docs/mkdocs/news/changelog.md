@@ -4,6 +4,20 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.1.0
+
+- **Improve `geometry` performance.**  
+  Enforcing dtypes for pipes with `geometry` columns has been dramatically improved.
+
+- **Add safeguards to in-place syncs.**  
+  Attempting to sync an in-place SQL pipe without index columns configured will now raise a relevant error.
+
+- **Rebase Docker image to `fedora:43`.**  
+  The new Docker image is based on Fedora 43, which includes Python 3.14.
+
+- **Invalidate `Pipe.id` cache when deleting a pipe.**  
+  Deleting a pipe will purge any local cache.
+
 ### v3.0.9 – v3.0.10
 
 - **Disable CLI daemon by default.**  

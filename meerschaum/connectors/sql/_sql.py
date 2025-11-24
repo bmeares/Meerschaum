@@ -301,7 +301,7 @@ def read(
                 def get_chunk_generator(connectable):
                     chunk_generator = pd.read_sql_query(
                         formatted_query,
-                        self.engine,
+                        connectable, # NOTE: test this against `self.engine`.
                         **read_sql_query_kwargs
                     )
 
@@ -327,7 +327,9 @@ def read(
                     chunk_generator, to_return = get_chunk_generator(self.engine)
                 else:
                     with self.engine.begin() as transaction:
-                        with transaction.execution_options(stream_results=stream_results) as connection:
+                        with transaction.execution_options(
+                            stream_results=stream_results,
+                        ) as connection:
                             chunk_generator, to_return = get_chunk_generator(connection)
 
                 if to_return is not None:

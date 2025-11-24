@@ -346,14 +346,37 @@ def attempt_cast_to_geometry(value: Any) -> Any:
     """
     Given a value, attempt to coerce it into a `shapely` (`geometry`) object.
     """
+    typ = str(type(value))
+    if 'pandas' in typ and 'Series' in typ:
+        gpd = mrsm.attempt_import('geopandas')
+        ix = value.first_valid_index()
+        sample_val = value[ix]
+        sample_is_gpkg = geometry_is_gpkg(sample_val)
+        if sample_is_gpkg:
+            try:
+                value = value.apply(lambda x: gpkg_wkb_to_wkb(x)[0])
+            except Exception:
+                return value
+
+        sample_is_wkt = geometry_is_wkt(sample_val) if not sample_is_gpkg else False
+        try:
+            return (
+                gpd.GeoSeries.from_wkt(value)
+                if sample_is_wkt
+                else gpd.GeoSeries.from_wkb(value)
+            )
+        except Exception:
+            return value
+
+    if 'shapely' in typ:
+        return value
+
     shapely, shapely_wkt, shapely_wkb = mrsm.attempt_import(
         'shapely',
         'shapely.wkt',
         'shapely.wkb',
         lazy=False,
     )
-    if 'shapely' in str(type(value)):
-        return value
 
     if isinstance(value, (dict, list)):
         try:
@@ -380,7 +403,9 @@ def attempt_cast_to_geometry(value: Any) -> Any:
             else shapely_wkb.loads(value)
         )
     except Exception:
-        return value
+        pass
+
+    return value
 
 
 def geometry_is_wkt(value: Union[str, bytes]) -> Union[bool, None]:
