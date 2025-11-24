@@ -33,8 +33,35 @@ def clear(
 
     options = {
         'pipes': _clear_pipes,
+        'cache': _clear_cache,
     }
     return choose_subaction(action, options, **kw)
+
+
+def _complete_clear(
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> List[str]:
+    """
+    Override the default Meerschaum `complete_` function.
+    """
+    from meerschaum.actions.delete import _complete_delete_cache
+    if action is None:
+        action = []
+    options = {
+        'cache': _complete_delete_cache,
+    }
+
+    if (
+        len(action) > 0 and action[0] in options
+            and kw.get('line', '').split(' ')[-1] != action[0]
+    ):
+        sub = action[0]
+        del action[0]
+        return options[sub](action=action, **kw)
+
+    from meerschaum._internal.shell import default_action_completer
+    return default_action_completer(action=(['clear'] + action), **kw)
 
 
 def _clear_pipes(
@@ -52,7 +79,6 @@ def _clear_pipes(
 ) -> SuccessTuple:
     """
     Clear pipes' data without dropping any tables.
-
     """
     from meerschaum import get_pipes
     from meerschaum.utils.formatting import print_tuple
@@ -151,6 +177,15 @@ def _ask_with_rowcounts(
     question += range_text + '\n\n'
 
     return yes_no(question, yes=yes, nopretty=nopretty, noask=noask, default='n')
+
+
+def _clear_cache(*args, **kwargs) -> SuccessTuple:
+    """
+    Delete local cache or temporary tables or keys from a SQL or Valkey connector.
+    """
+    from meerschaum.actions import get_action
+    return get_action(['delete', 'cache'])(*args, **kwargs)
+
 
 ### NOTE: This must be the final statement of the module.
 ###       Any subactions added below these lines will not

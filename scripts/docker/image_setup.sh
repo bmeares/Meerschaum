@@ -23,7 +23,6 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
     libpq-devel \
     libffi-devel \
     python3-devel \
-    gdal-devel \
     git \
     tmux \
     || exit 1

@@ -2144,7 +2144,8 @@ def sync_pipe_inplace(
         else None
     )
     if not {col_key: col for col_key, col in pipe.columns.items() if col_key and col}:
-        raise ValueError(f"Cannot sync without index columns.")
+        return False, f"Cannot sync in-place without index columns."
+
     autoincrement = pipe.parameters.get('autoincrement', False)
     dt_col = pipe.columns.get('datetime', None)
     dt_col_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None

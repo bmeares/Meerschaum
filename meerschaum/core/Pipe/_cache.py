@@ -11,6 +11,7 @@ import os
 import pickle
 import json
 import pathlib
+import shutil
 from datetime import datetime, timedelta
 from typing import Any, Union, List
 
@@ -132,11 +133,19 @@ def _invalidate_cache(
     if not hard:
         return True, "Success"
 
+    cache_conn = self._get_cache_connector()
+    cache_dir_path = self._get_cache_dir_path()
     cache_keys = self._get_cache_keys(debug=debug)
     for cache_key in cache_keys:
         if cache_keys == 'attributes':
             continue
         self._clear_cache_key(cache_key, debug=debug)
+
+    if cache_conn is None:
+        try:
+            shutil.rmtree(cache_dir_path)
+        except Exception:
+            warn(f"Failed to clear cache for {self}:\n{e}")
 
     return True, "Success"
 

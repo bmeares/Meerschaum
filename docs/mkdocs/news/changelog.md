@@ -7,16 +7,19 @@ This is the current release cycle, so stay tuned for future releases!
 ### v3.1.0
 
 - **Improve `geometry` performance.**  
-  Enforcing dtypes for pipes with `geometry` columns has been dramatically improved.
+  Enforcing dtypes for pipes with `geometry` columns has been significantly improved.
 
 - **Add safeguards to in-place syncs.**  
-  Attempting to sync an in-place SQL pipe without index columns configured will now raise a relevant error.
+  Attempting to sync an in-place SQL pipe without index columns configured will now gracefully fail.
 
-- **Rebase Docker image to `fedora:43`.**  
-  The new Docker image is based on Fedora 43, which includes Python 3.14.
+- **Add action `delete cache`.**  
+  Users may manually purge local or Valkey cache with `delete cache` or `clear cache`.
 
-- **Invalidate `Pipe.id` cache when deleting a pipe.**  
-  Deleting a pipe will purge any local cache.
+- **Clean up stray cache directories.**  
+  Deleting pipes automatically removes empty cache directories.
+
+- **Deprecate the `api` Docker tag.**  
+  The `latest` Docker tag now represents `full`. The `api` tag only exists to retain backwards compatability.
 
 ### v3.0.9 – v3.0.10
 

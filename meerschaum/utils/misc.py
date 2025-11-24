@@ -7,8 +7,10 @@ Miscellaneous functions go here
 
 from __future__ import annotations
 
+import os
 import sys
 import functools
+import pathlib
 from datetime import timedelta, datetime
 
 from meerschaum.utils.typing import (
@@ -304,7 +306,7 @@ def parse_config_substitution(
 
 
 def edit_file(
-    path: Union['pathlib.Path', str],
+    path: Union[pathlib.Path, str],
     default_editor: str = 'pyvim',
     debug: bool = False
 ) -> bool:
@@ -329,7 +331,6 @@ def edit_file(
     -------
     A bool indicating the file was successfully edited.
     """
-    import os
     from subprocess import call
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import run_python_package, attempt_import, package_venv
@@ -364,7 +365,6 @@ def get_cols_lines(default_cols: int = 100, default_lines: int = 120) -> Tuple[i
     -------
     A tuple if integers for the columns and lines.
     """
-    import os
     try:
         size = os.get_terminal_size()
         _cols, _lines = size.columns, size.lines
@@ -584,7 +584,6 @@ def _pyinstaller_traverse_dir(
     """
     Recursively traverse a directory and return a list of its contents.
     """
-    import os, pathlib
     paths = []
     _directory = pathlib.Path(directory)
 
@@ -972,7 +971,7 @@ def wget(
     """
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.debug import dprint
-    import os, pathlib, re, urllib.request
+    import re, urllib.request
     if headers is None:
         headers = {}
     request = urllib.request.Request(url, headers=headers)
@@ -1266,7 +1265,6 @@ def get_last_n_lines(file_name: str, N: int):
     """
     https://thispointer.com/python-get-last-n-lines-of-a-text-file-like-tail-command/
     """
-    import os
     # Create an empty list to keep the track of last N lines
     list_of_lines = []
     # Open file for reading in binary mode
@@ -1579,8 +1577,8 @@ def is_symlink(path: pathlib.Path) -> bool:
     """
     if path.is_symlink():
         return True
+
     import platform
-    import os
     if platform.system() != 'Windows':
         return False
     try:
@@ -1615,7 +1613,6 @@ def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> 
     output_dir: Union[str, pathlib.Path]
         The output directory.
     """
-    import os
 
     def is_within_directory(directory, target):
         abs_directory = os.path.abspath(directory)
@@ -1662,6 +1659,14 @@ def to_snake_case(name: str) -> str:
     name = re.sub(r'[^\w\s]', '', name)
     name = re.sub(r'\s+', '_', name)
     return name.lower()
+
+
+def get_directory_size(path: Path) -> int:
+    """
+    Return the cumulative size of a directory's files in bytes.
+    https://stackoverflow.com/a/55659577/9699829
+    """
+    return sum(file.stat().st_size for file in path.rglob('*'))
 
 
 ##################
