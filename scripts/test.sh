@@ -94,7 +94,7 @@ export MRSM_SQL_TEST_POSTGRESQL='postgresql://test:test1234@localhost:5559/testd
 ### For whatever reason, GitHub actions only works
 ### when the server is started, stopped, and started again.
 [ -z "$MRSM_TEST_FLAVORS" ] || [[ "$MRSM_TEST_FLAVORS" =~ "api" ]] && \
-  docker compose up -d postgresql && \
+  cd tests/ && docker compose up -d postgresql && cd .. \
   $mrsm delete jobs test_api -y && \
   $mrsm start api \
     -w 1 -p $test_port --name test_api -y -d -i sql:test_postgresql --no-webterm --no-dash && \
