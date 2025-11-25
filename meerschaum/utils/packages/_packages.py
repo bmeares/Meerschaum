@@ -72,6 +72,7 @@ packages: Dict[str, Dict[str, str]] = {
     'drivers': {
         'cryptography'               : 'cryptography>=38.0.1',
         'psycopg'                    : 'psycopg[binary]>=3.2.9',
+        'psycopg2'                   : 'psycopg2-binary>=2.9.11',
         'pymysql'                    : 'PyMySQL>=0.9.0',
         'aiomysql'                   : 'aiomysql>=0.0.21',
         'sqlalchemy_cockroachdb'     : 'sqlalchemy-cockroachdb>=2.0.0',
