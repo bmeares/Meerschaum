@@ -87,15 +87,6 @@ conns = {
         #  database=str(data_path / 'test_duck.db'),
         #  flavor='duckdb',
     #  ),
-    'citus': get_connector(
-        'sql', 'test_citus',
-        flavor='citus',
-        username='test',
-        password='test1234',
-        database='testdb',
-        port=5499,
-        host='localhost',
-    ),
     'api': get_connector(
         'api', 'test_api',
         port=8989,

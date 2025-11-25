@@ -21,6 +21,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Deprecate the `api` Docker tag.**  
   The `latest` Docker tag now represents `full`. The `api` tag only exists to retain backwards compatability.
 
+- **Drop `citus` from the test suite.**  
+  Like `cockroachdb`, the `citus` flavor has been deprecated; please use the `postgresql` flavor instead. 
+
 ### v3.0.9 – v3.0.10
 
 - **Disable CLI daemon by default.**  

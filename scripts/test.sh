@@ -88,14 +88,16 @@ $PYTHON_BIN -c "$connectors_uri_code"
 
 MRSM_URIS=$($PYTHON_BIN -c "$connectors_uri_code")
 export $MRSM_URIS
+export MRSM_SQL_TEST_POSTGRESQL='postgresql://test:test1234@localhost:5559/testdb'
 
 ### Start the test API on port 8989.
 ### For whatever reason, GitHub actions only works
 ### when the server is started, stopped, and started again.
 [ -z "$MRSM_TEST_FLAVORS" ] || [[ "$MRSM_TEST_FLAVORS" =~ "api" ]] && \
+  docker compose up -d postgresql && \
   $mrsm delete jobs test_api -y && \
   $mrsm start api \
-    -w 1 -p $test_port --name test_api -y -d -i sql:test_timescaledb --no-webterm --no-dash && \
+    -w 1 -p $test_port --name test_api -y -d -i sql:test_postgresql --no-webterm --no-dash && \
   $mrsm start connectors api:test && \
   $mrsm stop jobs test_api -y && \
   $mrsm start jobs test_api -y && \

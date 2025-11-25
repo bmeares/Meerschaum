@@ -5,10 +5,9 @@ volumes:
   mssql_volume:
   mariadb_volume:
   mysql_volume:
-  # cockroachdb_volume:
   oracle_volume:
-  citus_healthcheck_volume:
   valkey_volume:
+  postgresql_volume:
 
 services:
 
@@ -42,9 +41,22 @@ services:
       - "./connector_resources/timescaledb_ha/initdb:/docker-entrypoint-initdb.d:z,ro"
     image: "timescale/timescaledb-ha:pg17"
 
+  postgresql:
+    environment:
+      POSTGRES_DB: "testdb"
+      POSTGRES_USER: "test"
+      POSTGRES_PASSWORD: "test1234"
+      ALLOW_IP_RANGE: "0.0.0.0/0"
+    command: "postgres -c max_connections=1000 -c shared_buffers=1024MB -c max_prepared_transactions=100"
+    ports:
+      - "5559:5432"
+    volumes:
+      - "postgresql_volume:/var/lib/postgresql/data"
+    image: "postgres:18"
+    shm_size: "1gb"
+
   postgis:
     environment:
-      TIMESCALEDB_TELEMETRY: "off"
       POSTGRES_DB: "testdb"
       POSTGRES_USER: "test"
       POSTGRES_PASSWORD: "test1234"
@@ -100,37 +112,6 @@ services:
       ORACLE_PWD: "oracle"
     volumes:
       - "oracle_volume:/opt/oracle/oradata"
-
-  citus:
-    image: "citusdata/citus:11.0.2"
-    ports:
-      - "5499:5432"
-    labels: ["com.citusdata.role=Master"]
-    environment: &CITUS_AUTH
-      POSTGRES_DB: "testdb"
-      POSTGRES_USER: "test"
-      PGUSER: "test"
-      POSTGRES_PASSWORD: "test1234"
-      PGPASSWORD: "test1234"
-      POSTGRES_HOST_AUTH_METHOD: "${POSTGRES_HOST_AUTH_METHOD:-trust}"
-      CITUS_HOST: "citus"
-
-  citus_worker:
-    image: "citusdata/citus:11.0.2"
-    labels: ["com.citusdata.role=Worker"]
-    depends_on: ["citus_manager"]
-    command: "/wait-for-manager.sh"
-    environment: *CITUS_AUTH
-    volumes:
-      - "citus_healthcheck_volume:/healthcheck"
-
-  citus_manager:
-    image: "citusdata/membership-manager:0.3.0"
-    volumes:
-      - "${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock"
-      - "citus_healthcheck_volume:/healthcheck"
-    depends_on: ["citus"]
-    environment: *CITUS_AUTH
 
   valkey:
     image: "valkey/valkey"
