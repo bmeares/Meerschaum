@@ -423,7 +423,6 @@ def test_ignore_datetime_conversion(flavor: str):
 
     assert success, msg
     df = pipe.get_data(['dt'], debug=debug)
-    print(df)
     synced_docs = df.to_dict(orient='records')
     assert synced_docs == expected_docs
 

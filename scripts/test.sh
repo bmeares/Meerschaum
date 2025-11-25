@@ -105,6 +105,7 @@ export $MRSM_URIS
   $mrsm start connectors api:test
 
 true && \
+  $mrsm delete cache -y && \
   $mrsm show connectors && \
   $mrsm start connectors $MRSM_CONNS; rc="$?"
 [ "$rc" != '0' ] && exit "$rc"
