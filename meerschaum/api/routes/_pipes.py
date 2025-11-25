@@ -559,7 +559,6 @@ def get_pipe_data(
         order=order,
         debug=debug,
     )
-    print(f"{df=}")
     if df is None:
         raise fastapi.HTTPException(
             status_code=400,
@@ -573,7 +572,6 @@ def get_pipe_data(
         geometry_format=geometry_format,
         double_precision=double_precision,
     )
-    print(f"{json_content=}")
     return fastapi.Response(
         json_content,
         media_type='application/json',
