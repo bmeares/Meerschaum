@@ -1443,6 +1443,8 @@ def enforce_dtypes(
             dprint(f"Checking for geometry: {list(geometry_cols_types_srids)}")
         parsed_geom_cols = []
         for col in geometry_cols_types_srids:
+            if col not in df.columns:
+                continue
             try:
                 df[col] = attempt_cast_to_geometry(df[col])
                 parsed_geom_cols.append(col)
@@ -1457,11 +1459,7 @@ def enforce_dtypes(
                 dprint(f"Converting to GeoDataFrame (geometry column: '{parsed_geom_cols[0]}')...")
             try:
                 _, default_srid = geometry_cols_types_srids[parsed_geom_cols[0]]
-                print(f"BEFORE:")
-                print(df)
                 df = geopandas.GeoDataFrame(df, geometry=parsed_geom_cols[0], crs=default_srid)
-                print("AFTER 1")
-                print(df)
                 for col, (_, srid) in geometry_cols_types_srids.items():
                     if srid:
                         if debug:
@@ -1469,10 +1467,7 @@ def enforce_dtypes(
                         _ = df[col].set_crs(srid)
                 if parsed_geom_cols[0] not in df.columns:
                     df.rename_geometry(parsed_geom_cols[0], inplace=True)
-                print("AFTER 2")
-                print(df)
             except (ValueError, TypeError):
-                #  if debug:
                 import traceback
                 dprint(f"Failed to cast to GeoDataFrame:\n{traceback.format_exc()}")
 

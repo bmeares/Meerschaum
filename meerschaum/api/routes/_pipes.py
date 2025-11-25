@@ -398,8 +398,6 @@ async def sync_pipe(
     except (json.JSONDecodeError, UnicodeDecodeError):
         data = body.decode('utf-8', errors='replace')
 
-    print(f"{data=}")
-
     if not data:
         return True, "No data to sync."
 
@@ -428,7 +426,7 @@ async def sync_pipe(
 
     success, msg = pipe.sync(
         data,
-        debug=True,
+        debug=debug,
         check_existing=check_existing,
         blocking=blocking,
         force=force,

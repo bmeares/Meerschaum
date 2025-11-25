@@ -348,6 +348,8 @@ def attempt_cast_to_geometry(value: Any) -> Any:
     """
     typ = str(type(value))
     if 'pandas' in typ and 'Series' in typ:
+        if 'GeoSeries' in typ:
+            return value
         gpd = mrsm.attempt_import('geopandas')
         if len(value) == 0:
             return gpd.GeoSeries([])
@@ -356,7 +358,8 @@ def attempt_cast_to_geometry(value: Any) -> Any:
         if ix is None:
             try:
                 return gpd.GeoSeries(value)
-            except Exception as e:
+            except Exception:
+                traceback.print_exc()
                 return gpd.GeoSeries(attempt_cast_to_geometry(val) for val in value)
         sample_val = value[ix]
 
@@ -365,6 +368,7 @@ def attempt_cast_to_geometry(value: Any) -> Any:
             try:
                 value = value.apply(lambda x: gpkg_wkb_to_wkb(x)[0])
             except Exception:
+                traceback.print_exc()
                 return gpd.GeoSeries(attempt_cast_to_geometry(val) for val in value)
 
         sample_is_wkt = geometry_is_wkt(sample_val) if not sample_is_gpkg else False
@@ -375,6 +379,7 @@ def attempt_cast_to_geometry(value: Any) -> Any:
                 else gpd.GeoSeries.from_wkb(value)
             )
         except Exception:
+            traceback.print_exc()
             return gpd.GeoSeries(attempt_cast_to_geometry(val) for val in value)
 
     if 'shapely' in typ:
