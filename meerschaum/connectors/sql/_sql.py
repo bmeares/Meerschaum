@@ -1079,9 +1079,9 @@ def to_sql(
             warnings.filterwarnings('ignore')
             df.to_sql(**to_sql_kw)
         success = True
-    except Exception as e:
+    except Exception:
         if not silent:
-            warn(str(e))
+            warn(traceback.format_exc())
         success, msg = False, traceback.format_exc()
 
     end = time.perf_counter()
@@ -1138,6 +1138,7 @@ def psql_insert_copy(
     """
     import csv
     import json
+    import io
 
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.warnings import dprint
@@ -1173,9 +1174,23 @@ def psql_insert_copy(
 
     dbapi_conn = conn.connection
     with dbapi_conn.cursor() as cur:
-        with cur.copy(sql) as copy:
-            writer = csv.writer(copy)
+        copy_method = getattr(cur, 'copy', None)
+        copy_expert_method = getattr(cur, 'copy_expert', None)
+        if copy_method is not None:
+            with cur.copy(sql) as copy:
+                writer = csv.writer(copy)
+                writer.writerows(data_iter)
+        elif copy_expert_method is not None:
+            buffer = io.StringIO()
+            writer = csv.writer(buffer)
             writer.writerows(data_iter)
+            buffer.seek(0)
+            copy_expert_method(sql, buffer)
+        else:
+            raise SystemError(
+                "Cannot obtain `copy` or `copy_expert` from the PostgreSQL driver:\n"
+                f"{conn}\n{dbapi_conn}\n{cur}"
+            )
 
 
 def mssql_insert_json(

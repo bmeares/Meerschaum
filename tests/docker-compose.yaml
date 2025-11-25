@@ -51,7 +51,7 @@ services:
     ports:
       - "5559:5432"
     volumes:
-      - "postgresql_volume:/var/lib/postgresql/data"
+      - "postgresql_volume:/var/lib/postgresql"
     image: "postgres:18"
     shm_size: "1gb"
 
