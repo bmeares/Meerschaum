@@ -730,6 +730,11 @@ def _delete_cache(
     for cache_conn_keys in connector_keys:
 
         cache_conn = mrsm.get_connector(cache_conn_keys)
+        if cache_conn is None:
+            dne_msg = f"Connector '{cache_conn_keys}' does not exist."
+            warn(dne_msg, stack=False)
+            keys_results.append((cache_conn_keys, (False, dne_msg)))
+            continue
         if not force and not yes_no(f"Clean cache for '{cache_conn}'?", yes=yes, noask=noask):
             info(f"Nothing was deleted from '{cache_conn}'.")
             continue

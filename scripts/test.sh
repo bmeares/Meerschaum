@@ -42,18 +42,6 @@ fi
 rm -rf "$test_root/data"
 rm -f "$test_root/sqlite/mrsm_local.db"
 
-### Start the test API on port 8989.
-### For whatever reason, GitHub actions only works
-### when the server is started, stopped, and started again.
-[ -z "$MRSM_TEST_FLAVORS" ] || [[ "$MRSM_TEST_FLAVORS" =~ "api" ]] && \
-  $mrsm delete jobs test_api -y && \
-  $mrsm start api \
-    -w 1 -p $test_port --name test_api -y -d -i sql:local --no-webterm --no-dash && \
-  $mrsm start connectors api:test && \
-  $mrsm stop jobs test_api -y && \
-  $mrsm start jobs test_api -y && \
-  $mrsm start connectors api:test
-
 ### This is necessary to trigger installations in a clean environment.
 $PYTHON_BIN -c "
 from tests.connectors import conns, get_flavors
@@ -100,6 +88,18 @@ $PYTHON_BIN -c "$connectors_uri_code"
 
 MRSM_URIS=$($PYTHON_BIN -c "$connectors_uri_code")
 export $MRSM_URIS
+
+### Start the test API on port 8989.
+### For whatever reason, GitHub actions only works
+### when the server is started, stopped, and started again.
+[ -z "$MRSM_TEST_FLAVORS" ] || [[ "$MRSM_TEST_FLAVORS" =~ "api" ]] && \
+  $mrsm delete jobs test_api -y && \
+  $mrsm start api \
+    -w 1 -p $test_port --name test_api -y -d -i sql:test_timescaledb --no-webterm --no-dash && \
+  $mrsm start connectors api:test && \
+  $mrsm stop jobs test_api -y && \
+  $mrsm start jobs test_api -y && \
+  $mrsm start connectors api:test
 
 true && \
   $mrsm show connectors && \
