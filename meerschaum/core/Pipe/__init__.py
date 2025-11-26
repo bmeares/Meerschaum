@@ -330,7 +330,11 @@ class Pipe:
         self.metric_key = metric
         self.location_key = location
         self.temporary = temporary
-        self.cache = cache if cache is not None else (not temporary)
+        self.cache = (
+            cache
+            if cache is not None
+            else ((not temporary) and get_config('pipes', 'cache', 'enabled', warn=False))
+        )
         self.cache_connector_keys = (
             str(cache_connector_keys)
             if cache_connector_keys is not None

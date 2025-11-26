@@ -582,7 +582,12 @@ def sync_pipe(
             for doc in _docs
         ]
 
-    valkey_dtypes = pipe.parameters.get('valkey', {}).get('dtypes', {})
+    pipe._clear_cache_key('_columns_types', debug=debug)
+    pipe._clear_cache_key('_columns_indices', debug=debug)
+    valkey_dtypes = pipe.get_parameters(
+        refresh=True,
+        debug=debug,
+    ).get('valkey', {}).get('dtypes', {})
     new_dtypes = {
         str(key): str(val)
         for key, val in df.dtypes.items()
@@ -593,8 +598,6 @@ def sync_pipe(
             try:
                 df[col] = df[col].astype(typ)
             except Exception:
-                import traceback
-                traceback.print_exc()
                 valkey_dtypes[col] = 'string'
                 new_dtypes[col] = 'string'
                 df[col] = df[col].astype('string')

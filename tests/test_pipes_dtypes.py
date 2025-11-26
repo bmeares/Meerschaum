@@ -103,6 +103,10 @@ def test_dtype_enforcement(flavor: str):
     dtypes = pipe.dtypes
     for col, typ in df.dtypes.items():
         pipe_dtype = dtypes[col]
+        print(f"{col=}")
+        print(f"{str(typ)=}")
+        print(f"{pipe_dtype=}")
+
         if pipe_dtype == 'json':
             assert isinstance(df[col][0], dict)
             pipe_dtype = 'object'
@@ -121,9 +125,6 @@ def test_dtype_enforcement(flavor: str):
             assert 'shapely' in str(type(df[col][0]))
             assert 'Point' in str(type(df[col][0]))
             pipe_dtype = 'object'
-        print(f"{col=}")
-        print(f"{str(typ)=}")
-        print(f"{pipe_dtype=}")
         assert are_dtypes_equal(pipe_dtype.lower(), str(typ))
 
 
@@ -422,7 +423,6 @@ def test_ignore_datetime_conversion(flavor: str):
 
     assert success, msg
     df = pipe.get_data(['dt'], debug=debug)
-    print(df)
     synced_docs = df.to_dict(orient='records')
     assert synced_docs == expected_docs
 

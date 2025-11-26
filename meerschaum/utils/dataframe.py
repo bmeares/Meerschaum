@@ -371,8 +371,12 @@ def filter_unseen_df(
     new_cols = list(new_df_dtypes)
     delta_df = joined_df[new_cols][changed_rows_mask].reset_index(drop=True)
 
+    delta_json_cols = get_json_cols(delta_df)
     for json_col in json_cols:
-        if json_col not in delta_df.columns:
+        if (
+            json_col in delta_json_cols
+            or json_col not in delta_df.columns
+        ):
             continue
         try:
             delta_df[json_col] = delta_df[json_col].apply(
@@ -381,8 +385,12 @@ def filter_unseen_df(
         except Exception:
             warn(f"Unable to deserialize JSON column '{json_col}':\n{traceback.format_exc()}")
 
+    delta_numeric_cols = get_numeric_cols(delta_df)
     for numeric_col in numeric_cols:
-        if numeric_col not in delta_df.columns:
+        if (
+            numeric_col in delta_numeric_cols
+            or numeric_col not in delta_df.columns
+        ):
             continue
         try:
             delta_df[numeric_col] = delta_df[numeric_col].apply(
@@ -396,29 +404,41 @@ def filter_unseen_df(
         except Exception:
             warn(f"Unable to parse numeric column '{numeric_col}':\n{traceback.format_exc()}")
 
+    delta_uuid_cols = get_uuid_cols(delta_df)
     for uuid_col in uuid_cols:
-        if uuid_col not in delta_df.columns:
+        if (
+            uuid_col in delta_uuid_cols
+            or uuid_col not in delta_df.columns
+        ):
             continue
         try:
             delta_df[uuid_col] = delta_df[uuid_col].apply(attempt_cast_to_uuid)
         except Exception:
             warn(f"Unable to parse numeric column '{uuid_col}':\n{traceback.format_exc()}")
 
+    delta_bytes_cols = get_bytes_cols(delta_df)
     for bytes_col in bytes_cols:
-        if bytes_col not in delta_df.columns:
+        if (
+            bytes_col in delta_bytes_cols
+            or bytes_col not in delta_df.columns
+        ):
             continue
         try:
             delta_df[bytes_col] = delta_df[bytes_col].apply(attempt_cast_to_bytes)
         except Exception:
             warn(f"Unable to parse bytes column '{bytes_col}':\n{traceback.format_exc()}")
 
+    delta_geometry_cols = get_geometry_cols(delta_df)
     for geometry_col in geometry_cols:
-        if geometry_col not in delta_df.columns:
+        if (
+            geometry_col in delta_geometry_cols
+            or geometry_col not in delta_df.columns
+        ):
             continue
         try:
-            delta_df[geometry_col] = delta_df[geometry_col].apply(attempt_cast_to_geometry)
+            delta_df[geometry_col] = attempt_cast_to_geometry(delta_df[geometry_col])
         except Exception:
-            warn(f"Unable to parse bytes column '{bytes_col}':\n{traceback.format_exc()}")
+            warn(f"Unable to parse geometry column '{geometry_col}':\n{traceback.format_exc()}")
 
     return delta_df
 
@@ -1423,10 +1443,14 @@ def enforce_dtypes(
             dprint(f"Checking for geometry: {list(geometry_cols_types_srids)}")
         parsed_geom_cols = []
         for col in geometry_cols_types_srids:
+            if col not in df.columns:
+                continue
             try:
-                df[col] = df[col].apply(attempt_cast_to_geometry)
+                df[col] = attempt_cast_to_geometry(df[col])
                 parsed_geom_cols.append(col)
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 if debug:
                     dprint(f"Unable to parse column '{col}' as geometry:\n{e}")
 
@@ -1444,9 +1468,8 @@ def enforce_dtypes(
                 if parsed_geom_cols[0] not in df.columns:
                     df.rename_geometry(parsed_geom_cols[0], inplace=True)
             except (ValueError, TypeError):
-                if debug:
-                    import traceback
-                    dprint(f"Failed to cast to GeoDataFrame:\n{traceback.format_exc()}")
+                import traceback
+                dprint(f"Failed to cast to GeoDataFrame:\n{traceback.format_exc()}")
 
     df_dtypes = {c: str(t) for c, t in df.dtypes.items()}
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):
@@ -2092,6 +2115,18 @@ def to_json(
     } if 'geodataframe' in str(type(df)).lower() else {}
     if safe_copy and bool(uuid_cols or bytes_cols or geometry_cols or numeric_cols):
         df = df.copy()
+    if 'geodataframe' in str(type(df)).lower():
+        geometry_data = {
+            col: df[col]
+            for col in geometry_cols
+        }
+        df = pd.DataFrame({
+            col: df[col]
+            for col in df.columns
+            if col not in geometry_cols
+        })
+        for col in geometry_cols:
+            df[col] = pd.Series(ob for ob in geometry_data[col])
     for col in uuid_cols:
         df[col] = df[col].astype(str)
     for col in bytes_cols:
@@ -2102,12 +2137,9 @@ def to_json(
         warnings.simplefilter("ignore")
         for col in geometry_cols:
             srid = geometry_cols_srids.get(col, None) or None
-            df[col] = df[col].apply(
-                functools.partial(
-                    serialize_geometry,
-                    geometry_format=geometry_format,
-                    srid=srid,
-                )
+            df[col] = pd.Series(
+                serialize_geometry(val, geometry_format=geometry_format, srid=srid)
+                for val in df[col]
             )
     return df.infer_objects(copy=False).fillna(pd.NA).to_json(
         date_format=date_format,

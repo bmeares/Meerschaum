@@ -179,6 +179,7 @@ default_api_config = {
     'cache': {
         'connector': 'valkey:main',
         'session_expires_minutes': 43200,
+        'pipes': False,
     },
     'data': {
         'max_response_row_limit': 100_000,
@@ -254,6 +255,9 @@ default_pipes_config = {
     },
     'static': {
         'static_schema_cache_seconds': 3600.0,
+    },
+    'cache': {
+        'enabled': True,
     },
 }
 default_plugins_config = {}

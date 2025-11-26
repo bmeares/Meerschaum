@@ -7,6 +7,7 @@ Functions for deleting elements.
 """
 
 from __future__ import annotations
+import meerschaum as mrsm
 from meerschaum.utils.typing import Any, SuccessTuple, Union, Optional, List
 
 
@@ -30,6 +31,7 @@ def delete(
         'connectors' : _delete_connectors,
         'jobs'       : _delete_jobs,
         'venvs'      : _delete_venvs,
+        'cache'      : _delete_cache,
     }
     return choose_subaction(action, options, **kw)
 
@@ -50,6 +52,7 @@ def _complete_delete(
         'config': _complete_edit_config,
         'job': _complete_delete_jobs,
         'jobs': _complete_delete_jobs,
+        'cache': _complete_delete_cache,
     }
 
     if (
@@ -610,6 +613,174 @@ def _delete_venvs(
 
     msg = f"Removed {len(venvs)} venv" + ('s' if len(venvs) != 1 else '') + '.'
     return True, msg
+
+
+def _delete_cache(
+    action: Optional[List[str]] = None,
+    connector_keys: Optional[List[str]] = None,
+    chunksize: Optional[int] = -1,
+    force: bool = False,
+    yes: bool = False,
+    noask: bool = False,
+    debug: bool = False,
+    **kwargs
+) -> SuccessTuple:
+    """
+    Delete local cache or temporary tables or keys from a SQL or Valkey connector.
+
+    Examples
+    --------
+    delete cache
+    delete cache valkey:main sql:main
+    """
+    import shutil
+    from meerschaum.config.paths import CACHE_RESOURCES_PATH
+    from meerschaum.utils.prompt import yes_no
+    from meerschaum.utils.warnings import info, dprint, warn
+    from meerschaum.utils.formatting import make_header
+    from meerschaum.utils.misc import get_directory_size
+    humanize = mrsm.attempt_import('humanize')
+
+    chunksize = 1000 if not chunksize or chunksize < 1 else chunksize
+    connector_keys = (action or []) + (connector_keys or [])
+
+    if not connector_keys:
+        cache_bytes = get_directory_size(CACHE_RESOURCES_PATH)
+        cache_size_str = humanize.naturalsize(cache_bytes)
+        if not force and not yes_no(
+            f"Are you sure you want to remove the cache directory ({cache_size_str})?\n"
+            f"    {CACHE_RESOURCES_PATH}",
+            yes=yes,
+            noask=noask,
+        ):
+            return False, "Nothing was deleted."
+
+        try:
+            shutil.rmtree(CACHE_RESOURCES_PATH)
+            CACHE_RESOURCES_PATH.mkdir(exist_ok=True, parents=True)
+        except Exception as e:
+            return False, f"Failed to clean up cache:\n{e}"
+
+        return True, f"Successfully cleared {cache_size_str}."
+
+    def clean_valkey_conn(conn):
+        num_keys_deleted = 0
+        keys_to_delete = []
+        for key in cache_conn.client.scan_iter(match=".cache*"):
+            keys_to_delete.append(key)
+            if len(keys_to_delete) >= chunksize:
+                if debug:
+                    dprint(f"Unlinking keys: {' '.join(keys_to_delete)}")
+                cache_conn.client.unlink(*keys_to_delete)
+                num_keys_deleted += len(keys_to_delete)
+                info(
+                    f"Deleted {num_keys_deleted} key"
+                    + ('s' if num_keys_deleted != 1 else '')
+                    + "."
+                )
+                keys_to_delete.clear()
+
+        if keys_to_delete:
+            cache_conn.client.unlink(*keys_to_delete)
+            num_keys_deleted += len(keys_to_delete)
+            info(
+                f"Deleted {num_keys_deleted} key"
+                + ('s' if num_keys_deleted != 1 else '')
+                + "."
+            )
+
+        return (
+            True, (
+                f"Deleted {num_keys_deleted} key"
+                + ('s' if num_keys_deleted != 1 else '')
+                + "."
+            )
+        )
+
+    def clean_sql_conn(conn):
+        json_cache_path = conn.get_metadata_cache_path(kind='json')
+        pkl_cache_path = conn.get_metadata_cache_path(kind='pkl')
+        try:
+            if json_cache_path.exists():
+                json_cache_path.unlink()
+                if debug:
+                    dprint(f"Deleted: {json_cache_path}")
+        except Exception as e:
+            return False, str(e)
+
+        try:
+            if pkl_cache_path.exists():
+                pkl_cache_path.unlink()
+                if debug:
+                    dprint(f"Deleted: {pkl_cache_path}")
+        except Exception as e:
+            return False, str(e)
+
+        return conn._drop_old_temporary_tables(
+            stale_temporary_tables_minutes=(0 if force else None),
+            debug=debug,
+        )
+
+    types_methods = {
+        'valkey': clean_valkey_conn,
+        'sql': clean_sql_conn,
+    }
+
+    keys_results = []
+    for cache_conn_keys in connector_keys:
+
+        cache_conn = mrsm.get_connector(cache_conn_keys)
+        if cache_conn is None:
+            dne_msg = f"Connector '{cache_conn_keys}' does not exist."
+            warn(dne_msg, stack=False)
+            keys_results.append((cache_conn_keys, (False, dne_msg)))
+            continue
+        if not force and not yes_no(f"Clean cache for '{cache_conn}'?", yes=yes, noask=noask):
+            info(f"Nothing was deleted from '{cache_conn}'.")
+            continue
+
+        method = types_methods.get(cache_conn.type, None)
+        conn_success, conn_msg = (
+            method(cache_conn)
+            if method is not None
+            else (False, f"Cannot clean '{cache_conn}'.")
+        )
+        mrsm.pprint((conn_success, conn_msg), calm=True)
+        keys_results.append((cache_conn_keys, (conn_success, conn_msg)))
+
+    max_conn_len = max(len(ck) for ck in connector_keys)
+    buffers = [(' ' * ((max_conn_len + 1) - len(keys))) for keys, _ in keys_results]
+    success = all([result[0] for _, result in keys_results])
+    msg = (
+        make_header(
+            (
+                f"Cleared cache for {len(connector_keys)} connector"
+                + ('s' if len(connector_keys) != 1 else '')
+                + ':'
+            ),
+            left_pad=0,
+        )
+        + "\n    "
+        + "\n    ".join([
+            f"{keys}{buffer}| {result[1]}"
+            for (keys, result), buffer in zip(keys_results, buffers)
+        ])
+    )
+    return success, msg
+
+
+def _complete_delete_cache(
+    action: Optional[List[str]] = None,
+    line: str = '',
+    **kw: Any
+) -> List[str]:
+    from meerschaum.utils.misc import get_connector_labels
+    if line.split(' ')[-1] == '' or not action:
+        search_term = ''
+    else:
+        search_term = action[-1]
+    labels = get_connector_labels('sql', 'valkey', search_term=search_term)
+    return [label for label in labels if label not in (action or line.split(' '))]
 
 
 ### NOTE: This must be the final statement of the module.

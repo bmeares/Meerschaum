@@ -205,12 +205,11 @@ def sync_pipe(
         return False, msg
 
     def get_json_str(c):
-        ### allow syncing dict or JSON without needing to import pandas (for IOT devices)
         if isinstance(c, str):
             return c
         if isinstance(c, (dict, list, tuple)):
             return json.dumps(c, default=json_serialize_value)
-        return to_json(c, orient='columns')
+        return to_json(c, orient='columns', geometry_format='wkb_hex')
 
     df = json.loads(df) if isinstance(df, str) else df
 

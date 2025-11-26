@@ -2499,18 +2499,16 @@ def wrap_query_with_cte(
     Examples
     --------
 
-    ```python
-    from meerschaum.utils.sql import wrap_query_with_cte
-    sub_query = "WITH foo AS (SELECT 1 AS val) SELECT (val * 2) AS newval FROM foo"
-    parent_query = "SELECT newval * 3 FROM src"
-    query = wrap_query_with_cte(sub_query, parent_query, 'mssql')
-    print(query)
-    # WITH foo AS (SELECT 1 AS val),
-    # [src] AS (
-    #     SELECT (val * 2) AS newval FROM foo
-    # )
-    # SELECT newval * 3 FROM src
-    ```
+    >>> from meerschaum.utils.sql import wrap_query_with_cte
+    >>> sub_query = "WITH foo AS (SELECT 1 AS val) SELECT (val * 2) AS newval FROM foo"
+    >>> parent_query = "SELECT newval * 3 FROM src"
+    >>> query = wrap_query_with_cte(sub_query, parent_query, 'mssql')
+    >>> print(query)
+    >>> # WITH foo AS (SELECT 1 AS val),
+    >>> # [src] AS (
+    >>> #     SELECT (val * 2) AS newval FROM foo
+    >>> # )
+    >>> # SELECT newval * 3 FROM src
 
     """
     import textwrap
