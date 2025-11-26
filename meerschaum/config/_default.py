@@ -256,6 +256,9 @@ default_pipes_config = {
     'static': {
         'static_schema_cache_seconds': 3600.0,
     },
+    'cache': {
+        'enabled': True,
+    },
 }
 default_plugins_config = {}
 
