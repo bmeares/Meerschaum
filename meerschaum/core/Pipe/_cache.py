@@ -11,6 +11,7 @@ import os
 import pickle
 import json
 import pathlib
+import shutil
 from datetime import datetime, timedelta
 from typing import Any, Union, List
 
@@ -96,8 +97,12 @@ def _get_cached_value(
     """
     in_memory_key = _get_in_memory_key(cache_key)
     if in_memory_key in self.__dict__:
+        if debug:
+            dprint(f"Return cached key '{cache_key}' from memory.")
         return self.__dict__[in_memory_key]
 
+    if debug:
+        dprint(f"Reading cache key '{cache_key}'...")
     return self._read_cache_key(cache_key, debug=debug)
 
 
@@ -107,8 +112,7 @@ def _invalidate_cache(
     debug: bool = False,
 ) -> mrsm.SuccessTuple:
     """
-    Invalidate temporary in-memory cache.
-    Note this does not affect in on-disk cache created when `cache=True`.
+    Invalidate temporary cache.
 
     Parameters
     ----------
@@ -129,14 +133,21 @@ def _invalidate_cache(
     if not hard:
         return True, "Success"
 
-    if self.__dict__.get('_static', None):
-        return True, "Success"
-
+    cache_conn = self._get_cache_connector()
+    cache_dir_path = self._get_cache_dir_path()
     cache_keys = self._get_cache_keys(debug=debug)
     for cache_key in cache_keys:
         if cache_keys == 'attributes':
             continue
         self._clear_cache_key(cache_key, debug=debug)
+
+    if cache_conn is None:
+        try:
+            if cache_dir_path.exists():
+                shutil.rmtree(cache_dir_path)
+            _ = self.__dict__.pop('_checked_if_cache_dir_exists', None)
+        except Exception:
+            pass
 
     return True, "Success"
 
@@ -190,7 +201,9 @@ def _write_cache_file(
     from meerschaum.utils.dtypes import get_current_timestamp, json_serialize_value
     now = get_current_timestamp()
     _checked_if_cache_dir_exists = self.__dict__.get('_checked_if_cache_dir_exists', None)
-    cache_dir_path = self._get_cache_dir_path(create_if_not_exists=(not _checked_if_cache_dir_exists))
+    cache_dir_path = self._get_cache_dir_path(
+        create_if_not_exists=(not _checked_if_cache_dir_exists),
+    )
     if not _checked_if_cache_dir_exists:
         self._checked_if_cache_dir_exists = True
 

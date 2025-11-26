@@ -208,8 +208,9 @@ def replace_env(env: Union[Dict[str, Any], None]):
     if env is None:
         try:
             yield
-        finally:
-            return
+        except Exception:
+            pass
+        return
 
     from meerschaum.config import _config, set_config
     from meerschaum.config.paths import (

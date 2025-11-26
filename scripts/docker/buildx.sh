@@ -23,7 +23,8 @@ for tag in "${tags[@]}"; do
   if [[ "$mrsm_version" != *dev* && "$mrsm_version" != *rc* ]]; then
     specific_tags+=("$image:$tag")
     if [ "$latest_alias" == "$tag" ]; then
-      specific_tags+=("$image:latest" "$image:$mrsm_version")
+      ### NOTE: the `api` tag is deprecated; treat as `latest`.
+      specific_tags+=("$image:latest" "$image:$mrsm_version" "$image:api" "$image:$mrsm_version-api")
     fi
   fi
 

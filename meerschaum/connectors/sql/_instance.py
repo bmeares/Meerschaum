@@ -109,7 +109,7 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
             else []
         )
     if not tables_to_drop:
-        return True, "Success"
+        return True, "No tables to drop."
 
     dropped_tables = []
     failed_tables = []
@@ -130,7 +130,7 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
 
     success = len(failed_tables) == 0
     msg = (
-        "Success"
+        (f"Dropped {len(tables_to_drop)} table" + ('s' if len(tables_to_drop) != 1 else '') + '.')
         if success
         else (
             "Failed to drop temporary tables "
@@ -142,6 +142,7 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
 
 def _drop_old_temporary_tables(
     self,
+    stale_temporary_tables_minutes: Optional[int] = None,
     refresh: bool = True,
     debug: bool = False,
 ) -> SuccessTuple:
@@ -162,7 +163,7 @@ def _drop_old_temporary_tables(
 
     stale_temporary_tables_minutes = get_config(
         'system', 'connectors', 'sql', 'instance', 'stale_temporary_tables_minutes'
-    )
+    ) if stale_temporary_tables_minutes is None else stale_temporary_tables_minutes
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     end = now - timedelta(minutes=stale_temporary_tables_minutes)
 

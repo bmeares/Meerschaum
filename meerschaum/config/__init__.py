@@ -341,8 +341,9 @@ def replace_config(config_: Union[Dict[str, Any], None]):
     if config_ is None:
         try:
             yield
-        finally:
-            return
+        except Exception:
+            pass
+        return
 
     global _backup_config, _allow_write_missing
 
