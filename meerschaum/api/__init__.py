@@ -240,7 +240,7 @@ def get_pipe(
         metric_key,
         location_key,
         mrsm_instance=instance_keys,
-        cache=False,
+        cache=(get_config('api', 'cache', 'pipes', warn=False) or False),
         cache_connector_keys=get_cache_connector(),
     )
     return pipe
