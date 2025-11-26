@@ -9,7 +9,7 @@ Define utilities for instance connectors.
 import time
 from datetime import datetime, timezone, timedelta
 import meerschaum as mrsm
-from meerschaum.utils.typing import Dict, SuccessTuple, Union, List
+from meerschaum.utils.typing import Dict, SuccessTuple, Union, List, Optional
 
 
 _in_memory_temp_tables: Dict[str, bool] = {}
