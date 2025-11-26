@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.1.0
+### v3.1.0 – v3.1.1
 
 - **Improve `geometry` performance.**  
   Enforcing dtypes for pipes with `geometry` columns has been significantly improved.
