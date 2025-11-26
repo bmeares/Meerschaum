@@ -202,7 +202,7 @@ def pipes(instance_keys: Optional[str] = None, refresh: bool = False) -> PipesDi
         if pipes is None or refresh:
             pipes = _get_pipes(
                 mrsm_instance=instance_keys,
-                cache=False,
+                cache=(get_config('api', 'cache', 'pipes', warn=False) or False),
                 cache_connector_keys=get_cache_connector(),
             )
             _instance_pipes[instance_keys] = pipes
