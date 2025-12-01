@@ -53,6 +53,8 @@ from __future__ import annotations
 
 import sys
 import copy
+import threading
+import collections
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, Union, List, InstanceConnector
@@ -438,6 +440,8 @@ class Pipe:
 
         if self.instance_keys == 'sql:memory':
             self.cache = False
+
+        self._cache_locks = collections.defaultdict(lambda: threading.RLock())
 
 
     @property

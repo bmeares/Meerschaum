@@ -73,18 +73,19 @@ def _cache_value(
             dprint(f"Skip caching '{cache_key}': received value of `None`")
         return
 
-    in_memory_key = _get_in_memory_key(cache_key)
-    self.__dict__[in_memory_key] = value
-    if memory_only:
-        return
+    with self._cache_locks[cache_key]:
+        in_memory_key = _get_in_memory_key(cache_key)
+        self.__dict__[in_memory_key] = value
+        if memory_only:
+            return
 
-    write_success, write_msg = (
-        self._write_cache_key(cache_key, value)
-        if self.cache
-        else (True, "Success")
-    )
-    if not write_success and debug:
-        dprint(f"Failed to cache '{cache_key}':\n{write_msg}")
+        write_success, write_msg = (
+            self._write_cache_key(cache_key, value)
+            if self.cache
+            else (True, "Success")
+        )
+        if not write_success and debug:
+            dprint(f"Failed to cache '{cache_key}':\n{write_msg}")
 
 
 def _get_cached_value(
@@ -96,14 +97,15 @@ def _get_cached_value(
     Attempt to retrieve a cached value from in-memory on on-disk.
     """
     in_memory_key = _get_in_memory_key(cache_key)
-    if in_memory_key in self.__dict__:
-        if debug:
-            dprint(f"Return cached key '{cache_key}' from memory.")
-        return self.__dict__[in_memory_key]
+    with self._cache_locks[cache_key]:
+        if in_memory_key in self.__dict__:
+            if debug:
+                dprint(f"Return cached key '{cache_key}' from memory.")
+            return self.__dict__.get(in_memory_key, None)
 
-    if debug:
-        dprint(f"Reading cache key '{cache_key}'...")
-    return self._read_cache_key(cache_key, debug=debug)
+        if debug:
+            dprint(f"Reading cache key '{cache_key}'...")
+        return self._read_cache_key(cache_key, debug=debug)
 
 
 def _invalidate_cache(
@@ -142,12 +144,13 @@ def _invalidate_cache(
         self._clear_cache_key(cache_key, debug=debug)
 
     if cache_conn is None:
-        try:
-            if cache_dir_path.exists():
-                shutil.rmtree(cache_dir_path)
-            _ = self.__dict__.pop('_checked_if_cache_dir_exists', None)
-        except Exception:
-            pass
+        with self._cache_locks['cache_dir_path']:
+            try:
+                if cache_dir_path.exists():
+                    shutil.rmtree(cache_dir_path)
+                _ = self.__dict__.pop('_checked_if_cache_dir_exists', None)
+            except Exception:
+                pass
 
     return True, "Success"
 
@@ -164,11 +167,15 @@ def _get_cache_dir_path(self, create_if_not_exists: bool = False) -> pathlib.Pat
         / self.metric_key
         / str(self.location_key)
     )
-    if create_if_not_exists and not cache_dir_path.exists():
-        try:
-            cache_dir_path.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            warn(f"Encountered an issue when creating local pipe metadata cache:\n{e}")
+    if not create_if_not_exists:
+        return cache_dir_path
+
+    with self._cache_locks['cache_dir_path']:
+        if create_if_not_exists and not cache_dir_path.exists():
+            try:
+                cache_dir_path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                warn(f"Encountered an issue when creating local pipe metadata cache:\n{e}")
 
     return cache_dir_path
 
@@ -199,34 +206,37 @@ def _write_cache_file(
     Write a pickle-able object to a cache file.
     """
     from meerschaum.utils.dtypes import get_current_timestamp, json_serialize_value
-    now = get_current_timestamp()
-    _checked_if_cache_dir_exists = self.__dict__.get('_checked_if_cache_dir_exists', None)
-    cache_dir_path = self._get_cache_dir_path(
-        create_if_not_exists=(not _checked_if_cache_dir_exists),
-    )
-    if not _checked_if_cache_dir_exists:
-        self._checked_if_cache_dir_exists = True
 
-    file_path = cache_dir_path / (cache_key + '.pkl')
-    meta_file_path = cache_dir_path / (cache_key + '.meta.json')
-    metadata = {
-        'created': now,
-    }
+    with self._cache_locks[cache_key + '.file']:
+        now = get_current_timestamp()
+        with self._cache_locks['cache_dir_path']:
+            _checked_if_cache_dir_exists = self.__dict__.get('_checked_if_cache_dir_exists', None)
+            cache_dir_path = self._get_cache_dir_path(
+                create_if_not_exists=(not _checked_if_cache_dir_exists),
+            )
+            if not _checked_if_cache_dir_exists:
+                self._checked_if_cache_dir_exists = True
 
-    if debug:
-        dprint(f"Writing cache file '{file_path}'.")
+        file_path = cache_dir_path / (cache_key + '.pkl')
+        meta_file_path = cache_dir_path / (cache_key + '.meta.json')
+        metadata = {
+            'created': now,
+        }
 
-    try:
-        with open(file_path, 'wb+') as f:
-            pickle.dump(obj_to_write, f)
-        with open(meta_file_path, 'w+', encoding='utf-8') as f:
-            json.dump(metadata, f, default=json_serialize_value)
-    except Exception as e:
         if debug:
-            dprint(f"Failed to write cache file:\n{e}")
-        return False, f"Failed to write cache file:\n{e}"
+            dprint(f"Writing cache file '{file_path}'.")
 
-    return True, "Success"
+        try:
+            with open(file_path, 'wb+') as f:
+                pickle.dump(obj_to_write, f)
+            with open(meta_file_path, 'w+', encoding='utf-8') as f:
+                json.dump(metadata, f, default=json_serialize_value)
+        except Exception as e:
+            if debug:
+                dprint(f"Failed to write cache file:\n{e}")
+            return False, f"Failed to write cache file:\n{e}"
+
+        return True, "Success"
 
 
 def _write_cache_conn_key(
@@ -242,23 +252,24 @@ def _write_cache_conn_key(
     if cache_connector is None:
         return False, f"No cache connector is set for {self}."
 
-    cache_conn_cache_key = _get_cache_conn_cache_key(self, cache_key)
-    local_cache_timeout_seconds = int(mrsm.get_config(
-        'pipes', 'attributes', 'local_cache_timeout_seconds'
-    ))
-    obj_bytes = pickle.dumps(obj_to_write)
-    if debug:
-        dprint(f"Setting '{cache_conn_cache_key}' on '{cache_connector}'.")
+    with self._cache_locks[cache_key + '.' + str(cache_connector)]:
+        cache_conn_cache_key = _get_cache_conn_cache_key(self, cache_key)
+        local_cache_timeout_seconds = int(mrsm.get_config(
+            'pipes', 'attributes', 'local_cache_timeout_seconds'
+        ))
+        obj_bytes = pickle.dumps(obj_to_write)
+        if debug:
+            dprint(f"Setting '{cache_conn_cache_key}' on '{cache_connector}'.")
 
-    success = cache_connector.set(
-        cache_conn_cache_key,
-        obj_bytes,
-        ex=local_cache_timeout_seconds,
-    )
-    if not success:
-        return False, f"Failed to set '{cache_conn_cache_key}' on '{cache_connector}'."
+        success = cache_connector.set(
+            cache_conn_cache_key,
+            obj_bytes,
+            ex=local_cache_timeout_seconds,
+        )
+        if not success:
+            return False, f"Failed to set '{cache_conn_cache_key}' on '{cache_connector}'."
 
-    return True, "Success"
+        return True, "Success"
 
 
 def _read_cache_key(
@@ -286,50 +297,51 @@ def _read_cache_file(
     Returns `None` if the cache file does not exist or is expired.
     """
     from meerschaum.utils.dtypes import get_current_timestamp
-    now = get_current_timestamp()
-    cache_dir_path = self._get_cache_dir_path()
-    file_path = cache_dir_path / (cache_key + '.pkl')
-    meta_file_path = cache_dir_path / (cache_key + '.meta.json')
-    local_cache_timeout_seconds = mrsm.get_config(
-        'pipes', 'attributes', 'local_cache_timeout_seconds'
-    )
+    with self._cache_locks[cache_key + '.file']:
+        now = get_current_timestamp()
+        cache_dir_path = self._get_cache_dir_path()
+        file_path = cache_dir_path / (cache_key + '.pkl')
+        meta_file_path = cache_dir_path / (cache_key + '.meta.json')
+        local_cache_timeout_seconds = mrsm.get_config(
+            'pipes', 'attributes', 'local_cache_timeout_seconds'
+        )
 
-    if not meta_file_path.exists() or not file_path.exists():
-        return None
+        if not meta_file_path.exists() or not file_path.exists():
+            return None
 
-    try:
-        if debug:
-            dprint(f"Reading cache file '{file_path}'.")
+        try:
+            if debug:
+                dprint(f"Reading cache file '{file_path}'.")
 
-        with open(meta_file_path, 'r', encoding='utf-8') as f:
-            metadata = json.load(f)
-    except Exception as e:
-        if debug:
-            dprint(f"Failed to read cache metadata file '{meta_file_path}':\n{e}")
-        return None
+            with open(meta_file_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+        except Exception as e:
+            if debug:
+                dprint(f"Failed to read cache metadata file '{meta_file_path}':\n{e}")
+            return None
 
-    created_str = metadata.get('created', None)
-    created = datetime.fromisoformat(created_str) if created_str else None
-    if not created:
-        if debug:
-            dprint(f"Could not read cache `created` timestamp for '{meta_file_path}'.")
-        return None
+        created_str = metadata.get('created', None)
+        created = datetime.fromisoformat(created_str) if created_str else None
+        if not created:
+            if debug:
+                dprint(f"Could not read cache `created` timestamp for '{meta_file_path}'.")
+            return None
 
-    is_expired = (now - created) >= timedelta(seconds=local_cache_timeout_seconds)
-    if is_expired:
-        self._clear_cache_file(cache_key, debug=debug)
-        return None
+        is_expired = (now - created) >= timedelta(seconds=local_cache_timeout_seconds)
+        if is_expired:
+            self._clear_cache_key(cache_key, debug=debug)
+            return None
 
-    try:
-        with open(file_path, 'rb') as f:
-            obj = pickle.load(f)
-    except Exception as e:
-        if debug:
-            dprint(f"Failed to read cache file:\n{e}")
+        try:
+            with open(file_path, 'rb') as f:
+                obj = pickle.load(f)
+        except Exception as e:
+            if debug:
+                dprint(f"Failed to read cache file:\n{e}")
 
-        return None
+            return None
 
-    return obj
+        return obj
 
 
 def _read_cache_conn_key(
@@ -344,17 +356,18 @@ def _read_cache_conn_key(
     if cache_connector is None:
         return None
 
-    cache_conn_cache_key = _get_cache_conn_cache_key(self, cache_key)
-    try:
-        obj_bytes = cache_connector.get(cache_conn_cache_key, decode=False)
-        if obj_bytes is None:
+    with self._cache_locks[cache_key + '.' + str(cache_connector)]:
+        cache_conn_cache_key = _get_cache_conn_cache_key(self, cache_key)
+        try:
+            obj_bytes = cache_connector.get(cache_conn_cache_key, decode=False)
+            if obj_bytes is None:
+                return None
+            obj = pickle.loads(obj_bytes)
+        except Exception as e:
+            warn(f"Failed to load '{cache_conn_cache_key}' from '{cache_connector}':\n{e}")
             return None
-        obj = pickle.loads(obj_bytes)
-    except Exception as e:
-        warn(f"Failed to load '{cache_conn_cache_key}' from '{cache_connector}':\n{e}")
-        return None
 
-    return obj
+        return obj
 
 
 def _load_cache_keys(self, debug: bool = False) -> mrsm.SuccessTuple:
@@ -519,13 +532,14 @@ def _clear_cache_key(
     Clear a cached value from in-memory and on-disk / from Valkey.
     """
     in_memory_key = _get_in_memory_key(cache_key)
-    _ = self.__dict__.pop(in_memory_key, None)
+    with self._cache_locks[cache_key]:
+        _ = self.__dict__.pop(in_memory_key, None)
 
-    cache_connector = self._get_cache_connector()
-    if cache_connector is None:
-        self._clear_cache_file(cache_key, debug=debug)
-    else:
-        self._clear_cache_conn_key(cache_key, debug=debug)
+        cache_connector = self._get_cache_connector()
+        if cache_connector is None:
+            self._clear_cache_file(cache_key, debug=debug)
+        else:
+            self._clear_cache_conn_key(cache_key, debug=debug)
 
 
 def _clear_cache_file(
@@ -536,23 +550,24 @@ def _clear_cache_file(
     """
     Clear a cached value from on-disk.
     """
-    cache_dir_path = self._get_cache_dir_path()
-    file_path = cache_dir_path / (cache_key + '.pkl')
-    meta_file_path = cache_dir_path / (cache_key + '.meta.json')
+    with self._cache_locks[cache_key + '.file']:
+        cache_dir_path = self._get_cache_dir_path()
+        file_path = cache_dir_path / (cache_key + '.pkl')
+        meta_file_path = cache_dir_path / (cache_key + '.meta.json')
 
-    try:
-        if file_path.exists():
-            file_path.unlink()
-    except Exception as e:
-        if debug:
-            dprint(f"Failed to delete cache file '{file_path}':\n{e}")
+        try:
+            if file_path.exists():
+                file_path.unlink()
+        except Exception as e:
+            if debug:
+                dprint(f"Failed to delete cache file '{file_path}':\n{e}")
 
-    try:
-        if meta_file_path.exists():
-            meta_file_path.unlink()
-    except Exception as e:
-        if debug:
-            dprint(f"Failed to delete meta cache file '{meta_file_path}':{e}")
+        try:
+            if meta_file_path.exists():
+                meta_file_path.unlink()
+        except Exception as e:
+            if debug:
+                dprint(f"Failed to delete meta cache file '{meta_file_path}':{e}")
 
 
 def _clear_cache_conn_key(
@@ -567,8 +582,9 @@ def _clear_cache_conn_key(
     if cache_connector is None:
         return
 
-    cache_conn_cache_key = _get_cache_conn_cache_key(self, cache_key)
-    try:
-        cache_connector.client.unlink(cache_conn_cache_key)
-    except Exception as e:
-        warn(f"Failed to clear cache key '{cache_key}' from '{cache_connector}':\n{e}")
+    with self._cache_locks[cache_key + '.' + str(cache_connector)]:
+        cache_conn_cache_key = _get_cache_conn_cache_key(self, cache_key)
+        try:
+            cache_connector.client.unlink(cache_conn_cache_key)
+        except Exception as e:
+            warn(f"Failed to clear cache key '{cache_key}' from '{cache_connector}':\n{e}")

@@ -1,4 +1,4 @@
-FROM fedora:42 AS runtime
+FROM fedora:43 AS runtime
 
 ARG dep_group=full \
     mrsm_user=meerschaum \
