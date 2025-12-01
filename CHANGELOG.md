@@ -1,8 +1,22 @@
 # 🪵 Changelog
 
-## 3.0.x Releases
+## 3.1.x Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v3.1.2
+
+- **Improve filtering logic for non-datetime pipes.**  
+  The `Pipe.fiter_existing()` method has been fixed to correctly apply non-datetime filters when syncing dataframes.
+
+- **Handle mixed nulls when filtering dataframes.**  
+  Dataframes with different nulls (e.g. empty strings vs `None` vs `pd.NA`, etc.) are now correctly coerced to reduce excessive updates.
+
+- **Fix minor cache race condition.**  
+  When syncing pipes with many concurrent chunks, additional safeguards have been added to ensure cached values are ready correctly.
+
+- **Bump Docker base to Python 3.14.**  
+  The Docker image has been rebased to `fedora:43` which ships with Python 3.14.
 
 ### v3.1.0 – v3.1.1
 
@@ -23,6 +37,8 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Drop `citus` from the test suite.**  
   Like `cockroachdb`, the `citus` flavor has been deprecated; please use the `postgresql` flavor instead. 
+  
+## 3.0.x Releases
 
 ### v3.0.9 – v3.0.10
 
