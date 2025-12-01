@@ -718,7 +718,7 @@ def filter_existing(
         NA = pd.NA
 
     parameters = self.parameters
-    pipe_columns = parameters.get('columns', {})
+    pipe_columns = self.columns
     primary_key = pipe_columns.get('primary', None)
     dt_col = pipe_columns.get('datetime', None)
     dt_type = parameters.get('dtypes', {}).get(dt_col, 'datetime') if dt_col else None
@@ -839,8 +839,12 @@ def filter_existing(
 
     unique_index_vals = {
         col: df[col].unique()
-        for col in (pipe_columns if not primary_key else [primary_key])
+        for col in (pipe_columns.values() if not primary_key else [primary_key])
         if col in df.columns and col != dt_col
+    } if not date_bound_only else {}
+    unique_index_lens = {
+        col: len(unique_vals)
+        for col, unique_vals in unique_index_vals.items()
     } if not date_bound_only else {}
     filter_params_index_limit = get_config('pipes', 'sync', 'filter_params_index_limit')
     _ = kw.pop('params', None)
@@ -850,11 +854,17 @@ def filter_existing(
             for val in unique_vals
         ]
         for col, unique_vals in unique_index_vals.items()
-        if len(unique_vals) <= filter_params_index_limit
+        if unique_index_lens[col] <= filter_params_index_limit
     } if not date_bound_only else {}
 
     if debug:
-        dprint(f"Looking at data between '{begin}' and '{end}':", **kw)
+        dprint(
+            (
+                f"Looking at data between '{begin}' and '{end}' with index value lengths:\n"
+                f"{json.dumps(unique_index_lens, indent=4)}\n"
+            ),
+            **kw
+        )
 
     backtrack_df = self.get_data(
         begin=begin,

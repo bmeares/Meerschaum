@@ -360,9 +360,10 @@ def filter_unseen_df(
     new_geometry_cols = get_geometry_cols(new_df)
     geometry_cols = set(new_geometry_cols + old_geometry_cols)
 
+    na_pattern = r'(?i)^(none|nan|na|nat|natz|<na>)$'
     joined_df = merge(
-        new_df.infer_objects(copy=False).fillna(NA),
-        old_df.infer_objects(copy=False).fillna(NA),
+        new_df.infer_objects(copy=False).replace(na_pattern, pd.NA, regex=True).fillna(NA),
+        old_df.infer_objects(copy=False).replace(na_pattern, pd.NA, regex=True).fillna(NA),
         how='left',
         on=None,
         indicator=True,

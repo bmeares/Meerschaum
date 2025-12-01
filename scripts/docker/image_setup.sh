@@ -246,11 +246,5 @@ run -b '\''/home/'$MRSM_USER'/.tmux/plugins/tpm/tpm'\''
   sudo -u $MRSM_USER /home/$MRSM_USER/.tmux/plugins/tpm/bin/install_plugins
 fi
 
-### Remove dnf cache and sudo.
+### Remove dnf cache.
 dnf clean all
-dnf remove -y sudo
-
-### Also remove python3-devel and dependencies to get the image size down.
-if [ "$MRSM_DEP_GROUP" == "api" ]; then
-  dnf remove -y python3-devel
-fi
