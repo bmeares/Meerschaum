@@ -624,11 +624,16 @@ def exec(
             warn(str(e), stacklevel=3)
         result = None
         if _commit:
+            if debug:
+                dprint(f"[{self}] Rolling back failed transaction...")
             transaction.rollback()
             connection = self.get_connection(rebuild=True)
     finally:
         if _close:
             connection.close()
+
+    if debug:
+        dprint(f"[{self}] Done executing.")
 
     if with_connection:
         return result, connection
@@ -709,8 +714,14 @@ def exec_queries(
                 elif debug:
                     dprint(f"[{self}]\n" + str(msg))
                 result = None
+
+            if debug:
+                dprint(f"[{self}] Finished executing.")
+
             if result is None and break_on_error:
                 if rollback:
+                    if debug:
+                        dprint(f"[{self}] Rolling back...")
                     session.rollback()
                 results.append(result)
                 break

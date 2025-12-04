@@ -4,6 +4,35 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.1.3
+
+- **Fix syncing pipes with integer datetimes.**  
+  An issue with dtype detection has been fixed, improving performance for pipes with integer datetimes.
+
+- **Fix recursive parameters references.**  
+  A single pipe may now reference itself when symlinking parameters.
+
+- **Add `self` syntax for parameters symlinking.**  
+  Pipes may now use `self` in parameters rather than requiring the fully qualified name:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'sql:memory', 'symlink', 'self',
+      instance='sql:memory',
+      parameters={
+          "custom": {
+            "value": 123,
+          },
+          "sql": "SELECT * FROM foo WHERE val = {{ self.parameters['custom']['value'] }}",
+      },
+  )
+
+  print(pipe.parameters['sql'])
+  # SELECT * FROM foo WHERE val = 123 
+  ```
+
 ### v3.1.2
 
 - **Improve filtering logic for non-datetime pipes.**  

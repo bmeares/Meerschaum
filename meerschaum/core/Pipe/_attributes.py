@@ -118,7 +118,7 @@ def get_parameters(
         if isinstance(obj, list):
             return [recursive_replace(elem, path + (i,)) for i, elem in enumerate(obj)]
         if isinstance(obj, str):
-            substituted_val = replace_pipes_syntax(obj)
+            substituted_val = replace_pipes_syntax(obj, _pipe=self)
             if substituted_val != obj:
                 self._symlinks[path] = {
                     'original': obj,

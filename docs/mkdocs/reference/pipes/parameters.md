@@ -48,6 +48,8 @@ This page catalogs useful keys in the `parameters` dictionary.
             'upsert': "{{ Pipe('demo', 'symlink', instance='sql:memory').upsert }}",
             'custom': "{{ Pipe('demo', 'symlink', instance='sql:memory').parameters['custom'] }}",
             'parent_pipe_id': "{{ Pipe('demo', 'symlink', instance='sql:memory').id }}",
+            'value': 123,
+            'self_value': "{{ self.parameters['value'] }}",
         },
     )
 
@@ -67,6 +69,8 @@ This page catalogs useful keys in the `parameters` dictionary.
     #         ]
     #     },
     #     "parent_pipe_id": 1
+    #     "value": 123,
+    #     "self_value": 123,
     # }  
     ```
 
