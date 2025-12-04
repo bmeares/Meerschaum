@@ -18,11 +18,14 @@ from meerschaum.utils.typing import PipesDict, Optional
 import meerschaum as mrsm
 
 
-def evaluate_pipe_access_chain(access_chain: str, pipe: mrsm.Pipe):
+def evaluate_pipe_access_chain(access_chain: str, pipe: mrsm.Pipe, _pipe=None):
     """
     Safely evaluate the access chain on a Pipe.
     """
     expr = f"pipe{access_chain}"
+    if pipe == _pipe and access_chain.lstrip('.').startswith('parameters'):
+        parameters_access_chain = access_chain.lstrip('.').split('parameters', maxsplit=1)[-1]
+        expr = f"pipe.attributes['parameters']{parameters_access_chain}"
     tree = ast.parse(expr, mode='eval')
 
     def _eval(node, context):
@@ -59,7 +62,7 @@ def evaluate_pipe_access_chain(access_chain: str, pipe: mrsm.Pipe):
 
 
 
-def _evaluate_pipe_access_chain_from_match(pipe_match: re.Match) -> Any:
+def _evaluate_pipe_access_chain_from_match(pipe_match: re.Match, _pipe=None) -> Any:
     """
     Helper function to evaluate a pipe from a regex match object.
     """
@@ -67,10 +70,14 @@ def _evaluate_pipe_access_chain_from_match(pipe_match: re.Match) -> Any:
     from meerschaum.utils.misc import parse_arguments_str
     from meerschaum.utils.sql import sql_item_name
     try:
-        args_str = pipe_match.group(1)
-        access_chain = pipe_match.group(2)
-        args, kwargs = parse_arguments_str(args_str)
-        pipe = mrsm.Pipe(*args, **kwargs)
+        if 'self' in pipe_match.group(0) and _pipe is not None:
+            pipe = _pipe
+            access_chain = pipe_match.group(1)
+        else:
+            args_str = pipe_match.group(1)
+            access_chain = pipe_match.group(2)
+            args, kwargs = parse_arguments_str(args_str)
+            pipe = mrsm.Pipe(*args, **kwargs)
     except Exception as e:
         warn(f"Failed to parse pipe from template string:\n{e}")
         raise e
@@ -88,18 +95,22 @@ def _evaluate_pipe_access_chain_from_match(pipe_match: re.Match) -> Any:
             else pipe.target
         )
 
-    return evaluate_pipe_access_chain(access_chain, pipe)
+    return evaluate_pipe_access_chain(access_chain, pipe, _pipe=_pipe)
 
 
-def replace_pipes_syntax(text: str) -> Any:
+def replace_pipes_syntax(text: str, _pipe=None) -> Any:
     """
     Parse a string containing the `{{ Pipe() }}` syntax.
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.dtypes import json_serialize_value
     pattern = r'\{\{\s*(?:mrsm\.)?Pipe\((.*?)\)((?:\.[\w]+|\[[^\]]+\])*)\s*\}\}'
+    self_pattern = r'\{\{\s*self((?:\.[\w]+|\[[^\]]+\])*)\s*\}\}'
 
     matches = list(re.finditer(pattern, text))
+    if _pipe is not None:
+        self_matches = list(re.finditer(self_pattern, text))
+        matches.extend(self_matches)
     if not matches:
         return text
 
@@ -115,9 +126,10 @@ def replace_pipes_syntax(text: str) -> Any:
     resolved_values = {}
     for placeholder, match in placeholders.items():
         try:
-            resolved_values[placeholder] = _evaluate_pipe_access_chain_from_match(match)
+            resolved_values[placeholder] = _evaluate_pipe_access_chain_from_match(match, _pipe=_pipe)
         except Exception as e:
-            warn(f"Failed to resolve pipe syntax '{match.group(0)}': {e}")
+            import traceback
+            warn(f"Failed to resolve pipe syntax '{match.group(0)}': {traceback.format_exc()}")
             resolved_values[placeholder] = match.group(0)
 
     if len(matches) == 1:
