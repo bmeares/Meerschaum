@@ -222,8 +222,12 @@ def are_dtypes_equal(
         'int', 'int64', 'int32', 'int16', 'int8',
         'uint', 'uint64', 'uint32', 'uint16', 'uint8',
     )
+    int_substrings = ('int',)
     if ldtype.lower() in int_dtypes and rdtype.lower() in int_dtypes:
         return True
+    for substring in int_substrings:
+        if substring in ldtype.lower() and substring in rdtype.lower():
+            return True
 
     float_dtypes = ('float', 'float64', 'float32', 'float16', 'float128', 'double')
     if ldtype.lower() in float_dtypes and rdtype.lower() in float_dtypes:
