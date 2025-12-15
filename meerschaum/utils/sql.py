@@ -2731,13 +2731,17 @@ def get_postgis_geo_columns_types(
     truncated_schema_name = truncate_item_name(schema, flavor='postgis')
     truncated_table_name = truncate_item_name(table, flavor='postgis')
     query = sqlalchemy.text(
-        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", \"srid\"\n"
-        "FROM \"geometry_columns\"\n"
+        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", geom.\"srid\", s.\"auth_name\"\n"
+        "FROM \"geometry_columns\" AS geom\n"
+        "LEFT JOIN spatial_ref_sys AS s\n"
+        "    ON s.srid = geom.srid\n"
         f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
         f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
         "UNION ALL\n"
-        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", \"srid\"\n"
-        "FROM \"geography_columns\"\n"
+        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", geog.\"srid\", s.\"auth_name\"\n"
+        "FROM \"geography_columns\" AS geog\n"
+        "LEFT JOIN spatial_ref_sys AS s\n"
+        "    ON s.srid = geog.srid\n"
         f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
         f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
     )
@@ -2747,7 +2751,7 @@ def get_postgis_geo_columns_types(
         for row in connectable.execute(query, **debug_kwargs).fetchall()
     ]
     cols_type_tuples = {
-        row[0]: (row[1], row[2], row[3])
+        row[0]: (row[1], row[2], f"{row[4]}:{row[3]}")
         for row in result_rows
     }
 

@@ -1224,6 +1224,21 @@ def test_geometry_custom_srid(flavor: str):
     assert success, msg
     assert pipe.get_rowcount() == len(docs)
 
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_geometry_esri_srid(flavor: str):
+    """
+    Test support for ESRI CRS.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'geometry', 'esri', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'geometry', 'esri',
+        instance=conn,
+        columns={'primary': 'id'},
+        dtypes={'id': 'int', 'geo': 'geometry[esri:102003]'},
+    )
+
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_date_as_datetime(flavor: str):

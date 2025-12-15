@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.1.4
+
+- **Add support for ESRI CRS for `geometry` columns.**  
+  In addition to EPSG projections, pipes with geometry data may now sync shapefiles with ESRI projections.
+
 ### v3.1.3
 
 - **Fix syncing pipes with integer datetimes.**  

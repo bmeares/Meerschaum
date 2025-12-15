@@ -997,8 +997,8 @@ def json_serialize_value(x: Any, default_to_str: bool = True) -> Union[str, None
 def get_geometry_type_srid(
     dtype: str = 'geometry',
     default_type: str = 'geometry',
-    default_srid: int = 4326,
-) -> Union[Tuple[str, int], Tuple[str, None]]:
+    default_srid: Union[int, str] = 0,
+) -> Tuple[str, Union[int, str, None]]:
     """
     Given the specified geometry `dtype`, return a tuple in the form (type, SRID).
 
@@ -1038,9 +1038,11 @@ def get_geometry_type_srid(
     >>> get_geometry_type_srid('geometry[MULTILINESTRING, 4326]')
     ('MultiLineString', 4326)
     >>> get_geometry_type_srid('geography')
-    ('geometry', 4326)
+    ('geometry', 0)
     >>> get_geometry_type_srid('geography[POINT]')
-    ('Point', 4376)
+    ('Point', 0)
+    >>> get_geometry_type_srid('geometry[POINT, ESRI:102003]')
+    ('Point', 'ESRI:102003')
     """
     from meerschaum.utils.misc import is_int
     ### NOTE: PostGIS syntax must also be parsed.
@@ -1067,7 +1069,7 @@ def get_geometry_type_srid(
     geometry_type = default_type
 
     for part in parts_casted:
-        if isinstance(part, int):
+        if isinstance(part, int) or ':' in str(part):
             srid = part
             break
 
