@@ -1238,6 +1238,26 @@ def test_geometry_esri_srid(flavor: str):
         columns={'primary': 'id'},
         dtypes={'id': 'int', 'geo': 'geometry[esri:102003]'},
     )
+    pipe.sync([{'id': 1}], debug=debug)
+    gdf = pipe.get_data(debug=debug)
+    assert gdf.crs.list_authority()[0].auth_name == 'ESRI'
+
+    if conn.type != 'sql':
+        return
+
+    down_pipe = mrsm.Pipe(str(conn), 'geometry', 'esri', instance=conn)
+    down_pipe.delete()
+    down_pipe = mrsm.Pipe(
+        str(conn), 'geometry', 'esri',
+        instance=conn,
+        parameters={
+            'columns': {'primary': 'id'},
+            'sql': 'SELECT * FROM {{ ' + str(pipe) + ' }}',
+        },
+    )
+    down_pipe.sync(debug=debug)
+    gdf = down_pipe.get_data(debug=debug)
+    assert gdf.crs.list_authority()[0].auth_name == 'ESRI'
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

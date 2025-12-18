@@ -1074,7 +1074,7 @@ def get_geometry_type_srid(
             break
 
     for part in parts_casted:
-        if isinstance(part, str):
+        if isinstance(part, str) and part != srid:
             geometry_type = part
             break
 
