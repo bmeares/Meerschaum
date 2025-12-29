@@ -45,6 +45,8 @@ if [ "$MRSM_DEP_GROUP" != "minimal" ]; then
 fi
 
 sudo -u $MRSM_USER echo '
+unset PROMPT_COMMAND
+export SYSTEMD_TERMINAL_INTEGRATION=0
 HISTCONTROL=ignoreboth
 shopt -s histappend
 HISTSIZE=1000
