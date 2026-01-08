@@ -197,6 +197,9 @@ class APIConnector(InstanceConnector):
 
     @property
     def token(self):
+        if self.login_scheme == 'api_key':
+            return self.api_key
+
         expired = (
             True if self._expires is None else (
                 (

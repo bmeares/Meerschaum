@@ -787,7 +787,7 @@ def filter_existing(
         min_dt = None
 
     if not are_dtypes_equal('datetime', str(type(min_dt))) or value_is_null(min_dt):
-        if not are_dtypes_equal('int', str(type(min_dt))):
+       if not are_dtypes_equal('int', str(type(min_dt))):
             min_dt = None
 
     if isinstance(min_dt, datetime):
@@ -1074,9 +1074,6 @@ def _persist_new_special_columns(
         for col, typ in dtypes.items()
         if is_dtype_special(typ)
     }
-    print("dtypes!!!!!!!!!")
-    mrsm.pprint(dtypes)
-    mrsm.pprint(self.parameters)
     new_special_cols = {
         col: typ
         for col, typ in special_cols.items()

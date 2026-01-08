@@ -1321,6 +1321,7 @@ def get_table_cols_types(
     flavor: Optional[str] = None,
     schema: Optional[str] = None,
     database: Optional[str] = None,
+    strip_auth_from_srid: bool = False,
     debug: bool = False,
 ) -> Dict[str, str]:
     """
@@ -1353,6 +1354,10 @@ def get_table_cols_types(
 
     database: Optional[str]. default None
         If provided, restrict the query to this database.
+
+    strip_auth_from_srid: bool, default False
+        If `True`, do not include the SRID authority.
+        Applicable to `PostGIS`-flavors only.
 
     Returns
     -------
@@ -1456,12 +1461,11 @@ def get_table_cols_types(
                 get_postgis_geo_columns_types(
                     connectable,
                     table,
+                    strip_auth=strip_auth_from_srid,
                     schema=schema,
                     debug=debug,
                 )
             )
-            print('@@@@@@@@@@@@@@@@')
-            mrsm.pprint(geometry_cols_types)
 
         cols_types = {
             (
@@ -1485,16 +1489,6 @@ def get_table_cols_types(
             for doc in cols_types_docs_filtered
         }
         cols_types.update(geometry_cols_types)
-        print('#####################')
-        mrsm.pprint(geometry_cols_types)
-        #  cols_types.update({
-            #  col: (
-                #  typ.split(':')[-1]
-                #  if isinstance(typ, str)
-                #  else typ
-            #  )
-            #  for col, typ in geometry_cols_types.items()
-        #  })
         return cols_types
     except Exception as e:
         warn(f"Failed to fetch columns for table '{table}':\n{e}")
@@ -2727,10 +2721,29 @@ def get_postgis_geo_columns_types(
     ],
     table: str,
     schema: Optional[str] = 'public',
+    strip_auth: bool = False,
     debug: bool = False,
 ) -> Dict[str, str]:
     """
     Return a dictionary mapping PostGIS geometry column names to geometry types.
+
+    Parameters
+    ----------
+    connectable: Union[SQLConnector, sqlalchemy.orm.session.Session, sqlalchemy.engine.base.Engine]
+        The SQLConnector, Session, or Engine.
+
+    table: str
+        The table's name.
+
+    schema: Optional[str], default 'public'
+        The schema to use for the fully qualified table name.
+
+    strip_auth: bool, default False
+        If `True`, do not prepend the authority to the SRID (e.g. `EPSG` or `ESRI`).
+
+    Returns
+    -------
+    A dictionary mapping column names to geometry types.
     """
     from meerschaum.utils.dtypes import get_geometry_type_srid
     sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
@@ -2768,13 +2781,12 @@ def get_postgis_geo_columns_types(
             row[2], # type
             (
                 f"{row[4]}:{row[3]}"
-                if row[3] and row[4]
+                if row[3] and row[4] and not strip_auth
                 else row[3]
-            ) # auth:srid
+            ) # auth:srid or srid
         )
         for row in result_rows
     }
-    mrsm.pprint(cols_type_tuples)
 
     geometry_cols_types = {
         col: (
