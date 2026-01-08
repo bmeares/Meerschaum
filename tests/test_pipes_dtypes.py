@@ -1253,6 +1253,7 @@ def test_geometry_esri_srid(flavor: str):
         parameters={
             'columns': {'primary': 'id'},
             'sql': 'SELECT * FROM {{ ' + str(pipe) + ' }}',
+            'dtypes': '{{ ' + str(pipe) + '.dtypes }}',
         },
     )
     down_pipe.sync(debug=debug)

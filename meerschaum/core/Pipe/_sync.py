@@ -13,7 +13,7 @@ import time
 import threading
 import multiprocessing
 import functools
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import meerschaum as mrsm

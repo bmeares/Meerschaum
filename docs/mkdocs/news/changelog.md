@@ -9,6 +9,17 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add support for ESRI CRS for `geometry` columns.**  
   In addition to EPSG projections, pipes with geometry data may now sync shapefiles with ESRI projections.
 
+- **Add `Pipe.metric` and `Pipe.location` aliases.**  
+  Like `Pipe.connector_keys`, the keys `metric_key` and `location_key` may now be accessed via `metric` and `location`:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe('demo', 'aliases', target='{{ self.metric }}')
+  print(pipe.target)
+  # aliases
+  ```
+
 ### v3.1.3
 
 - **Fix syncing pipes with integer datetimes.**  

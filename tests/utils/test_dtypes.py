@@ -6,7 +6,7 @@
 Test functions from `meerschaum.utils.misc`.
 """
 
-from typing import Tuple, Union
+from typing import Tuple, Dict
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -97,12 +97,12 @@ def test_json_serialize_value(value, expected_serialized_value):
 @pytest.mark.parametrize(
     'kwargs,expected_type_srid',
     [
-        ({}, ('geometry', 4326)),
-        ({'dtype': 'geometry'}, ('geometry', 4326)),
+        ({}, ('geometry', 0)),
+        ({'dtype': 'geometry'}, ('geometry', 0)),
         ({'dtype': 'geometry[4326]'}, ('geometry', 4326)),
         ({'dtype': 'geometry[0]'}, ('geometry', 0)),
-        ({'dtype': 'geometry[PolygonZ]'}, ('PolygonZ', 4326)),
-        ({'dtype': 'geometry', 'default_type': 'Point'}, ('Point', 4326)),
+        ({'dtype': 'geometry[PolygonZ]'}, ('PolygonZ', 0)),
+        ({'dtype': 'geometry', 'default_type': 'Point'}, ('Point', 0)),
         ({'dtype': 'geometry', 'default_srid': 0}, ('geometry', 0)),
         ({'dtype': 'geometry', 'default_type': 'MultiLineString', 'default_srid': 0}, ('MultiLineString', 0)),
         ({'dtype': 'geometry[POLYGON, 4326]'}, ('POLYGON', 4326)),
@@ -111,13 +111,13 @@ def test_json_serialize_value(value, expected_serialized_value):
         ({'dtype': 'geometry[GeometryCollection,srid=0]'}, ('GeometryCollection', 0)),
         ({'dtype': 'geometry[type=LineString,srid=2000]'}, ('LineString', 2000)),
         ({'dtype': 'geometry[type=UNKNOWN,srid=2000]'}, ('UNKNOWN', 2000)),
-        ({'dtype': 'geography[POINT]'}, ('POINT', 4326)),
+        ({'dtype': 'geography[POINT]'}, ('POINT', 0)),
         ({'dtype': 'geography[4326]'}, ('geometry', 4326)),
         ({'dtype': 'geography[GEOMETRY, 4326]'}, ('GEOMETRY', 4326)),
     ]
 )
 def test_parse_geometry_type_srid(
-    kwargs: Tuple[Union[str, int], ...],
+    kwargs: Dict[str, str],
     expected_type_srid: Tuple[str, int],
 ):
     """
