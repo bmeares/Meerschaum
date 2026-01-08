@@ -17,7 +17,7 @@ This is the current release cycle, so stay tuned for future releases!
       columns={'primary': 'id'},
       dtypes={'geo': 'geometry[esri:102003]'}
   )
-  pipe.sync([{'id': 1}])
+  pipe.sync([{'id': 1, 'geo': 'POINT (0 0)'}])
   gdf = pipe.get_data()
   print(gdf.crs.to_authority())
   # ('ESRI', '102003')

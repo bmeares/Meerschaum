@@ -2232,7 +2232,6 @@ def sync_pipe_inplace(
         flavor=self.flavor,
         schema=internal_schema,
         database=database,
-        strip_auth_from_srid=True,
         debug=debug,
     ) if not static else pipe.get_columns_types(debug=debug)
     if not new_cols_types:
@@ -2346,7 +2345,6 @@ def sync_pipe_inplace(
         flavor=self.flavor,
         schema=internal_schema,
         database=database,
-        strip_auth_from_srid=True,
         debug=debug,
     ) if not (upsert or static) else new_cols_types
 
@@ -2425,7 +2423,6 @@ def sync_pipe_inplace(
         flavor=self.flavor,
         schema=internal_schema,
         database=database,
-        strip_auth_from_srid=True,
         debug=debug,
     ) if not (upsert or static) else new_cols_types
 
@@ -3234,7 +3231,6 @@ def get_add_columns_queries(
             pipe.target,
             self,
             schema=self.get_pipe_schema(pipe),
-            strip_auth_from_srid=True,
             debug=debug,
         ).items()
     }
@@ -3350,7 +3346,6 @@ def get_alter_columns_queries(
             pipe.target,
             self,
             schema=self.get_pipe_schema(pipe),
-            strip_auth_from_srid=True,
             debug=debug,
         ).items()
     }
@@ -4093,7 +4088,6 @@ def _init_geopackage_pipe(
             tbl,
             tmp_conn,
             flavor='sqlite',
-            strip_auth_from_srid=True,
             debug=debug,
         )
         for tbl in tables

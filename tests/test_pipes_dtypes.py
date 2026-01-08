@@ -1158,6 +1158,7 @@ def test_geography_dtype(flavor: str):
         instance=conn,
         columns={'primary': 'id'},
         dtypes={'id': 'int', 'geog': 'geography[SRID=4326]'},
+        cache=False,
     )
 
     geog = shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]])
@@ -1240,7 +1241,7 @@ def test_geometry_esri_srid(flavor: str):
         columns={'primary': 'id'},
         dtypes={'id': 'int', 'geo': 'geometry[esri:102003]'},
     )
-    pipe.sync([{'id': 1}], debug=debug)
+    pipe.sync([{'id': 1, 'geo': 'POINT (0 0)'}], debug=debug)
     gdf = pipe.get_data(debug=debug)
     assert gdf.crs.list_authority()[0].auth_name == 'ESRI'
 

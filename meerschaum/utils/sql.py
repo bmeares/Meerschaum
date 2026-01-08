@@ -1321,7 +1321,6 @@ def get_table_cols_types(
     flavor: Optional[str] = None,
     schema: Optional[str] = None,
     database: Optional[str] = None,
-    strip_auth_from_srid: bool = False,
     debug: bool = False,
 ) -> Dict[str, str]:
     """
@@ -1354,10 +1353,6 @@ def get_table_cols_types(
 
     database: Optional[str]. default None
         If provided, restrict the query to this database.
-
-    strip_auth_from_srid: bool, default False
-        If `True`, do not include the SRID authority.
-        Applicable to `PostGIS`-flavors only.
 
     Returns
     -------
@@ -1461,7 +1456,6 @@ def get_table_cols_types(
                 get_postgis_geo_columns_types(
                     connectable,
                     table,
-                    strip_auth=strip_auth_from_srid,
                     schema=schema,
                     debug=debug,
                 )
@@ -2429,7 +2423,7 @@ def _get_create_table_query_from_cte(
         alter_type_queries = [
             (
                 f"ALTER TABLE {new_table_name}\n"
-                "ADD PRIMARY KEY ({primary_key_name})"
+                f"ADD PRIMARY KEY ({primary_key_name})"
             ),
         ]
     elif (
@@ -2721,7 +2715,6 @@ def get_postgis_geo_columns_types(
     ],
     table: str,
     schema: Optional[str] = 'public',
-    strip_auth: bool = False,
     debug: bool = False,
 ) -> Dict[str, str]:
     """
@@ -2738,9 +2731,6 @@ def get_postgis_geo_columns_types(
     schema: Optional[str], default 'public'
         The schema to use for the fully qualified table name.
 
-    strip_auth: bool, default False
-        If `True`, do not prepend the authority to the SRID (e.g. `EPSG` or `ESRI`).
-
     Returns
     -------
     A dictionary mapping column names to geometry types.
@@ -2756,17 +2746,13 @@ def get_postgis_geo_columns_types(
     truncated_schema_name = truncate_item_name(schema, flavor='postgis')
     truncated_table_name = truncate_item_name(table, flavor='postgis')
     query = sqlalchemy.text(
-        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", geom.\"srid\", s.\"auth_name\"\n"
+        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", geom.\"srid\"\n"
         "FROM \"geometry_columns\" AS geom\n"
-        "LEFT JOIN spatial_ref_sys AS s\n"
-        "    ON s.srid = geom.srid\n"
         f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
         f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
         "UNION ALL\n"
-        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", geog.\"srid\", s.\"auth_name\"\n"
+        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", geog.\"srid\"\n"
         "FROM \"geography_columns\" AS geog\n"
-        "LEFT JOIN spatial_ref_sys AS s\n"
-        "    ON s.srid = geog.srid\n"
         f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
         f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
     )
@@ -2780,10 +2766,10 @@ def get_postgis_geo_columns_types(
             row[1], # func
             row[2], # type
             (
-                f"{row[4]}:{row[3]}"
-                if row[3] and row[4] and not strip_auth
-                else row[3]
-            ) # auth:srid or srid
+                row[3]
+                if row[3]
+                else 0
+            ) # srid
         )
         for row in result_rows
     }
