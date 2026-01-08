@@ -127,7 +127,7 @@ def edit_definition(
         return False, "Cannot edit pipes created with `temporary=True` (read-only)."
 
     from meerschaum.connectors import instance_types
-    if (self.connector is None) or self.connector.type not in instance_types:
+    if (self.connector is None or isinstance(self.connector, str)) or self.connector.type not in instance_types:
         return self.edit(interactive=True, debug=debug, **kw)
 
     import json

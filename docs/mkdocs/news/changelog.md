@@ -20,6 +20,17 @@ This is the current release cycle, so stay tuned for future releases!
   # aliases
   ```
 
+- **Remove `None` return for `Pipe.connector` with invalid keys.**  
+  Rather than returning `None` for pipes with invalid connectors, return the verbatim connector keys string instead.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe('demo', 'keys')
+  print(pipe.connector)
+  # demo
+  ```
+
 ### v3.1.3
 
 - **Fix syncing pipes with integer datetimes.**  

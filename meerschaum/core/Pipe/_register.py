@@ -9,10 +9,10 @@ Register a Pipe object
 from meerschaum.utils.typing import SuccessTuple, Any
 
 def register(
-        self,
-        debug: bool = False,
-        **kw: Any
-    ) -> SuccessTuple:
+    self,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
     """
     Register a new Pipe along with its attributes.
 
@@ -41,7 +41,10 @@ def register(
         warnings.simplefilter('ignore')
         try:
             _conn = self.connector
-        except Exception as e:
+        except Exception:
+            _conn = None
+
+        if isinstance(_conn, str):
             _conn = None
 
     if (
@@ -54,7 +57,7 @@ def register(
         try:
             with Venv(get_connector_plugin(_conn), debug=debug):
                 params = self.connector.register(self)
-        except Exception as e:
+        except Exception:
             get_console().print_exception()
             params = None
         params = {} if params is None else params

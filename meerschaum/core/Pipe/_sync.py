@@ -205,7 +205,7 @@ def sync(
         ### If a DataFrame is provided, continue as expected.
         if hasattr(df, 'MRSM_INFER_FETCH'):
             try:
-                if p.connector is None:
+                if isinstance(p.connector, str):
                     if ':' not in p.connector_keys:
                         return True, f"{p} does not support fetching; nothing to do."
 
@@ -564,6 +564,9 @@ def get_sync_time(
         return None
 
     connector = self.instance_connector if not remote else self.connector
+    if isinstance(connector, str) or connector is None:
+        return None
+
     with Venv(get_connector_plugin(connector)):
         if not hasattr(connector, 'get_sync_time'):
             warn(
