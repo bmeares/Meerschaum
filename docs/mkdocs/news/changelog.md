@@ -23,9 +23,6 @@ This is the current release cycle, so stay tuned for future releases!
   # ('ESRI', '102003')
   ```
 
-- **Fix `api_key` login schemes for `api` connectors.**  
-  An issue with `api` connectors using the `api_key` login scheme has been fixed.
-
 - **Add `Pipe.metric` and `Pipe.location` aliases.**  
   Like `Pipe.connector_keys`, the keys `metric_key` and `location_key` may now be accessed via `metric` and `location`:
 
@@ -44,9 +41,15 @@ This is the current release cycle, so stay tuned for future releases!
   import meerschaum as mrsm
 
   pipe = mrsm.Pipe('demo', 'keys')
-  print(pipe.connector)
-  # demo
+  print(f"{pipe.connector=}")
+  # pipe.connector='demo'
   ```
+
+- **Fix `api_key` login schemes for `api` connectors.**  
+  An issue with `api` connectors using the `api_key` login scheme has been fixed.
+
+- **Fix client credentials for remote jobs.**  
+  When executing a remote action or job using an `api` connector with client credentials (`client_id` and `client_secret`), scopes are now correctly evaluated.
 
 ### v3.1.3
 

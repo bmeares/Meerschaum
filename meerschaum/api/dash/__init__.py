@@ -14,7 +14,7 @@ from meerschaum.utils.packages import (
     import_html,
 )
 flask_compress = attempt_import('flask_compress', lazy=False)
-dash = attempt_import('dash', lazy=False)
+dash, dbc = attempt_import('dash', 'dash_bootstrap_components', lazy=False)
 
 from meerschaum.utils.typing import List, Optional
 from meerschaum.api import (
@@ -41,7 +41,7 @@ stylesheets = [
     '/static/css/bootstrap.min.css',
     '/static/css/dbc_dark.css',
     '/static/css/dash.css',
-    '/static/css/fontawesome/css/all.min.css',
+    dbc.icons.FONT_AWESOME,
 ]
 scripts = ['/static/js/node_modules/xterm/lib/xterm.js']
 dash_app = enrich.DashProxy(
