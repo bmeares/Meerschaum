@@ -291,10 +291,12 @@ def edit_token_submit_button_click(
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     token_id = component_dict['index']
 
+    expiration_date = datetime.fromisoformat(expiration) if expiration is not None else None
+
     token = Token(
         id=token_id,
         label=label,
-        expiration=(datetime.fromisoformat(f"{expiration}T00:00:00Z") if expiration is not None else None),
+        expiration=expiration_date,
         scopes=scopes,
         instance=get_api_connector(),
     )

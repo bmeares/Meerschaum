@@ -4084,7 +4084,12 @@ def _init_geopackage_pipe(
     )
     tables = tables_definitions['name']
     tables_cols_types = {
-        tbl: get_table_cols_types(tbl, tmp_conn, flavor='sqlite', debug=debug)
+        tbl: get_table_cols_types(
+            tbl,
+            tmp_conn,
+            flavor='sqlite',
+            debug=debug,
+        )
         for tbl in tables
     }
     tables_cols_indices = {

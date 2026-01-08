@@ -2423,7 +2423,7 @@ def _get_create_table_query_from_cte(
         alter_type_queries = [
             (
                 f"ALTER TABLE {new_table_name}\n"
-                "ADD PRIMARY KEY ({primary_key_name})"
+                f"ADD PRIMARY KEY ({primary_key_name})"
             ),
         ]
     elif (
@@ -2719,6 +2719,21 @@ def get_postgis_geo_columns_types(
 ) -> Dict[str, str]:
     """
     Return a dictionary mapping PostGIS geometry column names to geometry types.
+
+    Parameters
+    ----------
+    connectable: Union[SQLConnector, sqlalchemy.orm.session.Session, sqlalchemy.engine.base.Engine]
+        The SQLConnector, Session, or Engine.
+
+    table: str
+        The table's name.
+
+    schema: Optional[str], default 'public'
+        The schema to use for the fully qualified table name.
+
+    Returns
+    -------
+    A dictionary mapping column names to geometry types.
     """
     from meerschaum.utils.dtypes import get_geometry_type_srid
     sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
@@ -2731,13 +2746,13 @@ def get_postgis_geo_columns_types(
     truncated_schema_name = truncate_item_name(schema, flavor='postgis')
     truncated_table_name = truncate_item_name(table, flavor='postgis')
     query = sqlalchemy.text(
-        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", \"srid\"\n"
-        "FROM \"geometry_columns\"\n"
+        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", geom.\"srid\"\n"
+        "FROM \"geometry_columns\" AS geom\n"
         f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
         f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
         "UNION ALL\n"
-        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", \"srid\"\n"
-        "FROM \"geography_columns\"\n"
+        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", geog.\"srid\"\n"
+        "FROM \"geography_columns\" AS geog\n"
         f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
         f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
     )
@@ -2747,7 +2762,15 @@ def get_postgis_geo_columns_types(
         for row in connectable.execute(query, **debug_kwargs).fetchall()
     ]
     cols_type_tuples = {
-        row[0]: (row[1], row[2], row[3])
+        row[0]: (
+            row[1], # func
+            row[2], # type
+            (
+                row[3]
+                if row[3]
+                else 0
+            ) # srid
+        )
         for row in result_rows
     }
 

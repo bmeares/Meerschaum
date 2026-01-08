@@ -1158,6 +1158,7 @@ def test_geography_dtype(flavor: str):
         instance=conn,
         columns={'primary': 'id'},
         dtypes={'id': 'int', 'geog': 'geography[SRID=4326]'},
+        cache=False,
     )
 
     geog = shapely.MultiLineString([[[0, 0], [1, 2]], [[4, 4], [5, 6]]])
@@ -1200,6 +1201,7 @@ def test_geometry_custom_srid(flavor: str):
         instance=conn,
         columns={'primary': 'id'},
         dtypes={'id': 'int', 'geom': 'geometry[Point,4326]'},
+        cache=False,
     )
 
     geom = shapely.Point(-82.3511, 34.86965)
@@ -1223,6 +1225,42 @@ def test_geometry_custom_srid(flavor: str):
     success, msg = pipe.sync(new_docs, debug=debug)
     assert success, msg
     assert pipe.get_rowcount() == len(docs)
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_geometry_esri_srid(flavor: str):
+    """
+    Test support for ESRI CRS.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'geometry', 'esri', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'geometry', 'esri',
+        instance=conn,
+        columns={'primary': 'id'},
+        dtypes={'id': 'int', 'geo': 'geometry[esri:102003]'},
+    )
+    pipe.sync([{'id': 1, 'geo': 'POINT (0 0)'}], debug=debug)
+    gdf = pipe.get_data(debug=debug)
+    assert gdf.crs.list_authority()[0].auth_name == 'ESRI'
+
+    if conn.type != 'sql':
+        return
+
+    down_pipe = mrsm.Pipe(str(conn), 'geometry', 'esri', instance=conn)
+    down_pipe.delete()
+    down_pipe = mrsm.Pipe(
+        str(conn), 'geometry', 'esri',
+        instance=conn,
+        parameters={
+            'columns': {'primary': 'id'},
+            'sql': 'SELECT * FROM {{ ' + str(pipe) + ' }}',
+            'dtypes': '{{ ' + str(pipe) + '.dtypes }}',
+        },
+    )
+    down_pipe.sync(debug=debug)
+    gdf = down_pipe.get_data(debug=debug)
+    assert gdf.crs.list_authority()[0].auth_name == 'ESRI'
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

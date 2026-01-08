@@ -808,7 +808,8 @@ def target(self) -> str:
       - `target_table`
       - `target_table_name`
     """
-    if 'target' not in self.parameters:
+    target_val = self.parameters.get('target', None)
+    if not target_val:
         default_target = self._target_legacy()
         default_targets = {default_target}
         potential_keys = ('target_name', 'target_table', 'target_table_name')
@@ -836,8 +837,11 @@ def target(self) -> str:
 
         if _target in default_targets:
             return _target
+
         self.target = _target
-    return self.parameters['target']
+        return _target
+
+    return target_val
 
 
 def _target_legacy(self) -> str:

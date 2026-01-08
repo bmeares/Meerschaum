@@ -4,6 +4,53 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.1.4
+
+- **Add support for ESRI CRS for `geometry` columns.**  
+  In addition to EPSG projections, pipes with geometry data may now sync shapefiles with ESRI (or other authorities, default EPSG) projections.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'geometry', 'esri',
+      columns={'primary': 'id'},
+      dtypes={'geo': 'geometry[esri:102003]'}
+  )
+  pipe.sync([{'id': 1, 'geo': 'POINT (0 0)'}])
+  gdf = pipe.get_data()
+  print(gdf.crs.to_authority())
+  # ('ESRI', '102003')
+  ```
+
+- **Add `Pipe.metric` and `Pipe.location` aliases.**  
+  Like `Pipe.connector_keys`, the keys `metric_key` and `location_key` may now be accessed via `metric` and `location`:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe('demo', 'aliases', target='{{ self.metric }}')
+  print(pipe.target)
+  # aliases
+  ```
+
+- **Remove `None` return for `Pipe.connector` with invalid keys.**  
+  Rather than returning `None` for pipes with invalid connectors, return the verbatim connector keys string instead.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe('demo', 'keys')
+  print(f"{pipe.connector=}")
+  # pipe.connector='demo'
+  ```
+
+- **Fix `api_key` login schemes for `api` connectors.**  
+  An issue with `api` connectors using the `api_key` login scheme has been fixed.
+
+- **Fix client credentials for remote jobs.**  
+  When executing a remote action or job using an `api` connector with client credentials (`client_id` and `client_secret`), scopes are now correctly evaluated.
+
 ### v3.1.3
 
 - **Fix syncing pipes with integer datetimes.**  

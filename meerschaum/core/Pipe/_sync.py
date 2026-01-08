@@ -13,7 +13,7 @@ import time
 import threading
 import multiprocessing
 import functools
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import meerschaum as mrsm
@@ -205,7 +205,7 @@ def sync(
         ### If a DataFrame is provided, continue as expected.
         if hasattr(df, 'MRSM_INFER_FETCH'):
             try:
-                if p.connector is None:
+                if isinstance(p.connector, str):
                     if ':' not in p.connector_keys:
                         return True, f"{p} does not support fetching; nothing to do."
 
@@ -564,6 +564,9 @@ def get_sync_time(
         return None
 
     connector = self.instance_connector if not remote else self.connector
+    if isinstance(connector, str) or connector is None:
+        return None
+
     with Venv(get_connector_plugin(connector)):
         if not hasattr(connector, 'get_sync_time'):
             warn(
@@ -784,7 +787,7 @@ def filter_existing(
         min_dt = None
 
     if not are_dtypes_equal('datetime', str(type(min_dt))) or value_is_null(min_dt):
-        if not are_dtypes_equal('int', str(type(min_dt))):
+       if not are_dtypes_equal('int', str(type(min_dt))):
             min_dt = None
 
     if isinstance(min_dt, datetime):

@@ -327,10 +327,10 @@ class Pipe:
             if str(k).startswith(negation_prefix):
                 error(f"A pipe's keys and tags cannot start with the prefix '{negation_prefix}'.")
 
-        self.connector_keys = str(connector)
-        self.connector_key = self.connector_keys ### Alias
-        self.metric_key = metric
-        self.location_key = location
+        self._connector_keys = str(connector)
+        self._connector_key = self.connector_keys ### Alias
+        self._metric_key = metric
+        self._location_key = location
         self.temporary = temporary
         self.cache = (
             cache
@@ -345,9 +345,9 @@ class Pipe:
         self.debug = debug
 
         self._attributes: Dict[str, Any] = {
-            'connector_keys': self.connector_keys,
-            'metric_key': self.metric_key,
-            'location_key': self.location_key,
+            'connector_keys': self._connector_keys,
+            'metric_key': self._metric_key,
+            'location_key': self._location_key,
             'parameters': {},
         }
 
@@ -434,15 +434,42 @@ class Pipe:
 
         if not isinstance(_mrsm_instance, str):
             self._instance_connector = _mrsm_instance
-            self.instance_keys = str(_mrsm_instance)
+            self._instance_keys = str(_mrsm_instance)
         else:
-            self.instance_keys = _mrsm_instance
+            self._instance_keys = _mrsm_instance
 
-        if self.instance_keys == 'sql:memory':
+        if self._instance_keys == 'sql:memory':
             self.cache = False
 
         self._cache_locks = collections.defaultdict(lambda: threading.RLock())
 
+    @property
+    def metric_key(self) -> str:
+        """
+        Return the pipe's metric key.
+        """
+        return self._metric_key
+
+    @property
+    def metric(self) -> str:
+        """
+        Return the pipe's metric key.
+        """
+        return self._metric_key
+
+    @property
+    def location_key(self) -> Union[str, None]:
+        """
+        Return the pipe's location key.
+        """
+        return self._location_key
+
+    @property
+    def location(self) -> Union[str, None]:
+        """
+        Return the pipe's location key.
+        """
+        return self._location_key
 
     @property
     def meta(self):
@@ -467,6 +494,23 @@ class Pipe:
         }
 
     @property
+    def instance_keys(self) -> str:
+        """
+        Return the pipe's instance keys.
+        """
+        return self._instance_keys
+
+    @property
+    def instance(self) -> Union[InstanceConnector, str]:
+        """
+        Return the pipe's instance connector or keys.
+        """
+        conn = self.instance_connector
+        if conn is None:
+            return self.instance_keys
+        return conn
+
+    @property
     def instance_connector(self) -> Union[InstanceConnector, None]:
         """
         The instance connector on which this pipe resides.
@@ -481,7 +525,21 @@ class Pipe:
         return self._instance_connector
 
     @property
-    def connector(self) -> Union['Connector', None]:
+    def connector_keys(self) -> str:
+        """
+        Return the pipe's connector keys.
+        """
+        return self._connector_keys
+
+    @property
+    def connector_key(self) -> str:
+        """
+        Legacy: use `Pipe.connector_keys` instead.
+        """
+        return self.connector_keys
+
+    @property
+    def connector(self) -> Union['Connector', str]:
         """
         The connector to the data source.
         """
@@ -497,7 +555,7 @@ class Pipe:
             if conn:
                 self._connector = conn
             else:
-                return None
+                return self._connector_keys
         return self._connector
 
     def __str__(self, ansi: bool=False):

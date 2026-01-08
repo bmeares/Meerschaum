@@ -99,12 +99,8 @@ def _get_cached_value(
     in_memory_key = _get_in_memory_key(cache_key)
     with self._cache_locks[cache_key]:
         if in_memory_key in self.__dict__:
-            if debug:
-                dprint(f"Return cached key '{cache_key}' from memory.")
             return self.__dict__.get(in_memory_key, None)
 
-        if debug:
-            dprint(f"Reading cache key '{cache_key}'...")
         return self._read_cache_key(cache_key, debug=debug)
 
 
@@ -296,6 +292,9 @@ def _read_cache_file(
     Read a cache file and return the pickled object.
     Returns `None` if the cache file does not exist or is expired.
     """
+    if not self.cache:
+        return None
+
     from meerschaum.utils.dtypes import get_current_timestamp
     with self._cache_locks[cache_key + '.file']:
         now = get_current_timestamp()
@@ -306,7 +305,7 @@ def _read_cache_file(
             'pipes', 'attributes', 'local_cache_timeout_seconds'
         )
 
-        if not meta_file_path.exists() or not file_path.exists():
+        if not self.cache or not meta_file_path.exists() or not file_path.exists():
             return None
 
         try:
