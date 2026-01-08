@@ -1460,6 +1460,8 @@ def get_table_cols_types(
                     debug=debug,
                 )
             )
+            print('@@@@@@@@@@@@@@@@')
+            mrsm.pprint(geometry_cols_types)
 
         cols_types = {
             (
@@ -1483,6 +1485,16 @@ def get_table_cols_types(
             for doc in cols_types_docs_filtered
         }
         cols_types.update(geometry_cols_types)
+        print('#####################')
+        mrsm.pprint(geometry_cols_types)
+        #  cols_types.update({
+            #  col: (
+                #  typ.split(':')[-1]
+                #  if isinstance(typ, str)
+                #  else typ
+            #  )
+            #  for col, typ in geometry_cols_types.items()
+        #  })
         return cols_types
     except Exception as e:
         warn(f"Failed to fetch columns for table '{table}':\n{e}")
@@ -2762,6 +2774,7 @@ def get_postgis_geo_columns_types(
         )
         for row in result_rows
     }
+    mrsm.pprint(cols_type_tuples)
 
     geometry_cols_types = {
         col: (

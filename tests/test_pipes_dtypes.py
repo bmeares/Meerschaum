@@ -1200,6 +1200,7 @@ def test_geometry_custom_srid(flavor: str):
         instance=conn,
         columns={'primary': 'id'},
         dtypes={'id': 'int', 'geom': 'geometry[Point,4326]'},
+        cache=False,
     )
 
     geom = shapely.Point(-82.3511, 34.86965)
@@ -1209,6 +1210,7 @@ def test_geometry_custom_srid(flavor: str):
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
+    return pipe
 
     df = pipe.get_data()
     assert df['geom'][0].equals_exact(geom, 5)

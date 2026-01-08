@@ -1316,6 +1316,8 @@ def get_db_type_from_pd_type(
             if 'geometry' not in db_type.lower() and 'geography' not in db_type.lower():
                 return db_type
             db_type_bare = db_type.split('(', maxsplit=1)[0]
+            if isinstance(geometry_srid, str):
+                geometry_srid = int(geometry_srid.split(':')[-1])
             return f"{db_type_bare}({geometry_type.upper()}, {geometry_srid})"
         return db_type
 

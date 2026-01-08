@@ -1074,6 +1074,9 @@ def _persist_new_special_columns(
         for col, typ in dtypes.items()
         if is_dtype_special(typ)
     }
+    print("dtypes!!!!!!!!!")
+    mrsm.pprint(dtypes)
+    mrsm.pprint(self.parameters)
     new_special_cols = {
         col: typ
         for col, typ in special_cols.items()
