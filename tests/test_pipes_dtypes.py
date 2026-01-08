@@ -1211,7 +1211,6 @@ def test_geometry_custom_srid(flavor: str):
     ]
     success, msg = pipe.sync(docs, debug=debug)
     assert success, msg
-    return pipe
 
     df = pipe.get_data()
     assert df['geom'][0].equals_exact(geom, 5)
