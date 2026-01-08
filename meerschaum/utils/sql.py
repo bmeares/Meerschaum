@@ -2751,7 +2751,15 @@ def get_postgis_geo_columns_types(
         for row in connectable.execute(query, **debug_kwargs).fetchall()
     ]
     cols_type_tuples = {
-        row[0]: (row[1], row[2], f"{row[4]}:{row[3]}")
+        row[0]: (
+            row[1], # func
+            row[2], # type
+            (
+                f"{row[4]}:{row[3]}"
+                if row[3] and row[4]
+                else row[3]
+            ) # auth:srid
+        )
         for row in result_rows
     }
 

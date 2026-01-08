@@ -434,11 +434,11 @@ class Pipe:
 
         if not isinstance(_mrsm_instance, str):
             self._instance_connector = _mrsm_instance
-            self.instance_keys = str(_mrsm_instance)
+            self._instance_keys = str(_mrsm_instance)
         else:
-            self.instance_keys = _mrsm_instance
+            self._instance_keys = _mrsm_instance
 
-        if self.instance_keys == 'sql:memory':
+        if self._instance_keys == 'sql:memory':
             self.cache = False
 
         self._cache_locks = collections.defaultdict(lambda: threading.RLock())
@@ -492,6 +492,23 @@ class Pipe:
             for key, val in self.meta.items()
             if key != 'instance'
         }
+
+    @property
+    def instance_keys(self) -> str:
+        """
+        Return the pipe's instance keys.
+        """
+        return self._instance_keys
+
+    @property
+    def instance(self) -> Union[InstanceConnector, str]:
+        """
+        Return the pipe's instance connector or keys.
+        """
+        conn = self.instance_connector
+        if conn is None:
+            return self.instance_keys
+        return conn
 
     @property
     def instance_connector(self) -> Union[InstanceConnector, None]:
