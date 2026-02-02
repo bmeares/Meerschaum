@@ -362,8 +362,8 @@ def filter_unseen_df(
 
     na_pattern = r'(?i)^(none|nan|na|nat|natz|<na>)$'
     joined_df = merge(
-        new_df.infer_objects(copy=False).replace(na_pattern, pd.NA, regex=True).fillna(NA),
-        old_df.infer_objects(copy=False).replace(na_pattern, pd.NA, regex=True).fillna(NA),
+        new_df.infer_objects().replace(na_pattern, pd.NA, regex=True).fillna(NA),
+        old_df.infer_objects().replace(na_pattern, pd.NA, regex=True).fillna(NA),
         how='left',
         on=None,
         indicator=True,
@@ -586,7 +586,7 @@ def parse_df_datetimes(
     if len(cols_to_inspect) == 0:
         if debug:
             dprint("All columns are ignored, skipping datetime detection...")
-        return df.infer_objects(copy=False).fillna(pandas.NA)
+        return df.infer_objects().fillna(pandas.NA)
 
     ### apply regex to columns to determine which are ISO datetimes
     iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d+'
@@ -599,7 +599,7 @@ def parse_df_datetimes(
     if not datetime_cols:
         if debug:
             dprint("No columns detected as datetimes, returning...")
-        return df.infer_objects(copy=False).fillna(pandas.NA)
+        return df.infer_objects().fillna(pandas.NA)
 
     if debug:
         dprint("Converting columns to datetimes: " + str(datetime_cols))
@@ -2142,7 +2142,7 @@ def to_json(
                 serialize_geometry(val, geometry_format=geometry_format, srid=srid)
                 for val in df[col]
             )
-    return df.infer_objects(copy=False).fillna(pd.NA).to_json(
+    return df.infer_objects().fillna(pd.NA).to_json(
         date_format=date_format,
         date_unit=date_unit,
         double_precision=double_precision,
