@@ -125,12 +125,12 @@ def test_filter_unseen_df(old_docs, new_docs, expected_docs):
                 'other': [1],
             }),
             {
-                'dt_tz_aware': 'datetime64[ns, UTC]',
+                'dt_tz_aware': 'datetime64[us, UTC]',
                 'distant_dt': 'datetime64[us]',
                 'dt_second': 'datetime64[s]',
             },
             {
-                'dt_tz_aware': ('UTC', 'nanosecond'),
+                'dt_tz_aware': ('UTC', 'microsecond'),
                 'distant_dt': (None, 'microsecond'),
                 'dt_second': (None, 'second'),
             },

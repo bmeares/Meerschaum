@@ -140,7 +140,7 @@ packages: Dict[str, Dict[str, str]] = {
 }
 packages['sql'] = {
     'numpy'                          : 'numpy>=2.3.1',
-    'pandas'                         : 'pandas[parquet]>=2.3.1',
+    'pandas'                         : 'pandas[parquet]>=3.0.0',
     'pyarrow'                        : 'pyarrow>=20.0.0',
     'dask'                           : 'dask[complete]>=2024.12.1',
     'partd'                          : 'partd>=1.4.2',
