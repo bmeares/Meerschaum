@@ -848,7 +848,6 @@ def get_datetime_cols(
     if df is None:
         return [] if not with_tz_precision else {}
 
-    from datetime import datetime
     from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PRECISION_UNITS_ALIASES
     is_dask = 'dask' in df.__module__
     if is_dask:
