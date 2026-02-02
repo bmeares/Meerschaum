@@ -29,7 +29,7 @@ from starlette import status
 class CustomOAuth2PasswordRequestForm:
     def __init__(
         self,
-        grant_type: str = fastapi.Form(None, regex="password|client_credentials"),
+        grant_type: str = fastapi.Form(None, pattern="password|client_credentials"),
         username: Optional[str] = fastapi.Form(None),
         password: Optional[str] = fastapi.Form(None),
         scope: str = fastapi.Form(" ".join(STATIC_CONFIG['tokens']['scopes'])),

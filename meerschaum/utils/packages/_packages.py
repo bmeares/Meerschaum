@@ -157,8 +157,8 @@ packages['sql'].update(packages['core'])
 packages['sql'].update(packages['gis'])
 packages['dash'] = {
     'flask_compress'                 : 'Flask-Compress>=1.17.0',
-    'dash'                           : 'dash>=3.1.1',
-    'dash_bootstrap_components'      : 'dash-bootstrap-components>=1.7.1',
+    'dash'                           : 'dash<3.4.0',
+    'dash_bootstrap_components'      : 'dash-bootstrap-components>=2.0.4',
     'dash_ace'                       : 'dash-ace>=0.2.1',
     'dash_extensions'                : 'dash-extensions>=2.0.4',
     'dash_daq'                       : 'dash-daq>=0.6.0',
@@ -170,7 +170,7 @@ packages['api'] = {
     'gunicorn'                       : 'gunicorn>=23.0.0',
     'dotenv'                         : 'python-dotenv>=1.1.1',
     'websockets'                     : 'websockets>=15.0.1',
-    'fastapi'                        : 'fastapi>=0.116.0',
+    'fastapi'                        : 'fastapi>=0.128.0',
     'fastapi_login'                  : 'fastapi-login>=1.10.3',
     'multipart'                      : 'python-multipart>=0.0.20',
     'httpx'                          : 'httpx>=0.28.1',
