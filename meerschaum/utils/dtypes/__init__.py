@@ -842,7 +842,8 @@ def serialize_geometry(
 
     if geometry_format.startswith("wkb"):
         return shapely.to_wkb(geom, hex=(geometry_format=="wkb_hex"), include_srid=True)
-    elif geometry_format == 'gpkg_wkb':
+
+    if geometry_format == 'gpkg_wkb':
         wkb_data = shapely.to_wkb(geom, hex=False, byte_order=byte_order)
         flags = (
             ((byte_order & 0x01) | (0x20))

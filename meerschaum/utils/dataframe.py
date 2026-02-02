@@ -2103,11 +2103,13 @@ def to_json(
         serialize_bytes,
         serialize_decimal,
         serialize_geometry,
+        serialize_date,
     )
     pd = import_pandas()
     uuid_cols = get_uuid_cols(df)
     bytes_cols = get_bytes_cols(df)
     numeric_cols = get_numeric_cols(df)
+    date_cols = get_date_cols(df)
     geometry_cols = get_geometry_cols(df)
     geometry_cols_srids = {
         col: int((getattr(df[col].crs, 'srs', '') or '').split(':', maxsplit=1)[-1] or '0')
@@ -2133,6 +2135,8 @@ def to_json(
         df[col] = df[col].apply(serialize_bytes)
     for col in numeric_cols:
         df[col] = df[col].apply(serialize_decimal)
+    for col in date_cols:
+        df[col] = df[col].apply(serialize_date)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for col in geometry_cols:
