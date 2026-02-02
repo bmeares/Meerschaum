@@ -362,8 +362,8 @@ def filter_unseen_df(
 
     na_pattern = r'(?i)^(none|nan|na|nat|natz|<na>)$'
     joined_df = merge(
-        new_df.infer_objects(copy=False).replace(na_pattern, pd.NA, regex=True).fillna(NA),
-        old_df.infer_objects(copy=False).replace(na_pattern, pd.NA, regex=True).fillna(NA),
+        new_df.infer_objects().replace(na_pattern, pd.NA, regex=True).fillna(NA),
+        old_df.infer_objects().replace(na_pattern, pd.NA, regex=True).fillna(NA),
         how='left',
         on=None,
         indicator=True,
@@ -586,7 +586,7 @@ def parse_df_datetimes(
     if len(cols_to_inspect) == 0:
         if debug:
             dprint("All columns are ignored, skipping datetime detection...")
-        return df.infer_objects(copy=False).fillna(pandas.NA)
+        return df.infer_objects().fillna(pandas.NA)
 
     ### apply regex to columns to determine which are ISO datetimes
     iso_dt_regex = r'\d{4}-\d{2}-\d{2}.\d{2}\:\d{2}\:\d+'
@@ -599,7 +599,7 @@ def parse_df_datetimes(
     if not datetime_cols:
         if debug:
             dprint("No columns detected as datetimes, returning...")
-        return df.infer_objects(copy=False).fillna(pandas.NA)
+        return df.infer_objects().fillna(pandas.NA)
 
     if debug:
         dprint("Converting columns to datetimes: " + str(datetime_cols))
@@ -848,7 +848,6 @@ def get_datetime_cols(
     if df is None:
         return [] if not with_tz_precision else {}
 
-    from datetime import datetime
     from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PRECISION_UNITS_ALIASES
     is_dask = 'dask' in df.__module__
     if is_dask:
@@ -2104,11 +2103,13 @@ def to_json(
         serialize_bytes,
         serialize_decimal,
         serialize_geometry,
+        serialize_date,
     )
     pd = import_pandas()
     uuid_cols = get_uuid_cols(df)
     bytes_cols = get_bytes_cols(df)
     numeric_cols = get_numeric_cols(df)
+    date_cols = get_date_cols(df)
     geometry_cols = get_geometry_cols(df)
     geometry_cols_srids = {
         col: int((getattr(df[col].crs, 'srs', '') or '').split(':', maxsplit=1)[-1] or '0')
@@ -2134,6 +2135,8 @@ def to_json(
         df[col] = df[col].apply(serialize_bytes)
     for col in numeric_cols:
         df[col] = df[col].apply(serialize_decimal)
+    for col in date_cols:
+        df[col] = df[col].apply(serialize_date)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for col in geometry_cols:
@@ -2142,7 +2145,7 @@ def to_json(
                 serialize_geometry(val, geometry_format=geometry_format, srid=srid)
                 for val in df[col]
             )
-    return df.infer_objects(copy=False).fillna(pd.NA).to_json(
+    return df.infer_objects().fillna(pd.NA).to_json(
         date_format=date_format,
         date_unit=date_unit,
         double_precision=double_precision,
