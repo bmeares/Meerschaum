@@ -191,7 +191,13 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
           flavor: "sqlite"
           database: "{MRSM_ROOT_DIR}/foo.db"
         bar:
-          uri: "sqlite:///{__file__}/bar.db" 
+          uri: "sqlite:///{__file__}/../bar.db" 
+        secret:
+          flavor: "postgresql"
+          username: "${PGUSER}"
+          password: "${PGPASSWORD}"
+          port: $PGPORT
+          database: "$PGDATABASE"
     ```
 
 ### The `connectors` Key
@@ -203,10 +209,6 @@ connectors:
   sql:
     main: "{sql:dev}"
 ```
-
-### The `instance` Key
-
-The `instance` key (an alias for `config.meerschaum.instance`) defines the default instance connector for the project. If undefined, it defaults to `sql:main`.
 
 ### The `pipes` Key
 
