@@ -1359,7 +1359,7 @@ def truncate_string_sections(item: str, delimeter: str = '_', max_len: int = 128
     def _shorten(s: str) -> str:
         return s[:-1] if len(s) > 1 else s
 
-    sections = list(enumerate(item.split('_')))
+    sections = list(enumerate(item.split(delimeter)))
     sorted_sections = sorted(sections, key=lambda x: (-1 * len(x[1])))
     available_chars = max_len - len(sections)
 
