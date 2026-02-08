@@ -1228,20 +1228,7 @@ def is_bcp_available() -> bool:
 
 def is_systemd_available() -> bool:
     """Check if running on systemd."""
-    import subprocess
-    try:
-        has_systemctl = subprocess.call(
-            ['systemctl', 'whoami'],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
-        ) == 0
-    except FileNotFoundError:
-        has_systemctl = False
-    except Exception:
-        import traceback
-        traceback.print_exc()
-        has_systemctl = False
-    return has_systemctl
+    return os.path.isdir('/run/systemd/system')
 
 
 def is_tmux_available() -> bool:

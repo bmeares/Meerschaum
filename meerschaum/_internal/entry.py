@@ -122,7 +122,11 @@ def entry_without_daemon(
 
     chained_sysargs = (
         [sysargs]
-        if has_daemon or has_start_job or pipeline_has_api_executor_keys
+        if (
+            has_daemon
+            or has_start_job
+            or pipeline_has_api_executor_keys
+        )
         else split_chained_sysargs(sysargs)
     )
     if pipeline_args:

@@ -9,9 +9,9 @@ With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in 
     For complicated projects, a common pattern is to include multiple Compose files and run them with `--file`:
 
     ```bash
-    mrsm compose run --file mrsm-compose-00-extract.yaml && \
-    mrsm compose run --file mrsm-compose-01-transform.yaml && \
-    mrsm compose run --file mrsm-compose-02-load.yaml
+    mrsm compose run --file mrsm-compose-00-extract.yaml + \
+         compose run --file mrsm-compose-01-transform.yaml + \
+         compose run --file mrsm-compose-02-load.yaml
     ```
 
     This pattern allows multiple projects to cleanly share root and plugins directories.
@@ -142,6 +142,10 @@ Flag | Description | Example
 
 Below are the supported top-level keys in a Compose file. Note that all keys are optional.
 
+- **`connectors`**  
+  Define the available connectors for the project. Alias for `config.meerschaum.connectors`.
+- **`instance`**  
+  Connector keys for the default instance for the project. Alias for `config.meerschaum.instance`.
 - **`pipes`**  
   List all of the pipes to be used in this project. See the **The `pipes` Key** section below.
 - **`sync`**  
@@ -158,7 +162,7 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
   A list of plugins expected to be in the plugins directory. Missing plugins will be [installed from `api:mrsm`](/reference/plugins/using-plugins/).  
   To install from a custom repository, append `@api:<label>` to the plugins' names or set the configuration variable `meerschaum:default_repository`.
 - **`config`**  
-  Configuration keys to be patched on top of your host configuration, see [`MRSM_CONFIG`](/reference/environment/#mrsm_config). Custom connectors should be defined here.
+  Configuration keys to be patched on top of your host configuration, see [`MRSM_CONFIG`](/reference/environment/#mrsm_config).
 - **`environment`**  
   Additional environment variables to pass to subprocesses.
 - **`isolation`**  
@@ -176,6 +180,33 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
         sql:
           foo: MRSM{meerschaum:connectors:sql:main}
     ```
+
+!!! tip "File Path and Environment Variables"
+    Each Compose file substitutes the string values `{MRSM_ROOT_DIR}` and `{__file__}` with the corresponding file paths (root directory and compose file, respectively). Similarly, you may reference standard environment variables with `$`:
+
+    ```yaml
+    connectors:
+      sql:
+        foo:
+          flavor: "sqlite"
+          database: "{MRSM_ROOT_DIR}/foo.db"
+        bar:
+          uri: "sqlite:///{__file__}/bar.db" 
+    ```
+
+### The `connectors` Key
+
+The `connectors` key (an alias for `config.meerschaum.connectors`) defines the connectors available to the project. Project-defined connectors may reference connectors from the host Meerschaum configuration by referencing the host keys (in braces). For example, below is how you would define `sql:main` within a project to be `sql:dev` from the host environment.
+
+```yaml
+connectors:
+  sql:
+    main: "{sql:dev}"
+```
+
+### The `instance` Key
+
+The `instance` key (an alias for `config.meerschaum.instance`) defines the default instance connector for the project. If undefined, it defaults to `sql:main`.
 
 ### The `pipes` Key
 
