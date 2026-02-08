@@ -195,7 +195,7 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
         secret:
           flavor: "postgresql"
           username: "${PGUSER}"
-          password: "${PGPASSWORD}"
+          password: ${PGPASSWORD}
           port: $PGPORT
           database: "$PGDATABASE"
     ```
