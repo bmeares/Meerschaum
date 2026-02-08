@@ -1139,6 +1139,7 @@ def run_python_package(
     args: Optional[List[str]] = None,
     venv: Optional[str] = 'mrsm',
     cwd: Optional[str] = None,
+    env: Optional[Dict[str, str]] = None,
     foreground: bool = False,
     as_proc: bool = False,
     capture_output: bool = False,
@@ -1164,6 +1165,10 @@ def run_python_package(
         If specified, change directories before starting the process.
         Defaults to `None`.
 
+    env: Optional[Dict[str, str]], default None
+        If specified, only use the provided dictionary for the environment variables.
+        Defaults to `os.environ`.
+
     as_proc: bool, default False
         If `True`, return a `subprocess.Popen` object.
 
@@ -1184,8 +1189,8 @@ def run_python_package(
     (or `None` if a `KeyboardInterrupt` occurs and as_proc is `True`).
     """
     import sys
-    import platform
     import subprocess
+    import traceback
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     from meerschaum.utils.process import run_process
     from meerschaum.utils.warnings import warn
@@ -1196,11 +1201,10 @@ def run_python_package(
         os.chdir(cwd)
     executable = venv_executable(venv=venv)
     venv_path = (VIRTENV_RESOURCES_PATH / venv) if venv is not None else None
-    env_dict = kw.get('env', os.environ).copy()
+    env_dict = (env if isinstance(env, dict) else (os.environ or {})).copy()
     if venv_path is not None:
         env_dict.update({'VIRTUAL_ENV': venv_path.as_posix()})
     command = [executable, '-m', str(package_name)] + [str(a) for a in args]
-    import traceback
     if debug:
         print(command, file=sys.stderr)
     try:

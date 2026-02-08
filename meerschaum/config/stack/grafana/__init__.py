@@ -19,12 +19,12 @@ default_datasource = {
                 'sslmode': 'disable',
                 'postgresVersion': 1500,
                 'timescaledb': True,
+                'database': db_base,
             },
             'user': db_user,
             'secureJsonData': {
                 'password': db_pass,
             },
-            'database': db_base,
             'url': db_host + ':5432',
             'isDefault': True,
             'editable': True,

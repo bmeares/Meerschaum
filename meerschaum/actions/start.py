@@ -221,7 +221,7 @@ def _start_jobs(
             return (False, "Create a new job with `-d` / `--daemon`."), name
 
         job_sysargs = (
-            shlex.join([a for a in sysargs if a not in ('-d', '--daemon')])
+            shlex.join([a for a in (sysargs or []) if a not in ('-d', '--daemon')])
             if not line
             else line
         )
@@ -229,14 +229,14 @@ def _start_jobs(
 
         if not job.exists():
             try:
-                confirm = yes_no(
+                confirm = kw.get('force', False) or yes_no(
                     f"Create new job '{name}'?\n    {job_sysargs}\n",
                     default='y',
                     yes=kw.get('yes', False),
                     noask=kw.get('noask', False),
                 )
             except Exception:
-                confirm = True
+                confirm = False
             if not confirm:
                 return (False, "Nothing changed."), name
 

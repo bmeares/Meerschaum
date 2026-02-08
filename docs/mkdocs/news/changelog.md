@@ -4,7 +4,20 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.1.4
+### v3.1.7
+
+- **Fix `is_systemd_available()` for older versions of `systemd`.**  
+  Older versions of `systemd` (e.g. on the Raspberry Pi) are now correctly detected.
+
+- **Handle explicitly `None` environments for `run_python_package()`.**  
+  This resolves a subprocess issue with `compose`.
+
+- **Fix default database configuration for Grafana.**  
+  New deployments correctly configure the default Meerschaum 
+
+- **Properly cancel jobs when CTRL+C is pressed on confirmation.**
+
+### v3.1.4 — v3.1.6
 
 - **Add support for ESRI CRS for `geometry` columns.**  
   In addition to EPSG projections, pipes with geometry data may now sync shapefiles with ESRI (or other authorities, default EPSG) projections.

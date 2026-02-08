@@ -1228,20 +1228,7 @@ def is_bcp_available() -> bool:
 
 def is_systemd_available() -> bool:
     """Check if running on systemd."""
-    import subprocess
-    try:
-        has_systemctl = subprocess.call(
-            ['systemctl', 'whoami'],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
-        ) == 0
-    except FileNotFoundError:
-        has_systemctl = False
-    except Exception:
-        import traceback
-        traceback.print_exc()
-        has_systemctl = False
-    return has_systemctl
+    return os.path.isdir('/run/systemd/system')
 
 
 def is_tmux_available() -> bool:
@@ -1359,7 +1346,7 @@ def truncate_string_sections(item: str, delimeter: str = '_', max_len: int = 128
     def _shorten(s: str) -> str:
         return s[:-1] if len(s) > 1 else s
 
-    sections = list(enumerate(item.split('_')))
+    sections = list(enumerate(item.split(delimeter)))
     sorted_sections = sorted(sections, key=lambda x: (-1 * len(x[1])))
     available_chars = max_len - len(sections)
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pathlib
 import functools
+from collections import defaultdict
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List, Tuple
@@ -320,8 +321,8 @@ def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
     return function
 
 
-_synced_symlinks: bool = False
-_injected_plugin_symlinks = set()
+_synced_symlinks: int = 0
+_injected_plugin_symlinks = defaultdict(lambda: 0)
 def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     """
     Update the plugins' internal symlinks. 
@@ -329,7 +330,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     from meerschaum.utils.warnings import error, warn as _warn, dprint
     global _synced_symlinks
     with _locks['_synced_symlinks']:
-        if _synced_symlinks:
+        if _synced_symlinks > 1:
             if debug:
                 dprint("Skip syncing symlinks...")
             return
@@ -446,7 +447,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
 
             ### Remove invalid symlinks.
             if real_path not in plugins_to_be_symlinked:
-                if plugin_symlink_path in _injected_plugin_symlinks:
+                if _injected_plugin_symlinks[plugin_symlink_path] > 1:
                     continue
                 if plugin_symlink_path in injected_symlinked_paths:
                     continue
@@ -506,7 +507,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
             __path__.append(str(PLUGINS_RESOURCES_PATH.parent))
 
     with _locks['_synced_symlinks']:
-        _synced_symlinks = True
+        _synced_symlinks += 1
 
 
 def import_plugins(
@@ -796,7 +797,7 @@ def unload_plugins(
         from meerschaum.utils.warnings import dprint
 
     _loaded_plugins = False
-    _synced_symlinks = False
+    _synced_symlinks = 0
 
     all_plugins = get_plugins_names()
     plugins = plugins if plugins is not None else all_plugins
@@ -883,7 +884,7 @@ def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> 
     """
     global _synced_symlinks
     unload_plugins(plugins, debug=debug)
-    _synced_symlinks = False
+    _synced_symlinks = 0
     sync_plugins_symlinks(debug=debug)
     load_plugins(skip_if_loaded=False, debug=debug)
 
@@ -1019,7 +1020,7 @@ def inject_plugin_path(
     else:
         raise ValueError(f"Cannot deduce plugin name from path '{plugin_path}'.")
 
-    _injected_plugin_symlinks.add(dest_path)
+    _injected_plugin_symlinks[dest_path] += 1
     make_symlink(plugin_path, dest_path)
     make_symlink(plugin_path, injected_path)
 
