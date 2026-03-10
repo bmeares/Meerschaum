@@ -2,17 +2,27 @@
 // Copyright (c) 2014, Ramalingam Saravanan <sarava@sarava.net>
 // Distributed under the terms of the Simplified BSD License.
 
-function make_terminal(element, size, ws_url) {
+function make_terminal(element, options, ws_url) {
   var ws = new WebSocket(ws_url);
-  var term = new Terminal({
-    cols: size.cols,
-    rows: size.rows,
+  var terminal_options = {
+    cols: 80,
+    rows: 25,
     screenKeys: true,
     useStyle: true,
     scrollback: 9999999,
     cursorBlink: true,
     allowProposedApi: true
-  });
+  };
+  
+  // If options is a simple size object (legacy)
+  if (options.cols && options.rows && Object.keys(options).length === 2) {
+    terminal_options.cols = options.cols;
+    terminal_options.rows = options.rows;
+  } else {
+    Object.assign(terminal_options, options);
+  }
+
+  var term = new Terminal(terminal_options);
   term.loadAddon(new Unicode11Addon.Unicode11Addon());
   term.unicode.activeVersion = '11';
   term.attachCustomKeyEventHandler(copyPasteKeyEventHandler);
@@ -22,8 +32,8 @@ function make_terminal(element, size, ws_url) {
     ws.send(
       JSON.stringify([
         "set_size",
-        size.rows,
-        size.cols,
+        terminal_options.rows,
+        terminal_options.cols,
         element.innerHeight,
         element.innerWidth,
       ]),

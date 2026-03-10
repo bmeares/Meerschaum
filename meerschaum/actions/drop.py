@@ -42,6 +42,7 @@ def _drop_pipes(
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.sql import sql_item_name
 
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
@@ -53,7 +54,15 @@ def _drop_pipes(
     )
     seen_targets = set()
     for pipe in pipes:
-        target = pipe.target
+        target = (
+            pipe.target
+            if pipe.instance_connector.type != 'sql'
+            else sql_item_name(
+                pipe.target,
+                pipe.instance_connector.flavor,
+                schema=pipe.parameters.get('schema', None)
+            )
+        )
         if target in seen_targets:
             continue
         question += f"    - {target}" + "\n"

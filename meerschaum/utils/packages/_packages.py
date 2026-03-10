@@ -39,7 +39,7 @@ packages: Dict[str, Dict[str, str]] = {
         'semver'                     : 'semver>=3.0.2',
         'pathspec'                   : 'pathspec>=0.9.0',
         'dateutil'                   : 'python-dateutil>=2.7.5',
-        'requests'                   : 'requests>=2.32.3',
+        'requests'                   : 'requests>=2.32.5',
         'certifi'                    : 'certifi>=2024.8.30',
         'idna'                       : 'idna>=3.10.0',
         'binaryornot'                : 'binaryornot>=0.4.4',
@@ -157,10 +157,10 @@ packages['sql'].update(packages['core'])
 packages['sql'].update(packages['gis'])
 packages['dash'] = {
     'flask_compress'                 : 'Flask-Compress>=1.17.0',
-    'dash'                           : 'dash<3.4.0',
+    'dash'                           : 'dash>=4.0.0',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=2.0.4',
     'dash_ace'                       : 'dash-ace>=0.2.1',
-    'dash_extensions'                : 'dash-extensions>=2.0.4',
+    'dash_extensions'                : 'dash-extensions>=2.0.5',
     'dash_daq'                       : 'dash-daq>=0.6.0',
     'terminado'                      : 'terminado>=0.18.1',
     'tornado'                        : 'tornado>=6.5.1',

@@ -168,6 +168,7 @@ def get_pipe_metadef(
     if begin not in (None, '') and end is not None and begin >= end:
         begin = None
 
+    begin_da, end_da = None, None
     if dt_name:
         begin_da = (
             dateadd_str(
