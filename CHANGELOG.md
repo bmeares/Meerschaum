@@ -12,6 +12,12 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add the schema to the `drop pipes` confirmation prompt.**  
   To enhance clarification, a SQL pipe's table schema will be included the confirmation prompt.
 
+- **Upgrade `xterm.js`.**  
+  The latest `xterm.js` (v6.0.0) is now included for the webterm. This also includes refactoring work to address scrollbar issues on Chromium-based browsers.
+
+- **Upgrade `dash` to 4.0.**  
+  This release upgrades to web dashboard to Plotly Dash 4, which improves the multi-select dropdowns.
+
 ### v3.1.7
 
 - **Fix `is_systemd_available()` for older versions of `systemd`.**  
