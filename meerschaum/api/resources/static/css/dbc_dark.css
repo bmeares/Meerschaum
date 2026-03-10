@@ -37,10 +37,15 @@
  */
 
 /* input box */
-.dbc_dark .Select-control, .dash-dropdown-grid-container, .dash-dropdown-value, .dash-dropdown-placeholder, .dash-dropdown-content, .dash-dropdown-value-count, .dash-dropdown-clear, .dash-dropdown-trigger-icon, .dash-options-list, .dash-options-list-option-text, .dash-dropdown-action-button, .dash-dropdown-search {
-    /* background-color: black !important; */
+.dbc_dark .Select-control, .dash-dropdown-grid-container, .dash-dropdown-value-item, .dash-dropdown-placeholder, .dash-dropdown-content, .dash-dropdown-value-count, .dash-dropdown-clear, .dash-dropdown-trigger-icon, .dash-options-list, .dash-options-list-option-text, .dash-dropdown-action-button, .dash-dropdown-search {
     background-color: var(--bs-dark) !important;
     color: white;
+}
+.dash-dropdown-placeholder {
+  color: var(--bs-gray);
+}
+.dash-dropdown {
+  border: 1px solid grey;
 }
 
 .form-control {
