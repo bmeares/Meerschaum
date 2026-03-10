@@ -4,6 +4,14 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.1.8
+
+- **Fix issue with CTEs (`WITH` keyword) and `UNION ALL` subqueries.**  
+  A bug has been fixed where queries containing both CTEs (`WITH`) and `UNION ALL` queries would previously break the query parser.
+
+- **Add the schema to the `drop pipes` confirmation prompt.**  
+  To enhance clarification, a SQL pipe's table schema will be included the confirmation prompt.
+
 ### v3.1.7
 
 - **Fix `is_systemd_available()` for older versions of `systemd`.**  

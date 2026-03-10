@@ -44,13 +44,13 @@ from meerschaum.api.dash.components import (
     build_cards_grid,
     build_pages_offcanvas_children,
 )
+from meerschaum.api.dash.keys import build_flags_row, build_flags_options
 from meerschaum.api.dash import pages
 from meerschaum.utils.typing import Dict
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.utils.misc import filter_keywords, flatten_list, string_to_dict
 from meerschaum.utils.yaml import yaml
 from meerschaum.actions import get_subactions, actions
-from meerschaum._internal.arguments._parser import parser
 from meerschaum.connectors.sql._fetch import set_pipe_query, get_pipe_query
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
@@ -75,17 +75,7 @@ keys_state = (
     State('session-store', 'data'),
 )
 
-omit_flags = {
-    'help',
-    'gui',
-    'version',
-    'shell',
-    'use_bash',
-    'trace',
-    'allow_shell_job',
-    'action',
-    'mrsm_instance',
-}
+
 omit_actions = {
     'api',
     'sh',
@@ -400,88 +390,15 @@ def update_flags(input_flags_dropdown_values, n_clicks, input_flags_texts):
     trigger_type = trigger_dict.get('type', None)
     taken_input_flags = set(flatten_list(input_flags_dropdown_values))
 
-    def build_flags_options(is_input: bool = False):
-        _flags_options = []
-        for a in parser._actions:
-            acceptable_args = (a.nargs != 0 if not is_input else a.nargs == 0)
-            if acceptable_args or a.dest in omit_flags:
-                continue
-            _op = {'title': a.help}
-            for _trigger in a.option_strings:
-                if _trigger.startswith('--'):
-                    _op['value'] = _trigger
-                    break
-            if not _op.get('value', None):
-                _op['value'] = a.dest
-            _op['label'] = _op['value']
-            _flags_options.append(_op)
-        return sorted(_flags_options, key=lambda k: k['label'])
-
-    def build_row(index: int, val: Optional[str], val_text: Optional[str]):
-        options = [
-            op
-            for op in build_flags_options(is_input=True)
-            if op['value'] == val or op['value'] not in taken_input_flags
-        ]
-        row_children = [
-            dbc.Col(
-                html.Div(
-                    dbc.InputGroup([
-                        dbc.Button(
-                            '❌',
-                            color = 'link',
-                            id = {'type': 'input-flags-remove-button', 'index': index},
-                            size = 'sm',
-                            style = {'text-decoration': 'none'},
-                        ),
-                        dcc.Dropdown(
-                            id = {'type': 'input-flags-dropdown', 'index': index},
-                            multi = False,
-                            placeholder = 'Input flags',
-                            options = options,
-                            value = val,
-                            style = {'flex': 1},
-                        ),
-                    ]),
-                    id = {'type': 'input-flags-dropdown-div', 'index': index},
-                    className = 'dbc_dark',
-                ),
-                sm = 12,
-                md = 5,
-                lg = 5,
-                id = 'input-flags-left-col',
-            ),
-            dbc.Col(
-                html.Div(
-                    dbc.Input(
-                        id = {'type': 'input-flags-dropdown-text', 'index': index},
-                        placeholder = 'Flag value',
-                        className = 'input-text',
-                        value = val_text,
-                    ),
-                    id = {'type': 'input-flags-text-div', 'index': index},
-                    className = 'dbc_dark input-text',
-                ),
-                sm = 12,
-                md = 7,
-                lg = 7,
-            )
-        ]
-        return dbc.Row(
-            row_children,
-            id = {'type': 'input-flags-row', 'index': index},
-            className = 'input-text',
-        )
-
     remove_index = trigger_dict['index'] if trigger_type == 'input-flags-remove-button' else None
     rows = [
-        build_row(i, val, val_text)
+        build_flags_row(i, val, val_text)
         for i, (val, val_text) in enumerate(zip(input_flags_dropdown_values, input_flags_texts))
         if i != remove_index
     ]
 
     if not rows or input_flags_dropdown_values[-1]:
-        rows.append(build_row(len(rows), None, None))
+        rows.append(build_flags_row(len(rows), None, None, taken_input_flags=taken_input_flags))
 
     return rows, build_flags_options()
 

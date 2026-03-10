@@ -2524,14 +2524,47 @@ def wrap_query_with_cte(
         )
 
     if sub_query.lstrip().lower().startswith('with '):
-        final_select_ix = sub_query.lower().rfind('select')
-        return (
-            sub_query[:final_select_ix].rstrip() + ',\n'
-            + f"{cte_name_quoted} AS (\n"
-            + '    ' + sub_query[final_select_ix:]
-            + "\n)\n"
-            + parent_query
-        )
+        depth = 0
+        select_index = -1
+        sq_lower = sub_query.lower()
+
+        # Iterate through the query to find the first 'SELECT' at the top level (depth 0)
+        # Start searching after the 'WITH' keyword
+        start_search = sq_lower.find('with') + 4
+
+        for i in range(start_search, len(sq_lower)):
+            char = sq_lower[i]
+            if char == '(':
+                depth += 1
+            elif char == ')':
+                depth -= 1
+            elif depth == 0:
+                # Check for 'SELECT' at a word boundary
+                if sq_lower[i:i+6] == 'select':
+                    # Ensure it's not part of another word (e.g., 'selection')
+                    # by checking the character immediately following 'select'
+                    is_bound = (i + 6 == len(sq_lower)) or (not sq_lower[i+6].isalnum())
+                    if is_bound:
+                        select_index = i
+                        break
+
+        # If we found the main SELECT, we slice and flatten.
+        # Part 1 (definitions) contains the 'WITH cte AS (...),'
+        # Part 2 (body) contains the 'SELECT ... UNION ALL ...'
+        if select_index != -1:
+            definitions = sub_query[:select_index].rstrip()
+            # If the definitions end in a comma (rare but possible), remove it
+            if definitions.endswith(','):
+                definitions = definitions[:-1].rstrip()
+
+            body = sub_query[select_index:].strip()
+
+            return (
+                f"{definitions},\n"
+                f"{cte_name_quoted} AS (\n"
+                f"{textwrap.indent(body, '    ')}\n"
+                f")\n{parent_query}"
+            )
 
     return (
         f"WITH {cte_name_quoted} AS (\n"

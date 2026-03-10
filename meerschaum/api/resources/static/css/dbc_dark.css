@@ -37,7 +37,7 @@
  */
 
 /* input box */
-.dbc_dark .Select-control {
+.dbc_dark .Select-control, .dash-dropdown-grid-container, .dash-dropdown-value, .dash-dropdown-placeholder, .dash-dropdown-content, .dash-dropdown-value-count, .dash-dropdown-clear, .dash-dropdown-trigger-icon, .dash-options-list, .dash-options-list-option-text, .dash-dropdown-action-button, .dash-dropdown-search {
     /* background-color: black !important; */
     background-color: var(--bs-dark) !important;
     color: white;

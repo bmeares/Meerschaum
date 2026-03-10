@@ -11,6 +11,7 @@ from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.actions import actions
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.api.dash.components import search_parameters_editor
+from meerschaum._internal.arguments._parser import parser
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
@@ -33,6 +34,97 @@ input_group_sizes = {
     'lk' : 'sm',
     'params' : 'sm',
 }
+omit_flags = {
+    'help',
+    'gui',
+    'version',
+    'shell',
+    'use_bash',
+    'trace',
+    'allow_shell_job',
+    'action',
+    'mrsm_instance',
+}
+
+def build_flags_options(is_input: bool = False):
+    _flags_options = []
+    for a in parser._actions:
+        acceptable_args = (a.nargs != 0 if not is_input else a.nargs == 0)
+        if acceptable_args or a.dest in omit_flags:
+            continue
+        _op = {'title': a.help}
+        for _trigger in a.option_strings:
+            if _trigger.startswith('--'):
+                _op['value'] = _trigger
+                break
+        if not _op.get('value', None):
+            _op['value'] = a.dest
+        _op['label'] = _op['value']
+        _flags_options.append(_op)
+    return sorted(_flags_options, key=lambda k: k['label'])
+
+def build_flags_row(
+    index: int,
+    val: str | None,
+    val_text: str | None,
+    taken_input_flags: list[str] | None = None,
+):
+    taken_input_flags = taken_input_flags or []
+    options = [
+        op
+        for op in build_flags_options(is_input=True)
+        if op['value'] == val or op['value'] not in taken_input_flags
+    ]
+    row_children = [
+        dbc.Col(
+            html.Div(
+                dbc.InputGroup([
+                    dbc.Button(
+                        '❌',
+                        color = 'link',
+                        id = {'type': 'input-flags-remove-button', 'index': index},
+                        size = 'sm',
+                        style = {'text-decoration': 'none'},
+                    ),
+                    dcc.Dropdown(
+                        id = {'type': 'input-flags-dropdown', 'index': index},
+                        multi = False,
+                        placeholder = 'Input flags',
+                        options = options,
+                        value = val,
+                        style = {'flex': 1},
+                    ),
+                ]),
+                id = {'type': 'input-flags-dropdown-div', 'index': index},
+                className = 'dbc_dark',
+            ),
+            sm = 12,
+            md = 5,
+            lg = 5,
+            id = 'input-flags-left-col',
+        ),
+        dbc.Col(
+            html.Div(
+                dbc.Input(
+                    id = {'type': 'input-flags-dropdown-text', 'index': index},
+                    placeholder = 'Flag value',
+                    className = 'input-text',
+                    value = val_text,
+                ),
+                id = {'type': 'input-flags-text-div', 'index': index},
+                className = 'dbc_dark input-text',
+            ),
+            sm = 12,
+            md = 7,
+            lg = 7,
+        )
+    ]
+    return dbc.Row(
+        row_children,
+        id = {'type': 'input-flags-row', 'index': index},
+        className = 'input-text',
+    )
+
 
 action_dropdown_row = html.Div(
         children = [
@@ -116,7 +208,7 @@ action_dropdown_row = html.Div(
             ],
         ),
         html.Br(),
-        html.Div(id='input-flags-div'),
+        html.Div([build_flags_row(1, None, None)], id='input-flags-div'),
         dbc.Row(
             children=[
                 dbc.Col(
