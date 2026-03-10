@@ -7,6 +7,7 @@ Utility functions regarding the webterm.
 """
 
 from typing import List, Optional
+import warnings
 
 import meerschaum as mrsm
 
@@ -20,7 +21,9 @@ def is_webterm_running(
     """
     Determine whether the webterm service is running on a given host and port.
     """
-    requests = mrsm.attempt_import('requests', lazy=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        requests = mrsm.attempt_import('requests', lazy=False)
     host = host or mrsm.get_config('api', 'webterm', 'host')
     port = port or mrsm.get_config('api', 'webterm', 'port')
     url = f'{protocol}://{host}:{port}/webterm/{session_id}'
