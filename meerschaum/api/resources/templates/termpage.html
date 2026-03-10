@@ -1,10 +1,24 @@
 <!DOCTYPE html>
+<html>
 <head>
 <meta charset="UTF-8">
 <title>Meerschaum Shell</title>
 <style>
-  html {
+  html, body {
     background: #000;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  #xterm-div {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 5px;
+    box-sizing: border-box;
+    overflow: hidden;
   }
 </style>
 <link rel="stylesheet" href="{{ static('css/xterm.css') }}"/>
@@ -152,21 +166,42 @@ function cleanUpWebSocket(socket) {
 }
 
 window.onload = function() {
-    var termRowHeight = 0.0 + 0.95*document.getElementById("dummy-screen").offsetHeight / 25;
-    var termColWidth = 0.0 + (0.95*document.getElementById("dummy-screen-rows").offsetWidth / 80);
-    document.getElementById("dummy-screen").setAttribute("style", "display: none");
-
     var protocol = (window.location.protocol.indexOf("https") === 0) ? "wss" : "ws";
     var ws_url = protocol+"://"+window.location.host+ "{{ws_url_path}}";
 
-    function calculate_size(element) {
-        var rows = Math.max(2, Math.floor(element.innerHeight/termRowHeight)-1);
-        var cols = Math.max(3, Math.floor(element.innerWidth/termColWidth)-1);
+    var termOptions = {
+        fontFamily: '"DejaVu Sans Mono", "Liberation Mono", monospace',
+        fontSize: 16,
+        allowProposedApi: true,
+        scrollback: 9999999,
+        cursorBlink: true,
+        theme: {
+            background: '#000'
+        }
+    };
+
+    function calculate_size() {
+        var measure = document.createElement("div");
+        measure.style.fontFamily = termOptions.fontFamily;
+        measure.style.fontSize = termOptions.fontSize + "px";
+        measure.style.position = "absolute";
+        measure.style.visibility = "hidden";
+        measure.style.whiteSpace = "pre";
+        measure.innerText = "W";
+        document.body.appendChild(measure);
+        
+        var rect = measure.getBoundingClientRect();
+        var termRowHeight = rect.height;
+        var termColWidth = rect.width;
+        document.body.removeChild(measure);
+
+        var rows = Math.max(2, Math.floor((window.innerHeight - 10) / termRowHeight));
+        var cols = Math.max(3, Math.floor((window.innerWidth - 10) / termColWidth));
         return {rows: rows, cols: cols};
     }
 
     xterm_div = document.getElementById("xterm-div");
-    size = calculate_size(window);
+    size = calculate_size();
 
     function init_webterm() {
       old_terminal = window.terminal;
@@ -174,7 +209,11 @@ window.onload = function() {
         xterm_div.innerHTML = "";
         cleanUpWebSocket(old_terminal.socket);
       }
-      window.terminal = make_terminal(xterm_div, size, ws_url);
+      var options = Object.assign({}, termOptions, {
+          cols: size.cols,
+          rows: size.rows
+      });
+      window.terminal = make_terminal(xterm_div, options, ws_url);
       window.terminal.socket.onclose = function (event) {
         if (!event.wasClean && event.code !== 1005) {
           reconnectTimeout = setTimeout(init_webterm, 1000);
@@ -185,13 +224,13 @@ window.onload = function() {
     init_webterm();
 
     window.onresize = function() {
-      var geom = calculate_size(window);
+      var geom = calculate_size();
       rows = geom.rows;
       cols = geom.cols;
       window.terminal.term.resize(cols, rows);
       window.terminal.socket.send(
           JSON.stringify(
-              ["set_size", rows, cols, xterm_div.innerHeight, xterm_div.innerWidth]
+              ["set_size", rows, cols, window.innerHeight, window.innerWidth]
           )
       );
     };
@@ -199,32 +238,6 @@ window.onload = function() {
 </script>
 </head>
 <body>
-<!-- test size: 25x80 -->
-<div id="xterm-div" style="width: 100%; height: 100%; margin: 0;"></div>
-<pre id="dummy-screen" style="visibility:hidden; border: white solid 5px; font-family: &quot;DejaVu Sans Mono&quot;, &quot;Liberation Mono&quot;, monospace; font-size: 16px;">0
-1
-2
-3
-4
-5
-6
-7
-8
-9
-0
-1
-2
-3
-4
-5
-6
-7
-8
-9
-0
-1
-2
-3
-<span id="dummy-screen-rows" style="visibility:hidden; overflow-x: hidden;">01234567890123456789012345678901234567890123456789012345678901234567890123456789</span>
-</pre>
+<div id="xterm-div"></div>
 </body>
+</html>

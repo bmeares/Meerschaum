@@ -93,18 +93,18 @@ layout = dbc.Container([
             dbc.Container(id='login-container', children=[
                 dbc.Row([
                     dbc.Col(
-                    dcc.Input(
+                    dbc.Input(
                         placeholder = 'Username',
                         type = 'text',
                         id = 'username-input',
-                        className = 'form-control',
+                        class_name = 'form-control',
                         n_submit = 0,
                     )),
-                    dbc.Col(dcc.Input(
+                    dbc.Col(dbc.Input(
                         placeholder = 'Password',
                         type = 'password',
                         id = 'password-input',
-                        className = 'form-control',
+                        class_name = 'form-control',
                         n_submit = 0,
                     )),
                 ]),

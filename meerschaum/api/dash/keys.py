@@ -101,7 +101,7 @@ def build_flags_row(
             sm = 12,
             md = 5,
             lg = 5,
-            id = 'input-flags-left-col',
+            id = {'type': 'input-flags-left-col', 'index': index},
         ),
         dbc.Col(
             html.Div(
