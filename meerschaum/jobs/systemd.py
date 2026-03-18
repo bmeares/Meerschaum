@@ -18,7 +18,7 @@ from functools import partial
 
 import meerschaum as mrsm
 from meerschaum.jobs import Job, Executor, make_executor
-from meerschaum.utils.typing import Dict, Any, List, SuccessTuple, Union, Optional, Callable
+from meerschaum.utils.typing import Dict, Any, List, SuccessTuple, Union, Optional
 from meerschaum.config import get_config
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.warnings import warn, dprint

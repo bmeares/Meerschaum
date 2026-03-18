@@ -1279,6 +1279,11 @@ class Daemon:
         if not self.pickle:
             return True, "Success"
 
+        from meerschaum._internal.entry import _shells
+        if _shells:
+            from meerschaum._internal.shell.Shell import revert_input
+            revert_input()
+
         backup_path = self.pickle_path.parent / (generate_password(7) + '.pkl')
         try:
             self.path.mkdir(parents=True, exist_ok=True)

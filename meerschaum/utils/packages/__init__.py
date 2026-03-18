@@ -501,7 +501,6 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
     -------
     A dictionary of metadata from pip.
     """
-    import re
     from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     install_name = _import_to_install_name(import_name)
     if install_name.startswith(_MRSM_PACKAGE_ARCHIVES_PREFIX):
@@ -858,6 +857,7 @@ def pip_install(
 
     _args = list(args)
     have_pip = venv_contains_package('pip', venv=None, debug=debug)
+    pip_venv = None
     try:
         import pip
         have_pip = True
@@ -870,9 +870,10 @@ def pip_install(
     except (ImportError, FileNotFoundError):
         uv_bin = None
         have_uv_pip = False
+
     if have_pip and not have_uv_pip and _install_uv_pip and is_uv_enabled():
         if not pip_install(
-            'uv',
+            'uv', 'PyYAML',
             venv=None,
             debug=debug,
             _install_uv_pip=False,
@@ -895,19 +896,23 @@ def pip_install(
 
     import sys
     if not have_pip and not use_uv_pip:
-        if not get_pip(venv=venv, color=color, debug=debug):
+        have_mrsm_pip = venv_contains_package('pip', venv='mrsm')
+        if not have_mrsm_pip and not get_pip(venv=venv, color=color, debug=debug):
             import sys
             minor = sys.version_info.minor
             print(
                 "\nFailed to import `pip` and `ensurepip`.\n"
                 + "If you are running Ubuntu/Debian, "
-                + "you might need to install `python3.{minor}-distutils`:\n\n"
+                + f"you might need to install `python3.{minor}-distutils`:\n\n"
                 + f"    sudo apt install python3.{minor}-pip python3.{minor}-venv\n\n"
                 + "Please install pip and restart Meerschaum.\n\n"
                 + "You can find instructions on installing `pip` here:\n"
                 + "https://pip.pypa.io/en/stable/installing/"
             )
             sys.exit(1)
+
+        pip = attempt_import('pip', lazy=False)
+        pip_venv = 'mrsm'
 
     with Venv(venv, debug=debug):
         if venv is not None:
@@ -933,7 +938,7 @@ def pip_install(
         if check_wheel and not _uninstall and not use_uv_pip:
             if not have_wheel:
                 setup_packages_to_install = (
-                    ['setuptools', 'wheel']
+                    ['setuptools', 'wheel', 'PyYAML']
                     + (['uv'] if is_uv_enabled() else [])
                 )
                 if not pip_install(
@@ -979,7 +984,7 @@ def pip_install(
                 if not vtp.exists():
                     if not init_venv(venv, force=True):
                         vtp.mkdir(parents=True, exist_ok=True)
-                _args += ['--target', venv_target_path(venv, debug=debug)]
+                _args += ['--target', venv_target_path(venv, debug=debug).as_posix()]
         elif (
             '--target' not in _args
                 and '-t' not in _args
@@ -987,7 +992,10 @@ def pip_install(
                 and not _uninstall
                 and not use_uv_pip
         ):
-            _args += ['--user']
+            _args.append('--user')
+
+        if venv is None and '--break-system-packages' not in _args:
+            _args.append('--break-system-packages')
 
         if debug:
             if '-v' not in _args or '-vv' not in _args or '-vvv' not in _args:
@@ -1018,7 +1026,8 @@ def pip_install(
                     continue
                 if not completely_uninstall_package(
                     _install_no_version,
-                    venv=venv, debug=debug,
+                    venv=venv,
+                    debug=debug,
                 ) and not silent:
                     warn(
                         f"Failed to clean up package '{_install_no_version}'.",
@@ -1033,7 +1042,7 @@ def pip_install(
         rc = run_python_package(
             ('pip' if not use_uv_pip else 'uv'),
             _args + _packages,
-            venv=None,
+            venv=pip_venv,
             env=_get_pip_os_env(color=color),
             debug=debug,
         )
@@ -1928,11 +1937,6 @@ def is_uv_enabled() -> bool:
     """
     from meerschaum.utils.misc import is_android
     if is_android():
-        return False
-
-    from meerschaum.utils.venv import inside_venv
-
-    if inside_venv():
         return False
 
     try:

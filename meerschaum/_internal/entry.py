@@ -132,6 +132,19 @@ def entry_without_daemon(
     if pipeline_args:
         chained_sysargs = [get_pipeline_sysargs(sysargs, pipeline_args, _patch_args=_patch_args)]
 
+    shell_executor_keys = None
+    if _shells:
+        from meerschaum._internal.shell.Shell import shell_attrs
+        from meerschaum.utils.misc import remove_ansi
+        shell_executor_keys = remove_ansi(shell_attrs.get('executor_keys') or '')
+
+        if (
+            shell_attrs.get('executor_keys')
+            and '-e' not in pipeline_args
+            and '--executor-keys' not in pipeline_args
+        ):
+            pipeline_args.extend(['-e', shell_attrs['executor_keys']])
+
     results: List[SuccessTuple] = []
 
     for _sysargs in chained_sysargs:
@@ -144,6 +157,8 @@ def entry_without_daemon(
             ]
 
         args = parse_arguments(_sysargs)
+        if 'executor_keys' not in args and shell_executor_keys:
+            args['executor_keys'] = shell_executor_keys
         if _patch_args:
             args.update(_patch_args)
         argparse_exception = args.get(

@@ -1,5 +1,12 @@
 # 🪵 Changelog
 
+## 3.2.0 Releases
+
+### v3.2.0
+
+- **Improve `uv` and virtual environment support.**  
+  Meerschaum now installs correctly with `uv tool install` and enables `uv` when run from a virtual environment.
+
 ## 3.1.x Releases
 
 This is the current release cycle, so stay tuned for future releases!

@@ -421,6 +421,7 @@ def get_executor_keys_from_context() -> str:
     from meerschaum.config import get_config
     from meerschaum.config.paths import ROOT_DIR_PATH, DEFAULT_ROOT_DIR_PATH
     from meerschaum.utils.misc import is_systemd_available
+    from meerschaum.utils.packages import is_installed
 
     configured_executor = get_config('meerschaum', 'executor', warn=False)
     if configured_executor is not None:
@@ -428,7 +429,11 @@ def get_executor_keys_from_context() -> str:
 
     _context_keys = (
         'systemd'
-        if is_systemd_available() and ROOT_DIR_PATH == DEFAULT_ROOT_DIR_PATH
+        if (
+            is_systemd_available()
+            and ROOT_DIR_PATH == DEFAULT_ROOT_DIR_PATH
+            and is_installed('meerschaum', venv=None, allow_outside_venv=False)
+        )
         else 'local'
     )
     return _context_keys
