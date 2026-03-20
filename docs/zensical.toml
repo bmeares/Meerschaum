@@ -1,0 +1,47 @@
+[project]
+site_name = "Meerschaum Documentation"
+site_url = "https://meerschaum.io"
+site_description = "Craft elegant data pipes with Meerschaum."
+site_author = "Bennett Meares"
+copyright = "&copy; 2026 Bennett Meares"
+docs_dir = "zensical"
+site_dir = "site"
+dev_addr = "localhost:8000"
+repo_url = "https://github.com/bmeares/Meerschaum"
+nav = [
+  {"Home" = "index.md"},
+  {"Get Started" = [
+    {"🛠️ Setup"= "get-started/index.md"},
+    {"📦️ Compose Projects" = "get-started/compose-projects.md"},
+    {"🖥️ Web Console" = "get-started/start-api.md"},
+    {"🏗️ Building a Pipe" = "get-started/bootstrap.md"},
+  ]},
+]
+extra_css = ["stylesheets/extra.css"]
+
+[project.theme]
+features = [
+  "header.autohide",
+  "navigation.tabs",
+  "navigation.sections",
+  "navigation.expand",
+  "navigation.path",
+]
+logo = "assets/logo_500x500.png"
+favicon = "assets/logo.ico"
+
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.superfences]
+
+[project.extra.analytics]
+provider = "google"
+property = "G-CVXCQBW9NY"
+

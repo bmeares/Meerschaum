@@ -264,125 +264,101 @@ def search_and_substitute_config(
     The configuration dictionary with `MRSM{}` symlinks replaced with
     the values from the current configuration.
     """
+    import re
+    import json
     from meerschaum.config import get_config
+    needle = leading_key + begin_key
 
     _links = []
-    def _find_symlinks(d, _keys: Optional[List[str]] = None):
-        if _keys is None:
-            _keys = []
-        if not isinstance(d, dict):
-            return
-        for k, v in d.items():
-            if isinstance(v, dict):
-                _find_symlinks(v, _keys + [k])
-            elif (leading_key + begin_key) in str(v):
-                _links.append((_keys + [k], v))
+    if keep_symlinks:
+        def _find_symlinks(d, _keys: Optional[List[str]] = None):
+            if _keys is None:
+                _keys = []
+            if not isinstance(d, dict):
+                return
+            for k, v in d.items():
+                if isinstance(v, dict):
+                    _find_symlinks(v, _keys + [k])
+                elif isinstance(v, str) and needle in v:
+                    _links.append((_keys + [k], v))
+        _find_symlinks(config)
 
-    _find_symlinks(config)
-
-    import json
-    needle = leading_key + begin_key
     haystack = json.dumps(config, separators=(',', ':'))
+    if needle not in haystack:
+        parsed_config = config
+    else:
+        patterns = {}
+        isolated_patterns = {}
+        literal_patterns = {}
+        memo = {}
 
-    patterns = {}
-    isolated_patterns = {}
-    literal_patterns = {}
+        pattern_re = re.compile(
+            re.escape(needle) + r'(?P<pattern_keys>.*?)' + re.escape(end_key)
+        )
 
-    begin, end, floor = 0, 0, 0
-    while needle in haystack[floor:]:
-        ### extract the keys
-        hs = haystack[floor:]
+        for match in pattern_re.finditer(haystack):
+            pattern = match.group(0)
+            pattern_keys_raw = match.group('pattern_keys')
+            pattern_keys = pattern_keys_raw.split(delimiter)
 
-        ### the first character of the keys
-        ### MRSM{key1:key2}
-        ###      ^
-        begin = hs.find(needle) + len(needle)
+            start, end = match.span()
+            prior = haystack[start - 1] if start > 0 else None
+            after = haystack[end] if end < len(haystack) else None
 
-        ### The character behind the needle.
-        ### "MRSM{key1:key2}"
-        ### ^
-        prior = haystack[(floor + begin) - (len(needle) + 1)]
+            force_literal = False
+            keys = [k for k in pattern_keys]
+            if keys and str(keys[0]).startswith(literal_key):
+                keys[0] = str(keys[0])[len(literal_key):]
+                force_literal = True
+            if len(keys) == 1 and keys[0] == '':
+                keys = []
 
-        ### number of characters to end of keys
-        ### (really it's the index of the beginning of the end_key relative to the beginning
-        ###     but the math works out)
-        ### MRSM{key1}
-        ###      ^   ^  => 4
-        length = hs[begin:].find(end_key)
+            cache_key = tuple(keys)
+            if cache_key in memo:
+                valid, value = memo[cache_key]
+            else:
+                try:
+                    valid, value = get_config(
+                        *keys,
+                        substitute=False,
+                        as_tuple=True,
+                        write_missing=False,
+                        sync_files=False,
+                    )
+                except Exception:
+                    valid, value = False, None
+                memo[cache_key] = (valid, value)
 
-        ### index of the end_key (end of `length` characters)
-        end = begin + length
+            if not valid:
+                continue
 
-        ### The character after the end_key.
-        after = haystack[floor + end + 1]
+            patterns[pattern] = value
+            isolated_patterns[pattern] = (prior == '"' and after == '"')
+            literal_patterns[pattern] = force_literal
 
-        ### advance the floor to find the next leading key
-        floor += end + len(end_key)
-        pattern_keys = hs[begin:end].split(delimiter)
-
-        ### Check for isolation key and empty keys (MRSM{}).
-        force_literal = False
-        keys = [k for k in pattern_keys]
-        if str(keys[0]).startswith(literal_key):
-            keys[0] = str(keys[0])[len(literal_key):]
-            force_literal = True
-        if len(keys) == 1 and keys[0] == '':
-            keys = []
-
-        ### Evaluate the parsed keys to extract the referenced value.
-        ### TODO This needs to be recursive for chaining symlinks together.
-        try:
-            valid, value = get_config(
-                *keys,
-                substitute=False,
-                as_tuple=True,
-                write_missing=False,
-                sync_files=False,
-            )
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            valid = False
-        if not valid:
-            continue
-
-        ### pattern to search and replace
-        pattern = leading_key + begin_key + delimiter.join(pattern_keys) + end_key
-
-        ### store patterns and values
-        patterns[pattern] = value
-
-        ### Determine whether the pattern occured inside a string or is an isolated, direct symlink.
-        isolated_patterns[pattern] = (prior == '"' and after == '"')
-
-        literal_patterns[pattern] = force_literal
-
-    ### replace the patterns with the values
-    for pattern, value in patterns.items():
-        if isolated_patterns[pattern]:
-            haystack = haystack.replace(
-                json.dumps(pattern),
-                json.dumps(value),
-            )
-        elif literal_patterns[pattern]:
-            haystack = haystack.replace(
-                pattern,
-                (
-                    json.dumps(value)
-                    .replace("\\", "\\\\")
-                    .replace('"', '\\"')
-                    .replace("'", "\\'")
+        for pattern, value in patterns.items():
+            if isolated_patterns[pattern]:
+                haystack = haystack.replace(
+                    json.dumps(pattern),
+                    json.dumps(value),
                 )
-            )
-        else:
-            haystack = haystack.replace(pattern, str(value))
+            elif literal_patterns[pattern]:
+                haystack = haystack.replace(
+                    pattern,
+                    (
+                        json.dumps(value)
+                        .replace("\\", "\\\\")
+                        .replace('"', '\\"')
+                        .replace("'", "\\'")
+                    )
+                )
+            else:
+                haystack = haystack.replace(pattern, str(value))
 
-    ### parse back into dict
-    parsed_config = json.loads(haystack) or {}
+        parsed_config = json.loads(haystack) or {}
 
     symlinks = {}
     if keep_symlinks:
-        ### Keep track of symlinks for writing back to a file.
         for _keys, _pattern in _links:
             s = symlinks
             for k in _keys[:-1]:

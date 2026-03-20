@@ -1,6 +1,6 @@
 # 📦️ Compose Projects
 
-Now that you've got the idea behind pipes, let's write our own plugins and put together a project using [Meerschaum Compose](/reference/compose).
+Now that you've got the idea behind pipes, let's write our own plugins and put together a project using <a href="/reference/compose">Meerschaum Compose</a>.
 
 !!! tip "Meerschaum Compose Template Repository"
     If you'd like to jump straight into a Dockerized environment, create a new repository from the [Meerschaum Compose Project Template](https://github.com/bmeares/mrsm-compose-template).
@@ -92,12 +92,12 @@ Paste the following into `mrsm-compose.yaml`. This defines our pipes and runtime
               database: "tiny.db"
     ```
 
-There are two [Connectors](/reference/connectors) used in this project:
+There are two <a href="/reference/connectors">Connectors</a> used in this project:
 
 - **`plugin:fred`**  
-  A [plugin](/reference/plugins/) we will write shortly. This is the data source for our initial pipes.
+  A <a href="/reference/plugins/">plugin</a> we will write shortly. This is the data source for our initial pipes.
 - **`sql:tiny`**  
-  A SQLite file `tiny.db`. It's used as the [instance connector](/reference/connectors/instance-connectors/) as well as a data source.
+  A SQLite file `tiny.db`. It's used as the <a href="/reference/connectors/instance-connectors/">instance connector</a> as well as a data source.
 
 The SQLite database makes sense, but what is `plugin:fred`? [FRED](https://fred.stlouisfed.org/series/APU0000708111) is the data source we want to use for this project, so let's create our first plugin to fetch this data.
 
@@ -131,7 +131,7 @@ And paste the following into `fred.py`:
 
 The plugin provides one function `fetch()` that takes a pipe, pulls an ID from `pipe.parameters`, and returns the appropriate DataFrame.
 
-Now that we've got our YAML file and plugin, install the [`compose` plugin](/reference/compose):
+Now that we've got our YAML file and plugin, install the <a href="/reference/compose">`compose` plugin</a>:
 
 ```bash
 mrsm install plugin compose
@@ -144,7 +144,7 @@ cd ../
 mrsm compose init
 ```
 
-![mrsm compose init](/assets/screenshots/compose-init.png)
+<image src="/assets/screenshots/compose-init.png" alt="mrsm compose init"/>
 
 Run the project file to sync the pipes one-at-a-time:
 
@@ -152,7 +152,7 @@ Run the project file to sync the pipes one-at-a-time:
 mrsm compose run
 ```
 
-![mrsm compose run](/assets/screenshots/compose-run.png)
+<image src="/assets/screenshots/compose-run.png" alt="mrsm compose run" />
 
 🎉 Success! You've just run an ETL pipeline to process the following steps:
 
@@ -169,7 +169,7 @@ All other Meerschaum actions are executed within the context of this project. Fo
 mrsm compose show data
 ```
 
-![mrsm compose show data](/assets/screenshots/compose-show-data.png)
+<image src="/assets/screenshots/compose-show-data.png" alt="mrsm compose show data" />
 
 When developing, it's useful to hop into a REPL and test out the [Python API](https://docs.meerschaum.io).
 
@@ -177,8 +177,8 @@ When developing, it's useful to hop into a REPL and test out the [Python API](ht
 mrsm compose python
 ```
 
-![mrsm compose python](/assets/screenshots/compose-python.png)
+<image src="/assets/screenshots/compose-python.png" alt="mrsm compose python" />
 
 Thank you for making it through the Getting Started guide! This example was based on the May 2023 [Tech Slam 'N Eggs demo project](https://github.com/bmeares/techslamneggs).
 
-There's plenty more great information, such as the [plugins guide](/reference/plugins/writing-plugins/). Have fun building your pipes with Meerschaum!
+There's plenty more great information, such as the <a href="/reference/plugins/writing-plugins">plugins guide</a>. Have fun building your pipes with Meerschaum!

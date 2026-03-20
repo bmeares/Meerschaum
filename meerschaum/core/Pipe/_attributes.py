@@ -53,6 +53,8 @@ def attributes(self) -> Dict[str, Any]:
     return self._attributes
 
 
+_cached_base_params = {}
+
 def get_parameters(
     self,
     apply_symlinks: bool = True,
@@ -93,13 +95,27 @@ def get_parameters(
         try:
             if debug:
                 dprint(f"Building reference pipe from keys: {ref_keys}")
+
             ref_pipe = mrsm.Pipe(**ref_keys)
             if ref_pipe in _visited:
                 warn(f"Circular reference detected in {self}: chain involves {ref_pipe}.")
                 return search_and_substitute_config(raw_parameters)
 
             _visited.add(ref_pipe)
-            base_params = ref_pipe.get_parameters(_visited=_visited, debug=debug)
+            base_params = _cached_base_params.get(ref_pipe, None)
+            if base_params is None:
+                base_params = ref_pipe.get_parameters(
+                    apply_symlinks=apply_symlinks,
+                    _visited=_visited,
+                    debug=debug,
+                )
+                _cached_base_params[ref_pipe] = base_params
+                if debug:
+                    dprint(f"base_params from {ref_pipe} for {self}:")
+                    mrsm.pprint(base_params)
+            else:
+                if debug:
+                    dprint(f"Using cached base_params from {ref_pipe} for {self}")
         except Exception as e:
             warn(f"Failed to resolve reference pipe for {self}: {e}")
             base_params = {}
