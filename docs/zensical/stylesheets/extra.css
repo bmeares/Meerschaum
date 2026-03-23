@@ -39,13 +39,21 @@
   max-width: 1440px;
 }
 
-.md-typeset h1 {
-  color: #000000;
-}
-.md-typeset h2 {
-  color: #000000;
-}
+/* .md-typeset h1 { */
+  /* color: #000000; */
+/* } */
+/* .md-typeset h2 { */
+  /* color: #000000; */
+/* } */
 
 .md-banner {
     background-color: #4b100c;
+}
+
+.md-header__topic {
+  color: #ffffff;
+}
+
+.md-header__button {
+  color: #ffffff;
 }

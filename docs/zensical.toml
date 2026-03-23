@@ -29,6 +29,9 @@ features = [
 ]
 logo = "assets/logo_500x500.png"
 favicon = "assets/logo.ico"
+palette.primary = "deep orange"
+palette.accent = "amber"
+custom_dir = "zensical/overrides"
 
 
 [project.theme.icon]
