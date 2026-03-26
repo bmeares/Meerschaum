@@ -11,10 +11,53 @@ repo_url = "https://github.com/bmeares/Meerschaum"
 nav = [
   {"Home" = "index.md"},
   {"Get Started" = [
-    {"🛠️ Setup"= "get-started/index.md"},
+    {"🛠️ Setup" = "get-started/index.md"},
+    {"🏗️ Building a Pipe" = "get-started/bootstrap.md"},
     {"📦️ Compose Projects" = "get-started/compose-projects.md"},
     {"🖥️ Web Console" = "get-started/start-api.md"},
-    {"🏗️ Building a Pipe" = "get-started/bootstrap.md"},
+  ]},
+  {"Reference" = [
+    {"Reference" = "reference/index.md"},
+    {"🚰 Pipes" = [
+      {"Pipes" = "reference/pipes/index.md"},
+      {"🥾 Bootstrapping" = "reference/pipes/bootstrapping.md"},
+      {"📥 Syncing" = "reference/pipes/syncing.md"},
+      {"🔖 Tags" = "reference/pipes/tags.md"},
+      {"🧩 Parameters" = "reference/pipes/parameters.md"},
+    ]},
+    {"🔌 Connectors" = [
+      {"Connectors" = "reference/connectors/index.md"},
+      {"🗂️ SQL Connectors" = "reference/connectors/sql-connectors.md"},
+      {"🗄️ Instance Connectors" = "reference/connectors/instance-connectors.md"},
+      {"❓ Other Connector Types" = "reference/connectors/other-connectors.md"},
+    ]},
+    {"🥞 Stack" = "reference/stack.md"},
+    {"🌐 API Instance" = [
+      {"API Instance" = "reference/api-instance/index.md"},
+      {"Security and Tokens" = "reference/api-instance/tokens.md"},
+      {"NGINX" = "reference/api-instance/nginx.md"},
+      {"Web Console" = "reference/api-instance/web-console.md"},
+    ]},
+    {"🎼 Compose" = "reference/compose.md"},
+    {"⏯️ Actions" = "reference/actions/index.md"},
+    {"👷 Background Jobs" = "reference/background-jobs.md"},
+    {"🔧 Data Analysis Tools" = "reference/data-analysis-tools.md"},
+    {"➕ Plugins" = [
+      {"Plugins" = "reference/plugins/index.md"},
+      {"✍️ Writing Your Own" = "reference/plugins/writing-plugins.md"},
+      {"🤔 Types of Plugins" = "reference/plugins/types-of-plugins.md"},
+      {"🚀 Repositories" = "reference/plugins/repositories.md"},
+    ]},
+    {"🌳 Environment Variables" = "reference/environment.md"},
+    {"💼 Portable" = "reference/meerschaum-portable.md"},
+  ]},
+  {"Tutorials" = "tutorials/index.md"},
+  {"Docs" = "https://docs.meerschaum.io"},
+  {"News" = [
+    {"🪵 Changelog" = "news/changelog.md"},
+    {"📢 Announcements" = "news/announcements.md"},
+    {"🌠 To-Do / Wish List" = "news/to-do.md"},
+    {"🤗 Acknowledgements" = "news/acknowledgements.md"},
   ]},
 ]
 extra_css = ["stylesheets/extra.css"]
@@ -33,7 +76,6 @@ palette.primary = "deep orange"
 palette.accent = "amber"
 custom_dir = "zensical/overrides"
 
-
 [project.theme.icon]
 repo = "fontawesome/brands/github"
 
@@ -47,4 +89,3 @@ permalink = true
 [project.extra.analytics]
 provider = "google"
 property = "G-CVXCQBW9NY"
-

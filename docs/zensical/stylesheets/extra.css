@@ -57,3 +57,50 @@
 .md-header__button {
   color: #ffffff;
 }
+
+/* Navbar tabs */
+.md-tabs__link {
+  color: #ffffff;
+  opacity: 0.7;
+}
+
+.md-tabs__item--active .md-tabs__link,
+.md-tabs__link--active {
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+/* Search bar */
+.md-search__form {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  border-radius: 4px;
+}
+
+.md-search__form:hover {
+  background-color: rgba(255, 255, 255, 0.25) !important;
+}
+
+.md-search__input {
+  color: #ffffff !important;
+}
+
+.md-search__input::placeholder {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.md-search__icon {
+  color: #ffffff !important;
+}
+
+/* GitHub logo and text */
+.md-source {
+  color: #ffffff;
+}
+
+.md-source__icon {
+  color: #ffffff;
+}
+
+.md-source__repository {
+  color: #ffffff;
+}
