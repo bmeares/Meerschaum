@@ -2,7 +2,7 @@
 
 The Meerschaum Web Console provides a graphical interface for managing your Meerschaum instance, served by the [API instance](/reference/api-instance/). To access it, start the API (`mrsm start api`) and navigate to your host URL (e.g., [http://localhost:8000](http://localhost:8000)).
 
-![Meerschaum Web Console Dashboard](/assets/screenshots/web-console.png)
+<img src="/assets/screenshots/web-console.png" alt="Meerschaum Web Console Dashboard">
 
 ---
 
@@ -10,17 +10,17 @@ The Meerschaum Web Console provides a graphical interface for managing your Meer
 
     Click the Meerschaum logo in the top-left corner to reveal the navigation menu.
 
-    ![Pages navigation menu](/assets/screenshots/web-console-navigation.png)
+    <img src="/assets/screenshots/web-console-navigation.png" alt="Pages navigation menu">
 
 ## Webterm
 
 You have complete control of your Meerschaum instance via the webterm, an interactive terminal tied to your username. 
 
-![Webterm](/assets/screenshots/web-console-webterm.png)
+<img src="/assets/screenshots/web-console-webterm.png" alt="Webterm">
 
 Run actions by clicking `Exec`, which uses the values of your currently selected dropdowns (i.e. `-c` for connectors, `-t` for tags, etc.). Alternatively, click the webterm and type your commands directly into the shell session (the choice is yours!).
 
-![Execute actions via the webterm](/assets/screenshots/web-console-execute-action-button.png)
+<img src="/assets/screenshots/web-console-execute-action-button.png" alt="Execute actions via the webterm">
 
 The controls on the upper right correspond to **refresh** (`⟳`), **fullscreen** / **half-screen** (`⛶` / `🀲`), and (if `tmux` is available) **new tab** (`+`).
 
@@ -30,17 +30,17 @@ On the dashboard, use the left-hand dropdowns to filter your [pipes](/referrence
 
 Alternatively, navigate to the dedicated **Pipes** page on the side navbar (`/dash/pipes`). State is stored in the URL, so this page is the best for sharing links.
 
-![Pipe card on the web console](/assets/screenshots/web-console-pipe-card-closed.png)
+<img src="/assets/screenshots/web-console-pipe-card-closed.png" alt="Pipe card on the web console">
 
 Expand the accordion items to view and edit parameters and other metadata about your pipes.
 
-![Expanded pipe card on the web console](/assets/screenshots/web-console-pipe-card-open.png)
+<img src="/assets/screenshots/web-console-pipe-card-open.png" alt="Expanded pipe card on the web console">
 
 ## Plugins
 
 Visit the `/dash/plugins` page to see and download the plugins registered to the API instance as a [repository](/reference/connectors/#-instances-and-repositories).
 
-![Plugins page](/assets/screenshots/web-console-plugins.png)
+<img src="/assets/screenshots/web-console-plugins.png" alt="Plugins page">
 
 ## Jobs
 
@@ -50,4 +50,4 @@ Visit the `/dash/plugins` page to see and download the plugins registered to the
 
 Create manage long-lived [tokens](/reference/api-instance/tokens/) on the page `/dash/tokens`.
 
-![Register token popup](/assets/screenshots/web-console-tokens-register.png)
+<img src="/assets/screenshots/web-console-tokens-register.png" alt="Register token popup">

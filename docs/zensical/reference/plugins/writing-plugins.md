@@ -28,7 +28,7 @@ To create your plugin, follow these steps:
 
     > Plugins may have hyphenated names, e.g. `mongodb-connector`:
 
-    ![An example \`__init__.py`](/assets/screenshots/plugin-init.png)
+    <img src="/assets/screenshots/plugin-init.png" alt="An example \`__init__.py`">
 
 3. ***(Optional)* Define your plugin's `__version__` string.**
 
@@ -396,7 +396,7 @@ Your plugin may extend Meerschaum by providing additional actions. Actions are r
 
 Return a list of options from a function `complete_<action>()`, and these options will be suggested in the Meerschaum shell. The keyword arguments passed to `#!python complete_<action>()` are `line`, `sysargs`, `action`, and the currently parsed flags.
 
-![Meerschaum shell auto-completion.](/assets/screenshots/shell-complete.png){align=left}
+<img src="/assets/screenshots/shell-complete.png" alt="Meerschaum shell auto-completion." align="left">
 
 ```python
 @make_action
@@ -445,7 +445,7 @@ For your endpoints, arguments will be used as HTTP parameters, and to require th
             return {'message': f'The current user is {curr_user.name}'}
     ```
 
-    ![Custom Meerschaum API endpoint which requires a login.](/assets/screenshots/api-plugin-endpoint-login-required.png)
+    <img src="/assets/screenshots/api-plugin-endpoint-login-required.png" alt="Custom Meerschaum API endpoint which requires a login.">
 
 ### **The `#!python @dash_plugin` and `#!python @web_page` Decorators**
 

@@ -71,7 +71,7 @@ h1 {
 <script src="/assets/js/asciinema-player.js"></script>
 
 <!-- <script src="https://platform.linkedin.com/badges/js/profile.js" async defer type="text/javascript"></script> -->
-![Meerschaum Banner](assets/banner_1920x320.png)
+<img src="assets/banner_1920x320.png" alt="Meerschaum Banner">
 
 <!-- # Welcome to the Meerschaum Documentation Home Page -->
 

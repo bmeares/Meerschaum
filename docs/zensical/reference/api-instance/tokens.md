@@ -42,7 +42,7 @@ The easiest way to can manage tokens is on the [Web Console](/reference/api-inst
 
 When you create a new token, a dialog will appear prompting you for a label, expiration date, and scopes. After registration, you **must** copy the generated credentials, as the secret will not be shown again.
 
-![Web Console tokens page](/assets/screenshots/web-console-tokens.png)
+<img src="/assets/screenshots/web-console-tokens.png" alt="Web Console tokens page">
 
 ---
 ## 🐍 Python API

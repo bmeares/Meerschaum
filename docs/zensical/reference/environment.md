@@ -4,7 +4,7 @@ You can manage the behavior of Meerschaum and emulate multiple installations wit
 
 The command `mrsm show environment` will print out your current set `MRSM_` variables. For example, running this command in the Web Console reveals how the configuration is managed to subprocesses by the web server.
 
-![Meerschaum web console environment variables.](/assets/screenshots/web-console-environment.png)
+<img src="/assets/screenshots/web-console-environment.png" alt="Meerschaum web console environment variables.">
 
 ## **`MRSM_ROOT_DIR`**
 
