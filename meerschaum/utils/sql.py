@@ -2357,9 +2357,10 @@ def _get_create_table_query_from_cte(
         if datetime_column
         else None
     )
+    query = query.lstrip()
+    is_with_query = query.lower().startswith('with ')
     if flavor in ('mssql',):
-        query = query.lstrip()
-        if query.lower().startswith('with '):
+        if is_with_query:
             final_select_ix = query.lower().rfind('select')
             create_table_queries = [
                 (
@@ -2397,7 +2398,7 @@ def _get_create_table_query_from_cte(
     elif flavor in (None,):
         create_table_queries = [
             (
-                f"WITH {create_cte_name} AS (\n{textwrap.index(query, '    ')}\n)\n"
+                f"WITH {create_cte_name} AS (\n{textwrap.indent(query, '    ')}\n)\n"
                 f"CREATE TABLE {new_table_name} AS\n"
                 "SELECT *\n"
                 f"FROM {create_cte_name}"
@@ -2410,49 +2411,56 @@ def _get_create_table_query_from_cte(
                 f"ADD PRIMARY KEY ({primary_key_name})"
             ),
         ]
-    elif flavor in ('sqlite', 'mysql', 'mariadb', 'duckdb', 'oracle', 'geopackage'):
-        create_table_queries = [
-            (
-                f"CREATE TABLE {new_table_name} AS\n"
-                "SELECT *\n"
-                f"FROM (\n{textwrap.indent(query, '    ')}\n)"
-                + (f" AS {create_cte_name}" if flavor != 'oracle' else '')
-            ),
-        ]
-
-        alter_type_queries = [
-            (
-                f"ALTER TABLE {new_table_name}\n"
-                f"ADD PRIMARY KEY ({primary_key_name})"
-            ),
-        ]
-    elif (
-        flavor in ('timescaledb', 'timescaledb-ha')
-        and datetime_column
-        and datetime_column != primary_key
+    elif flavor in (
+        'sqlite', 'mysql', 'mariadb', 'duckdb', 'oracle', 'geopackage',
+        'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha', 'citus', 'cockroachdb'
     ):
-        create_table_queries = [
-            (
-                "SELECT *\n"
-                f"INTO {new_table_name}\n"
-                f"FROM (\n{textwrap.indent(query, '    ')}\n) AS {create_cte_name}\n"
-            ),
-        ]
+        if is_with_query:
+            create_table_queries = [
+                f"CREATE TABLE {new_table_name} AS\n{query}"
+            ]
+        else:
+            create_table_queries = [
+                (
+                    f"CREATE TABLE {new_table_name} AS\n"
+                    "SELECT *\n"
+                    f"FROM (\n{textwrap.indent(query, '    ')}\n)"
+                    + (f" AS {create_cte_name}" if flavor != 'oracle' else '')
+                ),
+            ]
 
+        pk_cols_str = (
+            f"{datetime_column_name}, {primary_key_name}"
+            if (
+                flavor in ('timescaledb', 'timescaledb-ha')
+                and datetime_column
+                and datetime_column != primary_key
+            )
+            else f"{primary_key_name}"
+        )
         alter_type_queries = [
             (
                 f"ALTER TABLE {new_table_name}\n"
-                f"ADD PRIMARY KEY ({datetime_column_name}, {primary_key_name})"
+                f"ADD PRIMARY KEY ({pk_cols_str})"
             ),
         ]
     else:
-        create_table_queries = [
-            (
-                "SELECT *\n"
-                f"INTO {new_table_name}\n"
-                f"FROM (\n{textwrap.indent(query, '    ')}\n) AS {create_cte_name}"
-            ),
-        ]
+        if is_with_query:
+            create_table_queries = [
+                (
+                    "SELECT *\n"
+                    f"INTO {new_table_name}\n"
+                    f"FROM (\n{textwrap.indent(query, '    ')}\n) AS {create_cte_name}"
+                ),
+            ]
+        else:
+            create_table_queries = [
+                (
+                    "SELECT *\n"
+                    f"INTO {new_table_name}\n"
+                    f"FROM (\n{textwrap.indent(query, '    ')}\n) AS {create_cte_name}"
+                ),
+            ]
 
         alter_type_queries = [
             (

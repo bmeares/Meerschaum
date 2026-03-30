@@ -140,7 +140,11 @@ def get_pipe_metadef(
         dt_name = sql_item_name(dt_col, self.flavor, None)
         is_guess = False
 
-    dtypes = fetch_params.get('dtypes', None) or pipe.dtypes
+    dtypes = (
+        fetch_params.get('dtypes', None)
+        or (parent.dtypes if parent is not None else None)
+        or pipe.dtypes
+    )
     dt_typ = dtypes.get(dt_col, 'datetime') if dt_col else None
     db_dt_typ = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
 
