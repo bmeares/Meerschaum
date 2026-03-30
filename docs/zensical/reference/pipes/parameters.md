@@ -294,6 +294,34 @@ Toggle whether a pipe will allow null indices (default `True`). Set this to `Fal
 
 ---------------
 
+## `parents`
+
+Associate a pipe with its upstream pipes via the `parents` (or `parent`) key. For example, syncing a SQL pipe with a defined `parent` allows for changing the data type of the `datetime` column between integer and timestamp values. The complement to `parents` is `children` (`child`).
+
+Set `parents` to a list of keys (`connector`, `metric`, `location`, etc.) or a string for the `Pipe` constructor.
+
+??? example
+    The `parent` key corresponds to the constructor for the parent pipe.
+
+    ```yaml
+    pipes:
+    - connector: foo
+      metric: bar
+      parameters:
+        children: 
+        - connector: foo
+          metric: bar
+          location: child
+
+    - connector: foo
+      metric: bar
+      location: child
+      parameters:
+        parent: "Pipe('foo', 'bar')"
+
+    ```
+
+
 ## `precision`
 
 The unit set by `precision` determines the value of the timestamp captured by `autotime` in units since the Unix Epoch in UTC (see above). By default, the `datetime` axis dtype determines `Pipe.precision` (e.g. the default `datetime64[us, UTC]` is `microsecond` precision).
@@ -362,7 +390,7 @@ This determines the direction to which the current timestamp is coerced when rou
 
 ## `reference`
 
-A pipe may inherit the base parameters from another reference pipe. Set `reference` to the keys of the base pipe, and additional keys will override the base parameters. To symlink subsets of other pipes' parameters, see the example at top of the page on using the `{{ Pipe(...) }}` syntax.
+A pipe may inherit the base parameters from another reference pipe. Set `reference` to the keys of the base pipe, and additional keys will override the base parameters. To symlink subsets of other pipes' parameters, see the example at top of the page on using the `{{ Pipe(...) }}` syntax. The `reference` key may be a dictionary or literal string to a `Pipe` constructor. Note that if the instance keys are not set, the instance keys of the pipe will be used as the default (to handle changing default instances across environments).
 
 ??? example
 

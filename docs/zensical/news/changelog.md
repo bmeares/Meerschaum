@@ -4,6 +4,54 @@
 
 ### v3.2.0
 
+- **Allow for strings for `reference`, `parents`, and `children`.**  
+  In addition to keys, reference other pipes with strings of the Pipe constructor:
+
+  ```yaml
+  connector: foo
+  metric: bar
+  parameters:
+    reference: "Pipe('spam', 'eggs')"
+  ```
+
+- **Default to the pipe's instance keys for reference pipes.**  
+  When referencing other pipes in parameters (`reference`, `parents`, `children`, etc.), the base pipe's instance keys will be used as the default keys (overriding the environment) to preserve behavior across environments.
+
+  ```python
+  ### Default instance is 'sql:main'
+  
+  pipe = mrsm.Pipe('foo', 'bar', columns={'datetime': 'ts'}, instance='sql:local')
+  downstream_pipe = mrsm.Pipe(
+      'foo', 'bar', 'baz',
+      instance='sql:local',
+      parameters={
+          'reference': "Pipe('foo', 'bar')",
+      },
+  )
+  print(downstream_pipe.columns)
+  # {'datetime': 'ts'}
+
+  ```
+
+- **Add `reference`, `parents` / `parent`, and `children` / `child` to `Pipe` constructor.**  
+  For convenience, the reference keys are now able to passed directly into the `Pipe` constructor. The value may either be a dictionary, string, or another `Pipe` (or a list of each for `parents` / `children`). 
+
+  ```python
+  pipe = mrsm.Pipe('foo', 'bar', instance='sql:local')
+  child_pipe = mrsm.Pipe('foo', 'bar', 'baz', parent=pipe, instance='sql:memory')
+  print(child_pipe.parent)
+  # Pipe('foo', 'bar', instance='sql:local')
+  pipe.child = child_pipe
+  print(pipe.child)
+  # Pipe('foo', 'bar', 'baz', instance='sql:memory')
+  ```
+
+- **Allow for changing `datetime` dtypes in SQL pipes.**  
+  When syncing SQL pipes with a `parent` pipe, the parameters for the parent are considered when building the metadefinition, allowing for changing from integer to timestamp dtypes.
+
+- **Improve config patch performance.**  
+  The config patching logic has been refactored to improve performance.
+
 - **Improve `uv` and virtual environment support.**  
   Meerschaum now installs correctly with `uv tool install` and enables `uv` when run from a virtual environment.
 

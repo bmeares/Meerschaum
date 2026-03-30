@@ -125,7 +125,13 @@ def get_pipe_metadef(
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     from meerschaum.config import get_config
 
-    dt_col = pipe.columns.get('datetime', None)
+    parent = pipe.parent
+    fetch_params = pipe.get_parameters(debug=debug).get('fetch', {})
+    dt_col = (
+        fetch_params.get('columns', {}).get('datetime', None)
+        or (parent.columns.get('datetime', None) if parent is not None else None)
+        or pipe.columns.get('datetime', None)
+    )
     if not dt_col:
         dt_col = pipe.guess_datetime()
         dt_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
@@ -133,7 +139,9 @@ def get_pipe_metadef(
     else:
         dt_name = sql_item_name(dt_col, self.flavor, None)
         is_guess = False
-    dt_typ = pipe.dtypes.get(dt_col, 'datetime') if dt_col else None
+
+    dtypes = fetch_params.get('dtypes', None) or pipe.dtypes
+    dt_typ = dtypes.get(dt_col, 'datetime') if dt_col else None
     db_dt_typ = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
 
     if begin not in (None, '') or end is not None:
