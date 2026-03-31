@@ -222,7 +222,11 @@ def get_pipe_metadef(
     handled_bounding = False
     if parent_dt_col and (begin not in (None, '') or end is not None):
         parent_target = parent.target
-        parent_schema = parent.schema
+        parent_schema = (
+            parent.instance_connector.get_pipe_schema(parent)
+            if parent.instance_connector.type == 'sql'
+            else None
+        )
         parent_dt_name = sql_item_name(parent_dt_col, self.flavor, None)
         parent_db_dt_typ = get_db_type_from_pd_type(parent_dt_typ, self.flavor)
 
@@ -290,7 +294,7 @@ def get_pipe_metadef(
         )
 
         parent_item_name = sql_item_name(parent_target, self.flavor, None)
-        parent_item_name_full = sql_item_name(parent_target, self.flavor, parent.instance_connector.schema)
+        parent_item_name_full = sql_item_name(parent_target, self.flavor, parent_schema)
 
         # Simple string search for parent target in the original definition.
         if parent_dt_name and (
@@ -315,12 +319,11 @@ def get_pipe_metadef(
             # Replace occurrences of parent target with pushdown CTE in the definition body.
             parent_found = False
             patterns_to_replace = []
-            parent_schema = parent.schema
+            parent_schema = parent_schema
             if parent_schema:
                 patterns_to_replace.append(parent_item_name_full)
-                patterns_to_replace.append(f'"{parent_schema}"."{parent_target}"')
                 patterns_to_replace.append(f'{parent_schema}.{parent_target}')
-            patterns_to_replace.append(f'"{parent_target}"')
+            patterns_to_replace.append(parent_item_name)
             patterns_to_replace.append(parent_target)
 
             new_definition_body = definition
