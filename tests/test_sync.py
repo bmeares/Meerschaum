@@ -1326,11 +1326,11 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
     """
     Test that a downstream pipe correctly handles a datetime column converted from an integer.
     """
-    if flavor not in ('timescaledb', 'postgresql', 'postgis'):
-        return
-
     from tests.connectors import conns
+    from meerschaum.utils.sql import sql_item_name
     conn = conns[flavor]
+    if conn.type != 'sql':
+        return
     
     base_pipe = mrsm.Pipe('test_mixed', 'base', instance=conn)
     base_pipe.delete()
@@ -1348,11 +1348,22 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
     ]
     base_pipe.sync(base_data)
     
-    downstream_query = """SELECT
-      TO_TIMESTAMP(ts / 1000.0) AS "time",
+    epoch_to_timestamp_sqls = {
+        'postgresql': 'TO_TIMESTAMP(ts / 1000.0)',
+        'sqlite': "datetime(ts / 1000.0, 'unixepoch')",
+        'mysql': 'FROM_UNIXTIME(ts / 1000.0)',
+        'mariadb': 'FROM_UNIXTIME(ts / 1000.0)',
+        'mssql': "DATEADD(SECOND, ts / 1000.0, '1970-01-01')",
+        'oracle': "TO_TIMESTAMP('1970-01-01', 'YYYY-MM-DD') + numtodsinterval(ts / 1000.0, 'SECOND')",
+        'duckdb': 'to_timestamp(ts / 1000.0)',
+    }
+    ts_conversion = epoch_to_timestamp_sqls.get(flavor, epoch_to_timestamp_sqls['postgresql'])
+
+    downstream_query = f"""SELECT
+      {ts_conversion} AS "time",
       id,
       val
-    FROM {{ """ + str(base_pipe) + """ }}
+    FROM {{{{ """ + str(base_pipe) + """ }}}}
     """
 
     downstream_pipe = mrsm.Pipe(conn, 'test_mixed', 'downstream', instance=conn)
@@ -1376,7 +1387,8 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
     # Verify pushdown
     assert '_mrsm_pushdown' in metadef
     assert 'WHERE' in metadef
-    assert '"ts" >=' in metadef.replace('\n', ' ')
+    quoted_ts = sql_item_name('ts', flavor)
+    assert quoted_ts + ' >=' in metadef.replace('\n', ' ')
     assert '17' in metadef # check for integer bound prefix
     
     success, msg = downstream_pipe.sync(begin=begin_time, debug=debug)
@@ -1388,7 +1400,7 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
 
     # Subsequent sync should also push down!
     assert '_mrsm_pushdown' in metadef_2
-    assert '"ts" >=' in metadef_2.replace('\n', ' ')
+    assert quoted_ts + ' >=' in metadef_2.replace('\n', ' ')
     assert 'CAST' not in metadef_2[metadef_2.find('WHERE'):]
 
     success, msg = downstream_pipe.sync(debug=debug)
@@ -1403,12 +1415,12 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
     assert 'datetime' in str(df['time'].dtype).lower()
 
     # Efficient pipe (automatic parent axis selection)
-    efficient_query = """SELECT
+    efficient_query = f"""SELECT
       ts,
-      TO_TIMESTAMP(ts / 1000.0) AS "time",
+      {ts_conversion} AS "time",
       id,
       val
-    FROM {{ """ + str(base_pipe) + """ }}
+    FROM {{{{ """ + str(base_pipe) + """ }}}}
     """
     efficient_pipe = mrsm.Pipe(conn, 'test_mixed', 'efficient', instance=conn)
     efficient_pipe.delete()
@@ -1438,7 +1450,7 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
     
     # Verify pushdown CTE exists and uses the integer bound on 'ts'!
     assert '_mrsm_pushdown' in metadef_eff_2
-    assert '"ts" >=' in metadef_eff_2.replace('\n', ' ')
+    assert quoted_ts + ' >=' in metadef_eff_2.replace('\n', ' ')
     assert metadef_eff_2.count('WHERE') == 1
     
     success, msg = efficient_pipe.sync(debug=debug)

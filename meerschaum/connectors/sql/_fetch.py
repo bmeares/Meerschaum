@@ -333,19 +333,13 @@ def get_pipe_metadef(
                     parent_found = True
             
             if parent_found:
-                # Handle existing WITH clause
-                if definition.lstrip().lower().startswith('with '):
-                    first_select_ix = definition.lower().find('select')
-                    definition = (
-                        definition[:first_select_ix].rstrip().rstrip(',')
-                        + f",\n{pushdown_cte_name} AS (\n    {pushdown_query}\n)\n"
-                        + new_definition_body[first_select_ix:]
-                    )
-                else:
-                    definition = (
-                        f"WITH {pushdown_cte_name} AS (\n    {pushdown_query}\n)\n"
-                        + new_definition_body
-                    )
+                from meerschaum.utils.sql import wrap_query_with_cte
+                definition = wrap_query_with_cte(
+                    pushdown_query,
+                    new_definition_body,
+                    self.flavor,
+                    cte_name='_mrsm_pushdown',
+                )
                 handled_bounding = True
 
     from meerschaum.utils.sql import format_cte_subquery
@@ -519,7 +513,7 @@ def _join_fetch_query(
         if pipe.connector.flavor not in ('mysql', 'mariadb')
         else (
         f"""
-    SELECT * FROM (\n{definition}\n) AS definition"""
+    SELECT\n* FROM (\n{definition}\n) AS definition"""
         )
     ) + f"""
     LEFT OUTER JOIN {sync_times_remote_name} AS st
