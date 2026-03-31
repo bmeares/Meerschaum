@@ -126,14 +126,11 @@ def get_pipe_metadef(
     from meerschaum.config import get_config
 
     parent = pipe.parent
-    fetch_params = pipe.get_parameters(debug=debug).get('fetch', {})
-    dt_col = fetch_params.get('columns', {}).get('datetime', None)
-    if not dt_col:
-        parent_dt_col = parent.columns.get('datetime', None) if parent is not None else None
-        if parent_dt_col and parent_dt_col in pipe.dtypes:
-            dt_col = parent_dt_col
-        else:
-            dt_col = pipe.columns.get('datetime', None) or parent_dt_col
+    parent_dt_col = parent.columns.get('datetime', None) if parent is not None else None
+    parent_dt_typ = parent.dtypes.get(parent_dt_col, 'datetime') if parent_dt_col else None
+    dt_col = parent_dt_col or pipe.columns.get('datetime', None)
+    dt_typ = parent_dt_typ or pipe.dtypes.get(dt_col, 'datetime')
+    db_dt_typ = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
     if not dt_col:
         dt_col = pipe.guess_datetime()
         dt_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
@@ -141,15 +138,6 @@ def get_pipe_metadef(
     else:
         dt_name = sql_item_name(dt_col, self.flavor, None)
         is_guess = False
-
-    from meerschaum.config import apply_patch_to_config
-    parent_dtypes = parent.dtypes if parent is not None else {}
-    pipe_dtypes = pipe.dtypes
-    fetch_dtypes = fetch_params.get('dtypes', None) or {}
-    dtypes = apply_patch_to_config(parent_dtypes, pipe_dtypes)
-    dtypes = apply_patch_to_config(dtypes, fetch_dtypes)
-    dt_typ = dtypes.get(dt_col, 'datetime') if dt_col else None
-    db_dt_typ = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
 
     if begin not in (None, '') or end is not None:
         if is_guess:

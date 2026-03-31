@@ -638,7 +638,6 @@ def _show_logs(
     timestamp_format = get_config('jobs', 'logs', 'timestamps', 'format')
     follow_timestamp_format = get_config('jobs', 'logs', 'timestamps', 'follow_format')
 
-    print(f"{executor_keys=}")
     jobs = get_filtered_jobs(executor_keys, action)
     now = datetime.now(timezone.utc)
     now_str = now.strftime(timestamp_format)

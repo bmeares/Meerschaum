@@ -124,8 +124,9 @@ $PYTHON_BIN -m pytest \
   --ignore=tests/data/ \
   --ignore=docs/ \
   --ff \
-  $([ "$#" -gt 0 ] && echo "$@") \
-  $([ "$#" -eq 0 ] && echo "-n=auto") \
+  -n=auto \
+  # $([ "$#" -gt 0 ] && echo "$@") \
+  # $([ "$#" -eq 0 ] && echo "-n=auto") \
   -v; rc="$?"
 
 ### Cleanup
