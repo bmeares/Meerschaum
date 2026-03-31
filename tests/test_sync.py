@@ -4,7 +4,7 @@
 
 import sys
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -1319,3 +1319,130 @@ def test_autotime(flavor: str):
     df = pipe.get_data(params={'id': 1})
     assert len(df) == 3
     print(df)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_mixed_datetime_dtypes_sql(flavor: str):
+    """
+    Test that a downstream pipe correctly handles a datetime column converted from an integer.
+    """
+    if flavor not in ('timescaledb', 'postgresql', 'postgis'):
+        return
+
+    from tests.connectors import conns
+    conn = conns[flavor]
+    
+    base_pipe = mrsm.Pipe('test_mixed', 'base', instance=conn)
+    base_pipe.delete()
+    base_pipe = mrsm.Pipe(
+        'test_mixed', 'base',
+        instance=conn,
+        columns={'datetime': 'ts', 'id': 'id'},
+        dtypes={'ts': 'int64'},
+        precision='ms',
+    )
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    base_data = [
+        {'ts': now_ms - 10000, 'id': 1, 'val': 10},
+        {'ts': now_ms, 'id': 1, 'val': 20},
+    ]
+    base_pipe.sync(base_data)
+    
+    downstream_query = """SELECT
+      TO_TIMESTAMP(ts / 1000.0) AS "time",
+      id,
+      val
+    FROM {{ """ + str(base_pipe) + """ }}
+    """
+
+    downstream_pipe = mrsm.Pipe(conn, 'test_mixed', 'downstream', instance=conn)
+    downstream_pipe.delete()
+    downstream_pipe = mrsm.Pipe(
+        conn, 'test_mixed', 'downstream',
+        instance=conn,
+        columns={'datetime': 'time', 'id': 'id'},
+        dtypes={'time': 'datetime'},
+        parent=base_pipe,
+        parameters={
+            'fetch': {
+                'definition': downstream_query,
+            },
+        }
+    )
+    
+    begin_time = datetime.now(timezone.utc) - timedelta(minutes=5)
+    metadef = conn.get_pipe_metadef(downstream_pipe, begin=begin_time, debug=debug)
+
+    # Verify pushdown
+    assert '_mrsm_pushdown' in metadef
+    assert 'WHERE' in metadef
+    assert '"ts" >=' in metadef.replace('\n', ' ')
+    assert '17' in metadef # check for integer bound prefix
+    
+    success, msg = downstream_pipe.sync(begin=begin_time, debug=debug)
+    assert success, msg
+
+    # Subsequent sync
+    sync_time = downstream_pipe.get_sync_time(debug=debug)
+    metadef_2 = conn.get_pipe_metadef(downstream_pipe, begin=sync_time, debug=debug)
+
+    # Subsequent sync should also push down!
+    assert '_mrsm_pushdown' in metadef_2
+    assert '"ts" >=' in metadef_2.replace('\n', ' ')
+    assert 'CAST' not in metadef_2[metadef_2.find('WHERE'):]
+
+    success, msg = downstream_pipe.sync(debug=debug)
+    assert success, msg
+     
+    assert downstream_pipe.exists()
+    
+    df = downstream_pipe.get_data()
+    assert df is not None, "get_data() returned None"
+    assert len(df) > 0
+    assert 'time' in df.columns
+    assert 'datetime' in str(df['time'].dtype).lower()
+
+    # Efficient pipe (automatic parent axis selection)
+    efficient_query = """SELECT
+      ts,
+      TO_TIMESTAMP(ts / 1000.0) AS "time",
+      id,
+      val
+    FROM {{ """ + str(base_pipe) + """ }}
+    """
+    efficient_pipe = mrsm.Pipe(conn, 'test_mixed', 'efficient', instance=conn)
+    efficient_pipe.delete()
+    efficient_pipe = mrsm.Pipe(
+        conn, 'test_mixed', 'efficient',
+        instance=conn,
+        columns={'datetime': 'time', 'id': 'id'},
+        dtypes={'time': 'datetime'},
+        parent=base_pipe,
+        parameters={
+            'fetch': {
+                'definition': efficient_query,
+            },
+        }
+    )
+
+    # Initial sync for efficient pipe with explicit begin
+    metadef_eff_1 = conn.get_pipe_metadef(efficient_pipe, begin=begin_time, debug=debug)
+    assert '_mrsm_pushdown' in metadef_eff_1
+
+    success, msg = efficient_pipe.sync(begin=begin_time, debug=debug)
+    assert success, msg
+
+    # Subsequent sync for efficient pipe
+    sync_time_eff = efficient_pipe.get_sync_time(debug=debug)
+    metadef_eff_2 = conn.get_pipe_metadef(efficient_pipe, begin=sync_time_eff, debug=debug)
+    
+    # Verify pushdown CTE exists and uses the integer bound on 'ts'!
+    assert '_mrsm_pushdown' in metadef_eff_2
+    assert '"ts" >=' in metadef_eff_2.replace('\n', ' ')
+    assert metadef_eff_2.count('WHERE') == 1
+    
+    success, msg = efficient_pipe.sync(debug=debug)
+    assert success, msg
+    assert efficient_pipe.get_rowcount() > 0
+
+

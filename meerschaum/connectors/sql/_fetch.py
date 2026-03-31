@@ -8,7 +8,7 @@ Implement the Connector fetch() method
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Union, Any, List, Dict
@@ -127,11 +127,13 @@ def get_pipe_metadef(
 
     parent = pipe.parent
     fetch_params = pipe.get_parameters(debug=debug).get('fetch', {})
-    dt_col = (
-        fetch_params.get('columns', {}).get('datetime', None)
-        or (parent.columns.get('datetime', None) if parent is not None else None)
-        or pipe.columns.get('datetime', None)
-    )
+    dt_col = fetch_params.get('columns', {}).get('datetime', None)
+    if not dt_col:
+        parent_dt_col = parent.columns.get('datetime', None) if parent is not None else None
+        if parent_dt_col and parent_dt_col in pipe.dtypes:
+            dt_col = parent_dt_col
+        else:
+            dt_col = pipe.columns.get('datetime', None) or parent_dt_col
     if not dt_col:
         dt_col = pipe.guess_datetime()
         dt_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
@@ -140,11 +142,12 @@ def get_pipe_metadef(
         dt_name = sql_item_name(dt_col, self.flavor, None)
         is_guess = False
 
-    dtypes = (
-        fetch_params.get('dtypes', None)
-        or (parent.dtypes if parent is not None else None)
-        or pipe.dtypes
-    )
+    from meerschaum.config import apply_patch_to_config
+    parent_dtypes = parent.dtypes if parent is not None else {}
+    pipe_dtypes = pipe.dtypes
+    fetch_dtypes = fetch_params.get('dtypes', None) or {}
+    dtypes = apply_patch_to_config(parent_dtypes, pipe_dtypes)
+    dtypes = apply_patch_to_config(dtypes, fetch_dtypes)
     dt_typ = dtypes.get(dt_col, 'datetime') if dt_col else None
     db_dt_typ = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
 
@@ -177,6 +180,32 @@ def get_pipe_metadef(
         else begin
     )
 
+    # Determine if we should use integer bounds based on child or parent axis.
+    target_dt_typ = dt_typ
+    target_precision_pipe = pipe
+    if not (dt_typ and 'int' in dt_typ.lower()) and parent is not None:
+        parent_dt_col = parent.columns.get('datetime', None)
+        parent_dt_typ = parent.dtypes.get(parent_dt_col, 'datetime')
+        if parent_dt_typ and 'int' in parent_dt_typ.lower():
+            target_dt_typ = parent_dt_typ
+            target_precision_pipe = parent
+
+    if target_dt_typ and 'int' in target_dt_typ.lower():
+        from meerschaum.utils.dtypes import (
+            get_current_timestamp,
+            MRSM_PRECISION_UNITS_SCALARS,
+            MRSM_PRECISION_UNITS_ALIASES,
+        )
+        precision_unit = target_precision_pipe.precision.get('unit', 'second')
+        if isinstance(begin, datetime):
+            begin = get_current_timestamp(precision_unit, _now=begin, as_int=True)
+        if isinstance(end, datetime):
+            end = get_current_timestamp(precision_unit, _now=end, as_int=True)
+
+        if isinstance(backtrack_interval, timedelta):
+            true_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
+            btm = int(backtrack_interval.total_seconds() * MRSM_PRECISION_UNITS_SCALARS[true_unit])
+
     if begin not in (None, '') and end is not None and begin >= end:
         begin = None
 
@@ -185,7 +214,7 @@ def get_pipe_metadef(
         begin_da = (
             dateadd_str(
                 flavor=self.flavor,
-                datepart='minute',
+                datepart=('minute' if not isinstance(begin, int) else None),
                 number=((-1 * btm) if apply_backtrack else 0),
                 begin=begin,
                 db_type=db_dt_typ,
@@ -196,7 +225,7 @@ def get_pipe_metadef(
         end_da = (
             dateadd_str(
                 flavor=self.flavor,
-                datepart='minute',
+                datepart=('minute' if not isinstance(end, int) else None),
                 number=0,
                 begin=end,
                 db_type=db_dt_typ,
@@ -206,15 +235,133 @@ def get_pipe_metadef(
         )
 
     definition_name = sql_item_name('definition', self.flavor, None)
+    definition = get_pipe_query(pipe)
+    if definition is None:
+        raise ValueError(f"No SQL definition could be found for {pipe}.")
+
+    ### Attempt to push down the predicate if possible.
+    handled_bounding = False
+    if parent is not None and begin not in (None, ''):
+        parent_target = parent.target
+        parent_dt_col = parent.columns.get('datetime', None)
+        parent_dt_name = sql_item_name(parent_dt_col, self.flavor, None) if parent_dt_col else None
+        
+        # Determine the correct bounds for the parent axis.
+        # Use the parent's precision if it's an integer.
+        parent_dt_typ = parent.dtypes.get(parent_dt_col, 'datetime')
+        parent_db_dt_typ = get_db_type_from_pd_type(parent_dt_typ, self.flavor) if parent_dt_typ else None
+        
+        # Calculate bounds for the parent axis (specifically for pushdown)
+        p_begin, p_end, p_btm = begin, end, btm
+        if parent_dt_typ and 'int' in parent_dt_typ.lower():
+            from meerschaum.utils.dtypes import get_current_timestamp, MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES
+            p_precision_unit = parent.precision.get('unit', 'second')
+            if isinstance(begin, (datetime, int)):
+                _dt_begin = begin if isinstance(begin, datetime) else datetime.fromtimestamp(
+                    begin / MRSM_PRECISION_UNITS_SCALARS[MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)], 
+                    timezone.utc
+                )
+                p_begin = get_current_timestamp(p_precision_unit, _now=_dt_begin, as_int=True)
+            
+            if isinstance(end, (datetime, int)) and end is not None:
+                _dt_end = end if isinstance(end, datetime) else datetime.fromtimestamp(
+                    end / MRSM_PRECISION_UNITS_SCALARS[MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)], 
+                    timezone.utc
+                )
+                p_end = get_current_timestamp(p_precision_unit, _now=_dt_end, as_int=True)
+            
+            if isinstance(backtrack_interval, timedelta):
+                p_true_unit = MRSM_PRECISION_UNITS_ALIASES.get(p_precision_unit, p_precision_unit)
+                p_btm = int(backtrack_interval.total_seconds() * MRSM_PRECISION_UNITS_SCALARS[p_true_unit])
+
+        parent_begin_da = (
+            dateadd_str(
+                flavor=self.flavor,
+                datepart=('minute' if not isinstance(p_begin, int) else None),
+                number=((-1 * p_btm) if apply_backtrack else 0),
+                begin=p_begin,
+                db_type=parent_db_dt_typ,
+            )
+            if p_begin not in ('', None)
+            else None
+        )
+        parent_end_da = (
+            dateadd_str(
+                flavor=self.flavor,
+                datepart=('minute' if not isinstance(p_end, int) else None),
+                number=0,
+                begin=p_end,
+                db_type=parent_db_dt_typ,
+            )
+            if p_end is not None
+            else None
+        )
+
+        parent_item_name = sql_item_name(parent_target, self.flavor, None)
+        parent_item_name_full = sql_item_name(parent_target, self.flavor, parent.instance_connector.schema)
+        
+        # Simple string search for parent target in the original definition.
+        if parent_dt_name and (
+            parent_item_name in definition 
+            or parent_item_name_full in definition
+            or parent_target in definition
+        ):
+            pushdown_cte_name = sql_item_name('_mrsm_pushdown', self.flavor, None)
+            pushdown_where = ""
+            if parent_begin_da:
+                pushdown_where += f"\n    {parent_dt_name} >= {parent_begin_da}"
+            if parent_begin_da and parent_end_da:
+                pushdown_where += "\n    AND"
+            if parent_end_da:
+                pushdown_where += f"\n    {parent_dt_name} < {parent_end_da}"
+            
+            pushdown_query = (
+                f"SELECT * FROM {parent_item_name_full}"
+                + f"\nWHERE {pushdown_where}"
+            )
+            
+            # Replace occurrences of parent target with pushdown CTE in the definition body.
+            parent_found = False
+            patterns_to_replace = []
+            parent_schema = parent.instance_connector.schema
+            if parent_schema:
+                patterns_to_replace.append(f'"{parent_schema}"."{parent_target}"')
+                patterns_to_replace.append(f'{parent_schema}.{parent_target}')
+            patterns_to_replace.append(f'"{parent_target}"')
+            patterns_to_replace.append(parent_target)
+
+            new_definition_body = definition
+            for pattern in patterns_to_replace:
+                if pattern in new_definition_body:
+                    new_definition_body = new_definition_body.replace(pattern, pushdown_cte_name)
+                    parent_found = True
+            
+            if parent_found:
+                # Handle existing WITH clause
+                if definition.lstrip().lower().startswith('with '):
+                    first_select_ix = definition.lower().find('select')
+                    definition = (
+                        definition[:first_select_ix].rstrip().rstrip(',')
+                        + f",\n{pushdown_cte_name} AS (\n    {pushdown_query}\n)\n"
+                        + new_definition_body[first_select_ix:]
+                    )
+                else:
+                    definition = (
+                        f"WITH {pushdown_cte_name} AS (\n    {pushdown_query}\n)\n"
+                        + new_definition_body
+                    )
+                handled_bounding = True
+
+    from meerschaum.utils.sql import format_cte_subquery
     meta_def = (
-        _simple_fetch_query(pipe, self.flavor) if (
+        format_cte_subquery(definition, self.flavor, 'definition') if (
             (not (pipe.columns or {}).get('id', None))
             or (not get_config('system', 'experimental', 'join_fetch'))
         ) else _join_fetch_query(pipe, self.flavor, debug=debug, **kw)
     )
 
     has_where = 'where' in meta_def.lower()[meta_def.lower().rfind('definition'):]
-    if dt_name and (begin_da or end_da):
+    if dt_name and (begin_da or end_da) and not handled_bounding:
         definition_dt_name = f"{definition_name}.{dt_name}"
         meta_def += "\n" + ("AND" if has_where else "WHERE") + " "
         has_where = True
@@ -271,6 +418,7 @@ def get_pipe_query(
 
     if apply_symlinks:
         definition = replace_pipes_syntax(definition)
+
     return textwrap.dedent(definition.lstrip().rstrip())
 
 
