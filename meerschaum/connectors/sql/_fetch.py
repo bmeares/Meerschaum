@@ -124,6 +124,11 @@ def get_pipe_metadef(
     from meerschaum.utils.sql import sql_item_name, dateadd_str, build_where
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     from meerschaum.config import get_config
+    from meerschaum.utils.dtypes import (
+        get_current_timestamp,
+        MRSM_PRECISION_UNITS_SCALARS,
+        MRSM_PRECISION_UNITS_ALIASES,
+    )
 
     parent = pipe.parent
     parent_dt_col = parent.columns.get('datetime', None) if parent is not None else None
@@ -131,6 +136,7 @@ def get_pipe_metadef(
     dt_col = parent_dt_col or pipe.columns.get('datetime', None)
     dt_typ = parent_dt_typ or pipe.dtypes.get(dt_col, 'datetime')
     db_dt_typ = get_db_type_from_pd_type(dt_typ, self.flavor) if dt_typ else None
+    precision = parent.precision if parent_dt_typ else pipe.precision
     if not dt_col:
         dt_col = pipe.guess_datetime()
         dt_name = sql_item_name(dt_col, self.flavor, None) if dt_col else None
@@ -168,23 +174,8 @@ def get_pipe_metadef(
         else begin
     )
 
-    # Determine if we should use integer bounds based on child or parent axis.
-    target_dt_typ = dt_typ
-    target_precision_pipe = pipe
-    if not (dt_typ and 'int' in dt_typ.lower()) and parent is not None:
-        parent_dt_col = parent.columns.get('datetime', None)
-        parent_dt_typ = parent.dtypes.get(parent_dt_col, 'datetime')
-        if parent_dt_typ and 'int' in parent_dt_typ.lower():
-            target_dt_typ = parent_dt_typ
-            target_precision_pipe = parent
-
-    if target_dt_typ and 'int' in target_dt_typ.lower():
-        from meerschaum.utils.dtypes import (
-            get_current_timestamp,
-            MRSM_PRECISION_UNITS_SCALARS,
-            MRSM_PRECISION_UNITS_ALIASES,
-        )
-        precision_unit = target_precision_pipe.precision.get('unit', 'second')
+    if 'int' in dt_typ.lower():
+        precision_unit = precision.get('unit', 'second')
         if isinstance(begin, datetime):
             begin = get_current_timestamp(precision_unit, _now=begin, as_int=True)
         if isinstance(end, datetime):
@@ -229,43 +220,56 @@ def get_pipe_metadef(
 
     ### Attempt to push down the predicate if possible.
     handled_bounding = False
-    if parent is not None and begin not in (None, ''):
+    if parent_dt_col and (begin not in (None, '') or end is not None):
         parent_target = parent.target
-        parent_dt_col = parent.columns.get('datetime', None)
-        parent_dt_name = sql_item_name(parent_dt_col, self.flavor, None) if parent_dt_col else None
-        
+        parent_schema = parent.schema
+        parent_dt_name = sql_item_name(parent_dt_col, self.flavor, None)
+        parent_db_dt_typ = get_db_type_from_pd_type(parent_dt_typ, self.flavor)
+
         # Determine the correct bounds for the parent axis.
         # Use the parent's precision if it's an integer.
-        parent_dt_typ = parent.dtypes.get(parent_dt_col, 'datetime')
-        parent_db_dt_typ = get_db_type_from_pd_type(parent_dt_typ, self.flavor) if parent_dt_typ else None
         
         # Calculate bounds for the parent axis (specifically for pushdown)
         p_begin, p_end, p_btm = begin, end, btm
-        if parent_dt_typ and 'int' in parent_dt_typ.lower():
-            from meerschaum.utils.dtypes import get_current_timestamp, MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES
-            p_precision_unit = parent.precision.get('unit', 'second')
+        if 'int' in parent_dt_typ.lower():
+            p_precision_unit = precision.get('unit', 'second')
             if isinstance(begin, (datetime, int)):
-                _dt_begin = begin if isinstance(begin, datetime) else datetime.fromtimestamp(
-                    begin / MRSM_PRECISION_UNITS_SCALARS[MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)], 
-                    timezone.utc
+                _dt_begin = (
+                    begin
+                    if isinstance(begin, datetime)
+                    else datetime.fromtimestamp(
+                        begin / MRSM_PRECISION_UNITS_SCALARS[
+                            MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
+                        ],
+                        timezone.utc
+                    )
                 )
                 p_begin = get_current_timestamp(p_precision_unit, _now=_dt_begin, as_int=True)
             
             if isinstance(end, (datetime, int)) and end is not None:
-                _dt_end = end if isinstance(end, datetime) else datetime.fromtimestamp(
-                    end / MRSM_PRECISION_UNITS_SCALARS[MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)], 
-                    timezone.utc
+                _dt_end = (
+                    end
+                    if isinstance(end, datetime)
+                    else datetime.fromtimestamp(
+                        end / MRSM_PRECISION_UNITS_SCALARS[
+                            MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
+                        ], 
+                        timezone.utc
+                    )
                 )
                 p_end = get_current_timestamp(p_precision_unit, _now=_dt_end, as_int=True)
-            
+
             if isinstance(backtrack_interval, timedelta):
                 p_true_unit = MRSM_PRECISION_UNITS_ALIASES.get(p_precision_unit, p_precision_unit)
-                p_btm = int(backtrack_interval.total_seconds() * MRSM_PRECISION_UNITS_SCALARS[p_true_unit])
+                p_btm = int(
+                    backtrack_interval.total_seconds()
+                    * MRSM_PRECISION_UNITS_SCALARS[p_true_unit]
+                )
 
         parent_begin_da = (
             dateadd_str(
                 flavor=self.flavor,
-                datepart=('minute' if not isinstance(p_begin, int) else None),
+                datepart='minute',
                 number=((-1 * p_btm) if apply_backtrack else 0),
                 begin=p_begin,
                 db_type=parent_db_dt_typ,
@@ -276,7 +280,7 @@ def get_pipe_metadef(
         parent_end_da = (
             dateadd_str(
                 flavor=self.flavor,
-                datepart=('minute' if not isinstance(p_end, int) else None),
+                datepart='minute',
                 number=0,
                 begin=p_end,
                 db_type=parent_db_dt_typ,
@@ -287,7 +291,7 @@ def get_pipe_metadef(
 
         parent_item_name = sql_item_name(parent_target, self.flavor, None)
         parent_item_name_full = sql_item_name(parent_target, self.flavor, parent.instance_connector.schema)
-        
+
         # Simple string search for parent target in the original definition.
         if parent_dt_name and (
             parent_item_name in definition 
@@ -304,15 +308,16 @@ def get_pipe_metadef(
                 pushdown_where += f"\n    {parent_dt_name} < {parent_end_da}"
             
             pushdown_query = (
-                f"SELECT * FROM {parent_item_name_full}"
+                f"SELECT *\nFROM {parent_item_name_full}"
                 + f"\nWHERE {pushdown_where}"
             )
             
             # Replace occurrences of parent target with pushdown CTE in the definition body.
             parent_found = False
             patterns_to_replace = []
-            parent_schema = parent.instance_connector.schema
+            parent_schema = parent.schema
             if parent_schema:
+                patterns_to_replace.append(parent_item_name_full)
                 patterns_to_replace.append(f'"{parent_schema}"."{parent_target}"')
                 patterns_to_replace.append(f'{parent_schema}.{parent_target}')
             patterns_to_replace.append(f'"{parent_target}"')
