@@ -60,7 +60,7 @@ This will start the pre-configured TimescaleDB instance (`sql:main`).
 
 ## ⚡ Connect to Your Instance
 
-<img src="/assets/screenshots/prompt.png" alt="Meerschaum instance prompt">
+![Meerschaum instance prompt](/assets/screenshots/prompt.png){ align=left }
 
 Open the Meerschaum shell with `mrsm` or `python -m meerschaum`.
 

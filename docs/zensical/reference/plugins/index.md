@@ -1,3 +1,8 @@
+---
+hide:
+    - toc
+---
+
 # ➕ Plugins
 
 Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes) as well as defining custom actions, connectors, API endpoints, dash apps, and more.

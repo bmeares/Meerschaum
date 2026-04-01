@@ -99,7 +99,7 @@ The primary reason for syncing in this way is to take advantage of the propertie
 
   - **Upsert** (*Load*)  
 
-    Once new rows are fetched and filtered, they are inserted into the database table via the pipe's [instance connector](/reference/connectors/#instances-and-repositories).
+    Once new rows are fetched and filtered, they are inserted into the database table via the pipe's [instance connector](/reference/connectors/#instances-and-repositories). If [`upsert`](/reference/pipes/parameters/#upsert) is set in the pipe's parameters, then inserts and updates are performed in one query.
 
 ??? example "Example `upsert` queries"
 
@@ -113,16 +113,26 @@ The primary reason for syncing in this way is to take advantage of the propertie
     === "Updates"
         ```sql
         UPDATE target_table AS f
-        SET value = CAST(p.value AS DOUBLE PRECISION)
+        SET value = p.value
         FROM target_table AS t
-        INNER JOIN ( SELECT DISTINCT * FROM patch_table ) AS p
+        INNER JOIN patch_table AS p
           ON p.id = t.id
-          AND
-          p.datetime = p.datetime
+            AND
+            p.datetime = p.datetime
         WHERE
           p.datetime = f.datetime
           AND
           p.id = f.id
+        ```
+
+    === "Upserts"
+        ```sql
+        INSERT INTO target_table (datetime, id, value)
+        SELECT datetime, id, value
+        FROM patch_table
+        ON CONFLICT (datetime, id)
+          DO UPDATE
+          SET value = EXCLUDED.value
         ```
 
 ## Backtracking

@@ -68,6 +68,8 @@ features = [
   "navigation.path",
   "navigation.prune",
   "navigation.indexes",
+  "content.code.copy",
+  "content.code.select",
 ]
 logo = "assets/logo_500x500.png"
 favicon = "assets/logo.ico"
@@ -84,6 +86,19 @@ permalink = true
 [project.markdown_extensions.admonition]
 [project.markdown_extensions.pymdownx.details]
 [project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.pymdownx.blocks.caption]
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.snippets]
 
 [project.extra.analytics]
 provider = "google"

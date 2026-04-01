@@ -470,29 +470,11 @@ class Pipe:
 
         if parents is not None or parent is not None:
             parent_vals = parents if parents is not None else parent
-            if not isinstance(parent_vals, list):
-                parent_vals = [parent_vals]
-            self._attributes['parameters']['parents'] = [
-                (
-                    val
-                    if isinstance(val, (dict, str))
-                    else val.keys()
-                )
-                for val in parent_vals
-            ]
+            self.parents = parent_vals
 
         if children is not None or child is not None:
             children_vals = children if children is not None else child
-            if not isinstance(children_vals, list):
-                parent_vals = [children_vals]
-            self._attributes['parameters']['children'] = [
-                (
-                    val
-                    if isinstance(val, (dict, str))
-                    else val.keys()
-                )
-                for val in children_vals
-            ]
+            self.children = children_vals
 
     @property
     def metric_key(self) -> str:

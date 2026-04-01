@@ -752,6 +752,10 @@ def parents(self) -> List[mrsm.Pipe]:
     """
     Return a list of `meerschaum.Pipe` objects to be designated as parents.
     """
+    _cached_parents = self.__dict__.get('_parents', None)
+    if _cached_parents is not None:
+        return _cached_parents
+
     from meerschaum.utils.pipes import get_pipe_from_value
     key = 'parents' if 'parents' in self.parameters else 'parent'
     parents_refs = self.parameters.get(key, None) or []
@@ -761,8 +765,8 @@ def parents(self) -> List[mrsm.Pipe]:
     if not parents_refs:
         return []
 
-    _parents = [get_pipe_from_value(val, _pipe=self) for val in parents_refs]
-    return _parents
+    self._parents = [get_pipe_from_value(val, _pipe=self) for val in parents_refs]
+    return self._parents
 
 
 @property
@@ -782,6 +786,10 @@ def parents(self, _parents) -> None:
     """
     if not isinstance(_parents, list):
         _parents = [_parents]
+
+    need_cache = all(isinstance(_parent, mrsm.Pipe) for _parent in _parents)
+    if need_cache:
+        self._parents = _parents
 
     _parents = [
         (
@@ -807,6 +815,10 @@ def children(self) -> List[mrsm.Pipe]:
     """
     Return a list of `meerschaum.Pipe` objects to be designated as children.
     """
+    _cached_children = self.__dict__.get('_children', None)
+    if _cached_children is not None:
+        return _cached_children
+
     from meerschaum.utils.pipes import get_pipe_from_value
     key = 'children' if 'children' in self.parameters else 'child'
     children_refs = self.parameters.get(key, None) or []
@@ -816,7 +828,8 @@ def children(self) -> List[mrsm.Pipe]:
     if not children_refs:
         return []
 
-    return [get_pipe_from_value(val, _pipe=self) for val in children_refs]
+    self._children = [get_pipe_from_value(val, _pipe=self) for val in children_refs]
+    return self._children
 
 
 @property
@@ -837,6 +850,10 @@ def children(self, _children) -> None:
     """
     if not isinstance(_children, list):
         _children = [_children]
+
+    need_cache = all(isinstance(_child, mrsm.Pipe) for _child in _children)
+    if need_cache:
+        self._children = _children
 
     _children = [
         (

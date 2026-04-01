@@ -6,16 +6,16 @@ The Meerschaum API instance (and [Web Console](/get-started/start-api/)) lets yo
 
 Starting the Meerschaum API server lets you treat your host as the following:
 
-- [API instance](/reference/connectors/#-instances-and-repositories)  
+- [API instance](/reference/connectors/#instances-and-repositories)  
   For managing pipes.
 - [Plugin repository](/reference/plugins/repositories/)  
   For storing plugins.
-- [Remote executor](/reference/background-jobs/#-executors)  
+- [Remote executor](/reference/background-jobs/#executors)  
   For running jobs.
 
 ### Adding Connectors
 
-Add new `api` connectors with `bootstrap connector` or declaring an [environment connector](/reference/connectors/#-environment-connectors):
+Add new `api` connectors with `bootstrap connector` or declaring an [environment connector](/reference/connectors/#environment-connectors):
 
 ```bash
 # URI is in the form 'protocol://user:pass@host:port'
@@ -24,7 +24,7 @@ export MRSM_API_FOO='https://foo:bar@mrsm.example.com'
 
 ### Remote Actions
 
-Add `-e` to client commands to [execute them remotely](/reference/background-jobs/#-executors) on your API instance:
+Add `-e` to client commands to [execute them remotely](/reference/background-jobs/#executors) on your API instance:
 
 ```
 sync pipes -e api:main

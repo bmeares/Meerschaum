@@ -2,6 +2,8 @@
 
 ## 3.2.0 Releases
 
+This is the current release cycle, so stay tuned for future releases!
+
 ### v3.2.0
 
 - **Allow for strings for `reference`, `parents`, and `children`.**  
@@ -34,7 +36,7 @@
   ```
 
 - **Add `reference`, `parents` / `parent`, and `children` / `child` to `Pipe` constructor.**  
-  For convenience, the reference keys are now able to passed directly into the `Pipe` constructor. The value may either be a dictionary, string, or another `Pipe` (or a list of each for `parents` / `children`). 
+  For convenience, reference pipes or keys are now able to passed directly into the `Pipe` constructor. The accepted values may either be dictionaries, strings, or other pipes (or a list of each for `parents` / `children`). 
 
   ```python
   pipe = mrsm.Pipe('foo', 'bar', instance='sql:local')
@@ -46,8 +48,65 @@
   # Pipe('foo', 'bar', 'baz', instance='sql:memory')
   ```
 
+- **Reference `parent` pipes when syncing SQL pipes.**  
+  If a SQL pipe includes a `parent` reference, then the date bounding logic injected into the SQL query definition will be more efficiently applied the parent table. This is especially useful for converting between integer and datetime dtypes via SQL.
+
+  ```python
+  import meerschaum as mrsm
+
+  base_pipe = mrsm.Pipe(
+      'demo', 'reference', 'parent',
+      instance='sql:local',
+      columns={'datetime': 'ts',},
+      dtypes={'ts': 'int'},
+      precision='s',
+  )
+  base_pipe.sync([{'ts': 1775063535, 'color': 'red'}])
+
+  pipe = mrsm.Pipe(
+      'sql:local', 'reference', 'child',
+      instance='sql:local',
+      columns={'datetime': 'ts'},
+      dtypes={'ts': 'datetime'},
+      parent=base_pipe, # Reference the parent pipe
+      parameters={
+          'sql': (
+            "SELECT datetime(ts, 'unixepoch') AS ts, color\n"
+            "FROM {{ Pipe('demo', 'reference', 'parent') }}"
+          ),
+      },
+  )
+  metadef = pipe.instance_connector.get_pipe_metadef(pipe, begin=base_pipe.get_sync_time())
+  print(metadef)
+  # WITH "_mrsm_pushdown" AS (
+  #     SELECT *
+  #     FROM "demo_reference_parent"
+  #     WHERE 
+  #         "ts" >= 1775063535
+  # ),
+  # "definition" AS (
+  #      SELECT datetime(ts, 'unixepoch') AS ts, color
+  #      FROM "_mrsm_pushdown"
+  # )
+  # SELECT *
+  # FROM "definition"
+
+
+  pipe.sync() 
+  base_pipe.sync([{'ts': 1775063837, 'color': 'blue'}])
+  pipe.sync()
+  df = pipe.get_data()
+  print(df)
+  #                          ts color
+  # 0 2026-04-01 17:12:15+00:00   red
+  # 1 2026-04-01 17:17:17+00:00  blue
+  ```
+
 - **Allow for changing `datetime` dtypes in SQL pipes.**  
   When syncing SQL pipes with a `parent` pipe, the parameters for the parent are considered when building the metadefinition, allowing for changing from integer to timestamp dtypes.
+
+- **Add run-time information to pipeline steps.**  
+  When chaining actions into pipelines, the output steps show the run-time for each step.
 
 - **Improve config patch performance.**  
   The config patching logic has been refactored to improve performance.
@@ -55,9 +114,10 @@
 - **Improve `uv` and virtual environment support.**  
   Meerschaum now installs correctly with `uv tool install` and enables `uv` when run from a virtual environment.
 
+- **Fixed a bug with the `sql:local` CLI.** 
+
 ## 3.1.x Releases
 
-This is the current release cycle, so stay tuned for future releases!
 
 ### v3.1.8
 

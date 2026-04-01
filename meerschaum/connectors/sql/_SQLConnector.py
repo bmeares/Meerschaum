@@ -186,7 +186,10 @@ class SQLConnector(InstanceConnector):
                 **kw
             )
             ### For backwards compatability reasons, set the path for sql:local if its missing.
-            if self.label == 'local' and not self.__dict__.get('database', None):
+            if (
+                self.label == 'local'
+                and self.__dict__.get('database', None) in (None, '{SQLITE_DB_PATH}')
+            ):
                 from meerschaum.config._paths import SQLITE_DB_PATH
                 self.database = SQLITE_DB_PATH.as_posix()
 

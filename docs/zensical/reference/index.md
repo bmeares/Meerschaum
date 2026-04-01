@@ -1,3 +1,8 @@
+---
+hide:
+    - toc
+---
+
 # 📚 Meerschaum Reference Wiki
 
 ## 👋 Welcome!

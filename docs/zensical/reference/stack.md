@@ -29,20 +29,14 @@ You can edit the stack's Docker Compose file with `mrsm edit config stack`.
 
 ### Docker Images
 
-The Docker image [`bmeares/meerschaum:latest`](https://hub.docker.com/r/bmeares/meerschaum) (alias tag `api`) contains the PostgreSQL driver and other dependencies to run the API server.
-
-To connect to Microsoft SQL Server or Oracle SQL, use the Docker image `bmeares/meerschaum:full` which has drivers pre-installed.
+The Docker image [`bmeares/meerschaum:latest`](https://hub.docker.com/r/bmeares/meerschaum) (alias tag `full`) contains the PostgreSQL driver and other dependencies to run the API server.
 
 Images are tagged with the following scheme for each release:
 
-- `latest` / `api`  
-  Contains the PostgreSQL driver and dependencies to run an API instance.
-- `full`  
-  In addition to `api` dependencies, contains drivers for Microsoft SQL Server and Oracle SQL as well as graphical depdencies.
+- `latest` / `full`  
+  Contains database drivers and dependencies to run an API instance.
 - `minimal`  
   Contains the PostgreSQL driver but no Python packages.
-- `{version}-api`  
-  The `api` image pinned to a specific version.
 - `{version}-full`  
   The `full` image pinned to a specific version.
 - `{version}-minimal`  

@@ -46,7 +46,7 @@ You can select pipes which *don't* have a certain key by prefacing the key with 
 
 ## Parameters
 
-Every pipe has a parameters dictionary where you can store and retrieve metadata.
+Every pipe has a [parameters](/reference/pipes/parameters) dictionary where you can store and retrieve metadata.
 
 The screenshots below show the `clemson` pipe's parameters. On the left, you can edit the parameters with `edit pipe -l clemson`, and on the right, you can directly access this dictionary with `pipe.parameters`. These values are set by the `noaa` plugin during registration to determine which data to fetch, and you can even add your own metadata.
 

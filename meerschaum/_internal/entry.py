@@ -15,6 +15,7 @@ import pathlib
 import shlex
 import json
 import time
+from datetime import timedelta
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, List, Optional, Dict, Callable, Any, Union
@@ -107,6 +108,7 @@ def entry_without_daemon(
         get_pipeline_sysargs,
     )
     from meerschaum._internal.static import STATIC_CONFIG
+    from meerschaum.utils.misc import remove_ansi, interval_str
     if sysargs is None:
         sysargs = []
     if not isinstance(sysargs, list):
@@ -135,7 +137,6 @@ def entry_without_daemon(
     shell_executor_keys = None
     if _shells:
         from meerschaum._internal.shell.Shell import shell_attrs
-        from meerschaum.utils.misc import remove_ansi
         shell_executor_keys = remove_ansi(shell_attrs.get('executor_keys') or '')
 
         if (
@@ -146,6 +147,7 @@ def entry_without_daemon(
             pipeline_args.extend(['-e', shell_attrs['executor_keys']])
 
     results: List[SuccessTuple] = []
+    steps_times: list[tuple[int, int]] = []
 
     for _sysargs in chained_sysargs:
         if escaped_pipeline_key in _sysargs:
@@ -177,8 +179,12 @@ def entry_without_daemon(
                     )
                 )
 
+        step_start = time.perf_counter()
         entry_success, entry_msg = entry_with_args(_patch_args=_patch_args, **args)
+        step_end = time.perf_counter()
+
         results.append((entry_success, entry_msg))
+        steps_times.append((step_start, step_end))
 
         if not entry_success:
             break
@@ -186,6 +192,11 @@ def entry_without_daemon(
     success = all(_success for _success, _ in results)
     any_success = any(_success for _success, _ in results)
     success_messages = [_msg for _success, _msg in results if _success]
+    total_time_delta = (
+        timedelta(seconds=(steps_times[-1][1] - steps_times[0][0]))
+        if steps_times
+        else None
+    )
 
     successes_msg = (
         success_messages[0]
@@ -200,13 +211,25 @@ def entry_without_daemon(
                     + ('s' if len(success_messages) != 1 else '')
                     + '.\n\nC'
                 )
-            ) + 'ompleted step'
+            ) + f'ompleted {len(success_messages)} step'
                 + ('s' if len(success_messages) != 1 else '') 
+            + (
+                f" in {interval_str(total_time_delta)}"
+                if total_time_delta is not None
+                else ""
+            )
             + ':\n\n'
             + '\n'.join(
                 [
                     (
-                        make_header(shlex.join(_sysargs))
+                        make_header(
+                            shlex.join(_sysargs)
+                            + "\n  ("
+                            + interval_str(
+                                timedelta(seconds=(steps_times[i][1] - steps_times[i][0]))
+                            )
+                            + ")"
+                        )
                         + '\n    ' + _msg + '\n'
                     )
                     for i, (_msg, _sysargs) in enumerate(zip(success_messages, chained_sysargs))
