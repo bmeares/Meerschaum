@@ -116,6 +116,8 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fixed a bug with the `sql:local` CLI.** 
 
+- **Fix pickling issue when editing jobs via the Shell.**
+
 ## 3.1.x Releases
 
 
