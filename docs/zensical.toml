@@ -17,23 +17,23 @@ nav = [
     {"🖥️ Web Console" = "get-started/start-api.md"},
   ]},
   {"Reference" = [
-    {"Reference" = "reference/index.md"},
+    "reference/index.md",
     {"🚰 Pipes" = [
-      {"Pipes" = "reference/pipes/index.md"},
+      "reference/pipes/index.md",
       {"🥾 Bootstrapping" = "reference/pipes/bootstrapping.md"},
       {"📥 Syncing" = "reference/pipes/syncing.md"},
       {"🔖 Tags" = "reference/pipes/tags.md"},
       {"🧩 Parameters" = "reference/pipes/parameters.md"},
     ]},
     {"🔌 Connectors" = [
-      {"Connectors" = "reference/connectors/index.md"},
+      "reference/connectors/index.md",
       {"🗂️ SQL Connectors" = "reference/connectors/sql-connectors.md"},
       {"🗄️ Instance Connectors" = "reference/connectors/instance-connectors.md"},
       {"❓ Other Connector Types" = "reference/connectors/other-connectors.md"},
     ]},
     {"🥞 Stack" = "reference/stack.md"},
     {"🌐 API Instance" = [
-      {"API Instance" = "reference/api-instance/index.md"},
+      "reference/api-instance/index.md",
       {"Security and Tokens" = "reference/api-instance/tokens.md"},
       {"NGINX" = "reference/api-instance/nginx.md"},
       {"Web Console" = "reference/api-instance/web-console.md"},
@@ -43,7 +43,7 @@ nav = [
     {"👷 Background Jobs" = "reference/background-jobs.md"},
     {"🔧 Data Analysis Tools" = "reference/data-analysis-tools.md"},
     {"➕ Plugins" = [
-      {"Plugins" = "reference/plugins/index.md"},
+      "reference/plugins/index.md",
       {"✍️ Writing Your Own" = "reference/plugins/writing-plugins.md"},
       {"🤔 Types of Plugins" = "reference/plugins/types-of-plugins.md"},
       {"🚀 Repositories" = "reference/plugins/repositories.md"},
@@ -64,11 +64,10 @@ extra_css = ["stylesheets/extra.css"]
 
 [project.theme]
 features = [
-  "header.autohide",
   "navigation.tabs",
-  "navigation.sections",
-  "navigation.expand",
   "navigation.path",
+  "navigation.prune",
+  "navigation.indexes",
 ]
 logo = "assets/logo_500x500.png"
 favicon = "assets/logo.ico"
