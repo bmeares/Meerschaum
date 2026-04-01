@@ -1,0 +1,105 @@
+[project]
+site_name = "Meerschaum Documentation"
+site_url = "https://meerschaum.io"
+site_description = "Craft elegant data pipes with Meerschaum."
+site_author = "Bennett Meares"
+copyright = "&copy; 2026 Bennett Meares"
+docs_dir = "zensical"
+site_dir = "site"
+dev_addr = "localhost:8000"
+repo_url = "https://github.com/bmeares/Meerschaum"
+nav = [
+  {"Home" = "index.md"},
+  {"Get Started" = [
+    {"🛠️ Setup" = "get-started/index.md"},
+    {"🏗️ Building a Pipe" = "get-started/bootstrap.md"},
+    {"📦️ Compose Projects" = "get-started/compose-projects.md"},
+    {"🖥️ Web Console" = "get-started/start-api.md"},
+  ]},
+  {"Reference" = [
+    "reference/index.md",
+    {"🚰 Pipes" = [
+      "reference/pipes/index.md",
+      {"🥾 Bootstrapping" = "reference/pipes/bootstrapping.md"},
+      {"📥 Syncing" = "reference/pipes/syncing.md"},
+      {"🔖 Tags" = "reference/pipes/tags.md"},
+      {"🧩 Parameters" = "reference/pipes/parameters.md"},
+    ]},
+    {"🔌 Connectors" = [
+      "reference/connectors/index.md",
+      {"🗂️ SQL Connectors" = "reference/connectors/sql-connectors.md"},
+      {"🗄️ Instance Connectors" = "reference/connectors/instance-connectors.md"},
+      {"❓ Other Connector Types" = "reference/connectors/other-connectors.md"},
+    ]},
+    {"🥞 Stack" = "reference/stack.md"},
+    {"🌐 API Instance" = [
+      "reference/api-instance/index.md",
+      {"Security and Tokens" = "reference/api-instance/tokens.md"},
+      {"NGINX" = "reference/api-instance/nginx.md"},
+      {"Web Console" = "reference/api-instance/web-console.md"},
+    ]},
+    {"🎼 Compose" = "reference/compose.md"},
+    {"⏯️ Actions" = "reference/actions/index.md"},
+    {"👷 Background Jobs" = "reference/background-jobs.md"},
+    {"🔧 Data Analysis Tools" = "reference/data-analysis-tools.md"},
+    {"➕ Plugins" = [
+      "reference/plugins/index.md",
+      {"✍️ Writing Your Own" = "reference/plugins/writing-plugins.md"},
+      {"🤔 Types of Plugins" = "reference/plugins/types-of-plugins.md"},
+      {"🚀 Repositories" = "reference/plugins/repositories.md"},
+    ]},
+    {"🌳 Environment Variables" = "reference/environment.md"},
+    {"💼 Portable" = "reference/meerschaum-portable.md"},
+  ]},
+  {"Tutorials" = "tutorials/index.md"},
+  {"Docs" = "https://docs.meerschaum.io"},
+  {"News" = [
+    {"🪵 Changelog" = "news/changelog.md"},
+    {"📢 Announcements" = "news/announcements.md"},
+    {"🌠 To-Do / Wish List" = "news/to-do.md"},
+    {"🤗 Acknowledgements" = "news/acknowledgements.md"},
+  ]},
+]
+extra_css = ["stylesheets/extra.css"]
+
+[project.theme]
+features = [
+  "navigation.tabs",
+  "navigation.path",
+  "navigation.prune",
+  "navigation.indexes",
+  "content.code.copy",
+  "content.code.select",
+]
+logo = "assets/logo_500x500.png"
+favicon = "assets/logo.ico"
+palette.primary = "deep orange"
+palette.accent = "amber"
+custom_dir = "zensical/overrides"
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.pymdownx.blocks.caption]
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.snippets]
+
+[project.extra.analytics]
+provider = "google"
+property = "G-CVXCQBW9NY"

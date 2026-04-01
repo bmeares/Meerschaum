@@ -53,6 +53,8 @@ def attributes(self) -> Dict[str, Any]:
     return self._attributes
 
 
+_cached_base_params = {}
+
 def get_parameters(
     self,
     apply_symlinks: bool = True,
@@ -77,6 +79,7 @@ def get_parameters(
     """
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config._read_config import search_and_substitute_config
+    from meerschaum.utils.pipes import get_pipe_from_value
 
     if _visited is None:
         _visited = {self}
@@ -93,13 +96,27 @@ def get_parameters(
         try:
             if debug:
                 dprint(f"Building reference pipe from keys: {ref_keys}")
-            ref_pipe = mrsm.Pipe(**ref_keys)
+
+            ref_pipe = get_pipe_from_value(ref_keys, _pipe=self)
             if ref_pipe in _visited:
                 warn(f"Circular reference detected in {self}: chain involves {ref_pipe}.")
                 return search_and_substitute_config(raw_parameters)
 
             _visited.add(ref_pipe)
-            base_params = ref_pipe.get_parameters(_visited=_visited, debug=debug)
+            base_params = _cached_base_params.get(ref_pipe, None)
+            if base_params is None:
+                base_params = ref_pipe.get_parameters(
+                    apply_symlinks=apply_symlinks,
+                    _visited=_visited,
+                    debug=debug,
+                )
+                _cached_base_params[ref_pipe] = base_params
+                if debug:
+                    dprint(f"base_params from {ref_pipe} for {self}:")
+                    mrsm.pprint(base_params)
+            else:
+                if debug:
+                    dprint(f"Using cached base_params from {ref_pipe} for {self}")
         except Exception as e:
             warn(f"Failed to resolve reference pipe for {self}: {e}")
             base_params = {}
@@ -735,27 +752,21 @@ def parents(self) -> List[mrsm.Pipe]:
     """
     Return a list of `meerschaum.Pipe` objects to be designated as parents.
     """
-    if 'parents' not in self.parameters:
+    _cached_parents = self.__dict__.get('_parents', None)
+    if _cached_parents is not None:
+        return _cached_parents
+
+    from meerschaum.utils.pipes import get_pipe_from_value
+    key = 'parents' if 'parents' in self.parameters else 'parent'
+    parents_refs = self.parameters.get(key, None) or []
+    if isinstance(parents_refs, str) or isinstance(parents_refs, dict):
+        parents_refs = [parents_refs]
+
+    if not parents_refs:
         return []
 
-    from meerschaum.utils.warnings import warn
-    _parents_keys = self.parameters['parents']
-    if not isinstance(_parents_keys, list):
-        warn(
-            f"Please ensure the parents for {self} are defined as a list of keys.",
-            stacklevel = 4
-        )
-        return []
-    from meerschaum import Pipe
-    _parents = []
-    for keys in _parents_keys:
-        try:
-            p = Pipe(**keys)
-        except Exception as e:
-            warn(f"Unable to build parent with keys '{keys}' for {self}:\n{e}")
-            continue
-        _parents.append(p)
-    return _parents
+    self._parents = [get_pipe_from_value(val, _pipe=self) for val in parents_refs]
+    return self._parents
 
 
 @property
@@ -768,33 +779,101 @@ def parent(self) -> Union[mrsm.Pipe, None]:
         return None
     return parents[0]
 
+@parents.setter
+def parents(self, _parents) -> None:
+    """
+    Set `parents`.
+    """
+    if not isinstance(_parents, list):
+        _parents = [_parents]
+
+    need_cache = all(isinstance(_parent, mrsm.Pipe) for _parent in _parents)
+    if need_cache:
+        self._parents = _parents
+
+    _parents = [
+        (
+            _parent.keys()
+            if isinstance(_parent, mrsm.Pipe)
+            else _parent
+        )
+        for _parent in _parents
+    ]
+    self.update_parameters({'parents': _parents}, persist=False)
+    
+
+@parent.setter
+def parent(self, _parent) -> None: 
+    """
+    Set the `parents` key from `parent`.
+    """
+    self.parents = _parent
+
 
 @property
 def children(self) -> List[mrsm.Pipe]:
     """
     Return a list of `meerschaum.Pipe` objects to be designated as children.
     """
-    if 'children' not in self.parameters:
+    _cached_children = self.__dict__.get('_children', None)
+    if _cached_children is not None:
+        return _cached_children
+
+    from meerschaum.utils.pipes import get_pipe_from_value
+    key = 'children' if 'children' in self.parameters else 'child'
+    children_refs = self.parameters.get(key, None) or []
+    if isinstance(children_refs, str) or isinstance(children_refs, dict):
+        children_refs = [children_refs]
+
+    if not children_refs:
         return []
 
-    from meerschaum.utils.warnings import warn
-    _children_keys = self.parameters['children']
-    if not isinstance(_children_keys, list):
-        warn(
-            f"Please ensure the children for {self} are defined as a list of keys.",
-            stacklevel = 4
+    self._children = [get_pipe_from_value(val, _pipe=self) for val in children_refs]
+    return self._children
+
+
+@property
+def child(self) -> mrsm.Pipe | None:
+    """
+    Return the first pipe in `self.children` or None.
+    """
+    children = self.children
+    if not children:
+        return None
+    return children[0]
+
+
+@children.setter
+def children(self, _children) -> None:
+    """
+    Set the `children` parameter.
+    """
+    if not isinstance(_children, list):
+        _children = [_children]
+
+    need_cache = all(isinstance(_child, mrsm.Pipe) for _child in _children)
+    if need_cache:
+        self._children = _children
+
+    _children = [
+        (
+            _child.keys()
+            if isinstance(_child, mrsm.Pipe)
+            else _child
         )
-        return []
-    from meerschaum import Pipe
-    _children = []
-    for keys in _children_keys:
-        try:
-            p = Pipe(**keys)
-        except Exception as e:
-            warn(f"Unable to build parent with keys '{keys}' for {self}:\n{e}")
-            continue
-        _children.append(p)
-    return _children
+        for _child in _children
+    ]
+
+    self.update_parameters({'children': _children}, persist=False)
+
+
+@child.setter
+def child(self, _child) -> None:
+    """
+    Set `children` from `child`.
+    """
+    self.children = _child
+
 
 
 @property

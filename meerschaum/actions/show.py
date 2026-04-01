@@ -130,8 +130,7 @@ def _show_config(
     import json
     from meerschaum.utils.formatting import pprint
     from meerschaum.config import get_config
-    from meerschaum.config._paths import CONFIG_DIR_PATH
-    from meerschaum.utils.debug import dprint
+    from meerschaum.config._paths import CONFIG_DIR_PATH as _
 
     if action is None:
         action = []
@@ -139,10 +138,17 @@ def _show_config(
     valid, config = get_config(*action, as_tuple=True, warn=False)
     if not valid:
         return False, f"Invalid configuration keys '{action}'."
+
+    config_to_print = {
+        k: v
+        for k, v in config.items()
+        if k != '_symlinks'
+    } if not debug else config
+
     if nopretty:
-        print(json.dumps(config))
+        print(json.dumps(config_to_print))
     else:
-        pprint(config)
+        pprint(config_to_print)
     return (True, "Success")
 
 

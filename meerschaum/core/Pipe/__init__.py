@@ -134,6 +134,7 @@ class Pipe:
         parents,
         parent,
         children,
+        child,
         target,
         _target_legacy,
         guess_datetime,
@@ -210,6 +211,11 @@ class Pipe:
         temporary: bool = False,
         cache: Optional[bool] = None,
         cache_connector_keys: Optional[str] = None,
+        reference: Union[str, Dict[str, Any], mrsm.Pipe, None] = None,
+        parents: Optional[List[Union[str, Dict[str, Any], mrsm.Pipe, None]]] = None,
+        parent: Union[str, Dict[str, Any], mrsm.Pipe, None] = None,
+        children: Optional[List[Union[str, Dict[str, Any], mrsm.Pipe, None]]] = None,
+        child: Union[str, Dict[str, Any], mrsm.Pipe, None] = None,
         mrsm_instance: Optional[Union[str, InstanceConnector]] = None,
         connector_keys: Optional[str] = None,
         metric_key: Optional[str] = None,
@@ -300,6 +306,18 @@ class Pipe:
 
         cache_connector_keys: Optional[str], default None
             If provided, use the keys to a Valkey connector (e.g. `valkey:main`).
+
+        reference: Union[str, Dict[str, Any], mrsm.Pipe, None], default None
+            If provided, inherit the parameters of the reference Pipe.
+            May be equal to a string of the Pipe constructor, a dictionary of constructor keys,
+            or a Pipe itself.
+
+        parents: Optional[List[Union[str, Dict[str, Any], mrsm.Pipe, None]]], default None
+            Convenience kwarg for `pipe.parameters['parents']`.
+
+        children: Optional[List[Union[str, Dict[str, Any], mrsm.Pipe, None]]], default None
+            Convenience kwarg for `pipe.parameters['children']`.
+
         """
         from meerschaum.utils.warnings import error, warn
         if (not connector and not connector_keys) or (not metric and not metric_key):
@@ -442,6 +460,21 @@ class Pipe:
             self.cache = False
 
         self._cache_locks = collections.defaultdict(lambda: threading.RLock())
+
+        if reference is not None:
+            self._attributes['parameters']['reference'] = (
+                reference
+                if isinstance(reference, (dict, str))
+                else reference.keys()
+            )
+
+        if parents is not None or parent is not None:
+            parent_vals = parents if parents is not None else parent
+            self.parents = parent_vals
+
+        if children is not None or child is not None:
+            children_vals = children if children is not None else child
+            self.children = children_vals
 
     @property
     def metric_key(self) -> str:

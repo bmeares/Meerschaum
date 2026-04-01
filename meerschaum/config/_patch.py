@@ -17,25 +17,24 @@ def apply_patch_to_config(
     warn: bool = False,
 ) -> Dict[str, Any]:
     """Patch the config dict with a new dict (cascade patching)."""
-    _base = copy.deepcopy(config) if isinstance(config, dict) else {}
-    if not isinstance(patch, dict):
+    if not isinstance(patch, dict) or not patch:
         return config
+    if not isinstance(config, dict) or not config:
+        return copy.deepcopy(patch)
 
-    def update_dict(base, patch):
-        if base is None:
-            return {}
-        if not isinstance(base, dict):
-            if warn:
-                _warn(f"Overwriting the value {base} with a dictionary:\n{patch}")
-            base = {}
-        for key, value in patch.items():
-            if isinstance(value, dict):
-                base[key] = update_dict(base.get(key, {}), value)
-            else:
-                base[key] = value
-        return base
+    base = config.copy()
 
-    return update_dict(_base, patch)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            base[key] = apply_patch_to_config(base[key], value, warn=warn)
+        elif isinstance(value, dict):
+            if warn and key in base:
+                _warn(f"Overwriting the value {base[key]} with a dictionary:\n{value}")
+            base[key] = copy.deepcopy(value)
+        else:
+            base[key] = value
+
+    return base
 
 
 def write_patch(

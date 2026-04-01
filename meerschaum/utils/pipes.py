@@ -18,6 +18,113 @@ from meerschaum.utils.typing import PipesDict, Optional
 import meerschaum as mrsm
 
 
+def get_pipe_from_value(
+    value: str | dict[str, str],
+    _pipe: mrsm.Pipe | None = None,
+) -> mrsm.Pipe | None:
+    """
+    Given an input value (string or dictionary), return the corresponding pipe.
+
+    Parameters
+    ----------
+    value: str | dict[str, str]
+        The definition keys for the pipe to be constructed.
+        This may either be the literal constructor string or a dictionary of constructor kwargs.
+
+    _pipe: mrsm.Pipe | None, default None
+        If provided, use the instance connector for this reference pipe
+        if an explicit instance connector is undefined.
+
+    Returns
+    -------
+    A `Pipe` corresponding to the given keys.
+    """
+    from meerschaum.utils.warnings import warn
+    if isinstance(value, mrsm.Pipe):
+        return value
+
+    if isinstance(value, str):
+        return get_pipe_from_string(value, _pipe=_pipe)
+
+    if not isinstance(value, dict):
+        raise ValueError("Expecting kwargs for a Pipe.")
+
+    if (
+        _pipe is not None
+        and not (
+            'instance' in value
+            or 'mrsm_instance' in value
+            or 'instance_keys' in value
+        )
+    ):
+        value = {**value}
+        value['instance'] = _pipe.instance_keys
+
+    try:
+        pipe = mrsm.Pipe(**value)
+    except Exception as e:
+        warn(f"Failed build pipe from value '{value}':\n{e}")
+        return None
+
+    return pipe
+
+
+def get_pipe_from_string(
+    string: str,
+    _pipe: mrsm.Pipe | None = None,
+) -> mrsm.Pipe | None:
+    """
+    If a string is equal to a `Pipe` constructor, return the pipe.
+
+    Parameters
+    ----------
+    string: str
+        The string containing the constructor syntax.
+        Must be an exact match.
+
+    _pipe: mrsm.Pipe | None, default None
+        If provided, use the instance connector for this reference pipe
+        if an explicit instance connector is undefined.
+
+    Returns
+    -------
+    A `Pipe` corresponding the defined pipe in the input string.
+    
+    Examples
+    --------
+    >>> get_pipe_from_string('Pipe("foo", "bar")')
+    Pipe('foo', 'bar')
+    >>> get_pipe_from_string('mrsm.Pipe("spam", "eggs", instance="sql:local")')
+    Pipe('spam', 'eggs', instance='sql:local')
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import parse_arguments_str
+    pattern = r'(?:mrsm\.)?Pipe\((.*?)\)'
+    matches = list(re.finditer(pattern, string))
+    if not matches:
+        return None
+
+    try:
+        match = matches[0]
+        args_str = match.group(1)
+        args, kwargs = parse_arguments_str(args_str)
+        if (
+            _pipe is not None
+            and not (
+                'instance' in kwargs
+                or 'mrsm_instance' in kwargs
+                or 'instance_keys' in kwargs
+            )
+        ):
+            kwargs['instance'] = _pipe.instance_keys
+        pipe = mrsm.Pipe(*args, **kwargs)
+    except Exception as e:
+        warn(f"Failed to build pipe from string '{string}': \n{e}")
+        return None
+
+    return pipe
+
+
 def evaluate_pipe_access_chain(access_chain: str, pipe: mrsm.Pipe, _pipe=None):
     """
     Safely evaluate the access chain on a Pipe.
@@ -77,6 +184,15 @@ def _evaluate_pipe_access_chain_from_match(pipe_match: re.Match, _pipe=None) -> 
             args_str = pipe_match.group(1)
             access_chain = pipe_match.group(2)
             args, kwargs = parse_arguments_str(args_str)
+            if (
+                _pipe is not None
+                and not (
+                    'instance' in kwargs
+                    or 'mrsm_instance' in kwargs
+                    or 'instance_keys' in kwargs
+                )
+            ):
+                kwargs['instance'] = _pipe.instance_keys
             pipe = mrsm.Pipe(*args, **kwargs)
     except Exception as e:
         warn(f"Failed to parse pipe from template string:\n{e}")
@@ -127,7 +243,7 @@ def replace_pipes_syntax(text: str, _pipe=None) -> Any:
     for placeholder, match in placeholders.items():
         try:
             resolved_values[placeholder] = _evaluate_pipe_access_chain_from_match(match, _pipe=_pipe)
-        except Exception as e:
+        except Exception:
             import traceback
             warn(f"Failed to resolve pipe syntax '{match.group(0)}': {traceback.format_exc()}")
             resolved_values[placeholder] = match.group(0)

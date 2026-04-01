@@ -1,5 +1,0 @@
-nav:
-  - index.md
-  - "✍️ Writing Your Own": writing-plugins.md
-  - "🤔 Types of Plugins": types-of-plugins.md
-  - "🚀 Repositories": repositories.md

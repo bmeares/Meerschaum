@@ -290,6 +290,10 @@ def get_shell_session():
     return shell_attrs['session']
 
 
+def revert_input():
+    cmd.__builtins__['input'] = _old_input
+
+
 class Shell(cmd.Cmd):
     """
     The interactive Meerschaum shell.

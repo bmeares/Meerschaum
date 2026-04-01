@@ -33,6 +33,9 @@ if [ "$1" == "db" ]; then
   cd ../
 fi
 
+cleanup_on_exit="$2"
+shift 2
+
 $mrsm stop daemon
 
 if [ ! -z "$MRSM_INSTALL_PACKAGES" ]; then
@@ -125,7 +128,7 @@ $PYTHON_BIN -m pytest \
   -v; rc="$?"
 
 ### Cleanup
-if [ "$2" == "rm" ]; then
+if [ "$cleanup_on_exit" == "rm" ]; then
   cd tests/
   docker compose down -v
   cd ../

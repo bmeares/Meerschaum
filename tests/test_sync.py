@@ -4,7 +4,7 @@
 
 import sys
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -1319,3 +1319,126 @@ def test_autotime(flavor: str):
     df = pipe.get_data(params={'id': 1})
     assert len(df) == 3
     print(df)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_mixed_datetime_dtypes_sql(flavor: str):
+    """
+    Test that a downstream pipe correctly handles a datetime column converted from an integer.
+    """
+    from tests.connectors import conns
+    from meerschaum.utils.sql import sql_item_name
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+    
+    base_pipe = mrsm.Pipe('test_mixed', 'base', instance=conn)
+    base_pipe.delete()
+    base_pipe = mrsm.Pipe(
+        'test_mixed', 'base',
+        instance=conn,
+        columns={'datetime': 'ts', 'id': 'id'},
+        dtypes={'ts': 'int64'},
+        precision='ms',
+    )
+    now_ms = int(datetime(2026, 3, 31, 12, 0, 0).replace(tzinfo=timezone.utc).timestamp() * 1000)
+    base_data = [
+        {'ts': now_ms - 10000, 'id': 1, 'val': 10},
+        {'ts': now_ms, 'id': 1, 'val': 20},
+    ]
+    base_pipe.sync(base_data)
+    
+    epoch_to_timestamp_sqls = {
+        'postgresql': 'TO_TIMESTAMP(ts / 1000.0)',
+        'sqlite': "datetime(ts / 1000.0, 'unixepoch')",
+        'mysql': 'FROM_UNIXTIME(ts / 1000.0)',
+        'mariadb': 'FROM_UNIXTIME(ts / 1000.0)',
+        'mssql': "DATEADD(SECOND, ts / 1000.0, '1970-01-01')",
+        'oracle': "TO_TIMESTAMP('1970-01-01', 'YYYY-MM-DD') + numtodsinterval(ts / 1000.0, 'SECOND')",
+        'duckdb': 'to_timestamp(ts / 1000.0)',
+    }
+    ts_conversion = epoch_to_timestamp_sqls.get(flavor, epoch_to_timestamp_sqls['postgresql'])
+
+    downstream_query = f"""SELECT
+      {ts_conversion} AS "time",
+      id,
+      val
+    FROM """ + """{{ """ + str(base_pipe) + """ }}
+    """
+
+    downstream_pipe = mrsm.Pipe(conn, 'test_mixed', 'downstream', instance=conn)
+    downstream_pipe.delete()
+    downstream_pipe = mrsm.Pipe(
+        conn, 'test_mixed', 'downstream',
+        instance=conn,
+        columns={'datetime': 'time', 'id': 'id'},
+        dtypes={'time': 'datetime'},
+        parent=base_pipe,
+        parameters={
+            'fetch': {
+                'definition': downstream_query,
+            },
+        }
+    )
+    
+    begin_time = datetime(2026, 3, 31, 12, 0, 0).replace(tzinfo=timezone.utc) - timedelta(minutes=5)
+    metadef = conn.get_pipe_metadef(downstream_pipe, begin=begin_time, debug=debug)
+
+    # Verify pushdown
+    print('########################')
+    print(metadef)
+    assert '_mrsm_pushdown' in metadef
+    print('########################')
+    assert 'WHERE' in metadef
+    quoted_ts = sql_item_name('ts', flavor)
+    assert quoted_ts + ' >=' in metadef.replace('\n', ' ')
+    assert '17' in metadef # check for integer bound prefix
+    
+    success, msg = downstream_pipe.sync(begin=begin_time, debug=debug)
+    assert success, msg
+
+    # Subsequent sync
+    sync_time = downstream_pipe.get_sync_time(debug=debug)
+    print(f"{sync_time=}")
+    metadef_2 = conn.get_pipe_metadef(downstream_pipe, begin=sync_time, debug=debug)
+
+    print('########################')
+    print(metadef_2)
+    print('########################')
+
+    # Subsequent sync should also push down!
+    assert '_mrsm_pushdown' in metadef_2
+    assert quoted_ts + ' >=' in metadef_2.replace('\n', ' ')
+    assert 'CAST' not in metadef_2[metadef_2.find('WHERE'):]
+
+    success, msg = downstream_pipe.sync(debug=debug)
+    assert success, msg
+     
+    assert downstream_pipe.exists()
+    
+    df = downstream_pipe.get_data()
+    assert df is not None, "get_data() returned None"
+    assert len(df) > 0
+    assert 'time' in df.columns
+    assert 'datetime' in str(df['time'].dtype).lower()
+
+    double_downstream_pipe = Pipe(conn, 'test_mixed', 'downstream2', instance=conn)
+    double_downstream_pipe.delete()
+    double_downstream_pipe = Pipe(
+        conn, 'test_mixed', 'downstream2',
+        instance=conn,
+        parent=downstream_pipe,
+        reference=downstream_pipe,
+        parameters={
+            'fetch': {'definition': "SELECT * FROM {{ " + str(downstream_pipe) + " }}"},
+        },
+    )
+    metadef_double = conn.get_pipe_metadef(double_downstream_pipe, begin=begin_time, debug=debug)
+    print('###########################')
+    print(metadef_double)
+    print('###########################')
+    assert '_mrsm_pushdown' in metadef_double
+    double_downstream_pipe.sync(debug=debug)
+    df = downstream_pipe.get_data()
+    double_df = double_downstream_pipe.get_data()
+    assert df.to_dict() == double_df.to_dict()
