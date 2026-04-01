@@ -1363,7 +1363,7 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
       {ts_conversion} AS "time",
       id,
       val
-    FROM {{{{ """ + str(base_pipe) + """ }}}}
+    FROM {{ """ + str(base_pipe) + """ }}
     """
 
     downstream_pipe = mrsm.Pipe(conn, 'test_mixed', 'downstream', instance=conn)
