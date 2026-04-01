@@ -1341,7 +1341,7 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
         dtypes={'ts': 'int64'},
         precision='ms',
     )
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    now_ms = int(datetime(2026, 3, 31, 12, 0, 0).timestamp() * 1000)
     base_data = [
         {'ts': now_ms - 10000, 'id': 1, 'val': 10},
         {'ts': now_ms, 'id': 1, 'val': 20},
@@ -1363,7 +1363,7 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
       {ts_conversion} AS "time",
       id,
       val
-    FROM {{ """ + str(base_pipe) + """ }}
+    FROM """ + """{{ """ + str(base_pipe) + """ }}
     """
 
     downstream_pipe = mrsm.Pipe(conn, 'test_mixed', 'downstream', instance=conn)
@@ -1381,11 +1381,14 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
         }
     )
     
-    begin_time = datetime.now(timezone.utc) - timedelta(minutes=5)
+    begin_time = datetime(2026, 3, 31, 12, 0, 0) - timedelta(minutes=5)
     metadef = conn.get_pipe_metadef(downstream_pipe, begin=begin_time, debug=debug)
 
     # Verify pushdown
+    print('########################')
+    print(metadef)
     assert '_mrsm_pushdown' in metadef
+    print('########################')
     assert 'WHERE' in metadef
     quoted_ts = sql_item_name('ts', flavor)
     assert quoted_ts + ' >=' in metadef.replace('\n', ' ')
@@ -1396,7 +1399,12 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
 
     # Subsequent sync
     sync_time = downstream_pipe.get_sync_time(debug=debug)
+    print(f"{sync_time=}")
     metadef_2 = conn.get_pipe_metadef(downstream_pipe, begin=sync_time, debug=debug)
+
+    print('########################')
+    print(metadef_2)
+    print('########################')
 
     # Subsequent sync should also push down!
     assert '_mrsm_pushdown' in metadef_2
@@ -1420,7 +1428,7 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
       {ts_conversion} AS "time",
       id,
       val
-    FROM {{{{ """ + str(base_pipe) + """ }}}}
+    FROM """ + """{{ """ + str(base_pipe) + """ }}
     """
     efficient_pipe = mrsm.Pipe(conn, 'test_mixed', 'efficient', instance=conn)
     efficient_pipe.delete()
@@ -1439,7 +1447,10 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
 
     # Initial sync for efficient pipe with explicit begin
     metadef_eff_1 = conn.get_pipe_metadef(efficient_pipe, begin=begin_time, debug=debug)
+    print('########################')
+    print(metadef_eff_1)
     assert '_mrsm_pushdown' in metadef_eff_1
+    print('########################')
 
     success, msg = efficient_pipe.sync(begin=begin_time, debug=debug)
     assert success, msg
@@ -1447,6 +1458,9 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
     # Subsequent sync for efficient pipe
     sync_time_eff = efficient_pipe.get_sync_time(debug=debug)
     metadef_eff_2 = conn.get_pipe_metadef(efficient_pipe, begin=sync_time_eff, debug=debug)
+    print('########################')
+    print(metadef_eff_2)
+    print('########################')
     
     # Verify pushdown CTE exists and uses the integer bound on 'ts'!
     assert '_mrsm_pushdown' in metadef_eff_2
