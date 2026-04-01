@@ -1422,55 +1422,23 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
     assert 'time' in df.columns
     assert 'datetime' in str(df['time'].dtype).lower()
 
-    return downstream_pipe
-
-    # Efficient pipe (automatic parent axis selection)
-    efficient_query = f"""SELECT
-      ts,
-      {ts_conversion} AS "time",
-      id,
-      val
-    FROM """ + """{{ """ + str(base_pipe) + """ }}
-    """
-    efficient_pipe = mrsm.Pipe(conn, 'test_mixed', 'efficient', instance=conn)
-    efficient_pipe.delete()
-    efficient_pipe = mrsm.Pipe(
-        conn, 'test_mixed', 'efficient',
+    double_downstream_pipe = Pipe(conn, 'test_mixed', 'downstream2', instance=conn)
+    double_downstream_pipe.delete()
+    double_downstream_pipe = Pipe(
+        conn, 'test_mixed', 'downstream2',
         instance=conn,
-        columns={'datetime': 'time', 'id': 'id'},
-        dtypes={'time': 'datetime'},
-        parent=base_pipe,
+        parent=downstream_pipe,
+        reference=downstream_pipe,
         parameters={
-            'fetch': {
-                'definition': efficient_query,
-            },
-        }
+            'fetch': {'definition': "SELECT * FROM {{ " + str(downstream_pipe) + " }}"},
+        },
     )
-
-    # Initial sync for efficient pipe with explicit begin
-    metadef_eff_1 = conn.get_pipe_metadef(efficient_pipe, begin=begin_time, debug=debug)
-    print('########################')
-    print(metadef_eff_1)
-    assert '_mrsm_pushdown' in metadef_eff_1
-    print('########################')
-
-    success, msg = efficient_pipe.sync(begin=begin_time, debug=debug)
-    assert success, msg
-
-    # Subsequent sync for efficient pipe
-    sync_time_eff = efficient_pipe.get_sync_time(debug=debug)
-    metadef_eff_2 = conn.get_pipe_metadef(efficient_pipe, begin=sync_time_eff, debug=debug)
-    print('########################')
-    print(metadef_eff_2)
-    print('########################')
-    
-    # Verify pushdown CTE exists and uses the integer bound on 'ts'!
-    assert '_mrsm_pushdown' in metadef_eff_2
-    assert quoted_ts + ' >=' in metadef_eff_2.replace('\n', ' ')
-    assert metadef_eff_2.count('WHERE') == 1
-    
-    success, msg = efficient_pipe.sync(debug=debug)
-    assert success, msg
-    assert efficient_pipe.get_rowcount() > 0
-
-
+    metadef_double = conn.get_pipe_metadef(double_downstream_pipe, begin=begin_time, debug=debug)
+    print('###########################')
+    print(metadef_double)
+    print('###########################')
+    assert '_mrsm_pushdown' in metadef_double
+    double_downstream_pipe.sync(debug=debug)
+    df = downstream_pipe.get_data()
+    double_df = double_downstream_pipe.get_data()
+    assert df.to_dict() == double_df.to_dict()

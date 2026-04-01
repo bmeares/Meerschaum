@@ -230,10 +230,6 @@ def get_pipe_metadef(
         parent_dt_name = sql_item_name(parent_dt_col, self.flavor, None)
         parent_db_dt_typ = get_db_type_from_pd_type(parent_dt_typ, self.flavor)
 
-        # Determine the correct bounds for the parent axis.
-        # Use the parent's precision if it's an integer.
-        
-        # Calculate bounds for the parent axis (specifically for pushdown)
         p_begin, p_end, p_btm = begin, end, btm
         if 'int' in parent_dt_typ.lower():
             p_precision_unit = precision.get('unit', 'second')
@@ -319,7 +315,7 @@ def get_pipe_metadef(
             # Replace occurrences of parent target with pushdown CTE in the definition body.
             parent_found = False
             patterns_to_replace = []
-            patterns_to_replace.append(parent_item_name_full)
+            patterns_to_replace.extend([parent_item_name_full, parent_item_name, parent_target])
 
             new_definition_body = definition
             for pattern in patterns_to_replace:
