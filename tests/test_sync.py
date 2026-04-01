@@ -1341,7 +1341,7 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
         dtypes={'ts': 'int64'},
         precision='ms',
     )
-    now_ms = int(datetime(2026, 3, 31, 12, 0, 0).timestamp() * 1000)
+    now_ms = int(datetime(2026, 3, 31, 12, 0, 0).replace(tzinfo=timezone.utc).timestamp() * 1000)
     base_data = [
         {'ts': now_ms - 10000, 'id': 1, 'val': 10},
         {'ts': now_ms, 'id': 1, 'val': 20},
@@ -1381,7 +1381,7 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
         }
     )
     
-    begin_time = datetime(2026, 3, 31, 12, 0, 0) - timedelta(minutes=5)
+    begin_time = datetime(2026, 3, 31, 12, 0, 0).replace(tzinfo=timezone.utc) - timedelta(minutes=5)
     metadef = conn.get_pipe_metadef(downstream_pipe, begin=begin_time, debug=debug)
 
     # Verify pushdown
@@ -1421,6 +1421,8 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
     assert len(df) > 0
     assert 'time' in df.columns
     assert 'datetime' in str(df['time'].dtype).lower()
+
+    return downstream_pipe
 
     # Efficient pipe (automatic parent axis selection)
     efficient_query = f"""SELECT

@@ -977,7 +977,7 @@ def sql_item_name(item: str, flavor: str, schema: Optional[str] = None) -> str:
         ### NOTE: System-reserved words must be quoted.
         if truncated_item.lower() in (
             'float', 'varchar', 'nvarchar', 'clob',
-            'boolean', 'integer', 'table', 'row', 'date',
+            'boolean', 'integer', 'table', 'row', 'date', 'time',
         ):
             wrappers = ('"', '"')
         else:
