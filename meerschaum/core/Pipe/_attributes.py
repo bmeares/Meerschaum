@@ -79,6 +79,7 @@ def get_parameters(
     """
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config._read_config import search_and_substitute_config
+    import traceback
 
     if _visited is None:
         _visited = {self}
@@ -90,6 +91,7 @@ def get_parameters(
     if not apply_symlinks:
         return raw_parameters
 
+    parameters = {}
     for ref_pipe in self.references:
         try:
             if ref_pipe in _visited:
@@ -117,10 +119,17 @@ def get_parameters(
             warn(f"Failed to resolve reference pipe for {self}: {e}")
             base_params = {}
 
-        params_to_apply = {k: v for k, v in raw_parameters.items() if k != 'reference'}
-        parameters = apply_patch_to_config(base_params, params_to_apply)
-    else:
+        parameters = apply_patch_to_config(parameters, base_params)
+
+    if not self.references:
         parameters = raw_parameters
+    else:
+        params_to_apply = {
+            k: v
+            for k, v in raw_parameters.items()
+            if k not in ('reference', 'references')
+        }
+        parameters = apply_patch_to_config(parameters, params_to_apply)
 
     from meerschaum.utils.pipes import replace_pipes_syntax
     self._symlinks = {}
