@@ -121,7 +121,13 @@ def get_pipe_metadef(
     A pipe's meta definition fetch query string.
     """
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.sql import sql_item_name, dateadd_str, build_where
+    from meerschaum.utils.sql import (
+        sql_item_name,
+        dateadd_str,
+        build_where,
+        wrap_query_with_cte,
+        format_cte_subquery,
+    )
     from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
     from meerschaum.config import get_config
     from meerschaum.utils.dtypes import (
@@ -324,7 +330,6 @@ def get_pipe_metadef(
                     parent_found = True
             
             if parent_found:
-                from meerschaum.utils.sql import wrap_query_with_cte
                 definition = wrap_query_with_cte(
                     pushdown_query,
                     new_definition_body,
@@ -333,7 +338,6 @@ def get_pipe_metadef(
                 )
                 handled_bounding = True
 
-    from meerschaum.utils.sql import format_cte_subquery
     meta_def = (
         format_cte_subquery(definition, self.flavor, 'definition') if (
             (not (pipe.columns or {}).get('id', None))

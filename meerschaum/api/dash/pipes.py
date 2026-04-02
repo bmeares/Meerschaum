@@ -611,32 +611,47 @@ def accordion_items_from_pipe(
         parameters_div_children = [
             parameters_editor,
             html.Br(),
-            dbc.Row([
-                dbc.Col(
-                    html.Span(
-                        (
-                            ([update_parameters_button] if authenticated else []) +
-                            [
-                                as_json_button,
-                                as_yaml_button,
-                            ]
-                        )
+            dbc.Row(
+                [
+                    dbc.Col(
+                        html.Span(
+                            (
+                                ([update_parameters_button] if authenticated else []) +
+                                [
+                                    as_json_button,
+                                    as_yaml_button,
+                                ]
+                            )
+                        ),
+                        width=4,
                     ),
-                    width=4,
-                ),
+                    dbc.Col(
+                        dbc.Switch(
+                            label="Resolve symlinks",
+                            value=False,
+                            id={'type': 'resolve-symlinks-parameters-switch', 'index': pipe_meta_str},
+                        ),
+                        width='auto',
+                    ),
+                ],
+                justify='between',
+                align='center',
+            ),
+            dbc.Row(
                 dbc.Col(
-                    [
-                        html.Div(
-                            id={
-                                'type': 'update-parameters-success-div',
-                                'index': pipe_meta_str,
-                            }
-                        )
-                    ],
+                    html.Div(
+                        id={
+                            'type': 'update-parameters-success-div',
+                            'index': pipe_meta_str,
+                        }
+                    ),
                     width=True,
-                )
-            ]),
+                ),
+            ),
         ]
+
+        #  if pipe.reference:
+            #  pass
 
         if _build_parents_num > 0 and pipe.parents:
             parents_cards = [

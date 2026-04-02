@@ -135,6 +135,8 @@ class Pipe:
         parent,
         children,
         child,
+        reference,
+        references,
         target,
         _target_legacy,
         guess_datetime,
@@ -211,6 +213,7 @@ class Pipe:
         temporary: bool = False,
         cache: Optional[bool] = None,
         cache_connector_keys: Optional[str] = None,
+        references: Optional[List[Union[str, Dict[str, Any], mrsm.Pipe, None]]] = None,
         reference: Union[str, Dict[str, Any], mrsm.Pipe, None] = None,
         parents: Optional[List[Union[str, Dict[str, Any], mrsm.Pipe, None]]] = None,
         parent: Union[str, Dict[str, Any], mrsm.Pipe, None] = None,
@@ -307,16 +310,16 @@ class Pipe:
         cache_connector_keys: Optional[str], default None
             If provided, use the keys to a Valkey connector (e.g. `valkey:main`).
 
-        reference: Union[str, Dict[str, Any], mrsm.Pipe, None], default None
-            If provided, inherit the parameters of the reference Pipe.
+        references: Optional[List[Union[str, Dict[str, Any], mrsm.Pipe, None]]], default None
+            If provided, inherit the parameters of the reference Pipe(s).
             May be equal to a string of the Pipe constructor, a dictionary of constructor keys,
-            or a Pipe itself.
+            a Pipe itself, or a list of any of these values.
 
         parents: Optional[List[Union[str, Dict[str, Any], mrsm.Pipe, None]]], default None
-            Convenience kwarg for `pipe.parameters['parents']`.
+            Set references for parent pipes. See `references` for values.
 
         children: Optional[List[Union[str, Dict[str, Any], mrsm.Pipe, None]]], default None
-            Convenience kwarg for `pipe.parameters['children']`.
+            Set references for child pipes. See `references` for values.
 
         """
         from meerschaum.utils.warnings import error, warn
@@ -461,12 +464,9 @@ class Pipe:
 
         self._cache_locks = collections.defaultdict(lambda: threading.RLock())
 
-        if reference is not None:
-            self._attributes['parameters']['reference'] = (
-                reference
-                if isinstance(reference, (dict, str))
-                else reference.keys()
-            )
+        if references is not None or reference is not None:
+            reference_vals = references if references is not None else reference
+            self.references = reference_vals
 
         if parents is not None or parent is not None:
             parent_vals = parents if parents is not None else parent

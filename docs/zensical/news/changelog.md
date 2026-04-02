@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.2.0
+### v3.2.0 – v3.2.1
 
 - **Allow for strings for `reference`, `parents`, and `children`.**  
   In addition to keys, reference other pipes with strings of the Pipe constructor:
@@ -105,6 +105,15 @@ This is the current release cycle, so stay tuned for future releases!
 - **Allow for changing `datetime` dtypes in SQL pipes.**  
   When syncing SQL pipes with a `parent` pipe, the parameters for the parent are considered when building the metadefinition, allowing for changing from integer to timestamp dtypes.
 
+- **Add "Resolve symlinks" toggle to pipe parameters editor.**  
+  The parameters editor on the web dashboard includes a "Resolve symlinks" switch, which corresponds to the `apply_symlinks` parameter for `Pipe.get_parameters()`.
+
+- **Expand the `reference` parameter into `references`.**  
+  Pipes may now inherit from multiple pipes via `references`. The existing parameter `reference` is still supported and treated as a list of length 1 (just like `parent` and `child`).
+
+- **Add `Pipe.references`.**  
+  For convenience, `Pipe.references` (or `Pipe.reference`) builds the defined pipes from the `references` parameter (similar to `Pipe.parents` and `Pipe.children`).
+
 - **Add run-time information to pipeline steps.**  
   When chaining actions into pipelines, the output steps show the run-time for each step.
 
@@ -148,7 +157,7 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Properly cancel jobs when CTRL+C is pressed on confirmation.**
 
-### v3.1.4 — v3.1.6
+### v3.1.4 – v3.1.6
 
 - **Add support for ESRI CRS for `geometry` columns.**  
   In addition to EPSG projections, pipes with geometry data may now sync shapefiles with ESRI (or other authorities, default EPSG) projections.
@@ -742,7 +751,7 @@ The 2.9 series added support for geometry data and improved the web console deve
 - **Fix null location keys behavior for pipes cards.**
 - **Fix autoincrementing primary keys for custom schemas.**
 
-### v2.9.0 ― v2.9.1
+### v2.9.0 – v2.9.1
 
 - **Add the dtype `geometry` (and `geography`).**  
   The new data type `geometry` adds support for syncing GIS data (e.g. WKB/WKT, GeoJSON, `shapely` objects, and `GeoDataFrames`).
@@ -1678,7 +1687,7 @@ The 2.4.x series added the `ValkeyConnector`, relative `--begin` and `--end`, pi
 
 - **Set `IS_THREAD_SAFE` to `False` for Oracle.**
 
-### v2.4.6 ― v2.4.7
+### v2.4.6 – v2.4.7
 
 - **Prefix temporary tables with `##`.**  
   Temporary tables are now prefixed with `##` to take advantage of `tempdb` in MSSQL.
@@ -1695,7 +1704,7 @@ The 2.4.x series added the `ValkeyConnector`, relative `--begin` and `--end`, pi
 - **Improve session management for MSSQL.**  
   Transactions and connections are now more gracefully handled when working with MSSQL.
 
-### v2.4.2 — v2.4.5
+### v2.4.2 – v2.4.5
 
 - **Fix `bootstrap connectors`.**  
   Revert a breaking change to the `bootstrap connectors` wizard.
@@ -1811,7 +1820,7 @@ The 2.4.x series added the `ValkeyConnector`, relative `--begin` and `--end`, pi
 
 The 2.3 series was short but brought significant improvements, notably the `Job` API, remote jobs, and action chaining.
 
-### v2.3.5 — v2.3.6
+### v2.3.5 – v2.3.6
 
 - **Properly handle remote jobs.**  
   Long-running remote jobs are now properly handled, allowing for graceful API shutdown.
@@ -3346,7 +3355,7 @@ The biggest features of the 1.6.x series were all about chunking and adding supp
 - **Fix an issue with in-place syncing.**  
   When syncing a SQL pipe in-place with a backtrack interval, the interval is applied to the existing data stage to avoid inserting duplicate rows.
 
-### v1.6.9 — v1.6.10
+### v1.6.9 – v1.6.10
 
 - **Improve thread safety checks.**  
   Added checks for `IS_THREAD_SAFE` to connectors to determine whether to use mutlithreading.
@@ -4535,7 +4544,7 @@ The v1.0.0 release was big news. A ton of features, bugfixes, and perfomance imp
 - **Fixed issues for Python 3.7**
 
 
-### v1.0.3 — v1.0.5
+### v1.0.3 – v1.0.5
 
 - **Fixed environment bugs.**  
   This patch resolves issues with the environment variables `MRSM_ROOT_DIR`, `MRSM_CONFIG`, and `MRSM_PATCH` as well as the configuration directories `patch_config` and `permanent_patch_config`.
@@ -4736,7 +4745,7 @@ The 0.5.x series tied up many loose ends and brought in new features, such as fu
   DuckDB, FastAPI, and Uvicorn have been updated to their latest stable versions.
 
 
-### v0.5.11 — v0.5.12
+### v0.5.11 – v0.5.12
 - **Improved Oracle support.**  
   Oracle SQL has been fully integrated into the testing suite, and critical bugs have been addressed.
 - **Added the `install required` command.**  
@@ -4754,7 +4763,7 @@ The 0.5.x series tied up many loose ends and brought in new features, such as fu
 - **Fixed shell argparse bug.**  
   When editing command line arguments within the shell, edge cases no longer cause the shell to exit.
 
-### v0.5.6 — v0.5.9
+### v0.5.6 – v0.5.9
 - **Added support for `gunicorn`.**  
   Gunicorn may be used to manage API processes with the `--production` or `--gunicorn` flags. The `--production` flag is now default in the Docker image of the API server.
 - **Updated `bootstrap pipes` flow.**  
@@ -4804,12 +4813,12 @@ The 0.5.x series tied up many loose ends and brought in new features, such as fu
 ## 0.4.x Releases
 The 0.4.x series dramatically updated Meerschaum, such as ensuring compatibility with Python 3.10, migrating to Bootstrap 5, and implementing useful features like the redesigned web console and the shell toolbar.
 
-### v0.4.16 — v0.4.18
+### v0.4.16 – v0.4.18
 - **Rewritten API \`register()\` methods.**
 - **MySQL / MariaDB and CockroachDB fixes.**
 - **Additional tests.**
 
-### v0.4.11 — v0.4.15
+### v0.4.11 – v0.4.15
 - **Change the number of columns when printing items.**  
   Depending on the lengths of items and size of the terminal, the number of columns is reduced until most items are not truncated.
 - **Allow shell jobs with the `-f` flag.**  
@@ -4819,7 +4828,7 @@ The 0.4.x series dramatically updated Meerschaum, such as ensuring compatibility
 - **More bugfixes.**  
   A warning when installing plugins has been addressed, and other virtual environment and portable bugs have been fixed.
 
-### v0.4.8 — v0.4.10
+### v0.4.8 – v0.4.10
 - **Added the bottom toolbar to the interactive shell.**  
    The includes the current instance, repo, and connection status.
 - **Fixed parsing issue with the Docker build.**  
@@ -4829,7 +4838,7 @@ The 0.4.x series dramatically updated Meerschaum, such as ensuring compatibility
 - **Delayed imports when changing instances.**  
    This postpones trying to connect to an instance until as late as possible.
 
-### v0.4.1 — v0.4.7
+### v0.4.1 – v0.4.7
 - **Added features to the Web Console.**  
   Features such as the `Show Pipes` button and others were added to give the Web Console better functionality.
 - **Migrated the Web Console to Bootstrap 5.**  
@@ -4856,7 +4865,7 @@ The 0.4.x series dramatically updated Meerschaum, such as ensuring compatibility
 ## 0.3.x Releases
 Version 0.3.0 introduced the web interface and added more robust SQL support for various flavors, including MSSQL and DuckDB.
 
-### v0.3.12 — v0.3.19
+### v0.3.12 – v0.3.19
 - **Mostly small bugfixes.**  
   Docker-compose fixes, `params` in `get_pipe_rowcount()`, unique index names for pipes.
 - **Added `newest` flag to `pipe.get_sync_time()`.**  
@@ -5010,7 +5019,7 @@ Version 0.2 improved greatly on 0.1, with a greater focus on the user experience
 ### v0.2.6
 - **Miscellaneous bugfixes and dependency updates**
 
-### v0.2.1 — v0.2.5
+### v0.2.1 – v0.2.5
 - **Shell improvements**  
   Stability, autosuggest, and more.
 - **Virtual environments**  
