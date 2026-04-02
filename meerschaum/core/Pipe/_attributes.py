@@ -771,7 +771,7 @@ def parent(self) -> Union[mrsm.Pipe, None]:
     """
     Return the first pipe in `self.parents` or `None`.
     """
-    _parents = self._parents
+    _parents = self.parents
     if not _parents:
         return None
 
