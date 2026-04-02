@@ -850,7 +850,7 @@ def update_pipe_sql_click(n_clicks, sql_editor_text):
 )
 def toggle_sql_symlinks(value):
     triggered = dash.callback_context.triggered
-    if triggered[0]['value'] is None:
+    if not triggered or triggered[0]['value'] is None:
         raise PreventUpdate
 
     pipe = pipe_from_ctx(triggered, 'value')
@@ -1049,29 +1049,41 @@ def sign_out_button_click(
     Output({'type': 'parameters-editor', 'index': MATCH}, 'value'),
     Input({'type': 'parameters-as-yaml-button', 'index': MATCH}, 'n_clicks'),
     Input({'type': 'parameters-as-json-button', 'index': MATCH}, 'n_clicks'),
+    Input({'type': 'resolve-symlinks-parameters-switch', 'index': MATCH}, 'value'),
+    State({'type': 'parameters-editor', 'index': MATCH}, 'value'),
     prevent_initial_call=True,
 )
 def parameters_as_yaml_or_json_click(
     yaml_n_clicks: Optional[int],
     json_n_clicks: Optional[int],
+    resolve_symlinks_value: Optional[bool],
+    parameters_editor_text: str,
+    prevent_initial_call=True,
 ):
     """
     When the `YAML` button is clicked under the parameters editor, switch the content to YAML.
     """
-    if not yaml_n_clicks and not json_n_clicks:
+    triggered = dash.callback_context.triggered
+    if not triggered or triggered[0]['value'] is None:
         raise PreventUpdate
 
-    triggered = dash.callback_context.triggered
-    if triggered[0]['value'] is None:
-        raise PreventUpdate
-    as_yaml = 'yaml' in triggered[0]['prop_id']
-    pipe = pipe_from_ctx(triggered, 'n_clicks')
+    as_json = (
+        'json' in triggered[0]['prop_id']
+        or (
+            parameters_editor_text.lstrip().startswith('{')
+            and 'switch' in triggered[0]['prop_id']
+        )
+    )
+    pipe = pipe_from_ctx(triggered, 'n_clicks') or pipe_from_ctx(triggered, 'value')
     if pipe is None:
         raise PreventUpdate
 
-    if as_yaml:
-        return yaml.dump(pipe.parameters)
-    return json.dumps(pipe.parameters, indent=4, separators=(',', ': '), sort_keys=True)
+    parameters = pipe.get_parameters(apply_symlinks=resolve_symlinks_value)
+
+    if as_json:
+        return json.dumps(parameters, indent=4, separators=(',', ': '), sort_keys=True)
+
+    return yaml.dump(parameters)
 
 
 @dash_app.callback(

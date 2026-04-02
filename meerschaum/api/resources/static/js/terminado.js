@@ -9,7 +9,7 @@ function make_terminal(element, options, ws_url) {
     rows: 25,
     screenKeys: true,
     useStyle: true,
-    scrollback: 9999999,
+    scrollback: 100000,
     cursorBlink: true,
     allowProposedApi: true
   };
@@ -23,6 +23,28 @@ function make_terminal(element, options, ws_url) {
   }
 
   var term = new Terminal(terminal_options);
+
+  function copyPasteKeyEventHandler(event) {
+    if (event.type !== "keydown") {
+      return true;
+    }
+    if (event.ctrlKey && event.shiftKey) {
+      key = event.key.toLowerCase();
+      if (key === "v") {
+        navigator.clipboard.readText().then((toPaste) => {
+          term.writeText(toPaste);
+        });
+        return false;
+      } else if (key === "c" || key === "x") {
+        text_to_be_copied = term.getSelection();
+        navigator.clipboard.writeText(text_to_be_copied);
+        term.focus();
+        return false;
+      }
+    }
+    return true;
+  }
+
   term.loadAddon(new Unicode11Addon.Unicode11Addon());
   term.unicode.activeVersion = '11';
   term.attachCustomKeyEventHandler(copyPasteKeyEventHandler);
@@ -56,25 +78,4 @@ function make_terminal(element, options, ws_url) {
     };
   };
   return { socket: ws, term: term };
-}
-
-function copyPasteKeyEventHandler(event) {
-  if (event.type !== "keydown") {
-    return true;
-  }
-  if (event.ctrlKey && event.shiftKey) {
-    key = event.key.toLowerCase();
-    if (key === "v") {
-      navigator.clipboard.readText().then((toPaste) => {
-        term.writeText(toPaste);
-      });
-      return false;
-    } else if (key === "c" || key === "x") {
-      text_to_be_copied = term.getSelection();
-      navigator.clipboard.writeText(text_to_be_copied);
-      term.focus();
-      return false;
-    }
-  }
-  return true;
 }

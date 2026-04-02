@@ -79,7 +79,6 @@ def get_parameters(
     """
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config._read_config import search_and_substitute_config
-    from meerschaum.utils.pipes import get_pipe_from_value
 
     if _visited is None:
         _visited = {self}
@@ -88,21 +87,19 @@ def get_parameters(
         _ = self._invalidate_cache(hard=True)
 
     raw_parameters = self.attributes.get('parameters', {})
-    ref_keys = raw_parameters.get('reference')
     if not apply_symlinks:
         return raw_parameters
 
-    if ref_keys:
+    parameters = {}
+    for ref_pipe in self.references:
         try:
-            if debug:
-                dprint(f"Building reference pipe from keys: {ref_keys}")
-
-            ref_pipe = get_pipe_from_value(ref_keys, _pipe=self)
             if ref_pipe in _visited:
                 warn(f"Circular reference detected in {self}: chain involves {ref_pipe}.")
                 return search_and_substitute_config(raw_parameters)
 
             _visited.add(ref_pipe)
+            if refresh:
+                _ = _cached_base_params.pop(ref_pipe, None)
             base_params = _cached_base_params.get(ref_pipe, None)
             if base_params is None:
                 base_params = ref_pipe.get_parameters(
@@ -121,10 +118,9 @@ def get_parameters(
             warn(f"Failed to resolve reference pipe for {self}: {e}")
             base_params = {}
 
-        params_to_apply = {k: v for k, v in raw_parameters.items() if k != 'reference'}
-        parameters = apply_patch_to_config(base_params, params_to_apply)
-    else:
-        parameters = raw_parameters
+        parameters = apply_patch_to_config(parameters, base_params)
+
+    parameters = apply_patch_to_config(parameters, raw_parameters)
 
     from meerschaum.utils.pipes import replace_pipes_syntax
     self._symlinks = {}
@@ -757,8 +753,9 @@ def parents(self) -> List[mrsm.Pipe]:
         return _cached_parents
 
     from meerschaum.utils.pipes import get_pipe_from_value
-    key = 'parents' if 'parents' in self.parameters else 'parent'
-    parents_refs = self.parameters.get(key, None) or []
+    base_params = self.get_parameters()
+    key = 'parents' if 'parents' in base_params else 'parent'
+    parents_refs = base_params.get(key, None) or []
     if isinstance(parents_refs, str) or isinstance(parents_refs, dict):
         parents_refs = [parents_refs]
 
@@ -774,10 +771,11 @@ def parent(self) -> Union[mrsm.Pipe, None]:
     """
     Return the first pipe in `self.parents` or `None`.
     """
-    parents = self.parents
-    if not parents:
+    _parents = self.parents
+    if not _parents:
         return None
-    return parents[0]
+
+    return _parents[0]
 
 @parents.setter
 def parents(self, _parents) -> None:
@@ -788,8 +786,11 @@ def parents(self, _parents) -> None:
         _parents = [_parents]
 
     need_cache = all(isinstance(_parent, mrsm.Pipe) for _parent in _parents)
-    if need_cache:
-        self._parents = _parents
+    self._parents = (
+        _parents
+        if need_cache
+        else None
+    )
 
     _parents = [
         (
@@ -820,8 +821,9 @@ def children(self) -> List[mrsm.Pipe]:
         return _cached_children
 
     from meerschaum.utils.pipes import get_pipe_from_value
-    key = 'children' if 'children' in self.parameters else 'child'
-    children_refs = self.parameters.get(key, None) or []
+    base_params = self.get_parameters()
+    key = 'children' if 'children' in base_params else 'child'
+    children_refs = base_params.get(key, None) or []
     if isinstance(children_refs, str) or isinstance(children_refs, dict):
         children_refs = [children_refs]
 
@@ -837,10 +839,11 @@ def child(self) -> mrsm.Pipe | None:
     """
     Return the first pipe in `self.children` or None.
     """
-    children = self.children
-    if not children:
+    _children = self.children
+    if not _children:
         return None
-    return children[0]
+
+    return _children[0]
 
 
 @children.setter
@@ -852,8 +855,11 @@ def children(self, _children) -> None:
         _children = [_children]
 
     need_cache = all(isinstance(_child, mrsm.Pipe) for _child in _children)
-    if need_cache:
-        self._children = _children
+    self._children = (
+        _children
+        if need_cache
+        else None
+    )
 
     _children = [
         (
@@ -874,6 +880,74 @@ def child(self, _child) -> None:
     """
     self.children = _child
 
+@property
+def references(self) -> List[mrsm.Pipe]:
+    """
+    Return a list of `meerschaum.Pipe` objects to be designated as references.
+    """
+    _cached_references = self.__dict__.get('_references', None)
+    if _cached_references is not None:
+        return _cached_references
+
+    from meerschaum.utils.pipes import get_pipe_from_value
+    base_params = self.get_parameters(apply_symlinks=False)
+    key = 'references' if 'references' in base_params else 'reference'
+    refs = base_params.get(key, None) or []
+    if isinstance(refs, str) or isinstance(refs, dict):
+        refs = [refs]
+
+    if not refs:
+        return []
+
+    self._refs = [get_pipe_from_value(val, _pipe=self) for val in refs]
+    return self._refs
+
+
+@property
+def reference(self) -> mrsm.Pipe | None:
+    """
+    Return the first pipe in `self.references` or None.
+    """
+    _references = self.references
+    if not _references:
+        return None
+
+    return _references[0]
+
+
+@references.setter
+def references(self, _references) -> None:
+    """
+    Set the `references` parameter.
+    """
+    if not isinstance(_references, list):
+        _references = [_references]
+
+    need_cache = all(isinstance(_reference, mrsm.Pipe) for _reference in _references)
+    self._references = (
+        _references
+        if need_cache
+        else None
+    )
+
+    _references = [
+        (
+            _reference.keys()
+            if isinstance(_reference, mrsm.Pipe)
+            else _reference
+        )
+        for _reference in _references
+    ]
+
+    self.update_parameters({'references': _references}, persist=False)
+
+
+@reference.setter
+def reference(self, _reference) -> None:
+    """
+    Set `references` from `reference`.
+    """
+    self.references = _reference
 
 
 @property
