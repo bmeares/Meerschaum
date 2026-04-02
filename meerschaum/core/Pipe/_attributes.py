@@ -79,7 +79,6 @@ def get_parameters(
     """
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config._read_config import search_and_substitute_config
-    import traceback
 
     if _visited is None:
         _visited = {self}
@@ -121,15 +120,7 @@ def get_parameters(
 
         parameters = apply_patch_to_config(parameters, base_params)
 
-    if not self.references:
-        parameters = raw_parameters
-    else:
-        params_to_apply = {
-            k: v
-            for k, v in raw_parameters.items()
-            if k not in ('reference', 'references')
-        }
-        parameters = apply_patch_to_config(parameters, params_to_apply)
+    parameters = apply_patch_to_config(parameters, raw_parameters)
 
     from meerschaum.utils.pipes import replace_pipes_syntax
     self._symlinks = {}

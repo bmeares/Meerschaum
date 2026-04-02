@@ -320,8 +320,11 @@ def get_pipe_metadef(
             
             # Replace occurrences of parent target with pushdown CTE in the definition body.
             parent_found = False
-            patterns_to_replace = []
-            patterns_to_replace.extend([parent_item_name_full, parent_item_name, parent_target])
+            patterns_to_replace = [
+                parent_item_name_full,
+                parent_item_name,
+                parent_target,
+            ]
 
             new_definition_body = definition
             for pattern in patterns_to_replace:

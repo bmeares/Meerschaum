@@ -4,7 +4,69 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.2.0 – v3.2.1
+### v3.2.1
+
+- **Improve webterm performance.**  
+  The webterm loads more quickly due to changes made to accomodate xterm.js v6.0.0.
+
+- **Allow for multiple reference pipes.**  
+  Pipes may inherit parameters from multiple pipes via `references` (which now behaves the same as `parents` and `children`):
+
+  ```python
+  import meerschaum as mrsm
+  import json
+
+  base_pipe_1 = mrsm.Pipe(
+      'demo', 'base', '1',
+      instance='sql:local',
+      dtypes={'a': 'int', 'b': 'int'},
+  )
+  base_pipe_2 = mrsm.Pipe(
+      'demo', 'base', '2',
+      instance='sql:local',
+      dtypes={'b': 'bool'},
+      columns={'primary': 'id'},
+  )
+
+  pipe = mrsm.Pipe(
+      'demo', 'inherit',
+      instance='sql:local',
+      references=[
+          base_pipe_1,
+          base_pipe_2,
+      ],
+  )
+
+  print(json.dumps(pipe.get_parameters(), indent=4))
+  # {
+  #     "dtypes": {
+  #         "a": "int",
+  #         "b": "bool"
+  #     },
+  #     "columns": {
+  #         "primary": "id"
+  #     },
+  #     "references": [
+  #         {
+  #             "connector_keys": "demo",
+  #             "metric_key": "base",
+  #             "location_key": "1",
+  #             "instance_keys": "sql:local"
+  #         },
+  #         {
+  #             "connector_keys": "demo",
+  #             "metric_key": "base",
+  #             "location_key": "2",
+  #             "instance_keys": "sql:local"
+  #         }
+  #     ]
+  # }
+  ```
+
+- **Add "Resolve symlinks" toggle to pipe parameters editor.**  
+  The parameters editor on the web dashboard includes a "Resolve symlinks" switch, which corresponds to the `apply_symlinks` parameter for `Pipe.get_parameters()`.
+
+### v3.2.0
 
 - **Allow for strings for `reference`, `parents`, and `children`.**  
   In addition to keys, reference other pipes with strings of the Pipe constructor:
@@ -104,15 +166,6 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Allow for changing `datetime` dtypes in SQL pipes.**  
   When syncing SQL pipes with a `parent` pipe, the parameters for the parent are considered when building the metadefinition, allowing for changing from integer to timestamp dtypes.
-
-- **Add "Resolve symlinks" toggle to pipe parameters editor.**  
-  The parameters editor on the web dashboard includes a "Resolve symlinks" switch, which corresponds to the `apply_symlinks` parameter for `Pipe.get_parameters()`.
-
-- **Expand the `reference` parameter into `references`.**  
-  Pipes may now inherit from multiple pipes via `references`. The existing parameter `reference` is still supported and treated as a list of length 1 (just like `parent` and `child`).
-
-- **Add `Pipe.references`.**  
-  For convenience, `Pipe.references` (or `Pipe.reference`) builds the defined pipes from the `references` parameter (similar to `Pipe.parents` and `Pipe.children`).
 
 - **Add run-time information to pipeline steps.**  
   When chaining actions into pipelines, the output steps show the run-time for each step.
