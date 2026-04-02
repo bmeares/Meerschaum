@@ -115,6 +115,7 @@ def build_pipe_card(
     pipe: mrsm.Pipe,
     authenticated: bool = False,
     include_manage: bool = True,
+    header_only: bool = False,
     _build_references_num: int = 10,
     _build_parents_num: int = 10,
     _build_children_num: int = 10,
@@ -132,6 +133,9 @@ def build_pipe_card(
 
     include_manage: bool, default True
         If `True` and `authenticated` is `True`, include the "Manage" dropdown.
+
+    header_only: bool, default False
+        If `True`, only build the card header.
 
     Returns
     -------
@@ -272,6 +276,9 @@ def build_pipe_card(
         ],
         justify='start',
     )
+
+    if header_only:
+        return dbc.Card(dbc.CardHeader(card_header_children))
 
     return dbc.Card([
         dbc.CardHeader(children=card_header_children),
@@ -658,6 +665,7 @@ def accordion_items_from_pipe(
                 build_pipe_card(
                     reference_pipe,
                     authenticated=authenticated,
+                    header_only=True,
                     _build_references_num=(_build_references_num - 1),
                 )
                 for reference_pipe in pipe.references
@@ -676,7 +684,8 @@ def accordion_items_from_pipe(
             parents_cards = [
                 build_pipe_card(
                     parent_pipe,
-                    authenticated = authenticated,
+                    authenticated=authenticated,
+                    header_only=True,
                     _build_parents_num=(_build_parents_num - 1),
                 )
                 for parent_pipe in pipe.parents
@@ -689,7 +698,8 @@ def accordion_items_from_pipe(
             children_cards = [
                 build_pipe_card(
                     child_pipe,
-                    authenticated = authenticated,
+                    authenticated=authenticated,
+                    header_only=True,
                     _build_children_num=(_build_children_num - 1),
                 )
                 for child_pipe in pipe.children

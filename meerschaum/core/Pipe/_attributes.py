@@ -79,7 +79,6 @@ def get_parameters(
     """
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config._read_config import search_and_substitute_config
-    from meerschaum.utils.pipes import get_pipe_from_value
 
     if _visited is None:
         _visited = {self}
@@ -91,14 +90,15 @@ def get_parameters(
     if not apply_symlinks:
         return raw_parameters
 
-    ref_pipes = self.references
-    for ref_pipe in ref_pipes:
+    for ref_pipe in self.references:
         try:
             if ref_pipe in _visited:
                 warn(f"Circular reference detected in {self}: chain involves {ref_pipe}.")
                 return search_and_substitute_config(raw_parameters)
 
             _visited.add(ref_pipe)
+            if refresh:
+                _ = _cached_base_params.pop(ref_pipe, None)
             base_params = _cached_base_params.get(ref_pipe, None)
             if base_params is None:
                 base_params = ref_pipe.get_parameters(
@@ -753,8 +753,9 @@ def parents(self) -> List[mrsm.Pipe]:
         return _cached_parents
 
     from meerschaum.utils.pipes import get_pipe_from_value
-    key = 'parents' if 'parents' in self.parameters else 'parent'
-    parents_refs = self.parameters.get(key, None) or []
+    base_params = self.get_parameters()
+    key = 'parents' if 'parents' in base_params else 'parent'
+    parents_refs = base_params.get(key, None) or []
     if isinstance(parents_refs, str) or isinstance(parents_refs, dict):
         parents_refs = [parents_refs]
 
@@ -820,8 +821,9 @@ def children(self) -> List[mrsm.Pipe]:
         return _cached_children
 
     from meerschaum.utils.pipes import get_pipe_from_value
-    key = 'children' if 'children' in self.parameters else 'child'
-    children_refs = self.parameters.get(key, None) or []
+    base_params = self.get_parameters()
+    key = 'children' if 'children' in base_params else 'child'
+    children_refs = base_params.get(key, None) or []
     if isinstance(children_refs, str) or isinstance(children_refs, dict):
         children_refs = [children_refs]
 
@@ -888,8 +890,9 @@ def references(self) -> List[mrsm.Pipe]:
         return _cached_references
 
     from meerschaum.utils.pipes import get_pipe_from_value
-    key = 'references' if 'references' in self.get_parameters(apply_symlinks=False) else 'reference'
-    refs = self.get_parameters(apply_symlinks=False).get(key, None) or []
+    base_params = self.get_parameters(apply_symlinks=False)
+    key = 'references' if 'references' in base_params else 'reference'
+    refs = base_params.get(key, None) or []
     if isinstance(refs, str) or isinstance(refs, dict):
         refs = [refs]
 
