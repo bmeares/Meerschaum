@@ -149,7 +149,7 @@ packages['sql'].update(packages['core'])
 packages['sql'].update(packages['gis'])
 packages['dash'] = {
     'flask_compress'                 : 'Flask-Compress>=1.17.0',
-    'dash'                           : 'dash>=4.0.0',
+    'dash'                           : 'dash>=4.1.0',
     'dash_bootstrap_components'      : 'dash-bootstrap-components>=2.0.4',
     'dash_ace'                       : 'dash-ace>=0.2.1',
     'dash_extensions'                : 'dash-extensions>=2.0.5',

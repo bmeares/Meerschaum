@@ -888,8 +888,8 @@ def references(self) -> List[mrsm.Pipe]:
         return _cached_references
 
     from meerschaum.utils.pipes import get_pipe_from_value
-    key = 'references' if 'references' in self.get_parameters(apply_symlinks=False) else 'child'
-    refs = self.parameters.get(key, None) or []
+    key = 'references' if 'references' in self.get_parameters(apply_symlinks=False) else 'reference'
+    refs = self.get_parameters(apply_symlinks=False).get(key, None) or []
     if isinstance(refs, str) or isinstance(refs, dict):
         refs = [refs]
 

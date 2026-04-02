@@ -115,6 +115,7 @@ def build_pipe_card(
     pipe: mrsm.Pipe,
     authenticated: bool = False,
     include_manage: bool = True,
+    _build_references_num: int = 10,
     _build_parents_num: int = 10,
     _build_children_num: int = 10,
 ) -> 'dbc.Card':
@@ -221,6 +222,7 @@ def build_pipe_card(
                 accordion_items_from_pipe(
                     pipe,
                     authenticated=authenticated,
+                    _build_references_num=_build_references_num,
                     _build_parents_num=_build_parents_num,
                     _build_children_num=_build_children_num,
                 ),
@@ -324,6 +326,7 @@ def accordion_items_from_pipe(
     pipe: mrsm.Pipe,
     active_items: Optional[List[str]] = None,
     authenticated: bool = False,
+    _build_references_num: int = 10,
     _build_parents_num: int = 10,
     _build_children_num: int = 10,
 ) -> 'List[dbc.AccordionItem]':
@@ -650,15 +653,31 @@ def accordion_items_from_pipe(
             ),
         ]
 
-        #  if pipe.reference:
-            #  pass
+        if _build_references_num > 0 and pipe.references:
+            references_cards = [
+                build_pipe_card(
+                    reference_pipe,
+                    authenticated=authenticated,
+                    _build_references_num=(_build_references_num - 1),
+                )
+                for reference_pipe in pipe.references
+            ]
+            references_grid = build_cards_grid(references_cards, num_columns=1)
+            references_div_items = [
+                html.Br(),
+                html.H3('Reference Pipes'),
+                html.Br(),
+                references_grid,
+
+            ]
+            parameters_div_children.extend([html.Br()] + references_div_items)
 
         if _build_parents_num > 0 and pipe.parents:
             parents_cards = [
                 build_pipe_card(
                     parent_pipe,
                     authenticated = authenticated,
-                    _build_parents_num = (_build_parents_num - 1),
+                    _build_parents_num=(_build_parents_num - 1),
                 )
                 for parent_pipe in pipe.parents
             ]
@@ -671,7 +690,7 @@ def accordion_items_from_pipe(
                 build_pipe_card(
                     child_pipe,
                     authenticated = authenticated,
-                    _build_children_num = (_build_children_num - 1),
+                    _build_children_num=(_build_children_num - 1),
                 )
                 for child_pipe in pipe.children
             ]

@@ -22,15 +22,18 @@
   }
 </style>
 <link rel="stylesheet" href="{{ static('css/xterm.css') }}"/>
-<script src="{{ static('js/xterm.js') }}"></script>
-<script src="{{ static('js/xterm-addon-unicode11.js') }}"></script>
-<script src="{{ static('js/terminado.js') }}"></script>
+</head>
+<body>
+<div id="xterm-div"></div>
+<script src="{{ static('js/xterm.js') }}" defer></script>
+<script src="{{ static('js/xterm-addon-unicode11.js') }}" defer></script>
+<script src="{{ static('js/terminado.js') }}" defer></script>
 <script>
-
 window.addEventListener(
   "message",
   (event) => {
     if (!event.isTrusted){ return; }
+    if (!window.terminal || !window.terminal.socket) { return; }
 
     let action_str = event.data.action;
     let subaction_str = event.data['subaction'] ? event.data['subaction'] : '';
@@ -165,7 +168,7 @@ function cleanUpWebSocket(socket) {
       socket = null;
 }
 
-window.onload = function() {
+document.addEventListener('DOMContentLoaded', function() {
     var protocol = (window.location.protocol.indexOf("https") === 0) ? "wss" : "ws";
     var ws_url = protocol+"://"+window.location.host+ "{{ws_url_path}}";
 
@@ -173,7 +176,7 @@ window.onload = function() {
         fontFamily: '"DejaVu Sans Mono", "Liberation Mono", monospace',
         fontSize: 16,
         allowProposedApi: true,
-        scrollback: 9999999,
+        scrollback: 100000,
         cursorBlink: true,
         theme: {
             background: '#000'
@@ -189,10 +192,10 @@ window.onload = function() {
         measure.style.whiteSpace = "pre";
         measure.innerText = "W";
         document.body.appendChild(measure);
-        
+
         var rect = measure.getBoundingClientRect();
-        var termRowHeight = rect.height;
-        var termColWidth = rect.width;
+        var termRowHeight = rect.height || 20;
+        var termColWidth = rect.width || 10;
         document.body.removeChild(measure);
 
         var rows = Math.max(2, Math.floor((window.innerHeight - 10) / termRowHeight));
@@ -201,14 +204,16 @@ window.onload = function() {
     }
 
     xterm_div = document.getElementById("xterm-div");
-    size = calculate_size();
 
     function init_webterm() {
+      if (window.terminal_initialized) { return; }
+      let startTime = performance.now();
       old_terminal = window.terminal;
       if (old_terminal){
         xterm_div.innerHTML = "";
         cleanUpWebSocket(old_terminal.socket);
       }
+      var size = calculate_size();
       var options = Object.assign({}, termOptions, {
           cols: size.cols,
           rows: size.rows
@@ -219,25 +224,34 @@ window.onload = function() {
           reconnectTimeout = setTimeout(init_webterm, 1000);
         }
       }
+      window.terminal_initialized = true;
+      let endTime = performance.now();
+      console.log(`Terminal initialized in ${endTime - startTime}ms with size ${size.cols}x${size.rows}`);
     }
 
-    init_webterm();
+    // Wait for fonts to be ready if possible, otherwise just go
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(init_webterm);
+    } else {
+        window.onload = init_webterm;
+    }
 
     window.onresize = function() {
       var geom = calculate_size();
       rows = geom.rows;
       cols = geom.cols;
-      window.terminal.term.resize(cols, rows);
-      window.terminal.socket.send(
-          JSON.stringify(
-              ["set_size", rows, cols, window.innerHeight, window.innerWidth]
-          )
-      );
+      if (window.terminal && window.terminal.term) {
+        window.terminal.term.resize(cols, rows);
+      }
+      if (window.terminal && window.terminal.socket) {
+        window.terminal.socket.send(
+            JSON.stringify(
+                ["set_size", rows, cols, window.innerHeight, window.innerWidth]
+            )
+        );
+      }
     };
-};
+});
 </script>
-</head>
-<body>
-<div id="xterm-div"></div>
 </body>
 </html>
