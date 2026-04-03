@@ -3848,7 +3848,8 @@ def deduplicate_pipe(
             dedup_table,
             pipe.target,
             self.flavor,
-            schema=self.get_pipe_schema(pipe),
+            schema=None,
+            new_schema=self.get_pipe_schema(pipe),
         ),
         f"DROP TABLE {if_exists_str} {temp_old_table_name}",
     ])
