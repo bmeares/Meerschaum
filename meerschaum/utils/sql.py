@@ -2047,6 +2047,7 @@ def get_rename_table_queries(
     new_table: str,
     flavor: str,
     schema: Optional[str] = None,
+    new_schema: Optional[str] = None,
 ) -> List[str]:
     """
     Return queries to alter a table's name.
@@ -2065,19 +2066,42 @@ def get_rename_table_queries(
     schema: Optional[str], default None
         The schema on which the table resides.
 
+    new_schema: Optional[str], default None
+        If provided, move the table to this schema.
+        Defaults to `schema`.
+
     Returns
     -------
     A list of `ALTER TABLE` or equivalent queries for the database flavor.
     """
+    if new_schema is None:
+        new_schema = schema
+
+    if flavor in ('sqlite', 'geopackage'):
+        schema = None
+        new_schema = None
+
     old_table_name = sql_item_name(old_table, flavor, schema)
     new_table_name = sql_item_name(new_table, flavor, None)
-    tmp_table = '_tmp_rename_' + new_table
-    tmp_table_name = sql_item_name(tmp_table, flavor, schema)
+
     if flavor == 'mssql':
-        return [f"EXEC sp_rename '{old_table}', '{new_table}'"]
+        queries = []
+        if schema != new_schema:
+            queries.append(f"ALTER SCHEMA {sql_item_name(new_schema, flavor)} TRANSFER {old_table_name}")
+            schema = new_schema
+            old_table_name = sql_item_name(old_table, flavor, schema)
+        if old_table != new_table:
+            queries.append(f"EXEC sp_rename '{old_table_name}', '{new_table}'")
+        return queries
+
+    if flavor in ('mysql', 'mariadb'):
+        new_table_qualified = sql_item_name(new_table, flavor, new_schema)
+        return [f"RENAME TABLE {old_table_name} TO {new_table_qualified}"]
 
     if_exists_str = "IF EXISTS" if flavor in DROP_IF_EXISTS_FLAVORS else ""
     if flavor == 'duckdb':
+        tmp_table = '_tmp_rename_' + new_table
+        tmp_table_name = sql_item_name(tmp_table, flavor, schema)
         return (
             get_create_table_queries(
                 f"SELECT * FROM {old_table_name}",
@@ -2088,14 +2112,24 @@ def get_rename_table_queries(
                 f"SELECT * FROM {tmp_table_name}",
                 new_table,
                 'duckdb',
-                schema,
+                new_schema,
             ) + [
                 f"DROP TABLE {if_exists_str} {tmp_table_name}",
                 f"DROP TABLE {if_exists_str} {old_table_name}",
             ]
         )
 
-    return [f"ALTER TABLE {old_table_name} RENAME TO {new_table_name}"]
+    queries = []
+    if schema != new_schema:
+        if flavor in ('postgresql', 'postgis', 'timescaledb', 'timescaledb-ha', 'citus', 'cockroachdb'):
+            queries.append(f"ALTER TABLE {old_table_name} SET SCHEMA {sql_item_name(new_schema, flavor)}")
+            schema = new_schema
+            old_table_name = sql_item_name(old_table, flavor, schema)
+
+    if old_table != new_table:
+        queries.append(f"ALTER TABLE {old_table_name} RENAME TO {new_table_name}")
+
+    return queries
 
 
 def get_create_table_query(

@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.2.1
+### v3.2.1 – v3.2.2
 
 - **Improve webterm performance.**  
   The webterm loads more quickly due to changes made to accomodate xterm.js v6.0.0.
@@ -175,6 +175,8 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Improve `uv` and virtual environment support.**  
   Meerschaum now installs correctly with `uv tool install` and enables `uv` when run from a virtual environment.
+  
+- **Fix `deduplicate pipes` for custom schemata.**  
 
 - **Fixed a bug with the `sql:local` CLI.** 
 
