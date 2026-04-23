@@ -18,6 +18,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Sort by descending for query data results.**  
   The "Query Data" option the web dashboard pipe card now sorts results in descending order.
 
+- **Fix primary key issues with SQLite.**  
+  Failed primary key creation on SQLite has been fixed.
+
 ### v3.2.1 – v3.2.2
 
 - **Improve webterm performance.**  

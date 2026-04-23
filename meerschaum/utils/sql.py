@@ -2445,8 +2445,23 @@ def _get_create_table_query_from_cte(
                 f"ADD PRIMARY KEY ({primary_key_name})"
             ),
         ]
+    elif flavor in ('sqlite', 'geopackage'):
+        if is_with_query:
+            create_table_queries = [
+                f"CREATE TABLE {new_table_name} AS\n{query}"
+            ]
+        else:
+            create_table_queries = [
+                (
+                    f"CREATE TABLE {new_table_name} AS\n"
+                    "SELECT *\n"
+                    f"FROM (\n{textwrap.indent(query, '    ')}\n)"
+                ),
+            ]
+        ### SQLite does not support ALTER TABLE ... ADD PRIMARY KEY.
+        alter_type_queries = []
     elif flavor in (
-        'sqlite', 'mysql', 'mariadb', 'duckdb', 'oracle', 'geopackage',
+        'mysql', 'mariadb', 'duckdb', 'oracle',
         'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha', 'citus', 'cockroachdb'
     ):
         if is_with_query:
