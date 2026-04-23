@@ -101,22 +101,12 @@ def sync_files(keys: Optional[List[str]] = None):
         keys = []
 
     def _stack():
-        import os
-        from meerschaum.config._paths import (
-            CONFIG_DIR_PATH,
-            STACK_ENV_PATH,
-            STACK_COMPOSE_PATH,
-            STACK_COMPOSE_FILENAME,
-            STACK_ENV_FILENAME,
-            GRAFANA_DATASOURCE_PATH,
-            GRAFANA_DASHBOARD_PATH,
-        )
-        from meerschaum._internal.static import STATIC_CONFIG
+        import meerschaum.config.paths as paths
         from meerschaum.config.stack import _write_initdb
 
         sync_yaml_configs(
-            ['stack', STACK_COMPOSE_FILENAME],
-            STACK_COMPOSE_PATH,
+            ['stack', paths.STACK_COMPOSE_FILENAME],
+            paths.STACK_COMPOSE_PATH,
             substitute=True,
             replace_tuples=[
                 ('$', '$$'),
@@ -125,12 +115,12 @@ def sync_files(keys: Optional[List[str]] = None):
         )
         sync_yaml_configs(
             ['stack', 'grafana', 'datasource'],
-            GRAFANA_DATASOURCE_PATH,
+            paths.GRAFANA_DATASOURCE_PATH,
             substitute=True,
         )
         sync_yaml_configs(
             ['stack', 'grafana', 'dashboard'],
-            GRAFANA_DASHBOARD_PATH,
+            paths.GRAFANA_DASHBOARD_PATH,
             substitute=True,
         )
         _write_initdb()

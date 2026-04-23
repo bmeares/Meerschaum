@@ -4,6 +4,20 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.2.3
+
+- **Fix environment isolation for `compose` projects.**  
+  Internal configuration isolation has been reworked to better handle dynamic environments (i.e. `compose` projects).
+
+- **Prompt user to restart stack when upgrading.**  
+  When running `mrsm upgrade mrsm`, the prompt now asks whether to bring up the stack with the new Docker images after pulling, allowing users to detach from a session when upgrading.
+
+- **Add schema to target table on pipe card.**  
+  The web dashboard's pipe card now shows the fully qualified table name for SQL pipes, including its schema and any truncation.
+
+- **Sort by descending for query data results.**  
+  The "Query Data" option the web dashboard pipe card now sorts results in descending order.
+
 ### v3.2.1 – v3.2.2
 
 - **Improve webterm performance.**  

@@ -63,12 +63,12 @@ def install_plugin(
     import pathlib
     import json
     from meerschaum.core import Plugin
-    from meerschaum.config._paths import PLUGINS_TEMP_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.packages import attempt_import
     binaryornot_check = attempt_import('binaryornot.check', lazy=False)
     r_url = plugin_r_url(name)
-    dest = pathlib.Path(os.path.join(PLUGINS_TEMP_RESOURCES_PATH, name + '.tar.gz'))
+    dest = pathlib.Path(os.path.join(paths.PLUGINS_TEMP_RESOURCES_PATH, name + '.tar.gz'))
     if debug:
         dprint(f"Fetching from '{self.url + r_url}' to '{dest}'...")
     archive_path = self.wget(r_url, dest, debug=debug) 

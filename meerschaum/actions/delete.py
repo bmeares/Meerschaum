@@ -142,33 +142,33 @@ def _delete_config(
     """
     import os
     import shutil
+    import meerschaum.config.paths as paths
     from meerschaum.utils.prompt import yes_no
-    from meerschaum.config._paths import STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH
     from meerschaum.config._read_config import get_possible_keys, get_keyfile_path
     from meerschaum.utils.debug import dprint
-    paths = [p for p in [STACK_COMPOSE_PATH, DEFAULT_CONFIG_DIR_PATH] if p.exists()]
+    file_paths = [p for p in [paths.STACK_COMPOSE_PATH, paths.DEFAULT_CONFIG_DIR_PATH] if p.exists()]
     if action is None:
         action = []
     keys = get_possible_keys() if len(action) == 0 else action
     for k in keys:
         _p = get_keyfile_path(k, create_new=False)
         if _p is not None:
-            paths.append(_p)
+            file_paths.append(_p)
 
-    if force or not paths:
+    if force or not file_paths:
         answer = True
     else:
         sep = '\n' + '  - '
         answer = yes_no(
             "Are you sure you want to delete the following configuration files?" +
-            f"{sep + sep.join([str(p) for p in paths])}\n",
+            f"{sep + sep.join([str(p) for p in file_paths])}\n",
             default='n',
             noask=noask,
             yes=yes,
         )
 
     if answer or force:
-        for path in paths:
+        for path in file_paths:
             if debug:
                 dprint(f"Removing {path}...")
             if os.path.isfile(path):
@@ -567,7 +567,7 @@ def _delete_venvs(
     import os
     import shutil
     import pathlib
-    from meerschaum.config.paths import VIRTENV_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.utils.venv import venv_exists
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.misc import print_options
@@ -575,7 +575,7 @@ def _delete_venvs(
     venvs_to_skip = ['mrsm']
     venvs = [
         _venv
-        for _venv in action or os.listdir(VIRTENV_RESOURCES_PATH)
+        for _venv in action or os.listdir(paths.VIRTENV_RESOURCES_PATH)
         if venv_exists(_venv)
         and _venv not in venvs_to_skip
     ]
@@ -604,7 +604,7 @@ def _delete_venvs(
         return True, "Nothing was deleted."
 
     for venv in venvs:
-        venv_path = pathlib.Path(VIRTENV_RESOURCES_PATH / venv)
+        venv_path = pathlib.Path(paths.VIRTENV_RESOURCES_PATH / venv)
         try:
             shutil.rmtree(venv_path)
         except Exception as e:
@@ -634,7 +634,7 @@ def _delete_cache(
     delete cache valkey:main sql:main
     """
     import shutil
-    from meerschaum.config.paths import CACHE_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.warnings import info, dprint, warn
     from meerschaum.utils.formatting import make_header
@@ -645,19 +645,19 @@ def _delete_cache(
     connector_keys = (action or []) + (connector_keys or [])
 
     if not connector_keys:
-        cache_bytes = get_directory_size(CACHE_RESOURCES_PATH)
+        cache_bytes = get_directory_size(paths.CACHE_RESOURCES_PATH)
         cache_size_str = humanize.naturalsize(cache_bytes)
         if not force and not yes_no(
             f"Are you sure you want to remove the cache directory ({cache_size_str})?\n"
-            f"    {CACHE_RESOURCES_PATH}",
+            f"    {paths.CACHE_RESOURCES_PATH}",
             yes=yes,
             noask=noask,
         ):
             return False, "Nothing was deleted."
 
         try:
-            shutil.rmtree(CACHE_RESOURCES_PATH)
-            CACHE_RESOURCES_PATH.mkdir(exist_ok=True, parents=True)
+            shutil.rmtree(paths.CACHE_RESOURCES_PATH)
+            paths.CACHE_RESOURCES_PATH.mkdir(exist_ok=True, parents=True)
         except Exception as e:
             return False, f"Failed to clean up cache:\n{e}"
 

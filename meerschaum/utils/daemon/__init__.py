@@ -9,14 +9,8 @@ Manage Daemons via the `Daemon` class.
 from __future__ import annotations
 
 import os
-import pathlib
-import shutil
-import json
-import datetime
-import threading
-import shlex
 
-from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Dict, Union
+from meerschaum.utils.typing import SuccessTuple, List, Optional, Callable, Any, Union
 from meerschaum.utils.daemon.StdinFile import StdinFile
 from meerschaum.utils.daemon.Daemon import Daemon
 from meerschaum.utils.daemon.RotatingFile import RotatingFile
@@ -211,11 +205,11 @@ def get_daemon_ids() -> List[str]:
     """
     Return the IDs of all daemons on disk.
     """
-    from meerschaum.config._paths import DAEMON_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     return [
         daemon_dir
-        for daemon_dir in sorted(os.listdir(DAEMON_RESOURCES_PATH))
-        if (DAEMON_RESOURCES_PATH / daemon_dir / 'properties.json').exists()
+        for daemon_dir in sorted(os.listdir(paths.DAEMON_RESOURCES_PATH))
+        if (paths.DAEMON_RESOURCES_PATH / daemon_dir / 'properties.json').exists()
     ]
 
 

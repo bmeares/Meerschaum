@@ -26,8 +26,8 @@ def get_cli_lock_path(ix: int) -> pathlib.Path:
     """
     Return the path to a CLI daemon's lock file.
     """
-    from meerschaum.config.paths import CLI_RESOURCES_PATH
-    return CLI_RESOURCES_PATH / f"ix-{ix}.lock"
+    import meerschaum.config.paths as paths
+    return paths.CLI_RESOURCES_PATH / f"ix-{ix}.lock"
 
 
 def get_cli_session_id() -> str:
@@ -87,8 +87,8 @@ def _get_cli_session_dir_path(session_id: str) -> pathlib.Path:
     """
     Return the path to the file handles for the CLI session.
     """
-    from meerschaum.config.paths import CLI_RESOURCES_PATH
-    return CLI_RESOURCES_PATH / session_id
+    import meerschaum.config.paths as paths
+    return paths.CLI_RESOURCES_PATH / session_id
 
 
 def _get_cli_stream_path(

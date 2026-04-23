@@ -355,9 +355,9 @@ def check_restart_jobs(
 
 
 def _check_restart_jobs_against_lock(*args, **kwargs):
-    from meerschaum.config.paths import CHECK_JOBS_LOCK_PATH
+    import meerschaum.config.paths as paths
     fasteners = mrsm.attempt_import('fasteners', lazy=False)
-    lock = fasteners.InterProcessLock(CHECK_JOBS_LOCK_PATH)
+    lock = fasteners.InterProcessLock(paths.CHECK_JOBS_LOCK_PATH)
     with lock:
         check_restart_jobs(*args, **kwargs)
 
@@ -393,7 +393,7 @@ def stop_check_jobs_thread():
     """
     Stop the job monitoring thread.
     """
-    from meerschaum.config.paths import CHECK_JOBS_LOCK_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.utils.warnings import warn
     if _check_loop_stop_thread is None:
         return
@@ -401,8 +401,8 @@ def stop_check_jobs_thread():
     _check_loop_stop_thread.cancel()
 
     try:
-        if CHECK_JOBS_LOCK_PATH.exists():
-            CHECK_JOBS_LOCK_PATH.unlink()
+        if paths.CHECK_JOBS_LOCK_PATH.exists():
+            paths.CHECK_JOBS_LOCK_PATH.unlink()
     except Exception as e:
         warn(f"Failed to remove check jobs lock file:\n{e}")
 
@@ -418,8 +418,8 @@ def get_executor_keys_from_context() -> str:
     if _context_keys is not None:
         return _context_keys
 
+    import meerschaum.config.paths as paths
     from meerschaum.config import get_config
-    from meerschaum.config.paths import ROOT_DIR_PATH, DEFAULT_ROOT_DIR_PATH
     from meerschaum.utils.misc import is_systemd_available
     from meerschaum.utils.packages import is_installed
 
@@ -431,7 +431,7 @@ def get_executor_keys_from_context() -> str:
         'systemd'
         if (
             is_systemd_available()
-            and ROOT_DIR_PATH == DEFAULT_ROOT_DIR_PATH
+            and paths.ROOT_DIR_PATH == paths.DEFAULT_ROOT_DIR_PATH
             and is_installed('meerschaum', venv=None, allow_outside_venv=False)
         )
         else 'local'

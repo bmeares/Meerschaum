@@ -9,7 +9,6 @@ The default configuration values to write to config.yaml.
 import multiprocessing
 from typing import Dict, Any
 
-from meerschaum.config._paths import SQLITE_DB_PATH
 from meerschaum._internal.static import STATIC_CONFIG
 
 CONNECTOR_ATTRIBUTES: Dict[str, Dict[str, Any]] = {

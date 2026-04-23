@@ -8,7 +8,6 @@ Import the config yaml file
 from __future__ import annotations
 import pathlib
 
-import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, List, Tuple, Union
 from meerschaum._internal.static import STATIC_CONFIG
 
@@ -53,11 +52,11 @@ def read_config(
     import os
     import json
     import itertools
+    import meerschaum.config.paths as paths
     from meerschaum.utils.yaml import yaml, _yaml
-    from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum.config._patch import apply_patch_to_config
     if directory is None:
-        directory = CONFIG_DIR_PATH
+        directory = paths.CONFIG_DIR_PATH
 
     if _yaml is None:
         print('Could not import YAML! Reverting to default configuration.')
@@ -422,12 +421,12 @@ def get_possible_keys() -> List[str]:
     Return a list of possible top-level keys.
     """
     import os
-    from meerschaum.config._paths import CONFIG_DIR_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.config._default import default_config
     keys = set()
     for key in default_config:
         keys.add(key)
-    for filename in os.listdir(CONFIG_DIR_PATH):
+    for filename in os.listdir(paths.CONFIG_DIR_PATH):
         keys.add('.'.join(filename.split('.')[:-1]))
     return sorted(list(keys))
 
@@ -441,8 +440,8 @@ def get_keyfile_path(
     import os
     import pathlib
     if directory is None:
-        from meerschaum.config._paths import CONFIG_DIR_PATH
-        directory = CONFIG_DIR_PATH
+        import meerschaum.config.paths as paths
+        directory = paths.CONFIG_DIR_PATH
 
     try:
         return pathlib.Path(

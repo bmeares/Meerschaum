@@ -96,9 +96,12 @@ def make_action(
         if skip_if_loaded and func.__name__ in actions:
             return func
 
-        from meerschaum.config.paths import PLUGINS_RESOURCES_PATH
+        import meerschaum.config.paths as paths
         plugin_name = (
-            func.__name__.split(f"{PLUGINS_RESOURCES_PATH.stem}.", maxsplit=1)[-1].split('.')[0]
+            func.__name__.split(
+                f"{paths.PLUGINS_RESOURCES_PATH.stem}.",
+                maxsplit=1,
+            )[-1].split('.')[0]
         )
         plugin = Plugin(plugin_name) if plugin_name else None
 
@@ -341,39 +344,36 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     from collections import defaultdict
     from meerschaum.utils.misc import flatten_list, make_symlink, is_symlink
     from meerschaum._internal.static import STATIC_CONFIG
-    from meerschaum.config._paths import (
-        PLUGINS_RESOURCES_PATH,
-        PLUGINS_INIT_PATH,
-        PLUGINS_DIR_PATHS,
-        PLUGINS_INTERNAL_LOCK_PATH,
-        PLUGINS_INJECTED_RESOURCES_PATH,
-    )
+    import meerschaum.config.paths as paths
 
     ### If the lock file exists, sleep for up to a second or until it's removed before continuing.
     with _locks['PLUGINS_INTERNAL_LOCK_PATH']:
-        if PLUGINS_INTERNAL_LOCK_PATH.exists():
-            lock_sleep_total     = STATIC_CONFIG['plugins']['lock_sleep_total']
+        if paths.PLUGINS_INTERNAL_LOCK_PATH.exists():
+            lock_sleep_total = STATIC_CONFIG['plugins']['lock_sleep_total']
             lock_sleep_increment = STATIC_CONFIG['plugins']['lock_sleep_increment']
             lock_start = time.perf_counter()
             while (
                 (time.perf_counter() - lock_start) < lock_sleep_total
             ):
                 time.sleep(lock_sleep_increment)
-                if not PLUGINS_INTERNAL_LOCK_PATH.exists():
+                if not paths.PLUGINS_INTERNAL_LOCK_PATH.exists():
                     break
                 try:
-                    PLUGINS_INTERNAL_LOCK_PATH.unlink()
+                    paths.PLUGINS_INTERNAL_LOCK_PATH.unlink()
                 except Exception as e:
                     if warn:
-                        _warn(f"Error while removing lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
+                        _warn(
+                            f"Error while removing lockfile {paths.PLUGINS_INTERNAL_LOCK_PATH}:\n"
+                            f"{e}"
+                        )
                     break
 
         ### Begin locking from other processes.
         try:
-            PLUGINS_INTERNAL_LOCK_PATH.touch()
+            paths.PLUGINS_INTERNAL_LOCK_PATH.touch()
         except Exception as e:
             if warn:
-                _warn(f"Unable to create lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
+                _warn(f"Unable to create lockfile {paths.PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
 
     with _locks['internal_plugins']:
 
@@ -400,23 +400,23 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 elif str(package_file_path) == f'{module_name}/__init__.py':
                     packaged_plugin_paths.append(package_file_path.locate().parent)
 
-        if is_symlink(PLUGINS_RESOURCES_PATH) or not PLUGINS_RESOURCES_PATH.exists():
+        if is_symlink(paths.PLUGINS_RESOURCES_PATH) or not paths.PLUGINS_RESOURCES_PATH.exists():
             try:
-                PLUGINS_RESOURCES_PATH.unlink()
+                paths.PLUGINS_RESOURCES_PATH.unlink()
             except Exception:
                 pass
 
-        PLUGINS_RESOURCES_PATH.mkdir(exist_ok=True)
+        paths.PLUGINS_RESOURCES_PATH.mkdir(exist_ok=True)
 
         existing_symlinked_paths = {
             _existing_symlink: pathlib.Path(os.path.realpath(_existing_symlink))
-            for item in os.listdir(PLUGINS_RESOURCES_PATH)
-            if is_symlink(_existing_symlink := (PLUGINS_RESOURCES_PATH / item))
+            for item in os.listdir(paths.PLUGINS_RESOURCES_PATH)
+            if is_symlink(_existing_symlink := (paths.PLUGINS_RESOURCES_PATH / item))
         }
         injected_symlinked_paths = {
             _injected_symlink: pathlib.Path(os.path.realpath(_injected_symlink))
-            for item in os.listdir(PLUGINS_INJECTED_RESOURCES_PATH)
-            if is_symlink(_injected_symlink := (PLUGINS_INJECTED_RESOURCES_PATH / item))
+            for item in os.listdir(paths.PLUGINS_INJECTED_RESOURCES_PATH)
+            if is_symlink(_injected_symlink := (paths.PLUGINS_INJECTED_RESOURCES_PATH / item))
         }
         plugins_to_be_symlinked = list(flatten_list(
             [
@@ -427,7 +427,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                         not item.startswith('.')
                     ) and (item not in ('__pycache__', '__init__.py'))
                 ]
-                for plugins_path in PLUGINS_DIR_PATHS
+                for plugins_path in paths.PLUGINS_DIR_PATHS
                 if plugins_path.exists()
             ]
         ))
@@ -463,7 +463,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 plugins_to_be_symlinked.remove(real_path)
 
         for plugin_path in plugins_to_be_symlinked:
-            plugin_symlink_path = PLUGINS_RESOURCES_PATH / plugin_path.name
+            plugin_symlink_path = paths.PLUGINS_RESOURCES_PATH / plugin_path.name
             try:
                 ### There might be duplicate folders (e.g. __pycache__).
                 if (
@@ -487,24 +487,24 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     ### Release symlink lock file in case other processes need it.
     with _locks['PLUGINS_INTERNAL_LOCK_PATH']:
         try:
-            if PLUGINS_INTERNAL_LOCK_PATH.exists():
-                PLUGINS_INTERNAL_LOCK_PATH.unlink()
+            if paths.PLUGINS_INTERNAL_LOCK_PATH.exists():
+                paths.PLUGINS_INTERNAL_LOCK_PATH.unlink()
         ### Sometimes competing threads will delete the lock file at the same time.
         except FileNotFoundError:
             pass
         except Exception as e:
             if warn:
-                _warn(f"Error cleaning up lockfile {PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
+                _warn(f"Error cleaning up lockfile {paths.PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
 
         try:
-            if not PLUGINS_INIT_PATH.exists():
-                PLUGINS_INIT_PATH.touch()
+            if not paths.PLUGINS_INIT_PATH.exists():
+                paths.PLUGINS_INIT_PATH.touch()
         except Exception as e:
-            error(f"Failed to create the file '{PLUGINS_INIT_PATH}':\n{e}")
+            error(f"Failed to create the file '{paths.PLUGINS_INIT_PATH}':\n{e}")
 
     with _locks['__path__']:
-        if str(PLUGINS_RESOURCES_PATH.parent) not in __path__:
-            __path__.append(str(PLUGINS_RESOURCES_PATH.parent))
+        if str(paths.PLUGINS_RESOURCES_PATH.parent) not in __path__:
+            __path__.append(str(paths.PLUGINS_RESOURCES_PATH.parent))
 
     with _locks['_synced_symlinks']:
         _synced_symlinks += 1
@@ -533,8 +533,8 @@ def import_plugins(
     """
     import sys
     import importlib
+    import meerschaum.config.paths as paths
     from meerschaum.utils.misc import flatten_list
-    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     from meerschaum.utils.venv import is_venv_active, activate_venv, deactivate_venv, Venv
     from meerschaum.utils.warnings import warn as _warn
     plugins_to_import = list(plugins_to_import)
@@ -550,15 +550,15 @@ def import_plugins(
         plugins_names = get_plugins_names()
         already_active_venvs = [is_venv_active(plugin_name) for plugin_name in plugins_names]
 
-        if not sys.path or sys.path[0] != str(PLUGINS_RESOURCES_PATH.parent):
+        if not sys.path or sys.path[0] != str(paths.PLUGINS_RESOURCES_PATH.parent):
             prepended_sys_path = True
-            sys.path.insert(0, str(PLUGINS_RESOURCES_PATH.parent))
+            sys.path.insert(0, str(paths.PLUGINS_RESOURCES_PATH.parent))
 
         if not plugins_to_import:
             for plugin_name in plugins_names:
                 activate_venv(plugin_name)
             try:
-                imported_plugins = importlib.import_module(PLUGINS_RESOURCES_PATH.stem)
+                imported_plugins = importlib.import_module(paths.PLUGINS_RESOURCES_PATH.stem)
             except ImportError as e:
                 _warn(f"Failed to import the plugins module:\n    {e}")
                 import traceback
@@ -577,7 +577,7 @@ def import_plugins(
                     with Venv(plugin, init_if_not_exists=False):
                         imported_plugins.append(
                             importlib.import_module(
-                                f'{PLUGINS_RESOURCES_PATH.stem}.{plugin_name}'
+                                f'{paths.PLUGINS_RESOURCES_PATH.stem}.{plugin_name}'
                             )
                         )
                 except Exception as e:
@@ -599,8 +599,8 @@ def import_plugins(
         if imported_plugins is None and warn:
             _warn("Failed to import plugins.", stacklevel=3)
 
-        if prepended_sys_path and str(PLUGINS_RESOURCES_PATH.parent) in sys.path:
-            sys.path.remove(str(PLUGINS_RESOURCES_PATH.parent))
+        if prepended_sys_path and str(paths.PLUGINS_RESOURCES_PATH.parent) in sys.path:
+            sys.path.remove(str(paths.PLUGINS_RESOURCES_PATH.parent))
 
     if isinstance(imported_plugins, list):
         return (imported_plugins[0] if len(imported_plugins) == 1 else tuple(imported_plugins))
@@ -639,7 +639,7 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
     >>> defined_pipes = get_defined_pipes(cf)
     """
     import importlib
-    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.utils.warnings import warn as _warn
     if plugin_import_name.startswith('plugins.'):
         plugin_import_name = plugin_import_name[len('plugins.'):]
@@ -648,7 +648,7 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
     plugin = mrsm.Plugin(plugin_root_name)
 
     submodule_import_name = '.'.join(
-        [PLUGINS_RESOURCES_PATH.stem]
+        [paths.PLUGINS_RESOURCES_PATH.stem]
         + plugin_import_parts
     )
     if len(attrs) == 0:
@@ -708,8 +708,8 @@ def load_plugins(
         return
 
     from inspect import isfunction, getmembers
+    import meerschaum.config.paths as paths
     from meerschaum.actions import __all__ as _all, modules
-    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     from meerschaum.utils.packages import get_modules_from_package
 
     _plugins_names, plugins_modules = get_modules_from_package(
@@ -724,7 +724,7 @@ def load_plugins(
         [
             mod
             for mod in modules
-            if not mod.__name__.startswith(PLUGINS_RESOURCES_PATH.stem + '.')
+            if not mod.__name__.startswith(paths.PLUGINS_RESOURCES_PATH.stem + '.')
         ]
         + plugins_modules
     )
@@ -791,7 +791,7 @@ def unload_plugins(
     """
     global _loaded_plugins, _synced_symlinks
     import sys
-    from meerschaum.config.paths import PLUGINS_RESOURCES_PATH, PLUGINS_INJECTED_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.connectors import unload_plugin_connectors
     if debug:
         from meerschaum.utils.warnings import dprint
@@ -807,20 +807,20 @@ def unload_plugins(
     unload_custom_actions(plugins, debug=debug)
     unload_plugin_connectors(plugins, debug=debug)
 
-    module_prefix = f"{PLUGINS_RESOURCES_PATH.stem}."
+    module_prefix = f"{paths.PLUGINS_RESOURCES_PATH.stem}."
     loaded_modules = [mod_name for mod_name in sys.modules if mod_name.startswith(module_prefix)]
 
     root_plugins_mod = (
-        sys.modules.get(PLUGINS_RESOURCES_PATH.stem, None)
+        sys.modules.get(paths.PLUGINS_RESOURCES_PATH.stem, None)
         if sorted(plugins) != sorted(all_plugins)
-        else sys.modules.pop(PLUGINS_RESOURCES_PATH, None)
+        else sys.modules.pop(paths.PLUGINS_RESOURCES_PATH, None)
     )
 
     for plugin_name in plugins:
         for mod_name in loaded_modules:
             if (
-                mod_name[len(PLUGINS_RESOURCES_PATH.stem):].startswith(plugin_name + '.')
-                or mod_name[len(PLUGINS_RESOURCES_PATH.stem):] == plugin_name
+                mod_name[len(paths.PLUGINS_RESOURCES_PATH.stem):].startswith(plugin_name + '.')
+                or mod_name[len(paths.PLUGINS_RESOURCES_PATH.stem):] == plugin_name
             ):
                 _ = sys.modules.pop(mod_name, None)
 
@@ -854,10 +854,10 @@ def unload_plugins(
 
         ### Remove all but injected symlinks.
         if remove_symlinks:
-            dir_symlink_path = PLUGINS_RESOURCES_PATH / plugin_name
-            dir_symlink_injected_path = PLUGINS_INJECTED_RESOURCES_PATH / plugin_name
-            file_symlink_path = PLUGINS_RESOURCES_PATH / f"{plugin_name}.py"
-            file_symlink_injected_path = PLUGINS_INJECTED_RESOURCES_PATH / f"{plugin_name}.py"
+            dir_symlink_path = paths.PLUGINS_RESOURCES_PATH / plugin_name
+            dir_symlink_injected_path = paths.PLUGINS_INJECTED_RESOURCES_PATH / plugin_name
+            file_symlink_path = paths.PLUGINS_RESOURCES_PATH / f"{plugin_name}.py"
+            file_symlink_injected_path = paths.PLUGINS_INJECTED_RESOURCES_PATH / f"{plugin_name}.py"
 
             try:
                 if dir_symlink_path.exists() and not dir_symlink_injected_path.exists():
@@ -902,7 +902,7 @@ def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugi
     try_import: bool, default True
         If `True`, allow for plugins to be imported.
     """
-    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     import os
     sync_plugins_symlinks()
     _plugins = [
@@ -910,10 +910,10 @@ def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugi
         for name in (
             to_load or [
                 (
-                    name if (PLUGINS_RESOURCES_PATH / name).is_dir()
+                    name if (paths.PLUGINS_RESOURCES_PATH / name).is_dir()
                     else name[:-3]
                 )
-                for name in os.listdir(PLUGINS_RESOURCES_PATH)
+                for name in os.listdir(paths.PLUGINS_RESOURCES_PATH)
                 if name != '__init__.py'
             ]
         )
@@ -997,11 +997,11 @@ def inject_plugin_path(
     plugin_path: pathlib.Path
         The path to the plugin's source module.
     """
+    import meerschaum.config.paths as paths
     from meerschaum.utils.misc import make_symlink
     if plugins_resources_path is None:
-        from meerschaum.config.paths import PLUGINS_RESOURCES_PATH, PLUGINS_INJECTED_RESOURCES_PATH
-        plugins_resources_path = PLUGINS_RESOURCES_PATH
-        plugins_injected_resources_path = PLUGINS_INJECTED_RESOURCES_PATH
+        plugins_resources_path = paths.PLUGINS_RESOURCES_PATH
+        plugins_injected_resources_path = paths.PLUGINS_INJECTED_RESOURCES_PATH
     else:
         plugins_injected_resources_path = plugins_resources_path / '.injected'
 

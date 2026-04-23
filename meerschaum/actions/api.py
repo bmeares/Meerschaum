@@ -155,6 +155,7 @@ def _api_start(
     import pathlib
     from copy import deepcopy
 
+    import meerschaum.config.paths as paths
     from meerschaum.utils.packages import (
         attempt_import,
         run_python_package,
@@ -165,13 +166,6 @@ def _api_start(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import error, warn
     from meerschaum.config import get_config, _config
-    from meerschaum.config._paths import (
-        API_UVICORN_RESOURCES_PATH,
-        API_UVICORN_CONFIG_PATH,
-        CACHE_RESOURCES_PATH,
-        PACKAGE_ROOT_PATH,
-        ROOT_DIR_PATH,
-    )
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config.environment import get_env_vars, get_daemon_env_vars
     from meerschaum._internal.static import STATIC_CONFIG, SERVER_ID
@@ -191,8 +185,8 @@ def _api_start(
         'uvicorn', 'gunicorn', venv=None, lazy=False, check_update=False,
     )
 
-    uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
-    uvicorn_env_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'uvicorn.env'
+    uvicorn_config_path = paths.API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
+    uvicorn_env_path = paths.API_UVICORN_RESOURCES_PATH / SERVER_ID / 'uvicorn.env'
 
     api_config = deepcopy(get_config('api'))
     cf = _config()
@@ -260,7 +254,7 @@ def _api_start(
     })
     if debug:
         uvicorn_config['reload'] = debug
-        uvicorn_config['reload_dirs'] = [str(PACKAGE_ROOT_PATH)]
+        uvicorn_config['reload_dirs'] = [paths.PACKAGE_ROOT_PATH.as_posix()]
         uvicorn_config['reload_excludes'] = 'plugins/__init__.py'
     if keyfile:
         uvicorn_config['ssl_keyfile'] = keyfile
@@ -321,7 +315,7 @@ def _api_start(
         MRSM_SERVER_ID: SERVER_ID,
         MRSM_RUNTIME: 'api',
         MRSM_CONFIG: json.loads(os.environ.get(MRSM_CONFIG, '{}')),
-        MRSM_ROOT_DIR: ROOT_DIR_PATH.as_posix(),
+        MRSM_ROOT_DIR: paths.ROOT_DIR_PATH.as_posix(),
         'FORWARDED_ALLOW_IPS': forwarded_allow_ips,
         'TERM': os.environ.get('TERM', 'screen-256color'),
         'SHELL': os.environ.get('SHELL', '/bin/bash'),

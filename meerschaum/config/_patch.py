@@ -42,11 +42,11 @@ def write_patch(
     debug: bool = False
 ) -> None:
     """Write patch dict to yaml."""
+    import meerschaum.config.paths as paths
     from meerschaum.utils.debug import dprint
-    from meerschaum.config._paths import PATCH_DIR_PATH
     from meerschaum.config._edit import write_config
     if debug:
         from meerschaum.utils.formatting import pprint
-        dprint(f"Writing configuration to {PATCH_DIR_PATH}:")
+        dprint(f"Writing configuration to {paths.PATCH_DIR_PATH}:")
         pprint(patch, stream=sys.stderr)
-    write_config(patch, directory=PATCH_DIR_PATH)
+    write_config(patch, directory=paths.PATCH_DIR_PATH)

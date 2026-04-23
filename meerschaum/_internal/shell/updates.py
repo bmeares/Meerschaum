@@ -10,14 +10,11 @@ import json
 from datetime import datetime, timezone, timedelta
 
 import meerschaum as mrsm
+import meerschaum.config.paths as paths
 from meerschaum.utils.typing import Union, SuccessTuple, Optional
 from meerschaum.config import get_config
 from meerschaum.utils.formatting import CHARSET, ANSI, colored
 from meerschaum.utils.misc import string_width, remove_ansi
-from meerschaum.config.paths import (
-    UPDATES_LOCK_PATH,
-    UPDATES_CACHE_PATH,
-)
 from meerschaum.utils.threading import Thread
 
 
@@ -32,9 +29,9 @@ def cache_remote_version(debug: bool = False) -> SuccessTuple:
     refresh_minutes = get_config('shell', 'updates', 'refresh_minutes')
     update_delta = timedelta(minutes=refresh_minutes)
 
-    if UPDATES_CACHE_PATH.exists():
+    if paths.UPDATES_CACHE_PATH.exists():
         try:
-            with open(UPDATES_CACHE_PATH, 'r', encoding='utf8') as f:
+            with open(paths.UPDATES_CACHE_PATH, 'r', encoding='utf8') as f:
                 cache_dict = json.load(f)
         except Exception:
             cache_dict = {}
@@ -62,7 +59,7 @@ def cache_remote_version(debug: bool = False) -> SuccessTuple:
     if remote_version is None:
         return False, "Could not determine remote version."
 
-    with open(UPDATES_CACHE_PATH, 'w+', encoding='utf-8') as f:
+    with open(paths.UPDATES_CACHE_PATH, 'w+', encoding='utf-8') as f:
         json.dump(
             {
                 'last_check_ts': now.isoformat(),
@@ -98,7 +95,7 @@ def get_remote_version_from_cache() -> Optional[str]:
     """
     global _remote_version
     try:
-        with open(UPDATES_CACHE_PATH, 'r', encoding='utf-8') as f:
+        with open(paths.UPDATES_CACHE_PATH, 'r', encoding='utf-8') as f:
             cache_dict = json.load(f)
     except Exception:
         return None
@@ -117,7 +114,7 @@ def mrsm_out_of_date() -> bool:
         return _out_of_date
 
     ### NOTE: Remote version is cached asynchronously.
-    if not UPDATES_CACHE_PATH.exists():
+    if not paths.UPDATES_CACHE_PATH.exists():
         return False
 
     remote_version_str = get_remote_version_from_cache()

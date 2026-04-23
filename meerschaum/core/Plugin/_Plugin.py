@@ -41,8 +41,8 @@ class Plugin:
         repo_connector: Optional['mrsm.connectors.api.APIConnector'] = None,
         repo: Union['mrsm.connectors.api.APIConnector', str, None] = None,
     ):
+        import meerschaum.config.paths as paths
         from meerschaum._internal.static import STATIC_CONFIG
-        from meerschaum.config.paths import PLUGINS_ARCHIVES_RESOURCES_PATH, VIRTENV_RESOURCES_PATH
         sep = STATIC_CONFIG['plugins']['repo_separator']
         _repo = None
         if sep in name:
@@ -62,11 +62,11 @@ class Plugin:
             self._required = required
         self.archive_path = (
             archive_path if archive_path is not None
-            else PLUGINS_ARCHIVES_RESOURCES_PATH / f"{self.name}.tar.gz"
+            else paths.PLUGINS_ARCHIVES_RESOURCES_PATH / f"{self.name}.tar.gz"
         )
         self.venv_path = (
             venv_path if venv_path is not None
-            else VIRTENV_RESOURCES_PATH / self.name
+            else paths.VIRTENV_RESOURCES_PATH / self.name
         )
         self._repo_connector = repo_connector
         self._repo_keys = repo
@@ -127,9 +127,9 @@ class Plugin:
         if self.__dict__.get('_module', None) is not None:
             return self.module.__file__
 
-        from meerschaum.config.paths import PLUGINS_RESOURCES_PATH
+        import meerschaum.config.paths as paths
 
-        potential_dir = PLUGINS_RESOURCES_PATH / self.name
+        potential_dir = paths.PLUGINS_RESOURCES_PATH / self.name
         if (
             potential_dir.exists()
             and potential_dir.is_dir()
@@ -137,7 +137,7 @@ class Plugin:
         ):
             return str((potential_dir / '__init__.py').as_posix())
 
-        potential_file = PLUGINS_RESOURCES_PATH / (self.name + '.py')
+        potential_file = paths.PLUGINS_RESOURCES_PATH / (self.name + '.py')
         if potential_file.exists() and not potential_file.is_dir():
             return str(potential_file.as_posix())
 
@@ -284,6 +284,8 @@ class Plugin:
         if self.full_name in _ongoing_installations:
             return True, f"Already installing plugin '{self}'."
         _ongoing_installations.add(self.full_name)
+
+        import meerschaum.config.paths as paths
         from meerschaum.utils.warnings import warn, error
         if debug:
             from meerschaum.utils.debug import dprint
@@ -291,14 +293,13 @@ class Plugin:
         import re
         import ast
         from meerschaum.plugins import sync_plugins_symlinks
-        from meerschaum.utils.packages import attempt_import, determine_version, reload_meerschaum
+        from meerschaum.utils.packages import attempt_import, reload_meerschaum
         from meerschaum.utils.venv import init_venv
         from meerschaum.utils.misc import safely_extract_tar
-        from meerschaum.config.paths import PLUGINS_TEMP_RESOURCES_PATH, PLUGINS_DIR_PATHS
         old_cwd = os.getcwd()
         old_version = ''
         new_version = ''
-        temp_dir = PLUGINS_TEMP_RESOURCES_PATH / self.name
+        temp_dir = paths.PLUGINS_TEMP_RESOURCES_PATH / self.name
         temp_dir.mkdir(exist_ok=True)
 
         if not self.archive_path.exists():
@@ -363,8 +364,8 @@ class Plugin:
             is_new_version, is_same_version = True, False
 
         ### Determine where to permanently store the new plugin.
-        plugin_installation_dir_path = PLUGINS_DIR_PATHS[0]
-        for path in PLUGINS_DIR_PATHS:
+        plugin_installation_dir_path = paths.PLUGINS_DIR_PATHS[0]
+        for path in paths.PLUGINS_DIR_PATHS:
             if not path.exists():
                 warn(f"Plugins path does not exist: {path}", stack=False)
                 continue
@@ -795,10 +796,10 @@ class Plugin:
         -------
         A bool indicating success.
         """
+        import meerschaum.config.paths as paths
         from meerschaum.utils.venv import venv_target_path
         from meerschaum.utils.packages import activate_venv
         from meerschaum.utils.misc import make_symlink, is_symlink
-        from meerschaum.config._paths import PACKAGE_ROOT_PATH
 
         if dependencies:
             for plugin in self.get_required_plugins(debug=debug):
@@ -810,13 +811,16 @@ class Plugin:
         try:
             success, msg = True, "Success"
             if is_symlink(venv_meerschaum_path):
-                if pathlib.Path(os.path.realpath(venv_meerschaum_path)) != PACKAGE_ROOT_PATH:
+                if pathlib.Path(os.path.realpath(venv_meerschaum_path)) != paths.PACKAGE_ROOT_PATH:
                     venv_meerschaum_path.unlink()
-                    success, msg = make_symlink(venv_meerschaum_path, PACKAGE_ROOT_PATH)
+                    success, msg = make_symlink(venv_meerschaum_path, paths.PACKAGE_ROOT_PATH)
         except Exception as e:
             success, msg = False, str(e)
         if not success:
-            warn(f"Unable to create symlink {venv_meerschaum_path} to {PACKAGE_ROOT_PATH}:\n{msg}")
+            warn(
+                f"Unable to create symlink {venv_meerschaum_path} to {paths.PACKAGE_ROOT_PATH}:\n"
+                f"{msg}"
+            )
 
         return activate_venv(self.name, init_if_not_exists=init_if_not_exists, debug=debug, **kw)
 

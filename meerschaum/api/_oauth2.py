@@ -185,13 +185,13 @@ def generate_secret_key() -> bytes:
     """
     Read or generate the secret keyfile.
     """
-    from meerschaum.config._paths import API_SECRET_KEY_PATH
-    if not API_SECRET_KEY_PATH.exists():
+    import meerschaum.config.paths as paths
+    if not paths.API_SECRET_KEY_PATH.exists():
         secret_key = os.urandom(24).hex()
-        with open(API_SECRET_KEY_PATH, 'w+', encoding='utf-8') as f:
+        with open(paths.API_SECRET_KEY_PATH, 'w+', encoding='utf-8') as f:
             f.write(secret_key)
     else:
-        with open(API_SECRET_KEY_PATH, 'r', encoding='utf-8') as f:
+        with open(paths.API_SECRET_KEY_PATH, 'r', encoding='utf-8') as f:
             secret_key = f.read()
 
     return secret_key.encode('utf-8')

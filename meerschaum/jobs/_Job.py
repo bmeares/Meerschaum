@@ -17,12 +17,12 @@ import traceback
 from datetime import datetime, timezone
 
 import meerschaum as mrsm
+import meerschaum.config.paths as paths
 from meerschaum.utils.typing import (
     List, Optional, Union, SuccessTuple, Any, Dict, Callable, TYPE_CHECKING,
 )
 from meerschaum._internal.entry import entry
 from meerschaum.utils.warnings import warn
-from meerschaum.config.paths import LOGS_RESOURCES_PATH
 from meerschaum.config import get_config
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.formatting._shell import clear_screen, flush_stdout
@@ -212,8 +212,6 @@ class Job:
         executor_keys: Optional[str], default None
             The executor keys to assign to the job.
         """
-        from meerschaum.config.paths import DAEMON_RESOURCES_PATH
-
         psutil = mrsm.attempt_import('psutil')
         try:
             process = psutil.Process(pid)
@@ -228,11 +226,10 @@ class Job:
             daemon_id = command_args[-1].split('daemon_id=')[-1].split(')')[0].replace("'", '')
             root_dir = process.environ().get(STATIC_CONFIG['environment']['root'], None)
             if root_dir is None:
-                from meerschaum.config.paths import ROOT_DIR_PATH
-                root_dir = ROOT_DIR_PATH
+                root_dir = paths.ROOT_DIR_PATH
             else:
                 root_dir = pathlib.Path(root_dir)
-            jobs_dir = root_dir / DAEMON_RESOURCES_PATH.name
+            jobs_dir = root_dir / paths.DAEMON_RESOURCES_PATH.name
             daemon_dir = jobs_dir / daemon_id
             pid_file = daemon_dir / 'process.pid'
 
@@ -689,7 +686,7 @@ class Job:
         dir_path_to_monitor = (
             _logs_path
             or (log.file_path.parent if log else None)
-            or LOGS_RESOURCES_PATH
+            or paths.LOGS_RESOURCES_PATH
         )
         async for changes in watchfiles.awatch(
             dir_path_to_monitor,

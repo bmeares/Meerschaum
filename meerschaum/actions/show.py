@@ -130,7 +130,6 @@ def _show_config(
     import json
     from meerschaum.utils.formatting import pprint
     from meerschaum.config import get_config
-    from meerschaum.config._paths import CONFIG_DIR_PATH as _
 
     if action is None:
         action = []
@@ -627,7 +626,6 @@ def _show_logs(
     from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import get_console, ANSI, UNICODE
     from meerschaum.utils.misc import tail
-    from meerschaum.config._paths import LOGS_RESOURCES_PATH
     from meerschaum.config import get_config
     rich = import_rich()
     rich_text = attempt_import('rich.text')
@@ -906,14 +904,13 @@ def _show_venvs(**kwargs: Any) -> SuccessTuple:
     Print the available virtual environments in the current MRSM_ROOT_DIR.
     """
     import os
-    import pathlib
-    from meerschaum.config.paths import VIRTENV_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.utils.venv import venv_exists
     from meerschaum.utils.misc import print_options
 
     venvs = [
         _venv
-        for _venv in os.listdir(VIRTENV_RESOURCES_PATH)
+        for _venv in os.listdir(paths.VIRTENV_RESOURCES_PATH)
         if venv_exists(_venv)
     ]
     print_options(venvs, name='Virtual Environments:', **kwargs)

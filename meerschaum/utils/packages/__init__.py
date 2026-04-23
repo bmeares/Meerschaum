@@ -501,13 +501,13 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
     -------
     A dictionary of metadata from pip.
     """
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     install_name = _import_to_install_name(import_name)
     if install_name.startswith(_MRSM_PACKAGE_ARCHIVES_PREFIX):
         return {}
     _args = ['pip', 'show', install_name]
     if venv is not None:
-        cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
+        cache_dir_path = paths.VIRTENV_RESOURCES_PATH / venv / 'cache'
         _args += ['--cache-dir', cache_dir_path.as_posix()]
 
     if use_uv():
@@ -758,11 +758,11 @@ def get_pip(
     """
     import sys
     import subprocess
+    import meerschaum.config.paths as paths
     from meerschaum.utils.misc import wget
-    from meerschaum.config._paths import CACHE_RESOURCES_PATH
     from meerschaum._internal.static import STATIC_CONFIG
     url = STATIC_CONFIG['system']['urls']['get-pip.py']
-    dest = CACHE_RESOURCES_PATH / 'get-pip.py'
+    dest = paths.CACHE_RESOURCES_PATH / 'get-pip.py'
     try:
         wget(url, dest, color=False, debug=debug)
     except Exception:
@@ -841,7 +841,7 @@ def pip_install(
     A bool indicating success.
 
     """
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
     if args is None:
@@ -924,7 +924,7 @@ def pip_install(
             ):
                 _args += ['--ignore-installed']
             if '--cache-dir' not in args and not _uninstall:
-                cache_dir_path = VIRTENV_RESOURCES_PATH / venv / 'cache'
+                cache_dir_path = paths.VIRTENV_RESOURCES_PATH / venv / 'cache'
                 _args += ['--cache-dir', str(cache_dir_path)]
 
         if 'pip' not in ' '.join(_args) and not use_uv_pip:
@@ -1200,7 +1200,7 @@ def run_python_package(
     import sys
     import subprocess
     import traceback
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.utils.process import run_process
     from meerschaum.utils.warnings import warn
     if args is None:
@@ -1209,7 +1209,7 @@ def run_python_package(
     if cwd is not None:
         os.chdir(cwd)
     executable = venv_executable(venv=venv)
-    venv_path = (VIRTENV_RESOURCES_PATH / venv) if venv is not None else None
+    venv_path = (paths.VIRTENV_RESOURCES_PATH / venv) if venv is not None else None
     env_dict = (env if isinstance(env, dict) else (os.environ or {})).copy()
     if venv_path is not None:
         env_dict.update({'VIRTUAL_ENV': venv_path.as_posix()})
@@ -1853,10 +1853,10 @@ def package_venv(package: 'ModuleType') -> Union[str, None]:
     Inspect a package and return the virtual environment in which it presides.
     """
     import os
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
-    if str(VIRTENV_RESOURCES_PATH) not in package.__file__:
+    import meerschaum.confing.paths as paths
+    if str(paths.VIRTENV_RESOURCES_PATH) not in package.__file__:
         return None
-    return package.__file__.split(str(VIRTENV_RESOURCES_PATH))[1].split(os.path.sep)[1]
+    return package.__file__.split(str(paths.VIRTENV_RESOURCES_PATH))[1].split(os.path.sep)[1]
 
 
 def ensure_readline() -> 'ModuleType':

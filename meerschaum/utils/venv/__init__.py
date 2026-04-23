@@ -247,12 +247,13 @@ def verify_venv(
     import os
     import shutil
     import sys
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+
+    import meerschaum.config.paths as paths
     from meerschaum.utils.process import run_process
     from meerschaum.utils.misc import make_symlink, is_symlink
     from meerschaum.utils.warnings import warn
 
-    venv_path = VIRTENV_RESOURCES_PATH / venv
+    venv_path = paths.VIRTENV_RESOURCES_PATH / venv
     bin_path = venv_path / (
         'bin' if platform.system() != 'Windows' else "Scripts"
     )
@@ -403,17 +404,14 @@ def init_venv(
     import shutil
     import time
 
+    import meerschaum.config.paths as paths
     from meerschaum._internal.static import STATIC_CONFIG
-    from meerschaum.config._paths import (
-        VIRTENV_RESOURCES_PATH,
-        VENVS_CACHE_RESOURCES_PATH,
-    )
     from meerschaum.utils.packages import is_uv_enabled
 
-    venv_path = VIRTENV_RESOURCES_PATH / venv
+    venv_path = paths.VIRTENV_RESOURCES_PATH / venv
     vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
     docker_home_venv_path = pathlib.Path('/home/meerschaum/venvs/mrsm')
-    lock_path = VENVS_CACHE_RESOURCES_PATH / (venv + '.lock')
+    lock_path = paths.VENVS_CACHE_RESOURCES_PATH / (venv + '.lock')
     work_dir_env_var = STATIC_CONFIG['environment']['work_dir']
 
     def update_lock(active: bool):
@@ -473,7 +471,7 @@ def init_venv(
         virtualenv = None
 
     _venv_success = False
-    temp_vtp = VENVS_CACHE_RESOURCES_PATH / str(venv)
+    temp_vtp = paths.VENVS_CACHE_RESOURCES_PATH / str(venv)
     ### NOTE: Disable site-packages movement for now.
     rename_vtp = False and vtp.exists() and not temp_vtp.exists()
 
@@ -539,11 +537,11 @@ def init_venv(
                 'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)
             )
             dist_packages_path = (
-                VIRTENV_RESOURCES_PATH /
+                paths.VIRTENV_RESOURCES_PATH /
                 venv / 'local' / 'lib' / python_folder / 'dist-packages'
             )
-            local_bin_path = VIRTENV_RESOURCES_PATH / venv / 'local' / 'bin'
-            bin_path = VIRTENV_RESOURCES_PATH / venv / 'bin'
+            local_bin_path = paths.VIRTENV_RESOURCES_PATH / venv / 'local' / 'bin'
+            bin_path = paths.VIRTENV_RESOURCES_PATH / venv / 'bin'
             vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
             if bin_path.exists():
                 try:
@@ -588,13 +586,13 @@ def venv_executable(venv: Optional[str] = 'mrsm') -> str:
     """
     The Python interpreter executable for a given virtual environment.
     """
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
     import sys
     import platform
+    import meerschaum.config.paths as paths
     return (
         sys.executable if venv is None
         else str(
-            VIRTENV_RESOURCES_PATH
+            paths.VIRTENV_RESOURCES_PATH
             / venv
             / (
                 'bin' if platform.system() != 'Windows'
@@ -721,7 +719,8 @@ def venv_target_path(
     import sys
     import platform
     import site
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+
+    import meerschaum.config.paths as paths
     from meerschaum._internal.static import STATIC_CONFIG
 
     ### Check sys.path for a user-writable site-packages directory.
@@ -770,7 +769,7 @@ def venv_target_path(
             return site_path
 
     venv_root_path = (
-        (VIRTENV_RESOURCES_PATH / venv)
+        (paths.VIRTENV_RESOURCES_PATH / venv)
         if venv is not None
         else pathlib.Path(sys.prefix)
     )
@@ -810,7 +809,7 @@ def venv_target_path(
         print(f"Failed to find site-packages directory for virtual environment '{venv}'.")
         print("This may be because you are using a different Python version.")
         print("Try deleting the following directory and restarting Meerschaum:")
-        print(VIRTENV_RESOURCES_PATH)
+        print(paths.VIRTENV_RESOURCES_PATH)
         sys.exit(1)
 
     return target_path
@@ -834,10 +833,10 @@ def get_venvs() -> List[str]:
     Return a list of all the virtual environments.
     """
     import os
-    from meerschaum.config._paths import VIRTENV_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     venvs = []
-    for filename in os.listdir(VIRTENV_RESOURCES_PATH):
-        path = VIRTENV_RESOURCES_PATH / filename
+    for filename in os.listdir(paths.VIRTENV_RESOURCES_PATH):
+        path = paths.VIRTENV_RESOURCES_PATH / filename
         if not path.is_dir():
             continue
         if not venv_exists(filename):
@@ -859,10 +858,10 @@ def get_module_venv(module) -> Union[str, None]:
     -------
     The name of a venv or `None`.
     """
-    from meerschaum.config.paths import VIRTENV_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     module_path = pathlib.Path(module.__file__).resolve()
     try:
-        rel_path = module_path.relative_to(VIRTENV_RESOURCES_PATH)
+        rel_path = module_path.relative_to(paths.VIRTENV_RESOURCES_PATH)
     except ValueError:
         return None
 

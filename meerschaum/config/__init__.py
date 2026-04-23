@@ -15,6 +15,7 @@ import sys
 import copy
 import contextlib
 
+import meerschaum.config.paths as paths
 from meerschaum.utils.typing import Any, Dict, Optional, Union
 from meerschaum.utils.threading import RLock
 
@@ -29,11 +30,6 @@ from meerschaum.config._read_config import (
 )
 from meerschaum._internal.static import STATIC_CONFIG
 
-from meerschaum.config._paths import (
-    PERMANENT_PATCH_DIR_PATH,
-    CONFIG_DIR_PATH,
-    DEFAULT_CONFIG_DIR_PATH,
-)
 from meerschaum.config._patch import (
     apply_patch_to_config,
 )
@@ -368,28 +364,25 @@ from meerschaum.config.environment import (
 _apply_environment_uris()
 _apply_environment_patches()
 
-
-from meerschaum.config._paths import PATCH_DIR_PATH, PERMANENT_PATCH_DIR_PATH
 patch_config = None
-if PATCH_DIR_PATH.exists():
+if paths.PATCH_DIR_PATH.exists():
     from meerschaum.utils.yaml import yaml, _yaml
     if _yaml is not None:
-        patch_config = read_config(directory=PATCH_DIR_PATH)
+        patch_config = read_config(directory=paths.PATCH_DIR_PATH)
 
 permanent_patch_config = None
-if PERMANENT_PATCH_DIR_PATH.exists():
+if paths.PERMANENT_PATCH_DIR_PATH.exists():
     from meerschaum.utils.yaml import yaml, _yaml
     if _yaml is not None:
-        permanent_patch_config = read_config(directory=PERMANENT_PATCH_DIR_PATH)
+        permanent_patch_config = read_config(directory=paths.PERMANENT_PATCH_DIR_PATH)
 ### If patches exist, apply to config.
 if patch_config is not None:
-    from meerschaum.config._paths import PATCH_DIR_PATH
     set_config(apply_patch_to_config(_config(), patch_config))
-    if PATCH_DIR_PATH.exists():
-        shutil.rmtree(PATCH_DIR_PATH)
+    if paths.PATCH_DIR_PATH.exists():
+        shutil.rmtree(paths.PATCH_DIR_PATH)
 
 ### if permanent_patch.yaml exists, apply patch to config, write config, and delete patch
-if permanent_patch_config is not None and PERMANENT_PATCH_DIR_PATH.exists():
+if permanent_patch_config is not None and paths.PERMANENT_PATCH_DIR_PATH.exists():
     print(
         "Found permanent patch configuration. " +
         "Updating main config and deleting permanent patch..."
@@ -397,10 +390,10 @@ if permanent_patch_config is not None and PERMANENT_PATCH_DIR_PATH.exists():
     set_config(apply_patch_to_config(_config(), permanent_patch_config))
     write_config(_config())
     permanent_patch_config = None
-    if PERMANENT_PATCH_DIR_PATH.exists():
-        shutil.rmtree(PERMANENT_PATCH_DIR_PATH)
-    if DEFAULT_CONFIG_DIR_PATH.exists():
-        shutil.rmtree(DEFAULT_CONFIG_DIR_PATH)
+    if paths.PERMANENT_PATCH_DIR_PATH.exists():
+        shutil.rmtree(paths.PERMANENT_PATCH_DIR_PATH)
+    if paths.DEFAULT_CONFIG_DIR_PATH.exists():
+        shutil.rmtree(paths.DEFAULT_CONFIG_DIR_PATH)
 
 
 ### Make sure readline is available for the portable version.
@@ -408,10 +401,9 @@ environment_runtime = STATIC_CONFIG['environment']['runtime']
 if environment_runtime in os.environ:
     if os.environ[environment_runtime] == 'portable':
         from meerschaum.utils.packages import ensure_readline
-        from meerschaum.config._paths import PORTABLE_CHECK_READLINE_PATH
-        if not PORTABLE_CHECK_READLINE_PATH.exists():
+        if not paths.PORTABLE_CHECK_READLINE_PATH.exists():
             ensure_readline()
-            PORTABLE_CHECK_READLINE_PATH.touch()
+            paths.PORTABLE_CHECK_READLINE_PATH.touch()
 
 
 ### If interactive REPL, print welcome header.

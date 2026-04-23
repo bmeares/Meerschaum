@@ -60,10 +60,10 @@ def edit(
         with Venv(get_connector_plugin(self.instance_connector)):
             return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
 
-    from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.utils.misc import edit_file
     parameters_filename = str(self) + '.yaml'
-    parameters_path = PIPES_CACHE_RESOURCES_PATH / parameters_filename
+    parameters_path = paths.PIPES_CACHE_RESOURCES_PATH / parameters_filename
 
     from meerschaum.utils.yaml import yaml
 
@@ -169,9 +169,9 @@ def edit_definition(
             "Would you like to add additional filter parameters?",
             yes=yes, noask=noask
         ):
-            from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
+            import meerschaum.config.paths as paths
             definition_filename = str(self) + '.json'
-            definition_path = PIPES_CACHE_RESOURCES_PATH / definition_filename
+            definition_path = paths.PIPES_CACHE_RESOURCES_PATH / definition_filename
             try:
                 definition_path.touch()
                 with open(definition_path, 'w+') as f:
@@ -205,10 +205,10 @@ def edit_definition(
 
     def _edit_sql():
         import textwrap
-        from meerschaum.config._paths import PIPES_CACHE_RESOURCES_PATH
+        import meerschaum.config.paths as paths
         from meerschaum.utils.misc import edit_file
         definition_filename = str(self) + '.sql'
-        definition_path = PIPES_CACHE_RESOURCES_PATH / definition_filename
+        definition_path = paths.PIPES_CACHE_RESOURCES_PATH / definition_filename
 
         sql_definition = _parameters['fetch'].get('definition', None)
         if sql_definition is None:

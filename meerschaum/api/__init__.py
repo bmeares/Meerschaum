@@ -12,12 +12,12 @@ from collections import defaultdict
 from fnmatch import fnmatch
 
 import meerschaum as mrsm
+import meerschaum.config.paths as paths
 from meerschaum.utils.typing import Dict, Any, Optional, PipesDict
 from meerschaum.config import get_config
 from meerschaum._internal.static import STATIC_CONFIG, SERVER_ID
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils import get_pipes as _get_pipes
-from meerschaum.config._paths import API_UVICORN_CONFIG_PATH, API_UVICORN_RESOURCES_PATH
 from meerschaum.plugins import _api_plugins
 from meerschaum.utils.warnings import warn, dprint
 from meerschaum.utils.threading import RLock
@@ -63,7 +63,7 @@ uv = attempt_import('uv', lazy=False, check_update=CHECK_UPDATE)
 )
 from meerschaum.api._chain import check_allow_chaining, DISALLOW_CHAINING_MESSAGE
 from meerschaum.api._exceptions import APIPermissionError
-uvicorn_config_path = API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
+uvicorn_config_path = paths.API_UVICORN_RESOURCES_PATH / SERVER_ID / 'config.json'
 
 uvicorn_config = None
 sys_config = get_config('api')
@@ -307,8 +307,7 @@ app = fastapi.FastAPI(
 HTMLResponse = fastapi_responses.HTMLResponse
 Request = fastapi.Request
 
-from meerschaum.config.paths import API_RESOURCES_PATH, API_STATIC_PATH, API_TEMPLATES_PATH
-app.mount('/static', fastapi_staticfiles.StaticFiles(directory=str(API_STATIC_PATH)), name='static')
+app.mount('/static', fastapi_staticfiles.StaticFiles(directory=paths.API_STATIC_PATH.as_posix()), name='static')
 
 _custom_kwargs = {'mrsm_instance'}
 

@@ -449,6 +449,7 @@ def _start_webterm(
         - `-i`, '--instance'
             The default instance to use for the Webterm shell.
     """
+    import meerschaum.config.paths as paths
     from meerschaum._internal.term import get_webterm_app_and_manager, tornado_ioloop
     from meerschaum._internal.term.tools import (
         is_webterm_running,
@@ -457,7 +458,6 @@ def _start_webterm(
     )
     from meerschaum.utils.networking import find_open_ports
     from meerschaum.utils.warnings import info
-    from meerschaum.config.paths import WEBTERM_INTERNAL_RESOURCES_PATH
 
     if host is None:
         host = mrsm.get_config('api', 'webterm', 'host')
@@ -467,7 +467,7 @@ def _start_webterm(
         sysargs = ['start', 'webterm']
     session_id = 'mrsm'
 
-    env_path = WEBTERM_INTERNAL_RESOURCES_PATH / (str(port) + '.json')
+    env_path = paths.WEBTERM_INTERNAL_RESOURCES_PATH / (str(port) + '.json')
 
     if is_webterm_running(host, port, session_id=session_id):
         if force:

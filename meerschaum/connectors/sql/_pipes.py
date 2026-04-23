@@ -3963,6 +3963,7 @@ def _init_geopackage_pipe(
     """
     import pathlib
     import shutil
+    import meerschaum.config.paths as paths
     from meerschaum.utils.sql import (
         get_table_cols_types,
         get_table_cols_indices,
@@ -3972,7 +3973,6 @@ def _init_geopackage_pipe(
     from meerschaum.utils.dtypes import get_geometry_type_srid
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     from meerschaum.utils.misc import generate_password
-    from meerschaum.config.paths import SQL_CONN_CACHE_RESOURCES_PATH
     from meerschaum.connectors import connectors
     database = self.__dict__.get('database', self.parse_uri(self.URI).get('database', None))
     if not database:
@@ -4043,7 +4043,7 @@ def _init_geopackage_pipe(
             False, f"Failed to init {self}."
         )
 
-    tmp_dir_path = SQL_CONN_CACHE_RESOURCES_PATH / tmp_id
+    tmp_dir_path = paths.SQL_CONN_CACHE_RESOURCES_PATH / tmp_id
     tmp_dir_path.mkdir(parents=True, exist_ok=False)
     temp_database_path = tmp_dir_path / f'{tmp_id}.gpkg'
     tmp_conn = mrsm.get_connector(

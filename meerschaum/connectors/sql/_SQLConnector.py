@@ -190,8 +190,8 @@ class SQLConnector(InstanceConnector):
                 self.label == 'local'
                 and self.__dict__.get('database', None) in (None, '{SQLITE_DB_PATH}')
             ):
-                from meerschaum.config._paths import SQLITE_DB_PATH
-                self.database = SQLITE_DB_PATH.as_posix()
+                import meerschaum.config.paths as paths
+                self.database = paths.SQLITE_DB_PATH.as_posix()
 
         ### ensure flavor and label are set accordingly
         if 'flavor' not in self.__dict__:
@@ -386,13 +386,13 @@ class SQLConnector(InstanceConnector):
         """
         Return the path to the file to which to write metadata cache.
         """
-        from meerschaum.config.paths import SQL_CONN_CACHE_RESOURCES_PATH
+        import meerschaum.config.paths as paths
         filename = (
             f'{self.label}-metadata.pkl'
             if kind == 'pkl'
             else f'{self.label}.json'
         )
-        return SQL_CONN_CACHE_RESOURCES_PATH / filename
+        return paths.SQL_CONN_CACHE_RESOURCES_PATH / filename
 
     def __getstate__(self):
         return self.__dict__

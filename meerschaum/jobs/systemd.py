@@ -36,15 +36,15 @@ class SystemdExecutor(Executor):
         """
         Return a list of existing jobs, including hidden ones.
         """
-        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
+        import meerschaum.config.paths as paths
         return [
             service_name[len('mrsm-'):(-1 * len('.service'))]
-            for service_name in os.listdir(SYSTEMD_USER_RESOURCES_PATH)
+            for service_name in os.listdir(paths.SYSTEMD_USER_RESOURCES_PATH)
             if (
                 service_name.startswith('mrsm-')
                 and service_name.endswith('.service')
                 ### Check for broken symlinks.
-                and (SYSTEMD_USER_RESOURCES_PATH / service_name).exists()
+                and (paths.SYSTEMD_USER_RESOURCES_PATH / service_name).exists()
             )
         ]
 
@@ -81,15 +81,15 @@ class SystemdExecutor(Executor):
         """
         Return the path for the job's files under the root directory.
         """
-        from meerschaum.config.paths import SYSTEMD_JOBS_RESOURCES_PATH
-        return SYSTEMD_JOBS_RESOURCES_PATH / name
+        import meerschaum.config.paths as paths
+        return paths.SYSTEMD_JOBS_RESOURCES_PATH / name
 
     def get_service_symlink_file_path(self, name: str, debug: bool = False) -> pathlib.Path:
         """
         Return the path to where to create the service symlink.
         """
-        from meerschaum.config.paths import SYSTEMD_USER_RESOURCES_PATH
-        return SYSTEMD_USER_RESOURCES_PATH / self.get_service_name(name, debug=debug)
+        import meerschaum.config.paths as paths
+        return paths.SYSTEMD_USER_RESOURCES_PATH / self.get_service_name(name, debug=debug)
 
     def get_service_file_path(self, name: str, debug: bool = False) -> pathlib.Path:
         """
@@ -104,8 +104,11 @@ class SystemdExecutor(Executor):
         """
         Return the path to direct service logs to.
         """
-        from meerschaum.config.paths import SYSTEMD_LOGS_RESOURCES_PATH
-        return SYSTEMD_LOGS_RESOURCES_PATH / (self.get_service_name(name, debug=debug) + '.log')
+        import meerschaum.config.paths as paths
+        return (
+            paths.SYSTEMD_LOGS_RESOURCES_PATH
+            / (self.get_service_name(name, debug=debug) + '.log')
+        )
 
     def get_socket_path(self, name: str, debug: bool = False) -> pathlib.Path:
         """
@@ -638,7 +641,7 @@ class SystemdExecutor(Executor):
         """
         Delete a job's service.
         """
-        from meerschaum.config.paths import SYSTEMD_LOGS_RESOURCES_PATH
+        import meerschaum.config.paths as paths
         job = self.get_hidden_job(name, debug=debug)
 
         if not job.delete_after_completion:
@@ -658,18 +661,18 @@ class SystemdExecutor(Executor):
 
         service_logs_path = self.get_service_logs_path(name, debug=debug)
         logs_paths = [
-            (SYSTEMD_LOGS_RESOURCES_PATH / name)
-            for name in os.listdir(SYSTEMD_LOGS_RESOURCES_PATH)
+            (paths.SYSTEMD_LOGS_RESOURCES_PATH / name)
+            for name in os.listdir(paths.SYSTEMD_LOGS_RESOURCES_PATH)
             if name.startswith(service_logs_path.name + '.')
         ]
-        paths = [
+        file_paths = [
             self.get_service_file_path(name, debug=debug),
             self.get_service_symlink_file_path(name, debug=debug),
             self.get_socket_path(name, debug=debug),
             self.get_result_path(name, debug=debug),
         ] + logs_paths
 
-        for path in paths:
+        for path in file_paths:
             if path.exists():
                 try:
                     path.unlink()
@@ -728,10 +731,10 @@ class SystemdExecutor(Executor):
         """
         Monitor a job's output.
         """
-        from meerschaum.config.paths import SYSTEMD_LOGS_RESOURCES_PATH
+        import meerschaum.config.paths as paths
         job = self.get_hidden_job(name, debug=debug)
         kwargs.update({
-            '_logs_path': SYSTEMD_LOGS_RESOURCES_PATH,
+            '_logs_path': paths.SYSTEMD_LOGS_RESOURCES_PATH,
             '_log': self.get_job_rotating_file(name, debug=debug),
             '_stdin_file': self.get_job_stdin_file(name, debug=debug),
             'debug': debug,

@@ -772,21 +772,21 @@ def bootstrap_plugin(
 
 
 def _get_plugins_dir_path() -> pathlib.Path:
-    from meerschaum.config.paths import PLUGINS_DIR_PATHS
+    import meerschaum.config.paths as paths
 
-    if not PLUGINS_DIR_PATHS:
+    if not paths.PLUGINS_DIR_PATHS:
         raise EnvironmentError("No plugin dir path could be found.")
 
-    if len(PLUGINS_DIR_PATHS) == 1:
-        return PLUGINS_DIR_PATHS[0]
+    if len(paths.PLUGINS_DIR_PATHS) == 1:
+        return paths.PLUGINS_DIR_PATHS[0]
 
     return pathlib.Path(
         choose(
             "In which directory do you want to write your plugin?",
-            [path.as_posix() for path in PLUGINS_DIR_PATHS],
+            [path.as_posix() for path in paths.PLUGINS_DIR_PATHS],
             numeric=True,
             multiple=False,
-            default=PLUGINS_DIR_PATHS[0].as_posix(),
+            default=paths.PLUGINS_DIR_PATHS[0].as_posix(),
         )
     )
  

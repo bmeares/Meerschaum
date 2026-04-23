@@ -19,9 +19,9 @@ def edit_config(
     **kw: Any
 ) -> SuccessTuple:
     """Edit the configuration files."""
+    import meerschaum.config.paths as paths
     from meerschaum.config import get_config, config
     from meerschaum.config._read_config import get_keyfile_path, read_config, revert_symlinks_config
-    from meerschaum.config._paths import CONFIG_DIR_PATH
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.packages import reload_meerschaum
     from meerschaum.utils.misc import edit_file
@@ -49,7 +49,7 @@ def edit_config(
             ### TODO: verify that the file is valid. Retry if not.
             try:
                 new_key_config = read_config(
-                    CONFIG_DIR_PATH,
+                    paths.CONFIG_DIR_PATH,
                     [key],
                     write_missing=False,
                     raise_parsing_errors=True,
@@ -101,8 +101,8 @@ def write_config(
 
     """
     if directory is None:
-        from meerschaum.config._paths import CONFIG_DIR_PATH
-        directory = CONFIG_DIR_PATH
+        import meerschaum.config.paths as paths
+        directory = paths.CONFIG_DIR_PATH
 
     from meerschaum.config import _allow_write_missing
     from meerschaum._internal.static import STATIC_CONFIG
@@ -252,10 +252,10 @@ def copy_default_to_config(debug : bool = False):
     """Copy the default config directory to the main config directory.
     NOTE: This function is now depreciated in favor of the new patch system.
     """
-    from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH, CONFIG_DIR_PATH
+    import meerschaum.config.paths as paths
     import shutil
     try:
-        shutil.copytree(DEFAULT_CONFIG_DIR_PATH, CONFIG_DIR_PATH)
+        shutil.copytree(paths.DEFAULT_CONFIG_DIR_PATH, paths.CONFIG_DIR_PATH)
     except FileNotFoundError:
         write_default_config(debug=debug)
         return copy_default_to_config(debug=debug)
@@ -268,6 +268,6 @@ def write_default_config(
     **kw
 ):
     """Write the default configuration files."""
-    from meerschaum.config._paths import DEFAULT_CONFIG_DIR_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.config._default import default_config
-    return write_config(default_config, directory=DEFAULT_CONFIG_DIR_PATH)
+    return write_config(default_config, directory=paths.DEFAULT_CONFIG_DIR_PATH)
