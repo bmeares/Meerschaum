@@ -221,6 +221,7 @@ document.addEventListener('DOMContentLoaded', function() {
       window.terminal = make_terminal(xterm_div, options, ws_url);
       window.terminal.socket.onclose = function (event) {
         if (!event.wasClean && event.code !== 1005) {
+          window.terminal_initialized = false;
           reconnectTimeout = setTimeout(init_webterm, 1000);
         }
       }

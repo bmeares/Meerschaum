@@ -422,11 +422,11 @@ def _bootstrap_plugins(
     """
     Launch an interactive wizard to guide the user to creating a new plugin.
     """
+    import meerschaum.config.paths as paths
     from meerschaum.utils.prompt import prompt, yes_no
     from meerschaum.plugins.bootstrap import bootstrap_plugin
-    from meerschaum.config.paths import PLUGINS_DIR_PATHS
 
-    for dir_path in PLUGINS_DIR_PATHS:
+    for dir_path in paths.PLUGINS_DIR_PATHS:
         if not dir_path.exists():
             create_dir_path = yes_no(f"Create path '{dir_path}'?", default='y')
             if create_dir_path:

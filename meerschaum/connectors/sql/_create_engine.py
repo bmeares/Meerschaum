@@ -80,8 +80,8 @@ def create_engine(
     _port = self.__dict__.get('port', None)
     _database = self.__dict__.get('database', None)
     if _database == '{SQLITE_DB_PATH}':
-        from meerschaum.config.paths import SQLITE_DB_PATH
-        _database = SQLITE_DB_PATH.as_posix()
+        import meerschaum.config.paths as paths
+        _database = paths.SQLITE_DB_PATH.as_posix()
     _options = self.__dict__.get('options', {})
     if isinstance(_options, str):
         _options = dict(urllib.parse.parse_qsl(_options))

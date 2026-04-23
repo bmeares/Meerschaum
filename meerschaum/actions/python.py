@@ -44,13 +44,16 @@ def python(
         Rather than run Python code, execute the interpreter with the given sub-flags
         (e.g. `mrsm python [-V]`)
     """
-    import sys, subprocess, os
+    import sys
+    import subprocess
+    import os
+
+    import meerschaum.config.paths as paths
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.warnings import warn, error
     from meerschaum.utils.venv import venv_executable
     from meerschaum.utils.misc import generate_password
     from meerschaum.config import __version__ as _version
-    from meerschaum.config.paths import VIRTENV_RESOURCES_PATH, PYTHON_RESOURCES_PATH
     from meerschaum.utils.packages import run_python_package, attempt_import
     from meerschaum.utils.process import run_process
 
@@ -114,12 +117,12 @@ def python(
     if debug:
         dprint(f"command:\n{command}")
 
-    init_script_path = PYTHON_RESOURCES_PATH / (generate_password(8) + '.py')
+    init_script_path = paths.PYTHON_RESOURCES_PATH / (generate_password(8) + '.py')
     with open(init_script_path, 'w', encoding='utf-8') as f:
         f.write(command)
 
     try:
-        ptpython = attempt_import('ptpython', venv=None)
+        _ = attempt_import('ptpython', venv=None)
         return_code = run_python_package(
             'ptpython',
             sub_args or ['--dark-bg', '-i', init_script_path.as_posix()],
@@ -146,7 +149,7 @@ def python(
     try:
         if init_script_path.exists():
             init_script_path.unlink()
-    except Exception as e:
+    except Exception:
         warn(f"Failed to clean up tempory file '{init_script_path}'.")
 
     return return_code == 0, (

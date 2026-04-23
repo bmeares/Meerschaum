@@ -7,12 +7,12 @@ Uninstall plugins and pip packages.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import List, Any, SuccessTuple, Optional, Union
+from meerschaum.utils.typing import List, Any, SuccessTuple, Optional
 
 def uninstall(
-        action: Optional[List[str]] = None,
-        **kw: Any
-    ) -> SuccessTuple:
+    action: Optional[List[str]] = None,
+    **kw: Any
+) -> SuccessTuple:
     """
     Uninstall Meerschaum plugins or Python packages.
     """
@@ -63,13 +63,14 @@ def _uninstall_plugins(
     Remove installed plugins. Does not affect repository registrations.
     """
     import meerschaum.actions
+    import meerschaum.config.paths as paths
     from meerschaum.plugins import get_plugins_names, get_plugins_modules, reload_plugins
-    from meerschaum.config._paths import PLUGINS_RESOURCES_PATH
     from meerschaum.utils.warnings import warn, error, info
     from meerschaum.utils.prompt import yes_no
     from meerschaum.connectors.parse import parse_repo_keys
     from meerschaum.core import Plugin
-    import os, shutil
+    import os
+    import shutil
     repo_connector = parse_repo_keys(repository)
 
     if action is None:
@@ -112,27 +113,6 @@ def _uninstall_plugins(
         + f"({success_count} succeeded, {fail_count} failed)."
     )
     return success, msg
-
-
-    ### delete the folders or files
-    for name, m in modules_to_delete.items():
-        ### __init__.py might be missing
-        if m.__file__ is None:
-            try:
-                shutil.rmtree(os.path.join(PLUGINS_RESOURCES_PATH, name))
-            except Exception as e:
-                return False, str(e)
-            continue
-        try:
-            if '__init__.py' in m.__file__:
-                shutil.rmtree(m.__file__.replace('__init__.py', ''))
-            else:
-                os.remove(m.__file__)
-        except Exception as e:
-            return False, f"Could not remove plugin '{name}'."
-
-    reload_plugins(debug=debug)
-    return True, "Success"
 
 
 def _complete_uninstall_plugins(action: Optional[List[str]] = None, **kw) -> List[str]:

@@ -11,10 +11,10 @@ import select
 import traceback
 import errno
 from threading import Event
-from datetime import datetime
+
+import meerschaum.config.paths as paths
 from meerschaum.utils.typing import Callable
 from meerschaum.utils.warnings import warn
-from meerschaum.config.paths import DAEMON_ERROR_LOG_PATH
 
 FD_CLOSED: int = 9
 STOP_READING_FD_EVENT: Event = Event()
@@ -95,7 +95,7 @@ class FileDescriptorInterceptor:
             except (BrokenPipeError, OSError):
                 break
             except Exception:
-                with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
+                with open(paths.DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
                     f.write(traceback.format_exc())
                 break
 

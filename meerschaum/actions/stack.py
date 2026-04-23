@@ -32,9 +32,10 @@ def stack(
     import os
     import sys
     import pathlib
+
+    import meerschaum.config.paths as paths
     import meerschaum.config.stack
     from meerschaum.config.stack import NECESSARY_FILES, write_stack
-    from meerschaum.config._paths import STACK_COMPOSE_PATH
     import meerschaum.config
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.utils.packages import (
@@ -152,14 +153,14 @@ def stack(
             ['docker', 'compose'] if has_builtin_compose
             else ['docker-compose']
         ) + cmd_list,
-        cwd=STACK_COMPOSE_PATH.parent,
+        cwd=paths.STACK_COMPOSE_PATH.parent,
         stdout=stdout,
         stderr=stderr,
         env=stack_env_dict,
     ) if (has_builtin_compose or has_binary_compose) else run_python_package(
         'compose',
         args=cmd_list,
-        cwd=STACK_COMPOSE_PATH.parent,
+        cwd=[paths.STACK_COMPOSE_PATH.parent],
         venv=_compose_venv,
         capture_output=_capture_output,
         as_proc=True,

@@ -276,12 +276,12 @@ def get_shell_session():
     """
     Return the `prompt_toolkit` prompt session.
     """
-    from meerschaum.config._paths import SHELL_HISTORY_PATH
+    import meerschaum.config.paths as paths
     if 'session' in shell_attrs:
         return shell_attrs['session']
 
     shell_attrs['session'] = prompt_toolkit_shortcuts.PromptSession(
-        history=prompt_toolkit_history.FileHistory(SHELL_HISTORY_PATH.as_posix()),
+        history=prompt_toolkit_history.FileHistory(paths.SHELL_HISTORY_PATH.as_posix()),
         auto_suggest=ValidAutoSuggest(),
         completer=ShellCompleter(),
         complete_while_typing=True,

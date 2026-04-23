@@ -382,8 +382,8 @@ class Daemon:
 
         except Exception:
             daemon_error = traceback.format_exc()
-            from meerschaum.config.paths import DAEMON_ERROR_LOG_PATH
-            with open(DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
+            import meerschaum.config.paths as paths
+            with open(paths.DAEMON_ERROR_LOG_PATH, 'a+', encoding='utf-8') as f:
                 f.write(
                     f"Error in Daemon '{self}':\n\n"
                     f"{sys.stdin=}\n"
@@ -908,8 +908,8 @@ class Daemon:
         """
         Return a Daemon's path from its `daemon_id`.
         """
-        from meerschaum.config.paths import DAEMON_RESOURCES_PATH
-        return DAEMON_RESOURCES_PATH / daemon_id
+        import meerschaum.config.paths as paths
+        return paths.DAEMON_RESOURCES_PATH / daemon_id
 
     @property
     def path(self) -> pathlib.Path:
@@ -946,8 +946,8 @@ class Daemon:
         """
         logs_cf = self.properties.get('logs', None) or {}
         if 'path' not in logs_cf:
-            from meerschaum.config.paths import LOGS_RESOURCES_PATH
-            return LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
+            import meerschaum.config.paths as paths
+            return paths.LOGS_RESOURCES_PATH / (self.daemon_id + '.log')
 
         return pathlib.Path(logs_cf['path'])
 
@@ -980,8 +980,8 @@ class Daemon:
         """
         Return the log offset file path.
         """
-        from meerschaum.config.paths import LOGS_RESOURCES_PATH
-        return LOGS_RESOURCES_PATH / ('.' + self.daemon_id + '.log.offset')
+        import meerschaum.config.paths as paths
+        return paths.LOGS_RESOURCES_PATH / ('.' + self.daemon_id + '.log.offset')
 
     @property
     def log_offset_lock(self) -> 'fasteners.InterProcessLock':

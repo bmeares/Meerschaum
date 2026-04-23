@@ -213,23 +213,14 @@ def replace_env(env: Union[Dict[str, Any], None]):
         return
 
     from meerschaum.config import _config, set_config
-    from meerschaum.config.paths import (
-        set_root,
-        set_plugins_dir_paths,
-        set_venvs_dir_path,
-        set_config_dir_path,
-        ROOT_DIR_PATH,
-        PLUGINS_DIR_PATHS,
-        VIRTENV_RESOURCES_PATH,
-        CONFIG_DIR_PATH,
-    )
+    import meerschaum.config.paths as paths
 
     old_environ = dict(os.environ)
     old_config = copy.deepcopy(_config())
-    old_root_dir_path = ROOT_DIR_PATH
-    old_plugins_dir_paths = PLUGINS_DIR_PATHS
-    old_venvs_dir_path = VIRTENV_RESOURCES_PATH
-    old_config_dir_path = CONFIG_DIR_PATH
+    old_root_dir_path = paths.ROOT_DIR_PATH
+    old_plugins_dir_paths = paths.PLUGINS_DIR_PATHS
+    old_venvs_dir_path = paths.VIRTENV_RESOURCES_PATH
+    old_config_dir_path = paths.CONFIG_DIR_PATH
 
     os.environ.update(env)
 
@@ -241,25 +232,25 @@ def replace_env(env: Union[Dict[str, Any], None]):
     replaced_root = False
     if root_dir_env_var in env:
         root_dir_path = pathlib.Path(env[root_dir_env_var])
-        set_root(root_dir_path)
+        paths.set_root(root_dir_path)
         replaced_root = True
 
     replaced_plugins = False
     if plugins_dir_env_var in env:
         plugins_dir_paths = env[plugins_dir_env_var]
-        set_plugins_dir_paths(plugins_dir_paths)
+        paths.set_plugins_dir_paths(plugins_dir_paths)
         replaced_plugins = True
 
     replaced_venvs = False
     if venvs_dir_env_var in env:
         venv_dir_path = pathlib.Path(env[venvs_dir_env_var])
-        set_venvs_dir_path(venv_dir_path)
+        paths.set_venvs_dir_path(venv_dir_path)
         replaced_venvs = True
 
     replaced_config_dir = False
     if config_dir_env_var in env:
         config_dir_path = pathlib.Path(env[config_dir_env_var])
-        set_config_dir_path(config_dir_path)
+        paths.set_config_dir_path(config_dir_path)
         replaced_config_dir = True
 
     apply_environment_patches(env)
@@ -272,16 +263,16 @@ def replace_env(env: Union[Dict[str, Any], None]):
         os.environ.update(old_environ)
 
         if replaced_root:
-            set_root(old_root_dir_path)
+            paths.set_root(old_root_dir_path)
 
         if replaced_plugins:
-            set_plugins_dir_paths(old_plugins_dir_paths)
+            paths.set_plugins_dir_paths(old_plugins_dir_paths)
 
         if replaced_venvs:
-            set_venvs_dir_path(old_venvs_dir_path)
+            paths.set_venvs_dir_path(old_venvs_dir_path)
 
         if replaced_config_dir:
-            set_config_dir_path(old_config_dir_path)
+            paths.set_config_dir_path(old_config_dir_path)
 
         _config().clear()
         set_config(old_config)

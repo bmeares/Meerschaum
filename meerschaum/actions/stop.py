@@ -174,7 +174,7 @@ def _stop_daemons(
     """
     import shutil
     from meerschaum._internal.cli.workers import get_existing_cli_workers
-    from meerschaum.config.paths import CLI_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     workers = get_existing_cli_workers()
 
     for worker in workers:
@@ -187,9 +187,9 @@ def _stop_daemons(
             return cleanup_success, cleanup_msg
 
     try:
-        if CLI_RESOURCES_PATH.exists():
-            shutil.rmtree(CLI_RESOURCES_PATH)
-        CLI_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
+        if paths.CLI_RESOURCES_PATH.exists():
+            shutil.rmtree(paths.CLI_RESOURCES_PATH)
+        paths.CLI_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
     except Exception as e:
         return False, f"Failed to clean up CLI resources directory.\n{e}"
 

@@ -41,14 +41,15 @@ def dprint(
     **kw
 ) -> None:
     """Print a debug message."""
+    import meerschaum.config.paths as paths
     if attrs is None:
         attrs = []
+
     if not isinstance(color, bool) and not nopretty:
         try:
             from meerschaum.utils.formatting import CHARSET, ANSI, colored
         except Exception as e:
             CHARSET, ANSI, colored = 'ascii', False, None
-        from meerschaum.config._paths import CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH
         from meerschaum.config import _config
         cf = _config('formatting')
         _color = color
@@ -87,7 +88,7 @@ def dprint(
                 "Failed to load config. " +
                 "Please delete the following directories and restart Meerschaum:"
             )
-            for p in [CONFIG_DIR_PATH, PERMANENT_PATCH_DIR_PATH]:
+            for p in [paths.CONFIG_DIR_PATH, paths.PERMANENT_PATCH_DIR_PATH]:
                 print('  - ' + str(p))
             debug_leader = ''
         premsg = ' ' + debug_leader + ' ' + premsg

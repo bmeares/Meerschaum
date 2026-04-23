@@ -7,20 +7,12 @@ Docker Compose stack configuration goes here
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import Optional, List, Any, SuccessTuple, Dict
 
 import os
 import json
-from meerschaum.config._paths import (
-    GRAFANA_DATASOURCE_PATH,
-    GRAFANA_DASHBOARD_PATH,
-    DB_INIT_RESOURCES_PATH,
-    DB_CREATE_EXTENSIONS_PATH,
-    ROOT_DIR_PATH,
-)
-from meerschaum.config._paths import STACK_COMPOSE_FILENAME, STACK_ENV_FILENAME
-from meerschaum.config._paths import CONFIG_DIR_PATH, STACK_ENV_PATH, STACK_COMPOSE_PATH
-from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
+
+import meerschaum.config.paths as paths
+from meerschaum.utils.typing import Optional, List
 
 db_port = "MRSM{meerschaum:connectors:sql:main:port}"
 db_user = "MRSM{meerschaum:connectors:sql:main:username}"
@@ -29,12 +21,12 @@ db_base = "MRSM{meerschaum:connectors:sql:main:database}"
 
 ### default localhost, db for docker network
 db_hostname = "db"
-db_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:db:hostname}'
+db_host = 'MRSM{stack:' + str(paths.STACK_COMPOSE_FILENAME) + ':services:db:hostname}'
 api_port = "MRSM{meerschaum:connectors:api:main:port}"
 api_host = "api"
 
 valkey_hostname = "valkey"
-valkey_host = 'MRSM{stack:' + str(STACK_COMPOSE_FILENAME) + ':services:valkey:hostname}'
+valkey_host = 'MRSM{stack:' + str(paths.STACK_COMPOSE_FILENAME) + ':services:valkey:hostname}'
 valkey_port = "MRSM{meerschaum:connectors:valkey:main:port}"
 valkey_username = 'MRSM{meerschaum:connectors:valkey:main:username}'
 valkey_password = 'MRSM{meerschaum:connectors:valkey:main:password}'
@@ -143,7 +135,7 @@ default_docker_compose_config = {
             'hostname': db_hostname,
             'volumes': [
                 'meerschaum_db_data:' + volumes['meerschaum_db_data'],
-                f'{DB_INIT_RESOURCES_PATH.as_posix()}:/docker-entrypoint-initdb.d:z,ro',
+                f'{paths.DB_INIT_RESOURCES_PATH.as_posix()}:/docker-entrypoint-initdb.d:z,ro',
             ],
             'shm_size': '1024m',
             'networks': [
@@ -230,8 +222,8 @@ default_docker_compose_config = {
             'volumes': [
                 'grafana_storage' + ':' + volumes['grafana_storage'],
                 ### NOTE: Mount with the 'z' option for SELinux.
-                f'{GRAFANA_DATASOURCE_PATH.parent.as_posix()}:/etc/grafana/provisioning/datasources:z,ro',
-                f'{GRAFANA_DASHBOARD_PATH.parent.as_posix()}:/etc/grafana/provisioning/dashboards:z,ro',
+                f'{paths.GRAFANA_DATASOURCE_PATH.parent.as_posix()}:/etc/grafana/provisioning/datasources:z,ro',
+                f'{paths.GRAFANA_DASHBOARD_PATH.parent.as_posix()}:/etc/grafana/provisioning/dashboards:z,ro',
             ],
             'environment': {
                 'GF_SECURITY_ALLOW_EMBEDDING': 'true',
@@ -252,7 +244,7 @@ for key in volumes:
 default_stack_config = {}
 ### compose project name (prepends to all services)
 default_stack_config['project_name'] = 'mrsm'
-compose_filename = os.path.split(STACK_COMPOSE_PATH)[1]
+compose_filename = os.path.split(paths.STACK_COMPOSE_PATH)[1]
 default_stack_config[compose_filename] = default_docker_compose_config
 from meerschaum.config.stack.grafana import default_grafana_config
 default_stack_config['grafana'] = default_grafana_config
@@ -263,21 +255,21 @@ default_stack_config['filetype'] = 'yaml'
 def _sync_stack_files():
     from meerschaum.config._sync import sync_yaml_configs
     sync_yaml_configs(
-        CONFIG_DIR_PATH / 'stack.yaml',
-        ['stack', STACK_COMPOSE_FILENAME],
-        STACK_COMPOSE_PATH,
+        paths.CONFIG_DIR_PATH / 'stack.yaml',
+        ['stack', paths.STACK_COMPOSE_FILENAME],
+        paths.STACK_COMPOSE_PATH,
         substitute = True,
     )
     sync_yaml_configs(
-        CONFIG_DIR_PATH / 'stack.yaml',
+        paths.CONFIG_DIR_PATH / 'stack.yaml',
         ['stack', 'grafana', 'datasource'],
-        GRAFANA_DATASOURCE_PATH,
+        paths.GRAFANA_DATASOURCE_PATH,
         substitute = True,
     )
     sync_yaml_configs(
-        CONFIG_DIR_PATH / 'stack.yaml',
+        paths.CONFIG_DIR_PATH / 'stack.yaml',
         ['stack', 'grafana', 'dashboard'],
-        GRAFANA_DASHBOARD_PATH,
+        paths.GRAFANA_DASHBOARD_PATH,
         substitute = True,
     )
 
@@ -290,21 +282,25 @@ def _write_initdb():
         "CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit;\n"
         "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;\n"
     )
-    if DB_CREATE_EXTENSIONS_PATH.exists():
+    if paths.DB_CREATE_EXTENSIONS_PATH.exists():
         return
 
-    with open(DB_CREATE_EXTENSIONS_PATH, 'w+', encoding='utf-8') as f:
+    with open(paths.DB_CREATE_EXTENSIONS_PATH, 'w+', encoding='utf-8') as f:
         f.write(create_postgis_text)
 
-NECESSARY_FILES = [STACK_COMPOSE_PATH, GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH]
+NECESSARY_FILES = [
+    paths.STACK_COMPOSE_PATH,
+    paths.GRAFANA_DATASOURCE_PATH,
+    paths.GRAFANA_DASHBOARD_PATH,
+]
 def get_necessary_files():
     from meerschaum.config import get_config
     return {
-        STACK_COMPOSE_PATH: (
-            get_config('stack', STACK_COMPOSE_FILENAME, substitute=True), compose_header
+        paths.STACK_COMPOSE_PATH: (
+            get_config('stack', paths.STACK_COMPOSE_FILENAME, substitute=True), compose_header
         ),
-        GRAFANA_DATASOURCE_PATH: get_config('stack', 'grafana', 'datasource', substitute=True),
-        GRAFANA_DASHBOARD_PATH: get_config('stack', 'grafana', 'dashboard', substitute=True),
+        paths.GRAFANA_DATASOURCE_PATH: get_config('stack', 'grafana', 'datasource', substitute=True),
+        paths.GRAFANA_DASHBOARD_PATH: get_config('stack', 'grafana', 'dashboard', substitute=True),
     }
 
 
@@ -328,8 +324,8 @@ def edit_stack(
     if action is None:
         action = []
     files = {
-        'compose' : STACK_COMPOSE_PATH,
-        'docker-compose' : STACK_COMPOSE_PATH,
-        'docker-compose.yaml' : STACK_COMPOSE_PATH,
+        'compose': paths.STACK_COMPOSE_PATH,
+        'docker-compose': paths.STACK_COMPOSE_PATH,
+        'docker-compose.yaml': paths.STACK_COMPOSE_PATH,
     }
     return general_edit_config(action=action, files=files, default='compose', debug=debug)

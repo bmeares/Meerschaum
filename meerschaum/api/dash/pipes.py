@@ -17,7 +17,7 @@ from meerschaum.utils.typing import List, Optional, Dict, Any, Tuple, Union
 from meerschaum.utils.misc import get_connector_labels
 from meerschaum.connectors import instance_types
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html, import_pandas
-from meerschaum.utils.sql import get_pd_type
+from meerschaum.utils.sql import get_pd_type, sql_item_name
 from meerschaum.utils.yaml import yaml
 from meerschaum.utils.warnings import warn
 from meerschaum.utils.dataframe import to_json, to_simple_lines
@@ -372,12 +372,21 @@ def accordion_items_from_pipe(
     if 'overview' in active_items:
         overview_header = [html.Thead(html.Tr([html.Th("Attribute"), html.Th("Value")]))]
         dt_name, id_name, val_name = pipe.get_columns('datetime', 'id', 'value', error=False)
+        target_str = (
+            pipe.target
+            if pipe.instance_connector.type != 'sql'
+            else sql_item_name(
+                pipe.target,
+                flavor=pipe.instance_connector.flavor,
+                schema=pipe.instance_connector.get_pipe_schema(pipe),
+            )
+        )
         overview_rows = [
             html.Tr([html.Td("Connector"), html.Td(html.Pre(f"{pipe.connector_keys}"))]),
             html.Tr([html.Td("Metric"), html.Td(html.Pre(f"{pipe.metric_key}"))]),
             html.Tr([html.Td("Location"), html.Td(html.Pre(f"{pipe.location_key}"))]),
             html.Tr([html.Td("Instance"), html.Td(html.Pre(f"{pipe.instance_keys}"))]),
-            html.Tr([html.Td("Target Table"), html.Td(html.Pre(f"{pipe.target}"))]),
+            html.Tr([html.Td("Target Table"), html.Td(html.Pre(target_str))]),
         ]
 
         indices_header = [

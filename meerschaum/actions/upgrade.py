@@ -52,7 +52,6 @@ def _upgrade_meerschaum(
 
     """
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.warnings import info
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.packages import pip_install
@@ -61,27 +60,13 @@ def _upgrade_meerschaum(
     if action is None:
         action = []
 
-    try:
-        success, msg = actions['stack'](
-            ['ps', '-q'], _capture_output=True, debug=debug
+    restart_stack = (
+        force
+        or (
+            is_docker_available()
+            and yes_no("Bring up the stack after upgrading?", default='n', yes=yes, noask=noask)
         )
-        if msg.endswith('\n'):
-            msg = msg[:-1]
-        containers = msg.split('\n')
-    except Exception:
-        containers = []
-
-    if containers:
-        if force:
-            answer = True
-        else:
-            answer = yes_no("Take down the stack?", default='n', yes=yes, noask=noask)
-
-        if answer:
-            if debug:
-                info("Taking stack down...")
-            actions['stack'](['down'], debug=debug)
-
+    )
     dependencies = None
     if action != [''] and len(action) > 0:
         dependencies = action[0]
@@ -95,10 +80,13 @@ def _upgrade_meerschaum(
     if not pip_install(install_name, venv=None, debug=debug):
         return False, "Failed to upgrade Meerschaum via pip."
 
-    if debug:
-        dprint("Pulling new Docker images...")
     if is_docker_available():
+        if debug:
+            dprint("Pulling new Docker images...")
         actions['stack'](['pull'], debug=debug)
+
+        if restart_stack:
+            actions['stack'](['up', '-d'], debug=debug)
 
     return actions['reload'](debug=debug)
 

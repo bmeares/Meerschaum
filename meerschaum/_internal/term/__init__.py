@@ -8,15 +8,14 @@ Build the web console virtual terminal using Tornado and xterm.js.
 
 from __future__ import annotations
 
-import os
 import json
 import pathlib
 from typing import Optional, Tuple
 
 import meerschaum as mrsm
+import meerschaum.config.paths as paths
 from meerschaum.utils.packages import attempt_import
 from meerschaum._internal.term.TermPageHandler import TermPageHandler, CustomTermSocket
-from meerschaum.config._paths import API_TEMPLATES_PATH, API_STATIC_PATH
 from meerschaum.utils.venv import venv_executable
 from meerschaum.utils.misc import is_tmux_available
 
@@ -42,8 +41,7 @@ def get_webterm_app_and_manager(
     """
     from meerschaum.config.environment import get_env_vars, get_daemon_env_vars
     if env_path is None:
-        from meerschaum.config.paths import WEBTERM_INTERNAL_RESOURCES_PATH
-        env_path = WEBTERM_INTERNAL_RESOURCES_PATH / (str(port) + '.json')
+        env_path = paths.WEBTERM_INTERNAL_RESOURCES_PATH / (str(port) + '.json')
 
     daemon_env_vars = get_daemon_env_vars()
     env_dict = {
@@ -89,8 +87,8 @@ def get_webterm_app_and_manager(
     ]
     tornado_app = tornado.web.Application(
         handlers,
-        static_path=API_STATIC_PATH,
-        template_path=API_TEMPLATES_PATH,
+        static_path=paths.API_STATIC_PATH,
+        template_path=paths.API_TEMPLATES_PATH,
         term_manager=term_manager,
     )
     return tornado_app, term_manager

@@ -929,7 +929,14 @@ def query_data_click(n_clicks, query_editor_text, limit_value, begin, end):
     if limit_value is None:
         limit_value = 100
 
-    df = pipe.get_data(params=params_query, debug=debug, begin=begin, end=end, limit=limit_value)
+    df = pipe.get_data(
+        params=params_query,
+        begin=begin,
+        end=end,
+        limit=limit_value,
+        order='desc',
+        debug=debug,
+    )
     if df is None:
         return [html.P("No data returned.")]
     df = df.astype(str)

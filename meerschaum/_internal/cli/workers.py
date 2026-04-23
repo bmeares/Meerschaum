@@ -25,24 +25,24 @@ def get_worker_input_file_path(ix: int) -> pathlib.Path:
     """
     Return the file path to the worker's input named pipe file.
     """
-    from meerschaum.config.paths import CLI_RESOURCES_PATH
-    return CLI_RESOURCES_PATH / f"worker-{ix}.input"
+    import meerschaum.config.paths as paths
+    return paths.CLI_RESOURCES_PATH / f"worker-{ix}.input"
 
 
 def get_worker_output_file_path(ix: int) -> pathlib.Path:
     """
     Return the file path to the worker's output `StdinFile`.
     """
-    from meerschaum.config.paths import CLI_RESOURCES_PATH
-    return CLI_RESOURCES_PATH / f"worker-{ix}.output"
+    import meerschaum.config.paths as paths
+    return paths.CLI_RESOURCES_PATH / f"worker-{ix}.output"
 
 
 def get_worker_stop_path(ix: int) -> pathlib.Path:
     """
     Return the file path to the worker's stop file.
     """
-    from meerschaum.config.paths import CLI_RESOURCES_PATH
-    return CLI_RESOURCES_PATH / f"worker-{ix}.stop"
+    import meerschaum.config.paths as paths
+    return paths.CLI_RESOURCES_PATH / f"worker-{ix}.stop"
 
 
 class ActionWorker:
@@ -90,8 +90,8 @@ class ActionWorker:
         """
         Return the job associated with this worker.
         """
-        from meerschaum.config.paths import CLI_LOGS_RESOURCES_PATH, PACKAGE_ROOT_PATH
-        log_path = CLI_LOGS_RESOURCES_PATH / f'cli.{self.ix}.worker.log'
+        import meerschaum.config.paths as paths
+        log_path = paths.CLI_LOGS_RESOURCES_PATH / f'cli.{self.ix}.worker.log'
 
         return Job(
             f'.cli.{self.ix}.worker',
@@ -108,7 +108,7 @@ class ActionWorker:
                     'redirect_streams': True,
                     'lines_to_show': 0,
                 },
-                'cwd': PACKAGE_ROOT_PATH.parent.as_posix(),
+                'cwd': paths.PACKAGE_ROOT_PATH.parent.as_posix(),
             },
         )
 
@@ -418,12 +418,12 @@ def get_existing_cli_worker_indices() -> List[int]:
     """
     Get a list of the existing CLI workers' indices.
     """
-    from meerschaum.config.paths import CLI_RESOURCES_PATH
+    import meerschaum.config.paths as paths
     from meerschaum.utils.misc import is_int
 
     return sorted(list({
         int(worker_ix)
-        for filename in os.listdir(CLI_RESOURCES_PATH)
+        for filename in os.listdir(paths.CLI_RESOURCES_PATH)
         if (
             filename.startswith('worker-')
             and is_int(

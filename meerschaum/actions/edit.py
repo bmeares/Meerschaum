@@ -228,6 +228,7 @@ def _edit_users(
     """
     Edit users' registration information.
     """
+    import meerschaum.config.paths as paths
     from meerschaum.config import get_config
     from meerschaum import get_connector
     from meerschaum.connectors.parse import parse_instance_keys
@@ -238,10 +239,8 @@ def _edit_users(
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.prompt import prompt, yes_no, get_password, get_email
     from meerschaum.utils.misc import edit_file
-    from meerschaum.config._paths import USERS_CACHE_RESOURCES_PATH
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.yaml import yaml
-    import os, pathlib
     instance_connector = parse_instance_keys(mrsm_instance)
     
     if action is None:
@@ -288,7 +287,7 @@ def _edit_users(
             yes=yes,
             noask=noask,
         ):
-            attr_path = pathlib.Path(os.path.join(USERS_CACHE_RESOURCES_PATH, f'{username}.yaml'))
+            attr_path = paths.USERS_CACHE_RESOURCES_PATH / f'{username}.yaml'
             try:
                 existing_attrs = instance_connector.get_user_attributes(
                     User(

@@ -51,22 +51,21 @@ default_grafana_config['dashboard'] = default_dashboard
 default_grafana_config['datasource'] = default_datasource
 
 def edit_grafana(
-        action: list = [''],
-        debug: bool = False,
-        **kw
-    ):
+    action: list = [''],
+    debug: bool = False,
+    **kw
+):
     """Open Grafana configuration files for editing."""
-
+    import meerschaum.config.paths as paths
     from meerschaum.config._edit import general_edit_config
-    from meerschaum.config._paths import GRAFANA_DATASOURCE_PATH, GRAFANA_DASHBOARD_PATH
     files = {
-        'data' : GRAFANA_DATASOURCE_PATH,
-        'datasource' : GRAFANA_DATASOURCE_PATH,
-        'datasources' : GRAFANA_DATASOURCE_PATH,
-        'datasource.yaml' : GRAFANA_DATASOURCE_PATH,
-        'datasources.yaml' : GRAFANA_DATASOURCE_PATH,
-        'dash' : GRAFANA_DASHBOARD_PATH,
-        'dashboard' : GRAFANA_DASHBOARD_PATH,
-        'dashboard.yaml' : GRAFANA_DASHBOARD_PATH,
+        'data': paths.GRAFANA_DATASOURCE_PATH,
+        'datasource': paths.GRAFANA_DATASOURCE_PATH,
+        'datasources': paths.GRAFANA_DATASOURCE_PATH,
+        'datasource.yaml': paths.GRAFANA_DATASOURCE_PATH,
+        'datasources.yaml': paths.GRAFANA_DATASOURCE_PATH,
+        'dash': paths.GRAFANA_DASHBOARD_PATH,
+        'dashboard': paths.GRAFANA_DASHBOARD_PATH,
+        'dashboard.yaml': paths.GRAFANA_DASHBOARD_PATH,
     }
     return general_edit_config(action=action, files=files, default='datasource', debug=debug)
