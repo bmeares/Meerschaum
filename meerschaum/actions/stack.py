@@ -160,7 +160,7 @@ def stack(
     ) if (has_builtin_compose or has_binary_compose) else run_python_package(
         'compose',
         args=cmd_list,
-        cwd=[paths.STACK_COMPOSE_PATH.parent,
+        cwd=[paths.STACK_COMPOSE_PATH.parent],
         venv=_compose_venv,
         capture_output=_capture_output,
         as_proc=True,
