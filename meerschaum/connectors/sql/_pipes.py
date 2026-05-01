@@ -2683,21 +2683,21 @@ def get_sync_time(
 
     base_query = (
         f"SELECT {dt_col_name}\n"
-        f"FROM {src_name}{where}\n"
+        f"FROM {src_name}\n"
         f"ORDER BY {dt_col_name} {ASC_or_DESC}\n"
         f"LIMIT 1"
     )
     if self.flavor == 'mssql':
         base_query = (
             f"SELECT TOP 1 {dt_col_name}\n"
-            f"FROM {src_name}{where}\n"
+            f"FROM {src_name}\n"
             f"ORDER BY {dt_col_name} {ASC_or_DESC}"
         )
     elif self.flavor == 'oracle':
         base_query = (
             "SELECT * FROM (\n"
             f"    SELECT {dt_col_name}\n"
-            f"    FROM {src_name}{where}\n"
+            f"    FROM {src_name}\n"
             f"    ORDER BY {dt_col_name} {ASC_or_DESC}\n"
             ") WHERE ROWNUM = 1"
         )

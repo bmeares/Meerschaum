@@ -814,14 +814,10 @@ def dateadd_str(
             f"CAST({begin} AS {db_type})" if begin != 'now'
             else f"CAST(NOW() AT TIME ZONE 'utc' AS {db_type})"
         )
-        if dt_is_utc:
-            begin += " AT TIME ZONE 'UTC'"
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
 
     elif flavor == 'duckdb':
         begin = f"CAST({begin} AS {db_type})" if begin != 'now' else 'NOW()'
-        if dt_is_utc:
-            begin += " AT TIME ZONE 'UTC'"
         da = begin + (f" + INTERVAL '{number} {datepart}'" if number != 0 else '')
 
     elif flavor in ('mssql',):
