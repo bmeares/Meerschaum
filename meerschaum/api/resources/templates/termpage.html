@@ -197,7 +197,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         var rect = measure.getBoundingClientRect();
         var termColWidth = rect.width || 10;
-        var termRowHeight = (termOptions.fontSize * termOptions.lineHeight) || 20;
+        var termRowHeight = Math.ceil(termOptions.fontSize * (termOptions.lineHeight || 1.0));
         document.body.removeChild(measure);
 
         var rows = Math.max(2, Math.floor((window.innerHeight - 10) / termRowHeight));
