@@ -7,7 +7,9 @@ Functions for flushing and recreating pipes and indices.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any, Optional, List
+
+from datetime import datetime
+from meerschaum.utils.typing import SuccessTuple, Any, Optional, List, Union, Dict
 
 
 def flush(
@@ -27,19 +29,37 @@ def flush(
     return choose_subaction(action, options, **kw)
 
 
-def _flush_pipes(**kwargs: Any) -> SuccessTuple:
+def _flush_pipes(
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    **kwargs: Any
+) -> SuccessTuple:
     """
     Drop and resync pipes.
     Equivalent to `drop pipes + sync pipes`.
     """
     from meerschaum.actions import get_action
-    drop_pipes_func = get_action(['drop', 'pipes'])
-    drop_success, drop_message = drop_pipes_func(**kwargs)
-    if not drop_success:
-        return drop_success, drop_message
+    drop_or_clear_pipes_func = get_action([
+        ('drop' if begin is None and end is None and not params else 'clear'),
+        'pipes'
+    ])
+    drop_or_clear_success, drop_or_clear_message = drop_or_clear_pipes_func(
+        begin=begin,
+        end=end,
+        params=params,
+        **kwargs
+    )
+    if not drop_or_clear_success:
+        return drop_or_clear_success, drop_or_clear_message
 
     sync_pipes_func = get_action(['sync', 'pipes'])
-    sync_success, sync_message = sync_pipes_func(**kwargs)
+    sync_success, sync_message = sync_pipes_func(
+        begin=begin,
+        end=end,
+        params=params,
+        **kwargs
+    )
     return sync_success, sync_message
 
 
@@ -64,4 +84,4 @@ def _flush_indices(
 ###       Any subactions added below these lines will not
 ###       be added to the `help` docstring.
 from meerschaum.actions import choices_docstring as _choices_docstring
-drop.__doc__ += _choices_docstring('flush')
+flush.__doc__ += _choices_docstring('flush')

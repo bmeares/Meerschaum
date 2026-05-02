@@ -6,9 +6,6 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v3.2.4
 
-- **Fix parametrized sync times.**  
-  Passing `params` to `get_sync_time()` correctly returns the appropriate sync time value for multiplexed pipes.
-
 - **Improvde default chunksize for integer pipes.**  
   Pipes with integer datetime columns now default to appropriately sized chunks based on the `precision` unit.
 
@@ -72,7 +69,11 @@ This is the current release cycle, so stay tuned for future releases!
   ```
 
 - **Add `flush pipes` and `flush indices`.**  
-  For convenience, the action `flush` is equivalent to `drop + sync`.
+  For convenience, the action `flush` is equivalent to `drop + sync` without arguments and `clear + sync` with filters (`--begin`, `--end`, `--params`).
+
+- **Fix parametrized sync times.**  
+  Passing `params` to `get_sync_time()` correctly returns the appropriate sync time value for multiplexed pipes.
+
 
 ### v3.2.3
 
