@@ -114,6 +114,7 @@ def get_backtrack_interval(
     -------
     The backtrack interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
     """
+    from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES
     default_backtrack_minutes = get_config('pipes', 'parameters', 'fetch', 'backtrack_minutes')
     configured_backtrack_minutes = self.parameters.get('fetch', {}).get('backtrack_minutes', None)
     backtrack_minutes = (
@@ -122,16 +123,22 @@ def get_backtrack_interval(
         else default_backtrack_minutes
     ) if check_existing else 0
 
-    backtrack_interval = timedelta(minutes=backtrack_minutes)
     dt_col = self.columns.get('datetime', None)
     if dt_col is None:
-        return backtrack_interval
+        return timedelta(minutes=backtrack_minutes)
 
     dt_dtype = self.dtypes.get(dt_col, 'datetime')
     if 'int' in dt_dtype.lower():
+        if not self.parameters.get('precision', None):
+            return backtrack_minutes
+        precision_unit = self.precision.get('unit', None)
+        true_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
+        scalar = MRSM_PRECISION_UNITS_SCALARS.get(true_unit, None)
+        if scalar is not None:
+            return int(backtrack_minutes * 60 * scalar)
         return backtrack_minutes
 
-    return backtrack_interval
+    return timedelta(minutes=backtrack_minutes)
 
 
 def _determine_begin(

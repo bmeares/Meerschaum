@@ -67,7 +67,7 @@ def get_action(
     """
     Return a function corresponding to the given action list.
     This may be a custom action with an underscore, in which case, allow for underscores.
-    This may also be a subactions, which is handled by `get_subactions()`
+    This may also be a subaction, which is handled by `get_subactions()`
     """
     if _actions is None:
         _actions = actions

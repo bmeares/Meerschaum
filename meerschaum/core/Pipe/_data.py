@@ -580,6 +580,7 @@ def get_chunk_interval(
     -------
     The chunk interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
     """
+    from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES
     default_chunk_minutes = get_config('pipes', 'parameters', 'verify', 'chunk_minutes')
     configured_chunk_minutes = self.parameters.get('verify', {}).get('chunk_minutes', None)
     chunk_minutes = (
@@ -598,7 +599,15 @@ def get_chunk_interval(
 
     dt_dtype = self.dtypes.get(dt_col, 'datetime')
     if 'int' in dt_dtype.lower():
+        if chunk_interval is not None or not self.parameters.get('precision', None):
+            return chunk_minutes
+        precision_unit = self.precision.get('unit', None)
+        true_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
+        scalar = MRSM_PRECISION_UNITS_SCALARS.get(true_unit, None)
+        if scalar is not None:
+            return int(chunk_minutes * 60 * scalar)
         return chunk_minutes
+
     return timedelta(minutes=chunk_minutes)
 
 

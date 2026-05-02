@@ -54,8 +54,8 @@ function make_terminal(element, options, ws_url) {
     ws.send(
       JSON.stringify([
         "set_size",
-        terminal_options.rows,
-        terminal_options.cols,
+        term.rows,
+        term.cols,
         element.innerHeight,
         element.innerWidth,
       ]),

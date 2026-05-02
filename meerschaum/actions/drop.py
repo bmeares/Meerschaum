@@ -111,7 +111,7 @@ def _drop_indices(
     **kw: Any
 ) -> SuccessTuple:
     """
-    Drop pipes' tables but keep pipe metadata registration.
+    Drop pipes' indices.
     """
     from meerschaum.utils.prompt import yes_no
     from meerschaum import get_pipes

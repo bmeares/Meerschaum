@@ -13,8 +13,15 @@ from meerschaum._internal.static import STATIC_CONFIG
 FLUSH_TOKEN: str = STATIC_CONFIG['jobs']['flush_token']
 
 
-def make_header(message: str, ruler: str = '─', left_pad: int = 2) -> str:
-    """Format a message string with a ruler.
+def make_header(
+    message: str,
+    ruler: str = '─',
+    left_pad: int = 2,
+    top: bool = False,
+    top_pad: int = 1,
+) -> str:
+    """
+    Format a message string with a ruler or box.
     Length of the ruler is the length of the longest word.
     
     Example:
@@ -34,7 +41,9 @@ def make_header(message: str, ruler: str = '─', left_pad: int = 2) -> str:
     left_buffer = left_pad * ' '
 
     return (
-        left_buffer
+        (('\n' * top_pad) if top else "")
+        + left_buffer
+        + (((ruler * max_length) + '\n') if top else "")
         + message.replace('\n', '\n' + left_buffer)
         + "\n"
         + left_buffer

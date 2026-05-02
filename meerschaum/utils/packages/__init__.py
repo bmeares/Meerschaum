@@ -1616,9 +1616,9 @@ def get_modules_from_package(
                 activate_venv(module_name.split('.')[-1], debug=debug)
             m = lazy_import(module_name, debug=debug) if lazy else _import_module(module_name)
             modules.append(m)
-        except Exception as e:
-            if debug:
-                dprint(str(e))
+        except Exception:
+            import traceback
+            traceback.print_exc()
         finally:
             if modules_venvs:
                 deactivate_venv(module_name.split('.')[-1], debug=debug)

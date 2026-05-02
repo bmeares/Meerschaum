@@ -38,10 +38,6 @@ def stack(
     from meerschaum.config.stack import NECESSARY_FILES, write_stack
     import meerschaum.config
     from meerschaum.config._patch import apply_patch_to_config
-    from meerschaum.utils.packages import (
-        attempt_import, run_python_package, venv_contains_package,
-        pip_install,
-    )
     from meerschaum.config._sync import sync_files
     from meerschaum.config import get_config
     from meerschaum.utils.debug import dprint
@@ -113,20 +109,7 @@ def stack(
         has_builtin_compose = False
 
     if not has_builtin_compose:
-        _compose_venv = 'mrsm'
-        _ = attempt_import('compose', lazy=False, venv=_compose_venv, debug=debug)
-
-        ### If docker-compose is installed globally, don't use the `mrsm` venv.
-        if not venv_contains_package('compose', _compose_venv):
-            _compose_venv = None
-
-        if not venv_contains_package('packaging', _compose_venv):
-            if not pip_install('packaging', venv=_compose_venv, debug=debug):
-                warn(f"Unable to install `packaging` into venv '{_compose_venv}'.")
-
-        if not venv_contains_package('yaml', _compose_venv):
-            if not pip_install('pyyaml', venv=_compose_venv, debug=debug):
-                warn(f"Unable to install `pyyaml` into venv '{_compose_venv}'.")
+        return False, "Docker Compose is not available."
 
     if 'down' in sysargs and '-v' in sysargs:
         if not yes_no(
@@ -147,23 +130,11 @@ def stack(
     stdout = None if not _capture_output else subprocess.PIPE
     stderr = stdout
 
-    has_binary_compose = pathlib.Path('/usr/bin/docker-compose').exists()
     proc = subprocess.Popen(
-        (
-            ['docker', 'compose'] if has_builtin_compose
-            else ['docker-compose']
-        ) + cmd_list,
+        ['docker', 'compose'] + cmd_list,
         cwd=paths.STACK_COMPOSE_PATH.parent,
         stdout=stdout,
         stderr=stderr,
-        env=stack_env_dict,
-    ) if (has_builtin_compose or has_binary_compose) else run_python_package(
-        'compose',
-        args=cmd_list,
-        cwd=[paths.STACK_COMPOSE_PATH.parent],
-        venv=_compose_venv,
-        capture_output=_capture_output,
-        as_proc=True,
         env=stack_env_dict,
     )
     try:
@@ -176,7 +147,9 @@ def stack(
         captured_stderr = captured_stderr.decode()
     success = rc == 0
     msg = (
-        "Success" if success else f"Failed to execute commands:\n{cmd_list}"
+        "Success"
+        if success
+        else f"Failed to execute commands:\n{cmd_list}"
     ) if not _capture_output else captured_stdout
 
     return success, msg

@@ -1206,7 +1206,7 @@ def precision(self, _precision: Union[str, Dict[str, Union[str, int]]]) -> None:
             **(
                 {
                     'interval': existing_precision['interval'],
-                } if existing_precision else {}
+                } if (existing_precision or {}).get('interval') else {}
             )
         }
     )
