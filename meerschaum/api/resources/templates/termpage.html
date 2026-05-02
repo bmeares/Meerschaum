@@ -175,6 +175,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var termOptions = {
         fontFamily: '"DejaVu Sans Mono", "Liberation Mono", monospace',
         fontSize: 16,
+        lineHeight: 1.2,
         allowProposedApi: true,
         scrollback: 100000,
         cursorBlink: true,
@@ -187,6 +188,7 @@ document.addEventListener('DOMContentLoaded', function() {
         var measure = document.createElement("div");
         measure.style.fontFamily = termOptions.fontFamily;
         measure.style.fontSize = termOptions.fontSize + "px";
+        measure.style.lineHeight = "1";
         measure.style.position = "absolute";
         measure.style.visibility = "hidden";
         measure.style.whiteSpace = "pre";
@@ -194,8 +196,8 @@ document.addEventListener('DOMContentLoaded', function() {
         document.body.appendChild(measure);
 
         var rect = measure.getBoundingClientRect();
-        var termRowHeight = rect.height || 20;
         var termColWidth = rect.width || 10;
+        var termRowHeight = (termOptions.fontSize * termOptions.lineHeight) || 20;
         document.body.removeChild(measure);
 
         var rows = Math.max(2, Math.floor((window.innerHeight - 10) / termRowHeight));
