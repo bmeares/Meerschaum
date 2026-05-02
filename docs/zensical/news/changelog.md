@@ -4,6 +4,76 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.2.4
+
+- **Fix parametrized sync times.**  
+  Passing `params` to `get_sync_time()` correctly returns the appropriate sync time value for multiplexed pipes.
+
+- **Improvde default chunksize for integer pipes.**  
+  Pipes with integer datetime columns now default to appropriately sized chunks based on the `precision` unit.
+
+  ```python
+  import meerschaum as mrsm
+  pipe = mrsm.Pipe(
+      'demo', 'chunksize', 'int',
+      instance='sql:memory',
+      parameters={
+          "columns": {
+              "datetime": "ts",
+              "id": "id",
+          },
+          "dtypes": {
+              "ts": "int",
+          },
+          "precision": "ms", # millisecond
+          "fetch": {
+              "backtrack_minutes": 1440,
+          },
+          "verify": {
+              "chunk_minutes": 1440 * 30, # 30 days
+          }
+      },
+  )
+
+  print(f"{pipe.get_chunk_interval()=}")
+  # pipe.get_chunk_interval()=2592000000
+  print(f"{pipe.get_backtrack_interval()=}")
+  # pipe.get_backtrack_interval()=86400000
+
+  pipe.precision = 's'
+  print(f"{pipe.get_chunk_interval()=}")
+  # pipe.get_chunk_interval()=2592000
+  print(f"{pipe.get_backtrack_interval()=}")
+  # pipe.get_backtrack_interval()=86400
+
+  simple_pipe = mrsm.Pipe(
+      'demo', 'chunksize', 'int_no_precision',
+      instance='sql:memory',
+      parameters={
+          'columns': {
+              'datetime': 'id',
+          },
+          'dtypes': {
+              'id': 'int',
+          },
+          "precision": None, # omitted precision defaults to literal chunksize value (previous behavior)
+          "fetch": {
+              "backtrack_minutes": 100,
+          },
+          'verify': {
+              'chunk_minutes': 10000,
+          },
+      },
+  )
+  print(f"{simple_pipe.get_chunk_interval()=}")
+  # simple_pipe.get_chunk_interval()=10000
+  print(f"{simple_pipe.get_backtrack_interval()=}")
+  # simple_pipe.get_backtrack_interval()=100
+  ```
+
+- **Add `flush pipes` and `flush indices`.**  
+  For convenience, the action `flush` is equivalent to `drop + sync`.
+
 ### v3.2.3
 
 - **Fix environment isolation for `compose` projects.**  

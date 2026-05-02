@@ -599,7 +599,7 @@ def get_chunk_interval(
 
     dt_dtype = self.dtypes.get(dt_col, 'datetime')
     if 'int' in dt_dtype.lower():
-        if chunk_interval is not None:
+        if chunk_interval is not None or not self.parameters.get('precision', None):
             return chunk_minutes
         precision_unit = self.precision.get('unit', None)
         true_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)

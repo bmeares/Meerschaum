@@ -129,6 +129,8 @@ def get_backtrack_interval(
 
     dt_dtype = self.dtypes.get(dt_col, 'datetime')
     if 'int' in dt_dtype.lower():
+        if not self.parameters.get('precision', None):
+            return backtrack_minutes
         precision_unit = self.precision.get('unit', None)
         true_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
         scalar = MRSM_PRECISION_UNITS_SCALARS.get(true_unit, None)

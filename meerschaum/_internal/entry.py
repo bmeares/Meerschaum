@@ -223,12 +223,16 @@ def entry_without_daemon(
                 [
                     (
                         make_header(
-                            shlex.join(_sysargs)
-                            + "\n  ("
-                            + interval_str(
-                                timedelta(seconds=(steps_times[i][1] - steps_times[i][0]))
-                            )
-                            + ")"
+                            (
+                                shlex.join(_sysargs)
+                                + "\n  ("
+                                + interval_str(
+                                    timedelta(seconds=(steps_times[i][1] - steps_times[i][0]))
+                                )
+                                + ")"
+                            ),
+                            left_pad=4,
+                            top=False,
                         )
                         + '\n    ' + _msg + '\n'
                     )
@@ -236,23 +240,37 @@ def entry_without_daemon(
                 ]
             )
         )
-    )
+    ).rstrip('\n')
     has_fail = results[-1][0] is False
     fail_ix = len(results) - 1
     fail_sysargs = chained_sysargs[fail_ix] if has_fail else None
     fail_msg = results[-1][1] if has_fail else ''
     fails_msg = (
         'Failed to complete step:\n\n'
-        + make_header(shlex.join(fail_sysargs))
+        + make_header(shlex.join(fail_sysargs), left_pad=4, top=False)
         + '\n    '
         + fail_msg
 
     ) if not results[-1][0] else ''
 
+    duration_summary_msg = make_header(
+        (
+            f"| {len(success_messages)} step"
+            + ('s' if len(success_messages) != 1 else '') 
+            + f" in {interval_str(total_time_delta)} |"
+        ),
+        top=True,
+        top_pad=3,
+        left_pad=4,
+        ruler='-'
+    ) if total_time_delta is not None else ""
+
     msg = (
         successes_msg
-        + ('\n\n' if any_success else '')
+        + ('\n\n' if fails_msg else '')
         + fails_msg
+        + duration_summary_msg
+
     ).rstrip() if len(chained_sysargs) > 1 else results[0][1]
 
     if _systemd_result_path:

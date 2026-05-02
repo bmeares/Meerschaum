@@ -87,3 +87,41 @@ def test_get_data_order(flavor: str):
     )
     assert len(df) == limit
     assert df['id'][0] == 3
+
+
+def test_int_pipe_chunk_interval():
+    """
+    Test that integer pipes with precision correctly scale chunk and backtrack intervals.
+    """
+    import meerschaum as mrsm
+    pipe = mrsm.Pipe(
+        'demo', 'chunksize', 'int',
+        instance='sql:memory',
+        parameters={
+            'columns': {'datetime': 'ts', 'id': 'id'},
+            'dtypes': {'ts': 'int'},
+            'precision': 'ms',
+            'fetch': {'backtrack_minutes': 1440},
+            'verify': {'chunk_minutes': 1440 * 30},
+        },
+    )
+    assert pipe.get_chunk_interval() == 1440 * 30 * 60 * 1000
+    assert pipe.get_backtrack_interval() == 1440 * 60 * 1000
+
+    pipe.precision = 's'
+    assert pipe.get_chunk_interval() == 1440 * 30 * 60
+    assert pipe.get_backtrack_interval() == 1440 * 60
+
+    simple_pipe = mrsm.Pipe(
+        'demo', 'chunksize', 'int_no_precision',
+        instance='sql:memory',
+        parameters={
+            'columns': {'datetime': 'id'},
+            'dtypes': {'id': 'int'},
+            'precision': None,
+            'fetch': {'backtrack_minutes': 100},
+            'verify': {'chunk_minutes': 10000},
+        },
+    )
+    assert simple_pipe.get_chunk_interval() == 10000
+    assert simple_pipe.get_backtrack_interval() == 100

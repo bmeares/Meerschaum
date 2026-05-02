@@ -1442,3 +1442,33 @@ def test_mixed_datetime_dtypes_sql(flavor: str):
     df = downstream_pipe.get_data()
     double_df = double_downstream_pipe.get_data()
     assert df.to_dict() == double_df.to_dict()
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_parametrized_sync_time(flavor: str):
+    """
+    Test that get_sync_time respects params for multiplexed pipes.
+    """
+    conn = conns[flavor]
+    pipe = mrsm.Pipe('test', 'sync_time', 'params', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'sync_time', 'params',
+        instance=conn,
+        columns={'datetime': 'ts', 'id': 'id'},
+    )
+    ts1 = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    ts2 = datetime(2024, 6, 1, tzinfo=timezone.utc)
+    docs = [
+        {'ts': ts1, 'id': 'a', 'val': 1},
+        {'ts': ts2, 'id': 'b', 'val': 2},
+    ]
+    success, msg = pipe.sync(docs, debug=debug)
+    assert success, msg
+
+    sync_time_a = pipe.get_sync_time(params={'id': 'a'}, debug=debug)
+    sync_time_b = pipe.get_sync_time(params={'id': 'b'}, debug=debug)
+
+    assert sync_time_a is not None
+    assert sync_time_b is not None
+    assert sync_time_a < sync_time_b
