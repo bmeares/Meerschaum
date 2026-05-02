@@ -187,10 +187,12 @@ document.addEventListener('DOMContentLoaded', function() {
     function calculate_size() {
         var lh = termOptions.lineHeight || 1.0;
         var dpr = window.devicePixelRatio || 1.0;
-        var measure = document.createElement("div");
+        var measure = document.createElement("span");
         measure.style.fontFamily = termOptions.fontFamily;
         measure.style.fontSize = termOptions.fontSize + "px";
         measure.style.fontKerning = "none";
+        measure.style.lineHeight = "normal";
+        measure.style.display = "inline-block";
         measure.style.position = "absolute";
         measure.style.visibility = "hidden";
         measure.style.whiteSpace = "pre";
@@ -226,6 +228,22 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!event.wasClean && event.code !== 1005) {
           window.terminal_initialized = false;
           reconnectTimeout = setTimeout(init_webterm, 1000);
+        }
+      }
+      // After term.open(), xterm inserts .xterm-screen sized to rows*cellHeight.
+      // Measure it to get xterm's actual cell dimensions and resize to fill the viewport.
+      var screen = xterm_div.querySelector('.xterm-screen');
+      if (screen) {
+        var screenRect = screen.getBoundingClientRect();
+        if (screenRect.height > 0 && screenRect.width > 0) {
+          var actualCellH = screenRect.height / size.rows;
+          var actualCellW = screenRect.width / size.cols;
+          var fitRows = Math.max(2, Math.floor((window.innerHeight - 10) / actualCellH));
+          var fitCols = Math.max(3, Math.floor((window.innerWidth - 10) / actualCellW));
+          if (fitRows !== size.rows || fitCols !== size.cols) {
+            window.terminal.term.resize(fitCols, fitRows);
+            size = {rows: fitRows, cols: fitCols};
+          }
         }
       }
       window.terminal_initialized = true;
