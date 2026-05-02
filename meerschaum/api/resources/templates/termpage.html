@@ -185,23 +185,24 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     function calculate_size() {
+        var lh = termOptions.lineHeight || 1.0;
+        var dpr = window.devicePixelRatio || 1.0;
         var measure = document.createElement("div");
         measure.style.fontFamily = termOptions.fontFamily;
         measure.style.fontSize = termOptions.fontSize + "px";
-        measure.style.lineHeight = "1";
+        measure.style.fontKerning = "none";
         measure.style.position = "absolute";
         measure.style.visibility = "hidden";
         measure.style.whiteSpace = "pre";
-        measure.innerText = "W";
+        measure.innerText = "W".repeat(32);
         document.body.appendChild(measure);
-
-        var rect = measure.getBoundingClientRect();
-        var termColWidth = rect.width || 10;
-        var termRowHeight = Math.ceil(termOptions.fontSize * (termOptions.lineHeight || 1.0));
+        // Mirror xterm.js v6 CharSizeService + DimensionService formulas exactly
+        var charWidth = measure.offsetWidth / 32;
+        var charHeight = measure.offsetHeight;
         document.body.removeChild(measure);
-
-        var rows = Math.max(2, Math.floor((window.innerHeight - 10) / termRowHeight));
-        var cols = Math.max(3, Math.floor((window.innerWidth - 10) / termColWidth));
+        var cellHeight = Math.floor(Math.ceil(charHeight * dpr) * lh) / dpr;
+        var rows = Math.max(2, Math.floor((window.innerHeight - 10) / cellHeight));
+        var cols = Math.max(3, Math.floor((window.innerWidth - 10) / charWidth));
         return {rows: rows, cols: cols};
     }
 
