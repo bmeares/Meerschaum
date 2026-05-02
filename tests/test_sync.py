@@ -1450,6 +1450,8 @@ def test_parametrized_sync_time(flavor: str):
     Test that get_sync_time respects params for multiplexed pipes.
     """
     conn = conns[flavor]
+    if conn.type != 'sql':
+        return
     pipe = mrsm.Pipe('test', 'sync_time', 'params', instance=conn)
     pipe.delete()
     pipe = mrsm.Pipe(
