@@ -30,6 +30,7 @@ def get_pipes(
     metric_keys: Union[str, List[str], None] = None,
     location_keys: Union[str, List[str], None] = None,
     tags: Optional[List[str]] = None,
+    datetime_dtypes: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     mrsm_instance: Union[str, InstanceConnector, None] = None,
     instance: Union[str, InstanceConnector, None] = None,
@@ -58,7 +59,12 @@ def get_pipes(
         String or list of location keys. See `connector_keys` for formatting.
 
     tags: Optional[List[str]], default None
-         If provided, only include pipes with these tags.
+        If provided, only include pipes with these tags.
+
+    datetime_dtypes: Optional[List[str]], default None
+        If provided, only include pipes with the corresponding `datetime` axis dtypes.
+        Accepted values are `datetime`, `int`, `None` (or `null`, etc.).
+        May be negated by `_`.
 
     params: Optional[Dict[str, Any]], default None
         Dictionary of additional parameters to search by.
@@ -127,13 +133,26 @@ def get_pipes(
     {'gvl': Pipe('sql:main', 'weather')}
     ```
     """
-
     import json
     from collections import defaultdict
     from meerschaum.config import get_config
+    from meerschaum.config.static import STATIC_CONFIG
     from meerschaum.utils.warnings import error
-    from meerschaum.utils.misc import filter_keywords
+    from meerschaum.utils.misc import filter_keywords, separate_negation_values
     from meerschaum.utils.pool import get_pool
+    from meerschaum.utils.pipes import replace_pipes_syntax
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.dtypes import value_is_null, get_current_timestamp
+    from meerschaum import Pipe
+
+    negation_prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
+    if datetime_dtypes:
+        if isinstance(datetime_dtypes, str):
+            datetime_dtypes = [datetime_dtypes]
+        for _dt in datetime_dtypes:
+            _clean = str(_dt).lstrip(negation_prefix).lower()
+            if _clean not in ('datetime', 'int') and not value_is_null(_clean):
+                error(f"Invalid datetime dtype '{_dt}'.")
 
     if connector_keys is None:
         connector_keys = []
@@ -171,7 +190,6 @@ def get_pipes(
             error(f"Invalid instance connector: {mrsm_instance}")
         connector = mrsm_instance
     if debug:
-        from meerschaum.utils.debug import dprint
         dprint(f"Using instance connector: {connector}")
     if not connector:
         error(f"Could not create connector from keys: '{mrsm_instance}'")
@@ -190,12 +208,17 @@ def get_pipes(
     )
     if result is None:
         error("Unable to build pipes!")
+    result_items: List[Tuple] = (
+        list(result.items())
+        if isinstance(result, dict)
+        else [(None, keys_tuple) for keys_tuple in result]
+    )
 
     ### Populate the `pipes` dictionary with Pipes based on the keys
     ### obtained from the chosen `method`.
-    from meerschaum import Pipe
-    pipes = {}
-    for keys_tuple in result:
+    in_dtypes, ex_dtypes = separate_negation_values(datetime_dtypes or [])
+    pipes: PipesDict = {}
+    for pipe_id, keys_tuple in result_items:
         ck, mk, lk = keys_tuple[0], keys_tuple[1], keys_tuple[2]
         pipe_tags_or_parameters = keys_tuple[3] if len(keys_tuple) == 4 else None
         pipe_parameters = (
@@ -215,12 +238,6 @@ def get_pipes(
             )
         )
 
-        if ck not in pipes:
-            pipes[ck] = {}
-
-        if mk not in pipes[ck]:
-            pipes[ck][mk] = {}
-
         pipe = Pipe(
             ck, mk, lk,
             mrsm_instance = connector,
@@ -230,12 +247,63 @@ def get_pipes(
             **filter_keywords(Pipe, **kw)
         )
         pipe.__dict__['_tags'] = pipe_tags
+        if pipe_id is not None:
+            pipe._cache_value('_id', pipe_id, memory_only=True, debug=debug)
+        if pipe_parameters is not None:
+            now = get_current_timestamp('ms', as_int=True) / 1000
+            full_attributes = {
+                'connector_keys': ck,
+                'metric_key': mk,
+                'location_key': lk,
+                'parameters': pipe_parameters,
+            }
+            if pipe_id is not None:
+                full_attributes['pipe_id'] = pipe_id
+            pipe._cache_value('attributes', full_attributes, memory_only=True, debug=debug)
+            pipe._cache_value('_attributes_sync_time', now, memory_only=True, debug=debug)
+        if datetime_dtypes:
+            if pipe_parameters is None:
+                pipe_parameters = pipe.get_parameters(debug=debug)
+            columns_val = (pipe_parameters or {}).get('columns', {}) or {}
+            if isinstance(columns_val, str) and 'Pipe(' in columns_val:
+                columns_val = replace_pipes_syntax(columns_val)
+
+            dt_col = columns_val.get('datetime', None)
+            dt_typ = (
+                ((pipe_parameters or {}).get('dtypes', None) or {}).get(dt_col, None)
+                if dt_col
+                else None
+            )
+
+            def _dtype_matches(clean_d):
+                if not dt_col:
+                    return value_is_null(clean_d)
+                return (
+                    (clean_d == 'int' and 'int' in str(dt_typ).lower())
+                    or
+                    (clean_d == 'datetime' and 'int' not in str(dt_typ).lower())
+                )
+
+            in_match = not in_dtypes or any(_dtype_matches(d) for d in in_dtypes)
+            ex_match = bool(ex_dtypes and any(_dtype_matches(d) for d in ex_dtypes))
+            keep_pipe = in_match and not ex_match
+
+            if not keep_pipe:
+                continue
+
+        if ck not in pipes:
+            pipes[ck] = {}
+
+        if mk not in pipes[ck]:
+            pipes[ck][mk] = {}
+
+
         pipes[ck][mk][lk] = pipe
 
     if not as_list and not as_tags_dict:
         return pipes
 
-    from meerschaum.utils.misc import flatten_pipes_dict
+    from meerschaum.utils.pipes import flatten_pipes_dict
     pipes_list = flatten_pipes_dict(pipes)
     if as_list:
         return pipes_list
@@ -259,7 +327,7 @@ def fetch_pipes_keys(
     method: str,
     connector: 'mrsm.connectors.InstanceConnector',
     **kw: Any
-) -> List[Tuple[str, str, str]]:
+) -> Union[List[Tuple[str, str, str]], List[Tuple[str, str, str, Union[str, Dict[str, Any]]]]]:
     """
     Fetch keys for pipes according to a method.
 
@@ -292,6 +360,7 @@ def fetch_pipes_keys(
     -------
     A list of tuples of strings (or `None` for `location_key`)
     in the form `(connector_keys, metric_key, location_key)`.
+    Optionally the parameters or tags may be returned alongside the keys.
     
     Examples
     --------

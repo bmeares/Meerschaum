@@ -56,6 +56,7 @@ class PipeModel(BasePipeModel):
 class FetchPipesKeysResponseModel(
     RootModel[
         Union[
+            Dict[str, List[Any]],
             List[Tuple[ConnectorKeysModel, MetricKeyModel, LocationKeyModel]],
             List[Tuple[ConnectorKeysModel, MetricKeyModel, LocationKeyModel, Dict[str, Any]]],
             List[Tuple[ConnectorKeysModel, MetricKeyModel, LocationKeyModel, List[str]]],
@@ -63,7 +64,7 @@ class FetchPipesKeysResponseModel(
     ]
 ):
     """
-    A list of tuples containing connector, metric, and location keys.
+    Pipes' keys as a list of tuples or a dict mapping pipe IDs (as strings) to key lists.
     """
     model_config = ConfigDict(
         json_schema_extra={

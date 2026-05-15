@@ -122,9 +122,19 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     debug: bool = False,
     **kwargs: Any
-) -> List[Tuple[str, str, str]]:
+) -> Union[
+    List[Tuple[str, str, str]],
+    List[Tuple[str, str, str, Union[Dict[str, Any], List[str]]]],
+    Dict[Union[int, str], Tuple[str, str, str]],
+    Dict[Union[int, str], Tuple[str, str, str, Union[Dict[str, Any], List[str]]]],
+]:
     """
-    Return a list of tuples for the registered pipes' keys according to the provided filters.
+    Return registered pipes' keys according to the provided filters.
+
+    May return either a list of key tuples or a dictionary mapping pipe IDs to key tuples.
+    When returning a dictionary, the key is the pipe's unique ID (int or str).
+    Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4
+    with parameters or tags appended as the fourth element.
 
     Parameters
     ----------
@@ -142,19 +152,19 @@ def fetch_pipes_keys(
 
     Returns
     -------
-    A list of connector, metric, and location keys in tuples.
-    You may return the string "None" for location keys in place of nulls.
+    A list of tuples or a dictionary mapping pipe IDs to tuples.
+    You may return the string `"None"` for location keys in place of nulls.
 
     Examples
     --------
     >>> import meerschaum as mrsm
     >>> conn = mrsm.get_connector('example:demo')
-    >>> 
+    >>>
     >>> pipe_a = mrsm.Pipe('a', 'demo', tags=['foo'], instance=conn)
     >>> pipe_b = mrsm.Pipe('b', 'demo', tags=['bar'], instance=conn)
     >>> pipe_a.register()
     >>> pipe_b.register()
-    >>> 
+    >>>
     >>> conn.fetch_pipes_keys(['a', 'b'])
     [('a', 'demo', 'None'), ('b', 'demo', 'None')]
     >>> conn.fetch_pipes_keys(metric_keys=['demo'])
@@ -327,7 +337,6 @@ def clear_pipe(
     """
     raise NotImplementedError
 
-@abc.abstractmethod
 def get_pipe_data(
     self,
     pipe: mrsm.Pipe,
@@ -367,6 +376,86 @@ def get_pipe_data(
     -------
     The target table's data as a DataFrame.
     """
+    if type(self).get_pipe_docs is get_pipe_docs:
+        raise NotImplementedError(
+            f"Missing `get_pipe_data()` or `get_pipe_docs()` for {type(self)}."
+        )
+
+    docs = self.get_pipe_docs(
+        pipe=pipe,
+        select_columns=select_columns,
+        omit_columns=omit_columns,
+        begin=begin,
+        end=end,
+        params=params,
+        debug=debug,
+        **kwargs
+    )
+    if not docs:
+        return None
+
+    pd = mrsm.attempt_import('pandas')
+    try:
+        return pd.DataFrame(docs)
+    except Exception as e:
+        from meerschaum.utils.warnings import warn
+        warn(f"Cannot build DataFrame from pipe docs:\n{e}")
+    
+    return None
+
+def get_pipe_docs(
+    self,
+    pipe: mrsm.Pipe,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Union[datetime, int, None] = None,
+    end: Union[datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> list[dict[str, Any]]:
+    """
+    Return a pipe's data as a list of documents.
+    Defaults to `get_pipe_data().to_dict(orient='records')`.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe with the target table from which to read.
+
+    select_columns: list[str] | None, default None
+        If provided, only select these given columns.
+        Otherwise select all available columns (i.e. `SELECT *`).
+
+    omit_columns: list[str] | None, default None
+        If provided, remove these columns from the selection.
+
+    begin: datetime | int | None, default None
+        The earliest `datetime` value to search from (inclusive).
+
+    end: datetime | int | None, default None
+        The lastest `datetime` value to search from (exclusive).
+
+    params: dict[str | str] | None, default None
+        Additional filters to apply to the query.
+
+    Returns
+    -------
+    The target table's data as a list of dictionaries.
+    """
+    df = self.get_pipe_data(
+        pipe=pipe,
+        select_columns=select_columns,
+        omit_columns=omit_columns,
+        begin=begin,
+        end=end,
+        params=params,
+        debug=debug,
+        **kwargs
+    )
+    if df is None or df.empty:
+        return []
+    return df.to_dict(orient='records')
 
 @abc.abstractmethod
 def get_sync_time(

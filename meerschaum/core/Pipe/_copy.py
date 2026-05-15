@@ -65,7 +65,7 @@ def copy_to(
         instance=instance_keys,
     )
 
-    new_pipe_is_registered = new_pipe.get_id() is not None
+    new_pipe_is_registered = new_pipe.id is not None
 
     metadata_method = new_pipe.edit if new_pipe_is_registered else new_pipe.register
     metadata_success, metadata_msg = metadata_method(debug=debug)

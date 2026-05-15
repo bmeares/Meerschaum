@@ -328,6 +328,10 @@ def get_dtypes(
         if infer
         else {}
     )
+    if debug and infer:
+        dprint(f"Remote dtypes for {self}:")
+        mrsm.pprint(remote_dtypes)
+
     patched_dtypes = apply_patch_to_config((remote_dtypes or {}), (configured_dtypes or {}))
 
     dt_col = parameters.get('columns', {}).get('datetime', None)
@@ -665,8 +669,10 @@ def id(self) -> Union[int, str, uuid.UUID, None]:
     """
     Fetch and cache a pipe's ID.
     """
-    _id = self._get_cached_value('_id', debug=self.debug)
-    if not _id:
+    _id = self.__dict__.get('_id', None)
+    if _id is None:
+        _id = self._get_cached_value('_id', debug=self.debug)
+    if _id is None:
         _id = self.get_id(debug=self.debug)
         if _id is not None:
             self._cache_value('_id', _id, debug=self.debug)

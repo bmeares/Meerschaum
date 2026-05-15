@@ -71,23 +71,45 @@ def _copy_pipes(
     """
     from meerschaum import get_pipes, Pipe
     from meerschaum.connectors import instance_types
-    from meerschaum.utils.prompt import prompt, yes_no, get_connectors_completer
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.prompt import prompt, yes_no, get_connectors_completer, choose
+    from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.formatting._shell import clear_screen
-    pipes = get_pipes(as_list=True, **kw)
+    from meerschaum.utils.formatting._pipes import pprint_pipes
+    from meerschaum.utils.pipes import pipes_dict_from_list
+    pipes = get_pipes(as_list=True, cache=False, debug=debug, **kw)
+    change_instance_only = False
+    instance_keys = None
+    if len(pipes) > 1:
+        clear_screen(debug=debug)
+        pprint_pipes(pipes_dict_from_list(pipes))
+        if force or yes_no(
+            f"Change only the instance keys for copies of the above {len(pipes)} pipes?",
+            noask=noask,
+            yes=yes,
+            default='y',
+        ):
+            instance_keys = prompt(
+                "Instance keys for the new pipes:",
+                completer=get_connectors_completer(*instance_types),
+            )
+            change_instance_only = True
     successes = 0
-    for pipe in pipes:
+    for i, pipe in enumerate(pipes):
+        info(f"Copying {pipe} ({i+1} / {len(pipes)})...")
         ck = prompt(
             f"Connector keys for copy of {pipe}:",
             default=pipe.connector_keys,
             completer=get_connectors_completer(),
+        ) if not change_instance_only else pipe.connector_keys
+        mk = (
+            prompt(f"Metric key for copy of {pipe}:", default=pipe.metric_key)
+            if not change_instance_only else pipe.metric_key
         )
-        mk = prompt(f"Metric key for copy of {pipe}:", default=pipe.metric_key)
         lk = prompt(
             f"Location key for copy of {pipe} ('None' to omit):",
             default=str(pipe.location_key),
-        )
+        ) if not change_instance_only else str(pipe.location_key)
         if lk in ('', 'None', '[None]'):
             lk = None
 
@@ -95,46 +117,73 @@ def _copy_pipes(
             f"Meerschaum instance for copy of {pipe}:",
             default=pipe.instance_keys,
             completer=get_connectors_completer(*instance_types),
-        )
+        ) if not change_instance_only else instance_keys
         new_pipe = Pipe(
             ck, mk, lk,
             instance=instance_keys,
             parameters=pipe.get_parameters(apply_symlinks=False),
+            cache=False,
         )
 
-        if new_pipe.get_id(debug=debug) is not None:
-            warn(f"{new_pipe} already exists. Skipping...", stack=False)
-            continue
-        _register_success_tuple = new_pipe.register(debug=debug)
-        if not _register_success_tuple[0]:
-            warn(f"Failed to register new {new_pipe}.", stack=False)
-            continue
+        if new_pipe.id is not None:
+            warn(f"{new_pipe} already exists.", stack=False)
+            if force or yes_no("Continue copying?", yes=yes, noask=noask, default='n'):
+                edit_success, edit_msg = new_pipe.edit(debug=debug)
+                if not edit_success:
+                    warn(f"Failed to copy attributes to {new_pipe}:\n{edit_msg}", stack=False)
+                    continue
+            else:
+                continue
+        else:
+            register_success, register_msg = new_pipe.register(debug=debug)
+            if not register_success:
+                warn(f"Failed to register new {new_pipe}:\n{register_msg}", stack=False)
+                continue
 
         clear_screen(debug=debug)
         successes += 1
         print_tuple(
-            (True, f"Successfully copied attributes of {pipe} " + f" into {new_pipe}.")
+            (True, f"Successfully copied attributes of {pipe}" + f" into {new_pipe}.")
         )
-        if (
-            force or yes_no(
-                (
-                    f"Do you want to copy data from {pipe} into {new_pipe}?\n\n"
-                    + "If you specified `--begin`, `--end` or `--params`, data will be filtered."
-                ),
-                    noask=noask,
-                    yes=yes,
-                    default='n',
-                )
-        ):
-            new_pipe.sync(
-                pipe.get_data(
-                    debug=debug,
-                    as_iterator=True,
-                    **kw
-                ),
-                debug=debug,
-                **kw
+        if pipe.exists(debug=debug):
+            sync_choice = choose(
+                f"How you want to sync data into {new_pipe}?",
+                [
+                    ('nothing', 'Do not copy data (attributes only).'),
+                    ('backtrack', 'Seed with recent backtrack data.'),
+                    ('all', 'Sync all data.'),
+                    ('filter', 'Sync data fetched with filters (begin, end, params).'),
+                ],
+                default='nothing',
+                noask=noask,
+                as_indices=True,
+                numeric=True,
             )
+
+            if sync_choice != 'nothing':
+                filter_kw = {}
+                if sync_choice == 'filter':
+                    from meerschaum._internal.arguments._parse_arguments import parse_line
+                    filter_line = prompt(
+                        "Enter filter flags"
+                        " (e.g. --begin 2024-01-01 --end 2024-12-31 --params '{\"foo\": \"bar\"}'):",
+                        noask=noask,
+                    )
+                    parsed = parse_line(filter_line)
+                    for key in ('begin', 'end', 'params'):
+                        if key in parsed:
+                            filter_kw[key] = parsed[key]
+
+                sync_data = (
+                    pipe.get_backtrack_data(debug=debug)
+                    if sync_choice == 'backtrack'
+                    else pipe.get_data(debug=debug, as_iterator=True, **filter_kw)
+                )
+                sync_success, sync_msg = new_pipe.sync(sync_data, debug=debug, **kw)
+                print_tuple((sync_success, sync_msg))
+                if not sync_success:
+                    warn(f"Failed to copy data from {pipe} to {new_pipe}.", stack=False)
+                    successes -= 1
 
     msg = (
         "No pipes were copied." if successes == 0

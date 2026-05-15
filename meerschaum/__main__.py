@@ -75,7 +75,11 @@ def _exit(return_code: int = 0, old_cwd: str = None) -> None:
 def _close_pools():
     """Close multiprocessing pools before exiting."""
     ### Final step: close global pools.
-    from meerschaum.utils.pool import get_pools
+    try:
+        from meerschaum.utils.pool import get_pools
+    except (ImportError, ModuleNotFoundError):
+        return
+
     for pool in get_pools().values():
         try:
             pool.close()

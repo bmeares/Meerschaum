@@ -33,7 +33,7 @@ def register_pipe(
     from meerschaum.connectors.sql.tables import get_tables
     pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
-    if pipe.get_id(debug=debug) is not None:
+    if pipe.id is not None:
         return False, f"{pipe} is already registered."
 
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
@@ -148,11 +148,11 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False,
-) -> List[
-        Tuple[str, str, Union[str, None], Dict[str, Any]]
+) -> Dict[
+        int, Tuple[str, str, Union[str, None], Dict[str, Any]]
     ]:
     """
-    Return a list of tuples corresponding to the parameters provided.
+    Return a dictionary mapping pipe IDs to key tuples corresponding to the parameters provided.
 
     Parameters
     ----------
@@ -231,7 +231,7 @@ def fetch_pipes_keys(
             parameters[col] = vals
 
     if not table_exists('mrsm_pipes', self, schema=self.instance_schema, debug=debug):
-        return []
+        return {}
 
     from meerschaum.connectors.sql.tables import get_tables
     pipes_tbl = get_tables(mrsm_instance=self, create=False, debug=debug)['pipes']
@@ -260,6 +260,7 @@ def fetch_pipes_keys(
 
     select_cols = (
         [
+            pipes_tbl.c.pipe_id,
             pipes_tbl.c.connector_keys,
             pipes_tbl.c.metric_key,
             pipes_tbl.c.location_key,
@@ -337,14 +338,23 @@ def fetch_pipes_keys(
             self.execute(q).fetchall()
             if self.flavor != 'duckdb'
             else [
-                (row['connector_keys'], row['metric_key'], row['location_key'])
+                (
+                    row['pipe_id'],
+                    row['connector_keys'],
+                    row['metric_key'],
+                    row['location_key'],
+                    row['parameters'],
+                )
                 for row in self.read(q).to_dict(orient='records')
             ]
         )
     except Exception as e:
         error(str(e))
 
-    return rows
+    return {
+        row[0]: row[1:]
+        for row in rows
+    }
 
 
 def create_pipe_indices(
@@ -1226,6 +1236,41 @@ def get_pipe_data(
     return pd.concat(chunks)
 
 
+def get_pipe_docs(
+    self,
+    pipe: mrsm.Pipe,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Union[datetime, str, None] = None,
+    end: Union[datetime, str, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    order: str = 'asc',
+    limit: Optional[int] = None,
+    debug: bool = False,
+    **kw: Any
+) -> List[Dict[str, Any]]:
+    """
+    Return a pipe's data as a list of dictionaries, bypassing pandas overhead.
+    """
+    query = self.get_pipe_data_query(
+        pipe=pipe,
+        select_columns=select_columns,
+        omit_columns=omit_columns,
+        begin=begin,
+        end=end,
+        params=params,
+        order=order,
+        limit=limit,
+        debug=debug,
+    )
+    if query is None:
+        return []
+    result = self.exec(query, silent=True, debug=debug)
+    if result is None:
+        return []
+    return [dict(row) for row in result.mappings().fetchall()]
+
+
 def get_pipe_data_query(
     self,
     pipe: mrsm.Pipe,
@@ -1512,7 +1557,7 @@ def get_pipe_attributes(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
-    if pipe.get_id(debug=debug) is None:
+    if pipe.id is None:
         return {}
 
     pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
@@ -1709,7 +1754,7 @@ def sync_pipe(
     pipe_name = sql_item_name(pipe.target, self.flavor, schema=self.get_pipe_schema(pipe))
     dtypes = pipe.get_dtypes(debug=debug)
 
-    if not pipe.temporary and not pipe.get_id(debug=debug):
+    if not pipe.temporary and not pipe.id:
         register_tuple = pipe.register(debug=debug)
         if not register_tuple[0]:
             return register_tuple

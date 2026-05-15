@@ -1,12 +1,31 @@
 # 🪵 Changelog
 
-## 3.2.0 Releases
+## 3.3.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.3.0
+
+- **Add `--dtype` flag.**  
+  The flag `--dtype` (explicitly `--datetime-dtypes` or `--datetime-dtype`) allows filtering pipes based on the data type of the `datetime` axis. Accepted values are `datetime`, `int`, `None`. This behaves similarly to keys selectors: multiple values may be provided, and values may be negated:
+
+  ```bash
+  mrsm show pipes --dtype int
+  mrsm show pipes --dtype int None
+  mrsm show pipes --dtype _datetime
+  ```
+
+- **Improve `copy pipes` flow.**  
+  The `copy pipes` action now better handles batches of pipes when the only key to be changed is the instance.
+
+- **Improve caching performance.**  
+  Better cache handling now reduces round-trips when fetching pipes' metadata.
+
+## 3.2.0 Releases
+
 ### v3.2.4
 
-- **Improvde default chunksize for integer pipes.**  
+- **Improve default chunksize for integer pipes.**  
   Pipes with integer datetime columns now default to appropriately sized chunks based on the `precision` unit.
 
   ```python

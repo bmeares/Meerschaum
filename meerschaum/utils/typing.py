@@ -78,9 +78,9 @@ collections.Iterable = collections.abc.Iterable
 SuccessTuple = Tuple[bool, str]
 InstanceConnector = 'meerschaum.connectors.InstanceConnector'
 PipesDict = Dict[
-    str, Dict[                           ### connector_keys : metrics
-        str, Dict[                       ### metric_key     : locations
-            str, 'meerschaum.Pipe'       ### location_key   : Pipe
+    str, Dict[                                       ### connector_keys : metrics
+        str, Dict[                                   ### metric_key     : locations
+            Union[str, None], 'meerschaum.Pipe'      ### location_key   : Pipe
         ]
     ]
 ]

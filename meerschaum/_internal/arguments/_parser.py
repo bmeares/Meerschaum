@@ -288,6 +288,10 @@ groups['pipes'].add_argument(
 groups['pipes'].add_argument(
     '-t', '--tags', nargs='+', help="Only include pipes with these tags.",
 )
+groups['pipes'].add_argument(
+    '--datetime-dtypes', '--datetime-dtype', '--dtype', nargs='+',
+    help="Only select pipes with the corresponding datetime dtype (`datetime` or `int`)."
+)
 
 
 ### Sync options

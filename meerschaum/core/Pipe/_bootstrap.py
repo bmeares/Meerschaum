@@ -61,7 +61,7 @@ def bootstrap(
 
     _clear = get_config('shell', 'clear_screen', patch=True)
 
-    if self.get_id(debug=debug) is not None:
+    if self.id is not None:
         delete_tuple = self.delete(debug=debug)
         if not delete_tuple[0]:
             return delete_tuple

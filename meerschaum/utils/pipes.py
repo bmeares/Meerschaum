@@ -242,7 +242,10 @@ def replace_pipes_syntax(text: str, _pipe=None) -> Any:
     resolved_values = {}
     for placeholder, match in placeholders.items():
         try:
-            resolved_values[placeholder] = _evaluate_pipe_access_chain_from_match(match, _pipe=_pipe)
+            resolved_values[placeholder] = _evaluate_pipe_access_chain_from_match(
+                match,
+                _pipe=_pipe,
+            )
         except Exception:
             import traceback
             warn(f"Failed to resolve pipe syntax '{match.group(0)}': {traceback.format_exc()}")
@@ -333,12 +336,72 @@ def is_pipe_registered(
     -------
     A bool indicating whether the pipe is inside the dictionary.
     """
-    from meerschaum.utils.debug import dprint
     ck, mk, lk = pipe.connector_keys, pipe.metric_key, pipe.location_key
-    if debug:
-        dprint(f'{ck}, {mk}, {lk}')
-        dprint(f'{pipe}, {pipes}')
     try:
         return ck in pipes and mk in pipes[ck] and lk in pipes[ck][mk]
-    except Exception:
+    except KeyError:
         return False
+
+
+def pipes_dict_from_list(pipes_list: list[mrsm.Pipe]) -> PipesDict:
+    """
+    Return a PipesDict from a list of pipes.
+    Note that all pipes must share the same instance connector.
+
+    Examples
+    --------
+    >>> pipes_list = [mrsm.Pipe('a', 'b'), mrsm.Pipe('a', 'b', 'c')]
+    >>> pipes_dict_from_list(pipes)
+    {
+        'a': {
+            'b': {
+                None: Pipe('a', 'b')
+                'c': Pipe('a', 'b', 'c')
+            }
+        }
+    }
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.misc import items_str
+    if not pipes_list:
+        return {}
+
+    instance_keys = pipes_list[0].instance_keys
+    same_pipes = [pipe for pipe in pipes_list if pipe.instance_keys == instance_keys]
+    diff_pipes = [pipe for pipe in pipes_list if pipe.instance_keys != instance_keys]
+    if diff_pipes:
+        warn(
+            f"Skipping pipes with instance keys different from '{instance_keys}':\n"
+            f"{items_str(diff_pipes, quotes=False)}"
+        )
+
+    pipes_dict: PipesDict = {}
+    for pipe in same_pipes:
+        if pipe.connector_keys not in pipes_dict:
+            pipes_dict[pipe.connector_keys] = {}
+        if pipe.metric_key not in pipes_dict[pipe.connector_key]:
+            pipes_dict[pipe.connector_keys][pipe.metric_key] = {}
+        pipes_dict[pipe.connector_keys][pipe.metric_key][pipe.location_key] = pipe
+
+    return pipes_dict
+
+
+def flatten_pipes_dict(pipes_dict: PipesDict) -> list[mrsm.Pipe]:
+    """
+    Convert the standard pipes dictionary into a list.
+
+    Parameters
+    ----------
+    pipes_dict: PipesDict
+        The pipes dictionary to be flattened.
+
+    Returns
+    -------
+    A list of `Pipe` objects.
+
+    """
+    pipes_list = []
+    for ck in pipes_dict.values():
+        for mk in ck.values():
+            pipes_list.extend(list(mk.values()))
+    return pipes_list
