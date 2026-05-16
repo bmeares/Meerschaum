@@ -30,6 +30,8 @@ def _get_in_memory_key(cache_key: str) -> str:
     )
 
 
+_instance_hash_cache: dict[str, str] = {}
+
 def _get_instance_hash(pipe: mrsm.Pipe) -> str:
     """
     Return a short hash of the instance connector's stable attributes.
@@ -43,13 +45,19 @@ def _get_instance_hash(pipe: mrsm.Pipe) -> str:
     if connector is None:
         return 'none'
 
+    cache_key = str(id(connector))
+    if cache_key in _instance_hash_cache:
+        return _instance_hash_cache[cache_key]
+
     attrs = {
         k: v
         for k, v in connector.__dict__.items()
         if not k.startswith('_') and isinstance(v, (str, int, float, bool, type(None)))
     }
     attrs_str = json.dumps(attrs, sort_keys=True, default=str)
-    return hashlib.md5(attrs_str.encode()).hexdigest()[:8]
+    result = hashlib.md5(attrs_str.encode()).hexdigest()[:8]
+    _instance_hash_cache[cache_key] = result
+    return result
 
 
 def _get_cache_conn_cache_key(pipe: mrsm.Pipe, cache_key: str) -> str:
@@ -165,7 +173,7 @@ def _invalidate_cache(
     cache_dir_path = self._get_cache_dir_path()
     cache_keys = self._get_cache_keys(debug=debug)
     for cache_key in cache_keys:
-        if cache_keys == 'attributes':
+        if cache_key == 'attributes':
             continue
         self._clear_cache_key(cache_key, debug=debug)
 

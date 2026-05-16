@@ -669,9 +669,7 @@ def id(self) -> Union[int, str, uuid.UUID, None]:
     """
     Fetch and cache a pipe's ID.
     """
-    _id = self.__dict__.get('_id', None)
-    if _id is None:
-        _id = self._get_cached_value('_id', debug=self.debug)
+    _id = self._get_cached_value('_id', debug=self.debug)
     if _id is None:
         _id = self.get_id(debug=self.debug)
         if _id is not None:
