@@ -518,6 +518,16 @@ def get_pipe_index_names(self, pipe: mrsm.Pipe) -> Dict[str, str]:
         for index_name, ix in seen_index_names.items()
     }
 
+def _is_non_indexable_col(col: str, existing_cols_types: dict, flavor: str) -> bool:
+    """Return True if a column cannot be directly indexed on the given flavor."""
+    col_db_type = existing_cols_types.get(col, '').upper()
+    if flavor in ('mysql', 'mariadb'):
+        return 'TEXT' in col_db_type or 'BLOB' in col_db_type
+    if flavor == 'mssql':
+        return col_db_type in ('TEXT', 'NTEXT') or 'MAX' in col_db_type
+    return False
+
+
 def get_create_index_queries(
     self,
     pipe: mrsm.Pipe,
@@ -821,7 +831,11 @@ def get_create_index_queries(
             )
             pass
         else: ### mssql, sqlite, etc.
-            id_query = f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})"
+            id_query = (
+                None
+                if _is_non_indexable_col(_id, existing_cols_types, self.flavor)
+                else f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})"
+            )
 
         if id_query is not None:
             index_queries[_id] = id_query if isinstance(id_query, list) else [id_query]
@@ -842,6 +856,13 @@ def get_create_index_queries(
             cols = [cols]
         if ix_key == 'unique' and upsert:
             continue
+        if self.flavor in ('mysql', 'mariadb', 'mssql'):
+            cols = [
+                col for col in cols
+                if col and not _is_non_indexable_col(
+                    col, existing_cols_types, self.flavor
+                )
+            ]
         cols_names = [sql_item_name(col, self.flavor, None) for col in cols if col]
         if not cols_names:
             continue

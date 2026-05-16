@@ -984,12 +984,12 @@ def target(self) -> str:
             default_targets.add(truncated_target)
             warned_target = self.__dict__.get('_warned_target', False)
             if truncated_target != _target and not warned_target:
-                if not warned_target:
+                if self.instance_connector.flavor not in ('oracle', 'mysql', 'mariadb'):
                     warn(
                         f"The target '{_target}' is too long for '{self.instance_connector.flavor}', "
                         + f"will use {truncated_target} instead."
                     )
-                    self.__dict__['_warned_target'] = True
+                self.__dict__['_warned_target'] = True
                 _target = truncated_target
 
         if _target in default_targets:

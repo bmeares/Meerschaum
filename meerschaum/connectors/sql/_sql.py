@@ -208,10 +208,11 @@ def read(
     ):
         truncated_table_name = truncate_item_name(str(query_or_table), self.flavor)
         if truncated_table_name != str(query_or_table) and not silent:
-            warn(
-                f"Table '{query_or_table}' is too long for '{self.flavor}',"
-                + f" will instead read the table '{truncated_table_name}'."
-            )
+            if self.flavor not in ('oracle', 'mysql', 'mariadb'):
+                warn(
+                    f"Table '{query_or_table}' is too long for '{self.flavor}',"
+                    + f" will instead read the table '{truncated_table_name}'."
+                )
 
         query_or_table = sql_item_name(str(query_or_table), self.flavor, schema)
         if debug:
@@ -1001,10 +1002,11 @@ def to_sql(
     ### Check if the name is too long.
     truncated_name = truncate_item_name(name, self.flavor)
     if name != truncated_name:
-        warn(
-            f"Table '{name}' is too long for '{self.flavor}',"
-            f" will instead create the table '{truncated_name}'."
-        )
+        if self.flavor not in ('oracle', 'mysql', 'mariadb'):
+            warn(
+                f"Table '{name}' is too long for '{self.flavor}',"
+                f" will instead create the table '{truncated_name}'."
+            )
 
     ### filter out non-pandas args
     import inspect
