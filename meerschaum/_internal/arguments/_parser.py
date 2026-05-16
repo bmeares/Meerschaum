@@ -383,6 +383,14 @@ groups['sync'].add_argument(
     )
 )
 groups['sync'].add_argument(
+    '--sync-data', choices=['nothing', 'backtrack', 'all', 'filter'],
+    help=(
+        "When copying pipes, specify what data to sync into destination pipes. "
+        "'filter' uses --begin, --end, and --params to restrict the range. "
+        "Defaults to 'nothing' (copy pipe definitions only)."
+    ),
+)
+groups['sync'].add_argument(
     '--cache', action='store_true',
     help=(
         "Sync pipes' metadata to disk."

@@ -16,7 +16,36 @@ This is the current release cycle, so stay tuned for future releases!
   ```
 
 - **Improve `copy pipes` flow.**  
-  The `copy pipes` action now better handles batches of pipes when the only key to be changed is the instance.
+  The `copy pipes` action has been significantly improved for both interactive and scripted use cases.
+
+  **Non-interactive batch copying:** Specify the destination instance as the first positional argument to skip all prompts. Combined with `--force` and `--sync-data`, pipes can now be fully scripted:
+
+  ```bash
+  # Copy pipe definitions only (skip existing pipes)
+  mrsm copy pipes sql:dest -i sql:src
+
+  # Overwrite existing pipes and copy all data
+  mrsm copy pipes sql:dest -i sql:src --force --sync-data all
+
+  # Overwrite and sync with a date filter (--begin/--end imply filter mode automatically)
+  mrsm copy pipes sql:dest -i sql:src --force --begin 2024-01-01
+  ```
+
+  **New `--sync-data` flag:** 
+    Controls what data is synced when copying destination pipes. Accepted values are `nothing` (default), `backtrack`, `all`, and `filter`. When `--begin`, `--end`, or `--params` are provided without `--sync-data`, filter mode is selected automatically.
+
+  **Reduced interactive prompts for batches:**  
+    When copying many pipes to the same destination instance, all choices (conflict resolution, data sync mode, filter flags) are now collected upfront before any copying begins.
+
+  **Granular conflict resolution:**  
+    When destination pipes already exist, the interactive prompt now offers three options rather than a simple yes/no:
+    - *Skip* — leave the destination pipe entirely unchanged.
+    - *Data only* — sync data without updating stored attributes.
+    - *Attributes only* — update attributes without syncing data.
+    - *Attributes and data* — full overwrite (equivalent to `--force`).
+
+  **Copy summary table:**  
+    After copying data, a table is printed showing inserted, updated, and upserted row counts alongside the elapsed time per pipe and totals.
 
 - **Improve caching performance.**  
   Better cache handling now reduces round-trips when fetching pipes' metadata.

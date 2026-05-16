@@ -60,9 +60,11 @@ def _complete_copy(
 
 
 def _copy_pipes(
+    action: Optional[List[str]] = None,
     yes: bool = False,
     noask: bool = False,
     force: bool = False,
+    sync_data: Optional[str] = None,
     debug: bool = False,
     **kw
 ) -> SuccessTuple:
@@ -77,10 +79,19 @@ def _copy_pipes(
     from meerschaum.utils.formatting._shell import clear_screen
     from meerschaum.utils.formatting._pipes import pprint_pipes
     from meerschaum.utils.pipes import pipes_dict_from_list
+
+    if action is None:
+        action = []
+
+    destination_instance = action[0] if action else None
     pipes = get_pipes(as_list=True, cache=False, debug=debug, **kw)
     change_instance_only = False
     instance_keys = None
-    if len(pipes) > 1:
+
+    if destination_instance:
+        instance_keys = destination_instance
+        change_instance_only = True
+    elif len(pipes) > 1:
         clear_screen(debug=debug)
         pprint_pipes(pipes_dict_from_list(pipes))
         if force or yes_no(
@@ -97,6 +108,13 @@ def _copy_pipes(
     batch_sync_choice = None
     batch_filter_kw = {}
     overwrite_existing = None
+
+    if sync_data == 'filter' or (sync_data is None and (kw.get('begin') or kw.get('end') or kw.get('params'))):
+        sync_data = 'filter'
+        for key in ('begin', 'end', 'params'):
+            if kw.get(key) is not None:
+                batch_filter_kw[key] = kw[key]
+
     if change_instance_only:
         prospective_pipes = [
             Pipe(p.connector_keys, p.metric_key, p.location_key, instance=instance_keys, cache=False)
@@ -106,7 +124,10 @@ def _copy_pipes(
         new_only_pipes = [p for p in prospective_pipes if p.id is None]
         all_exist = not new_only_pipes
 
-        if existing_new_pipes and not force:
+        if destination_instance:
+            overwrite_existing = 'overwrite' if force else 'skip'
+            batch_sync_choice = sync_data or 'nothing'
+        elif existing_new_pipes and not force:
             clear_screen(debug=debug)
             pprint_pipes(pipes_dict_from_list(existing_new_pipes))
             _n = len(existing_new_pipes)
