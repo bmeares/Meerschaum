@@ -358,14 +358,15 @@ def fetch_pipes_keys(
 
     Returns
     -------
-    A list of tuples of strings (or `None` for `location_key`)
+    A list or a dictionary (with pipe IDs as indices) of tuples of strings (or `None` for `location_key`)
     in the form `(connector_keys, metric_key, location_key)`.
     Optionally the parameters or tags may be returned alongside the keys.
+    Note the return value depends on the instance connector implementation.
     
     Examples
     --------
     >>> fetch_pipes_keys(metric_keys=['weather'])
-    [('sql:main', 'weather', None)]
+    {1: ('sql:main', 'weather', None, {'columns': {'datetime': 'ts', 'id': 'station'}})}
     """
     from meerschaum.utils.warnings import error
 

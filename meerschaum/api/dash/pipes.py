@@ -947,6 +947,8 @@ def build_pipes_dropdown_keys_row(
     mk_alone = metric_keys and not any([str(x) for x in (connector_keys + tags + location_keys)])
     lk_alone = location_keys and not any([str(x) for x in (connector_keys + metric_keys + tags)])
     all_keys = fetch_pipes_keys('registered', instance_connector)
+    if isinstance(all_keys, dict):
+        all_keys = list(all_keys.values())
 
     ck_options_source = (
         {keys_tuple[0] for keys_tuple in all_keys}

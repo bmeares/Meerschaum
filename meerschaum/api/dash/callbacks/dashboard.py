@@ -469,7 +469,7 @@ def update_keys_options(
     try:
         _all_keys = fetch_pipes_keys('registered', get_web_connector(ctx.states))
         if isinstance(_all_keys, dict):
-            _all_keys = sorted(list(_all_keys.values()))
+            _all_keys = list(_all_keys.values())
         _keys = fetch_pipes_keys(
             'registered',
             get_web_connector(ctx.states),
@@ -479,7 +479,7 @@ def update_keys_options(
             tags=tags,
         )
         if isinstance(_keys, dict):
-            _keys = sorted(list(_keys.values()))
+            _keys = list(_keys.values())
         _tags_pipes = mrsm.get_pipes(
             connector_keys=connector_keys,
             metric_keys=metric_keys,

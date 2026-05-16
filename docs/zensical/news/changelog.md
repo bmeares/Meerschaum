@@ -21,6 +21,46 @@ This is the current release cycle, so stay tuned for future releases!
 - **Improve caching performance.**  
   Better cache handling now reduces round-trips when fetching pipes' metadata.
 
+- **Allow dictionary return value from `fetch_pipes_keys()`.**  
+  The `InstanceConnector` method `fetch_pipes_keys()` may now return a dictionary, where the indices are pipes' IDs and the values are keys tuples (and possibly parameters or tags).
+
+  ```python
+  import json
+  import meerschaum as mrsm
+  from meerschaum.utils import fetch_pipes_keys
+
+  conn = mrsm.get_connector('sql:main')
+  keys_dict = fetch_pipes_keys('registered', mrsm.get_connector(), connector_keys=['sql:main'], metric_keys=['test'])
+  print(json.dumps(keys_dict, indent=4))
+  # {
+  #     "24": [
+  #         "sql:main",
+  #         "test",
+  #         null,
+  #         {
+  #             "sql": "SELECT *\nFROM {{ Pipe('plugin:noaa', 'weather') }}\nWHERE 1 = 1",
+  #             "tags": [
+  #                 "test"
+  #             ],
+  #             "fetch": {
+  #                 "backtrack_minutes": 1440
+  #             },
+  #             "verify": {
+  #                 "bound_days": 366,
+  #                 "chunk_minutes": 43200
+  #             },
+  #             "columns": {
+  #                 "id": null,
+  #                 "datetime": null
+  #             }
+  #         }
+  #     ]
+  # }
+  ```
+
+- **Fix shell suggestions.**  
+  A bug has been fixed where shell actions were truncated when chaining actions. Additionally, actions suggestions have been updated with highlight colors.
+
 ## 3.2.0 Releases
 
 ### v3.2.4
