@@ -40,6 +40,24 @@ In addition to filtering by the above keys, you can also select a custom group o
 show pipes --tags foo bar
 ```
 
+### Datetime Dtype
+
+Filter pipes by the dtype of their `datetime` index column with `--datetime-dtypes` (alias `--dtype`). Accepted values are `datetime`, `int`, and `None` (no datetime axis). Prefix with `_` to exclude:
+
+```bash
+### Only pipes with a timestamp datetime index:
+show pipes --dtype datetime
+
+### Only pipes with an integer datetime index:
+show pipes --dtype int
+
+### Only pipes without a datetime index:
+show pipes --dtype None
+
+### Exclude integer datetime pipes:
+show pipes --dtype _int
+```
+
 ### Key Negation
 
 You can select pipes which *don't* have a certain key by prefacing the key with an underscore (`'_'`).

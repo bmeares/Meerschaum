@@ -10,7 +10,7 @@
 </p>
 
 ## What is Meerschaum?
-Meerschaum is a tool for quickly synchronizing time-series data streams called **pipes**. With Meerschaum, you can have a data visualization stack running in minutes.
+Meerschaum is a tool for quickly synchronizing time-series data streams called **pipes**. With Meerschaum, you can have a data pipeline and visualization stack running in minutes.
 
 <p align="center">
 <img src="https://meerschaum.io/assets/screenshots/weather_pipes.png"/>
@@ -80,32 +80,32 @@ pipe = mrsm.Pipe(
     },
 )
 ### Pass a DataFrame to create the table and indices.
-pipe.sync([{'dt': '2022-07-01', 'id': 1, 'val': 10}])
+pipe.sync([{'dt': '2024-07-01', 'id': 1, 'val': 10}])
 
 ### Duplicate rows are ignored.
-pipe.sync([{'dt': '2022-07-01', 'id': 1, 'val': 10}])
+pipe.sync([{'dt': '2024-07-01', 'id': 1, 'val': 10}])
 assert len(pipe.get_data()) == 1
 
 ### Rows with existing keys (datetime and/or id) are updated.
-pipe.sync([{'dt': '2022-07-01', 'id': 1, 'val': 100}])
+pipe.sync([{'dt': '2024-07-01', 'id': 1, 'val': 100}])
 assert len(pipe.get_data()) == 1
 
 ### Translates to this query for SQLite:
 ###
 ### SELECT *
 ### FROM "MyTableName!"
-### WHERE "dt" >= datetime('2022-01-01', '0 minute')
-###   AND "dt" <  datetime('2023-01-01', '0 minute')
+### WHERE "dt" >= datetime('2024-01-01', '0 minute')
+###   AND "dt" <  datetime('2025-01-01', '0 minute')
 ###   AND "id" IN ('1')
 df = pipe.get_data(
-    begin  = '2022-01-01',
-    end    = '2023-01-01',
+    begin  = '2024-01-01',
+    end    = '2025-01-01',
     params = {'id': [1]},
 )
 
 ### Shape of the DataFrame:
 ###           dt  id  val
-### 0 2022-07-01   1  100
+### 0 2024-07-01   1  100
 
 ### Drop the table and remove the pipe's metadata.
 pipe.delete()
@@ -114,7 +114,7 @@ pipe.delete()
 ### Simple Plugin
 
 ```python
-# ~/.config/plugins/example.py
+# ~/.config/meerschaum/plugins/example.py
 
 __version__ = '1.0.0'
 required = ['requests']
@@ -127,24 +127,19 @@ def register(pipe, **kw):
         },
     }
 
-def fetch(pipe, **kw):
-    import requests, datetime, random
-    response = requests.get('http://date.jsontest.com/')
+def fetch(pipe, begin=None, end=None, **kw):
+    import requests, random
+    from datetime import datetime, timezone
 
-    ### The fetched JSON has the following shape:
-    ### {
-    ###     "date": "07-01-2022",
-    ###     "milliseconds_since_epoch": 1656718801566,
-    ###     "time": "11:40:01 PM"
-    ### }
-    data = response.json()
-    timestamp = datetime.datetime.fromtimestamp(
-        int(str(data['milliseconds_since_epoch'])[:-3])
-    )
+    ### Fetch data from an external API.
+    response = requests.get('https://api.example.com/data')
+    data = response.json()  ### list of dicts
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     ### You may also return a Pandas DataFrame.
     return [{
-        "dt"   : timestamp,
+        "dt"   : now,
         "id"   : random.randint(1, 4),
         "value": random.uniform(1, 100),
     }]
@@ -153,24 +148,33 @@ def fetch(pipe, **kw):
 ## Features
 
 - 📊 **Built for Data Scientists and Analysts**  
-  - Integrate with Pandas, Grafana and other popular [data analysis tools](https://meerschaum.io/reference/data-analysis-tools/).
+  - Integrate with Pandas, Grafana, and other popular [data analysis tools](https://meerschaum.io/reference/data-analysis-tools/).
   - Persist your dataframes and always get the latest data.
+  - Filter pipes by connector, metric, location, tags, or `datetime` column dtype (`--dtype datetime|int|None`).
 - ⚡️ **Production-Ready, Batteries Included**  
   - [Synchronization engine](https://meerschaum.io/reference/pipes/syncing/) concurrently updates many time-series data streams.
   - One-click deploy a [TimescaleDB and Grafana stack](https://meerschaum.io/reference/stack/) for prototyping.
   - Serve data to your entire organization through the power of `uvicorn`, `gunicorn`, and `FastAPI`.
+  - Supports PostGIS geometry columns for geospatial pipelines.
+- 💼 **Jobs and Scheduling**  
+  - Run any command as a background [job](https://meerschaum.io/reference/background-jobs/) with `-d` (`--daemon`).
+  - Built-in scheduler handles cron and interval schedules — no `crontab` or `systemd` setup required.
+  - Execute jobs locally, via `systemd` services, or remotely on an API instance with `--executor-keys`.
+  - Copy pipes across instances with the improved `copy pipes` command and `--sync-data` flag.
 - 🔌 **Easily Expandable**  
-  -  Ingest any data source with a simple [plugin](https://meerschaum.io/reference/plugins/writing-plugins/). Just return a DataFrame, and Meerschaum handles the rest.
+  - Ingest any data source with a simple [plugin](https://meerschaum.io/reference/plugins/writing-plugins/). Just return a DataFrame, and Meerschaum handles the rest.
   - [Add any function as a command](https://meerschaum.io/reference/plugins/types-of-plugins/#action-plugins) to the Meerschaum system.
+  - Define parent/child pipe relationships and pipe references for composable SQL pipelines.
   - Include Meerschaum in your projects with its [easy-to-use Python API](https://docs.meerschaum.io).
 - ✨ **Tailored for Your Experience**  
   - Rich CLI makes managing your data streams surprisingly enjoyable!
   - Web dashboard for those who prefer a more graphical experience.
-  - Manage your database connections with [Meerschaum connectors](https://meerschaum.io/reference/connectors/).
+  - Manage your database connections with [Meerschaum connectors](https://meerschaum.io/reference/connectors/) (SQL, API, Valkey, and custom).
   - Utility commands with sensible syntax let you control many pipes with grace.
 - 💼 **Portable from the Start**  
   - The environment variable `$MRSM_ROOT_DIR` lets you emulate multiple installations and group together your [instances](https://meerschaum.io/reference/connectors/#instances-and-repositories).
   - No dependencies required; anything needed will be installed into a virtual environment.
+  - Compatible with `uv` — install with `uv tool install meerschaum`.
   - [Specify required packages for your plugins](https://meerschaum.io/reference/plugins/writing-plugins/), and users will get those packages in a virtual environment.
 
 ## Support Meerschaum's Development
@@ -181,7 +185,7 @@ Additionally, you can always [buy me a coffee☕](https://www.buymeacoffee.com/b
 
 ### License
 
-Copyright 2021 Bennett Meares
+Copyright 2020-2026 Bennett Meares
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

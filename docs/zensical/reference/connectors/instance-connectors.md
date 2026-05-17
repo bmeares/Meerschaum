@@ -27,7 +27,7 @@ To use your custom connector type as an instance connector, inherit from `Instan
     ```
 
 ??? tip "Using the `params` Filter"
-    Methods which take the `params` argument ([`get_pipe_data()`](#get_pipe_data), [`get_sync_time()`](#get_sync_time), [`get_backtrack_data()`](#get_backtrack_data)) behave similarly to the filters applied to [`fetch_pipes_keys`](#fetch_pipes_keys).
+    Methods which take the `params` argument ([`get_pipe_data()`](#get_pipe_data), [`get_sync_time()`](#get_sync_time)) behave similarly to the filters applied to [`fetch_pipes_keys`](#fetch_pipes_keys).
 
     The easiest way to support `params` is with [`meerschaum.utils.dataframe.query_df()`](https://docs.meerschaum.io/meerschaum/utils/dataframe.html#query_df):
 
@@ -578,6 +578,8 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
         rows = []
         return parse_df_datetimes(rows)
     ```
+
+<a id="get_pipe_docs"></a>
 
 ## `#!python get_pipe_docs()` (alternative to `get_pipe_data()`)
 

@@ -17,8 +17,10 @@ Below is a brief description of the Meerschaum internal modules. For further inf
 - `connectors`  
   Connector implementations are defined here:
     - `Connector`: Base class for reading configuration details.
+    - `InstanceConnector`: Base class for instance connectors (subclass to build custom storage backends).
     - `SQLConnector`: Interact with pipes via `sqlalchemy` engines.
     - `APIConnector`: Interact with pipes via web requests.
+    - `ValkeyConnector`: Interact with pipes via a Valkey/Redis server.
     - `PluginConnector`: Wrapper for plugins' `fetch()` or `sync()` methods.
 
 - `core`  
@@ -32,11 +34,15 @@ Below is a brief description of the Meerschaum internal modules. For further inf
 
 - `utils`  
   The `utils` module is a parent for many useful tools, such as custom implementations for daemons, threads, processes, packages, typing, prompts, warnings, and more.
+    - `utils.pipes`: Pipe object utilities (`get_pipe_from_string()`, `replace_pipes_syntax()`, `flatten_pipes_dict()`, etc.)
+    - `utils.dataframe`: DataFrame manipulation and dtype utilities.
+    - `utils.sql`: SQL query building helpers for custom instance connectors.
+    - `utils.schedule`: Scheduling utilities (`parse_schedule()`, `schedule_function()`).
 
 
 ### License
 
-Copyright 2021 Bennett Meares
+Copyright 2020-2026 Bennett Meares
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

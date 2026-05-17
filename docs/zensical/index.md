@@ -84,7 +84,7 @@ h1 {
     <a id="get-started-button" class="md-button md-button--primary" href="get-started">Get Started</a>
   </div>
   <div class="grid-child" >
-    <a id="pip-button" class="md-button" href="#!" style="font-family: monospace" onclick="copy_install_text(this)">$ pip install meerschaum<span class="twemoji">
+    <a id="pip-button" class="md-button" href="javascript:void(0)" style="font-family: monospace" onclick="copy_install_text(this)">$ pip install meerschaum<span class="twemoji">
 </a>
   </div>
 </div>

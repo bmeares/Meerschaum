@@ -23,6 +23,7 @@ __all__ = (
     'get_stopped_jobs',
     'get_paused_jobs',
     'get_restart_jobs',
+    'get_executor_keys_from_context',
     'make_executor',
     'Executor',
     'check_restart_jobs',

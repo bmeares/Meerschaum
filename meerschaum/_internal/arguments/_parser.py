@@ -289,8 +289,13 @@ groups['pipes'].add_argument(
     '-t', '--tags', nargs='+', help="Only include pipes with these tags.",
 )
 groups['pipes'].add_argument(
-    '--datetime-dtypes', '--datetime-dtype', '--dtype', nargs='+',
-    help="Only select pipes with the corresponding datetime dtype (`datetime` or `int`)."
+    '--datetime-dtypes', '--datetime-dtype', '--dtype', '--dtypes',
+    nargs='+',
+    choices=['datetime', 'int', 'None', '_datetime', '_int', '_None'],
+    help=(
+        "Only select pipes with the corresponding datetime dtypes (`datetime`, `int`, or `None`)."
+        "\nMay be negated with `_`."
+    )
 )
 
 

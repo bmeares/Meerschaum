@@ -3,7 +3,7 @@
 
 # 👷 Background Jobs
 
-Meerschaum's job management system lets you run any process in the background ― just add `-d` to any command. Thanks to the built-in [scheduler](#️-schedules), you no longer have to worry about manually configuring `crontab` or `systemd`.
+Meerschaum's job management system lets you run any process in the background ― just add `-d` to any command. Thanks to the built-in [scheduler](#schedules), you no longer have to worry about manually configuring `crontab` or `systemd`.
 
 !!! tip ""
     Depending on the [executor](#executors), jobs are created as either `systemd` services or managed daemon processes.
