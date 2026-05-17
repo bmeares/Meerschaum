@@ -22,6 +22,7 @@ nav = [
       "reference/pipes/index.md",
       {"🥾 Bootstrapping" = "reference/pipes/bootstrapping.md"},
       {"📥 Syncing" = "reference/pipes/syncing.md"},
+      {"📖 Reading Data" = "reference/pipes/reading.md"},
       {"🔖 Tags" = "reference/pipes/tags.md"},
       {"🧩 Parameters" = "reference/pipes/parameters.md"},
     ]},

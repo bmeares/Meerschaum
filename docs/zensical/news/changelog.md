@@ -87,6 +87,38 @@ This is the current release cycle, so stay tuned for future releases!
   # }
   ```
 
+- **Add `Pipe.get_docs()`.**  
+  The convenience method `Pipe.get_docs()` returns a pipe's data as a list of dictionaries, bypassing pandas overhead. Combine with `as_chunks=True` to get an iterator of `List[Dict]` chunked by time bounds:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'docs',
+      instance='sql:memory',
+      temporary=True,
+      columns={'primary': 'id'},
+  )
+  pipe.sync([
+      {'id': 1, 'name': 'Alice'},
+      {'id': 2, 'name': 'Bob'},
+  ])
+
+  # All rows as a list of dicts (no pandas overhead):
+  docs = pipe.get_docs()
+  print(docs)
+  # [{'id': 1, 'name': 'Alice'}, {'id': 2, 'name': 'Bob'}]
+
+  # Single row as a dict:
+  doc = pipe.get_doc(params={'id': 2})
+  print(doc)
+  # {'id': 2, 'name': 'Bob'}
+
+  # Chunked iterator of lists of dicts:
+  for chunk in pipe.get_docs(as_chunks=True):
+      print(chunk)
+  ```
+
 - **Fix shell suggestions.**  
   A bug has been fixed where shell actions were truncated when chaining actions. Additionally, actions suggestions have been updated with highlight colors.
 

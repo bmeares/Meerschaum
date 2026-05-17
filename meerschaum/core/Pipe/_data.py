@@ -67,12 +67,16 @@ def get_data(
     as_docs: bool, default False
         If `True`, return a list of dictionaries rather than a DataFrame.
         Relies on `get_pipe_docs` from the instance connector if implemented.
+        May be combined with `as_chunks` to return an `Iterator[List[Dict]]`
+        chunked by time bounds (useful for large result sets without pandas overhead).
 
     as_iterator: bool, default False
         If `True`, return a generator of chunks of pipe data.
+        When combined with `as_docs=True`, yields `List[Dict]` per chunk instead of DataFrames.
 
     as_chunks: bool, default False
         Alias for `as_iterator`.
+        When combined with `as_docs=True`, yields `List[Dict]` per chunk instead of DataFrames.
 
     as_dask: bool, default False
         If `True`, return a `dask.DataFrame`
@@ -106,7 +110,10 @@ def get_data(
 
     Returns
     -------
-    A `pd.DataFrame` for the pipe's data corresponding to the provided parameters.
+    A `pd.DataFrame` of the pipe's data (default).
+    A `List[Dict]` if `as_docs=True`.
+    An `Iterator[pd.DataFrame]` if `as_chunks=True` (or `as_iterator=True`).
+    An `Iterator[List[Dict]]` if both `as_docs=True` and `as_chunks=True`.
 
     """
     from meerschaum.utils.warnings import warn

@@ -1139,7 +1139,6 @@ def get_pipe_data(
     A `pd.DataFrame` of the pipe's data.
 
     """
-    import functools
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type

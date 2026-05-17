@@ -140,3 +140,7 @@ Additionally, when `upsert` is `True`, a unique index is created on the designat
 You may choose to specify additional indices to be created with the `indices` dictionary (alias `indexes`). Whereas the `columns` dictionary is for specifying uniqueness, the `indices` dictionary allows you to specify multi-column indices for performance tuning. This is for extending the `columns` dictionary, so no need to restate the primary index columns.
 
 See [Indices](/reference/pipes/parameters/#indices) for more information.
+
+## Reading Data
+
+See [Reading Data](/reference/pipes/reading/) for `get_data()`, `get_docs()`, `get_doc()`, `get_value()`, and `params` filtering.
