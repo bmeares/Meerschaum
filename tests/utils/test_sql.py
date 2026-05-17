@@ -226,11 +226,14 @@ def test_build_where_escapes_values(injection_params: Dict[str, Any]):
     build_where() must either abort (return '') or escape quotes so the raw
     injection payload does not appear verbatim in the output.
     """
+    import warnings
     conn = mrsm.get_connector(
         'sql', 'build_where_injection_test',
         uri='postgresql+psycopg2://foo:bar@localhost:5432/baz',
     )
-    result = build_where(injection_params, conn)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', message='.*SQL injection.*', category=UserWarning)
+        result = build_where(injection_params, conn)
     raw_value = list(injection_params.values())[0]
     # Either aborted entirely or the raw unescaped value is absent
     assert result == '' or raw_value not in result

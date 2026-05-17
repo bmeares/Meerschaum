@@ -921,8 +921,14 @@ def get_create_index_queries(
     constraint_queries = [create_unique_index_query]
     if self.flavor not in ('sqlite', 'geopackage'):
         constraint_queries.append(add_constraint_query)
-    if upsert and indices_cols_str:
+    if upsert and indices_cols_str and unique_index_name_unquoted.lower() not in existing_ix_names:
         index_queries[unique_index_name] = constraint_queries
+        ### Remove regular indices that cover the same single column as the unique index.
+        ### Some flavors (e.g. Oracle) reject two indices on the same column combination.
+        if unique_index_cols_str == _id_name:
+            index_queries.pop(_id, None)
+        if unique_index_cols_str == _datetime_name:
+            index_queries.pop(_datetime, None)
     return index_queries
 
 
@@ -1595,7 +1601,8 @@ def get_pipe_attributes(
             return {}
         attributes = dict(rows[0])
     except Exception:
-        warn(traceback.format_exc())
+        if debug:
+            dprint(traceback.format_exc())
         return {}
 
     ### handle non-PostgreSQL databases (text vs JSON)
@@ -2730,6 +2737,8 @@ def get_sync_time(
 
     ASC_or_DESC = "DESC" if newest else "ASC"
     existing_cols = pipe.get_columns_types(debug=debug)
+    if not remote and not existing_cols:
+        return None
     valid_params = {}
     if params is not None:
         valid_params = {k: v for k, v in params.items() if k in existing_cols}
@@ -2885,6 +2894,8 @@ def get_pipe_rowcount(
         if 'definition' not in pipe.parameters['fetch']:
             error(msg)
             return None
+    elif not pipe.exists(debug=debug):
+        return None
 
     flavor = self.flavor if not remote else pipe.connector.flavor
     conn = self if not remote else pipe.connector

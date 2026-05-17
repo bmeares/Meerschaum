@@ -279,7 +279,7 @@ columns_types_queries = {
             TABLE_SCHEMA AS [schema],
             TABLE_NAME AS [table],
             COLUMN_NAME AS [column],
-            DATA_TYPE AS [type],
+            CASE WHEN CHARACTER_MAXIMUM_LENGTH = -1 THEN DATA_TYPE + '(max)' ELSE DATA_TYPE END AS [type],
             NUMERIC_PRECISION AS [numeric_precision],
             NUMERIC_SCALE AS [numeric_scale]
         FROM {db_prefix}INFORMATION_SCHEMA.COLUMNS WITH (NOLOCK)

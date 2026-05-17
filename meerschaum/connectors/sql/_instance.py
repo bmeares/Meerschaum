@@ -75,7 +75,12 @@ def _drop_temporary_table(
         self.flavor,
         schema=self.internal_schema
     )
-    drop_success = self.exec(drop_query, silent=True, debug=debug) is not None
+    ### Oracle auto-commits DDL; passing commit=False avoids a transaction conflict
+    ### that would cause exec() to return None despite a successful drop.
+    exec_commit = self.flavor not in ('oracle',)
+    drop_success = self.exec(drop_query, silent=True, commit=exec_commit, debug=debug) is not None
+    if not drop_success and not table_exists(table, self, self.internal_schema, debug=debug):
+        drop_success = True
     drop_msg = "Success" if drop_success else f"Failed to drop temporary table '{table}'."
     return drop_success, drop_msg
 
