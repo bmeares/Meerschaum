@@ -10,6 +10,8 @@ from typing import Dict, List, Any, Tuple
 import pytest
 from meerschaum.utils.sql import (
     build_where,
+    clean,
+    dateadd_str,
     get_pd_type,
 )
 from meerschaum.utils.dtypes.sql import get_numeric_precision_scale
@@ -139,3 +141,96 @@ def test_get_numeric_precision_scale(flavor: str, dtype: str, expected_precision
     precision, scale = get_numeric_precision_scale(flavor, dtype=dtype)
     assert precision == expected_precision
     assert scale == expected_scale
+
+
+@pytest.mark.parametrize('bad_string', [
+    '; DROP TABLE users',
+    '-- comment',
+    'drop table foo',
+    '/* block comment',
+    'union select password from users',
+    'exec xp_cmdshell',
+    'execute sp_executesql',
+    'insert into foo',
+    'update users set',
+    'delete from foo',
+    'create table evil',
+    'alter table foo',
+    'truncate table foo',
+])
+def test_clean_rejects_injection(bad_string: str):
+    """
+    clean() must raise on strings containing banned SQL patterns.
+    """
+    with pytest.raises(Exception):
+        clean(bad_string)
+
+
+@pytest.mark.parametrize('safe_string', [
+    'normal_value',
+    '2024-01-01',
+    'some text without keywords',
+    '12345',
+    'hello world',
+])
+def test_clean_allows_safe_strings(safe_string: str):
+    """
+    clean() must not raise on benign strings.
+    """
+    clean(safe_string)
+
+
+@pytest.mark.parametrize('bad_datepart', [
+    "day'; DROP TABLE users; --",
+    'week',
+    'quarter',
+    'epoch',
+    'microsecond',
+    '',
+    'DAY',
+    "day' UNION SELECT 1--",
+])
+def test_dateadd_str_rejects_invalid_datepart(bad_datepart: str):
+    """
+    dateadd_str() must raise ValueError for non-whitelisted datepart values.
+    """
+    with pytest.raises(ValueError):
+        dateadd_str(flavor='postgresql', datepart=bad_datepart, number=1, begin='now')
+
+
+def test_dateadd_str_none_datepart_allowed_for_int_begin():
+    """
+    datepart=None is valid when begin is an integer (int path returns before datepart is used).
+    """
+    result = dateadd_str(flavor='postgresql', datepart=None, number=5, begin=1000)
+    assert result == '1000 + 5'
+
+
+@pytest.mark.parametrize('good_datepart', ['year', 'month', 'day', 'hour', 'minute', 'second'])
+def test_dateadd_str_accepts_valid_dateparts(good_datepart: str):
+    """
+    dateadd_str() must accept the six standard datepart values.
+    """
+    result = dateadd_str(flavor='postgresql', datepart=good_datepart, number=1, begin='now')
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+@pytest.mark.parametrize('injection_params', [
+    {'col': "1'; DROP TABLE users; --"},
+    {'col': "val' OR '1'='1"},
+    {'col': "x' UNION SELECT password FROM users --"},
+])
+def test_build_where_escapes_values(injection_params: Dict[str, Any]):
+    """
+    build_where() must either abort (return '') or escape quotes so the raw
+    injection payload does not appear verbatim in the output.
+    """
+    conn = mrsm.get_connector(
+        'sql', 'build_where_injection_test',
+        uri='postgresql+psycopg2://foo:bar@localhost:5432/baz',
+    )
+    result = build_where(injection_params, conn)
+    raw_value = list(injection_params.values())[0]
+    # Either aborted entirely or the raw unescaped value is absent
+    assert result == '' or raw_value not in result

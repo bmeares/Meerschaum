@@ -49,6 +49,7 @@ class APIConnector(InstanceConnector):
         edit_pipe,
         sync_pipe,
         delete_pipe,
+        delete_pipe_cache,
         get_pipe_data,
         get_pipe_id,
         get_pipe_attributes,

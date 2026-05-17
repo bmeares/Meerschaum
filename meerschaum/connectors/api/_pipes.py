@@ -305,6 +305,7 @@ def sync_pipe(
         rowcount += len(c)
         num_success_chunks += 1
 
+    self.delete_pipe_cache(pipe, debug=debug)
     success_tuple = True, (
         f"It took {interval_str(timedelta(seconds=(time.perf_counter() - begin)))} "
         + f"to sync {rowcount:,} row"
@@ -313,6 +314,28 @@ def sync_pipe(
         f" to {pipe}."
     )
     return success_tuple
+
+
+def delete_pipe_cache(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """Invalidate the server-side cache for a pipe."""
+    r_url = pipe_r_url(pipe)
+    response = self.delete(
+        r_url + '/cache',
+        params={'instance_keys': self.get_pipe_instance_keys(pipe)},
+        debug=debug,
+    )
+    if not response.ok:
+        return False, f"Failed to invalidate cache for {pipe}: {response.text}"
+    try:
+        data = response.json()
+        return tuple(data) if isinstance(data, list) else (response.ok, response.text)
+    except Exception:
+        return response.ok, response.text
 
 
 def delete_pipe(

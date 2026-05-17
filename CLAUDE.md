@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) working in this repo.
 
 ## Commands
 
 ### Development CLI
 
-`./scripts/mrsm.sh <args>` runs `python -m meerschaum` with `MRSM_ROOT_DIR=./test_root` and `MRSM_PLUGINS_DIR=./tests/plugins` so it never touches the user's real config.
+`./scripts/mrsm.sh <args>` runs `python -m meerschaum` with `MRSM_ROOT_DIR=./test_root` and `MRSM_PLUGINS_DIR=./tests/plugins` — never touches real config.
 
 ### Running Tests
 
@@ -24,7 +24,7 @@ MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins python -m pytest test
 MRSM_TEST_FLAVORS=sqlite python -m pytest tests/ -v
 ```
 
-Test connectors are defined in `tests/connectors.py`. The default flavor set is `api,timescaledb`; set `MRSM_TEST_FLAVORS=sqlite` for fast local runs without Docker.
+Test connectors in `tests/connectors.py`. Default flavor set: `api,timescaledb`; set `MRSM_TEST_FLAVORS=sqlite` for fast local runs without Docker.
 
 ### Docs
 
@@ -41,13 +41,13 @@ Test connectors are defined in `tests/connectors.py`. The default flavor set is 
 
 ## Architecture Overview
 
-Meerschaum is an ETL framework centered on **pipes** — named data streams synced into tables. Each pipe is identified by three keys, stored in a metadata table managed by an **instance connector**, and fetches data from a **source connector**.
+ETL framework centered on **pipes** — named data streams synced into tables. Each pipe: three keys, metadata managed by **instance connector**, data from **source connector**.
 
 ### Core Abstractions
 
-**`SuccessTuple`** (`Tuple[bool, str]`) is the universal return type for all actions, pipe methods, and connector methods. Always return `(True, "Success")` or `(False, "reason")`. Never raise exceptions from action-level code — catch and return a `SuccessTuple`.
+**`SuccessTuple`** (`Tuple[bool, str]`) — universal return type for all actions, pipe methods, connector methods. Return `(True, "Success")` or `(False, "reason")`. Never raise from action-level code — catch and return `SuccessTuple`.
 
-**`warn(msg)` / `error(msg, exception)` / `info(msg)` / `dprint(msg, debug=debug)`** — use these from `meerschaum.utils.warnings` rather than `print()`. `warn` uses Python's warnings system (stackable). `error` raises an exception (default `Exception`). `dprint` is debug-only and requires passing `debug=debug`. `info` is for user-facing status messages.
+**`warn(msg)` / `error(msg, exception)` / `info(msg)` / `dprint(msg, debug=debug)`** — use from `meerschaum.utils.warnings` not `print()`. `warn`: Python warnings system (stackable). `error`: raises `Exception`. `dprint`: debug-only, requires `debug=debug`. `info`: user-facing status.
 
 ---
 
@@ -55,7 +55,7 @@ Meerschaum is an ETL framework centered on **pipes** — named data streams sync
 
 ### Identity
 
-A pipe is uniquely identified by three string keys:
+Pipe = three string keys:
 
 | Key | Arg in constructor | Meaning |
 |---|---|---|
@@ -63,15 +63,15 @@ A pipe is uniquely identified by three string keys:
 | `metric_key` | 2nd positional or `metric=` | Label for the data stream (e.g. `'weather'`) |
 | `location_key` | 3rd positional or `location=` | Optional tag/shard (default `None`) |
 
-The 4th constructor argument (or `instance=` / `mrsm_instance=`) is the **instance connector** — where pipe metadata (parameters, registration) and data are stored.
+4th arg (or `instance=` / `mrsm_instance=`) = **instance connector** — where metadata and data are stored.
 
 ### Target Table Name
 
-`pipe.target` is the table name in the instance database. By default: `{connector_keys.replace(':', '_')}_{metric_key}` (plus `_{location_key}` if set). Override via `parameters['target']`, `parameters['target_name']`, or `parameters['target_table']`. Long names are truncated per-flavor. On SQL instances, the full qualified name is `schema.target`.
+`pipe.target` = table name. Default: `{connector_keys.replace(':', '_')}_{metric_key}` (plus `_{location_key}` if set). Override via `parameters['target']`, `parameters['target_name']`, or `parameters['target_table']`. Long names truncated per-flavor. SQL instances: full name is `schema.target`.
 
 ### The `parameters` Dictionary
 
-`pipe.parameters` is the central metadata dict. Important top-level keys:
+`pipe.parameters` — central metadata dict. Top-level keys:
 
 | Key | Type | Purpose |
 |---|---|---|
@@ -96,7 +96,7 @@ The 4th constructor argument (or `instance=` / `mrsm_instance=`) is the **instan
 | `parents` / `children` | `List[str\|Dict\|Pipe]` | Pipe relationship graph (informational and for SQL pushdown). |
 | `parent` / `child` | `str\|Dict\|Pipe` | Singular alias for first parent/child. |
 
-Mutating parameters in memory: `pipe.update_parameters({'key': value}, persist=False)` or assign directly like `pipe.upsert = True`. To persist to the instance, call `pipe.edit()` or pass `persist=True`.
+Mutate in memory: `pipe.update_parameters({'key': value}, persist=False)` or assign like `pipe.upsert = True`. Persist: call `pipe.edit()` or pass `persist=True`.
 
 **Key convenience attributes and methods:**
 - `pipe.metric` / `pipe.location` — aliases for `metric_key` / `location_key`
@@ -107,9 +107,9 @@ Mutating parameters in memory: `pipe.update_parameters({'key': value}, persist=F
 
 ### Columns and Dtypes
 
-`pipe.columns` is a shortcut to `pipe.parameters['columns']`. The `'datetime'` column drives all incremental syncing logic (begin/end window). The `'id'` column (or any additional named columns) forms the composite uniqueness key. Pipes without a `datetime` column still work but lose incremental behavior.
+`pipe.columns` shortcut to `pipe.parameters['columns']`. `'datetime'` column drives incremental sync (begin/end window). `'id'` column forms composite uniqueness key. Pipes without `'datetime'` work but lose incremental behavior.
 
-Supported Meerschaum dtypes (stored in `parameters['dtypes']`):
+Supported dtypes (stored in `parameters['dtypes']`):
 - `'datetime'` — timezone-aware timestamp (stored as `TIMESTAMPTZ` or equivalent)
 - `'int'` — integer (used when the datetime axis is an integer epoch)
 - `'numeric'` — arbitrary-precision decimal (`NUMERIC` in SQL)
@@ -119,22 +119,22 @@ Supported Meerschaum dtypes (stored in `parameters['dtypes']`):
 - `'geometry[srid]'` — PostGIS geometry (e.g. `'geometry[EPSG:4326]'`, `'geometry[ESRI:102003]'`)
 - Any Pandas dtype string is also valid (e.g. `'Int64'`, `'float64'`, `'bool'`, `'object'`)
 
-Dtype mapping between Meerschaum strings and DB types lives in `meerschaum/utils/dtypes/sql.py` (`get_pd_type_from_db_type`, `get_db_type_from_pd_type`).
+Dtype mapping in `meerschaum/utils/dtypes/sql.py` (`get_pd_type_from_db_type`, `get_db_type_from_pd_type`).
 
 ### Sync Flow
 
-`pipe.sync(df=None, begin='', end=None, ...)` is the main entry point. The flow:
+`pipe.sync(df=None, begin='', end=None, ...)` — main entry point. Flow:
 
-1. **Fetch** — if `df` is not provided, calls `pipe.fetch()` which delegates to `pipe.connector.fetch(pipe, begin, end, ...)`. For SQL connectors this executes the metadefinition query. For plugin connectors this calls the plugin's `fetch()` function. For API connectors this hits the remote API.
-2. **Dtype enforcement** — `pipe.enforce_dtypes(df)` casts incoming data to registered dtypes.
-3. **Filter existing** — `pipe.filter_existing(df)` fetches the overlapping time window from the instance (`get_backtrack_data`) and computes the diff via `filter_unseen_df()` to find only new/changed rows.
-4. **Sync to instance** — `instance_connector.sync_pipe(pipe, df)` writes the filtered rows. For SQL instances this generates INSERT/UPDATE queries (or UPSERT if `upsert=True`).
+1. **Fetch** — if `df` not provided, calls `pipe.fetch()` → `pipe.connector.fetch(pipe, begin, end, ...)`. SQL: executes metadefinition. Plugin: calls `fetch()`. API: hits remote.
+2. **Dtype enforcement** — `pipe.enforce_dtypes(df)` casts to registered dtypes.
+3. **Filter existing** — `pipe.filter_existing(df)` fetches overlapping window (`get_backtrack_data`), diffs via `filter_unseen_df()` to find new/changed rows.
+4. **Sync to instance** — `instance_connector.sync_pipe(pipe, df)` writes filtered rows. SQL: INSERT/UPDATE (or UPSERT if `upsert=True`).
 
-The `begin` parameter defaults to `''` (empty string), which signals "use the pipe's sync time minus backtrack interval". `None` means "no lower bound". An explicit datetime/int overrides.
+`begin=''` = use sync time minus backtrack. `None` = no lower bound. Explicit datetime/int overrides.
 
 ### SQL Connector Fetch (Metadefinition)
 
-For `connector_keys` starting with `'sql:'`, the connector's `get_pipe_metadef()` builds the query:
+For `connector_keys` starting with `'sql:'`, `get_pipe_metadef()` builds:
 
 ```
 WITH "definition" AS (
@@ -145,15 +145,15 @@ WHERE "<dt_col>" >= <begin - backtrack>
   AND "<dt_col>" < <end>
 ```
 
-If a `parent` pipe is set, the pushdown `WHERE` clause is applied to the parent's table instead (allows dtype conversion via SQL). The `{{ Pipe('connector', 'metric') }}` syntax in the SQL definition is resolved to the target table name at query time.
+If `parent` pipe set, pushdown `WHERE` hits parent's table (allows SQL dtype conversion). `{{ Pipe('connector', 'metric') }}` resolved to target table at query time.
 
 ### `{{ Pipe() }}` Syntax
 
-SQL definitions and parameter values can reference other pipes using `{{ Pipe('ck', 'mk', 'lk') }}`. This is resolved by `replace_pipes_syntax()` in `meerschaum/utils/pipes.py`. Attribute chains work: `{{ Pipe('a', 'b').columns['datetime'] }}`. Use `{{ self.parameters['key'] }}` to self-reference.
+Reference other pipes with `{{ Pipe('ck', 'mk', 'lk') }}`. Resolved by `replace_pipes_syntax()` in `meerschaum/utils/pipes.py`. Attribute chains: `{{ Pipe('a', 'b').columns['datetime'] }}`. Self-reference: `{{ self.parameters['key'] }}`.
 
 ### `MRSM{}` Config Symlinks
 
-Reference Meerschaum config values from within pipe parameters using `MRSM{key1:key2:key3}` syntax:
+Reference config values from pipe parameters with `MRSM{key1:key2:key3}` syntax:
 
 ```python
 pipe = mrsm.Pipe('demo', 'cfg', parameters={
@@ -164,7 +164,7 @@ print(pipe.parameters['username'])  # resolved at access time
 
 ### `params` Filter
 
-`params: Dict[str, Any]` passed to `get_data()`, `get_backtrack_data()`, `get_rowcount()`, `get_sync_time()`, `get_pipes()`, `build_where()`, etc. generates a `WHERE` clause. The actual SQL is built by `meerschaum.utils.sql.build_where()`. Values support:
+`params: Dict[str, Any]` passed to `get_data()`, `get_backtrack_data()`, `get_rowcount()`, `get_sync_time()`, `get_pipes()`, `build_where()`, etc. generates `WHERE` clause via `meerschaum.utils.sql.build_where()`. Values:
 - Single value: `{'color': 'red'}` → `WHERE color = 'red'`
 - List: `{'color': ['red', 'blue']}` → `WHERE color IN ('red', 'blue')`
 - Negation prefix `_`: `{'color': '_red'}` → `WHERE color != 'red'`
@@ -174,13 +174,40 @@ print(pipe.parameters['username'])  # resolved at access time
 - Negated null: `{'color': '_None'}` → `WHERE color IS NOT NULL`
 - Dict value: `{'meta': {'k': 'v'}}` → `WHERE CAST(meta AS TEXT) = '{"k": "v"}'`
 
-**Column validation for SQL pipes:** when `pipe.enforce=True` (the default), `get_pipe_data_query()` filters `params` to only columns that actually exist on the table before building the `WHERE` clause — unknown columns are silently dropped. Pass `pipe.enforce=False` to skip this check.
+**Column validation for SQL pipes:** `pipe.enforce=True` (default) filters `params` to existing columns before building `WHERE` — unknown columns dropped. Pass `pipe.enforce=False` to skip.
 
-For in-memory filtering on a DataFrame, use `meerschaum.utils.dataframe.query_df(df, params)` — same negation semantics apply.
+In-memory filtering: `meerschaum.utils.dataframe.query_df(df, params)` — same negation semantics.
 
 ### Verification Syncs
 
-`pipe.verify(begin, end, chunk_interval, ...)` re-syncs the entire historical range in chunks (default 1440-minute chunks). Uses `pipe.get_rowcount()` to compare remote vs local counts and only re-syncs mismatched chunks. Configured via `parameters['verify']`.
+`pipe.verify(begin, end, chunk_interval, ...)` re-syncs historical range in chunks (default 1440 min). Uses `pipe.get_rowcount()` to compare remote vs local; re-syncs only mismatched chunks. Configured via `parameters['verify']`.
+
+---
+
+## SQL Security Patterns
+
+### `clean()` — keyword blocklist
+
+`clean(substring)` in `meerschaum/utils/sql.py` raises on banned SQL keywords (`;`, `--`, `drop`, `union`, `insert`, `update`, `delete`, `create`, `alter`, `truncate`, `exec`, `/*`). **Keyword blocklist only** — quote-only payloads like `' OR '1'='1` not caught. Use parameterized queries for user input; `clean()` for internal names (tables, columns).
+
+### `dateadd_str()` — `datepart` whitelist
+
+`datepart` validated against `_VALID_DATEPARTS = frozenset({'year', 'month', 'day', 'hour', 'minute', 'second'})`. **Exception:** `datepart=None` valid when `begin` is int — returns early before `datepart` used. Whitelist check must come after `isinstance(begin, int)` early-return.
+
+### Table name escaping in `.format()` queries
+
+Functions building queries via `.format()` (e.g. `get_table_cols_types()`, `get_table_cols_indices()` in `meerschaum/utils/sql.py`) escape table/schema names with `s.replace("'", "''")` before interpolation. Never skip for new format-based queries.
+
+---
+
+## API Server Pipe Cache
+
+API server keeps shared `pipes_dict` (in `meerschaum/api/__init__.py`) caching live `Pipe` objects between requests. Two behaviors:
+
+- `get_pipe(refresh=False)` — returns **shared** `pipes_dict` object (mutations/cache clears persist across requests).
+- `get_pipe(refresh=True)` — creates **throwaway** `Pipe` not stored in `pipes_dict`; cache cleared on it has no effect on future requests.
+
+**Stale column-types cache:** After dtype-changing sync, `pipes_dict` object retains `_columns_types` up to 60 s (`columns_types_cache_seconds`). `DELETE /pipes/{ck}/{mk}/{lk}/cache` (added 2025-05) clears it via `pipe._invalidate_cache(hard=True)` on the shared object. `APIConnector.sync_pipe` calls `self.delete_pipe_cache(pipe)` after every sync.
 
 ---
 
@@ -194,11 +221,11 @@ Connector                         (meerschaum/connectors/_Connector.py)
     └── ValkeyConnector           (meerschaum/connectors/valkey/)
 ```
 
-`Connector` reads config from `MRSM_ROOT_DIR/config/connectors.yaml` keyed by `type:label`. The class attribute `REQUIRED_ATTRIBUTES` lists keys that must be set (either in config or passed directly). When cast to string, a connector returns `"type:label"`.
+`Connector` reads config from `MRSM_ROOT_DIR/config/connectors.yaml` keyed by `type:label`. `REQUIRED_ATTRIBUTES` lists required keys. Cast to string returns `"type:label"`.
 
-`InstanceConnector` adds the full pipes/users/plugins/tokens interface that all instances must implement. Set `IS_INSTANCE = True` to make a connector usable as an instance. Set `IS_THREAD_SAFE = True` if the connector supports concurrent reads (used by `get_pool` for parallel pipe fetching). Registering a custom connector type with `IS_INSTANCE = True` automatically adds its `type` to `meerschaum.connectors.instance_types`.
+`InstanceConnector` adds pipes/users/plugins/tokens interface. `IS_INSTANCE = True` makes connector usable as instance. `IS_THREAD_SAFE = True` enables concurrent reads (used by `get_pool`). Custom connector with `IS_INSTANCE = True` auto-adds its `type` to `meerschaum.connectors.instance_types`.
 
-**All major connector classes compose their methods via class-level imports:**
+All major connector classes compose methods via class-level imports:
 
 ```python
 class SQLConnector(InstanceConnector):
@@ -207,7 +234,7 @@ class SQLConnector(InstanceConnector):
     from ._fetch import fetch, get_pipe_metadef
 ```
 
-This means each logical group of methods lives in a separate `_*.py` file. New methods belong in the appropriate file, not the class definition file.
+Each logical group of methods lives in separate `_*.py`. New methods go in appropriate file, not class definition.
 
 ### Adding a Custom Connector
 
@@ -223,17 +250,17 @@ class FooConnector(InstanceConnector):
     # Implement all InstanceConnector abstract methods...
 ```
 
-See `meerschaum/connectors/instance/_InstanceConnector.py` for the full interface and `docs/zensical/reference/connectors/instance-connectors.md` for the method-by-method guide.
+See `meerschaum/connectors/instance/_InstanceConnector.py` for full interface and `docs/zensical/reference/connectors/instance-connectors.md` for method-by-method guide.
 
-`fetch_pipes_keys()` may return either a list of key tuples or a dict where keys are pipe IDs (int) and values are key tuples (with optional parameters/tags appended). The dict form lets the instance return full pipe attributes in a single round-trip.
+`fetch_pipes_keys()` returns list of key tuples or dict (pipe ID → key tuple, optional params/tags appended). Dict form returns full pipe attributes in one round-trip.
 
 ---
 
 ## Actions
 
-Each top-level action (`sync`, `show`, `register`, `copy`, etc.) is a module in `meerschaum/actions/`. Actions receive `**kwargs` matching the argparse namespace from `meerschaum/_internal/arguments/_parser.py`.
+Top-level actions (`sync`, `show`, `register`, `copy`, etc.) are modules in `meerschaum/actions/`. Receive `**kwargs` matching argparse namespace from `meerschaum/_internal/arguments/_parser.py`.
 
-Common kwargs passed to all actions:
+Common kwargs:
 - `connector_keys: List[str]`, `metric_keys: List[str]`, `location_keys: List[str]`
 - `mrsm_instance: str` — instance connector keys
 - `begin: datetime`, `end: datetime`
@@ -242,7 +269,7 @@ Common kwargs passed to all actions:
 - `debug: bool`
 - `yes: bool`, `force: bool`, `noask: bool`
 
-Subactions are functions within the module auto-discovered by naming convention (e.g. `sync_pipes` in `actions/sync.py`). To add a subaction, define `def <action>_<subaction>(**kwargs) -> SuccessTuple` in the module — no registration needed.
+Subactions auto-discovered by naming convention (e.g. `sync_pipes` in `actions/sync.py`). Add: define `def <action>_<subaction>(**kwargs) -> SuccessTuple` — no registration needed.
 
 Plugin actions use `@make_action` from `meerschaum.plugins` or `meerschaum.actions`.
 
@@ -252,7 +279,7 @@ Plugin actions use `@make_action` from `meerschaum.plugins` or `meerschaum.actio
 
 ### Mixin-via-Import Pattern
 
-Both `Pipe` and connectors use class-level `from ._file import func` imports to compose methods from separate files. This avoids large monolithic classes. When adding functionality to `Pipe`:
+`Pipe` and connectors compose methods via class-level `from ._file import func` imports. When adding to `Pipe`:
 - Data retrieval → `meerschaum/core/Pipe/_data.py`
 - Sync logic → `meerschaum/core/Pipe/_sync.py`
 - Attributes/properties → `meerschaum/core/Pipe/_attributes.py`
@@ -271,12 +298,12 @@ dateutil = attempt_import('dateutil', venv='mrsm')
 shapely = attempt_import('shapely', venv='mrsm')
 ```
 
-For packages that must be in a specific plugin's venv:
+For packages in plugin venv:
 ```python
 requests = attempt_import('requests', venv='my_plugin')
 ```
 
-Use `TYPE_CHECKING` for type hints on heavy types:
+For type hints on heavy types:
 ```python
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -285,7 +312,7 @@ if TYPE_CHECKING:
 
 ### `Venv` Context Manager
 
-When calling a plugin's or connector's code that uses the plugin's venv:
+When calling plugin/connector code using plugin's venv:
 ```python
 from meerschaum.utils.venv import Venv
 from meerschaum.connectors import get_connector_plugin
@@ -296,7 +323,7 @@ with Venv(get_connector_plugin(pipe.connector)):
 
 ### `filter_arguments` / `filter_keywords`
 
-Connectors and plugins may not accept all kwargs. Use:
+Connectors/plugins may not accept all kwargs:
 ```python
 from meerschaum.utils.misc import filter_arguments, filter_keywords
 
@@ -313,58 +340,58 @@ result = func(**kw)
 
 ## Pipes Dictionary
 
-`get_pipes()` returns `{connector_keys: {metric_key: {location_key: Pipe}}}`. `location_key` is `None` when absent. Use:
+`get_pipes()` returns `{connector_keys: {metric_key: {location_key: Pipe}}}` (`location_key` is `None` when absent). Use:
 - `as_list=True` to get `[Pipe, ...]`
 - `flatten_pipes_dict(pipes_dict)` from `meerschaum.utils.pipes`
 - `pipes_dict_from_list(pipes_list)` to reconstruct the hierarchy
 
 ### Key Negation
 
-Prefix any filter value with `_` to negate it. Applies to `connector_keys`, `metric_keys`, `location_keys`, `tags`, `datetime_dtypes`. Implemented via `separate_negation_values()` from `meerschaum.utils.misc`.
+Prefix filter value with `_` to negate. Applies to `connector_keys`, `metric_keys`, `location_keys`, `tags`, `datetime_dtypes`. Via `separate_negation_values()` in `meerschaum.utils.misc`.
 
 ---
 
 ## Config System
 
-`get_config(*keys, patch=False)` reads the hierarchical YAML config registry at `MRSM_ROOT_DIR/config/`. Keys are path segments: `get_config('meerschaum', 'instance')` reads `config.meerschaum.instance`.
+`get_config(*keys, patch=False)` reads YAML config registry at `MRSM_ROOT_DIR/config/`. Keys are path segments: `get_config('meerschaum', 'instance')` → `config.meerschaum.instance`.
 
-`STATIC_CONFIG` in `meerschaum/_internal/static.py` holds compile-time constants (e.g. `negation_prefix = '_'`). Import as:
+`STATIC_CONFIG` in `meerschaum/_internal/static.py` holds compile-time constants. Import:
 ```python
 from meerschaum._internal.static import STATIC_CONFIG
 prefix = STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']
 ```
 
-Plugin config: `get_plugin_config(*keys)` / `write_plugin_config(value, *keys)` — reads/writes under `plugins.<plugin_name>` in the config registry.
+Plugin config: `get_plugin_config(*keys)` / `write_plugin_config(value, *keys)` — reads/writes under `plugins.<plugin_name>`.
 
 ---
 
 ## Cache System
 
-`Pipe._cache_value(key, value, memory_only=False)` and `Pipe._get_cached_value(key)` provide two-layer caching:
+`Pipe._cache_value(key, value, memory_only=False)` and `Pipe._get_cached_value(key)` — two-layer cache:
 - **Memory** (always): stored in `pipe.__dict__` under `_<key>`.
 - **Disk** (when `memory_only=False`): pickled to `MRSM_ROOT_DIR/cache/<instance_hash>/<pipe_id>/`.
 
-Keys starting with `_` are treated as memory-only regardless. The cache is keyed per instance-hash (derived from the connector's stable config), so changing a host/port invalidates cached data.
+Keys starting with `_` = memory-only. Cache keyed per instance-hash (derived from connector config); changing host/port invalidates.
 
-Important cached values: `'_id'` (pipe's row ID in the pipes table), `'attributes'` (full pipe metadata), `'_attributes_sync_time'` (last refresh timestamp), `'precision'`.
+Cached values: `'_id'` (row ID), `'attributes'` (full metadata), `'_attributes_sync_time'` (last refresh), `'precision'`.
 
 ---
 
 ## Jobs System
 
-`meerschaum.jobs.Job(name, sysargs, executor_keys='local')` wraps `meerschaum.utils.daemon.Daemon` to run a `sysargs` string as a background process.
+`meerschaum.jobs.Job(name, sysargs, executor_keys='local')` wraps `meerschaum.utils.daemon.Daemon` to run `sysargs` as background process.
 
-- `executor_keys='local'` — runs as a managed daemon process under `MRSM_ROOT_DIR/jobs/`
+- `executor_keys='local'` — managed daemon process under `MRSM_ROOT_DIR/jobs/`
 - `executor_keys='systemd'` — creates a `systemd` user service
 - `executor_keys='api:label'` — posts the job to a remote API instance
 
-Jobs persist across restarts. Their logs stream via `job.monitor_logs(callback)`. `job.start()` / `job.stop()` / `job.pause()` return `SuccessTuple`.
+Jobs persist across restarts. Logs stream via `job.monitor_logs(callback)`. `job.start()` / `job.stop()` / `job.pause()` return `SuccessTuple`.
 
 ---
 
 ## Plugins System
 
-Plugins are Python files/packages in `MRSM_PLUGINS_DIR`. Recognized functions (called automatically by the system):
+Plugins: Python files/packages in `MRSM_PLUGINS_DIR`. Recognized functions:
 
 | Function | When called |
 |---|---|
@@ -373,7 +400,7 @@ Plugins are Python files/packages in `MRSM_PLUGINS_DIR`. Recognized functions (c
 | `sync(pipe, **kw) -> SuccessTuple` | Override the full sync process |
 | `setup(**kw) -> SuccessTuple` | On first install / `mrsm setup plugins` |
 
-Decorator-based extensions:
+Decorator extensions:
 - `@make_action` — register a function as an action
 - `@api_plugin` — add FastAPI routes (receives `app: FastAPI`)
 - `@dash_plugin` — add Dash callbacks (receives `dash_app: Dash`)
@@ -382,7 +409,7 @@ Decorator-based extensions:
 
 Custom CLI args: `add_plugin_argument('--foo', type=str, help='...')` from `meerschaum.plugins`.
 
-Declare package dependencies: `required = ['requests>=2.0', 'pandas']`. These install into a venv named after the plugin.
+Package dependencies: `required = ['requests>=2.0', 'pandas']`. Install into plugin-named venv.
 
 ---
 

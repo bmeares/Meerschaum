@@ -671,10 +671,18 @@ def clean(substring: str) -> None:
     Raises an exception when banned words are used.
     """
     from meerschaum.utils.warnings import error
-    banned_symbols = [';', '--', 'drop ',]
+    banned_symbols = [
+        ';', '--', 'drop ', '/*', '*/',
+        'union ', 'exec ', 'execute ',
+        'insert ', 'update ', 'delete ',
+        'create ', 'alter ', 'truncate ',
+    ]
     for symbol in banned_symbols:
         if symbol in str(substring).lower():
             error(f"Invalid string: '{substring}'")
+
+
+_VALID_DATEPARTS = frozenset({'year', 'month', 'day', 'hour', 'minute', 'second'})
 
 
 def dateadd_str(
@@ -760,6 +768,10 @@ def dateadd_str(
                 else f" - {number * -1}"
             )
         return num_str
+    if datepart not in _VALID_DATEPARTS:
+        raise ValueError(
+            f"Invalid datepart '{datepart}'. Must be one of: {sorted(_VALID_DATEPARTS)}"
+        )
     if not begin:
         return ''
 
@@ -1379,17 +1391,20 @@ def get_table_cols_types(
         else ""
     )
 
+    def _esc(s: str) -> str:
+        return s.replace("'", "''")
+
     cols_types_query = sqlalchemy.text(
         textwrap.dedent(columns_types_queries.get(
             flavor,
             columns_types_queries['default']
         ).format(
-            table=table,
-            table_trunc=table_trunc,
-            table_lower=table_lower,
-            table_lower_trunc=table_lower_trunc,
-            table_upper=table_upper,
-            table_upper_trunc=table_upper_trunc,
+            table=_esc(table),
+            table_trunc=_esc(table_trunc),
+            table_lower=_esc(table_lower),
+            table_lower_trunc=_esc(table_lower_trunc),
+            table_upper=_esc(table_upper),
+            table_upper_trunc=_esc(table_upper_trunc),
             db_prefix=db_prefix,
         )).lstrip().rstrip()
     )
@@ -1558,19 +1573,22 @@ def get_table_cols_indices(
         else ""
     )
 
+    def _esc(s: str) -> str:
+        return s.replace("'", "''")
+
     cols_indices_query = sqlalchemy.text(
         textwrap.dedent(columns_indices_queries.get(
             flavor,
             columns_indices_queries['default']
         ).format(
-            table=table,
-            table_trunc=table_trunc,
-            table_lower=table_lower,
-            table_lower_trunc=table_lower_trunc,
-            table_upper=table_upper,
-            table_upper_trunc=table_upper_trunc,
+            table=_esc(table),
+            table_trunc=_esc(table_trunc),
+            table_lower=_esc(table_lower),
+            table_lower_trunc=_esc(table_lower_trunc),
+            table_upper=_esc(table_upper),
+            table_upper_trunc=_esc(table_upper_trunc),
             db_prefix=db_prefix,
-            schema=schema,
+            schema=_esc(schema) if schema else schema,
         )).lstrip().rstrip()
     )
 

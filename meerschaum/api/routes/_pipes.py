@@ -798,6 +798,25 @@ def clear_pipe(
     return results
 
 
+@app.delete(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/cache',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def delete_pipe_cache(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:read'])),
+) -> mrsm.SuccessTuple:
+    """
+    Invalidate the server-side cache for a pipe (e.g. column types after a schema change).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    return pipe._invalidate_cache(hard=True, debug=debug)
+
+
 @app.get(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/csv',
     tags=['Pipes: Data'],
