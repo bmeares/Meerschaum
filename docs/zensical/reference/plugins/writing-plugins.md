@@ -188,6 +188,8 @@ def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pd.DataFrame']:
         yield pd.read_csv(file_name)
 ```
 
+<a id="sync-plugins"></a>
+
 ### **The `#!python sync()` Function**
 
 The `#!python sync()` function makes `sync pipes` override the built-in syncing process and behaves more like an [action](/reference/plugins/types-of-plugins/#-action-plugins), returning only a `SuccessTuple` (e.g. `#!python True, "Success"`).

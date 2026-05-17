@@ -184,7 +184,7 @@ def _bootstrap_pipes(
     )
     pipes = []
     for p in _pipes:
-        if p.get_id(debug=debug) is not None and not force:
+        if p.id is not None and not force:
             try:
                 if not yes_no(
                     f"{p} already exists.\n\n    Delete {p}?\n    Data will be lost!",

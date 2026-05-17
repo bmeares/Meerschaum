@@ -50,6 +50,7 @@ class SQLConnector(InstanceConnector):
         get_alter_columns_queries,
         delete_pipe,
         get_pipe_data,
+        get_pipe_docs,
         get_pipe_data_query,
         register_pipe,
         edit_pipe,

@@ -468,6 +468,8 @@ def update_keys_options(
 
     try:
         _all_keys = fetch_pipes_keys('registered', get_web_connector(ctx.states))
+        if isinstance(_all_keys, dict):
+            _all_keys = list(_all_keys.values())
         _keys = fetch_pipes_keys(
             'registered',
             get_web_connector(ctx.states),
@@ -476,6 +478,8 @@ def update_keys_options(
             location_keys=location_keys,
             tags=tags,
         )
+        if isinstance(_keys, dict):
+            _keys = list(_keys.values())
         _tags_pipes = mrsm.get_pipes(
             connector_keys=connector_keys,
             metric_keys=metric_keys,
@@ -493,8 +497,11 @@ def update_keys_options(
             ).union(tags or [])
         ) if _tags_alone else []
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         instance_alerts += [alert_from_success_tuple((False, str(e)))]
         _all_keys, _all_tags, _keys = [], [], []
+        _tags_pipes = {}
 
     connectors_options = sorted(
         list(

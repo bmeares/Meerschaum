@@ -97,6 +97,7 @@ class Pipe:
         get_rowcount,
         get_data,
         get_doc,
+        get_docs,
         get_value,
         _get_data_as_iterator,
         get_chunk_interval,

@@ -234,7 +234,7 @@ def get_pipe_attributes(
     -------
     The document that matches the keys of the pipe.
     """
-    pipe_id = pipe.get_id(debug=debug)
+    pipe_id = pipe.id
     if pipe_id is None:
         return {}
 
@@ -271,7 +271,7 @@ def edit_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
-    pipe_id = pipe.get_id(debug=debug)
+    pipe_id = pipe.id
     if pipe_id is None:
         return False, f"{pipe} is not registered."
 

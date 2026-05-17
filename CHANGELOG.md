@@ -1,12 +1,132 @@
 # 🪵 Changelog
 
-## 3.2.0 Releases
+## 3.3.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.3.0
+
+- **Add `--dtype` flag.**  
+  The flag `--dtype` (explicitly `--datetime-dtypes` or `--datetime-dtype`) allows filtering pipes based on the data type of the `datetime` axis. Accepted values are `datetime`, `int`, `None`. This behaves similarly to keys selectors: multiple values may be provided, and values may be negated:
+
+  ```bash
+  mrsm show pipes --dtype int
+  mrsm show pipes --dtype int None
+  mrsm show pipes --dtype _datetime
+  ```
+
+- **Improve `copy pipes` flow.**  
+  The `copy pipes` action has been significantly improved for both interactive and scripted use cases.
+
+  **Non-interactive batch copying:** Specify the destination instance as the first positional argument to skip all prompts. Combined with `--force` and `--sync-data`, pipes can now be fully scripted:
+
+  ```bash
+  # Copy pipe definitions only (skip existing pipes)
+  mrsm copy pipes sql:dest -i sql:src
+
+  # Overwrite existing pipes and copy all data
+  mrsm copy pipes sql:dest -i sql:src --force --sync-data all
+
+  # Overwrite and sync with a date filter (--begin/--end imply filter mode automatically)
+  mrsm copy pipes sql:dest -i sql:src --force --begin 2024-01-01
+  ```
+
+  **New `--sync-data` flag:** 
+    Controls what data is synced when copying destination pipes. Accepted values are `nothing` (default), `backtrack`, `all`, and `filter`. When `--begin`, `--end`, or `--params` are provided without `--sync-data`, filter mode is selected automatically.
+
+  **Reduced interactive prompts for batches:**  
+    When copying many pipes to the same destination instance, all choices (conflict resolution, data sync mode, filter flags) are now collected upfront before any copying begins.
+
+  **Granular conflict resolution:**  
+    When destination pipes already exist, the interactive prompt now offers three options rather than a simple yes/no:
+    - *Skip* — leave the destination pipe entirely unchanged.
+    - *Data only* — sync data without updating stored attributes.
+    - *Attributes only* — update attributes without syncing data.
+    - *Attributes and data* — full overwrite (equivalent to `--force`).
+
+  **Copy summary table:**  
+    After copying data, a table is printed showing inserted, updated, and upserted row counts alongside the elapsed time per pipe and totals.
+
+- **Improve caching performance.**  
+  Better cache handling now reduces round-trips when fetching pipes' metadata.
+
+- **Allow dictionary return value from `fetch_pipes_keys()`.**  
+  The `InstanceConnector` method `fetch_pipes_keys()` may now return a dictionary, where the indices are pipes' IDs and the values are keys tuples (and possibly parameters or tags).
+
+  ```python
+  import json
+  import meerschaum as mrsm
+  from meerschaum.utils import fetch_pipes_keys
+
+  conn = mrsm.get_connector('sql:main')
+  keys_dict = fetch_pipes_keys('registered', mrsm.get_connector(), connector_keys=['sql:main'], metric_keys=['test'])
+  print(json.dumps(keys_dict, indent=4))
+  # {
+  #     "24": [
+  #         "sql:main",
+  #         "test",
+  #         null,
+  #         {
+  #             "sql": "SELECT *\nFROM {{ Pipe('plugin:noaa', 'weather') }}\nWHERE 1 = 1",
+  #             "tags": [
+  #                 "test"
+  #             ],
+  #             "fetch": {
+  #                 "backtrack_minutes": 1440
+  #             },
+  #             "verify": {
+  #                 "bound_days": 366,
+  #                 "chunk_minutes": 43200
+  #             },
+  #             "columns": {
+  #                 "id": null,
+  #                 "datetime": null
+  #             }
+  #         }
+  #     ]
+  # }
+  ```
+
+- **Add `Pipe.get_docs()`.**  
+  The convenience method `Pipe.get_docs()` returns a pipe's data as a list of dictionaries, bypassing pandas overhead. Combine with `as_chunks=True` to get an iterator of `List[Dict]` chunked by time bounds:
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'demo', 'docs',
+      instance='sql:memory',
+      temporary=True,
+      columns={'primary': 'id'},
+  )
+  pipe.sync([
+      {'id': 1, 'name': 'Alice'},
+      {'id': 2, 'name': 'Bob'},
+  ])
+
+  # All rows as a list of dicts (no pandas overhead):
+  docs = pipe.get_docs()
+  print(docs)
+  # [{'id': 1, 'name': 'Alice'}, {'id': 2, 'name': 'Bob'}]
+
+  # Single row as a dict:
+  doc = pipe.get_doc(params={'id': 2})
+  print(doc)
+  # {'id': 2, 'name': 'Bob'}
+
+  # Chunked iterator of lists of dicts:
+  for chunk in pipe.get_docs(as_chunks=True):
+      print(chunk)
+  ```
+
+- **Fix shell suggestions.**  
+  A bug has been fixed where shell actions were truncated when chaining actions. Additionally, actions suggestions have been updated with highlight colors.
+
+## 3.2.0 Releases
+
 ### v3.2.4
 
-- **Improvde default chunksize for integer pipes.**  
+- **Improve default chunksize for integer pipes.**  
   Pipes with integer datetime columns now default to appropriately sized chunks based on the `precision` unit.
 
   ```python

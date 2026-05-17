@@ -4,6 +4,14 @@ Instance connectors store pipes' metadata (and may also be used as a source conn
 
 To use your custom connector type as an instance connector, inherit from `InstanceConnector` and implement the following methods (replacing the pseudocode under the `TODO` comments with your connector's equivalent). See the [`MongoDBConnector`](https://github.com/bmeares/mongodb-connector/blob/main/plugins/mongodb-connector/_pipes.py) for a specific reference.
 
+!!! note "Implementing `get_pipe_data` or `get_pipe_docs`"
+    For reading data from a pipe's target table, you may implement **either** [`get_pipe_data()`](#get_pipe_data) **or** [`get_pipe_docs()`](#get_pipe_docs):
+
+    - Implement `get_pipe_data()` to return a `pd.DataFrame` (recommended for SQL-based connectors).
+    - Implement `get_pipe_docs()` to return a `list[dict]` (recommended for document stores and connectors that produce JSON natively). This avoids DataFrame construction overhead when callers use [`Pipe.get_docs()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_docs) or `Pipe.get_data(as_docs=True)`.
+
+    The default `get_pipe_data()` calls `get_pipe_docs()` and wraps the result in a DataFrame. The default `get_pipe_docs()` calls `get_pipe_data()` and converts to records. You only need to implement one.
+
 
 !!! example "Inherit from `InstanceConnector`"
     Your connector class inherits from `InstanceConnector`, a subclass of `Connector` which implements the pipes' methods as an interface.
@@ -19,7 +27,7 @@ To use your custom connector type as an instance connector, inherit from `Instan
     ```
 
 ??? tip "Using the `params` Filter"
-    Methods which take the `params` argument ([`get_pipe_data()`](#get_pipe_data), [`get_sync_time()`](#get_sync_time), [`get_backtrack_data()`](#get_backtrack_data)) behave similarly to the filters applied to [`fetch_pipes_keys`](#fetch_pipes_keys).
+    Methods which take the `params` argument ([`get_pipe_data()`](#get_pipe_data), [`get_sync_time()`](#get_sync_time)) behave similarly to the filters applied to [`fetch_pipes_keys`](#fetch_pipes_keys).
 
     The easiest way to support `params` is with [`meerschaum.utils.dataframe.query_df()`](https://docs.meerschaum.io/meerschaum/utils/dataframe.html#query_df):
 
@@ -244,12 +252,15 @@ Delete a pipe's registration from the `pipes` table.
 
 ## `#!python fetch_pipes_keys()`
 
-Return a list of tuples for the registered pipes' keys according to the provided filters.
+Return registered pipes' keys according to the provided filters.
 
 Each filter should only be applied if the given list is not empty.
 Values within filters are joined by `OR`, and filters are joined by `AND`.
 
 The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/misc.html#meerschaum.utils.misc.separate_negation_values) returns two sublists: regular values (`IN`) and values preceded by an underscore (`NOT IN`).
+
+You may return either a **list of tuples** or a **dictionary mapping pipe IDs to tuples**.
+Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 with parameters or tags as the fourth element.
 
 ??? example "`#!python def fetch_pipes_keys():`"
     ```python
@@ -261,9 +272,14 @@ The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/mis
         tags: list[str] | None = None,
         debug: bool = False,
         **kwargs: Any
-    ) -> List[Tuple[str, str, str]]:
+    ) -> (
+        list[tuple[str, str, str]]
+        | list[tuple[str, str, str, dict | list]]
+        | dict[int | str, tuple[str, str, str]]
+        | dict[int | str, tuple[str, str, str, dict | list]]
+    ):
         """
-        Return a list of tuples for the registered pipes' keys according to the provided filters.
+        Return registered pipes' keys according to the provided filters.
 
         Parameters
         ----------
@@ -281,19 +297,20 @@ The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/mis
 
         Returns
         -------
-        A list of connector, metric, and location keys in tuples.
-        You may return the string "None" for location keys in place of nulls.
+        A list of tuples or a dictionary mapping pipe IDs to tuples.
+        You may return the string `"None"` for location keys in place of nulls.
+        Tuples may include parameters or tags as a fourth element.
 
         Examples
         --------
         >>> import meerschaum as mrsm
         >>> conn = mrsm.get_connector('example:demo')
-        >>> 
+        >>>
         >>> pipe_a = mrsm.Pipe('a', 'demo', tags=['foo'], instance=conn)
         >>> pipe_b = mrsm.Pipe('b', 'demo', tags=['bar'], instance=conn)
         >>> pipe_a.register()
         >>> pipe_b.register()
-        >>> 
+        >>>
         >>> conn.fetch_pipes_keys(['a', 'b'])
         [('a', 'demo', 'None'), ('b', 'demo', 'None')]
         >>> conn.fetch_pipes_keys(metric_keys=['demo'])
@@ -312,9 +329,9 @@ The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/mis
 
         ### TODO build a query like so, only including clauses if the given list is not empty.
         ### The `tags` clause is an OR ("?|"), meaning any of the tags may match.
-        ### 
-        ### 
-        ### SELECT connector_keys, metric_key, location_key
+        ###
+        ###
+        ### SELECT pipe_id, connector_keys, metric_key, location_key
         ### FROM pipes
         ### WHERE connector_keys IN ({in_ck})
         ###   AND connector_keys NOT IN ({nin_ck})
@@ -324,7 +341,12 @@ The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/mis
         ###   AND location_key NOT IN ({nin_lk})
         ###   AND (parameters->'tags')::JSONB ?| ARRAY[{tags}]
         ###   AND NOT (parameters->'tags')::JSONB ?| ARRAY[{nin_tags}]
-        return []
+
+        ### Return a dict mapping pipe_id to (connector_keys, metric_key, location_key):
+        return {}
+
+        ### Or return a list of tuples (also accepted):
+        ### return []
     ```
 
 ## `#!python pipe_exists()`
@@ -555,6 +577,71 @@ The `params` argument behaves the same as [`fetch_pipes_keys()`](#fetch_pipes_ke
         from meerschaum.utils.dataframe import parse_df_datetimes
         rows = []
         return parse_df_datetimes(rows)
+    ```
+
+<a id="get_pipe_docs"></a>
+
+## `#!python get_pipe_docs()` (alternative to `get_pipe_data()`)
+
+Return the target table's data as a `list[dict]`. Implement this instead of `get_pipe_data()` when your connector produces JSON natively (e.g. document stores, REST APIs), avoiding DataFrame construction overhead.
+
+Callers that use [`Pipe.get_docs()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_docs) or `Pipe.get_data(as_docs=True)` will call `get_pipe_docs()` directly, bypassing dtype enforcement and Pandas overhead.
+
+??? example "`#!python def get_pipe_docs():`"
+    ```python
+    def get_pipe_docs(
+        self,
+        pipe: mrsm.Pipe,
+        select_columns: list[str] | None = None,
+        omit_columns: list[str] | None = None,
+        begin: datetime | int | None = None,
+        end: datetime | int | None = None,
+        params: dict[str, Any] | None = None,
+        order: str = 'asc',
+        limit: int | None = None,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        """
+        Return a pipe's data as a list of documents.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe with the target table from which to read.
+
+        select_columns: list[str] | None, default None
+            If provided, only select these given columns.
+
+        omit_columns: list[str] | None, default None
+            If provided, remove these columns from the selection.
+
+        begin: datetime | int | None, default None
+            The earliest `datetime` value to search from (inclusive).
+
+        end: datetime | int | None, default None
+            The latest `datetime` value to search from (exclusive).
+
+        params: dict[str, Any] | None, default None
+            Additional filters to apply to the query.
+
+        order: str, default 'asc'
+            Sort order for the `datetime` axis (`'asc'` or `'desc'`).
+
+        limit: int | None, default None
+            If provided, cap the number of rows returned.
+
+        Returns
+        -------
+        The target table's data as a list of dictionaries.
+        """
+        table_name = pipe.target
+        dt_col = pipe.columns.get("datetime", None)
+
+        ### TODO Write a query to fetch from `table_name` and return raw dicts.
+        ### Apply begin, end, params, order, and limit as in get_pipe_data().
+        rows = []
+        return rows
     ```
 
 ## `#!python get_sync_time()`

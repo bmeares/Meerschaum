@@ -40,6 +40,24 @@ In addition to filtering by the above keys, you can also select a custom group o
 show pipes --tags foo bar
 ```
 
+### Datetime Dtype
+
+Filter pipes by the dtype of their `datetime` index column with `--datetime-dtypes` (alias `--dtype`). Accepted values are `datetime`, `int`, and `None` (no datetime axis). Prefix with `_` to exclude:
+
+```bash
+### Only pipes with a timestamp datetime index:
+show pipes --dtype datetime
+
+### Only pipes with an integer datetime index:
+show pipes --dtype int
+
+### Only pipes without a datetime index:
+show pipes --dtype None
+
+### Exclude integer datetime pipes:
+show pipes --dtype _int
+```
+
 ### Key Negation
 
 You can select pipes which *don't* have a certain key by prefacing the key with an underscore (`'_'`).
@@ -122,3 +140,7 @@ Additionally, when `upsert` is `True`, a unique index is created on the designat
 You may choose to specify additional indices to be created with the `indices` dictionary (alias `indexes`). Whereas the `columns` dictionary is for specifying uniqueness, the `indices` dictionary allows you to specify multi-column indices for performance tuning. This is for extending the `columns` dictionary, so no need to restate the primary index columns.
 
 See [Indices](/reference/pipes/parameters/#indices) for more information.
+
+## Reading Data
+
+See [Reading Data](/reference/pipes/reading/) for `get_data()`, `get_docs()`, `get_doc()`, `get_value()`, and `params` filtering.

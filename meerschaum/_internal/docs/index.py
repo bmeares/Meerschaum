@@ -34,6 +34,7 @@ For your convenience, the following classes and functions may be imported from t
 
 <ul>
 <li><code>meerschaum.Connector</code></li>
+<li><code>meerschaum.InstanceConnector</code></li>
 <li><code>meerschaum.Pipe</code></li>
 <li><code>meerschaum.Plugin</code></li>
 <li><code>meerschaum.Job</code></li>
@@ -177,6 +178,21 @@ pipes = mrsm.get_pipes(
 )
 print(pipes)
 # [Pipe('foo:bar', 'demo', instance='sql:temp')]
+```
+
+Filter by the dtype of the `datetime` index column with `datetime_dtypes`. Accepted values are `'datetime'`, `'int'`, and `'None'`; prefix with `'_'` to negate:
+
+```python
+import meerschaum as mrsm
+
+### Only pipes with a timestamp datetime index:
+timestamp_pipes = mrsm.get_pipes(datetime_dtypes=['datetime'], as_list=True)
+
+### Only pipes with an integer datetime index:
+int_pipes = mrsm.get_pipes(datetime_dtypes=['int'], as_list=True)
+
+### Exclude pipes without a datetime index:
+datetime_pipes = mrsm.get_pipes(datetime_dtypes=['_None'], as_list=True)
 ```
 </details>
 
@@ -423,6 +439,25 @@ def init_dash(dash_app):
   - `meerschaum.config.write_config()`
   - `meerschaum.config.write_plugin_config()`
 
+  <details>
+    <summary>
+    <code>meerschaum.config.environment</code><br>
+    Patch configuration and connectors from environment variables.<br>
+    </summary>
+    <p></p>
+    <ul>
+      <li><code>meerschaum.config.environment.apply_environment_patches()</code></li>
+      <li><code>meerschaum.config.environment.apply_environment_config()</code></li>
+      <li><code>meerschaum.config.environment.apply_environment_uris()</code></li>
+      <li><code>meerschaum.config.environment.apply_connector_uri()</code></li>
+      <li><code>meerschaum.config.environment.get_connector_env_regex()</code></li>
+      <li><code>meerschaum.config.environment.get_connector_env_vars()</code></li>
+      <li><code>meerschaum.config.environment.get_env_vars()</code></li>
+      <li><code>meerschaum.config.environment.get_daemon_env_vars()</code></li>
+      <li><code>meerschaum.config.environment.replace_env()</code></li>
+    </ul>
+  </details>
+
 </details>
 
 <details>
@@ -461,6 +496,7 @@ def init_dash(dash_app):
   - `meerschaum.jobs.check_restart_jobs()`
   - `meerschaum.jobs.start_check_jobs_thread()`
   - `meerschaum.jobs.stop_check_jobs_thread()`
+  - `meerschaum.jobs.get_executor_keys_from_context()`
 
 </details>
 
@@ -543,6 +579,7 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dataframe.get_bool_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.get_bytes_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.get_datetime_bound_from_df()</code></li>
+      <li><code>meerschaum.utils.dataframe.get_date_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.get_datetime_cols()</code></li>
       <li><code>meerschaum.utils.dataframe.get_datetime_cols_types()</code></li>
       <li><code>meerschaum.utils.dataframe.get_first_valid_dask_partition()</code></li>
@@ -557,6 +594,8 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dataframe.parse_df_datetimes()</code></li>
       <li><code>meerschaum.utils.dataframe.query_df()</code></li>
       <li><code>meerschaum.utils.dataframe.to_json()</code></li>
+      <li><code>meerschaum.utils.dataframe.to_simple_lines()</code></li>
+      <li><code>meerschaum.utils.dataframe.parse_simple_lines()</code></li>
     </ul>
   </details>
   </ul>
@@ -579,6 +618,7 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dtypes.deserialize_bytes_string()</code></li>
       <li><code>meerschaum.utils.dtypes.deserialize_geometry()</code></li>
       <li><code>meerschaum.utils.dtypes.encode_bytes_for_bytea()</code></li>
+      <li><code>meerschaum.utils.dtypes.geometry_is_gpkg()</code></li>
       <li><code>meerschaum.utils.dtypes.geometry_is_wkt()</code></li>
       <li><code>meerschaum.utils.dtypes.get_current_timestamp()</code></li>
       <li><code>meerschaum.utils.dtypes.get_geometry_type_srid()</code></li>
@@ -596,7 +636,6 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dtypes.to_datetime()</code></li>
       <li><code>meerschaum.utils.dtypes.to_pandas_dtype()</code></li>
       <li><code>meerschaum.utils.dtypes.value_is_null()</code></li>
-      <li><code>meerschaum.utils.dtypes.get_current_timestamp()</code></li>
       <li><code>meerschaum.utils.dtypes.get_next_precision_unit()</code></li>
       <li><code>meerschaum.utils.dtypes.round_time()</code></li>
     </ul>
@@ -653,6 +692,7 @@ def init_dash(dash_app):
     <ul>
       <li><code>meerschaum.utils.misc.items_str()</code></li>
       <li><code>meerschaum.utils.misc.is_int()</code></li>
+      <li><code>meerschaum.utils.misc.is_uuid()</code></li>
       <li><code>meerschaum.utils.misc.interval_str()</code></li>
       <li><code>meerschaum.utils.misc.filter_keywords()</code></li>
       <li><code>meerschaum.utils.misc.generate_password()</code></li>
@@ -732,6 +772,24 @@ def init_dash(dash_app):
   <ul>
   <details>
     <summary>
+    <code>meerschaum.utils.pipes</code><br>
+    Utilities for working with pipe objects.<br>
+    </summary>
+    <p></p>
+    <ul>
+      <li><code>meerschaum.utils.pipes.get_pipe_from_string()</code></li>
+      <li><code>meerschaum.utils.pipes.replace_pipes_syntax()</code></li>
+      <li><code>meerschaum.utils.pipes.replace_pipes_in_dict()</code></li>
+      <li><code>meerschaum.utils.pipes.is_pipe_registered()</code></li>
+      <li><code>meerschaum.utils.pipes.pipes_dict_from_list()</code></li>
+      <li><code>meerschaum.utils.pipes.flatten_pipes_dict()</code></li>
+    </ul>
+  </details>
+  </ul>
+
+  <ul>
+  <details>
+    <summary>
     <code>meerschaum.utils.prompt</code><br>
     Read input from the user.
     <br>
@@ -774,6 +832,7 @@ def init_dash(dash_app):
     <ul>
       <li><code>meerschaum.utils.sql.build_where()</code></li>
       <li><code>meerschaum.utils.sql.clean()</code></li>
+      <li><code>meerschaum.utils.sql.get_sqlalchemy_table()</code></li>
       <li><code>meerschaum.utils.sql.dateadd_str()</code></li>
       <li><code>meerschaum.utils.sql.test_connection()</code></li>
       <li><code>meerschaum.utils.sql.get_distinct_col_count()</code></li>
@@ -783,6 +842,7 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.sql.truncate_item_name()</code></li>
       <li><code>meerschaum.utils.sql.table_exists()</code></li>
       <li><code>meerschaum.utils.sql.get_table_cols_types()</code></li>
+      <li><code>meerschaum.utils.sql.get_table_cols_indices()</code></li>
       <li><code>meerschaum.utils.sql.get_update_queries()</code></li>
       <li><code>meerschaum.utils.sql.get_null_replacement()</code></li>
       <li><code>meerschaum.utils.sql.get_db_version()</code></li>
@@ -792,6 +852,8 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.sql.format_cte_subquery()</code></li>
       <li><code>meerschaum.utils.sql.session_execute()</code></li>
       <li><code>meerschaum.utils.sql.get_reset_autoincrement_queries()</code></li>
+      <li><code>meerschaum.utils.sql.get_postgis_geo_columns_types()</code></li>
+      <li><code>meerschaum.utils.sql.get_create_schema_if_not_exists_queries()</code></li>
     </ul>
   </details>
   </ul>

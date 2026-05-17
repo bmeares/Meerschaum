@@ -59,5 +59,6 @@ def delete(
 
     if result[0]:
         self._invalidate_cache(hard=True, debug=debug)
+        self._clear_cache_key('_id', debug=debug)
 
     return result

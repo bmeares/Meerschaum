@@ -89,6 +89,71 @@ def test_get_data_order(flavor: str):
     assert df['id'][0] == 3
 
 
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_get_docs(flavor: str):
+    """Test that get_docs returns a list of dicts and as_docs=True works."""
+    conn = conns[flavor]
+    pipe = Pipe('test', 'get_docs', instance=conn)
+    _ = pipe.delete()
+    pipe = Pipe(
+        'test', 'get_docs',
+        columns={'datetime': 'dt', 'id': 'id'},
+        instance=conn,
+    )
+    data = [
+        {'dt': '2024-01-01', 'id': 1, 'val': 10.0},
+        {'dt': '2024-01-02', 'id': 2, 'val': 20.0},
+        {'dt': '2024-01-03', 'id': 3, 'val': 30.0},
+    ]
+    success, msg = pipe.sync(data, check_existing=False, debug=debug)
+    assert success, msg
+
+    docs = pipe.get_docs(debug=debug)
+    assert isinstance(docs, list), f"Expected list, got {type(docs)}"
+    assert len(docs) == 3
+    assert isinstance(docs[0], dict)
+    assert 'val' in docs[0]
+
+    docs2 = pipe.get_data(as_docs=True, debug=debug)
+    assert isinstance(docs2, list), f"Expected list from as_docs=True, got {type(docs2)}"
+    assert len(docs2) == 3
+
+    docs_empty = pipe.get_docs(begin='2099-01-01', debug=debug)
+    assert docs_empty == []
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_get_docs_as_iterator(flavor: str):
+    """Test that as_docs=True with as_iterator=True yields lists of dicts."""
+    conn = conns[flavor]
+    pipe = Pipe('test', 'get_docs_iterator', instance=conn)
+    _ = pipe.delete()
+    pipe = Pipe(
+        'test', 'get_docs_iterator',
+        columns={'datetime': 'dt', 'id': 'id'},
+        instance=conn,
+    )
+    data = [
+        {'dt': '2024-01-01', 'id': 1, 'val': 10.0},
+        {'dt': '2024-01-02', 'id': 2, 'val': 20.0},
+    ]
+    success, msg = pipe.sync(data, check_existing=False, debug=debug)
+    assert success, msg
+
+    import types
+    chunks_gen = pipe.get_data(as_docs=True, as_iterator=True, debug=debug)
+    assert isinstance(chunks_gen, types.GeneratorType)
+
+    all_docs = []
+    for chunk in chunks_gen:
+        assert isinstance(chunk, list), f"Expected list chunk, got {type(chunk)}"
+        for doc in chunk:
+            assert isinstance(doc, dict)
+        all_docs.extend(chunk)
+
+    assert len(all_docs) == 2
+
+
 def test_int_pipe_chunk_interval():
     """
     Test that integer pipes with precision correctly scale chunk and backtrack intervals.

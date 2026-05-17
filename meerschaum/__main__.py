@@ -4,7 +4,7 @@
 # vim:fenc=utf-8
 
 """
-Copyright 2024 Bennett Meares
+Copyright 2020–2026 Bennett Meares
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -75,7 +75,11 @@ def _exit(return_code: int = 0, old_cwd: str = None) -> None:
 def _close_pools():
     """Close multiprocessing pools before exiting."""
     ### Final step: close global pools.
-    from meerschaum.utils.pool import get_pools
+    try:
+        from meerschaum.utils.pool import get_pools
+    except (ImportError, ModuleNotFoundError):
+        return
+
     for pool in get_pools().values():
         try:
             pool.close()

@@ -112,16 +112,13 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False
-) -> List[
-        Union[
-            Tuple[str, str, Union[str, None]],
-            Tuple[str, str, Union[str, None], List[str]],
-            Tuple[str, str, Union[str, None], Dict[str, Any]]
-        ]
-    ]:
+) -> Union[
+    Dict[Union[int, str], Tuple[str, str, Union[str, None], Dict[str, Any]]],
+    List[Tuple[str, str, Union[str, None]]],
+]:
     """
     Fetch registered Pipes' keys from the API.
-    
+
     Parameters
     ----------
     connector_keys: Optional[List[str]], default None
@@ -146,7 +143,7 @@ def fetch_pipes_keys(
 
     Returns
     -------
-    A list of tuples containing pipes' keys.
+    A dictionary mapping pipe IDs to key tuples, or a list of key tuples for older servers.
     """
     from meerschaum._internal.static import STATIC_CONFIG
     if connector_keys is None:
@@ -169,6 +166,7 @@ def fetch_pipes_keys(
                 'tags': json.dumps(tags),
                 'params': json.dumps(params),
                 'instance_keys': self.instance_keys,
+                'as_dict': True,
             },
             debug=debug
         ).json()
@@ -179,6 +177,12 @@ def fetch_pipes_keys(
 
     if 'detail' in j:
         error(j['detail'], stack=False)
+
+    if isinstance(j, dict):
+        return {
+            (int(k) if str(k).isdigit() else k): tuple(v)
+            for k, v in j.items()
+        }
     return [tuple(r) for r in j]
 
 
@@ -301,6 +305,7 @@ def sync_pipe(
         rowcount += len(c)
         num_success_chunks += 1
 
+    self.delete_pipe_cache(pipe, debug=debug)
     success_tuple = True, (
         f"It took {interval_str(timedelta(seconds=(time.perf_counter() - begin)))} "
         + f"to sync {rowcount:,} row"
@@ -309,6 +314,28 @@ def sync_pipe(
         f" to {pipe}."
     )
     return success_tuple
+
+
+def delete_pipe_cache(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """Invalidate the server-side cache for a pipe."""
+    r_url = pipe_r_url(pipe)
+    response = self.delete(
+        r_url + '/cache',
+        params={'instance_keys': self.get_pipe_instance_keys(pipe)},
+        debug=debug,
+    )
+    if not response.ok:
+        return False, f"Failed to invalidate cache for {pipe}: {response.text}"
+    try:
+        data = response.json()
+        return tuple(data) if isinstance(data, list) else (response.ok, response.text)
+    except Exception:
+        return response.ok, response.text
 
 
 def delete_pipe(
@@ -807,6 +834,48 @@ def get_pipe_columns_indices(
         warn(response.text)
         return None
     return j
+
+
+def get_pipe_docs(
+    self,
+    pipe: mrsm.Pipe,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Union[str, datetime, int, None] = None,
+    end: Union[str, datetime, int, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    order: str = 'asc',
+    limit: Optional[int] = None,
+    debug: bool = False,
+    **kw: Any
+) -> List[Dict[str, Any]]:
+    """Fetch a pipe's data as a list of documents from the API."""
+    r_url = pipe_r_url(pipe)
+    try:
+        response = self.get(
+            r_url + "/docs",
+            params={
+                'select_columns': json.dumps(select_columns),
+                'omit_columns': json.dumps(omit_columns),
+                'begin': begin,
+                'end': end,
+                'params': json.dumps(params, default=str),
+                'order': order,
+                'limit': limit,
+                'instance_keys': self.get_pipe_instance_keys(pipe),
+            },
+            debug=debug,
+        )
+        if not response.ok:
+            warn(f"Failed to get docs for {pipe}:\n{response.text}")
+            return []
+        j = response.json()
+        if isinstance(j, list):
+            return j
+        return []
+    except Exception as e:
+        warn(f"Failed to get docs for {pipe}:\n{e}")
+        return []
 
 
 def get_pipe_index_names(self, pipe: mrsm.Pipe, debug: bool = False) -> Dict[str, str]:

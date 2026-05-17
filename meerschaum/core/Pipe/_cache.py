@@ -30,14 +30,46 @@ def _get_in_memory_key(cache_key: str) -> str:
     )
 
 
+_instance_hash_cache: dict[str, str] = {}
+
+def _get_instance_hash(pipe: mrsm.Pipe) -> str:
+    """
+    Return a short hash of the instance connector's stable attributes.
+    Changing the connector's config (e.g. hostname) produces a different hash,
+    preventing stale cache from being loaded.
+    """
+    import hashlib
+    import json
+
+    connector = pipe.instance_connector
+    if connector is None:
+        return 'none'
+
+    cache_key = str(id(connector))
+    if cache_key in _instance_hash_cache:
+        return _instance_hash_cache[cache_key]
+
+    attrs = {
+        k: v
+        for k, v in connector.__dict__.items()
+        if not k.startswith('_') and isinstance(v, (str, int, float, bool, type(None)))
+    }
+    attrs_str = json.dumps(attrs, sort_keys=True, default=str)
+    result = hashlib.md5(attrs_str.encode()).hexdigest()[:8]
+    _instance_hash_cache[cache_key] = result
+    return result
+
+
 def _get_cache_conn_cache_key(pipe: mrsm.Pipe, cache_key: str) -> str:
     """
     Return the cache key to use in the cache connector.
     """
+    ick = pipe.instance_keys.replace(':', '_')
+    ihash = _get_instance_hash(pipe)
     ck = pipe.connector_keys.replace(':', '_')
     mk = pipe.metric_key
     lk = str(pipe.location_key)
-    return f'.cache:pipes:{ck}:{mk}:{lk}:{cache_key}'
+    return f'.cache:pipes:{ick}:{ihash}:{ck}:{mk}:{lk}:{cache_key}'
 
 
 def _get_cache_connector(self) -> 'Union[None, ValkeyConnector]':
@@ -101,7 +133,13 @@ def _get_cached_value(
         if in_memory_key in self.__dict__:
             return self.__dict__.get(in_memory_key, None)
 
-        return self._read_cache_key(cache_key, debug=debug)
+        if not self.cache:
+            return None
+
+        value = self._read_cache_key(cache_key, debug=debug)
+        if value is not None:
+            self.__dict__[in_memory_key] = value
+        return value
 
 
 def _invalidate_cache(
@@ -135,7 +173,7 @@ def _invalidate_cache(
     cache_dir_path = self._get_cache_dir_path()
     cache_keys = self._get_cache_keys(debug=debug)
     for cache_key in cache_keys:
-        if cache_keys == 'attributes':
+        if cache_key == 'attributes':
             continue
         self._clear_cache_key(cache_key, debug=debug)
 
@@ -159,6 +197,7 @@ def _get_cache_dir_path(self, create_if_not_exists: bool = False) -> pathlib.Pat
     cache_dir_path = (
         paths.PIPES_CACHE_RESOURCES_PATH
         / self.instance_keys
+        / _get_instance_hash(self)
         / self.connector_keys
         / self.metric_key
         / str(self.location_key)

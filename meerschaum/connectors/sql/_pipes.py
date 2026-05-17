@@ -33,7 +33,7 @@ def register_pipe(
     from meerschaum.connectors.sql.tables import get_tables
     pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
-    if pipe.get_id(debug=debug) is not None:
+    if pipe.id is not None:
         return False, f"{pipe} is already registered."
 
     ### NOTE: if `parameters` is supplied in the Pipe constructor,
@@ -148,11 +148,11 @@ def fetch_pipes_keys(
     tags: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     debug: bool = False,
-) -> List[
-        Tuple[str, str, Union[str, None], Dict[str, Any]]
+) -> Dict[
+        int, Tuple[str, str, Union[str, None], Dict[str, Any]]
     ]:
     """
-    Return a list of tuples corresponding to the parameters provided.
+    Return a dictionary mapping pipe IDs to key tuples corresponding to the parameters provided.
 
     Parameters
     ----------
@@ -231,7 +231,7 @@ def fetch_pipes_keys(
             parameters[col] = vals
 
     if not table_exists('mrsm_pipes', self, schema=self.instance_schema, debug=debug):
-        return []
+        return {}
 
     from meerschaum.connectors.sql.tables import get_tables
     pipes_tbl = get_tables(mrsm_instance=self, create=False, debug=debug)['pipes']
@@ -260,6 +260,7 @@ def fetch_pipes_keys(
 
     select_cols = (
         [
+            pipes_tbl.c.pipe_id,
             pipes_tbl.c.connector_keys,
             pipes_tbl.c.metric_key,
             pipes_tbl.c.location_key,
@@ -337,14 +338,23 @@ def fetch_pipes_keys(
             self.execute(q).fetchall()
             if self.flavor != 'duckdb'
             else [
-                (row['connector_keys'], row['metric_key'], row['location_key'])
+                (
+                    row['pipe_id'],
+                    row['connector_keys'],
+                    row['metric_key'],
+                    row['location_key'],
+                    row['parameters'],
+                )
                 for row in self.read(q).to_dict(orient='records')
             ]
         )
     except Exception as e:
         error(str(e))
 
-    return rows
+    return {
+        row[0]: row[1:]
+        for row in rows
+    }
 
 
 def create_pipe_indices(
@@ -507,6 +517,16 @@ def get_pipe_index_names(self, pipe: mrsm.Pipe) -> Dict[str, str]:
         ix: truncate_item_name(index_name, flavor=self.flavor)
         for index_name, ix in seen_index_names.items()
     }
+
+def _is_non_indexable_col(col: str, existing_cols_types: dict, flavor: str) -> bool:
+    """Return True if a column cannot be directly indexed on the given flavor."""
+    col_db_type = existing_cols_types.get(col, '').upper()
+    if flavor in ('mysql', 'mariadb'):
+        return 'TEXT' in col_db_type or 'BLOB' in col_db_type
+    if flavor == 'mssql':
+        return col_db_type in ('TEXT', 'NTEXT') or 'MAX' in col_db_type
+    return False
+
 
 def get_create_index_queries(
     self,
@@ -811,7 +831,11 @@ def get_create_index_queries(
             )
             pass
         else: ### mssql, sqlite, etc.
-            id_query = f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})"
+            id_query = (
+                None
+                if _is_non_indexable_col(_id, existing_cols_types, self.flavor)
+                else f"CREATE INDEX {_id_index_name} ON {_pipe_name} ({_id_name})"
+            )
 
         if id_query is not None:
             index_queries[_id] = id_query if isinstance(id_query, list) else [id_query]
@@ -832,6 +856,13 @@ def get_create_index_queries(
             cols = [cols]
         if ix_key == 'unique' and upsert:
             continue
+        if self.flavor in ('mysql', 'mariadb', 'mssql'):
+            cols = [
+                col for col in cols
+                if col and not _is_non_indexable_col(
+                    col, existing_cols_types, self.flavor
+                )
+            ]
         cols_names = [sql_item_name(col, self.flavor, None) for col in cols if col]
         if not cols_names:
             continue
@@ -890,8 +921,14 @@ def get_create_index_queries(
     constraint_queries = [create_unique_index_query]
     if self.flavor not in ('sqlite', 'geopackage'):
         constraint_queries.append(add_constraint_query)
-    if upsert and indices_cols_str:
+    if upsert and indices_cols_str and unique_index_name_unquoted.lower() not in existing_ix_names:
         index_queries[unique_index_name] = constraint_queries
+        ### Remove regular indices that cover the same single column as the unique index.
+        ### Some flavors (e.g. Oracle) reject two indices on the same column combination.
+        if unique_index_cols_str == _id_name:
+            index_queries.pop(_id, None)
+        if unique_index_cols_str == _datetime_name:
+            index_queries.pop(_datetime, None)
     return index_queries
 
 
@@ -1108,7 +1145,6 @@ def get_pipe_data(
     A `pd.DataFrame` of the pipe's data.
 
     """
-    import functools
     from meerschaum.utils.packages import import_pandas
     from meerschaum.utils.dtypes import to_pandas_dtype, are_dtypes_equal
     from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
@@ -1224,6 +1260,41 @@ def get_pipe_data(
         return chunks
 
     return pd.concat(chunks)
+
+
+def get_pipe_docs(
+    self,
+    pipe: mrsm.Pipe,
+    select_columns: Optional[List[str]] = None,
+    omit_columns: Optional[List[str]] = None,
+    begin: Union[datetime, str, None] = None,
+    end: Union[datetime, str, None] = None,
+    params: Optional[Dict[str, Any]] = None,
+    order: str = 'asc',
+    limit: Optional[int] = None,
+    debug: bool = False,
+    **kw: Any
+) -> List[Dict[str, Any]]:
+    """
+    Return a pipe's data as a list of dictionaries, bypassing pandas overhead.
+    """
+    query = self.get_pipe_data_query(
+        pipe=pipe,
+        select_columns=select_columns,
+        omit_columns=omit_columns,
+        begin=begin,
+        end=end,
+        params=params,
+        order=order,
+        limit=limit,
+        debug=debug,
+    )
+    if query is None:
+        return []
+    result = self.exec(query, silent=True, debug=debug)
+    if result is None:
+        return []
+    return [dict(row) for row in result.mappings().fetchall()]
 
 
 def get_pipe_data_query(
@@ -1512,7 +1583,7 @@ def get_pipe_attributes(
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
 
-    if pipe.get_id(debug=debug) is None:
+    if pipe.id is None:
         return {}
 
     pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
@@ -1530,7 +1601,8 @@ def get_pipe_attributes(
             return {}
         attributes = dict(rows[0])
     except Exception:
-        warn(traceback.format_exc())
+        if debug:
+            dprint(traceback.format_exc())
         return {}
 
     ### handle non-PostgreSQL databases (text vs JSON)
@@ -1709,7 +1781,7 @@ def sync_pipe(
     pipe_name = sql_item_name(pipe.target, self.flavor, schema=self.get_pipe_schema(pipe))
     dtypes = pipe.get_dtypes(debug=debug)
 
-    if not pipe.temporary and not pipe.get_id(debug=debug):
+    if not pipe.temporary and not pipe.id:
         register_tuple = pipe.register(debug=debug)
         if not register_tuple[0]:
             return register_tuple
@@ -2665,6 +2737,8 @@ def get_sync_time(
 
     ASC_or_DESC = "DESC" if newest else "ASC"
     existing_cols = pipe.get_columns_types(debug=debug)
+    if not remote and not existing_cols:
+        return None
     valid_params = {}
     if params is not None:
         valid_params = {k: v for k, v in params.items() if k in existing_cols}
@@ -2820,6 +2894,8 @@ def get_pipe_rowcount(
         if 'definition' not in pipe.parameters['fetch']:
             error(msg)
             return None
+    elif not pipe.exists(debug=debug):
+        return None
 
     flavor = self.flavor if not remote else pipe.connector.flavor
     conn = self if not remote else pipe.connector

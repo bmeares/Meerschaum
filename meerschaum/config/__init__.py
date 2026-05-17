@@ -47,6 +47,7 @@ __all__ = (
     'get_keyfile_path',
     'apply_patch_to_config',
     'read_config',
+    'environment',
     'paths',
     'STATIC_CONFIG',
 )

@@ -13,8 +13,10 @@ from meerschaum._internal.arguments import parse_line
 from meerschaum.utils.packages import attempt_import, ensure_readline
 
 prompt_toolkit_completion = attempt_import('prompt_toolkit.completion', lazy=False, install=True)
+prompt_toolkit_formatted_text = attempt_import('prompt_toolkit.formatted_text', lazy=False, install=True)
 Completer = prompt_toolkit_completion.Completer
 Completion = prompt_toolkit_completion.Completion
+FormattedText = prompt_toolkit_formatted_text.FormattedText
 
 
 class ShellCompleter(Completer):
@@ -39,6 +41,10 @@ class ShellCompleter(Completer):
         if not parsed_text:
             return
 
+        # Typed text after the last `+` — used for start_position and highlighting.
+        typed_text = last_action_line.lstrip()
+        typed_len = len(typed_text)
+
         ### Index is the rank order (0 is closest match).
         ### Break when no results are returned.
         for i, a in enumerate(shell_actions):
@@ -51,7 +57,11 @@ class ShellCompleter(Completer):
                 poss = False
             if not poss:
                 break
-            yield Completion(poss, start_position=(-1 * len(poss)))
+            display = FormattedText([
+                ('fg:ansiblue bold', poss[:typed_len]),
+                ('', poss[typed_len:]),
+            ])
+            yield Completion(poss, start_position=-typed_len, display=display)
             yielded.append(poss)
 
         line = document.text
@@ -87,9 +97,17 @@ class ShellCompleter(Completer):
             )
 
         if possibilities:
+            last_word = document.text.split(' ')[-1]
+            last_word_len = len(last_word)
             for suggestion in possibilities:
+                display = FormattedText([
+                    ('fg:ansiblue bold', suggestion[:last_word_len]),
+                    ('', suggestion[last_word_len:]),
+                ])
                 yield Completion(
-                    suggestion, start_position=(-1 * len(document.text.split(' ')[-1]))
+                    suggestion,
+                    start_position=-last_word_len,
+                    display=display,
                 )
             return
 

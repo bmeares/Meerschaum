@@ -26,15 +26,23 @@ if [ -z "$MRSM_DEBUG" ]; then
   export MRSM_DEBUG='false'
 fi
 
+### Parse flags; remaining args forwarded to pytest.
+start_db=""
+cleanup_on_exit=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    db)  start_db=1; shift ;;
+    rm)  cleanup_on_exit="rm"; shift ;;
+    *)   break ;;
+  esac
+done
+
 ### Start the test databases.
-if [ "$1" == "db" ]; then
+if [ -n "$start_db" ]; then
   cd tests/
   docker compose up --quiet-pull -d $services
   cd ../
 fi
-
-cleanup_on_exit="$2"
-shift 2
 
 $mrsm stop daemon
 
@@ -125,7 +133,8 @@ $PYTHON_BIN -m pytest \
   --ignore=docs/ \
   --ff \
   -n=auto \
-  -v; rc="$?"
+  -v \
+  "$@"; rc="$?"
 
 ### Cleanup
 if [ "$cleanup_on_exit" == "rm" ]; then

@@ -49,6 +49,7 @@ class APIConnector(InstanceConnector):
         edit_pipe,
         sync_pipe,
         delete_pipe,
+        delete_pipe_cache,
         get_pipe_data,
         get_pipe_id,
         get_pipe_attributes,
@@ -60,6 +61,7 @@ class APIConnector(InstanceConnector):
         clear_pipe,
         get_pipe_columns_types,
         get_pipe_columns_indices,
+        get_pipe_docs,
     )
     from ._fetch import fetch
     from ._plugins import (

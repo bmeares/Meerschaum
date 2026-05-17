@@ -75,7 +75,20 @@ def _drop_temporary_table(
         self.flavor,
         schema=self.internal_schema
     )
-    drop_success = self.exec(drop_query, silent=True, debug=debug) is not None
+    ### Oracle auto-commits DDL, which conflicts with SQLAlchemy's transaction tracking.
+    ### Use engine.begin() directly to get a clean connection isolated from the thread-local pool.
+    if self.flavor == 'oracle':
+        sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(sqlalchemy.text(drop_query))
+            drop_success = True
+        except Exception:
+            drop_success = not table_exists(table, self, self.internal_schema, debug=debug)
+    else:
+        drop_success = self.exec(drop_query, silent=True, debug=debug) is not None
+    if not drop_success and not table_exists(table, self, self.internal_schema, debug=debug):
+        drop_success = True
     drop_msg = "Success" if drop_success else f"Failed to drop temporary table '{table}'."
     return drop_success, drop_msg
 

@@ -328,6 +328,10 @@ def get_dtypes(
         if infer
         else {}
     )
+    if debug and infer:
+        dprint(f"Remote dtypes for {self}:")
+        mrsm.pprint(remote_dtypes)
+
     patched_dtypes = apply_patch_to_config((remote_dtypes or {}), (configured_dtypes or {}))
 
     dt_col = parameters.get('columns', {}).get('datetime', None)
@@ -666,7 +670,7 @@ def id(self) -> Union[int, str, uuid.UUID, None]:
     Fetch and cache a pipe's ID.
     """
     _id = self._get_cached_value('_id', debug=self.debug)
-    if not _id:
+    if _id is None:
         _id = self.get_id(debug=self.debug)
         if _id is not None:
             self._cache_value('_id', _id, debug=self.debug)
@@ -980,12 +984,12 @@ def target(self) -> str:
             default_targets.add(truncated_target)
             warned_target = self.__dict__.get('_warned_target', False)
             if truncated_target != _target and not warned_target:
-                if not warned_target:
+                if self.instance_connector.flavor not in ('oracle', 'mysql', 'mariadb'):
                     warn(
                         f"The target '{_target}' is too long for '{self.instance_connector.flavor}', "
                         + f"will use {truncated_target} instead."
                     )
-                    self.__dict__['_warned_target'] = True
+                self.__dict__['_warned_target'] = True
                 _target = truncated_target
 
         if _target in default_targets:

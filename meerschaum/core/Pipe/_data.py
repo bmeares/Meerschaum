@@ -26,6 +26,7 @@ def get_data(
     begin: Union[datetime, int, str, None] = None,
     end: Union[datetime, int, str, None] = None,
     params: Optional[Dict[str, Any]] = None,
+    as_docs: bool = False,
     as_iterator: bool = False,
     as_chunks: bool = False,
     as_dask: bool = False,
@@ -63,11 +64,19 @@ def get_data(
         Filter the retrieved data by a dictionary of parameters.
         See `meerschaum.utils.sql.build_where` for more details. 
 
+    as_docs: bool, default False
+        If `True`, return a list of dictionaries rather than a DataFrame.
+        Relies on `get_pipe_docs` from the instance connector if implemented.
+        May be combined with `as_chunks` to return an `Iterator[List[Dict]]`
+        chunked by time bounds (useful for large result sets without pandas overhead).
+
     as_iterator: bool, default False
         If `True`, return a generator of chunks of pipe data.
+        When combined with `as_docs=True`, yields `List[Dict]` per chunk instead of DataFrames.
 
     as_chunks: bool, default False
         Alias for `as_iterator`.
+        When combined with `as_docs=True`, yields `List[Dict]` per chunk instead of DataFrames.
 
     as_dask: bool, default False
         If `True`, return a `dask.DataFrame`
@@ -101,7 +110,10 @@ def get_data(
 
     Returns
     -------
-    A `pd.DataFrame` for the pipe's data corresponding to the provided parameters.
+    A `pd.DataFrame` of the pipe's data (default).
+    A `List[Dict]` if `as_docs=True`.
+    An `Iterator[pd.DataFrame]` if `as_chunks=True` (or `as_iterator=True`).
+    An `Iterator[List[Dict]]` if both `as_docs=True` and `as_chunks=True`.
 
     """
     from meerschaum.utils.warnings import warn
@@ -123,7 +135,7 @@ def get_data(
     if isinstance(omit_columns, str):
         omit_columns = [omit_columns]
 
-    begin, end = self.parse_date_bounds(begin, end)
+    begin, end = self.parse_date_bounds(begin, end, debug=debug)
     as_iterator = as_iterator or as_chunks
     dt_col = self.columns.get('datetime', None)
 
@@ -164,9 +176,12 @@ def get_data(
             chunk_interval=chunk_interval,
             limit=limit,
             order=order,
+            as_docs=as_docs,
             fresh=fresh,
             debug=debug,
         )
+        if as_docs:
+            return df
         return _sort_df(df)
 
     if as_dask:
@@ -206,7 +221,23 @@ def get_data(
         return _sort_df(dd.from_delayed(dask_chunks, meta=dask_meta))
 
     if not self.exists(debug=debug):
-        return None
+        return [] if as_docs else None
+
+    if as_docs:
+        with Venv(get_connector_plugin(self.instance_connector)):
+            docs = self.instance_connector.get_pipe_docs(
+                pipe=self,
+                select_columns=select_columns,
+                omit_columns=omit_columns,
+                begin=begin,
+                end=end,
+                params=params,
+                limit=limit,
+                order=order,
+                debug=debug,
+                **kw
+            )
+        return docs if docs is not None else []
 
     with Venv(get_connector_plugin(self.instance_connector)):
         df = self.instance_connector.get_pipe_data(
@@ -297,6 +328,7 @@ def _get_data_as_iterator(
     chunk_interval: Union[timedelta, int, None] = None,
     limit: Optional[int] = None,
     order: Optional[str] = 'asc',
+    as_docs: bool = False,
     fresh: bool = False,
     debug: bool = False,
     **kw: Any
@@ -305,7 +337,7 @@ def _get_data_as_iterator(
     Return a pipe's data as a generator.
     """
     from meerschaum.utils.dtypes import round_time
-    begin, end = self.parse_date_bounds(begin, end)
+    begin, end = self.parse_date_bounds(begin, end, debug=debug)
     if not self.exists(debug=debug):
         return
 
@@ -348,6 +380,7 @@ def _get_data_as_iterator(
             params=params,
             limit=limit,
             order=order,
+            as_docs=as_docs,
             fresh=fresh,
             debug=debug,
         )
@@ -369,10 +402,11 @@ def _get_data_as_iterator(
             params=params,
             limit=limit,
             order=order,
+            as_docs=as_docs,
             fresh=fresh,
             debug=debug,
         )
-        if len(chunk) > 0:
+        if chunk is not None and len(chunk) > 0:
             yield chunk
 
 
@@ -428,14 +462,13 @@ def get_backtrack_data(
     A `pd.DataFrame` for the pipe's data corresponding to the provided parameters. Backtrack data
     is a convenient way to get a pipe's data "backtracked" from the most recent datetime.
     """
-    from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
 
     if not self.exists(debug=debug):
         return None
 
-    begin = self.parse_date_bounds(begin)
+    begin = self.parse_date_bounds(begin, debug=debug)
 
     backtrack_interval = self.get_backtrack_interval(debug=debug)
     if backtrack_minutes is None:
@@ -471,12 +504,12 @@ def get_backtrack_data(
     if begin is not None:
         begin = begin - backtrack_interval
 
+    kw['order'] = kw.get('order', 'desc') or 'desc'
     return self.get_data(
         begin=begin,
         params=params,
         debug=debug,
         limit=limit,
-        order=kw.get('order', 'desc'),
         **kw
     )
 
@@ -517,7 +550,7 @@ def get_rowcount(
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.misc import filter_keywords
 
-    begin, end = self.parse_date_bounds(begin, end)
+    begin, end = self.parse_date_bounds(begin, end, debug=debug)
     connector = self.instance_connector if not remote else self.connector
     try:
         with Venv(get_connector_plugin(connector)):
@@ -673,7 +706,7 @@ def get_chunk_bounds(
     if begin is None and end is None:
         return [(None, None)]
 
-    begin, end = self.parse_date_bounds(begin, end)
+    begin, end = self.parse_date_bounds(begin, end, debug=debug)
 
     if begin and end:
         if begin >= end:
@@ -784,7 +817,7 @@ def get_chunk_bounds_batches(
     ]
 
 
-def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
+def parse_date_bounds(self, *dt_vals: Union[datetime, int, None], debug: bool = False) -> Union[
     datetime,
     int,
     str,
@@ -798,6 +831,16 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
     from meerschaum.utils.dtypes import coerce_timezone, MRSM_PD_DTYPES
     from meerschaum.utils.warnings import warn
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
+
+    _columns = None
+    _dtypes = None
+
+    def _get_coercion_info():
+        nonlocal _columns, _dtypes
+        if _columns is None:
+            _columns = self.get_parameters(debug=debug).get('columns', {}) or {}
+        if _dtypes is None:
+            _dtypes = self.get_dtypes(debug=debug)
 
     def _parse_date_bound(dt_val):
         if dt_val is None:
@@ -819,8 +862,9 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None]) -> Union[
                 warn(f"Could not parse '{dt_val}' as datetime:\n{e}")
                 return None
 
-        dt_col = self.columns.get('datetime', None)
-        dt_typ = str(self.dtypes.get(dt_col, 'datetime'))
+        _get_coercion_info()
+        dt_col = _columns.get('datetime', None)
+        dt_typ = str(_dtypes.get(dt_col, 'datetime'))
         if dt_typ == 'datetime':
             dt_typ = MRSM_PD_DTYPES['datetime']
         return coerce_timezone(dt_val, strip_utc=('utc' not in dt_typ.lower()))
@@ -838,14 +882,23 @@ def get_doc(self, **kwargs) -> Union[Dict[str, Any], None]:
     """
     from meerschaum.utils.warnings import warn
     kwargs['limit'] = 1
+    kwargs['as_docs'] = True
     try:
-        result_df = self.get_data(**kwargs)
-        if result_df is None or len(result_df) == 0:
+        docs = self.get_data(**kwargs)
+        if not docs:
             return None
-        return result_df.reset_index(drop=True).iloc[0].to_dict()
+        return docs[0]
     except Exception as e:
         warn(f"Failed to read value from {self}:\n{e}", stack=False)
         return None
+
+def get_docs(self, **kwargs) -> list[dict[str, Any]]:
+    """
+    Convenience method to return a pipe's data as a list of dictionaries.
+    Relies on `get_pipe_docs` from the instance connector if implemented.
+    """
+    kwargs['as_docs'] = True
+    return self.get_data(**kwargs)
 
 def get_value(
     self,
@@ -860,13 +913,14 @@ def get_value(
     from meerschaum.utils.warnings import warn
     kwargs['select_columns'] = [column]
     kwargs['limit'] = 1
+    kwargs['as_docs'] = True
     try:
-        result_df = self.get_data(params=params, **kwargs)
-        if result_df is None or len(result_df) == 0:
+        docs = self.get_data(params=params, **kwargs)
+        if not docs:
             return None
-        if column not in result_df.columns:
+        if column not in docs[0]:
             raise ValueError(f"Column '{column}' was not included in the result set.")
-        return result_df[column][0]
+        return docs[0][column]
     except Exception as e:
         warn(f"Failed to read value from {self}:\n{e}", stack=False)
         return None

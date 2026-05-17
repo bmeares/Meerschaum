@@ -427,26 +427,6 @@ def sorted_dict(d: Dict[Any, Any]) -> Dict[Any, Any]:
     except Exception:
         return d
 
-def flatten_pipes_dict(pipes_dict: PipesDict) -> List[Pipe]:
-    """
-    Convert the standard pipes dictionary into a list.
-
-    Parameters
-    ----------
-    pipes_dict: PipesDict
-        The pipes dictionary to be flattened.
-
-    Returns
-    -------
-    A list of `Pipe` objects.
-
-    """
-    pipes_list = []
-    for ck in pipes_dict.values():
-        for mk in ck.values():
-            pipes_list += list(mk.values())
-    return pipes_list
-
 
 def timed_input(
     seconds: int = 10,
@@ -1827,6 +1807,15 @@ def round_time(*args, **kwargs):
     """
     from meerschaum.utils.dtypes import round_time
     return round_time(*args, **kwargs)
+
+
+def flatten_pipes_dict(*args, **kwargs):
+    """
+    Placeholder function to prevent breaking legacy behavior.
+    See `meerschaum.utils.pipes.flatten_pipes_dict`.
+    """
+    from meerschaum.utils.pipes import flatten_pipes_dict
+    return flatten_pipes_dict(*args, **kwargs)
 
 
 _current_module = sys.modules[__name__]

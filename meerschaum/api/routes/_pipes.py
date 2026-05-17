@@ -176,10 +176,13 @@ async def fetch_pipes_keys(
     instance_keys: Optional[str] = None,
     tags: str = "[]",
     params: str = "{}",
+    as_dict: bool = False,
     curr_user = fastapi.Security(ScopedAuth(['pipes:read'])),
 ) -> FetchPipesKeysResponseModel:
     """
-    Get a list of tuples of all registered pipes' keys.
+    Get registered pipes' keys.
+    When `as_dict` is `True`, return a dictionary mapping pipe IDs (as strings) to key lists.
+    Otherwise return a list of 3-tuples for backward compatibility.
     """
     keys = get_api_connector(instance_keys).fetch_pipes_keys(
         connector_keys=json.loads(connector_keys),
@@ -188,10 +191,14 @@ async def fetch_pipes_keys(
         tags=json.loads(tags),
         params=json.loads(params),
     )
-    return [
-        (keys_tuple[0], keys_tuple[1], keys_tuple[2])
-        for keys_tuple in keys
-    ]
+    if isinstance(keys, dict):
+        if as_dict:
+            return {str(k): list(v) for k, v in keys.items()}
+        return [list(v[:3]) for v in keys.values()]
+    keys_list = list(keys)
+    if as_dict:
+        return {str(i): list(t) for i, t in enumerate(keys_list)}
+    return [(t[0], t[1], t[2]) for t in keys_list]
 
 
 @app.get(pipes_endpoint, tags=['Pipes: Attributes'])
@@ -579,6 +586,108 @@ def get_pipe_data(
 
 
 @app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/docs',
+    tags=['Pipes: Data'],
+)
+def get_pipe_docs(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    select_columns: Optional[str] = None,
+    omit_columns: Optional[str] = None,
+    begin: Union[str, int, None] = None,
+    end: Union[str, int, None] = None,
+    params: Optional[str] = None,
+    limit: int = MAX_RESPONSE_ROW_LIMIT,
+    order: str = 'asc',
+    curr_user = fastapi.Security(ScopedAuth(['pipes:read'])),
+) -> str:
+    """
+    Get a pipe's data as a list of documents (list of dicts).
+    Bypasses DataFrame construction overhead; ideal for connectors that return JSON natively.
+    See [`Pipe.get_docs()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_docs).
+
+    Note that `select_columns`, `omit_columns`, and `params` are JSON-encoded strings.
+    """
+    if limit > MAX_RESPONSE_ROW_LIMIT:
+        raise fastapi.HTTPException(
+            status_code=413,
+            detail=(
+                f"Requested limit {limit} exceeds the maximum response size of "
+                f"{MAX_RESPONSE_ROW_LIMIT} rows."
+            ),
+        )
+
+    _params = {}
+    if params == 'null':
+        params = None
+    if params is not None:
+        try:
+            _params = json.loads(params)
+        except Exception:
+            _params = None
+    if not isinstance(_params, dict):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail="Params must be a valid JSON-encoded dictionary.",
+        )
+
+    _select_columns = []
+    if select_columns == 'null':
+        select_columns = None
+    if select_columns is not None:
+        try:
+            _select_columns = json.loads(select_columns)
+        except Exception:
+            _select_columns = None
+    if not isinstance(_select_columns, list):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail="Selected columns must be a JSON-encoded list.",
+        )
+
+    _omit_columns = []
+    if omit_columns == 'null':
+        omit_columns = None
+    if omit_columns is not None:
+        try:
+            _omit_columns = json.loads(omit_columns)
+        except Exception:
+            _omit_columns = None
+    if _omit_columns is None:
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail="Omitted columns must be a JSON-encoded list.",
+        )
+
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    begin, end = pipe.parse_date_bounds(begin, end)
+
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot retrieve data from protected table '{pipe.target}'.",
+        )
+
+    docs = pipe.get_docs(
+        select_columns=_select_columns or None,
+        omit_columns=_omit_columns or None,
+        begin=begin,
+        end=end,
+        params=_params,
+        limit=min(limit, MAX_RESPONSE_ROW_LIMIT),
+        order=order,
+        debug=debug,
+    )
+
+    return fastapi.Response(
+        json.dumps(docs, default=json_serialize_value),
+        media_type='application/json',
+    )
+
+
+@app.get(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/chunk_bounds',
     tags=['Pipes: Data'],
 )
@@ -689,6 +798,25 @@ def clear_pipe(
     return results
 
 
+@app.delete(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/cache',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def delete_pipe_cache(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:read'])),
+) -> mrsm.SuccessTuple:
+    """
+    Invalidate the server-side cache for a pipe (e.g. column types after a schema change).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    return pipe._invalidate_cache(hard=True, debug=debug)
+
+
 @app.get(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/csv',
     tags=['Pipes: Data'],
@@ -771,7 +899,7 @@ def get_pipe_id(
     """
     Get a pipe's ID.
     """
-    pipe_id = get_pipe(connector_keys, metric_key, location_key, instance_keys).get_id(debug=debug)
+    pipe_id = get_pipe(connector_keys, metric_key, location_key, instance_keys).id
     if pipe_id is None:
         raise fastapi.HTTPException(status_code=404, detail="Pipe is not registered.")
     return pipe_id

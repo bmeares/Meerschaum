@@ -77,6 +77,7 @@ class InstanceConnector(Connector):
         create_pipe_indices,
         clear_pipe,
         get_pipe_data,
+        get_pipe_docs,
         get_sync_time,
         get_pipe_columns_types,
         get_pipe_columns_indices,

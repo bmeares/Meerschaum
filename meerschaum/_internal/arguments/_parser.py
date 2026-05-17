@@ -288,6 +288,15 @@ groups['pipes'].add_argument(
 groups['pipes'].add_argument(
     '-t', '--tags', nargs='+', help="Only include pipes with these tags.",
 )
+groups['pipes'].add_argument(
+    '--datetime-dtypes', '--datetime-dtype', '--dtype', '--dtypes',
+    nargs='+',
+    choices=['datetime', 'int', 'None', '_datetime', '_int', '_None'],
+    help=(
+        "Only select pipes with the corresponding datetime dtypes (`datetime`, `int`, or `None`)."
+        "\nMay be negated with `_`."
+    )
+)
 
 
 ### Sync options
@@ -377,6 +386,14 @@ groups['sync'].add_argument(
     '--skip-hooks', action='store_true', help=(
         "Skip calling the sync hooks."
     )
+)
+groups['sync'].add_argument(
+    '--sync-data', choices=['nothing', 'backtrack', 'all', 'filter'],
+    help=(
+        "When copying pipes, specify what data to sync into destination pipes. "
+        "'filter' uses --begin, --end, and --params to restrict the range. "
+        "Defaults to 'nothing' (copy pipe definitions only)."
+    ),
 )
 groups['sync'].add_argument(
     '--cache', action='store_true',

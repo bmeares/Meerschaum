@@ -18,6 +18,7 @@ __all__ = (
     'misc',
     'networking',
     'packages',
+    'pipes',
     'pool',
     'process',
     'prompt',

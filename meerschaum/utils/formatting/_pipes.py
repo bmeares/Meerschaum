@@ -205,10 +205,10 @@ def pprint_pipes(pipes: PipesDict) -> None:
 
 
 def pprint_pipe_columns(
-        pipe: meerschaum.Pipe,
-        nopretty: bool = False,
-        debug: bool = False,
-    ) -> None:
+    pipe: meerschaum.Pipe,
+    nopretty: bool = False,
+    debug: bool = False,
+) -> None:
     """Pretty-print a pipe's columns."""
     from meerschaum.utils.warnings import info
     from meerschaum.utils.formatting import UNICODE, ANSI, pprint, print_tuple, get_console
