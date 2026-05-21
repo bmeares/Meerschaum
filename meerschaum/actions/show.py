@@ -43,6 +43,7 @@ def show(
         'jobs'       : _show_jobs,
         'logs'       : _show_logs,
         'tags'       : _show_tags,
+        'targets'    : _show_targets,
         'schedules'  : _show_schedules,
         'venvs'      : _show_venvs,
         'tokens'     : _show_tokens,
@@ -1081,6 +1082,62 @@ def _show_daemons() -> SuccessTuple:
             ready_icon,
             str(worker.job.daemon.rotating_log.get_latest_subfile_index()),
         )
+
+    mrsm.pprint(table)
+    return True, "Success"
+
+
+def _show_targets(
+    action: Optional[List[str]] = None,
+    nopretty: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
+    """
+    Show the target tables for pipes, grouped by target name.
+    """
+    import json
+    import meerschaum as mrsm
+    from meerschaum.utils.formatting import pipe_repr
+    rich_table, rich_box, rich_console = mrsm.attempt_import(
+        'rich.table', 'rich.box', 'rich.console',
+    )
+    action = action or []
+
+    targets_pipes = mrsm.get_pipes(as_targets_dict=True, **kwargs)
+    if action:
+        targets_pipes = {
+            (schema, target): pipes
+            for (schema, target), pipes in targets_pipes.items()
+            if target in action
+        }
+
+    if not targets_pipes:
+        return False, "No targets to show."
+
+    if nopretty:
+        for (schema, target), _pipes in targets_pipes.items():
+            print(f"{schema or ''}.{target}" if schema else target)
+            for pipe in _pipes:
+                print(json.dumps(pipe.meta))
+        return True, "Success"
+
+    table = rich_table.Table(
+        box=rich_box.HEAVY_HEAD,
+        show_lines=True,
+        header_style='bold',
+    )
+    table.add_column("Schema", overflow='fold')
+    table.add_column("Target", overflow='fold')
+    table.add_column("Pipes", overflow='fold')
+
+    sort_key = lambda st: (st[0] or '', st[1])
+    for schema, target in sorted(targets_pipes, key=sort_key):
+        _pipes = targets_pipes[(schema, target)]
+        pipes_group = rich_console.Group(*[
+            pipe_repr(pipe, as_rich_text=True)
+            for pipe in _pipes
+        ])
+        table.add_row(schema or '', target, pipes_group)
 
     mrsm.pprint(table)
     return True, "Success"

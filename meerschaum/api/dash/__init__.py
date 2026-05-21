@@ -63,6 +63,16 @@ dash_app.layout = html.Div([
     html.Div([], id='page-layout-div'),
 ])
 
+
+@dash_app.server.before_request
+def _skip_sourcemap_requests():
+    """Return 404 for browser-requested sourcemaps to avoid noisy tracebacks."""
+    from flask import request
+    path = request.path
+    if path.endswith('.map') and '/_dash-component-suites/' in path:
+        return ('', 404)
+    return None
+
 import meerschaum.api.dash.pages as pages
 import meerschaum.api.dash.callbacks as callbacks
 

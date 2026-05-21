@@ -4,6 +4,14 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.3.1
+
+- **Add `--targets` / `--target`.**  
+  Similar to `--tags`, the `--target` flag filters pipes based on the target table name. Values may be negated.
+
+- **Fix `--dtype` filtering on symlinked pipes.**  
+  Pipes which symlink their dtypes are now correctly handled by the `--dtype` filter.
+
 ### v3.3.0
 
 - **Add `--dtype` flag.**  

@@ -903,8 +903,8 @@ def references(self) -> List[mrsm.Pipe]:
     if not refs:
         return []
 
-    self._refs = [get_pipe_from_value(val, _pipe=self) for val in refs]
-    return self._refs
+    self._references = [get_pipe_from_value(val, _pipe=self) for val in refs]
+    return self._references
 
 
 @property
@@ -965,40 +965,46 @@ def target(self) -> str:
       - `target_table`
       - `target_table_name`
     """
-    target_val = self.parameters.get('target', None)
-    if not target_val:
-        default_target = self._target_legacy()
-        default_targets = {default_target}
-        potential_keys = ('target_name', 'target_table', 'target_table_name')
-        _target = None
-        for k in potential_keys:
-            if k in self.parameters:
-                _target = self.parameters[k]
-                break
+    cached_target = self.__dict__.get('_target', None)
+    if cached_target:
+        return cached_target
 
-        _target = _target or default_target
+    params = self.parameters
+    target_val = params.get('target', None)
+    if target_val:
+        self.__dict__['_target'] = target_val
+        return target_val
 
-        if self.instance_connector.type == 'sql':
-            from meerschaum.utils.sql import truncate_item_name
-            truncated_target = truncate_item_name(_target, self.instance_connector.flavor)
-            default_targets.add(truncated_target)
-            warned_target = self.__dict__.get('_warned_target', False)
-            if truncated_target != _target and not warned_target:
-                if self.instance_connector.flavor not in ('oracle', 'mysql', 'mariadb'):
-                    warn(
-                        f"The target '{_target}' is too long for '{self.instance_connector.flavor}', "
-                        + f"will use {truncated_target} instead."
-                    )
-                self.__dict__['_warned_target'] = True
-                _target = truncated_target
+    default_target = self._target_legacy()
+    default_targets = {default_target}
+    potential_keys = ('target_name', 'target_table', 'target_table_name')
+    _target = None
+    for k in potential_keys:
+        if k in params:
+            _target = params[k]
+            break
 
-        if _target in default_targets:
-            return _target
+    _target = _target or default_target
 
+    if self.instance_connector.type == 'sql':
+        from meerschaum.utils.sql import truncate_item_name
+        truncated_target = truncate_item_name(_target, self.instance_connector.flavor)
+        default_targets.add(truncated_target)
+        warned_target = self.__dict__.get('_warned_target', False)
+        if truncated_target != _target and not warned_target:
+            if self.instance_connector.flavor not in ('oracle', 'mysql', 'mariadb'):
+                warn(
+                    f"The target '{_target}' is too long for '{self.instance_connector.flavor}', "
+                    + f"will use {truncated_target} instead."
+                )
+            self.__dict__['_warned_target'] = True
+            _target = truncated_target
+
+    if _target not in default_targets:
         self.target = _target
-        return _target
 
-    return target_val
+    self.__dict__['_target'] = _target
+    return _target
 
 
 def _target_legacy(self) -> str:
@@ -1018,6 +1024,7 @@ def target(self, _target: str) -> None:
     Override the target of the in-memory pipe.
     Call `meerschaum.Pipe.edit` to persist changes.
     """
+    self.__dict__.pop('_target', None)
     self.update_parameters({'target': _target}, persist=False)
 
 
