@@ -43,6 +43,7 @@ def _complete_copy(
         action = []
 
     options = {
+        'pipes': _complete_copy_pipes,
         'connector': _complete_copy_connectors,
         'connectors': _complete_copy_connectors,
     }
@@ -124,9 +125,12 @@ def _copy_pipes(
         new_only_pipes = [p for p in prospective_pipes if p.id is None]
         all_exist = not new_only_pipes
 
-        if destination_instance:
+        auto_resolve = force or yes or noask
+
+        if destination_instance and auto_resolve:
             overwrite_existing = 'overwrite' if force else 'skip'
-            batch_sync_choice = sync_data or 'nothing'
+            if batch_sync_choice is None:
+                batch_sync_choice = sync_data or 'nothing'
         elif existing_new_pipes and not force:
             clear_screen(debug=debug)
             pprint_pipes(pipes_dict_from_list(existing_new_pipes))
@@ -168,10 +172,22 @@ def _copy_pipes(
         else:
             overwrite_existing = 'overwrite'
 
+        if batch_sync_choice is None and sync_data is not None:
+            batch_sync_choice = sync_data
+
         if batch_sync_choice is None:
             _data_committed = overwrite_existing in ('data_only', 'overwrite')
             _data_options = [
-                ('backtrack', 'Recent data only (within the configured backtrack window).'),
+                (
+                    'backtrack',
+                    "Recent data from each source pipe\n     (backtrack window before the"
+                    " source sync time).",
+                ),
+                (
+                    'incremental',
+                    "Only data at or after each destination pipe's sync time"
+                    "\n     (backtrack window before the destination sync time).",
+                ),
                 ('all', 'All available data from the source pipes.'),
                 ('filter', 'Data matching specific filters (begin, end, params).'),
             ]
@@ -296,7 +312,16 @@ def _copy_pipes(
                     "What data should be copied?",
                     [
                         ('nothing', 'No data.'),
-                        ('backtrack', 'Recent data only (within the configured backtrack window).'),
+                        (
+                            'backtrack',
+                            "Recent data from the source pipe (backtrack window before the"
+                            " source pipe's sync time).",
+                        ),
+                        (
+                            'incremental',
+                            "Only data at or after the destination pipe's sync time"
+                            " (applies the backtrack interval to the destination's sync time).",
+                        ),
                         ('all', 'All available data from the source pipe.'),
                         ('filter', 'Data matching specific filters (begin, end, params).'),
                     ],
@@ -321,11 +346,20 @@ def _copy_pipes(
             if sync_choice != 'nothing':
                 info(f"Fetching data from {pipe}...")
                 _sync_start = time.monotonic()
-                sync_data = (
-                    pipe.get_backtrack_data(debug=debug)
-                    if sync_choice == 'backtrack'
-                    else pipe.get_data(debug=debug, as_iterator=True, **filter_kw)
-                )
+                if sync_choice == 'backtrack':
+                    sync_data = pipe.get_backtrack_data(debug=debug)
+                elif sync_choice == 'incremental':
+                    _incr_begin = new_pipe.get_sync_time(
+                        apply_backtrack_interval=True,
+                        debug=debug,
+                    )
+                    sync_data = pipe.get_data(
+                        begin=_incr_begin,
+                        debug=debug,
+                        as_iterator=True,
+                    )
+                else:
+                    sync_data = pipe.get_data(debug=debug, as_iterator=True, **filter_kw)
                 info(f"Syncing into {new_pipe}...")
                 sync_success, sync_msg = new_pipe.sync(sync_data, debug=debug, **kw)
                 _sync_elapsed = time.monotonic() - _sync_start
@@ -374,7 +408,7 @@ def _copy_pipes(
         table.add_column(
             "Pipe",
             footer=Text("Total", style=_style("bold")),
-            no_wrap=True,
+            overflow="fold",
         )
         table.add_column(
             "Inserted",
@@ -405,7 +439,7 @@ def _copy_pipes(
                 Text(f"{stats.get('upserted', 0):,}", style=_row_style),
                 Text(_fmt_dur(elapsed), style=_row_style),
             )
-        get_console().print(table)
+        get_console().print(table, crop=False, soft_wrap=False)
 
     msg = (
         "No pipes were copied." if successes == 0
@@ -502,6 +536,42 @@ def _complete_copy_connectors(
     else:
         search_term = action[-1]
     return get_connector_labels(*types, search_term=search_term)
+
+
+def _complete_copy_pipes(
+    action: Optional[List[str]] = None,
+    line: str = '',
+    **kw: Any
+) -> List[str]:
+    """
+    Suggest instance connectors as the destination positional for `copy pipes`.
+    """
+    from meerschaum.connectors import instance_types
+    from meerschaum.utils.misc import get_connector_labels
+
+    if action is None:
+        action = []
+
+    ### Count non-flag tokens after `pipes` in the original line so we only complete
+    ### the first positional (the destination instance).
+    raw_tokens = line.split()
+    try:
+        pipes_idx = raw_tokens.index('pipes')
+    except ValueError:
+        pipes_idx = -1
+    positionals = [
+        tok for tok in raw_tokens[pipes_idx + 1:]
+        if not tok.startswith('-')
+    ] if pipes_idx >= 0 else []
+
+    line_ends_with_space = line.endswith(' ') or line.endswith('\t')
+    if len(positionals) > 1:
+        return []
+    if len(positionals) == 1 and line_ends_with_space:
+        return []
+
+    search_term = '' if (line_ends_with_space or not action) else action[-1]
+    return get_connector_labels(*instance_types, search_term=search_term)
 
 
 ### NOTE: This must be the final statement of the module.

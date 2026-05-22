@@ -395,9 +395,11 @@ groups['sync'].add_argument(
     )
 )
 groups['sync'].add_argument(
-    '--sync-data', choices=['nothing', 'backtrack', 'all', 'filter'],
+    '--sync-data', choices=['nothing', 'backtrack', 'incremental', 'all', 'filter'],
     help=(
         "When copying pipes, specify what data to sync into destination pipes. "
+        "'backtrack' uses the source pipe's sync time; 'incremental' uses the "
+        "destination pipe's sync time (both apply the backtrack interval). "
         "'filter' uses --begin, --end, and --params to restrict the range. "
         "Defaults to 'nothing' (copy pipe definitions only)."
     ),
