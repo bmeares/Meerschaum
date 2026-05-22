@@ -334,16 +334,39 @@ def load_plugin_connectors():
     If a plugin makes use of the `make_connector` decorator,
     load its module.
     """
+    import os
     from meerschaum.plugins import get_plugins, import_plugins
     to_import = []
     for plugin in get_plugins():
         if plugin is None:
             continue
 
-        with open(plugin.__file__, encoding='utf-8') as f:
-            text = f.read()
+        plugin_file = plugin.__file__
+        if not plugin_file:
+            continue
 
-        if 'make_connector' in text or 'Connector' in text:
+        files_to_scan = []
+        plugin_dir = os.path.dirname(plugin_file)
+        if os.path.basename(plugin_file) == '__init__.py':
+            for root, _, files in os.walk(plugin_dir):
+                for fname in files:
+                    if fname.endswith('.py'):
+                        files_to_scan.append(os.path.join(root, fname))
+        else:
+            files_to_scan.append(plugin_file)
+
+        found = False
+        for fpath in files_to_scan:
+            try:
+                with open(fpath, encoding='utf-8') as f:
+                    text = f.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            if 'make_connector' in text or 'Connector' in text:
+                found = True
+                break
+
+        if found:
             to_import.append(plugin.name)
 
     if not to_import:

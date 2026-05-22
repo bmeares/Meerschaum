@@ -16,13 +16,15 @@ from meerschaum.utils.typing import Optional
 from meerschaum.api.dash.components import pages_navbar
 
 search_box = dbc.Input(
-    id = "search-plugins-input",
-    placeholder = "Search for plugins...",
-    type = "text",
+    id="search-plugins-input",
+    placeholder="Search for plugins...",
+    type="text",
+    debounce=True,
 )
 
 layout = [
     pages_navbar,
+    dcc.Location(id='plugins-location'),
     dbc.Container([
         html.Div([
             html.Br(),
@@ -47,9 +49,9 @@ layout = [
                 style={'background-color': 'var(--dark)', 'padding': '1em'},
             ),
             html.Br(),
-            search_box,
+            html.Div(search_box, id='plugins-search-wrapper'),
             html.Br(),
-            html.Div([], id='plugins-cards-div'),
+            html.Div([], id='plugins-content-div'),
         ])
     ])
 ]

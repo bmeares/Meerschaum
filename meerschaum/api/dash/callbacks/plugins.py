@@ -18,18 +18,59 @@ from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State, ALL, MATCH
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
-from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
-from dash.exceptions import PreventUpdate
-from meerschaum.api.dash.plugins import get_plugins_cards, is_plugin_owner
+from meerschaum.api.dash.components import alert_from_success_tuple
+from meerschaum.api.dash.plugins import (
+    build_plugins_listing,
+    build_plugin_detail,
+    is_plugin_owner,
+)
+
+
+def _parse_plugin_name_from_pathname(pathname: Optional[str]) -> Optional[str]:
+    """
+    Return the plugin name from ``/dash/plugins/<name>`` or ``None`` for the listing.
+    """
+    if not pathname or not str(pathname).startswith('/dash/plugins'):
+        return None
+    suffix = str(pathname)[len('/dash/plugins'):].strip('/')
+    return suffix or None
+
 
 @dash_app.callback(
-    Output('plugins-cards-div', 'children'),
+    Output('plugins-content-div', 'children'),
+    Output('plugins-search-wrapper', 'style'),
+    Input('plugins-location', 'pathname'),
     Input('search-plugins-input', 'value'),
+    Input('plugins-pagination', 'active_page'),
     State('session-store', 'data'),
 )
-def search_plugins(text: Optional[str] = None, session_data: Optional[Dict[str, Any]] = None):
-    cards, alerts = get_plugins_cards(search_term=text, session_data=session_data)
-    return build_cards_grid(cards, num_columns=3)
+def render_plugins_page(
+    pathname: Optional[str] = None,
+    search_term: Optional[str] = None,
+    active_page: Optional[int] = None,
+    session_data: Optional[Dict[str, Any]] = None,
+):
+    """
+    Render either the paginated plugins listing or a single plugin's detail page.
+    """
+    plugin_name = _parse_plugin_name_from_pathname(pathname)
+    if plugin_name:
+        return build_plugin_detail(plugin_name, session_data), {'display': 'none'}
+
+    triggered_id = getattr(dash.callback_context, 'triggered_id', None)
+    if triggered_id == 'search-plugins-input':
+        page = 1
+    else:
+        page = int(active_page or 1)
+
+    return (
+        build_plugins_listing(
+            search_term=search_term,
+            session_data=session_data,
+            page=page,
+        ),
+        {'display': 'block'},
+    )
 
 
 @dash_app.callback(
