@@ -9,6 +9,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add `--targets` / `--target`.**  
   Similar to `--tags`, the `--target` flag filters pipes based on the target table name. Values may be negated.
 
+- **Add `show targets`.**  
+  The action `show targets` prints a table of pipes and their target tables and schemata.
+
 - **Fix `--dtype` filtering on symlinked pipes.**  
   Pipes which symlink their dtypes are now correctly handled by the `--dtype` filter.
 
