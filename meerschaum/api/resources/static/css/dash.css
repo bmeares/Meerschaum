@@ -114,6 +114,29 @@ a {
 .plugin-detail-wrapper {
   margin-top: -0.5rem;
 }
+#plugins-pagination .page-link {
+  background-color: transparent;
+  border-color: var(--bs-gray-700);
+  color: var(--bs-gray-300);
+  box-shadow: none;
+}
+#plugins-pagination .page-link:hover,
+#plugins-pagination .page-link:focus {
+  background-color: var(--bs-gray-800);
+  border-color: var(--bs-gray-600);
+  color: var(--bs-light);
+  box-shadow: none;
+}
+#plugins-pagination .page-item.active .page-link {
+  background-color: var(--bs-gray-600);
+  border-color: var(--bs-gray-600);
+  color: var(--bs-light);
+}
+#plugins-pagination .page-item.disabled .page-link {
+  background-color: transparent;
+  border-color: var(--bs-gray-800);
+  color: var(--bs-gray-600);
+}
 .plugins-empty-state {
   text-align: center;
   padding: 3em 1em;
