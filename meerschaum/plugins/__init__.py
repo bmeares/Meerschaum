@@ -819,8 +819,8 @@ def unload_plugins(
     for plugin_name in plugins:
         for mod_name in loaded_modules:
             if (
-                mod_name[len(paths.PLUGINS_RESOURCES_PATH.stem):].startswith(plugin_name + '.')
-                or mod_name[len(paths.PLUGINS_RESOURCES_PATH.stem):] == plugin_name
+                mod_name[len(module_prefix):].startswith(plugin_name + '.')
+                or mod_name[len(module_prefix):] == plugin_name
             ):
                 _ = sys.modules.pop(mod_name, None)
 

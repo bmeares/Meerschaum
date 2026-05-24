@@ -4,6 +4,23 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.3.1
+
+- **Add `--targets` / `--target`.**  
+  Similar to `--tags`, the `--target` flag filters pipes based on the target table name. Values may be negated.
+
+- **Add `show targets`.**  
+  The action `show targets` prints a table of pipes and their target tables and schemata.
+
+- **Fix `--dtype` filtering on symlinked pipes.**  
+  Pipes which symlink their dtypes are now correctly handled by the `--dtype` filter.
+
+- **Fix stale plugins bug.**  
+  A bug with plugin loading and unloading has been fixed.
+
+- **Update plugins page.**  
+  The Web Console plugins page has been improved. 
+
 ### v3.3.0
 
 - **Add `--dtype` flag.**  
@@ -18,7 +35,8 @@ This is the current release cycle, so stay tuned for future releases!
 - **Improve `copy pipes` flow.**  
   The `copy pipes` action has been significantly improved for both interactive and scripted use cases.
 
-  **Non-interactive batch copying:** Specify the destination instance as the first positional argument to skip all prompts. Combined with `--force` and `--sync-data`, pipes can now be fully scripted:
+  **Non-interactive batch copying:**  
+  Specify the destination instance as the first positional argument to skip all prompts. Combined with `--force` and `--sync-data`, pipes can now be fully scripted:
 
   ```bash
   # Copy pipe definitions only (skip existing pipes)

@@ -16,40 +16,30 @@ from meerschaum.utils.typing import Optional
 from meerschaum.api.dash.components import pages_navbar
 
 search_box = dbc.Input(
-    id = "search-plugins-input",
-    placeholder = "Search for plugins...",
-    type = "text",
+    id="search-plugins-input",
+    placeholder="Search for plugins...",
+    type="text",
+    debounce=True,
 )
 
 layout = [
     pages_navbar,
+    dcc.Location(id='plugins-location'),
     dbc.Container([
         html.Div([
             html.Br(),
-            html.Div(
-                dbc.Container([
-                    html.H3('Plugins'),
-                    html.P([
-                        (
-                            'Plugins extend the functionality of Meerschaum.'
-                            ' To find out more, check out the '
-                        ),
-                        html.A(
-                            'plugins documentation',
-                            href='https://meerschaum.io/reference/plugins/',
-                            rel="noreferrer noopener",
-                            target="_blank",
-                        ),
-                        '.',
-                    ]),
-                ]),
-                className='page-header',
-                style={'background-color': 'var(--dark)', 'padding': '1em'},
+            html.Div(search_box, id='plugins-search-wrapper'),
+            html.Br(),
+            dbc.Pagination(
+                id='plugins-pagination',
+                max_value=1,
+                active_page=1,
+                first_last=True,
+                previous_next=True,
+                fully_expanded=False,
+                style={'justify-content': 'center', 'display': 'none'},
             ),
-            html.Br(),
-            search_box,
-            html.Br(),
-            html.Div([], id='plugins-cards-div'),
+            html.Div([], id='plugins-content-div'),
         ])
     ])
 ]

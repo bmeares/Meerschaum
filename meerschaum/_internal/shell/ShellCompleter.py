@@ -18,6 +18,24 @@ Completer = prompt_toolkit_completion.Completer
 Completion = prompt_toolkit_completion.Completion
 FormattedText = prompt_toolkit_formatted_text.FormattedText
 
+_FLAG_CHOICES_MAP = None
+
+
+def _get_flag_choices_map():
+    """Map every ``--flag`` (and short alias) to its argparse ``choices`` list."""
+    global _FLAG_CHOICES_MAP
+    if _FLAG_CHOICES_MAP is not None:
+        return _FLAG_CHOICES_MAP
+    from meerschaum._internal.arguments._parser import parser
+    choices_map = {}
+    for act in parser._actions:
+        if not act.choices:
+            continue
+        for opt in act.option_strings:
+            choices_map[opt] = [str(c) for c in act.choices]
+    _FLAG_CHOICES_MAP = choices_map
+    return _FLAG_CHOICES_MAP
+
 
 class ShellCompleter(Completer):
     """
@@ -44,6 +62,43 @@ class ShellCompleter(Completer):
         # Typed text after the last `+` — used for start_position and highlighting.
         typed_text = last_action_line.lstrip()
         typed_len = len(typed_text)
+
+        ### Flag-value completion: if the cursor is positioned to fill in a value for
+        ### a `--flag` that declares argparse `choices`, yield those choices.
+        current_segment = document.text.split('+')[-1]
+        segment_ends_with_space = (
+            current_segment.endswith(' ') or current_segment.endswith('\t')
+        )
+        segment_tokens = current_segment.split()
+        flag_token = None
+        partial_value = ''
+        if segment_tokens:
+            if segment_ends_with_space and segment_tokens[-1].startswith('--'):
+                flag_token = segment_tokens[-1]
+            elif (
+                not segment_ends_with_space
+                and len(segment_tokens) >= 2
+                and segment_tokens[-2].startswith('--')
+                and not segment_tokens[-1].startswith('--')
+            ):
+                flag_token = segment_tokens[-2]
+                partial_value = segment_tokens[-1]
+        if flag_token:
+            choices = _get_flag_choices_map().get(flag_token)
+            if choices:
+                for choice in choices:
+                    if not choice.startswith(partial_value):
+                        continue
+                    display = FormattedText([
+                        ('fg:ansiblue bold', choice[:len(partial_value)]),
+                        ('', choice[len(partial_value):]),
+                    ])
+                    yield Completion(
+                        choice,
+                        start_position=-len(partial_value),
+                        display=display,
+                    )
+                return
 
         ### Index is the rank order (0 is closest match).
         ### Break when no results are returned.

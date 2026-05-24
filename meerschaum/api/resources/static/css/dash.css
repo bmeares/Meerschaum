@@ -50,11 +50,107 @@ a {
   margin: 0px;
   padding: 0px;
   display: block;
-
+  background-color: transparent !important;
+  color: inherit !important;
+  resize: vertical;
 }
 .plugin-description:focus, .plugin-description:active {
   outline: 0px solid transparent !important;
   border-color: transparent;
+  box-shadow: none !important;
+}
+.plugin-card {
+  height: 100%;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.plugin-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.35);
+}
+.plugin-card-detail:hover {
+  transform: none;
+  box-shadow: none;
+}
+.plugin-author {
+  margin-bottom: 0.75em;
+  font-size: 0.9rem;
+}
+.plugin-version-badge {
+  font-family: Consolas, Menlo, Monaco, "Lucida Console", monospace;
+  background-color: var(--bs-secondary);
+  color: white;
+  padding: 0.15em 0.55em;
+  border-radius: 0.3rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.plugin-card-link {
+  text-decoration: none;
+}
+.plugin-card-link:hover {
+  text-decoration: underline;
+}
+.plugin-card-footer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5em;
+}
+.plugin-back-button {
+  background-color: transparent !important;
+  border: none !important;
+  padding: 0.25rem 0 !important;
+  font-size: 1.35rem !important;
+  text-decoration: none !important;
+  box-shadow: none !important;
+  color: var(--bs-yellow) !important;
+}
+.plugin-back-button:hover, .plugin-back-button:focus, .plugin-back-button:active {
+  background-color: transparent !important;
+  color: var(--bs-warning) !important;
+  text-decoration: none !important;
+  box-shadow: none !important;
+}
+.plugin-detail-wrapper {
+  margin-top: -0.5rem;
+}
+#plugins-pagination .page-link {
+  background-color: transparent;
+  border-color: var(--bs-gray-700);
+  color: var(--bs-gray-300);
+  box-shadow: none;
+}
+#plugins-pagination .page-link:hover,
+#plugins-pagination .page-link:focus {
+  background-color: var(--bs-gray-800);
+  border-color: var(--bs-gray-600);
+  color: var(--bs-light);
+  box-shadow: none;
+}
+#plugins-pagination .page-item.active .page-link {
+  background-color: var(--bs-gray-600);
+  border-color: var(--bs-gray-600);
+  color: var(--bs-light);
+}
+#plugins-pagination .page-item.disabled .page-link {
+  background-color: transparent;
+  border-color: var(--bs-gray-800);
+  color: var(--bs-gray-600);
+}
+.plugins-empty-state {
+  text-align: center;
+  padding: 3em 1em;
+  max-width: 36rem;
+  margin: 0 auto;
+}
+.plugins-empty-icon {
+  font-size: 3.5rem;
+  line-height: 1;
+  margin-bottom: 0.5em;
+}
+.plugins-empty-state pre,
+.plugins-empty-state code {
+  text-align: left;
 }
 .job-card-text {
   font-family: Consolas, Menlo, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace, serif;

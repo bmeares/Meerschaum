@@ -30,12 +30,14 @@ def get_pipes(
     metric_keys: Union[str, List[str], None] = None,
     location_keys: Union[str, List[str], None] = None,
     tags: Optional[List[str]] = None,
+    targets: Optional[List[str]] = None,
     datetime_dtypes: Optional[List[str]] = None,
     params: Optional[Dict[str, Any]] = None,
     mrsm_instance: Union[str, InstanceConnector, None] = None,
     instance: Union[str, InstanceConnector, None] = None,
     as_list: bool = False,
     as_tags_dict: bool = False,
+    as_targets_dict: bool = False,
     method: str = 'registered',
     workers: Optional[int] = None,
     debug: bool = False,
@@ -85,6 +87,10 @@ def get_pipes(
         If `True`, return a dictionary mapping tags to pipes.
         Pipes with multiple tags will be repeated.
 
+    as_targets_dict: bool, default False
+        If `True`, return a dictionary mapping `(schema, target)` tuples to pipes.
+        Pipes sharing the same target across different schemata are grouped separately.
+
     method: str, default 'registered'
         Available options: `['registered', 'explicit', 'all']`
         If `'registered'` (default), create pipes based on registered keys in the connector's pipes table
@@ -95,9 +101,9 @@ def get_pipes(
         **NOTE:** Method `'all'` is not implemented!
 
     workers: Optional[int], default None
-        If provided (and `as_tags_dict` is `True`), set the number of workers for the pool
-        to fetch tags.
-        Only takes effect if the instance connector supports multi-threading
+        If provided (and `as_tags_dict` or `as_targets_dict` is `True`), set the number of workers
+        for the pool to fetch tags or targets.
+        Only takes effect if the instance connector supports multi-threading.
 
     **kw: Any:
         Keyword arguments to pass to the `meerschaum.Pipe` constructor.
@@ -108,6 +114,7 @@ def get_pipes(
     in the connector, metric, location hierarchy.
     If `as_list` is `True`, return a list of `meerschaum.Pipe` objects.
     If `as_tags_dict` is `True`, return a dictionary mapping tags to pipes.
+    If `as_targets_dict` is `True`, return a dictionary mapping targets to pipes.
 
     Examples
     --------
@@ -217,7 +224,12 @@ def get_pipes(
     ### Populate the `pipes` dictionary with Pipes based on the keys
     ### obtained from the chosen `method`.
     in_dtypes, ex_dtypes = separate_negation_values(datetime_dtypes or [])
+    in_targets, ex_targets = separate_negation_values(targets or [])
     pipes: PipesDict = {}
+    targets_pipes: Dict[Tuple[Optional[str], str], List[mrsm.Pipe]] = defaultdict(lambda: [])
+    connector_schema = getattr(connector, 'schema', None)
+    connector_is_sql = getattr(connector, 'type', None) == 'sql'
+    connector_flavor = getattr(connector, 'flavor', None)
     for pipe_id, keys_tuple in result_items:
         ck, mk, lk = keys_tuple[0], keys_tuple[1], keys_tuple[2]
         pipe_tags_or_parameters = keys_tuple[3] if len(keys_tuple) == 4 else None
@@ -261,19 +273,23 @@ def get_pipes(
                 full_attributes['pipe_id'] = pipe_id
             pipe._cache_value('attributes', full_attributes, memory_only=True, debug=debug)
             pipe._cache_value('_attributes_sync_time', now, memory_only=True, debug=debug)
-        if datetime_dtypes:
-            if pipe_parameters is None:
-                pipe_parameters = pipe.get_parameters(debug=debug)
-            columns_val = (pipe_parameters or {}).get('columns', {}) or {}
-            if isinstance(columns_val, str) and 'Pipe(' in columns_val:
-                columns_val = replace_pipes_syntax(columns_val)
 
+        if datetime_dtypes or targets:
+            parameters_str = str(pipe_parameters)
+            if pipe_parameters is None or 'MRSM{' in parameters_str or 'Pipe(' in parameters_str:
+                pipe_parameters = pipe.get_parameters(debug=debug)
+
+        keep_pipe = True
+
+        if datetime_dtypes:
+            columns_val = (pipe_parameters or {}).get('columns', {}) or {}
             dt_col = columns_val.get('datetime', None)
-            dt_typ = (
-                ((pipe_parameters or {}).get('dtypes', None) or {}).get(dt_col, None)
+            pipe_dtypes = (
+                ((pipe_parameters or {}).get('dtypes', None) or {})
                 if dt_col
                 else None
             )
+            dt_typ = pipe_dtypes.get(dt_col, None) if dt_col else None
 
             def _dtype_matches(clean_d):
                 if not dt_col:
@@ -286,8 +302,15 @@ def get_pipes(
 
             in_match = not in_dtypes or any(_dtype_matches(d) for d in in_dtypes)
             ex_match = bool(ex_dtypes and any(_dtype_matches(d) for d in ex_dtypes))
-            keep_pipe = in_match and not ex_match
+            keep_pipe = keep_pipe and in_match and not ex_match
+            if not keep_pipe:
+                continue
 
+        if targets:
+            pipe_target = pipe.target
+            in_target_match = not in_targets or any(t == pipe_target for t in in_targets)
+            ex_target_match = bool(ex_targets and any(t == pipe_target for t in ex_targets))
+            keep_pipe = keep_pipe and in_target_match and not ex_target_match
             if not keep_pipe:
                 continue
 
@@ -300,7 +323,29 @@ def get_pipes(
 
         pipes[ck][mk][lk] = pipe
 
-    if not as_list and not as_tags_dict:
+        if as_targets_dict:
+            raw_params = pipe_parameters if isinstance(pipe_parameters, dict) else {}
+            schema = raw_params.get('schema') or connector_schema
+            explicit_target = (
+                raw_params.get('target')
+                or raw_params.get('target_name')
+                or raw_params.get('target_table')
+                or raw_params.get('target_table_name')
+            )
+            if explicit_target:
+                target_name = (
+                    replace_pipes_syntax(explicit_target, _pipe=pipe)
+                    if isinstance(explicit_target, str) and '{{' in explicit_target
+                    else explicit_target
+                )
+            else:
+                target_name = pipe._target_legacy()
+                if connector_is_sql and connector_flavor:
+                    from meerschaum.utils.sql import truncate_item_name
+                    target_name = truncate_item_name(target_name, connector_flavor)
+            targets_pipes[(schema, target_name)].append(pipe)
+
+    if not as_list and not as_tags_dict and not as_targets_dict:
         return pipes
 
     from meerschaum.utils.pipes import flatten_pipes_dict
@@ -309,18 +354,25 @@ def get_pipes(
         return pipes_list
 
     pool = get_pool(workers=(workers if connector.IS_THREAD_SAFE else 1))
+
     def gather_pipe_tags(pipe: mrsm.Pipe) -> Tuple[mrsm.Pipe, List[str]]:
         _tags = pipe.__dict__.get('_tags', None)
         gathered_tags = _tags if _tags is not None else pipe.tags
         return pipe, (gathered_tags or [])
 
-    tags_pipes = defaultdict(lambda: [])
-    pipes_tags = dict(pool.map(gather_pipe_tags, pipes_list))
-    for pipe, tags in pipes_tags.items():
-        for tag in (tags or []):
-            tags_pipes[tag].append(pipe)
+    if as_tags_dict:
+        tags_pipes = defaultdict(lambda: [])
+        pipes_tags = dict(pool.map(gather_pipe_tags, pipes_list))
+        for pipe, tags in pipes_tags.items():
+            for tag in (tags or []):
+                tags_pipes[tag].append(pipe)
 
-    return dict(tags_pipes)
+        return dict(tags_pipes)
+
+    if as_targets_dict:
+        return dict(targets_pipes)
+
+    raise NotImplementedError("No futher options for returning pipes.")
 
 
 def fetch_pipes_keys(

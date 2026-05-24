@@ -289,6 +289,13 @@ groups['pipes'].add_argument(
     '-t', '--tags', nargs='+', help="Only include pipes with these tags.",
 )
 groups['pipes'].add_argument(
+    '--targets', '--target',
+    nargs='+',
+    help=(
+        "Filter pipes by targets. May be negated with `_`."
+    )
+)
+groups['pipes'].add_argument(
     '--datetime-dtypes', '--datetime-dtype', '--dtype', '--dtypes',
     nargs='+',
     choices=['datetime', 'int', 'None', '_datetime', '_int', '_None'],
@@ -388,9 +395,11 @@ groups['sync'].add_argument(
     )
 )
 groups['sync'].add_argument(
-    '--sync-data', choices=['nothing', 'backtrack', 'all', 'filter'],
+    '--sync-data', choices=['nothing', 'backtrack', 'incremental', 'all', 'filter'],
     help=(
         "When copying pipes, specify what data to sync into destination pipes. "
+        "'backtrack' uses the source pipe's sync time; 'incremental' uses the "
+        "destination pipe's sync time (both apply the backtrack interval). "
         "'filter' uses --begin, --end, and --params to restrict the range. "
         "Defaults to 'nothing' (copy pipe definitions only)."
     ),
