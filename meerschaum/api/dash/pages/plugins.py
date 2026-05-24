@@ -28,29 +28,17 @@ layout = [
     dbc.Container([
         html.Div([
             html.Br(),
-            html.Div(
-                dbc.Container([
-                    html.H3('Plugins'),
-                    html.P([
-                        (
-                            'Plugins extend the functionality of Meerschaum.'
-                            ' To find out more, check out the '
-                        ),
-                        html.A(
-                            'plugins documentation',
-                            href='https://meerschaum.io/reference/plugins/',
-                            rel="noreferrer noopener",
-                            target="_blank",
-                        ),
-                        '.',
-                    ]),
-                ]),
-                className='page-header',
-                style={'background-color': 'var(--dark)', 'padding': '1em'},
-            ),
-            html.Br(),
             html.Div(search_box, id='plugins-search-wrapper'),
             html.Br(),
+            dbc.Pagination(
+                id='plugins-pagination',
+                max_value=1,
+                active_page=1,
+                first_last=True,
+                previous_next=True,
+                fully_expanded=False,
+                style={'justify-content': 'center', 'display': 'none'},
+            ),
             html.Div([], id='plugins-content-div'),
         ])
     ])

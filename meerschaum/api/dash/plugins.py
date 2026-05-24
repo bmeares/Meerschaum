@@ -36,7 +36,7 @@ def _build_plugin_card(
     attrs = conn.get_plugin_attributes(plugin, debug=debug) or {}
     desc = attrs.get('description', 'No description provided.')
     plugin_username = conn.get_plugin_username(plugin, debug=debug)
-    plugin_version = conn.get_plugin_version(plugin, debug=debug) or ' '
+    plugin_version = (conn.get_plugin_version(plugin, debug=debug) or '').strip()
 
     owner = is_plugin_owner(plugin_name, session_data)
     desc_textarea_kw = {
@@ -52,35 +52,48 @@ def _build_plugin_card(
     if detail:
         desc_textarea_kw['style'] = {'min-height': '12em'}
 
-    header_left = html.A(
-        html.H4(plugin_name, style={'margin': 0}) if detail else plugin_name,
+    title_el = (
+        html.H3(plugin_name, style={'margin': 0})
+        if detail
+        else html.H5(plugin_name, style={'margin': 0})
+    )
+    title_link = html.A(
+        title_el,
         href='/dash/plugins/' + plugin_name,
         style={'text-decoration': 'none', 'color': 'inherit'},
+    )
+
+    version_badge = html.Span(
+        plugin_version or '—',
+        className='plugin-version-badge',
     )
 
     card_header = dbc.CardHeader(
         dbc.Row(
             [
-                dbc.Col(header_left),
+                dbc.Col(title_link),
                 dbc.Col(
-                    html.Pre(
-                        str(plugin_version),
-                        style={'text-align': 'right', 'margin': 0},
-                    ),
+                    version_badge,
+                    width='auto',
+                    style={'text-align': 'right'},
                 ),
             ],
             justify='between',
             align='center',
+            className='g-2',
         ),
     )
 
-    body_children: List[Any] = []
-    if not detail:
-        body_children.append(html.H5(plugin_name, style={'margin-bottom': '0.5em'}))
-    body_children.append(html.Small('👤 ' + str(plugin_username), className='text-muted'))
-    body_children.append(html.Br())
-    body_children.append(html.Br())
-    body_children.append(dbc.Textarea(**desc_textarea_kw))
+    body_children: List[Any] = [
+        html.Div(
+            [
+                html.Span('👤 ', className='text-muted'),
+                html.Span(str(plugin_username), className='text-muted'),
+            ],
+            className='plugin-author',
+        ),
+        dbc.Textarea(**desc_textarea_kw),
+    ]
     if owner:
         body_children += [
             dbc.Button(
@@ -88,6 +101,7 @@ def _build_plugin_card(
                 size='sm',
                 color='link',
                 id={'type': 'edit-button', 'index': plugin_name},
+                style={'padding-left': 0},
             ),
             html.Div(id={'type': 'edit-alert-div', 'index': plugin_name}),
         ]
@@ -96,12 +110,16 @@ def _build_plugin_card(
         install_cmd = f"mrsm install plugin {plugin_name}"
         body_children += [
             html.Hr(),
-            html.H6('Install'),
+            html.H5('Install', style={'margin-bottom': '0.5em'}),
             html.P(
-                'Run the following command in a shell with Meerschaum installed.'
-                ' Add ``-r api:<label>`` to target this repository.',
+                [
+                    'Run the following command in a shell with Meerschaum installed. ',
+                    'Add ',
+                    html.Code('-r api:<label>'),
+                    ' to target this repository.',
+                ],
                 className='text-muted',
-                style={'margin-bottom': '0.5em'},
+                style={'margin-bottom': '0.75em'},
             ),
             dcc.Markdown(
                 f"```bash\n{install_cmd}\n```",
@@ -109,26 +127,36 @@ def _build_plugin_card(
             ),
         ]
 
-    footer_children: List[Any] = [
-        html.A(
-            '⬇️ Download',
-            href=(endpoints['plugins'] + '/' + plugin_name),
-        ),
-    ]
-    if not detail:
-        footer_children += [
-            html.Span(' | ', className='text-muted'),
-            html.A('🔗 Share', href='/dash/plugins/' + plugin_name),
-        ]
+    download_link = html.A(
+        '⬇️ Download',
+        href=(endpoints['plugins'] + '/' + plugin_name),
+        className='plugin-card-link',
+    )
+    if detail:
+        footer = dbc.CardFooter(download_link)
+    else:
+        footer = dbc.CardFooter(
+            html.Div(
+                [
+                    download_link,
+                    html.A(
+                        '🔗 Share',
+                        href='/dash/plugins/' + plugin_name,
+                        className='plugin-card-link',
+                    ),
+                ],
+                className='plugin-card-footer-row',
+            ),
+        )
 
     return dbc.Card(
         [
             card_header,
             dbc.CardBody(body_children),
-            dbc.CardFooter(footer_children),
+            footer,
         ],
         id=plugin_name + '_card',
-        className='plugin-card',
+        className='plugin-card' + (' plugin-card-detail' if detail else ''),
     )
 
 
@@ -164,36 +192,39 @@ def build_plugins_listing(
     search_term: Optional[str],
     session_data: Optional[Dict[str, Any]],
     page: int = 1,
-) -> Any:
+) -> Tuple[Any, int, int]:
     """
-    Build the paginated plugins listing (cards grid + pagination control).
+    Build the plugins listing body (summary + cards grid) and return it
+    along with the total page count and total plugin count. The
+    ``plugins-pagination`` control is rendered persistently by the page layout.
     """
     cards, _alerts, total_pages, total = get_plugins_cards(
         search_term=search_term,
         session_data=session_data,
         page=page,
     )
+
+    if not cards and not search_term:
+        return _build_empty_plugins_placeholder(), total_pages, total
+
     if not cards:
-        body = html.P(
-            'No plugins found.' if not search_term
-            else f"No plugins match '{search_term}'.",
-            className='text-muted',
+        body = html.Div(
+            [
+                html.H4(
+                    f"No plugins match '{search_term}'.",
+                    className='text-muted',
+                    style={'text-align': 'center'},
+                ),
+                html.P(
+                    'Try a different search term or clear the search to browse all plugins.',
+                    className='text-muted',
+                    style={'text-align': 'center'},
+                ),
+            ],
+            className='plugins-empty-state',
         )
     else:
         body = build_cards_grid(cards, num_columns=PLUGINS_GRID_COLUMNS)
-
-    pagination = dbc.Pagination(
-        id='plugins-pagination',
-        max_value=total_pages,
-        active_page=page,
-        first_last=True,
-        previous_next=True,
-        fully_expanded=False,
-        style={
-            'justify-content': 'center',
-            'display': 'flex' if total_pages > 1 else 'none',
-        },
-    )
 
     summary_text = (
         f"Showing page {page} of {total_pages} ({total} plugin"
@@ -201,12 +232,51 @@ def build_plugins_listing(
         + ')'
     )
 
-    return html.Div([
+    content = html.Div([
         html.P(summary_text, className='text-muted', style={'text-align': 'center'}),
-        pagination,
         body,
-        pagination if total_pages > 1 else html.Div(),
     ])
+    return content, total_pages, total
+
+
+def _build_empty_plugins_placeholder() -> Any:
+    """
+    Friendly empty-state shown when the instance has zero plugins published.
+    """
+    return html.Div(
+        [
+            html.Div('🧩', className='plugins-empty-icon'),
+            html.H3('No plugins published yet', style={'margin-bottom': '0.5em'}),
+            html.P(
+                [
+                    'This Meerschaum instance does not host any plugins. ',
+                    'Plugins extend Meerschaum with custom connectors, actions, '
+                    'and dashboard pages.',
+                ],
+                className='text-muted',
+                style={'margin-bottom': '1.25em'},
+            ),
+            html.H6('Publish a plugin from your shell:'),
+            dcc.Markdown(
+                "```bash\nmrsm register plugin <name> -r api:<label>\n```",
+                style={'margin-bottom': '1em'},
+            ),
+            html.P(
+                [
+                    'See the ',
+                    html.A(
+                        'plugins documentation',
+                        href='https://meerschaum.io/reference/plugins/',
+                        rel='noreferrer noopener',
+                        target='_blank',
+                    ),
+                    ' to learn how to build and publish a plugin.',
+                ],
+                className='text-muted',
+            ),
+        ],
+        className='plugins-empty-state',
+    )
 
 
 def build_plugin_detail(
@@ -219,28 +289,30 @@ def build_plugin_detail(
     if session_data is None:
         session_data = {}
 
+    back_button = dbc.Button(
+        '← Back to plugins',
+        href='/dash/plugins',
+        color='link',
+        size='lg',
+        className='plugin-back-button',
+    )
+
     existing = get_api_connector().get_plugins(search_term=plugin_name) or []
     if plugin_name not in existing:
         return html.Div([
+            back_button,
+            html.Br(),
             html.Br(),
             html.H3(f"404: Plugin '{plugin_name}' not found."),
-            html.A('← Back to plugins', href='/dash/plugins'),
-        ])
+        ], className='plugin-detail-wrapper')
 
     return html.Div([
+        back_button,
         html.Br(),
-        html.Div([
-            html.A('← Back to plugins', href='/dash/plugins'),
-        ], style={'margin-bottom': '1em'}),
+        html.Br(),
         _build_plugin_card(plugin_name, session_data, detail=True),
         html.Br(),
-        dbc.Pagination(
-            id='plugins-pagination',
-            max_value=1,
-            active_page=1,
-            style={'display': 'none'},
-        ),
-    ])
+    ], className='plugin-detail-wrapper')
 
 
 def is_plugin_owner(plugin_name: str, session_data: Dict['str', Any]) -> bool:

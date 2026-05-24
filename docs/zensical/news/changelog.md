@@ -15,6 +15,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Fix stale plugins bug.**  
   A bug with plugin loading and unloading has been fixed.
 
+- **Update plugins page.**  
+  The Web Console plugins page has been improved. 
+
 ### v3.3.0
 
 - **Add `--dtype` flag.**  

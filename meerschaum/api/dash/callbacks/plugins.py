@@ -39,6 +39,9 @@ def _parse_plugin_name_from_pathname(pathname: Optional[str]) -> Optional[str]:
 @dash_app.callback(
     Output('plugins-content-div', 'children'),
     Output('plugins-search-wrapper', 'style'),
+    Output('plugins-pagination', 'max_value'),
+    Output('plugins-pagination', 'active_page'),
+    Output('plugins-pagination', 'style'),
     Input('plugins-location', 'pathname'),
     Input('search-plugins-input', 'value'),
     Input('plugins-pagination', 'active_page'),
@@ -55,7 +58,13 @@ def render_plugins_page(
     """
     plugin_name = _parse_plugin_name_from_pathname(pathname)
     if plugin_name:
-        return build_plugin_detail(plugin_name, session_data), {'display': 'none'}
+        return (
+            build_plugin_detail(plugin_name, session_data),
+            {'display': 'none'},
+            1,
+            1,
+            {'display': 'none'},
+        )
 
     triggered_id = getattr(dash.callback_context, 'triggered_id', None)
     if triggered_id == 'search-plugins-input':
@@ -63,13 +72,21 @@ def render_plugins_page(
     else:
         page = int(active_page or 1)
 
+    content, total_pages, total = build_plugins_listing(
+        search_term=search_term,
+        session_data=session_data,
+        page=page,
+    )
+    show_search = bool(search_term) or total > 0
     return (
-        build_plugins_listing(
-            search_term=search_term,
-            session_data=session_data,
-            page=page,
-        ),
-        {'display': 'block'},
+        content,
+        {'display': 'block'} if show_search else {'display': 'none'},
+        total_pages,
+        page,
+        {
+            'justify-content': 'center',
+            'display': 'flex' if total_pages > 1 else 'none',
+        },
     )
 
 
