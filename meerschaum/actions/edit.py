@@ -70,6 +70,7 @@ def _complete_edit(
 def _edit_config(
     action: Optional[List[str]] = None,
     noask: bool = False,
+    rollback: bool = False,
     debug: bool = False,
     **kwargs: Any
 ) -> SuccessTuple:
@@ -78,6 +79,9 @@ def _edit_config(
 
     Specify a specific configuration key to edit.
     Defaults to editing `meerschaum` configuration (connectors, instance, etc.).
+
+    Pass `--rollback` to restore a key from its most recent backup instead of
+    opening the editor. Backups are taken automatically before each edit.
 
     Examples:
         ```
@@ -89,12 +93,18 @@ def _edit_config(
 
         ### Create a new configuration file called 'myconfig'.
         edit config myconfig
+
+        ### Roll back the 'stack' configuration to its previous state.
+        edit config stack --rollback
         ```
     """
     from meerschaum.config._edit import edit_config
     from meerschaum.config._read_config import get_possible_keys
     from meerschaum.actions import actions
     from meerschaum.utils.prompt import choose
+
+    if rollback:
+        return _rollback_config(action=action, noask=noask, debug=debug, **kwargs)
 
     if not action:
         action = [
@@ -111,6 +121,66 @@ def _edit_config(
         return edit_success, edit_msg
 
     return actions['reload'](debug=debug)
+
+
+def _rollback_config(
+    action: Optional[List[str]] = None,
+    noask: bool = False,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
+    """Restore configuration keys from their most recent backups."""
+    from meerschaum.config._read_config import get_possible_keys
+    from meerschaum.config._backup import list_config_backups, restore_config_backup
+    from meerschaum.utils.prompt import choose, yes_no
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.formatting import print_tuple
+
+    if not action:
+        backed_up_keys = [key for key in get_possible_keys() if list_config_backups(key)]
+        if not backed_up_keys:
+            return False, "No configuration backups exist yet."
+        action = [
+            choose(
+                "Choose a configuration file to roll back:",
+                backed_up_keys,
+                default=backed_up_keys[0],
+                noask=noask,
+            )
+        ]
+
+    successes, fails = 0, 0
+    for key in action:
+        backups = list_config_backups(key)
+        if not backups:
+            warn(f"No configuration backups found for '{key}'.", stack=False)
+            fails += 1
+            continue
+
+        latest = backups[0]
+        if not noask and not yes_no(
+            f"Restore '{key}' from backup '{latest.name}'? "
+            "The current file will itself be backed up first.",
+            default='y',
+            noask=noask,
+        ):
+            info(f"Skipped rolling back '{key}'.")
+            continue
+
+        success, msg = restore_config_backup(key, backup_path=latest, debug=debug)
+        print_tuple((success, msg))
+        if success:
+            successes += 1
+        else:
+            fails += 1
+
+    if fails and not successes:
+        return False, f"Failed to roll back {fails} config key(s)."
+    if fails:
+        return True, f"Rolled back {successes} config key(s); {fails} failed."
+    if not successes:
+        return False, "No configuration keys were rolled back."
+    return True, f"Rolled back {successes} config key(s)."
 
 
 def _complete_edit_config(action: Optional[List[str]] = None, **kw: Any) -> List[str]:

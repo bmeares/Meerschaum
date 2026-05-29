@@ -4,6 +4,28 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.3.2
+
+- **Print full, untruncated results from `mrsm sql`.**  
+  Reading a table or query with `sql ... read` now prints the entire DataFrame as a Markdown table — no more `...` column or cell truncation. The format is friendly to both users and LLMs and ends with a `[rows x columns]` shape footer. The `--nopretty` JSON output is unchanged.
+
+- **Back up configuration files before editing.**  
+  Running `edit config` now snapshots the existing file before opening your editor. Backups are kept under `MRSM_ROOT_DIR/.internal/config_backups/<key>/` (the ten most recent per key).
+
+- **Add `edit config --rollback`.**  
+  Restore a configuration key from its most recent backup instead of opening the editor. The current file is itself backed up first, so a rollback can always be undone.
+
+  ```bash
+  # Roll back the 'stack' configuration to its previous state.
+  mrsm edit config stack --rollback
+  ```
+
+- **Stop overwriting config files with defaults.**  
+  A malformed configuration file (e.g. from a bad manual edit) is no longer silently overwritten with default values. Meerschaum now falls back to defaults in memory, leaves the file on disk untouched, and points you to `edit config <key> --rollback`. Brand-new config files are still populated on upgrade.
+
+- **Fix `stop jobs` leaving zombie sync threads.**  
+  Stopping a job now reliably terminates `sync pipes` worker threads. Previously the daemon's main thread could exit while non-daemon worker threads kept running and appending to the log, requiring a container restart. Workers now honor a process-wide stop signal and are interrupted when a job is stopped.
+
 ### v3.3.1
 
 - **Add `--targets` / `--target`.**  

@@ -58,7 +58,14 @@ def sync_yaml_configs(
         header_comment = ""
         with open(path, 'r', encoding='utf-8') as f:
             if _yaml is not None:
-                config = yaml.load(f)
+                try:
+                    config = yaml.load(f)
+                except Exception as e:
+                    ### A malformed file must not crash syncing or be overwritten;
+                    ### fall back to an empty mapping and leave the file as-is.
+                    from meerschaum.utils.warnings import warn as _warn
+                    _warn(f"Could not parse '{path}':\n    {e}", stack=False)
+                    config = {}
             else:
                 print("PyYAML not installed!")
                 sys.exit(1)

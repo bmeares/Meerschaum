@@ -12,12 +12,58 @@ from meerschaum.utils.typing import Optional
 import threading
 import ctypes
 import signal
+import weakref
 
 Lock = threading.Lock
 RLock = threading.RLock
 Event = threading.Event
 Timer = threading.Timer
 get_ident = threading.get_ident
+
+### Process-wide cooperative stop signal.
+### Long-running loops (e.g. `sync pipes --loop`) and worker threads should poll
+### `stop_requested()` and exit promptly when it is set. It is set by the daemon's
+### signal handler so that `stop jobs` propagates to background worker threads.
+STOP_EVENT = threading.Event()
+
+### Registry of live `Thread` instances so a signal handler can interrupt them
+### even when they are blocked outside of a `stop_requested()` check.
+_threads_registry: "weakref.WeakSet[Thread]" = weakref.WeakSet()
+_registry_lock = threading.Lock()
+
+
+def request_stop() -> None:
+    """Signal all cooperative loops to stop at their next opportunity."""
+    STOP_EVENT.set()
+
+
+def stop_requested() -> bool:
+    """Return whether a process-wide stop has been requested."""
+    return STOP_EVENT.is_set()
+
+
+def clear_stop() -> None:
+    """Clear the process-wide stop signal."""
+    STOP_EVENT.clear()
+
+
+def interrupt_threads(exc: type = SystemExit) -> None:
+    """
+    Raise `exc` in every registered, still-alive `Thread`.
+
+    This actively unwinds worker threads that are not polling `stop_requested()`
+    so that the process can exit instead of becoming a zombie.
+    """
+    with _registry_lock:
+        threads = list(_threads_registry)
+    current_ident = threading.get_ident()
+    for thread in threads:
+        if thread.ident == current_ident:
+            continue
+        try:
+            thread.raise_exception(exc)
+        except Exception:
+            pass
 
 class Thread(threading.Thread):
     """Wrapper for threading.Thread with optional callback and error_callback functions."""
@@ -45,6 +91,12 @@ class Thread(threading.Thread):
         if cb is not None:
             cb(result)
         return result
+
+    def start(self):
+        """Register the thread before starting so it may be interrupted on shutdown."""
+        with _registry_lock:
+            _threads_registry.add(self)
+        return super().start()
 
     def join(self, timeout: Optional[float] = None):
         """

@@ -502,6 +502,10 @@ groups['misc'].add_argument(
     '--nopretty', action="store_true", help="Print elements without 'pretty' formatting"
 )
 groups['misc'].add_argument(
+    '--rollback', '--restore', action="store_true",
+    help="When editing config, restore a key from its most recent backup instead of editing.",
+)
+groups['misc'].add_argument(
     '--skip-deps', action="store_true", help="Skip dependencies when installing plugins.",
 )
 groups['misc'].add_argument(

@@ -50,7 +50,7 @@ __pdoc__: Dict[str, bool] = {
 
 def add_method_to_class(
     func: Callable[[Any], Any],
-    class_def: 'Class',
+    class_def: type,
     method_name: Optional[str] = None,
     keep_self: Optional[bool] = None,
 ) -> Callable[[Any], Any]:
@@ -1567,7 +1567,7 @@ def parametrized(dec):
     return layer
 
 
-def safely_extract_tar(tarf: 'file', output_dir: Union[str, 'pathlib.Path']) -> None:
+def safely_extract_tar(tarf: Any, output_dir: Union[str, 'pathlib.Path']) -> None:
     """
     Safely extract a TAR file to a give directory.
     This defends against CVE-2007-4559.
@@ -1628,7 +1628,7 @@ def to_snake_case(name: str) -> str:
     return name.lower()
 
 
-def get_directory_size(path: Path) -> int:
+def get_directory_size(path: 'pathlib.Path') -> int:
     """
     Return the cumulative size of a directory's files in bytes.
     https://stackoverflow.com/a/55659577/9699829

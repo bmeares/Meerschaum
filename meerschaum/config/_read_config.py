@@ -178,12 +178,23 @@ def read_config(
                     try:
                         _config_key = filetype_loaders[_type](f)
                     except Exception as e:
-                        print(f"Error processing file: {filepath}")
                         if raise_parsing_errors:
                             raise e
-                        import traceback
-                        traceback.print_exc()
-                        _config_key = {}
+                        ### The file exists but is malformed (e.g. a bad manual edit).
+                        ### Fall back to default values in memory so the app keeps
+                        ### working, but leave the file on disk untouched so it is
+                        ### never overwritten and can be fixed or rolled back.
+                        import copy
+                        from meerschaum.config._default import default_config
+                        from meerschaum.utils.warnings import warn as _warn
+                        _warn(
+                            f"Could not parse '{filename}':\n    {e}\n"
+                            "Using default values in memory; the file on disk is unchanged.\n"
+                            f"Fix it manually or run `edit config {key} --rollback` "
+                            "to restore a backup.",
+                            stack=False,
+                        )
+                        _config_key = copy.deepcopy(default_config.get(key, {}))
                 _single_key_config = (
                     search_and_substitute_config({key: _config_key}) if substitute
                     else {key: _config_key}

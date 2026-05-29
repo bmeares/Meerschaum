@@ -126,22 +126,26 @@ def sql(
         return (False, f"Failed to execute query:\n\n{query}")
     
     from meerschaum.utils.packages import attempt_import
-    from meerschaum.utils.formatting import print_tuple, pprint
+    from meerschaum.utils.formatting import print_tuple, pprint, pprint_df
     _ = attempt_import('sqlalchemy.engine.result', lazy=False)
     if 'sqlalchemy' in str(type(result)):
         if not nopretty:
             print_tuple((True, f"Successfully executed query:\n\n{query}"))
-    else:
-        if not nopretty:
-            pprint(result)
+    elif not nopretty:
+        ### `read` returns a DataFrame; print it in full (no column truncation)
+        ### as a Markdown table, which is friendly to both users and LLMs.
+        if hasattr(result, 'to_markdown') and hasattr(result, 'shape'):
+            pprint_df(result)
         else:
-            print(
-                to_json(
-                    result,
-                    orient='split',
-                    index=False,
-                )
+            pprint(result)
+    else:
+        print(
+            to_json(
+                result,
+                orient='split',
+                index=False,
             )
+        )
 
     return (True, "Success")
 

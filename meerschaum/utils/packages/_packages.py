@@ -29,6 +29,7 @@ packages: Dict[str, Dict[str, str]] = {
         'rich'                       : 'rich>=13.4.2',
         'more_termcolor'             : 'more-termcolor>=1.1.3',
         'humanfriendly'              : 'humanfriendly>=10.0.0',
+        'tabulate'                   : 'tabulate>=0.9.0',
     },
     'core': {
         'wheel'                      : 'wheel>=0.34.2',

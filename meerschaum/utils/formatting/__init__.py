@@ -14,6 +14,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Union, Any, Dict, Iterable
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
+from meerschaum.utils.formatting._dataframe import pprint_df, format_dataframe
 from meerschaum.utils.formatting._pipes import (
     pprint_pipes,
     highlight_pipes,
@@ -40,6 +41,8 @@ __all__ = sorted([
     'print_options',
     'fill_ansi',
     'pprint',
+    'pprint_df',
+    'format_dataframe',
     'highlight_pipes',
     'pprint_pipes',
     'make_header',
