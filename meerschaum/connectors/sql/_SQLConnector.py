@@ -50,6 +50,22 @@ class SQLConnector(InstanceConnector):
         _get_columnstore_policy_query,
         _get_columnstore_remove_policy_query,
     )
+    from ._maintenance import (
+        vacuum_pipe,
+        analyze_pipe,
+        _run_in_autocommit,
+        _get_vacuum_queries,
+        _get_analyze_query,
+    )
+    from ._partition import (
+        _should_partition,
+        _get_partition_column,
+        _partition_bounds,
+        _partition_literal,
+        _partition_name,
+        _get_partition_ranges_for_df,
+        _create_missing_partitions,
+    )
     from ._pipes import (
         fetch_pipes_keys,
         create_indices,

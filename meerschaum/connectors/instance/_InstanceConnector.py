@@ -83,4 +83,6 @@ class InstanceConnector(Connector):
         get_pipe_columns_indices,
         get_pipe_size,
         compress_pipe,
+        vacuum_pipe,
+        analyze_pipe,
     )

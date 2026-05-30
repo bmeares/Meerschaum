@@ -71,7 +71,18 @@ def get_pipe_size(
         if size is not None:
             return size
 
-    if flavor in ('timescaledb', 'timescaledb-ha', 'postgresql', 'postgis', 'citus', 'cockroachdb'):
+    if flavor in ('timescaledb', 'timescaledb-ha', 'postgresql', 'postgis', 'citus'):
+        ### `pg_partition_tree` sums the parent plus every child partition (a partitioned parent
+        ### holds no rows itself); it returns the single relation for non-partitioned tables.
+        size = _value(
+            "SELECT SUM(pg_total_relation_size(relid))\n"
+            f"FROM pg_partition_tree('{pipe_name}')"
+        )
+        if size is not None:
+            return size
+        return _value(f"SELECT pg_total_relation_size('{pipe_name}')")
+
+    if flavor == 'cockroachdb':
         return _value(f"SELECT pg_total_relation_size('{pipe_name}')")
 
     if flavor in ('mysql', 'mariadb'):

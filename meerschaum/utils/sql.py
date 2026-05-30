@@ -2197,6 +2197,7 @@ def get_create_table_queries(
     hypertable_chunk_interval: Optional[str] = None,
     hypertable_segmentby: Optional[List[str]] = None,
     hypertable_orderby: Optional[List[str]] = None,
+    partition_by_column: Optional[str] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2276,8 +2277,13 @@ def get_create_table_queries(
         hypertable_chunk_interval=hypertable_chunk_interval,
         hypertable_segmentby=hypertable_segmentby,
         hypertable_orderby=hypertable_orderby,
+        partition_by_column=partition_by_column,
         _parse_dtypes=_parse_dtypes,
     )
+
+
+### Non-TimescaleDB flavors that support declarative `PARTITION BY RANGE` on a datetime column.
+NATIVE_PARTITION_FLAVORS = {'postgresql', 'postgis'}
 
 
 def _get_create_table_query_from_dtypes(
@@ -2292,6 +2298,7 @@ def _get_create_table_query_from_dtypes(
     hypertable_chunk_interval: Optional[str] = None,
     hypertable_segmentby: Optional[List[str]] = None,
     hypertable_orderby: Optional[List[str]] = None,
+    partition_by_column: Optional[str] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2337,6 +2344,17 @@ def _get_create_table_query_from_dtypes(
         else None
     )
     datetime_column_name = sql_item_name(datetime_column, flavor) if datetime_column else None
+
+    ### Native (non-TimescaleDB) declarative range partitioning. The partition column must be
+    ### part of the primary key, so it is folded into a composite PK just like the TimescaleDB
+    ### datetime column below.
+    is_native_partitioned = bool(
+        partition_by_column is not None
+        and flavor in NATIVE_PARTITION_FLAVORS
+    )
+    partition_by_column_name = (
+        sql_item_name(partition_by_column, flavor) if is_native_partitioned else None
+    )
     primary_key_clustered = (
         "CLUSTERED"
         if not datetime_column or datetime_column == primary_key
@@ -2365,6 +2383,9 @@ def _get_create_table_query_from_dtypes(
             and datetime_column != primary_key
         ):
             query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
+        elif is_native_partitioned and partition_by_column != primary_key:
+            ### Defer the PK to a composite `PRIMARY KEY(partition_col, pk)` below.
+            query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
         elif flavor == 'mssql':
             query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
         else:
@@ -2383,11 +2404,19 @@ def _get_create_table_query_from_dtypes(
     ):
         query += f"\n    PRIMARY KEY({datetime_column_name}, {primary_key_name}),"
 
+    if is_native_partitioned and primary_key and partition_by_column != primary_key:
+        query += f"\n    PRIMARY KEY({partition_by_column_name}, {primary_key_name}),"
+
     if flavor == 'mssql' and primary_key:
         query += f"\n    CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name}),"
 
     query = query[:-1]
     query += "\n)"
+
+    if is_native_partitioned:
+        ### The parent table holds no rows directly; child partitions are created on demand
+        ### (see `SQLConnector._create_missing_partitions`).
+        query += f"\nPARTITION BY RANGE ({partition_by_column_name})"
 
     if (
         hypertable_chunk_interval is not None
@@ -2427,6 +2456,7 @@ def _get_create_table_query_from_cte(
     hypertable_chunk_interval: Optional[str] = None,
     hypertable_segmentby: Optional[List[str]] = None,
     hypertable_orderby: Optional[List[str]] = None,
+    partition_by_column: Optional[str] = None,
     _parse_dtypes=None,
 ) -> List[str]:
     """

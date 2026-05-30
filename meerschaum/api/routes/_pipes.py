@@ -1157,3 +1157,58 @@ def compress_pipe(
     success, msg = pipe.compress(debug=debug)
     _ = pipes(instance_keys, refresh=True)
     return success, msg
+
+
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/vacuum',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def vacuum_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    full: bool = False,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
+) -> mrsm.SuccessTuple:
+    """
+    Vacuum a pipe's target table to reclaim disk space.
+    See [`Pipe.vacuum()`](https://docs.meerschaum.io/meerschaum.html#Pipe.vacuum).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot vacuum protected table '{pipe.target}'.",
+        )
+    success, msg = pipe.vacuum(full=full, debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg
+
+
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/analyze',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def analyze_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
+) -> mrsm.SuccessTuple:
+    """
+    Analyze a pipe's target table to refresh planner statistics.
+    See [`Pipe.analyze()`](https://docs.meerschaum.io/meerschaum.html#Pipe.analyze).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot analyze protected table '{pipe.target}'.",
+        )
+    success, msg = pipe.analyze(debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg

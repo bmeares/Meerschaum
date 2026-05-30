@@ -1704,6 +1704,9 @@ def create_pipe_table_from_df(
         hypertable_segmentby = _compress_settings['segmentby'] or None
         hypertable_orderby = _compress_settings['orderby'] or None
 
+    ### Native range partitioning (non-TimescaleDB flavors); a no-op column for others.
+    partition_by_column = self._get_partition_column(pipe)
+
     def _build_create_table_queries(_hypertable_chunk_interval):
         _queries = get_create_table_queries(
             new_dtypes,
@@ -1716,6 +1719,7 @@ def create_pipe_table_from_df(
             hypertable_chunk_interval=_hypertable_chunk_interval,
             hypertable_segmentby=(hypertable_segmentby if _hypertable_chunk_interval else None),
             hypertable_orderby=(hypertable_orderby if _hypertable_chunk_interval else None),
+            partition_by_column=partition_by_column,
         )
         if schema:
             _queries = (
@@ -1959,6 +1963,17 @@ def sync_pipe(
         )
         if not create_success:
             return create_success, create_msg
+
+    ### Pre-create native range partitions (non-TimescaleDB) so the rows about to be written
+    ### land in an existing partition. No-op for non-partitioned pipes.
+    if self._should_partition(pipe):
+        for _part_df in (unseen_df, update_df):
+            if _part_df is not None and len(_part_df) > 0:
+                part_success, part_msg = self._create_missing_partitions(
+                    pipe, _part_df, debug=debug,
+                )
+                if not part_success:
+                    return part_success, part_msg
 
     do_identity_insert = bool(
         self.flavor in ('mssql',)

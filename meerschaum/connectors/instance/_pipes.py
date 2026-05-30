@@ -574,3 +574,47 @@ def compress_pipe(
     return False, (
         f"Compression is not supported for instance connectors of type '{self.type}'."
     )
+
+def vacuum_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Reclaim disk space from a pipe's target table.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to vacuum.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    return False, (
+        f"Vacuuming is not supported for instance connectors of type '{self.type}'."
+    )
+
+def analyze_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Refresh the planner statistics for a pipe's target table.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to analyze.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    return False, (
+        f"Analyzing is not supported for instance connectors of type '{self.type}'."
+    )

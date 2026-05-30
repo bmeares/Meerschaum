@@ -965,6 +965,93 @@ def compress_pipe(
     return response.__bool__(), response.text
 
 
+def vacuum_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    full: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Vacuum a pipe's target table via the API.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to vacuum.
+
+    full: bool, default False
+        If `True`, run `VACUUM FULL` (PostgreSQL family only).
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    r_url = pipe_r_url(pipe) + '/vacuum'
+    response = self.post(
+        r_url,
+        params={
+            'instance_keys': self.get_pipe_instance_keys(pipe),
+            'full': full,
+        },
+        debug=debug,
+    )
+    if debug:
+        dprint(response.text)
+
+    try:
+        data = response.json()
+    except Exception:
+        return False, f"Failed to vacuum {pipe}."
+
+    if isinstance(data, list):
+        return data[0], data[1]
+    if isinstance(data, dict) and 'detail' in data:
+        return response.__bool__(), data['detail']
+    return response.__bool__(), response.text
+
+
+def analyze_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Analyze a pipe's target table via the API.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to analyze.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    r_url = pipe_r_url(pipe) + '/analyze'
+    response = self.post(
+        r_url,
+        params={
+            'instance_keys': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug,
+    )
+    if debug:
+        dprint(response.text)
+
+    try:
+        data = response.json()
+    except Exception:
+        return False, f"Failed to analyze {pipe}."
+
+    if isinstance(data, list):
+        return data[0], data[1]
+    if isinstance(data, dict) and 'detail' in data:
+        return response.__bool__(), data['detail']
+    return response.__bool__(), response.text
+
+
 def get_pipe_index_names(self, pipe: mrsm.Pipe, debug: bool = False) -> Dict[str, str]:
     """
     Return the templated index names.

@@ -311,6 +311,13 @@ groups['pipes'].add_argument(
         "ongoing compression (columnstore) policy. TimescaleDB only."
     )
 )
+groups['pipes'].add_argument(
+    '--full', action='store_true',
+    help=(
+        "When running `vacuum pipes`, run `VACUUM FULL` to return freed space to the OS. "
+        "Takes an exclusive lock. PostgreSQL family only."
+    )
+)
 
 
 ### Sync options
