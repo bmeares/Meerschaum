@@ -185,7 +185,7 @@ class Pipe:
     )
     from ._delete import delete
     from ._drop import drop, drop_indices
-    from ._compress import compress
+    from ._compress import compress, decompress
     from ._maintenance import vacuum, analyze
     from ._index import create_indices
     from ._clear import clear

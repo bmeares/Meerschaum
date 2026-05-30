@@ -43,12 +43,14 @@ class SQLConnector(InstanceConnector):
     from ._compress import (
         get_pipe_size,
         compress_pipe,
+        decompress_pipe,
         apply_compression_policy,
         _get_compress_settings,
         _is_hypertable,
         _get_columnstore_settings_query,
         _get_columnstore_policy_query,
         _get_columnstore_remove_policy_query,
+        _get_columnstore_disable_query,
     )
     from ._maintenance import (
         vacuum_pipe,

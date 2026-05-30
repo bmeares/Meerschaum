@@ -575,6 +575,28 @@ def compress_pipe(
         f"Compression is not supported for instance connectors of type '{self.type}'."
     )
 
+def decompress_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Decompress a pipe's target table, the inverse of `compress_pipe()`.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to decompress.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    return False, (
+        f"Decompression is not supported for instance connectors of type '{self.type}'."
+    )
+
 def vacuum_pipe(
     self,
     pipe: mrsm.Pipe,

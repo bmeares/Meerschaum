@@ -3,8 +3,8 @@
 # vim:fenc=utf-8
 
 """
-Test pipe maintenance operations: `get_size()`, `vacuum()`, `analyze()`, and `compress()`,
-plus their corresponding actions (`vacuum`, `analyze`, `compress`).
+Test pipe maintenance operations: `get_size()`, `vacuum()`, `analyze()`, `compress()`, and
+`decompress()`, plus their corresponding actions (`vacuum`, `analyze`, `compress`, `decompress`).
 """
 
 import pytest
@@ -146,13 +146,38 @@ def test_compress(flavor: str):
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
+def test_decompress(flavor: str):
+    """`Pipe.decompress()` reverses `compress()` without losing data."""
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+    pipe = _build_synced_pipe(conn, 'maintenance_decompress')
+    rowcount_before = pipe.get_rowcount(debug=debug)
+
+    if conn.flavor in RELIABLE_COMPRESS_FLAVORS:
+        compress_success, compress_msg = pipe.compress(debug=debug)
+        assert compress_success, compress_msg
+
+    success, msg = pipe.decompress(debug=debug)
+    _assert_success_tuple((success, msg))
+    if conn.flavor in RELIABLE_COMPRESS_FLAVORS:
+        assert success, msg
+        assert pipe.get_rowcount(debug=debug) == rowcount_before
+        ### A decompressed table re-syncs cleanly and can be compressed again.
+        recompress_success, recompress_msg = pipe.compress(debug=debug)
+        assert recompress_success, recompress_msg
+    elif conn.flavor not in COMPRESSIBLE_FLAVORS:
+        assert not success, "Decompression should be unsupported on this flavor."
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_unsupported_instance_maintenance(flavor: str):
     """Non-SQL instance connectors return a graceful failure rather than raising."""
     conn = conns[flavor]
     if conn.type != 'valkey':
         return
     pipe = mrsm.Pipe('plugin:stress', 'test', 'maintenance_unsupported', instance=conn)
-    for method in ('vacuum', 'analyze', 'compress'):
+    for method in ('vacuum', 'analyze', 'compress', 'decompress'):
         result = getattr(pipe, method)(debug=debug)
         _assert_success_tuple(result)
         assert not result[0], f"{method} should be unsupported for '{conn.type}'."
@@ -256,7 +281,7 @@ def test_compress_settings_user_overrides():
 
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_maintenance_actions(flavor: str):
-    """The `vacuum`, `analyze`, and `compress` actions dispatch to the instance connector."""
+    """The `vacuum`, `analyze`, `compress`, and `decompress` actions dispatch to the connector."""
     conn = conns[flavor]
     if conn.type != 'sql':
         return
@@ -275,6 +300,7 @@ def test_maintenance_actions(flavor: str):
         ('vacuum', conn.flavor in VACUUMABLE_FLAVORS),
         ('analyze', conn.flavor in ANALYZABLE_FLAVORS),
         ('compress', conn.flavor in RELIABLE_COMPRESS_FLAVORS),
+        ('decompress', conn.flavor in RELIABLE_COMPRESS_FLAVORS),
     ):
         success, msg = actions[action_name](['pipes'], debug=debug, **keys)
         _assert_success_tuple((success, msg))

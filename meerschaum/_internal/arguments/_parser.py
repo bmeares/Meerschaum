@@ -307,8 +307,10 @@ groups['pipes'].add_argument(
 groups['pipes'].add_argument(
     '--no-policy', '--nopolicy', action='store_true',
     help=(
-        "When running `compress pipes`, compress existing chunks now without installing an "
-        "ongoing compression (columnstore) policy. TimescaleDB only."
+        "Leave the compression (columnstore) policy untouched. With `compress pipes`, compress "
+        "existing chunks now without installing a policy; with `decompress pipes`, decompress "
+        "existing chunks now without removing the policy (they will be recompressed on schedule). "
+        "TimescaleDB only."
     )
 )
 groups['pipes'].add_argument(

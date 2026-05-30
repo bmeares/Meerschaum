@@ -474,3 +474,121 @@ def compress_pipe(
             reclaimed_msg = f"Size unchanged ({format_bytes(size_before)})."
 
     return True, reclaimed_msg
+
+
+def _get_columnstore_disable_query(
+    self,
+    pipe: mrsm.Pipe,
+) -> str:
+    """
+    Build the `ALTER TABLE` query that disables the Hypercore columnstore for a TimescaleDB
+    hypertable. Only valid once every chunk has been decompressed (no compressed chunks may
+    remain) and the columnstore policy has been removed.
+    """
+    from meerschaum.utils.sql import sql_item_name
+    pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
+    return f"ALTER TABLE {pipe_name} SET (timescaledb.enable_columnstore = false)"
+
+
+def decompress_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    no_policy: bool = False,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
+    """
+    Decompress a pipe's target table, the inverse of `compress_pipe()`.
+
+    For TimescaleDB, removes the columnstore (compression) policy, converts every compressed
+    chunk back to row-store, and disables the columnstore so future synced chunks stay
+    uncompressed. For MySQL/MariaDB and MSSQL, reverts the flavor's native table compression.
+    Other flavors are unsupported.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to decompress.
+
+    no_policy: bool, default False
+        If `True` (TimescaleDB only), decompress existing chunks now but leave the columnstore
+        (compression) policy in place — chunks will be recompressed on the policy's schedule.
+        Useful to temporarily decompress for a bulk backfill without disabling compression.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success, including the change in disk size.
+    """
+    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.formatting import format_bytes
+
+    if not pipe.exists(debug=debug):
+        return False, f"{pipe} does not exist; nothing to decompress."
+
+    flavor = self.flavor
+    if flavor not in COMPRESSIBLE_FLAVORS:
+        return False, f"Decompression is not supported for flavor '{flavor}'."
+
+    pipe_name = sql_item_name(pipe.target, flavor, self.get_pipe_schema(pipe))
+    size_before = pipe.get_size(debug=debug)
+
+    ### Each group is run in its own transaction.
+    query_groups: List[List[str]] = []
+    if flavor in ('timescaledb', 'timescaledb-ha'):
+        if not self._is_hypertable(pipe, debug=debug):
+            return False, (
+                f"{pipe} is not a hypertable; only hypertables support TimescaleDB compression."
+            )
+        ### 1. Remove the ongoing policy so chunks aren't recompressed. Skipped with `no_policy`,
+        ### which decompresses existing chunks now but leaves the policy (e.g. for a backfill).
+        if not no_policy:
+            query_groups.append([self._get_columnstore_remove_policy_query(pipe)])
+        ### 2. Convert every compressed chunk back to row-store. `decompress_chunk` is the function
+        ### form (transaction-safe, unlike the `CALL` form of `convert_to_rowstore`).
+        query_groups.append([
+            f"SELECT decompress_chunk(c, if_compressed => true) "
+            f"FROM show_chunks('{pipe_name}') c"
+        ])
+        ### 3. Disable the columnstore so future synced chunks stay uncompressed. Only valid once
+        ### no compressed chunks remain, and only sensible when the policy is also gone.
+        if not no_policy:
+            query_groups.append([self._get_columnstore_disable_query(pipe)])
+    elif flavor in ('mysql', 'mariadb'):
+        query_groups.append([f"ALTER TABLE {pipe_name} ROW_FORMAT=DYNAMIC"])
+    elif flavor == 'mssql':
+        query_groups.append([
+            f"ALTER TABLE {pipe_name} REBUILD PARTITION = ALL "
+            "WITH (DATA_COMPRESSION = NONE)"
+        ])
+
+    try:
+        success = all(
+            all(self.exec_queries(
+                group, break_on_error=True, rollback=True, silent=(not debug), debug=debug,
+            ))
+            for group in query_groups
+        )
+    except Exception as e:
+        return False, f"Failed to decompress {pipe}:\n{e}"
+
+    if not success:
+        return False, f"Failed to decompress {pipe}."
+
+    pipe._clear_cache_key('_exists', debug=debug)
+    size_after = pipe.get_size(debug=debug)
+
+    change_msg = ""
+    if size_before is not None and size_after is not None:
+        added = size_after - size_before
+        change_str = f"{format_bytes(size_before)} to {format_bytes(size_after)}"
+        if added > 0:
+            change_msg = f"Expanded by {format_bytes(added)} ({change_str})."
+        elif added < 0:
+            change_msg = f"Shrank by {format_bytes(-added)} ({change_str})."
+        else:
+            change_msg = f"Size unchanged ({format_bytes(size_before)})."
+
+    return True, change_msg

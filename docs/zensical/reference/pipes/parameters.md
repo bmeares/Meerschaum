@@ -154,6 +154,9 @@ By default ([`hypercore`](#hypercore)), the columnstore is already enabled at ta
 !!! tip "One-shot compression"
     Run `compress pipes --no-policy` to convert existing chunks now **without** installing an ongoing columnstore policy (any pre-existing policy is left untouched). Useful for a one-time reclaim on a pipe you don't want to keep auto-compressing.
 
+!!! tip "Decompressing"
+    Run the `decompress pipes` action (or `Pipe.decompress()`) to reverse compression: it removes the columnstore policy, converts compressed chunks back to row-store, and disables the columnstore so future synced chunks stay uncompressed (MySQL / MariaDB and MSSQL revert their native table compression). Pass `decompress pipes --no-policy` to decompress existing chunks now while leaving the policy in place — handy for a bulk backfill, after which chunks are recompressed on the policy's schedule.
+
 You may set `compress` to `true` to use sensible defaults (segment by the `id` column, order by the `datetime` column descending), or to a dictionary with the following keys for fine-grained control:
 
 - `after`
