@@ -160,6 +160,7 @@ def _get_timescaledb_compress_queries(
     for a TimescaleDB hypertable.
     """
     from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PRECISION_UNITS_SCALARS
     pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
     settings = self._get_compress_settings(pipe)
 
@@ -174,15 +175,37 @@ def _get_timescaledb_compress_queries(
     queries = [f"ALTER TABLE {pipe_name} SET ({', '.join(set_options)})"]
 
     if include_policy:
+        ### Hypertables with an integer time dimension (int epoch datetime axis) require an
+        ### integer `compress_after`; an `INTERVAL` raises `InvalidParameterValue`.
+        dt_col = pipe.columns.get('datetime', None)
+        dt_typ = str(pipe.dtypes.get(dt_col, 'datetime')) if dt_col else 'datetime'
+        dt_is_integer = are_dtypes_equal(dt_typ, 'int')
+
         after = settings['after']
-        if not after:
-            ### Default to compressing chunks older than 7 days.
-            after = '7 days'
-        after_clean = str(after).replace("'", "''")
-        queries.append(
-            f"SELECT add_compression_policy('{pipe_name}', INTERVAL '{after_clean}', "
-            "if_not_exists => true)"
-        )
+        if dt_is_integer:
+            ### Integer time dimensions need an integer `compress_after`. Honor an explicit
+            ### integer, otherwise derive a 7-day-equivalent offset from the axis precision
+            ### (e.g. 604800 for second precision, 604800000 for millisecond).
+            if isinstance(after, int) and not isinstance(after, bool):
+                after_int = after
+            else:
+                unit = pipe.precision.get('unit', 'second')
+                scalar = MRSM_PRECISION_UNITS_SCALARS.get(unit, 1)
+                ### 7 days = 604800 seconds; scalar is units-per-second.
+                after_int = int(604800 * scalar)
+            queries.append(
+                f"SELECT add_compression_policy('{pipe_name}', {after_int}, "
+                "if_not_exists => true)"
+            )
+        else:
+            if not after:
+                ### Default to compressing chunks older than 7 days.
+                after = '7 days'
+            after_clean = str(after).replace("'", "''")
+            queries.append(
+                f"SELECT add_compression_policy('{pipe_name}', INTERVAL '{after_clean}', "
+                "if_not_exists => true)"
+            )
 
     return queries
 
@@ -293,7 +316,9 @@ def compress_pipe(
         )
 
     try:
-        success = all(self.exec_queries(queries, break_on_error=False, silent=(not debug), debug=debug))
+        success = all(
+            self.exec_queries(queries, break_on_error=False, silent=(not debug), debug=debug)
+        )
     except Exception as e:
         return False, f"Failed to compress {pipe}:\n{e}"
 
@@ -306,13 +331,13 @@ def compress_pipe(
     reclaimed_msg = ""
     if size_before is not None and size_after is not None:
         reclaimed = size_before - size_after
-        change_str = f"{format_bytes(size_before)} → {format_bytes(size_after)}"
+        change_str = f"{format_bytes(size_before)} to {format_bytes(size_after)}"
         if reclaimed > 0:
-            reclaimed_msg = f" Reclaimed {format_bytes(reclaimed)} ({change_str})."
+            reclaimed_msg = f"Reclaimed {format_bytes(reclaimed)} ({change_str})."
         elif reclaimed < 0:
             ### On small tables, compression overhead can exceed the savings.
-            reclaimed_msg = f" Size grew by {format_bytes(-reclaimed)} ({change_str})."
+            reclaimed_msg = f"Size grew by {format_bytes(-reclaimed)} ({change_str})."
         else:
-            reclaimed_msg = f" Size unchanged ({change_str})."
+            reclaimed_msg = f"Size unchanged ({format_bytes(size_before)})."
 
-    return True, f"Compressed {pipe}.{reclaimed_msg}"
+    return True, reclaimed_msg

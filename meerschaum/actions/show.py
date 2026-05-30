@@ -466,27 +466,71 @@ def _show_rowcounts(
 def _show_sizes(
     action: Optional[List[str]] = None,
     workers: Optional[int] = None,
+    shell: bool = False,
+    nopretty: bool = False,
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
     """
     Show the on-disk sizes of pipes' target tables, sorted largest first.
     """
+    import os
+    import contextlib
     from meerschaum.utils.misc import print_options
     from meerschaum.utils.formatting import format_bytes
+    from meerschaum.utils.formatting._shell import progress
+    from meerschaum.utils.warnings import info
+    from meerschaum.utils.daemon import running_in_daemon
     from meerschaum.utils.pool import get_pool
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum import get_pipes
 
     pipes = get_pipes(as_list=True, debug=debug, **kw)
-    pool = get_pool(workers=workers)
-    def _get_size(_pipe):
-        return _pipe.get_size(debug=debug)
+    
+    if not pipes:
+        return False, "No pipes selected."
 
-    sizes = pool.map(_get_size, pipes) if pool is not None else [_get_size(p) for p in pipes]
+    pool = (
+        get_pool(workers=workers)
+        if getattr(pipes[0].instance_connector, 'IS_THREAD_SAFE', False)
+        else None
+    )
+    def _get_size(_pipe):
+        if not nopretty:
+            info(f"Calculating size for {_pipe}...")
+        _size = _pipe.get_size(debug=debug)
+        if not nopretty:
+            info(f"Size for {_pipe}: {format_bytes(_size)}")
+        return _size
+
+    noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)
+    noninteractive = str(noninteractive_val).lower() in ('1', 'true', 'yes')
+    _progress = (
+        progress()
+        if (shell and not noninteractive and not running_in_daemon() and pipes)
+        else None
+    )
 
     size_dict = {}
-    for i, p in enumerate(pipes):
-        size_dict[p] = sizes[i]
+    cm = _progress if _progress is not None else contextlib.nullcontext()
+    with cm:
+        task = (
+            _progress.add_task("Calculating pipe sizes...", total=len(pipes))
+            if _progress is not None
+            else None
+        )
+
+        def _record(_pipe, _size):
+            size_dict[_pipe] = _size
+            if _progress is not None:
+                _progress.advance(task)
+
+        if pool is not None:
+            for p, sz in zip(pipes, pool.imap(_get_size, pipes)):
+                _record(p, sz)
+        else:
+            for p in pipes:
+                _record(p, _get_size(p))
 
     ### Sort descending (largest pipes first); treat `None` as the smallest.
     sorted_items = sorted(
@@ -1175,7 +1219,9 @@ def _show_targets(
     table.add_column("Target", overflow='fold')
     table.add_column("Pipes", overflow='fold')
 
-    sort_key = lambda st: (st[0] or '', st[1])
+    def sort_key(st):
+        return (st[0] or '', st[1])
+
     for schema, target in sorted(targets_pipes, key=sort_key):
         _pipes = targets_pipes[(schema, target)]
         pipes_group = rich_console.Group(*[

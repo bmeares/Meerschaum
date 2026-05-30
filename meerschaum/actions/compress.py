@@ -38,7 +38,7 @@ def _compress_pipes(
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
-    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.formatting import pprint, format_bytes
 
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
@@ -62,7 +62,10 @@ def _compress_pipes(
 
     success_dict = {}
     successes, fails = 0, 0
+    total_before, total_after = 0, 0
+    stats_rows = []
     for pipe in pipes:
+        size_before = pipe.get_size(debug=debug)
         compress_success, compress_msg = pipe.compress(debug=debug)
         success_dict[pipe] = compress_msg
         if compress_success:
@@ -70,6 +73,18 @@ def _compress_pipes(
         else:
             fails += 1
             warn(compress_msg, stack=False)
+
+        size_after = pipe.get_size(debug=debug)
+        if size_before is not None and size_after is not None:
+            total_before += size_before
+            total_after += size_after
+            reclaimed = size_before - size_after
+            stats_rows.append((
+                str(pipe),
+                format_bytes(size_before),
+                format_bytes(size_after),
+                format_bytes(reclaimed) if reclaimed >= 0 else f"-{format_bytes(-reclaimed)}",
+            ))
 
     if debug:
         dprint("Results for compressing pipes.")
@@ -80,4 +95,35 @@ def _compress_pipes(
         + ('s' if len(pipes) != 1 else '')
         + f"\n    ({successes} succeeded, {fails} failed)."
     )
+
+    if stats_rows:
+        total_reclaimed = total_before - total_after
+        name_width = max([len("Pipe")] + [len(row[0]) for row in stats_rows])
+        before_width = max([len("Before")] + [len(row[1]) for row in stats_rows])
+        after_width = max([len("After")] + [len(row[2]) for row in stats_rows])
+        saved_width = max([len("Saved")] + [len(row[3]) for row in stats_rows])
+
+        header = (
+            f"    {'Pipe':<{name_width}}  {'Before':>{before_width}}  "
+            f"{'After':>{after_width}}  {'Saved':>{saved_width}}"
+        )
+        sep = "    " + "-" * (len(header) - 4)
+        lines = [header, sep]
+        for name, before, after, saved in stats_rows:
+            lines.append(
+                f"    {name:<{name_width}}  {before:>{before_width}}  "
+                f"{after:>{after_width}}  {saved:>{saved_width}}"
+            )
+        lines.append(sep)
+        total_saved_str = (
+            format_bytes(total_reclaimed)
+            if total_reclaimed >= 0
+            else f"-{format_bytes(-total_reclaimed)}"
+        )
+        lines.append(
+            f"    {'Total':<{name_width}}  {format_bytes(total_before):>{before_width}}  "
+            f"{format_bytes(total_after):>{after_width}}  {total_saved_str:>{saved_width}}"
+        )
+        msg += "\n\n" + "\n".join(lines)
+
     return successes > 0, msg
