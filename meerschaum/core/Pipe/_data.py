@@ -692,6 +692,7 @@ def get_chunk_bounds(
     end: Union[datetime, int, None] = None,
     bounded: bool = False,
     chunk_interval: Union[timedelta, int, None] = None,
+    align: bool = False,
     debug: bool = False,
 ) -> List[
     Tuple[
@@ -719,6 +720,13 @@ def get_chunk_bounds(
         If provided, use this interval for the size of chunk boundaries.
         The default value for this pipe may be set
         under `pipe.parameters['verify']['chunk_minutes']`.
+
+    align: bool, default False
+        If `True`, anchor the interior chunk boundaries to a fixed Unix-epoch grid (the same
+        grid used for native range partitioning) rather than to `begin`. This makes the
+        boundaries deterministic across re-syncs and aligned with the pipe's partitions
+        (used by `Pipe.verify()`). The first chunk's lower bound and the last chunk's upper
+        bound are still clamped to `begin` / `end`.
 
     debug: bool, default False
         Verbosity toggle.
@@ -766,12 +774,28 @@ def get_chunk_bounds(
 
     ### Set the chunk interval under `pipe.parameters['verify']['chunk_minutes']`.
     chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
-    
+
+    ### Anchor the interior boundaries to a fixed Unix-epoch grid (matching native range
+    ### partitioning, see `SQLConnector._partition_bounds`) so chunk edges line up with partition
+    ### edges and stay deterministic regardless of `begin`. The first chunk is clamped back to
+    ### `begin` below.
+    begin_cursor = begin
+    if align and begin is not None:
+        if isinstance(chunk_interval, int):
+            begin_cursor = (int(begin) // chunk_interval) * chunk_interval
+        else:
+            epoch = (
+                datetime(1970, 1, 1, tzinfo=begin.tzinfo)
+                if getattr(begin, 'tzinfo', None) is not None
+                else datetime(1970, 1, 1)
+            )
+            n = (begin - epoch) // chunk_interval
+            begin_cursor = epoch + (n * chunk_interval)
+
     ### Build a list of tuples containing the chunk boundaries
     ### so that we can sync multiple chunks in parallel.
     ### Run `verify pipes --workers 1` to sync chunks in series.
     chunk_bounds = []
-    begin_cursor = begin
     num_chunks = 0
     max_chunks = 1_000_000
     while begin_cursor < end:
@@ -801,6 +825,16 @@ def get_chunk_bounds(
     ### Pop the last chunk if its bounds are equal.
     if chunk_bounds[-1][0] == chunk_bounds[-1][1]:
         chunk_bounds = chunk_bounds[:-1]
+
+    ### Clamp the epoch-aligned first chunk's lower bound back to the requested `begin` so the
+    ### returned range still starts exactly at `begin` (only the interior edges are grid-aligned).
+    if (
+        align
+        and chunk_bounds
+        and chunk_bounds[0][0] is not None
+        and chunk_bounds[0][0] < begin
+    ):
+        chunk_bounds[0] = (begin, chunk_bounds[0][1])
 
     if include_less_than_begin:
         chunk_bounds = [(None, begin)] + chunk_bounds

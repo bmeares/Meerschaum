@@ -149,6 +149,7 @@ def verify(
         end=end,
         chunk_interval=chunk_interval,
         bounded=bounded,
+        align=True,
         debug=debug,
     )
 
