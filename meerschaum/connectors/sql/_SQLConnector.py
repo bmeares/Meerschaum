@@ -46,7 +46,9 @@ class SQLConnector(InstanceConnector):
         apply_compression_policy,
         _get_compress_settings,
         _is_hypertable,
-        _get_timescaledb_compress_queries,
+        _get_columnstore_settings_query,
+        _get_columnstore_policy_query,
+        _get_columnstore_remove_policy_query,
     )
     from ._pipes import (
         fetch_pipes_keys,

@@ -28,6 +28,7 @@ def _compress_pipes(
     yes: bool = False,
     force: bool = False,
     noask: bool = False,
+    no_policy: bool = False,
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
@@ -66,7 +67,7 @@ def _compress_pipes(
     stats_rows = []
     for pipe in pipes:
         size_before = pipe.get_size(debug=debug)
-        compress_success, compress_msg = pipe.compress(debug=debug)
+        compress_success, compress_msg = pipe.compress(no_policy=no_policy, debug=debug)
         success_dict[pipe] = compress_msg
         if compress_success:
             successes += 1

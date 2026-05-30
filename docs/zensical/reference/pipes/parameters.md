@@ -147,14 +147,19 @@ You may designate the same column as both the `datetime` and `primary` indices.
 
 Set `compress` to enable compression for a pipe's target table to reduce disk usage.
 
-For **TimescaleDB** hypertables (the default stack), setting `compress` installs a [compression policy](https://docs.timescale.com/use-timescale/latest/compression/) automatically on sync, so newly synced chunks are compressed in the background. Running the `compress pipes` action (or `Pipe.compress()`) additionally compresses any existing uncompressed chunks immediately.
+For **TimescaleDB** hypertables (the default stack), compression is handled by the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore). The columnstore (compression) policy is the same mechanism under both names — `add_columnstore_policy` is the modern equivalent of the legacy `add_compression_policy`.
+
+By default ([`hypercore`](#hypercore)), the columnstore is already enabled at table creation and a policy is auto-created. Setting `compress` additionally (re)installs a columnstore policy automatically on sync, so newly synced chunks are converted in the background. Running the `compress pipes` action (or `Pipe.compress()`) additionally converts any existing uncompressed chunks immediately.
+
+!!! tip "One-shot compression"
+    Run `compress pipes --no-policy` to convert existing chunks now **without** installing an ongoing columnstore policy (any pre-existing policy is left untouched). Useful for a one-time reclaim on a pipe you don't want to keep auto-compressing.
 
 You may set `compress` to `true` to use sensible defaults (segment by the `id` column, order by the `datetime` column descending), or to a dictionary for fine-grained control:
 
 | Key | Description |
 |---|---|
-| `after` | How old a chunk must be before the policy compresses it (e.g. `'7 days'`). Defaults to `7 days`. |
-| `segmentby` | Column(s) to segment by when compressing. Defaults to the `id` index. |
+| `after` | How old a chunk must be before the policy converts it (e.g. `'7 days'`). Defaults to `7 days`. |
+| `segmentby` | Column(s) to segment by. Defaults to the `id` index — unless `id` is the unique [`primary`](#primary) key, in which case it is dropped from `segmentby` (a high-cardinality `segmentby` defeats columnstore compression) and moved into `orderby`. |
 | `orderby` | Column(s) (with optional `ASC`/`DESC`) to order by within compressed batches. Defaults to the `datetime` index, descending. |
 
 !!! warning
@@ -289,6 +294,14 @@ The base SQL query to be run when fetching new rows. Aliased as `sql` or `query`
 ## `hypertable`
 
 If `hypertable` is `False`, then the target table will not be created as a hypertable (TimescaleDB-only).
+
+---------------
+
+## `hypercore`
+
+TimescaleDB-only. By default (`True`), the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore) is enabled when the hypertable is created — the `CREATE TABLE` declares `tsdb.segmentby` / `tsdb.orderby` (resolved the same way as [`compress`](#compress)), which causes TimescaleDB to auto-create a columnstore policy that converts old chunks in the background.
+
+Set `hypercore` to `False` for a plain row-store hypertable (no columnstore, no auto-policy). Has no effect unless the pipe is a [`hypertable`](#hypertable).
 
 ---------------
 

@@ -1682,14 +1682,27 @@ def create_pipe_table_from_df(
         and pipe.parameters.get('hypertable', True)
         and dt_col is not None
     )
+
+    ### Use the declarative `CREATE TABLE ... WITH (tsdb.hypertable, ...)` path only when Hypercore
+    ### is enabled (the default). Declarative creation enables the columnstore (via the
+    ### `segmentby`/`orderby` options) AND makes TimescaleDB auto-install a columnstore policy —
+    ### exactly the Hypercore behavior we want. With `hypercore=False`, fall back to a plain table
+    ### plus the `create_hypertable()` call during index creation, which adds NO columnstore policy,
+    ### keeping `hypercore` a true opt-out (a plain row-store hypertable).
+    hypercore = hypertable and pipe.parameters.get('hypercore', True)
     hypertable_chunk_interval = None
-    if hypertable:
+    hypertable_segmentby = None
+    hypertable_orderby = None
+    if hypercore:
         chunk_interval = pipe.get_chunk_interval(debug=debug)
         hypertable_chunk_interval = (
             f'{chunk_interval}'
             if isinstance(chunk_interval, int)
             else f'{int(chunk_interval.total_seconds() / 60)} minutes'
         )
+        _compress_settings = self._get_compress_settings(pipe)
+        hypertable_segmentby = _compress_settings['segmentby'] or None
+        hypertable_orderby = _compress_settings['orderby'] or None
 
     def _build_create_table_queries(_hypertable_chunk_interval):
         _queries = get_create_table_queries(
@@ -1701,6 +1714,8 @@ def create_pipe_table_from_df(
             primary_key_db_type=primary_key_db_type,
             datetime_column=dt_col,
             hypertable_chunk_interval=_hypertable_chunk_interval,
+            hypertable_segmentby=(hypertable_segmentby if _hypertable_chunk_interval else None),
+            hypertable_orderby=(hypertable_orderby if _hypertable_chunk_interval else None),
         )
         if schema:
             _queries = (
@@ -1715,11 +1730,11 @@ def create_pipe_table_from_df(
             create_table_queries,
             break_on_error=True,
             rollback=True,
-            silent=hypertable,
+            silent=hypercore,
             debug=debug,
         )
     )
-    if not success and hypertable:
+    if not success and hypercore:
         ### Declarative hypertable syntax unsupported; retry as a plain table.
         ### `create_hypertable()` runs later during index creation.
         create_table_queries = _build_create_table_queries(None)

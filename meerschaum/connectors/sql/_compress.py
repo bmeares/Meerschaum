@@ -118,16 +118,28 @@ def _get_compress_settings(
 
     dt_col = pipe.columns.get('datetime', None)
     id_col = pipe.columns.get('id', None)
+    primary_col = pipe.columns.get('primary', None)
+
+    ### A unique / primary `id` column is high-cardinality: segmenting by it yields ≈1 row per
+    ### segment, which defeats columnstore batching (no compression, larger table). Such columns
+    ### belong in `orderby` instead. See the Hypercore docs:
+    ### https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore
+    id_is_unique = bool(id_col) and id_col == primary_col
 
     segmentby = settings.get('segmentby', None)
     if segmentby is None:
-        segmentby = [id_col] if id_col else []
+        segmentby = [id_col] if (id_col and not id_is_unique) else []
     elif isinstance(segmentby, str):
         segmentby = [segmentby]
 
     orderby = settings.get('orderby', None)
     if orderby is None:
-        orderby = [f"{dt_col} DESC"] if dt_col else []
+        orderby = []
+        if dt_col:
+            orderby.append(f"{dt_col} DESC")
+        ### Keep the unique `id` in `orderby` (not `segmentby`) so chunks stay well-ordered.
+        if id_is_unique and id_col not in orderby:
+            orderby.append(id_col)
     elif isinstance(orderby, str):
         orderby = [orderby]
 
@@ -150,64 +162,97 @@ def _is_hypertable(self, pipe: mrsm.Pipe, debug: bool = False) -> bool:
     return self.value(query, silent=True, debug=debug) is not None
 
 
-def _get_timescaledb_compress_queries(
+def _get_columnstore_settings_query(
     self,
     pipe: mrsm.Pipe,
-    include_policy: bool = True,
-) -> List[str]:
+) -> str:
     """
-    Build the queries to enable compression (and optionally add a compression policy)
-    for a TimescaleDB hypertable.
+    Build the `ALTER TABLE` query that enables the Hypercore columnstore and configures its
+    `segmentby` / `orderby` for a TimescaleDB hypertable.
+
+    NOTE: this must be committed in its own transaction *before* `add_columnstore_policy()`;
+    enabling the columnstore and adding the policy in the same transaction raises
+    "columnstore not enabled" (see timescale/timescaledb#8600).
+    """
+    from meerschaum.utils.sql import sql_item_name
+    pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
+    settings = self._get_compress_settings(pipe)
+
+    ### `enable_columnstore` is the Hypercore replacement for the legacy `timescaledb.compress`
+    ### (which still works as an alias). `segmentby`/`orderby` likewise supersede
+    ### `compress_segmentby`/`compress_orderby`.
+    set_options = ['timescaledb.enable_columnstore']
+    if settings['segmentby']:
+        cols = ', '.join(settings['segmentby']).replace("'", "''")
+        set_options.append(f"timescaledb.segmentby = '{cols}'")
+    if settings['orderby']:
+        cols = ', '.join(settings['orderby']).replace("'", "''")
+        set_options.append(f"timescaledb.orderby = '{cols}'")
+
+    return f"ALTER TABLE {pipe_name} SET ({', '.join(set_options)})"
+
+
+def _get_columnstore_policy_query(
+    self,
+    pipe: mrsm.Pipe,
+) -> str:
+    """
+    Build the `CALL add_columnstore_policy(...)` query that schedules automatic conversion of
+    old chunks to the columnstore for a TimescaleDB hypertable.
+
+    `add_columnstore_policy` is the Hypercore replacement for `add_compression_policy` (same
+    underlying mechanism — the "columnstore policy" *is* the "compression policy"). Run this in a
+    separate transaction from `_get_columnstore_settings_query` (see timescale/timescaledb#8600).
     """
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PRECISION_UNITS_SCALARS
     pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
     settings = self._get_compress_settings(pipe)
 
-    set_options = ['timescaledb.compress']
-    if settings['segmentby']:
-        cols = ', '.join(settings['segmentby'])
-        set_options.append(f"timescaledb.compress_segmentby = '{cols}'")
-    if settings['orderby']:
-        cols = ', '.join(settings['orderby'])
-        set_options.append(f"timescaledb.compress_orderby = '{cols}'")
+    ### Hypertables with an integer time dimension (int epoch datetime axis) require an integer
+    ### `after`; an `INTERVAL` raises `InvalidParameterValue`.
+    dt_col = pipe.columns.get('datetime', None)
+    dt_typ = str(pipe.dtypes.get(dt_col, 'datetime')) if dt_col else 'datetime'
+    dt_is_integer = are_dtypes_equal(dt_typ, 'int')
 
-    queries = [f"ALTER TABLE {pipe_name} SET ({', '.join(set_options)})"]
-
-    if include_policy:
-        ### Hypertables with an integer time dimension (int epoch datetime axis) require an
-        ### integer `compress_after`; an `INTERVAL` raises `InvalidParameterValue`.
-        dt_col = pipe.columns.get('datetime', None)
-        dt_typ = str(pipe.dtypes.get(dt_col, 'datetime')) if dt_col else 'datetime'
-        dt_is_integer = are_dtypes_equal(dt_typ, 'int')
-
-        after = settings['after']
-        if dt_is_integer:
-            ### Integer time dimensions need an integer `compress_after`. Honor an explicit
-            ### integer, otherwise derive a 7-day-equivalent offset from the axis precision
-            ### (e.g. 604800 for second precision, 604800000 for millisecond).
-            if isinstance(after, int) and not isinstance(after, bool):
-                after_int = after
-            else:
-                unit = pipe.precision.get('unit', 'second')
-                scalar = MRSM_PRECISION_UNITS_SCALARS.get(unit, 1)
-                ### 7 days = 604800 seconds; scalar is units-per-second.
-                after_int = int(604800 * scalar)
-            queries.append(
-                f"SELECT add_compression_policy('{pipe_name}', {after_int}, "
-                "if_not_exists => true)"
-            )
+    after = settings['after']
+    if dt_is_integer:
+        ### Honor an explicit integer, otherwise derive a 7-day-equivalent offset from the axis
+        ### precision (e.g. 604800 for second precision, 604800000 for millisecond).
+        if isinstance(after, int) and not isinstance(after, bool):
+            after_clause = str(after)
         else:
-            if not after:
-                ### Default to compressing chunks older than 7 days.
-                after = '7 days'
-            after_clean = str(after).replace("'", "''")
-            queries.append(
-                f"SELECT add_compression_policy('{pipe_name}', INTERVAL '{after_clean}', "
-                "if_not_exists => true)"
-            )
+            unit = pipe.precision.get('unit', 'second')
+            scalar = MRSM_PRECISION_UNITS_SCALARS.get(unit, 1)
+            ### 7 days = 604800 seconds; scalar is units-per-second.
+            after_clause = str(int(604800 * scalar))
+    else:
+        if not after:
+            ### Default to converting chunks older than 7 days.
+            after = '7 days'
+        after_clean = str(after).replace("'", "''")
+        after_clause = f"INTERVAL '{after_clean}'"
 
-    return queries
+    return (
+        f"CALL add_columnstore_policy('{pipe_name}', after => {after_clause}, "
+        "if_not_exists => true)"
+    )
+
+
+def _get_columnstore_remove_policy_query(
+    self,
+    pipe: mrsm.Pipe,
+) -> str:
+    """
+    Build the `CALL remove_columnstore_policy(...)` query.
+
+    Used so the explicit `compress pipes` action can re-create the policy with the configured
+    `after` — `add_columnstore_policy(..., if_not_exists => true)` will NOT update an existing
+    policy (e.g. the one TimescaleDB auto-creates for Hypercore tables at `CREATE TABLE`).
+    """
+    from meerschaum.utils.sql import sql_item_name
+    pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
+    return f"CALL remove_columnstore_policy('{pipe_name}', if_exists => true)"
 
 
 def apply_compression_policy(
@@ -242,9 +287,17 @@ def apply_compression_policy(
         if not pipe.exists(debug=debug) or not self._is_hypertable(pipe, debug=debug):
             return True, f"{pipe} is not a hypertable; skipping compression policy."
 
-        queries = self._get_timescaledb_compress_queries(pipe, include_policy=True)
-        success = all(self.exec_queries(queries, break_on_error=False, silent=True, debug=debug))
-        if not success:
+        ### Enable the columnstore and add the policy in SEPARATE transactions
+        ### (see timescale/timescaledb#8600).
+        settings_success = all(self.exec_queries(
+            [self._get_columnstore_settings_query(pipe)],
+            break_on_error=True, rollback=True, silent=True, debug=debug,
+        ))
+        policy_success = all(self.exec_queries(
+            [self._get_columnstore_policy_query(pipe)],
+            break_on_error=True, rollback=True, silent=True, debug=debug,
+        ))
+        if not (settings_success and policy_success):
             return False, f"Failed to apply a compression policy to {pipe}."
     except Exception as e:
         msg = f"Failed to apply a compression policy to {pipe}:\n{e}"
@@ -258,21 +311,26 @@ def apply_compression_policy(
 def compress_pipe(
     self,
     pipe: mrsm.Pipe,
+    no_policy: bool = False,
     debug: bool = False,
     **kwargs: Any
 ) -> SuccessTuple:
     """
     Compress a pipe's target table to reduce disk usage.
 
-    For TimescaleDB, enables native compression, installs a compression policy
-    (so future synced chunks are compressed automatically), and compresses any
-    existing uncompressed chunks. For MySQL/MariaDB and MSSQL, applies the flavor's
-    native table compression. Other flavors are unsupported.
+    For TimescaleDB, enables the Hypercore columnstore, installs a columnstore (compression)
+    policy (so future synced chunks are converted automatically), and converts any existing
+    uncompressed chunks now. For MySQL/MariaDB and MSSQL, applies the flavor's native table
+    compression. Other flavors are unsupported.
 
     Parameters
     ----------
     pipe: mrsm.Pipe
         The pipe whose target table to compress.
+
+    no_policy: bool, default False
+        If `True` (TimescaleDB only), compress existing chunks now without installing an ongoing
+        columnstore (compression) policy. Any pre-existing policy is left untouched.
 
     debug: bool, default False
         Verbosity toggle.
@@ -294,30 +352,42 @@ def compress_pipe(
     pipe_name = sql_item_name(pipe.target, flavor, self.get_pipe_schema(pipe))
     size_before = pipe.get_size(debug=debug)
 
-    queries: List[str] = []
+    ### Each group is run in its own transaction. TimescaleDB requires enabling the columnstore
+    ### and adding its policy in separate transactions (see timescale/timescaledb#8600).
+    query_groups: List[List[str]] = []
     if flavor in ('timescaledb', 'timescaledb-ha'):
         if not self._is_hypertable(pipe, debug=debug):
             return False, (
                 f"{pipe} is not a hypertable; only hypertables support TimescaleDB compression."
             )
-        ### Enable compression + install a policy for ongoing automatic compression.
-        queries.extend(self._get_timescaledb_compress_queries(pipe, include_policy=True))
-        ### Compress any existing uncompressed chunks now.
-        queries.append(
+        ### 1. Enable the columnstore (required before any chunk can be converted).
+        query_groups.append([self._get_columnstore_settings_query(pipe)])
+        ### 2. Install a policy for ongoing conversion — re-create it so the configured `after`
+        ### wins over any existing (e.g. auto-created) policy. Skipped entirely with `no_policy`,
+        ### which compresses existing chunks now but leaves any pre-existing policy untouched.
+        if not no_policy:
+            query_groups.append([self._get_columnstore_remove_policy_query(pipe)])
+            query_groups.append([self._get_columnstore_policy_query(pipe)])
+        ### 3. Convert any existing uncompressed chunks now. `compress_chunk` is the still-supported
+        ### function form of `convert_to_columnstore` (transaction-safe, unlike the `CALL` form).
+        query_groups.append([
             f"SELECT compress_chunk(c, if_not_compressed => true) "
             f"FROM show_chunks('{pipe_name}') c"
-        )
+        ])
     elif flavor in ('mysql', 'mariadb'):
-        queries.append(f"ALTER TABLE {pipe_name} ROW_FORMAT=COMPRESSED")
+        query_groups.append([f"ALTER TABLE {pipe_name} ROW_FORMAT=COMPRESSED"])
     elif flavor == 'mssql':
-        queries.append(
+        query_groups.append([
             f"ALTER TABLE {pipe_name} REBUILD PARTITION = ALL "
             "WITH (DATA_COMPRESSION = PAGE)"
-        )
+        ])
 
     try:
         success = all(
-            self.exec_queries(queries, break_on_error=False, silent=(not debug), debug=debug)
+            all(self.exec_queries(
+                group, break_on_error=True, rollback=True, silent=(not debug), debug=debug,
+            ))
+            for group in query_groups
         )
     except Exception as e:
         return False, f"Failed to compress {pipe}:\n{e}"

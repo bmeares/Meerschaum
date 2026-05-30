@@ -2195,6 +2195,8 @@ def get_create_table_queries(
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
     hypertable_chunk_interval: Optional[str] = None,
+    hypertable_segmentby: Optional[List[str]] = None,
+    hypertable_orderby: Optional[List[str]] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2235,6 +2237,17 @@ def get_create_table_queries(
         `datetime_column` with this chunk interval (e.g. `'10080 minutes'` or `'100000'`).
         Requires TimescaleDB 2.21+; callers should fall back to `create_hypertable()` on failure.
 
+    hypertable_segmentby: Optional[List[str]], default None
+        If provided (alongside `hypertable_chunk_interval`), enable the Hypercore columnstore on
+        the new hypertable and segment compressed chunks by these columns (`tsdb.segmentby`).
+        Should be low-cardinality columns; high-cardinality / unique columns belong in
+        `hypertable_orderby` instead.
+
+    hypertable_orderby: Optional[List[str]], default None
+        If provided (alongside `hypertable_chunk_interval`), order the columnstore by these
+        columns (`tsdb.orderby`, e.g. `['"timestamp" DESC']`). Declaring `segmentby`/`orderby`
+        in `CREATE TABLE` causes TimescaleDB to auto-create a columnstore policy.
+
     _parse_dtypes: bool, default True
         If `True`, cast Pandas dtypes to SQL dtypes.
         Otherwise pass through the given value directly.
@@ -2261,6 +2274,8 @@ def get_create_table_queries(
         autoincrement=(autoincrement and flavor not in SKIP_AUTO_INCREMENT_FLAVORS),
         datetime_column=datetime_column,
         hypertable_chunk_interval=hypertable_chunk_interval,
+        hypertable_segmentby=hypertable_segmentby,
+        hypertable_orderby=hypertable_orderby,
         _parse_dtypes=_parse_dtypes,
     )
 
@@ -2275,6 +2290,8 @@ def _get_create_table_query_from_dtypes(
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
     hypertable_chunk_interval: Optional[str] = None,
+    hypertable_segmentby: Optional[List[str]] = None,
+    hypertable_orderby: Optional[List[str]] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2379,13 +2396,20 @@ def _get_create_table_query_from_dtypes(
     ):
         partition_column = datetime_column.replace("'", "''")
         chunk_interval = hypertable_chunk_interval.replace("'", "''")
-        query += (
-            "\nWITH (\n"
-            "    tsdb.hypertable,\n"
-            f"    tsdb.partition_column='{partition_column}',\n"
-            f"    tsdb.chunk_interval='{chunk_interval}'\n"
-            ")"
-        )
+        with_options = [
+            "tsdb.hypertable",
+            f"tsdb.partition_column='{partition_column}'",
+            f"tsdb.chunk_interval='{chunk_interval}'",
+        ]
+        ### Declaring `segmentby`/`orderby` enables the Hypercore columnstore and causes
+        ### TimescaleDB to auto-create a columnstore (compression) policy.
+        if hypertable_segmentby:
+            segmentby = ', '.join(hypertable_segmentby).replace("'", "''")
+            with_options.append(f"tsdb.segmentby='{segmentby}'")
+        if hypertable_orderby:
+            orderby = ', '.join(hypertable_orderby).replace("'", "''")
+            with_options.append(f"tsdb.orderby='{orderby}'")
+        query += "\nWITH (\n    " + ",\n    ".join(with_options) + "\n)"
 
     queries = [query]
     return queries
@@ -2401,12 +2425,14 @@ def _get_create_table_query_from_cte(
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
     hypertable_chunk_interval: Optional[str] = None,
+    hypertable_segmentby: Optional[List[str]] = None,
+    hypertable_orderby: Optional[List[str]] = None,
     _parse_dtypes=None,
 ) -> List[str]:
     """
     Create a new table from a CTE query.
-    NOTE: `hypertable_chunk_interval` is ignored here; `CREATE TABLE ... AS` cannot declare a
-    hypertable. Convert via `create_hypertable()` afterward.
+    NOTE: `hypertable_chunk_interval`/`hypertable_segmentby`/`hypertable_orderby` are ignored here;
+    `CREATE TABLE ... AS` cannot declare a hypertable. Convert via `create_hypertable()` afterward.
     """
     import textwrap
     create_cte = 'create_query'

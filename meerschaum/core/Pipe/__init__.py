@@ -305,8 +305,15 @@ class Pipe:
 
         compress: Union[bool, Dict[str, Any], None], default None
             If `True` (or a dictionary of compression settings), mark the pipe for compression.
-            For TimescaleDB hypertables, a compression policy is installed automatically on sync.
+            For TimescaleDB hypertables, a columnstore (compression) policy is installed
+            automatically on sync. A dictionary may override `segmentby`, `orderby`, and `after`.
             Defaults to `False`.
+
+        hypercore: bool, default True
+            For TimescaleDB hypertables, enable the Hypercore columnstore at table creation
+            (declaring `segmentby`/`orderby` in `CREATE TABLE`), which causes TimescaleDB to
+            auto-create a columnstore policy. Set to `False` for a plain row-store hypertable.
+            Has no effect unless the pipe is a hypertable (`hypertable`, default `True`).
 
         temporary: bool, default False
             If `True`, prevent instance tables (pipes, users, plugins) from being created.

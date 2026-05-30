@@ -304,6 +304,13 @@ groups['pipes'].add_argument(
         "\nMay be negated with `_`."
     )
 )
+groups['pipes'].add_argument(
+    '--no-policy', '--nopolicy', action='store_true',
+    help=(
+        "When running `compress pipes`, compress existing chunks now without installing an "
+        "ongoing compression (columnstore) policy. TimescaleDB only."
+    )
+)
 
 
 ### Sync options

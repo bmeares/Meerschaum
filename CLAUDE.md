@@ -87,6 +87,9 @@ Pipe = three string keys:
 | `static` | `bool` | If `True`, never alter the schema (no new columns added). |
 | `autoincrement` | `bool` | If `True`, add an auto-incrementing primary key column. |
 | `autotime` | `bool` | If `True`, automatically add a `datetime` timestamp column on insert. |
+| `hypertable` | `bool` | TimescaleDB only. If `True` (default), create the target table as a hypertable. |
+| `hypercore` | `bool` | TimescaleDB only. If `True` (default), enable the Hypercore columnstore at `CREATE TABLE` (`tsdb.segmentby`/`tsdb.orderby`), auto-creating a columnstore policy. `False` = plain row-store hypertable. |
+| `compress` | `bool\|Dict` | If truthy, install a columnstore (compression) policy. Dict overrides `segmentby`, `orderby`, `after`. The columnstore policy *is* the compression policy (`add_columnstore_policy` ≡ legacy `add_compression_policy`). |
 | `enforce` | `bool` | If `False`, skip dtype enforcement on incoming data. |
 | `null_indices` | `bool` | If `True`, allow `NULL` values in index columns. |
 | `precision` | `str\|Dict` | Datetime precision unit: `'ns'`, `'us'`, `'ms'`, `'s'`, `'m'`, `'h'`, `'d'`. Aliases defined in `MRSM_PRECISION_UNITS_ALIASES`. |
