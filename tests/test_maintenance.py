@@ -17,7 +17,10 @@ from meerschaum.connectors.sql._maintenance import (
     ANALYZABLE_FLAVORS,
     _FULL_VACUUM_FLAVORS,
 )
-from meerschaum.connectors.sql._compress import COMPRESSIBLE_FLAVORS
+from meerschaum.connectors.sql._compress import (
+    COMPRESSIBLE_FLAVORS,
+    _normalize_columnstore_cols,
+)
 
 from tests import debug
 from tests.connectors import conns, get_flavors
@@ -153,6 +156,102 @@ def test_unsupported_instance_maintenance(flavor: str):
         result = getattr(pipe, method)(debug=debug)
         _assert_success_tuple(result)
         assert not result[0], f"{method} should be unsupported for '{conn.type}'."
+
+
+### -------------------------------------------------------------------------------------------
+### Columnstore (compression) settings — quoting and direction handling. These exercise pure
+### query-building logic and do not touch a live database, so they run on every flavor set.
+### -------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("value,flavor,allow_direction,expected", [
+    ### A bare mixed-case identifier must be double-quoted (the reported regression: unquoted
+    ### `startTime` is folded to `starttime` by PostgreSQL and rejected by TimescaleDB).
+    ('startTime', 'postgresql', False, ['"startTime"']),
+    ### Comma-separated string splits into individually-quoted columns.
+    ('col1, col2', 'postgresql', False, ['"col1"', '"col2"']),
+    ### `ASC` / `DESC` is preserved and upper-cased; the column stays quoted.
+    ('startTime desc', 'postgresql', True, ['"startTime" DESC']),
+    ('startTime DESC, endTime', 'postgresql', True, ['"startTime" DESC', '"endTime"']),
+    ### List form with mixed directions.
+    (['startTime desc', 'endTime asc'], 'postgresql', True, ['"startTime" DESC', '"endTime" ASC']),
+    ### A list element that is itself comma-separated is flattened.
+    (['a, b DESC', 'c'], 'postgresql', True, ['"a"', '"b" DESC', '"c"']),
+    ### `NULLS FIRST` / `NULLS LAST` modifiers are preserved.
+    ('ts DESC NULLS LAST', 'postgresql', True, ['"ts" DESC NULLS LAST']),
+    ('ts NULLS FIRST', 'postgresql', True, ['"ts" NULLS FIRST']),
+    ### Empty / whitespace-only entries (e.g. a trailing comma) are dropped.
+    ('a, , b', 'postgresql', False, ['"a"', '"b"']),
+    ('', 'postgresql', False, []),
+    (['', '  '], 'postgresql', True, []),
+    ### Flavor-specific quote character.
+    ('startTime', 'mysql', False, ['`startTime`']),
+    ('startTime', 'mariadb', False, ['`startTime`']),
+    ### With direction disallowed (segmentby), a trailing keyword is part of the identifier.
+    ('startTime DESC', 'postgresql', False, ['"startTime DESC"']),
+    ### An unrecognized trailing token is NOT treated as a direction; the whole entry is quoted
+    ### as one identifier rather than guessing where the column ends.
+    ('col FOO', 'postgresql', True, ['"col FOO"']),
+])
+def test_normalize_columnstore_cols(value, flavor, allow_direction, expected):
+    """`_normalize_columnstore_cols` quotes identifiers and preserves recognized directions."""
+    assert _normalize_columnstore_cols(value, flavor, allow_direction) == expected
+
+
+def test_compress_settings_default_quoting():
+    """A mixed-case datetime column is quoted in the default `orderby` (the reported bug)."""
+    conn = conns['sqlite']
+    pipe = mrsm.Pipe(
+        'plugin:timeline', 'activities', 'compress_quote',
+        instance=conn,
+        columns={'datetime': 'startTime'},
+    )
+    settings = conn._get_compress_settings(pipe)
+    assert settings['orderby'] == ['"startTime" DESC']
+
+    query = conn._get_columnstore_settings_query(pipe)
+    assert 'timescaledb.orderby = \'"startTime" DESC\'' in query
+    ### Guard against the lowercase-folding regression returning.
+    assert "orderby = 'startTime DESC'" not in query
+
+
+def test_compress_settings_id_placement():
+    """A non-unique `id` goes to `segmentby`; a unique (primary) `id` goes to `orderby`."""
+    conn = conns['sqlite']
+
+    non_unique = mrsm.Pipe(
+        'plugin:x', 'y', 'seg_nonunique',
+        instance=conn,
+        columns={'datetime': 'ts', 'id': 'device'},
+    )
+    settings = conn._get_compress_settings(non_unique)
+    assert settings['segmentby'] == ['"device"']
+    assert settings['orderby'] == ['"ts" DESC']
+
+    unique = mrsm.Pipe(
+        'plugin:x', 'y', 'seg_unique',
+        instance=conn,
+        columns={'datetime': 'ts', 'id': 'pk', 'primary': 'pk'},
+    )
+    settings = conn._get_compress_settings(unique)
+    assert settings['segmentby'] == []
+    assert settings['orderby'] == ['"ts" DESC', '"pk"']
+
+
+def test_compress_settings_user_overrides():
+    """User-supplied `compress` dict specs are split and quoted, with directions preserved."""
+    conn = conns['sqlite']
+    pipe = mrsm.Pipe(
+        'plugin:x', 'y', 'overrides',
+        instance=conn,
+        columns={'datetime': 'startTime'},
+        parameters={'compress': {
+            'segmentby': 'col1, col2',
+            'orderby': 'startTime DESC, endTime',
+        }},
+    )
+    settings = conn._get_compress_settings(pipe)
+    assert settings['segmentby'] == ['"col1"', '"col2"']
+    assert settings['orderby'] == ['"startTime" DESC', '"endTime"']
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

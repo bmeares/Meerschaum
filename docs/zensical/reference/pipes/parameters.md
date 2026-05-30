@@ -154,13 +154,23 @@ By default ([`hypercore`](#hypercore)), the columnstore is already enabled at ta
 !!! tip "One-shot compression"
     Run `compress pipes --no-policy` to convert existing chunks now **without** installing an ongoing columnstore policy (any pre-existing policy is left untouched). Useful for a one-time reclaim on a pipe you don't want to keep auto-compressing.
 
-You may set `compress` to `true` to use sensible defaults (segment by the `id` column, order by the `datetime` column descending), or to a dictionary for fine-grained control:
+You may set `compress` to `true` to use sensible defaults (segment by the `id` column, order by the `datetime` column descending), or to a dictionary with the following keys for fine-grained control:
 
-| Key | Description |
-|---|---|
-| `after` | How old a chunk must be before the policy converts it (e.g. `'7 days'`). Defaults to `7 days`. |
-| `segmentby` | Column(s) to segment by. Defaults to the `id` index — unless `id` is the unique [`primary`](#primary) key, in which case it is dropped from `segmentby` (a high-cardinality `segmentby` defeats columnstore compression) and moved into `orderby`. |
-| `orderby` | Column(s) (with optional `ASC`/`DESC`) to order by within compressed batches. Defaults to the `datetime` index, descending. |
+- `after`
+- `segmentby`
+- `orderby`
+
+### `compress.after`
+
+How old a chunk must be before the policy converts it (e.g. `'7 days'`). Defaults to `7 days`.
+
+### `compress.segmentby`
+
+The column(s) to segment by. Accepts a single column name (string) or a list of column names. Defaults to the `id` index — unless `id` is the unique [`primary`](#the-primary-index) key, in which case it is dropped from `segmentby` (a high-cardinality `segmentby` defeats columnstore compression) and moved into `orderby`.
+
+### `compress.orderby`
+
+The column(s) to order by within compressed batches. Accepts a single column name (string) or a list of column names, each with an optional `ASC` / `DESC` suffix (e.g. `'ts DESC'`). Defaults to the `datetime` index, descending.
 
 !!! warning
     TimescaleDB compression requires the target table to be a [hypertable](#hypertable). Other flavors fall back to their native table compression where supported (e.g. `ROW_FORMAT=COMPRESSED` for MySQL / MariaDB, `DATA_COMPRESSION = PAGE` for MSSQL); flavors without table-level compression return an informative failure.

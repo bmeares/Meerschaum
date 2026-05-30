@@ -24,6 +24,49 @@ COMPRESSIBLE_FLAVORS = {
 }
 
 
+### Recognized trailing keywords in an `orderby` spec (e.g. `"ts DESC NULLS LAST"`).
+_ORDERBY_DIRECTION_KEYWORDS = frozenset({'ASC', 'DESC', 'NULLS', 'FIRST', 'LAST'})
+
+
+def _normalize_columnstore_cols(
+    value: Union[str, List[str]],
+    flavor: str,
+    allow_direction: bool = False,
+) -> List[str]:
+    """
+    Normalize a user-supplied `segmentby` / `orderby` spec into a list of quoted column refs.
+
+    Accepts a string (possibly comma-separated, e.g. `"a, b DESC"`), a list of strings, or a
+    list whose elements are themselves comma-separated. Each resulting entry is one column,
+    optionally followed by a direction (`ASC` / `DESC`, plus `NULLS FIRST` / `NULLS LAST`) when
+    `allow_direction` is `True`. Column identifiers are quoted via `sql_item_name`; recognized
+    direction keywords are preserved unquoted and upper-cased.
+
+    An entry whose trailing tokens are not all recognized direction keywords is treated as a
+    single bare identifier and quoted whole, rather than guessing where the column name ends.
+    """
+    from meerschaum.utils.sql import sql_item_name
+    raw = value if isinstance(value, (list, tuple)) else [value]
+    entries = []
+    for item in raw:
+        entries.extend(part.strip() for part in str(item).split(','))
+
+    normalized = []
+    for entry in entries:
+        if not entry:
+            continue
+        col, direction = entry, ''
+        if allow_direction:
+            tokens = entry.split()
+            if len(tokens) > 1 and all(
+                tok.upper() in _ORDERBY_DIRECTION_KEYWORDS for tok in tokens[1:]
+            ):
+                col = tokens[0]
+                direction = ' ' + ' '.join(tok.upper() for tok in tokens[1:])
+        normalized.append(f"{sql_item_name(col, flavor=flavor)}{direction}")
+    return normalized
+
+
 def get_pipe_size(
     self,
     pipe: mrsm.Pipe,
@@ -86,7 +129,13 @@ def get_pipe_size(
         return _value(f"SELECT pg_total_relation_size('{pipe_name}')")
 
     if flavor in ('mysql', 'mariadb'):
-        db_name = self.database or self.parse_uri(self.URI).get('database', None)
+        ### A MySQL/MariaDB "schema" is a database; honor a pipe's configured schema so the size
+        ### lookup matches the database the table actually lives in.
+        db_name = (
+            self.get_pipe_schema(pipe)
+            or self.database
+            or self.parse_uri(self.URI).get('database', None)
+        )
         if not db_name:
             return None
         clean_db = db_name.replace("'", "''")
@@ -124,11 +173,14 @@ def _get_compress_settings(
     Reads the `compress` parameter (which may be a `bool` or a `dict`) and falls back
     to the pipe's index columns for sensible TimescaleDB defaults.
     """
+    from meerschaum.utils.sql import sql_item_name
     compress_param = pipe.parameters.get('compress', False)
     settings = compress_param if isinstance(compress_param, dict) else {}
 
     dt_col = pipe.columns.get('datetime', None)
+    dt_col_name = sql_item_name(dt_col, flavor=self.flavor) if dt_col else None
     id_col = pipe.columns.get('id', None)
+    id_col_name = sql_item_name(id_col, flavor=self.flavor) if id_col else None
     primary_col = pipe.columns.get('primary', None)
 
     ### A unique / primary `id` column is high-cardinality: segmenting by it yields ≈1 row per
@@ -139,20 +191,20 @@ def _get_compress_settings(
 
     segmentby = settings.get('segmentby', None)
     if segmentby is None:
-        segmentby = [id_col] if (id_col and not id_is_unique) else []
-    elif isinstance(segmentby, str):
-        segmentby = [segmentby]
+        segmentby = [id_col_name] if (id_col and not id_is_unique) else []
+    else:
+        segmentby = _normalize_columnstore_cols(segmentby, self.flavor)
 
     orderby = settings.get('orderby', None)
     if orderby is None:
         orderby = []
         if dt_col:
-            orderby.append(f"{dt_col} DESC")
+            orderby.append(f"{dt_col_name} DESC")
         ### Keep the unique `id` in `orderby` (not `segmentby`) so chunks stay well-ordered.
-        if id_is_unique and id_col not in orderby:
-            orderby.append(id_col)
-    elif isinstance(orderby, str):
-        orderby = [orderby]
+        if id_is_unique and id_col_name not in orderby:
+            orderby.append(id_col_name)
+    else:
+        orderby = _normalize_columnstore_cols(orderby, self.flavor, allow_direction=True)
 
     after = settings.get('after', None)
 

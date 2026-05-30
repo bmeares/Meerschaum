@@ -265,7 +265,13 @@ def _get_mysql_max_partition_bound(
     Parses `information_schema.PARTITIONS.PARTITION_DESCRIPTION` (the literal upper bound) rather
     than partition names, which may be truncated. Returns `None` if no partitions are found.
     """
-    db_name = self.database or self.parse_uri(self.URI).get('database', None)
+    ### On MySQL/MariaDB a "schema" is a database; honor a pipe's configured schema so this lookup
+    ### matches the database the partition DDL actually targets (`get_pipe_schema` in the DDL path).
+    db_name = (
+        self.get_pipe_schema(pipe)
+        or self.database
+        or self.parse_uri(self.URI).get('database', None)
+    )
     if not db_name:
         return None
     clean_db = db_name.replace("'", "''")
