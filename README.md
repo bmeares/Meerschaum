@@ -10,26 +10,35 @@
 </p>
 
 ## What is Meerschaum?
-Meerschaum is a tool for quickly synchronizing time-series data streams called **pipes**. With Meerschaum, you can have a data pipeline and visualization stack running in minutes.
+
+**Meerschaum is an ETL framework for time-series data.** You define **pipes** — named data streams — and Meerschaum keeps them in sync: it fetches only the new or changed rows, deduplicates and upserts them, manages the schema, and handles scheduling, serving, and storage.
+
+Write a few lines of fetch logic; Meerschaum handles the rest of the pipeline. No more copy/pasting ETL scripts, hand-rolling incremental windows, or babysitting cron jobs. Drop it into an existing stack or stand up a full database-and-dashboard stack in minutes.
+
+```python
+import meerschaum as mrsm
+
+pipe = mrsm.Pipe('plugin:noaa', 'weather', 'atl', instance='sql:local')
+pipe.sync()  ### Pulls only what's new since the last sync.
+```
 
 <p align="center">
 <img src="https://meerschaum.io/assets/screenshots/weather_pipes.png"/>
 </p>
 
-## Why Meerschaum?
+## Features
 
-Two words: *incremental updates*. Fetch the data you need, and Meerschaum will handle the rest.
+- ⚡️ **Incremental by default** — [the sync engine](https://meerschaum.io/reference/pipes/syncing/) fetches only new or changed rows and concurrently updates many streams at once. Duplicate rows are ignored; rows with existing keys are updated.
+- 📊 **Built for data scientists and analysts** — integrate with [Pandas, Grafana, and friends](https://meerschaum.io/reference/data-analysis-tools/); persist DataFrames and always get the latest data. Skip pandas overhead and read rows as plain dicts with `Pipe.get_docs()`.
+- 🗄️ **Production-ready, batteries included** — one-click deploy a [TimescaleDB + Grafana stack](https://meerschaum.io/reference/stack/), serve data org-wide via `FastAPI` (`uvicorn`/`gunicorn`), and secure API instances with scoped auth tokens. Supports PostGIS geometry (incl. ESRI CRS) for geospatial pipelines.
+- 💼 **Jobs and scheduling** — run any command as a background [job](https://meerschaum.io/reference/background-jobs/) with `-d`. Built-in scheduler handles cron and interval schedules — no `crontab` or `systemd` setup. Execute locally, via `systemd`, or remotely on an API instance with `--executor-keys`.
+- 🔌 **Easily expandable** — ingest any source with a simple [plugin](https://meerschaum.io/reference/plugins/writing-plugins/): just return a DataFrame. [Add any function as a command](https://meerschaum.io/reference/plugins/types-of-plugins/#action-plugins), define parent/child pipe relationships for composable SQL pipelines, or embed Meerschaum via its [Python API](https://docs.meerschaum.io).
+- ✨ **Tailored for your experience** — a rich CLI that's surprisingly enjoyable, a web dashboard for the graphically inclined, and [connectors](https://meerschaum.io/reference/connectors/) for SQL, API, Valkey, and custom backends.
+- 🧳 **Portable from the start** — `$MRSM_ROOT_DIR` emulates multiple installations and groups [instances](https://meerschaum.io/reference/connectors/#instances-and-repositories). No dependencies required (anything needed installs into a virtual environment), and it's `uv`-compatible: `uv tool install meerschaum`.
 
-If you've worked with time-series data, you know the headaches that come with ETL.
-Data engineering often gets in analysts' way, and when work needs to get done, every minute spent on pipelining is time taken away from real analysis.
+### Want to learn more?
 
-Rather than copy / pasting your ETL scripts, simply build pipes with Meerschaum! [Meerschaum gives you the tools to design your data streams how you like](https://towardsdatascience.com/easy-time-series-etl-for-data-scientists-with-meerschaum-5aade339b398) ― and don't worry — you can always incorporate Meerschaum into your existing systems!
-
-### Want to Learn More?
-
-You can find a wealth of information at [meerschaum.io](https://meerschaum.io)!
-
-Additionally, below are several articles published about Meerschaum:
+Find a wealth of information at [meerschaum.io](https://meerschaum.io), or read up on Meerschaum in the wild:
 
 - Interview featured in [*Console 100 - The Open Source Newsletter*](https://console.substack.com/p/console-100)
 - [*A Data Scientist's Guide to Fetching COVID-19 Data in 2022*](https://towardsdatascience.com/a-data-scientists-guide-to-fetching-covid-19-data-in-2022-d952b4697) (Towards Data Science)
@@ -43,14 +52,13 @@ For a more thorough setup guide, visit the [Getting Started](https://meerschaum.
 ### TL;DR
 
 ```bash
-pip install -U --user meerschaum
-mrsm stack up -d db grafana
+pip install meerschaum # or `uv tool install meerschaum[api]`
+mrsm stack up -d
 mrsm bootstrap pipes
 ```
 
 ## Usage
-
-Please visit [meerschaum.io](https://meerschaum.io) for setup, usage, and troubleshooting information. You can find technical documentation at [docs.meerschaum.io](https://docs.meerschaum.io), and here is a complete list of the [Meerschaum actions](https://meerschaum.io/reference/actions/).
+Visit [meerschaum.io](https://meerschaum.io) for setup, usage, and troubleshooting information. You can find technical documentation at [docs.meerschaum.io](https://docs.meerschaum.io).
 
 ### CLI
 ```bash
@@ -70,142 +78,47 @@ mrsm sync pipes -l atl -i sql:local
 
 ```python
 import meerschaum as mrsm
+
 pipe = mrsm.Pipe(
-    'foo', 'bar',              ### Connector and metric labels.
-    target   = 'MyTableName!', ### Table name. Defaults to 'foo_bar'.
-    instance = 'sql:local',    ### Built-in SQLite DB. Defaults to 'sql:main'.
-    columns  = {
-        'datetime': 'dt',      ### Column for the datetime index.
-        'id'      : 'id',      ### Column for the ID index (optional).
-    },
+    'foo', 'bar',
+    instance = 'sql:local',                  ### Built-in SQLite DB.
+    columns  = {'datetime': 'dt', 'id': 'id'},
 )
-### Pass a DataFrame to create the table and indices.
+
+### Sync a DataFrame (or list of dicts) — creates the table on first run.
 pipe.sync([{'dt': '2024-07-01', 'id': 1, 'val': 10}])
 
-### Duplicate rows are ignored.
-pipe.sync([{'dt': '2024-07-01', 'id': 1, 'val': 10}])
-assert len(pipe.get_data()) == 1
-
-### Rows with existing keys (datetime and/or id) are updated.
+### Duplicates are ignored; rows with existing keys are updated.
 pipe.sync([{'dt': '2024-07-01', 'id': 1, 'val': 100}])
-assert len(pipe.get_data()) == 1
+assert pipe.get_rowcount() == 1
 
-### Translates to this query for SQLite:
-###
-### SELECT *
-### FROM "MyTableName!"
-### WHERE "dt" >= datetime('2024-01-01', '0 minute')
-###   AND "dt" <  datetime('2025-01-01', '0 minute')
-###   AND "id" IN ('1')
-df = pipe.get_data(
-    begin  = '2024-01-01',
-    end    = '2025-01-01',
-    params = {'id': [1]},
-)
+### Read back as a DataFrame, filtered by time range and params.
+df = pipe.get_data(begin='2024-01-01', end='2025-01-01', params={'id': [1]})
 
-### Shape of the DataFrame:
-###           dt  id  val
-### 0 2024-07-01   1  100
-
-### Skip pandas entirely — read rows as plain dicts.
+### Or skip pandas and read plain dicts.
 docs = pipe.get_docs(params={'id': [1]})
 ### [{'dt': datetime(2024, 7, 1), 'id': 1, 'val': 100}]
-
-### Drop the table and remove the pipe's metadata.
-pipe.delete()
 ```
 
-### Composable SQL Pipelines
+For composable in-database SQL pipelines (`reference` inheritance and `{{ Pipe(...) }}` table resolution), see the [SQL pipes guide](https://meerschaum.io/reference/pipes/syncing/).
 
-Inherit and reference other pipes to build composable, in-database pipelines.
-Pass `reference` to inherit another pipe's parameters, and use `{{ Pipe(...) }}` to
-resolve a pipe's target table inside a SQL definition:
+### Plugins
 
-```python
-import meerschaum as mrsm
-
-raw = mrsm.Pipe('sql:main', 'raw', instance='sql:main', columns={'datetime': 'dt'})
-
-### `clean` inherits `raw`'s columns and reads from its target table.
-clean = mrsm.Pipe(
-    'sql:main', 'clean',
-    instance='sql:main',
-    reference=raw,                ### Inherit the parent pipe's parameters.
-    parameters={
-        'sql': "SELECT * FROM {{ Pipe('sql:main', 'raw') }} WHERE val > 0",
-    },
-)
-clean.sync()
-```
-
-### Simple Plugin
+Ingest any source by returning rows from a `fetch` function — Meerschaum handles the rest:
 
 ```python
 # ~/.config/meerschaum/plugins/example.py
-
 __version__ = '1.0.0'
 required = ['requests']
 
 def register(pipe, **kw):
-    return {
-        'columns': {
-            'datetime': 'dt',
-            'id'      : 'id',
-        },
-    }
+    return {'columns': {'datetime': 'dt', 'id': 'id'}}
 
 def fetch(pipe, begin=None, end=None, **kw):
-    import requests, random
-    from datetime import datetime, timezone
-
-    ### Fetch data from an external API.
-    response = requests.get('https://api.example.com/data')
-    data = response.json()  ### list of dicts
-
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-
-    ### You may also return a Pandas DataFrame.
-    return [{
-        "dt"   : now,
-        "id"   : random.randint(1, 4),
-        "value": random.uniform(1, 100),
-    }]
+    import requests
+    rows = requests.get('https://api.example.com/data').json()
+    return rows  ### list of dicts or a Pandas DataFrame
 ```
-
-## Features
-
-- 📊 **Built for Data Scientists and Analysts**  
-  - Integrate with Pandas, Grafana, and other popular [data analysis tools](https://meerschaum.io/reference/data-analysis-tools/).
-  - Persist your dataframes and always get the latest data.
-  - Skip pandas overhead and read rows as plain dicts with `Pipe.get_docs()` / `get_doc()`.
-  - Filter pipes by connector, metric, location, tags, target table (`--target`), or `datetime` column dtype (`--dtype datetime|int|None`).
-- ⚡️ **Production-Ready, Batteries Included**  
-  - [Synchronization engine](https://meerschaum.io/reference/pipes/syncing/) concurrently updates many time-series data streams.
-  - One-click deploy a [TimescaleDB and Grafana stack](https://meerschaum.io/reference/stack/) for prototyping.
-  - Serve data to your entire organization through the power of `uvicorn`, `gunicorn`, and `FastAPI`.
-  - Secure your API instances with long-lived, scoped authentication tokens.
-  - Supports PostGIS geometry columns (including ESRI CRS) for geospatial pipelines.
-  - Manage disk usage: inspect tables with `show sizes` / `show targets` and reclaim space with `compress pipes`.
-- 💼 **Jobs and Scheduling**  
-  - Run any command as a background [job](https://meerschaum.io/reference/background-jobs/) with `-d` (`--daemon`).
-  - Built-in scheduler handles cron and interval schedules — no `crontab` or `systemd` setup required.
-  - Execute jobs locally, via `systemd` services, or remotely on an API instance with `--executor-keys`.
-  - Copy pipes across instances with the improved `copy pipes` command and `--sync-data` flag.
-- 🔌 **Easily Expandable**  
-  - Ingest any data source with a simple [plugin](https://meerschaum.io/reference/plugins/writing-plugins/). Just return a DataFrame, and Meerschaum handles the rest.
-  - [Add any function as a command](https://meerschaum.io/reference/plugins/types-of-plugins/#action-plugins) to the Meerschaum system.
-  - Define parent/child pipe relationships and pipe references for composable SQL pipelines.
-  - Include Meerschaum in your projects with its [easy-to-use Python API](https://docs.meerschaum.io).
-- ✨ **Tailored for Your Experience**  
-  - Rich CLI makes managing your data streams surprisingly enjoyable!
-  - Web dashboard for those who prefer a more graphical experience.
-  - Manage your database connections with [Meerschaum connectors](https://meerschaum.io/reference/connectors/) (SQL, API, Valkey, and custom).
-  - Utility commands with sensible syntax let you control many pipes with grace.
-- 💼 **Portable from the Start**  
-  - The environment variable `$MRSM_ROOT_DIR` lets you emulate multiple installations and group together your [instances](https://meerschaum.io/reference/connectors/#instances-and-repositories).
-  - No dependencies required; anything needed will be installed into a virtual environment.
-  - Compatible with `uv` — install with `uv tool install meerschaum`.
-  - [Specify required packages for your plugins](https://meerschaum.io/reference/plugins/writing-plugins/), and users will get those packages in a virtual environment.
 
 ## Support Meerschaum's Development
 
