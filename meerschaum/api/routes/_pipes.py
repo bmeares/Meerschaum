@@ -1112,3 +1112,48 @@ def get_pipe_index_names(
         location_key,
         instance_keys,
     ).get_indices()
+
+
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/size',
+    tags=['Pipes: Data'],
+)
+def get_pipe_size(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:read'])),
+) -> Union[int, None]:
+    """
+    Return the on-disk size of a pipe's target table in bytes.
+    See [`Pipe.get_size()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_size).
+    """
+    return get_pipe(connector_keys, metric_key, location_key, instance_keys).get_size(debug=debug)
+
+
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/compress',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def compress_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
+) -> mrsm.SuccessTuple:
+    """
+    Compress a pipe's target table to reduce disk usage.
+    See [`Pipe.compress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.compress).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot compress protected table '{pipe.target}'.",
+        )
+    success, msg = pipe.compress(debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg

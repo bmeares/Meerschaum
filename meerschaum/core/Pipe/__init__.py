@@ -95,6 +95,7 @@ class Pipe:
         get_data,
         get_backtrack_data,
         get_rowcount,
+        get_size,
         get_data,
         get_doc,
         get_docs,
@@ -184,6 +185,7 @@ class Pipe:
     )
     from ._delete import delete
     from ._drop import drop, drop_indices
+    from ._compress import compress
     from ._index import create_indices
     from ._clear import clear
     from ._deduplicate import deduplicate
@@ -211,6 +213,7 @@ class Pipe:
         enforce: Optional[bool] = None,
         null_indices: Optional[bool] = None,
         mixed_numerics: Optional[bool] = None,
+        compress: Union[bool, Dict[str, Any], None] = None,
         temporary: bool = False,
         cache: Optional[bool] = None,
         cache_connector_keys: Optional[str] = None,
@@ -299,6 +302,11 @@ class Pipe:
             If `True`, integer columns will be converted to `numeric` when floats are synced.
             Set to `False` to disable this behavior.
             Defaults to `True`.
+
+        compress: Union[bool, Dict[str, Any], None], default None
+            If `True` (or a dictionary of compression settings), mark the pipe for compression.
+            For TimescaleDB hypertables, a compression policy is installed automatically on sync.
+            Defaults to `False`.
 
         temporary: bool, default False
             If `True`, prevent instance tables (pipes, users, plugins) from being created.
@@ -446,6 +454,9 @@ class Pipe:
 
         if isinstance(mixed_numerics, bool):
             self._attributes['parameters']['mixed_numerics'] = mixed_numerics
+
+        if isinstance(compress, (bool, dict)):
+            self._attributes['parameters']['compress'] = compress
 
         ### NOTE: The parameters dictionary is {} by default.
         ###       A Pipe may be registered without parameters, then edited,

@@ -6,6 +6,32 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v3.3.2
 
+- **Add disk usage and compression tools.**  
+  New tooling helps manage how much space pipes occupy on disk:
+
+    - **`show targets` now reports table sizes.**  
+      The `show targets` action includes a `Size` column with each target table's on-disk size (human-readable in the table, raw bytes with `--nopretty`). Sizes are fetched in parallel.
+
+    - **Add `Pipe.get_size()`.**  
+      Returns a target table's on-disk size in bytes (or `None` if unavailable). Backed by the new instance-connector method `get_pipe_size()`, with per-flavor support for SQL connectors — TimescaleDB hypertables use `hypertable_size()`, PostgreSQL-like flavors use `pg_total_relation_size()`, and MySQL/MariaDB, MSSQL, and SQLite use their respective size queries.
+
+    - **Add the `compress pipes` action and `Pipe.compress()`.**  
+      Compress pipes' target tables to reclaim disk space. For TimescaleDB this enables native compression, installs a compression policy, and compresses existing chunks; MySQL/MariaDB and MSSQL use their native table compression. Backed by the new instance-connector method `compress_pipe()`.
+
+    - **Add the `compress` pipe parameter.**  
+      Set `compress` (a `bool` or a dictionary of `after`/`segmentby`/`orderby` settings) to mark a pipe for compression. For TimescaleDB hypertables, a compression policy is installed automatically on sync.
+
+      ```python
+      import meerschaum as mrsm
+
+      pipe = mrsm.Pipe(
+          'demo', 'compress',
+          instance='sql:main',
+          columns={'datetime': 'ts', 'id': 'station'},
+          compress={'after': '7 days'},
+      )
+      ```
+
 - **Print full, untruncated results from `mrsm sql`.**  
   Reading a table or query with `sql ... read` now prints the entire DataFrame as a Markdown table — no more `...` column or cell truncation. The format is friendly to both users and LLMs and ends with a `[rows x columns]` shape footer. The `--nopretty` JSON output is unchanged.
 

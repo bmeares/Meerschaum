@@ -40,6 +40,14 @@ class SQLConnector(InstanceConnector):
     from meerschaum.utils.sql import test_connection
     from ._fetch import fetch, get_pipe_metadef
     from ._cli import cli, _cli_exit
+    from ._compress import (
+        get_pipe_size,
+        compress_pipe,
+        apply_compression_policy,
+        _get_compress_settings,
+        _is_hypertable,
+        _get_timescaledb_compress_queries,
+    )
     from ._pipes import (
         fetch_pipes_keys,
         create_indices,

@@ -480,6 +480,23 @@ def sync(
         ### CHECKPOINT: Finished syncing.
         _checkpoint(**kw)
         p._invalidate_cache(debug=debug)
+
+        ### Automatically apply a compression policy if the pipe is configured for compression.
+        if return_tuple[0] and p.parameters.get('compress', False):
+            if hasattr(p.instance_connector, 'apply_compression_policy'):
+                try:
+                    with Venv(get_connector_plugin(p.instance_connector)):
+                        compress_success, compress_msg = (
+                            p.instance_connector.apply_compression_policy(p, debug=debug)
+                        )
+                    if not compress_success and debug:
+                        dprint(f"Could not apply compression policy to {p}:\n{compress_msg}")
+                except Exception as compress_e:
+                    warn(
+                        f"Failed to apply compression policy to {p}:\n{compress_e}",
+                        stack=False,
+                    )
+
         return return_tuple
 
     if blocking:

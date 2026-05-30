@@ -1089,21 +1089,24 @@ def _show_daemons() -> SuccessTuple:
 
 def _show_targets(
     action: Optional[List[str]] = None,
+    workers: Optional[int] = None,
     nopretty: bool = False,
+    debug: bool = False,
     **kwargs: Any
 ) -> SuccessTuple:
     """
-    Show the target tables for pipes, grouped by target name.
+    Show the target tables for pipes, grouped by target name, including each table's size.
     """
     import json
     import meerschaum as mrsm
-    from meerschaum.utils.formatting import pipe_repr
+    from meerschaum.utils.formatting import pipe_repr, format_bytes
+    from meerschaum.utils.pool import get_pool
     rich_table, rich_box, rich_console = mrsm.attempt_import(
         'rich.table', 'rich.box', 'rich.console',
     )
     action = action or []
 
-    targets_pipes = mrsm.get_pipes(as_targets_dict=True, **kwargs)
+    targets_pipes = mrsm.get_pipes(as_targets_dict=True, debug=debug, **kwargs)
     if action:
         targets_pipes = {
             (schema, target): pipes
@@ -1114,9 +1117,27 @@ def _show_targets(
     if not targets_pipes:
         return False, "No targets to show."
 
+    ### Compute one on-disk size per target table (pipes sharing a target share a table).
+    target_keys = list(targets_pipes)
+    def _get_size(target_key):
+        _pipes = targets_pipes[target_key]
+        if not _pipes:
+            return None
+        return _pipes[0].get_size(debug=debug)
+
+    pool = get_pool(workers=workers)
+    sizes_list = (
+        pool.map(_get_size, target_keys)
+        if pool is not None
+        else [_get_size(tk) for tk in target_keys]
+    )
+    sizes = {tk: sizes_list[i] for i, tk in enumerate(target_keys)}
+
     if nopretty:
         for (schema, target), _pipes in targets_pipes.items():
             print(f"{schema or ''}.{target}" if schema else target)
+            size_bytes = sizes.get((schema, target), None)
+            print(size_bytes if size_bytes is not None else '')
             for pipe in _pipes:
                 print(json.dumps(pipe.meta))
         return True, "Success"
@@ -1128,6 +1149,7 @@ def _show_targets(
     )
     table.add_column("Schema", overflow='fold')
     table.add_column("Target", overflow='fold')
+    table.add_column("Size", justify='right', overflow='fold')
     table.add_column("Pipes", overflow='fold')
 
     sort_key = lambda st: (st[0] or '', st[1])
@@ -1137,7 +1159,8 @@ def _show_targets(
             pipe_repr(pipe, as_rich_text=True)
             for pipe in _pipes
         ])
-        table.add_row(schema or '', target, pipes_group)
+        size_str = format_bytes(sizes.get((schema, target), None))
+        table.add_row(schema or '', target, size_str, pipes_group)
 
     mrsm.pprint(table)
     return True, "Success"

@@ -594,6 +594,48 @@ def get_rowcount(
     return 0
 
 
+def get_size(
+    self,
+    debug: bool = False,
+    **kw: Any
+) -> Union[int, None]:
+    """
+    Return the on-disk size of the pipe's target table in bytes.
+
+    Parameters
+    ----------
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    An `int` of the number of bytes occupied by the pipe's target table,
+    or `None` if the size could not be determined (e.g. the connector does
+    not implement `get_pipe_size()` or the table does not exist).
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+    from meerschaum.utils.misc import filter_keywords
+
+    connector = self.instance_connector
+    try:
+        with Venv(get_connector_plugin(connector)):
+            if not hasattr(connector, 'get_pipe_size'):
+                return None
+            kwargs = filter_keywords(
+                connector.get_pipe_size,
+                debug=debug,
+                **kw
+            )
+            return connector.get_pipe_size(self, **kwargs)
+    except NotImplementedError:
+        return None
+    except Exception as e:
+        warn(f"Failed to get the size of {self}:\n{e}", stack=False)
+    return None
+
+
 def get_chunk_interval(
     self,
     chunk_interval: Union[timedelta, int, None] = None,

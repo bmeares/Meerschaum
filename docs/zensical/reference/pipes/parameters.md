@@ -143,6 +143,49 @@ You may designate the same column as both the `datetime` and `primary` indices.
 
 ---------------
 
+## `compress`
+
+Set `compress` to enable compression for a pipe's target table to reduce disk usage.
+
+For **TimescaleDB** hypertables (the default stack), setting `compress` installs a [compression policy](https://docs.timescale.com/use-timescale/latest/compression/) automatically on sync, so newly synced chunks are compressed in the background. Running the `compress pipes` action (or `Pipe.compress()`) additionally compresses any existing uncompressed chunks immediately.
+
+You may set `compress` to `true` to use sensible defaults (segment by the `id` column, order by the `datetime` column descending), or to a dictionary for fine-grained control:
+
+| Key | Description |
+|---|---|
+| `after` | How old a chunk must be before the policy compresses it (e.g. `'7 days'`). Defaults to `7 days`. |
+| `segmentby` | Column(s) to segment by when compressing. Defaults to the `id` index. |
+| `orderby` | Column(s) (with optional `ASC`/`DESC`) to order by within compressed batches. Defaults to the `datetime` index, descending. |
+
+!!! warning
+    TimescaleDB compression requires the target table to be a [hypertable](#hypertable). Other flavors fall back to their native table compression where supported (e.g. `ROW_FORMAT=COMPRESSED` for MySQL / MariaDB, `DATA_COMPRESSION = PAGE` for MSSQL); flavors without table-level compression return an informative failure.
+
+??? example
+
+    ```python
+    import meerschaum as mrsm
+
+    pipe = mrsm.Pipe(
+        'demo', 'compress',
+        instance='sql:main',
+        columns={'datetime': 'ts', 'id': 'station'},
+        compress={
+            'after': '30 days',
+            'segmentby': ['station'],
+            'orderby': ['ts DESC'],
+        },
+    )
+    ```
+
+    Inspect the on-disk size of a pipe's target table with `Pipe.get_size()` or the `show targets` action:
+
+    ```python
+    print(pipe.get_size())
+    # 1859584
+    ```
+
+---------------
+
 ## `dtypes`
 
 You will often want to explictly set the dtypes for certain columns, which you can do with the `dtype` parameters.

@@ -81,4 +81,6 @@ class InstanceConnector(Connector):
         get_sync_time,
         get_pipe_columns_types,
         get_pipe_columns_indices,
+        get_pipe_size,
+        compress_pipe,
     )

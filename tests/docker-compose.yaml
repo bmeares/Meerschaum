@@ -22,7 +22,7 @@ services:
     ports:
       - "5439:5432"
     volumes:
-      - "timescaledb_volume:/var/lib/postgresql/data"
+      - "timescaledb_volume:/var/lib/postgresql"
     image: "timescale/timescaledb:latest-pg18"
     shm_size: "1gb"
 

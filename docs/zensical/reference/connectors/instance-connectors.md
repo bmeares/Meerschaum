@@ -797,3 +797,61 @@ Return the number of rows in the pipe's target table within the `begin`, `end`, 
         count = 0
         return count
     ```
+
+### `#!python get_pipe_size()` (optional)
+
+Return the on-disk size (in bytes) of a pipe's target table, or `None` if the size cannot be determined. This powers [`#!python Pipe.get_size()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_size) and the `Size` column of `show targets`. The default implementation raises `NotImplementedError`. See the [`#!python SQLConnector.get_pipe_size()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.get_pipe_size) method for reference.
+
+??? example "`#!python def get_pipe_size():`"
+    ```python
+    def get_pipe_size(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> int | None:
+        """
+        Return the on-disk size of a pipe's target table in bytes.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table size to measure.
+
+        Returns
+        -------
+        An `int` of the number of bytes occupied by the target table,
+        or `None` if the size cannot be determined.
+        """
+        table_name = pipe.target
+        ### TODO write a query to measure the size of `table_name` in bytes.
+        return None
+    ```
+
+### `#!python compress_pipe()` (optional)
+
+Compress a pipe's target table to reduce disk usage (for the action `compress pipes` and [`#!python Pipe.compress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.compress)). The default implementation returns a failure `SuccessTuple` indicating compression is unsupported. See the [`#!python SQLConnector.compress_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.compress_pipe) method for reference.
+
+??? example "`#!python def compress_pipe():`"
+    ```python
+    def compress_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        """
+        Compress a pipe's target table to reduce disk usage.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table to compress.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        """
+        ### TODO write the logic to compress `pipe.target` (if supported).
+        return False, f"Compression is not supported for instance connectors of type '{self.type}'."
+    ```
