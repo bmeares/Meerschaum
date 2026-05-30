@@ -2198,6 +2198,7 @@ def get_create_table_queries(
     hypertable_segmentby: Optional[List[str]] = None,
     hypertable_orderby: Optional[List[str]] = None,
     partition_by_column: Optional[str] = None,
+    partition_bounds: Optional[List] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2278,12 +2279,17 @@ def get_create_table_queries(
         hypertable_segmentby=hypertable_segmentby,
         hypertable_orderby=hypertable_orderby,
         partition_by_column=partition_by_column,
+        partition_bounds=partition_bounds,
         _parse_dtypes=_parse_dtypes,
     )
 
 
-### Non-TimescaleDB flavors that support declarative `PARTITION BY RANGE` on a datetime column.
-NATIVE_PARTITION_FLAVORS = {'postgresql', 'postgis'}
+### Non-TimescaleDB flavors that support declarative range partitioning on a datetime column.
+### PostgreSQL-style declares an empty parent (`PARTITION BY RANGE`) with children added
+### separately; MySQL-style requires the initial partitions inline at `CREATE TABLE`.
+PG_PARTITION_FLAVORS = {'postgresql', 'postgis'}
+MYSQL_PARTITION_FLAVORS = {'mysql', 'mariadb'}
+NATIVE_PARTITION_FLAVORS = PG_PARTITION_FLAVORS | MYSQL_PARTITION_FLAVORS
 
 
 def _get_create_table_query_from_dtypes(
@@ -2299,6 +2305,7 @@ def _get_create_table_query_from_dtypes(
     hypertable_segmentby: Optional[List[str]] = None,
     hypertable_orderby: Optional[List[str]] = None,
     partition_by_column: Optional[str] = None,
+    partition_bounds: Optional[List] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2405,7 +2412,12 @@ def _get_create_table_query_from_dtypes(
         query += f"\n    PRIMARY KEY({datetime_column_name}, {primary_key_name}),"
 
     if is_native_partitioned and primary_key and partition_by_column != primary_key:
-        query += f"\n    PRIMARY KEY({partition_by_column_name}, {primary_key_name}),"
+        ### MySQL requires an `AUTO_INCREMENT` column to be the first column of a key, so list the
+        ### primary key first there; PostgreSQL is order-insensitive.
+        if flavor in MYSQL_PARTITION_FLAVORS:
+            query += f"\n    PRIMARY KEY({primary_key_name}, {partition_by_column_name}),"
+        else:
+            query += f"\n    PRIMARY KEY({partition_by_column_name}, {primary_key_name}),"
 
     if flavor == 'mssql' and primary_key:
         query += f"\n    CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name}),"
@@ -2413,10 +2425,25 @@ def _get_create_table_query_from_dtypes(
     query = query[:-1]
     query += "\n)"
 
-    if is_native_partitioned:
+    if is_native_partitioned and flavor in PG_PARTITION_FLAVORS:
         ### The parent table holds no rows directly; child partitions are created on demand
         ### (see `SQLConnector._create_missing_partitions`).
         query += f"\nPARTITION BY RANGE ({partition_by_column_name})"
+
+    elif is_native_partitioned and flavor in MYSQL_PARTITION_FLAVORS:
+        ### MySQL/MariaDB cannot create a RANGE-partitioned table with zero partitions, so the
+        ### initial partitions (computed by the connector from the creation dataframe) are declared
+        ### inline. Further partitions are appended later via `ALTER TABLE ... ADD PARTITION`.
+        ### `RANGE COLUMNS` partitions on the DATETIME column directly (no integer conversion).
+        bounds = partition_bounds or []
+        partition_defs = ',\n'.join(
+            f"    PARTITION {sql_item_name(part_name, flavor)} VALUES LESS THAN ({hi_literal})"
+            for part_name, hi_literal in bounds
+        )
+        query += (
+            f"\nPARTITION BY RANGE COLUMNS ({partition_by_column_name}) (\n"
+            f"{partition_defs}\n)"
+        )
 
     if (
         hypertable_chunk_interval is not None
@@ -2457,6 +2484,7 @@ def _get_create_table_query_from_cte(
     hypertable_segmentby: Optional[List[str]] = None,
     hypertable_orderby: Optional[List[str]] = None,
     partition_by_column: Optional[str] = None,
+    partition_bounds: Optional[List] = None,
     _parse_dtypes=None,
 ) -> List[str]:
     """

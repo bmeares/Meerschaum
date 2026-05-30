@@ -1706,6 +1706,17 @@ def create_pipe_table_from_df(
 
     ### Native range partitioning (non-TimescaleDB flavors); a no-op column for others.
     partition_by_column = self._get_partition_column(pipe)
+    ### MySQL/MariaDB require the initial partitions declared inline at `CREATE TABLE`
+    ### (an empty RANGE-partitioned table is invalid); compute them from the creation df.
+    partition_bounds = (
+        self._get_initial_partition_bounds(pipe, df, debug=debug)
+        if (partition_by_column is not None and self.flavor in ('mysql', 'mariadb'))
+        else None
+    )
+    ### A MySQL RANGE table needs at least one inline partition; if the creation df has no
+    ### datetime values, fall back to a plain table (rare — `is_new` normally implies rows).
+    if partition_by_column is not None and self.flavor in ('mysql', 'mariadb') and not partition_bounds:
+        partition_by_column = None
 
     def _build_create_table_queries(_hypertable_chunk_interval):
         _queries = get_create_table_queries(
@@ -1720,6 +1731,7 @@ def create_pipe_table_from_df(
             hypertable_segmentby=(hypertable_segmentby if _hypertable_chunk_interval else None),
             hypertable_orderby=(hypertable_orderby if _hypertable_chunk_interval else None),
             partition_by_column=partition_by_column,
+            partition_bounds=partition_bounds,
         )
         if schema:
             _queries = (

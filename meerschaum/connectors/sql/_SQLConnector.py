@@ -64,7 +64,11 @@ class SQLConnector(InstanceConnector):
         _partition_literal,
         _partition_name,
         _get_partition_ranges_for_df,
+        _get_initial_partition_bounds,
         _create_missing_partitions,
+        _create_missing_partitions_pg,
+        _create_missing_partitions_mysql,
+        _get_mysql_max_partition_bound,
     )
     from ._pipes import (
         fetch_pipes_keys,

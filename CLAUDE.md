@@ -87,7 +87,7 @@ Pipe = three string keys:
 | `static` | `bool` | If `True`, never alter the schema (no new columns added). |
 | `autoincrement` | `bool` | If `True`, add an auto-incrementing primary key column. |
 | `autotime` | `bool` | If `True`, automatically add a `datetime` timestamp column on insert. |
-| `hypertable` | `bool` | TimescaleDB only. If `True` (default), create the target table as a hypertable. |
+| `hypertable` | `bool` | On TimescaleDB, `True` (default) creates the target as a hypertable. On other flavors supporting native range partitioning (`postgresql`/`postgis`, `mysql`/`mariadb`), set `True` to opt in to `PARTITION BY RANGE` on the datetime column (default off); width reuses `verify.chunk_minutes`. Partitions auto-created in `sync_pipe` before insert (PostgreSQL: `PARTITION OF ... FOR VALUES FROM/TO`; MySQL: inline at create + `ALTER TABLE ADD PARTITION`). |
 | `hypercore` | `bool` | TimescaleDB only. If `True` (default), enable the Hypercore columnstore at `CREATE TABLE` (`tsdb.segmentby`/`tsdb.orderby`), auto-creating a columnstore policy. `False` = plain row-store hypertable. |
 | `compress` | `bool\|Dict` | If truthy, install a columnstore (compression) policy. Dict overrides `segmentby`, `orderby`, `after`. The columnstore policy *is* the compression policy (`add_columnstore_policy` ≡ legacy `add_compression_policy`). |
 | `enforce` | `bool` | If `False`, skip dtype enforcement on incoming data. |
