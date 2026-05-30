@@ -1673,23 +1673,59 @@ def create_pipe_table_from_df(
         _ = new_dtypes.pop(primary_key, None)
 
     schema = self.get_pipe_schema(pipe)
-    create_table_queries = get_create_table_queries(
-        new_dtypes,
-        pipe.target,
-        self.flavor,
-        schema=schema,
-        primary_key=primary_key,
-        primary_key_db_type=primary_key_db_type,
-        datetime_column=dt_col,
+
+    ### When supported (TimescaleDB 2.21+), create the hypertable declaratively via
+    ### `CREATE TABLE ... WITH (tsdb.hypertable, ...)`. Fall back to a plain `CREATE TABLE`
+    ### (and the `create_hypertable()` call in `get_create_index_queries`) if it fails.
+    hypertable = (
+        self.flavor in ('timescaledb', 'timescaledb-ha')
+        and pipe.parameters.get('hypertable', True)
+        and dt_col is not None
     )
-    if schema:
-        create_table_queries = (
-            get_create_schema_if_not_exists_queries(schema, self.flavor)
-            + create_table_queries
+    hypertable_chunk_interval = None
+    if hypertable:
+        chunk_interval = pipe.get_chunk_interval(debug=debug)
+        hypertable_chunk_interval = (
+            f'{chunk_interval}'
+            if isinstance(chunk_interval, int)
+            else f'{int(chunk_interval.total_seconds() / 60)} minutes'
         )
+
+    def _build_create_table_queries(_hypertable_chunk_interval):
+        _queries = get_create_table_queries(
+            new_dtypes,
+            pipe.target,
+            self.flavor,
+            schema=schema,
+            primary_key=primary_key,
+            primary_key_db_type=primary_key_db_type,
+            datetime_column=dt_col,
+            hypertable_chunk_interval=_hypertable_chunk_interval,
+        )
+        if schema:
+            _queries = (
+                get_create_schema_if_not_exists_queries(schema, self.flavor)
+                + _queries
+            )
+        return _queries
+
+    create_table_queries = _build_create_table_queries(hypertable_chunk_interval)
     success = all(
-        self.exec_queries(create_table_queries, break_on_error=True, rollback=True, debug=debug)
+        self.exec_queries(
+            create_table_queries,
+            break_on_error=True,
+            rollback=True,
+            silent=hypertable,
+            debug=debug,
+        )
     )
+    if not success and hypertable:
+        ### Declarative hypertable syntax unsupported; retry as a plain table.
+        ### `create_hypertable()` runs later during index creation.
+        create_table_queries = _build_create_table_queries(None)
+        success = all(
+            self.exec_queries(create_table_queries, break_on_error=True, rollback=True, debug=debug)
+        )
     target_name = sql_item_name(pipe.target, schema=self.get_pipe_schema(pipe), flavor=self.flavor)
     msg = (
         "Success"

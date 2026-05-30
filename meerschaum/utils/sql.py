@@ -2194,6 +2194,7 @@ def get_create_table_queries(
     primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
+    hypertable_chunk_interval: Optional[str] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2228,6 +2229,12 @@ def get_create_table_queries(
         If provided, include this column in the primary key.
         Applicable to TimescaleDB only.
 
+    hypertable_chunk_interval: Optional[str], default None
+        If provided (and `flavor` is TimescaleDB), create the table as a hypertable using the
+        declarative `CREATE TABLE ... WITH (tsdb.hypertable, ...)` syntax, partitioned on
+        `datetime_column` with this chunk interval (e.g. `'10080 minutes'` or `'100000'`).
+        Requires TimescaleDB 2.21+; callers should fall back to `create_hypertable()` on failure.
+
     _parse_dtypes: bool, default True
         If `True`, cast Pandas dtypes to SQL dtypes.
         Otherwise pass through the given value directly.
@@ -2253,6 +2260,7 @@ def get_create_table_queries(
         primary_key_db_type=primary_key_db_type,
         autoincrement=(autoincrement and flavor not in SKIP_AUTO_INCREMENT_FLAVORS),
         datetime_column=datetime_column,
+        hypertable_chunk_interval=hypertable_chunk_interval,
         _parse_dtypes=_parse_dtypes,
     )
 
@@ -2266,6 +2274,7 @@ def _get_create_table_query_from_dtypes(
     primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
+    hypertable_chunk_interval: Optional[str] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2363,6 +2372,21 @@ def _get_create_table_query_from_dtypes(
     query = query[:-1]
     query += "\n)"
 
+    if (
+        hypertable_chunk_interval is not None
+        and flavor in ('timescaledb', 'timescaledb-ha')
+        and datetime_column
+    ):
+        partition_column = datetime_column.replace("'", "''")
+        chunk_interval = hypertable_chunk_interval.replace("'", "''")
+        query += (
+            "\nWITH (\n"
+            "    tsdb.hypertable,\n"
+            f"    tsdb.partition_column='{partition_column}',\n"
+            f"    tsdb.chunk_interval='{chunk_interval}'\n"
+            ")"
+        )
+
     queries = [query]
     return queries
 
@@ -2376,10 +2400,13 @@ def _get_create_table_query_from_cte(
     primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
+    hypertable_chunk_interval: Optional[str] = None,
     _parse_dtypes=None,
 ) -> List[str]:
     """
     Create a new table from a CTE query.
+    NOTE: `hypertable_chunk_interval` is ignored here; `CREATE TABLE ... AS` cannot declare a
+    hypertable. Convert via `create_hypertable()` afterward.
     """
     import textwrap
     create_cte = 'create_query'
