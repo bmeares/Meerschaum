@@ -2199,6 +2199,7 @@ def get_create_table_queries(
     hypertable_orderby: Optional[List[str]] = None,
     partition_by_column: Optional[str] = None,
     partition_bounds: Optional[List] = None,
+    partition_scheme_name: Optional[str] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2280,6 +2281,7 @@ def get_create_table_queries(
         hypertable_orderby=hypertable_orderby,
         partition_by_column=partition_by_column,
         partition_bounds=partition_bounds,
+        partition_scheme_name=partition_scheme_name,
         _parse_dtypes=_parse_dtypes,
     )
 
@@ -2306,6 +2308,7 @@ def _get_create_table_query_from_dtypes(
     hypertable_orderby: Optional[List[str]] = None,
     partition_by_column: Optional[str] = None,
     partition_bounds: Optional[List] = None,
+    partition_scheme_name: Optional[str] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2360,7 +2363,19 @@ def _get_create_table_query_from_dtypes(
         and flavor in NATIVE_PARTITION_FLAVORS
     )
     partition_by_column_name = (
-        sql_item_name(partition_by_column, flavor) if is_native_partitioned else None
+        sql_item_name(partition_by_column, flavor)
+        if (partition_by_column is not None and flavor in NATIVE_PARTITION_FLAVORS | {'mssql'})
+        else None
+    )
+    ### MSSQL partitions a table by placing its clustered index on a partition scheme (created
+    ### beforehand by the connector); the partitioning column must be part of that clustered key.
+    is_mssql_partitioned = bool(
+        flavor == 'mssql'
+        and partition_scheme_name is not None
+        and partition_by_column is not None
+    )
+    partition_scheme_item = (
+        sql_item_name(partition_scheme_name, flavor, None) if is_mssql_partitioned else None
     )
     primary_key_clustered = (
         "CLUSTERED"
@@ -2420,10 +2435,23 @@ def _get_create_table_query_from_dtypes(
             query += f"\n    PRIMARY KEY({partition_by_column_name}, {primary_key_name}),"
 
     if flavor == 'mssql' and primary_key:
-        query += f"\n    CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name}),"
+        if is_mssql_partitioned and partition_by_column != primary_key:
+            ### Make the primary key CLUSTERED and place it on the partition scheme, including the
+            ### partition column as the leading key. This is what partitions the table's storage.
+            query += (
+                f"\n    CONSTRAINT {primary_key_constraint_name} PRIMARY KEY CLUSTERED "
+                f"({partition_by_column_name}, {primary_key_name}) "
+                f"ON {partition_scheme_item}({partition_by_column_name}),"
+            )
+        else:
+            query += f"\n    CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name}),"
 
     query = query[:-1]
     query += "\n)"
+
+    if is_mssql_partitioned and not primary_key:
+        ### No primary key to anchor storage on the scheme, so place the table itself on it.
+        query += f"\nON {partition_scheme_item}({partition_by_column_name})"
 
     if is_native_partitioned and flavor in PG_PARTITION_FLAVORS:
         ### The parent table holds no rows directly; child partitions are created on demand
@@ -2485,6 +2513,7 @@ def _get_create_table_query_from_cte(
     hypertable_orderby: Optional[List[str]] = None,
     partition_by_column: Optional[str] = None,
     partition_bounds: Optional[List] = None,
+    partition_scheme_name: Optional[str] = None,
     _parse_dtypes=None,
 ) -> List[str]:
     """

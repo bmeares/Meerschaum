@@ -69,6 +69,13 @@ class SQLConnector(InstanceConnector):
         _create_missing_partitions_pg,
         _create_missing_partitions_mysql,
         _get_mysql_max_partition_bound,
+        _partition_function_name,
+        _partition_scheme_name,
+        _get_partition_boundary_values,
+        _get_mssql_partition_creation_queries,
+        _get_mssql_max_partition_boundary,
+        _create_missing_partitions_mssql,
+        _get_partition_cleanup_queries,
     )
     from ._pipes import (
         fetch_pipes_keys,

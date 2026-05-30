@@ -1718,6 +1718,16 @@ def create_pipe_table_from_df(
     if partition_by_column is not None and self.flavor in ('mysql', 'mariadb') and not partition_bounds:
         partition_by_column = None
 
+    ### MSSQL partitions via a function + scheme created before the table; its clustered index is
+    ### placed on the scheme (passed as `partition_scheme_name`).
+    partition_scheme_name = None
+    partition_creation_queries = []
+    if partition_by_column is not None and self.flavor == 'mssql':
+        partition_scheme_name = self._partition_scheme_name(pipe)
+        partition_creation_queries = self._get_mssql_partition_creation_queries(
+            pipe, df, debug=debug
+        )
+
     def _build_create_table_queries(_hypertable_chunk_interval):
         _queries = get_create_table_queries(
             new_dtypes,
@@ -1732,7 +1742,10 @@ def create_pipe_table_from_df(
             hypertable_orderby=(hypertable_orderby if _hypertable_chunk_interval else None),
             partition_by_column=partition_by_column,
             partition_bounds=partition_bounds,
+            partition_scheme_name=partition_scheme_name,
         )
+        if partition_creation_queries:
+            _queries = partition_creation_queries + _queries
         if schema:
             _queries = (
                 get_create_schema_if_not_exists_queries(schema, self.flavor)
@@ -3093,6 +3106,12 @@ def drop_pipe(
         success = self.exec(
             f"DROP TABLE {if_exists_str} {target_name}", silent=True, debug=debug
         ) is not None
+
+    ### Drop any MSSQL partition scheme + function the table referenced (no-op otherwise).
+    if success:
+        cleanup_queries = self._get_partition_cleanup_queries(pipe)
+        if cleanup_queries:
+            self.exec_queries(cleanup_queries, break_on_error=False, silent=True, debug=debug)
 
     msg = "Success" if success else f"Failed to drop {pipe}."
     return success, msg

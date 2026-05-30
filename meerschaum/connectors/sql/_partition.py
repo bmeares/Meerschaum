@@ -28,8 +28,11 @@ PG_PARTITION_FLAVORS = {'postgresql', 'postgis'}
 ### MySQL-style: initial partitions inline at `CREATE TABLE`, extended via `ALTER TABLE ADD
 ### PARTITION ... VALUES LESS THAN`.
 MYSQL_PARTITION_FLAVORS = {'mysql', 'mariadb'}
+### MSSQL-style: a partition function + scheme (database objects) created before the table;
+### extended via `ALTER PARTITION FUNCTION ... SPLIT RANGE`.
+MSSQL_PARTITION_FLAVORS = {'mssql'}
 ### Non-TimescaleDB flavors supporting declarative range partitioning on a datetime column.
-PARTITIONABLE_FLAVORS = PG_PARTITION_FLAVORS | MYSQL_PARTITION_FLAVORS
+PARTITIONABLE_FLAVORS = PG_PARTITION_FLAVORS | MYSQL_PARTITION_FLAVORS | MSSQL_PARTITION_FLAVORS
 
 ### Safety cap on the number of partitions created for a single dataframe.
 _MAX_PARTITIONS_PER_SYNC = 10_000
@@ -173,6 +176,18 @@ def _get_partition_ranges_for_df(
     return ranges
 
 
+def _partition_function_name(self, pipe: mrsm.Pipe) -> str:
+    """Return the (truncated) MSSQL partition-function name for a pipe."""
+    from meerschaum.utils.sql import truncate_item_name
+    return truncate_item_name(f"pf_{pipe.target}", self.flavor)
+
+
+def _partition_scheme_name(self, pipe: mrsm.Pipe) -> str:
+    """Return the (truncated) MSSQL partition-scheme name for a pipe."""
+    from meerschaum.utils.sql import truncate_item_name
+    return truncate_item_name(f"ps_{pipe.target}", self.flavor)
+
+
 def _create_missing_partitions(
     self,
     pipe: mrsm.Pipe,
@@ -193,6 +208,8 @@ def _create_missing_partitions(
         return self._create_missing_partitions_pg(pipe, df, debug=debug)
     if self.flavor in MYSQL_PARTITION_FLAVORS:
         return self._create_missing_partitions_mysql(pipe, df, debug=debug)
+    if self.flavor in MSSQL_PARTITION_FLAVORS:
+        return self._create_missing_partitions_mssql(pipe, df, debug=debug)
     return True, "Pipe is not partitioned."
 
 
@@ -366,3 +383,212 @@ def _create_missing_partitions_mysql(
     if not success:
         return False, f"Failed to add partitions for {pipe}."
     return True, f"Added {len(queries)} partition(s) to {pipe}."
+
+
+def _get_partition_boundary_values(
+    self,
+    pipe: mrsm.Pipe,
+    df: 'Any',
+    debug: bool = False,
+) -> List[Union[datetime, int]]:
+    """
+    Return the ascending interval-aligned boundary values (`lo` grid points) spanning a
+    dataframe — the split points for an MSSQL `RANGE RIGHT` partition function.
+    """
+    ranges = self._get_partition_ranges_for_df(pipe, df, debug=debug)
+    return [lo for lo, _ in ranges]
+
+
+def _get_mssql_partition_creation_queries(
+    self,
+    pipe: mrsm.Pipe,
+    df: 'Any',
+    debug: bool = False,
+) -> List[str]:
+    """
+    Build the `CREATE PARTITION FUNCTION` / `CREATE PARTITION SCHEME` queries for a pipe.
+
+    Idempotent (guarded by `sys.partition_functions` / `sys.partition_schemes`); intended to be
+    run before the `CREATE TABLE` that places its clustered index on the scheme.
+    """
+    from meerschaum.utils.sql import sql_item_name
+    from meerschaum.utils.dtypes.sql import get_db_type_from_pd_type
+
+    dt_col = pipe.columns.get('datetime', None)
+    if dt_col is None:
+        return []
+
+    func_name = self._partition_function_name(pipe)
+    scheme_name = self._partition_scheme_name(pipe)
+    func_item = sql_item_name(func_name, self.flavor, None)
+    scheme_item = sql_item_name(scheme_name, self.flavor, None)
+    clean_func = func_name.replace("'", "''")
+    clean_scheme = scheme_name.replace("'", "''")
+
+    dt_db_type = get_db_type_from_pd_type(pipe.dtypes.get(dt_col, 'datetime'), self.flavor)
+    boundaries = self._get_partition_boundary_values(pipe, df, debug=debug)
+    values_clause = ', '.join(self._partition_literal(b) for b in boundaries)
+
+    return [
+        (
+            f"IF NOT EXISTS (SELECT 1 FROM sys.partition_functions WHERE name = '{clean_func}')\n"
+            f"CREATE PARTITION FUNCTION {func_item} ({dt_db_type})\n"
+            f"AS RANGE RIGHT FOR VALUES ({values_clause})"
+        ),
+        (
+            f"IF NOT EXISTS (SELECT 1 FROM sys.partition_schemes WHERE name = '{clean_scheme}')\n"
+            f"CREATE PARTITION SCHEME {scheme_item}\n"
+            f"AS PARTITION {func_item} ALL TO ([PRIMARY])"
+        ),
+    ]
+
+
+def _get_mssql_max_partition_boundary(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> Optional[Union[datetime, int]]:
+    """
+    Return the highest existing boundary of a pipe's MSSQL partition function, or `None`.
+    """
+    func_name = self._partition_function_name(pipe).replace("'", "''")
+    dt_col = pipe.columns.get('datetime', None)
+    dt_dtype = str(pipe.dtypes.get(dt_col, 'datetime')) if dt_col else 'datetime'
+    is_int_axis = 'int' in dt_dtype.lower()
+
+    cast_type = 'BIGINT' if is_int_axis else 'NVARCHAR(64)'
+    query = (
+        f"SELECT CONVERT(NVARCHAR(64), MAX(CAST(prv.value AS {('BIGINT' if is_int_axis else 'DATETIMEOFFSET')})), 127) AS b\n"
+        "FROM sys.partition_functions pf\n"
+        "JOIN sys.partition_range_values prv ON pf.function_id = prv.function_id\n"
+        f"WHERE pf.name = '{func_name}'"
+    )
+    try:
+        result = self.value(query, silent=True, debug=debug)
+    except Exception:
+        return None
+    if result is None:
+        return None
+
+    text = str(result).strip()
+    if is_int_axis:
+        try:
+            return int(text)
+        except Exception:
+            return None
+    ### Boundaries are interval-aligned (no sub-second component); parse the leading
+    ### `YYYY-MM-DDTHH:MM:SS` and treat as UTC.
+    try:
+        return datetime.fromisoformat(text[:19]).replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _create_missing_partitions_mssql(
+    self,
+    pipe: mrsm.Pipe,
+    df: 'Any',
+    debug: bool = False,
+) -> SuccessTuple:
+    """
+    Extend a pipe's MSSQL partition function upward via `ALTER PARTITION FUNCTION ... SPLIT RANGE`.
+
+    Each new boundary needs `ALTER PARTITION SCHEME ... NEXT USED` first so the new partition has
+    a target filegroup. Values below the highest existing boundary already fall into a partition.
+    """
+    from meerschaum.utils.sql import sql_item_name
+
+    dt_col = pipe.columns.get('datetime', None)
+    if dt_col is None or dt_col not in getattr(df, 'columns', []):
+        return True, "No partitions to create."
+
+    series = df[dt_col].dropna()
+    if len(series) == 0:
+        return True, "No partitions to create."
+
+    max_val = series.max()
+    if hasattr(max_val, 'to_pydatetime'):
+        max_val = max_val.to_pydatetime()
+
+    max_bound = self._get_mssql_max_partition_boundary(pipe, debug=debug)
+    if max_bound is None:
+        return True, "No partitions to create."
+
+    interval = pipe.get_chunk_interval(debug=debug)
+
+    if isinstance(max_bound, datetime):
+        if not isinstance(max_val, datetime):
+            return True, "No partitions to create."
+        if max_val.tzinfo is None:
+            max_val = max_val.replace(tzinfo=timezone.utc)
+        else:
+            max_val = max_val.astimezone(timezone.utc)
+    else:
+        max_val = int(max_val)
+
+    func_item = sql_item_name(self._partition_function_name(pipe), self.flavor, None)
+    scheme_item = sql_item_name(self._partition_scheme_name(pipe), self.flavor, None)
+
+    queries = []
+    cursor = max_bound + interval
+    count = 0
+    while cursor <= max_val:
+        queries.append(f"ALTER PARTITION SCHEME {scheme_item} NEXT USED [PRIMARY]")
+        queries.append(
+            f"ALTER PARTITION FUNCTION {func_item}() SPLIT RANGE ({self._partition_literal(cursor)})"
+        )
+        cursor = cursor + interval
+        count += 1
+        if count >= _MAX_PARTITIONS_PER_SYNC:
+            from meerschaum.utils.warnings import warn
+            warn(
+                f"Reached the {_MAX_PARTITIONS_PER_SYNC}-partition limit for {pipe}; "
+                "consider a larger `chunk_minutes`.",
+                stack=False,
+            )
+            break
+
+    if not queries:
+        return True, "No partitions to create."
+
+    if debug:
+        dprint(f"[{self}] Splitting {count} partition(s) for {pipe}.")
+
+    try:
+        success = all(self.exec_queries(
+            queries, break_on_error=True, rollback=True, silent=(not debug), debug=debug,
+        ))
+    except Exception as e:
+        return False, f"Failed to split partitions for {pipe}:\n{e}"
+
+    if not success:
+        return False, f"Failed to split partitions for {pipe}."
+    return True, f"Split {count} partition(s) for {pipe}."
+
+
+def _get_partition_cleanup_queries(self, pipe: mrsm.Pipe) -> List[str]:
+    """
+    Return queries dropping a pipe's MSSQL partition scheme and function (in that order).
+
+    Safe to call unconditionally — returns `[]` for non-MSSQL or non-partitioned pipes. The
+    scheme must be dropped before the function it references.
+    """
+    if self.flavor not in MSSQL_PARTITION_FLAVORS or not self._should_partition(pipe):
+        return []
+    from meerschaum.utils.sql import sql_item_name
+    func_name = self._partition_function_name(pipe)
+    scheme_name = self._partition_scheme_name(pipe)
+    func_item = sql_item_name(func_name, self.flavor, None)
+    scheme_item = sql_item_name(scheme_name, self.flavor, None)
+    clean_func = func_name.replace("'", "''")
+    clean_scheme = scheme_name.replace("'", "''")
+    return [
+        (
+            f"IF EXISTS (SELECT 1 FROM sys.partition_schemes WHERE name = '{clean_scheme}')\n"
+            f"DROP PARTITION SCHEME {scheme_item}"
+        ),
+        (
+            f"IF EXISTS (SELECT 1 FROM sys.partition_functions WHERE name = '{clean_func}')\n"
+            f"DROP PARTITION FUNCTION {func_item}"
+        ),
+    ]
