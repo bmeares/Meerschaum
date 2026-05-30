@@ -9,8 +9,8 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add disk usage and compression tools.**  
   New tooling helps manage how much space pipes occupy on disk:
 
-    - **`show targets` now reports table sizes.**  
-      The `show targets` action includes a `Size` column with each target table's on-disk size (human-readable in the table, raw bytes with `--nopretty`). Sizes are fetched in parallel.
+    - **Add the `show sizes` action.**  
+      Lists pipes with each target table's on-disk size, sorted largest first. Sizes are fetched in parallel. `show rowcounts` now also sorts largest first.
 
     - **Add `Pipe.get_size()`.**  
       Returns a target table's on-disk size in bytes (or `None` if unavailable). Backed by the new instance-connector method `get_pipe_size()`, with per-flavor support for SQL connectors — TimescaleDB hypertables use `hypertable_size()`, PostgreSQL-like flavors use `pg_total_relation_size()`, and MySQL/MariaDB, MSSQL, and SQLite use their respective size queries.

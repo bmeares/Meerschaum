@@ -107,8 +107,35 @@ df = pipe.get_data(
 ###           dt  id  val
 ### 0 2024-07-01   1  100
 
+### Skip pandas entirely — read rows as plain dicts.
+docs = pipe.get_docs(params={'id': [1]})
+### [{'dt': datetime(2024, 7, 1), 'id': 1, 'val': 100}]
+
 ### Drop the table and remove the pipe's metadata.
 pipe.delete()
+```
+
+### Composable SQL Pipelines
+
+Inherit and reference other pipes to build composable, in-database pipelines.
+Pass `reference` to inherit another pipe's parameters, and use `{{ Pipe(...) }}` to
+resolve a pipe's target table inside a SQL definition:
+
+```python
+import meerschaum as mrsm
+
+raw = mrsm.Pipe('sql:main', 'raw', instance='sql:main', columns={'datetime': 'dt'})
+
+### `clean` inherits `raw`'s columns and reads from its target table.
+clean = mrsm.Pipe(
+    'sql:main', 'clean',
+    instance='sql:main',
+    reference=raw,                ### Inherit the parent pipe's parameters.
+    parameters={
+        'sql': "SELECT * FROM {{ Pipe('sql:main', 'raw') }} WHERE val > 0",
+    },
+)
+clean.sync()
 ```
 
 ### Simple Plugin
@@ -150,12 +177,15 @@ def fetch(pipe, begin=None, end=None, **kw):
 - 📊 **Built for Data Scientists and Analysts**  
   - Integrate with Pandas, Grafana, and other popular [data analysis tools](https://meerschaum.io/reference/data-analysis-tools/).
   - Persist your dataframes and always get the latest data.
-  - Filter pipes by connector, metric, location, tags, or `datetime` column dtype (`--dtype datetime|int|None`).
+  - Skip pandas overhead and read rows as plain dicts with `Pipe.get_docs()` / `get_doc()`.
+  - Filter pipes by connector, metric, location, tags, target table (`--target`), or `datetime` column dtype (`--dtype datetime|int|None`).
 - ⚡️ **Production-Ready, Batteries Included**  
   - [Synchronization engine](https://meerschaum.io/reference/pipes/syncing/) concurrently updates many time-series data streams.
   - One-click deploy a [TimescaleDB and Grafana stack](https://meerschaum.io/reference/stack/) for prototyping.
   - Serve data to your entire organization through the power of `uvicorn`, `gunicorn`, and `FastAPI`.
-  - Supports PostGIS geometry columns for geospatial pipelines.
+  - Secure your API instances with long-lived, scoped authentication tokens.
+  - Supports PostGIS geometry columns (including ESRI CRS) for geospatial pipelines.
+  - Manage disk usage: inspect tables with `show sizes` / `show targets` and reclaim space with `compress pipes`.
 - 💼 **Jobs and Scheduling**  
   - Run any command as a background [job](https://meerschaum.io/reference/background-jobs/) with `-d` (`--daemon`).
   - Built-in scheduler handles cron and interval schedules — no `crontab` or `systemd` setup required.
