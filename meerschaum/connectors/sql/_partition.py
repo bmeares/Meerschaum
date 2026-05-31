@@ -247,8 +247,17 @@ def _partition_bounds(
         else _EPOCH_NAIVE
     )
     n = (value - epoch) // interval
-    lo = epoch + (n * interval)
-    return lo, lo + interval
+    ### A pathologically large interval (e.g. a chunk width of thousands of years) can push a
+    ### boundary past `datetime.min`/`datetime.max`; clamp instead of raising `OverflowError`.
+    try:
+        lo = epoch + (n * interval)
+    except OverflowError:
+        lo = datetime.min.replace(tzinfo=getattr(value, 'tzinfo', None))
+    try:
+        hi = lo + interval
+    except OverflowError:
+        hi = datetime.max.replace(tzinfo=getattr(value, 'tzinfo', None))
+    return lo, hi
 
 
 def _partition_literal(self, value: Union[datetime, int]) -> str:

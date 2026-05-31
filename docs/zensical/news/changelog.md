@@ -149,6 +149,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Fix `get_sync_time()` with `params` on partitioned MariaDB tables.**  
   Because datetime-axis pipes are now range-partitioned by default, `get_sync_time(params=...)` could return `None` for a populated MariaDB pipe — a MariaDB optimizer quirk where `ORDER BY <dt> DESC LIMIT 1` over a `RANGE COLUMNS` table with a `WHERE` clause stops scanning early. Partitioned MariaDB pipes now compute the bound with `MAX()` / `MIN()`, which prunes partitions correctly. Other flavors are unaffected.
 
+- **Fix native partitioning for `date`-axis and distant-datetime pipes.**  
+  Two partition-boundary edge cases no longer error on sync. (1) A pipe whose `datetime` column has a `date` dtype (rather than a timestamp) raised `TypeError: int() argument must be ... not 'datetime.date'`; the boundary helpers now promote a `date` to a midnight `datetime` so it follows the timestamp grid instead of the integer-epoch path. (2) A very wide datetime span combined with a large chunk interval could push a computed boundary past `datetime.min` / `datetime.max` and raise `OverflowError: date value out of range`; boundaries are now clamped to the representable range. Affects PostgreSQL / PostGIS, MySQL / MariaDB, and MSSQL.
+
 ## 3.3.0 Releases
 
 ### v3.3.1

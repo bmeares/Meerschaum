@@ -23,7 +23,7 @@ This is the current release cycle, so stay tuned for future releases!
   New tooling helps manage how much space pipes occupy on disk:
 
     - **Add the `show sizes` action.**  
-      Lists pipes with each target table's on-disk size, sorted largest first. Sizes are fetched in parallel. `show rowcounts` now also sorts largest first.
+      Lists pipes with each target table's on-disk size, sorted largest first. Sizes are fetched in parallel when the instance connector is thread-safe (otherwise serially). `show rowcounts` now also sorts largest first.
 
     - **Add `Pipe.get_size()`.**  
       Returns a target table's on-disk size in bytes (or `None` if unavailable). Backed by the new instance-connector method `get_pipe_size()`, with per-flavor support for SQL connectors — TimescaleDB hypertables use `hypertable_size()`, PostgreSQL-like flavors use `pg_total_relation_size()`, and MySQL/MariaDB, MSSQL, and SQLite use their respective size queries.
@@ -33,6 +33,12 @@ This is the current release cycle, so stay tuned for future releases!
 
     - **Add the `decompress pipes` action and `Pipe.decompress()`.**  
       The inverse of `compress pipes`. For TimescaleDB this removes the compression policy, converts compressed chunks back to row-store, and disables the columnstore so future synced chunks stay uncompressed; MySQL/MariaDB and MSSQL revert their native table compression. Pass `--no-policy` to decompress existing chunks now while leaving the policy in place (e.g. for a bulk backfill, after which chunks are recompressed on schedule). Backed by the new instance-connector method `decompress_pipe()`.
+
+    - **Add the `vacuum pipes` and `analyze pipes` actions (and `Pipe.vacuum()` / `Pipe.analyze()`).**  
+      `vacuum pipes` reclaims disk space from dead rows (`--full` runs `VACUUM FULL` on PostgreSQL-family flavors; MySQL/MariaDB use `OPTIMIZE TABLE`, MSSQL rebuilds indices, SQLite runs `VACUUM`). `analyze pipes` refreshes the query planner's statistics without reclaiming space. Backed by the new instance-connector methods `vacuum_pipe()` and `analyze_pipe()`. See [Maintenance](/reference/pipes/maintenance/).
+
+    - **Add the `show sizes` companion `show partitions` action.**  
+      Lists each partitioned pipe's partition (or TimescaleDB chunk) count and physical width. Backed by the new instance-connector method `get_partition_info()`.
 
     - **Add the `compress` pipe parameter.**  
       Set `compress` (a `bool` or a dictionary of `after`/`segmentby`/`orderby` settings) to mark a pipe for compression. For TimescaleDB hypertables, a compression policy is installed automatically on sync.
@@ -47,6 +53,11 @@ This is the current release cycle, so stay tuned for future releases!
           compress={'after': '7 days'},
       )
       ```
+
+      `compress pipes --no-policy` also accepts `--no-policy`, to compress existing chunks immediately without installing an ongoing policy.
+
+    - **Add the `hypercore` pipe parameter (TimescaleDB).**  
+      `hypercore` (default `True`) enables the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore) at `CREATE TABLE` (declaring `tsdb.segmentby` / `tsdb.orderby`), so TimescaleDB auto-creates a columnstore policy that converts old chunks in the background. Set `hypercore` to `False` for a plain row-store hypertable. The columnstore policy *is* the compression policy — `add_columnstore_policy` is the modern equivalent of the legacy `add_compression_policy`.
 
 - **Add native range partitioning for non-TimescaleDB flavors.**  
   TimescaleDB auto-creates chunks on insert; PostgreSQL / PostGIS, MySQL / MariaDB, and MSSQL do not. The [`hypertable`](/reference/pipes/parameters/#hypertable) parameter (which **defaults to `True`**) now drives declarative range partitioning on the pipe's `datetime` column for these flavors too — so datetime-axis pipes are partitioned by default; set `hypertable` to `False` to opt out. Only newly created tables are affected (pre-existing plain tables are never retroactively partitioned). The partition width reuses the chunk interval (`verify.chunk_minutes`, default 43200 — 30 days), and boundaries are epoch-aligned so the same value always maps to the same partition (deterministic, value-independent). A single sync creates at most `system.connectors.sql.instance.max_partitions_per_sync` partitions (default 10,000) as a runaway guard.
@@ -70,7 +81,36 @@ This is the current release cycle, so stay tuned for future releases!
   `verify.chunk_minutes` is the authoritative partition width — it is read at sync time, so editing it for a populated table can create misaligned, overlapping partitions. Use the new `partition pipes` action (below) to change an existing table's width.
 
 - **Expand the `verify` chunk-interval keys.**  
-  `verify.chunk_minutes` now accepts `chunk_hours`, `chunk_days`, `chunk_weeks`, `chunk_years`, and `chunk_seconds` aliases (resolved in that priority order, mirroring the `bound_*` keys). For an integer `datetime` axis, the new `verify.chunk_range` sets the chunk size directly in the axis's units (used verbatim); without it, the legacy behavior is preserved (convert via `precision`, or use minutes verbatim when no `precision` is set).
+  The chunk interval — used both for [verification syncs](/reference/pipes/syncing/#verification-syncs) and as the [native partition](/reference/connectors/sql-connectors/#native-range-partitioning) width — can now be set with whichever unit reads most naturally, instead of always converting to minutes.
+
+    - **Unit aliases for `verify.chunk_minutes`.**  
+      `chunk_hours`, `chunk_days`, `chunk_weeks`, `chunk_years`, and `chunk_seconds` join `chunk_minutes`. If several are set, the first on this priority list wins (mirroring the existing `bound_*` keys): `chunk_minutes`, `chunk_hours`, `chunk_days`, `chunk_weeks`, `chunk_years`, `chunk_seconds`. The default is unchanged (`chunk_minutes: 43200` — 30 days).
+
+      ```python
+      import meerschaum as mrsm
+
+      # These two pipes use the same one-week chunk interval.
+      mrsm.Pipe('demo', 'minutes', parameters={'verify': {'chunk_minutes': 10080}})
+      mrsm.Pipe('demo', 'days',    parameters={'verify': {'chunk_days': 7}})
+      ```
+
+    - **Add `verify.chunk_range` for integer `datetime` axes.**  
+      For a pipe whose `datetime` axis is an integer epoch, `chunk_range` sets the chunk size directly in the axis's own units (used verbatim) — the integer-axis counterpart to `chunk_minutes`.
+
+      ```python
+      import meerschaum as mrsm
+
+      pipe = mrsm.Pipe(
+          'demo', 'int_axis',
+          columns={'datetime': 'ts'},
+          dtypes={'ts': 'int'},
+          parameters={'verify': {'chunk_range': 1000}},  # 1000 units per chunk
+      )
+      ```
+
+      When `chunk_range` is unset, the legacy behavior is preserved: the time-based size is converted to the axis's units via the pipe's `precision`, or — when no `precision` is set — its value in minutes is used verbatim.
+
+  The `--chunk-minutes` flag and an explicit `chunk_interval` argument to `Pipe.get_chunk_interval()` still override the configured keys.
 
 - **Add the `partition pipes` action and `Pipe.repartition()`.**  
   Rebuild a partitioned pipe's target table to a new chunk width. Pass `--chunk-minutes` (defaults to the pipe's `verify.chunk_minutes`). On TimescaleDB this calls `set_chunk_time_interval()` (applies to future chunks; existing chunks keep their size); on PostgreSQL / PostGIS, MySQL / MariaDB, and MSSQL the table is rebuilt at the new width (read → drop → re-sync) and `verify.chunk_minutes` is updated. Backed by the new instance-connector method `partition_pipe()`.
@@ -83,8 +123,8 @@ This is the current release cycle, so stay tuned for future releases!
   !!! warning
       The non-TimescaleDB rebuild reads the whole table into memory and briefly drops it before re-syncing. Run it during a maintenance window for large tables.
 
-- **Wire `vacuum` / `analyze` / `partition` through `APIConnector`.**  
-  `APIConnector` now imports `vacuum_pipe`, `analyze_pipe`, and `partition_pipe`, so these maintenance actions work against `api:` instances (previously `vacuum` / `analyze` over the API reported "not supported").
+- **Wire the maintenance actions through `APIConnector`.**  
+  `APIConnector` now implements `get_pipe_size`, `compress_pipe`, `decompress_pipe`, `vacuum_pipe`, `analyze_pipe`, and `partition_pipe` (with matching `/size`, `/compress`, `/decompress`, `/vacuum`, `/analyze`, and `/partition` routes), so `show sizes`, `compress` / `decompress`, `vacuum` / `analyze`, and `partition` all work against `api:` instances (previously these reported "not supported" over the API).
 
 - **Print full, untruncated results from `mrsm sql`.**  
   Reading a table or query with `sql ... read` now prints the entire DataFrame as a Markdown table — no more `...` column or cell truncation. The format is friendly to both users and LLMs and ends with a `[rows x columns]` shape footer. The `--nopretty` JSON output is unchanged.
@@ -105,6 +145,12 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fix `stop jobs` leaving zombie sync threads.**  
   Stopping a job now reliably terminates `sync pipes` worker threads. Previously the daemon's main thread could exit while non-daemon worker threads kept running and appending to the log, requiring a container restart. Workers now honor a process-wide stop signal and are interrupted when a job is stopped.
+
+- **Fix `get_sync_time()` with `params` on partitioned MariaDB tables.**  
+  Because datetime-axis pipes are now range-partitioned by default, `get_sync_time(params=...)` could return `None` for a populated MariaDB pipe — a MariaDB optimizer quirk where `ORDER BY <dt> DESC LIMIT 1` over a `RANGE COLUMNS` table with a `WHERE` clause stops scanning early. Partitioned MariaDB pipes now compute the bound with `MAX()` / `MIN()`, which prunes partitions correctly. Other flavors are unaffected.
+
+- **Fix native partitioning for `date`-axis and distant-datetime pipes.**  
+  Two partition-boundary edge cases no longer error on sync. (1) A pipe whose `datetime` column has a `date` dtype (rather than a timestamp) raised `TypeError: int() argument must be ... not 'datetime.date'`; the boundary helpers now promote a `date` to a midnight `datetime` so it follows the timestamp grid instead of the integer-epoch path. (2) A very wide datetime span combined with a large chunk interval could push a computed boundary past `datetime.min` / `datetime.max` and raise `OverflowError: date value out of range`; boundaries are now clamped to the representable range. Affects PostgreSQL / PostGIS, MySQL / MariaDB, and MSSQL.
 
 ## 3.3.0 Releases
 
