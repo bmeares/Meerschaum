@@ -28,17 +28,23 @@ def _analyze_pipes(
     yes: bool = False,
     force: bool = False,
     noask: bool = False,
+    nopretty: bool = False,
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
     """
     Analyze the target tables for the selected pipes.
     """
+    import os
+    import contextlib
     from meerschaum import get_pipes
     from meerschaum.utils.prompt import yes_no
-    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.warnings import warn, info
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.formatting._shell import progress
+    from meerschaum.utils.daemon import running_in_daemon
+    from meerschaum._internal.static import STATIC_CONFIG
 
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
@@ -57,16 +63,43 @@ def _analyze_pipes(
     if not answer:
         return False, "No pipes were analyzed."
 
+    noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)
+    noninteractive = str(noninteractive_val).lower() in ('1', 'true', 'yes')
+    _progress = (
+        progress()
+        if (
+            kw.get('shell', False)
+            and not noninteractive
+            and not running_in_daemon()
+            and not nopretty
+            and not debug
+        )
+        else None
+    )
+
     success_dict = {}
     successes, fails = 0, 0
-    for pipe in pipes:
-        analyze_success, analyze_msg = pipe.analyze(debug=debug)
-        success_dict[pipe] = analyze_msg
-        if analyze_success:
-            successes += 1
-        else:
-            fails += 1
-            warn(analyze_msg, stack=False)
+
+    cm = _progress if _progress is not None else contextlib.nullcontext()
+    with cm:
+        task = (
+            _progress.add_task("Analyzing pipes...", total=len(pipes))
+            if _progress is not None
+            else None
+        )
+        for pipe in pipes:
+            if not nopretty:
+                info(f"Analyzing {pipe}...")
+            analyze_success, analyze_msg = pipe.analyze(debug=debug)
+            success_dict[pipe] = analyze_msg
+            if analyze_success:
+                successes += 1
+            else:
+                fails += 1
+                warn(analyze_msg, stack=False)
+
+            if _progress is not None:
+                _progress.advance(task)
 
     if debug:
         dprint("Results for analyzing pipes.")

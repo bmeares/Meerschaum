@@ -29,35 +29,71 @@ def _index_pipes(
     yes: bool = False,
     force: bool = False,
     noask: bool = False,
+    nopretty: bool = False,
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
     """
     Create pipes' indices.
     """
+    import os
+    import contextlib
     from meerschaum import get_pipes
     from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.formatting._shell import progress
+    from meerschaum.utils.daemon import running_in_daemon
+    from meerschaum._internal.static import STATIC_CONFIG
 
     pipes = get_pipes(as_list=True, debug=debug, **kw)
     if len(pipes) == 0:
         return False, "No pipes to index."
 
+    noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)
+    noninteractive = str(noninteractive_val).lower() in ('1', 'true', 'yes')
+    _progress = (
+        progress()
+        if (
+            kw.get('shell', False)
+            and not noninteractive
+            and not running_in_daemon()
+            and not nopretty
+            and not debug
+        )
+        else None
+    )
+
     success_dict = {}
     successes, fails = 0, 0
-    msg = ""
 
-    for pipe in pipes:
-        info(f"Creating indices for {pipe}...")
-        index_success, index_msg = pipe.create_indices(columns=(action or None), debug=debug)
-        success_dict[pipe] = index_msg
-        if index_success:
-            successes += 1
-        else:
-            fails += 1
-            warn(index_msg, stack=False)
-    
+    cm = _progress if _progress is not None else contextlib.nullcontext()
+    with cm:
+        task = (
+            _progress.add_task("Indexing pipes...", total=len(pipes))
+            if _progress is not None
+            else None
+        )
+        for pipe in pipes:
+            if not nopretty:
+                info(f"Creating indices for {pipe}...")
+            index_success, index_msg = pipe.create_indices(columns=(action or None), debug=debug)
+            success_dict[pipe] = index_msg
+            if index_success:
+                successes += 1
+            else:
+                fails += 1
+                warn(index_msg, stack=False)
+
+            if _progress is not None:
+                _progress.advance(task)
+
+    if debug:
+        dprint("Results for indexing pipes.")
+        pprint(success_dict)
+
     msg = (
-        f"Finished indexing {len(pipes)} pipes"
+        f"Finished indexing {len(pipes)} pipe"
         + ('s' if len(pipes) != 1 else '')
         + f"\n    ({successes} succeeded, {fails} failed)."
     )

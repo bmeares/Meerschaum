@@ -111,7 +111,7 @@ def _decompress_pipes(
                 total_after += size_after
                 added = size_after - size_before
                 stats_rows.append((
-                    size_before,
+                    added,
                     str(pipe),
                     format_bytes(size_before),
                     format_bytes(size_after),
@@ -121,7 +121,7 @@ def _decompress_pipes(
             if _progress is not None:
                 _progress.advance(task)
 
-    ### Sort by on-disk size descending (largest tables first).
+    ### Sort by space added descending (largest change at top).
     stats_rows.sort(key=lambda row: row[0], reverse=True)
 
     if debug:

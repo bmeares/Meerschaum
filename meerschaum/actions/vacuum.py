@@ -141,7 +141,7 @@ def _vacuum_pipes(
                 total_after += size_after
                 reclaimed = size_before - size_after
                 stats_rows.append((
-                    size_before,
+                    reclaimed,
                     str(pipe),
                     format_bytes(size_before),
                     format_bytes(size_after),
@@ -151,7 +151,7 @@ def _vacuum_pipes(
             if _progress is not None:
                 _progress.advance(task)
 
-    ### Sort by on-disk size descending (largest tables first).
+    ### Sort by space saved descending (most reclaimed at top).
     stats_rows.sort(key=lambda row: row[0], reverse=True)
 
     if debug:

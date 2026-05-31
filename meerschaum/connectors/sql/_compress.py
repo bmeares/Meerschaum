@@ -67,6 +67,39 @@ def _normalize_columnstore_cols(
     return normalized
 
 
+def _not_a_hypertable_message(pipe: mrsm.Pipe) -> str:
+    """
+    Build the "not a hypertable" failure message for `compress_pipe` / `decompress_pipe`.
+
+    Only pipes with a `datetime` axis can be turned into a hypertable, so the `index pipes`
+    conversion hint is appended only when one is configured.
+    """
+    msg = f"{pipe} is not a hypertable; only hypertables support TimescaleDB compression."
+    if pipe.columns.get('datetime', None):
+        msg += (
+            f"\n    Run `{_index_pipes_command(pipe)}` to convert its table into a hypertable\n"
+            "    (ensure the pipe's 'hypertable' parameter is not set to false)."
+        )
+    return msg
+
+
+def _index_pipes_command(pipe: mrsm.Pipe) -> str:
+    """
+    Build a copy-pasteable `index pipes` command targeting a single pipe, including its
+    `-c`/`-m`/`-l` key flags and `-i` instance (the `-l` flag is omitted when the pipe has no
+    location key).
+    """
+    parts = [
+        'index pipes',
+        '-c', str(pipe.connector_keys),
+        '-m', str(pipe.metric_key),
+    ]
+    if pipe.location_key is not None:
+        parts.extend(['-l', str(pipe.location_key)])
+    parts.extend(['-i', str(pipe.instance_keys)])
+    return ' '.join(parts)
+
+
 def get_pipe_size(
     self,
     pipe: mrsm.Pipe,
@@ -216,12 +249,22 @@ def _get_compress_settings(
 
 
 def _is_hypertable(self, pipe: mrsm.Pipe, debug: bool = False) -> bool:
-    """Return whether a pipe's target table is a TimescaleDB hypertable."""
-    from meerschaum.utils.sql import sql_item_name, hypertable_queries
-    if self.flavor not in hypertable_queries:
+    """Return whether a pipe's target table is a TimescaleDB hypertable.
+
+    Queries the TimescaleDB catalog rather than a size function: `hypertable_size()` SUMs chunk
+    sizes and returns `NULL` for a hypertable with zero chunks (e.g. one synced no data yet),
+    which would otherwise be a false negative.
+    """
+    if self.flavor not in ('timescaledb', 'timescaledb-ha'):
         return False
-    pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
-    query = hypertable_queries[self.flavor].format(table_name=pipe_name)
+    schema = self.get_pipe_schema(pipe) or 'public'
+    clean_schema = schema.replace("'", "''")
+    clean_target = pipe.target.replace("'", "''")
+    query = (
+        "SELECT 1 FROM timescaledb_information.hypertables\n"
+        f"WHERE hypertable_schema = '{clean_schema}'\n"
+        f"  AND hypertable_name = '{clean_target}'"
+    )
     return self.value(query, silent=True, debug=debug) is not None
 
 
@@ -423,9 +466,7 @@ def compress_pipe(
     query_groups: List[List[str]] = []
     if flavor in ('timescaledb', 'timescaledb-ha'):
         if not self._is_hypertable(pipe, debug=debug):
-            return False, (
-                f"{pipe} is not a hypertable; only hypertables support TimescaleDB compression."
-            )
+            return False, _not_a_hypertable_message(pipe)
         ### 1. Enable the columnstore (required before any chunk can be converted).
         query_groups.append([self._get_columnstore_settings_query(pipe)])
         ### 2. Install a policy for ongoing conversion — re-create it so the configured `after`
@@ -542,9 +583,7 @@ def decompress_pipe(
     query_groups: List[List[str]] = []
     if flavor in ('timescaledb', 'timescaledb-ha'):
         if not self._is_hypertable(pipe, debug=debug):
-            return False, (
-                f"{pipe} is not a hypertable; only hypertables support TimescaleDB compression."
-            )
+            return False, _not_a_hypertable_message(pipe)
         ### 1. Remove the ongoing policy so chunks aren't recompressed. Skipped with `no_policy`,
         ### which decompresses existing chunks now but leaves the policy (e.g. for a backfill).
         if not no_policy:
