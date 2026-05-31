@@ -529,3 +529,140 @@ def get_pipe_columns_indices(
     {'id': [{'name': 'demo_shirts_pkey', 'type': 'PRIMARY KEY'}], 'color': [{'name': 'IX_demo_shirts_color_size', 'type': 'INDEX'}], 'size': [{'name': 'IX_demo_shirts_color_size', 'type': 'INDEX'}]}
     """
     return {}
+
+def get_pipe_size(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kwargs: Any
+) -> Union[int, None]:
+    """
+    Return the on-disk size of a pipe's target table in bytes.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table size to measure.
+
+    Returns
+    -------
+    An `int` of the number of bytes occupied by the target table,
+    or `None` if the size cannot be determined.
+    """
+    raise NotImplementedError(
+        f"`get_pipe_size()` is not implemented for instance connectors of type '{self.type}'."
+    )
+
+def compress_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Compress a pipe's target table to reduce disk usage.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to compress.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    return False, (
+        f"Compression is not supported for instance connectors of type '{self.type}'."
+    )
+
+def decompress_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Decompress a pipe's target table, the inverse of `compress_pipe()`.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to decompress.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    return False, (
+        f"Decompression is not supported for instance connectors of type '{self.type}'."
+    )
+
+def vacuum_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Reclaim disk space from a pipe's target table.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to vacuum.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    return False, (
+        f"Vacuuming is not supported for instance connectors of type '{self.type}'."
+    )
+
+def analyze_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Refresh the planner statistics for a pipe's target table.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to analyze.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    return False, (
+        f"Analyzing is not supported for instance connectors of type '{self.type}'."
+    )
+
+def partition_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    chunk_minutes: Optional[int] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Rebuild a pipe's target table to a new partition (chunk) width.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The partitioned pipe whose target table to repartition.
+
+    chunk_minutes: Optional[int], default None
+        The new partition width in minutes. Defaults to the pipe's `verify.chunk_minutes`.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    return False, (
+        f"Repartitioning is not supported for instance connectors of type '{self.type}'."
+    )

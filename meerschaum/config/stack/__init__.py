@@ -33,7 +33,7 @@ valkey_password = 'MRSM{meerschaum:connectors:valkey:main:password}'
 
 env_dict = {
     'COMPOSE_PROJECT_NAME': 'mrsm',
-    'TIMESCALEDB_VERSION': 'pg17',
+    'TIMESCALEDB_VERSION': 'pg18',
     'POSTGRES_USER': db_user,
     'POSTGRES_PASSWORD': db_pass,
     'POSTGRES_DB': db_base,

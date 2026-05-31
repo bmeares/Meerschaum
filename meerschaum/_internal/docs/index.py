@@ -155,6 +155,40 @@ Add `temporary=True` to skip registering the pipe in the pipes table.
 </details>
 
 <details>
+    <summary><b>Query an Integer-Axis Pipe by Datetime</b></summary>
+
+When a pipe's `datetime` axis is an integer epoch, set `precision` so datetime bounds can be translated to the axis's integer value. This lets you pass a datetime `begin` / `end` to `meerschaum.Pipe.get_data()` (and to actions like `show data`, `clear`, and `deduplicate`):
+
+```python
+from datetime import datetime, timezone
+import meerschaum as mrsm
+
+pipe = mrsm.Pipe(
+    'demo', 'epoch',
+    instance='sql:temp',
+    columns={'datetime': 'ts'},
+    dtypes={'ts': 'int'},
+    precision='millisecond',
+)
+pipe.sync([{'ts': 1780099200000}])
+
+### The datetime is translated to the epoch value `1780099200000`.
+df = pipe.get_data(begin='2026-05-30')
+```
+
+Integer bounds (`begin=1780099200000`) still pass through unchanged. A datetime bound on a non-epoch integer axis (no `precision` set) raises a `ValueError`. Convert directly with `meerschaum.utils.dtypes.datetime_to_int()`:
+
+```python
+from datetime import datetime, timezone
+from meerschaum.utils.dtypes import datetime_to_int
+
+datetime_to_int(datetime(2026, 5, 30, tzinfo=timezone.utc), 'millisecond')
+# 1780099200000
+```
+
+</details>
+
+<details>
     <summary><b>Get Registered Pipes</b></summary>
 
 The `meerschaum.get_pipes()` function returns a dictionary hierarchy of pipes by connector, metric, and location:
@@ -614,6 +648,7 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.dtypes.attempt_cast_to_numeric()</code></li>
       <li><code>meerschaum.utils.dtypes.attempt_cast_to_uuid()</code></li>
       <li><code>meerschaum.utils.dtypes.coerce_timezone()</code></li>
+      <li><code>meerschaum.utils.dtypes.datetime_to_int()</code></li>
       <li><code>meerschaum.utils.dtypes.deserialize_base64()</code></li>
       <li><code>meerschaum.utils.dtypes.deserialize_bytes_string()</code></li>
       <li><code>meerschaum.utils.dtypes.deserialize_geometry()</code></li>
@@ -668,11 +703,14 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.formatting.colored()</code></li>
       <li><code>meerschaum.utils.formatting.extract_stats_from_message()</code></li>
       <li><code>meerschaum.utils.formatting.fill_ansi()</code></li>
+      <li><code>meerschaum.utils.formatting.format_bytes()</code></li>
+      <li><code>meerschaum.utils.formatting.format_dataframe()</code></li>
       <li><code>meerschaum.utils.formatting.get_console()</code></li>
       <li><code>meerschaum.utils.formatting.highlight_pipes()</code></li>
       <li><code>meerschaum.utils.formatting.make_header()</code></li>
       <li><code>meerschaum.utils.formatting.pipe_repr()</code></li>
       <li><code>meerschaum.utils.formatting.pprint()</code></li>
+      <li><code>meerschaum.utils.formatting.pprint_df()</code></li>
       <li><code>meerschaum.utils.formatting.pprint_pipes()</code></li>
       <li><code>meerschaum.utils.formatting.print_options()</code></li>
       <li><code>meerschaum.utils.formatting.print_pipes_results()</code></li>
@@ -726,6 +764,7 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.misc.is_bcp_available()</code></li>
       <li><code>meerschaum.utils.misc.truncate_string_sections()</code></li>
       <li><code>meerschaum.utils.misc.safely_extract_tar()</code></li>
+      <li><code>meerschaum.utils.misc.get_directory_size()</code></li>
     </ul>
   </details>
   </ul>
@@ -854,6 +893,23 @@ def init_dash(dash_app):
       <li><code>meerschaum.utils.sql.get_reset_autoincrement_queries()</code></li>
       <li><code>meerschaum.utils.sql.get_postgis_geo_columns_types()</code></li>
       <li><code>meerschaum.utils.sql.get_create_schema_if_not_exists_queries()</code></li>
+    </ul>
+  </details>
+  </ul>
+
+  <ul>
+  <details>
+    <summary>
+    <code>meerschaum.utils.threading</code><br>
+    Manage threads and process-wide stop signals.
+    <br>
+    </summary>
+    <p></p>
+    <ul>
+      <li><code>meerschaum.utils.threading.request_stop()</code></li>
+      <li><code>meerschaum.utils.threading.stop_requested()</code></li>
+      <li><code>meerschaum.utils.threading.clear_stop()</code></li>
+      <li><code>meerschaum.utils.threading.interrupt_threads()</code></li>
     </ul>
   </details>
   </ul>

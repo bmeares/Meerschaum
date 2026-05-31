@@ -133,6 +133,8 @@ paths = {
     'PERMANENT_PATCH_DIR_PATH'       : ('{ROOT_DIR_PATH}', 'permanent_patch_config'),
     'INTERNAL_RESOURCES_PATH'        : ('{ROOT_DIR_PATH}', '.internal'),
 
+    'CONFIG_BACKUPS_RESOURCES_PATH'  : ('{INTERNAL_RESOURCES_PATH}', 'config_backups'),
+
     'UPDATES_RESOURCES_PATH'         : ('{INTERNAL_RESOURCES_PATH}', 'updates'),
     'UPDATES_CACHE_PATH'             : ('{UPDATES_RESOURCES_PATH}', 'cache.json'),
     'UPDATES_LOCK_PATH'              : ('{UPDATES_RESOURCES_PATH}', '.updates.lock'),

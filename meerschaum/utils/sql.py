@@ -2194,6 +2194,12 @@ def get_create_table_queries(
     primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
+    hypertable_chunk_interval: Optional[str] = None,
+    hypertable_segmentby: Optional[List[str]] = None,
+    hypertable_orderby: Optional[List[str]] = None,
+    partition_by_column: Optional[str] = None,
+    partition_bounds: Optional[List] = None,
+    partition_scheme_name: Optional[str] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2228,6 +2234,23 @@ def get_create_table_queries(
         If provided, include this column in the primary key.
         Applicable to TimescaleDB only.
 
+    hypertable_chunk_interval: Optional[str], default None
+        If provided (and `flavor` is TimescaleDB), create the table as a hypertable using the
+        declarative `CREATE TABLE ... WITH (tsdb.hypertable, ...)` syntax, partitioned on
+        `datetime_column` with this chunk interval (e.g. `'10080 minutes'` or `'100000'`).
+        Requires TimescaleDB 2.21+; callers should fall back to `create_hypertable()` on failure.
+
+    hypertable_segmentby: Optional[List[str]], default None
+        If provided (alongside `hypertable_chunk_interval`), enable the Hypercore columnstore on
+        the new hypertable and segment compressed chunks by these columns (`tsdb.segmentby`).
+        Should be low-cardinality columns; high-cardinality / unique columns belong in
+        `hypertable_orderby` instead.
+
+    hypertable_orderby: Optional[List[str]], default None
+        If provided (alongside `hypertable_chunk_interval`), order the columnstore by these
+        columns (`tsdb.orderby`, e.g. `['"timestamp" DESC']`). Declaring `segmentby`/`orderby`
+        in `CREATE TABLE` causes TimescaleDB to auto-create a columnstore policy.
+
     _parse_dtypes: bool, default True
         If `True`, cast Pandas dtypes to SQL dtypes.
         Otherwise pass through the given value directly.
@@ -2253,8 +2276,22 @@ def get_create_table_queries(
         primary_key_db_type=primary_key_db_type,
         autoincrement=(autoincrement and flavor not in SKIP_AUTO_INCREMENT_FLAVORS),
         datetime_column=datetime_column,
+        hypertable_chunk_interval=hypertable_chunk_interval,
+        hypertable_segmentby=hypertable_segmentby,
+        hypertable_orderby=hypertable_orderby,
+        partition_by_column=partition_by_column,
+        partition_bounds=partition_bounds,
+        partition_scheme_name=partition_scheme_name,
         _parse_dtypes=_parse_dtypes,
     )
+
+
+### Non-TimescaleDB flavors that support declarative range partitioning on a datetime column.
+### PostgreSQL-style declares an empty parent (`PARTITION BY RANGE`) with children added
+### separately; MySQL-style requires the initial partitions inline at `CREATE TABLE`.
+PG_PARTITION_FLAVORS = {'postgresql', 'postgis'}
+MYSQL_PARTITION_FLAVORS = {'mysql', 'mariadb'}
+NATIVE_PARTITION_FLAVORS = PG_PARTITION_FLAVORS | MYSQL_PARTITION_FLAVORS
 
 
 def _get_create_table_query_from_dtypes(
@@ -2266,6 +2303,12 @@ def _get_create_table_query_from_dtypes(
     primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
+    hypertable_chunk_interval: Optional[str] = None,
+    hypertable_segmentby: Optional[List[str]] = None,
+    hypertable_orderby: Optional[List[str]] = None,
+    partition_by_column: Optional[str] = None,
+    partition_bounds: Optional[List] = None,
+    partition_scheme_name: Optional[str] = None,
     _parse_dtypes: bool = True,
 ) -> List[str]:
     """
@@ -2311,6 +2354,29 @@ def _get_create_table_query_from_dtypes(
         else None
     )
     datetime_column_name = sql_item_name(datetime_column, flavor) if datetime_column else None
+
+    ### Native (non-TimescaleDB) declarative range partitioning. The partition column must be
+    ### part of the primary key, so it is folded into a composite PK just like the TimescaleDB
+    ### datetime column below.
+    is_native_partitioned = bool(
+        partition_by_column is not None
+        and flavor in NATIVE_PARTITION_FLAVORS
+    )
+    partition_by_column_name = (
+        sql_item_name(partition_by_column, flavor)
+        if (partition_by_column is not None and flavor in NATIVE_PARTITION_FLAVORS | {'mssql'})
+        else None
+    )
+    ### MSSQL partitions a table by placing its clustered index on a partition scheme (created
+    ### beforehand by the connector); the partitioning column must be part of that clustered key.
+    is_mssql_partitioned = bool(
+        flavor == 'mssql'
+        and partition_scheme_name is not None
+        and partition_by_column is not None
+    )
+    partition_scheme_item = (
+        sql_item_name(partition_scheme_name, flavor, None) if is_mssql_partitioned else None
+    )
     primary_key_clustered = (
         "CLUSTERED"
         if not datetime_column or datetime_column == primary_key
@@ -2339,6 +2405,9 @@ def _get_create_table_query_from_dtypes(
             and datetime_column != primary_key
         ):
             query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
+        elif is_native_partitioned and partition_by_column != primary_key:
+            ### Defer the PK to a composite `PRIMARY KEY(partition_col, pk)` below.
+            query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
         elif flavor == 'mssql':
             query += f"\n    {col_name} {col_db_type}{auto_increment_str} NOT NULL,"
         else:
@@ -2357,11 +2426,74 @@ def _get_create_table_query_from_dtypes(
     ):
         query += f"\n    PRIMARY KEY({datetime_column_name}, {primary_key_name}),"
 
+    if is_native_partitioned and primary_key and partition_by_column != primary_key:
+        ### MySQL requires an `AUTO_INCREMENT` column to be the first column of a key, so list the
+        ### primary key first there; PostgreSQL is order-insensitive.
+        if flavor in MYSQL_PARTITION_FLAVORS:
+            query += f"\n    PRIMARY KEY({primary_key_name}, {partition_by_column_name}),"
+        else:
+            query += f"\n    PRIMARY KEY({partition_by_column_name}, {primary_key_name}),"
+
     if flavor == 'mssql' and primary_key:
-        query += f"\n    CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name}),"
+        if is_mssql_partitioned and partition_by_column != primary_key:
+            ### Make the primary key CLUSTERED and place it on the partition scheme, including the
+            ### partition column as the leading key. This is what partitions the table's storage.
+            query += (
+                f"\n    CONSTRAINT {primary_key_constraint_name} PRIMARY KEY CLUSTERED "
+                f"({partition_by_column_name}, {primary_key_name}) "
+                f"ON {partition_scheme_item}({partition_by_column_name}),"
+            )
+        else:
+            query += f"\n    CONSTRAINT {primary_key_constraint_name} PRIMARY KEY {primary_key_clustered} ({primary_key_name}),"
 
     query = query[:-1]
     query += "\n)"
+
+    if is_mssql_partitioned and not primary_key:
+        ### No primary key to anchor storage on the scheme, so place the table itself on it.
+        query += f"\nON {partition_scheme_item}({partition_by_column_name})"
+
+    if is_native_partitioned and flavor in PG_PARTITION_FLAVORS:
+        ### The parent table holds no rows directly; child partitions are created on demand
+        ### (see `SQLConnector._create_missing_partitions`).
+        query += f"\nPARTITION BY RANGE ({partition_by_column_name})"
+
+    elif is_native_partitioned and flavor in MYSQL_PARTITION_FLAVORS:
+        ### MySQL/MariaDB cannot create a RANGE-partitioned table with zero partitions, so the
+        ### initial partitions (computed by the connector from the creation dataframe) are declared
+        ### inline. Further partitions are appended later via `ALTER TABLE ... ADD PARTITION`.
+        ### `RANGE COLUMNS` partitions on the DATETIME column directly (no integer conversion).
+        bounds = partition_bounds or []
+        partition_defs = ',\n'.join(
+            f"    PARTITION {sql_item_name(part_name, flavor)} VALUES LESS THAN ({hi_literal})"
+            for part_name, hi_literal in bounds
+        )
+        query += (
+            f"\nPARTITION BY RANGE COLUMNS ({partition_by_column_name}) (\n"
+            f"{partition_defs}\n)"
+        )
+
+    if (
+        hypertable_chunk_interval is not None
+        and flavor in ('timescaledb', 'timescaledb-ha')
+        and datetime_column
+    ):
+        partition_column = datetime_column.replace("'", "''")
+        chunk_interval = hypertable_chunk_interval.replace("'", "''")
+        with_options = [
+            "tsdb.hypertable",
+            f"tsdb.partition_column='{partition_column}'",
+            f"tsdb.chunk_interval='{chunk_interval}'",
+        ]
+        ### Declaring `segmentby`/`orderby` enables the Hypercore columnstore and causes
+        ### TimescaleDB to auto-create a columnstore (compression) policy.
+        if hypertable_segmentby:
+            segmentby = ', '.join(hypertable_segmentby).replace("'", "''")
+            with_options.append(f"tsdb.segmentby='{segmentby}'")
+        if hypertable_orderby:
+            orderby = ', '.join(hypertable_orderby).replace("'", "''")
+            with_options.append(f"tsdb.orderby='{orderby}'")
+        query += "\nWITH (\n    " + ",\n    ".join(with_options) + "\n)"
 
     queries = [query]
     return queries
@@ -2376,10 +2508,18 @@ def _get_create_table_query_from_cte(
     primary_key_db_type: Optional[str] = None,
     autoincrement: bool = False,
     datetime_column: Optional[str] = None,
+    hypertable_chunk_interval: Optional[str] = None,
+    hypertable_segmentby: Optional[List[str]] = None,
+    hypertable_orderby: Optional[List[str]] = None,
+    partition_by_column: Optional[str] = None,
+    partition_bounds: Optional[List] = None,
+    partition_scheme_name: Optional[str] = None,
     _parse_dtypes=None,
 ) -> List[str]:
     """
     Create a new table from a CTE query.
+    NOTE: `hypertable_chunk_interval`/`hypertable_segmentby`/`hypertable_orderby` are ignored here;
+    `CREATE TABLE ... AS` cannot declare a hypertable. Convert via `create_hypertable()` afterward.
     """
     import textwrap
     create_cte = 'create_query'

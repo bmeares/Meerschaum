@@ -1112,3 +1112,159 @@ def get_pipe_index_names(
         location_key,
         instance_keys,
     ).get_indices()
+
+
+@app.get(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/size',
+    tags=['Pipes: Data'],
+)
+def get_pipe_size(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:read'])),
+) -> Union[int, None]:
+    """
+    Return the on-disk size of a pipe's target table in bytes.
+    See [`Pipe.get_size()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_size).
+    """
+    return get_pipe(connector_keys, metric_key, location_key, instance_keys).get_size(debug=debug)
+
+
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/compress',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def compress_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
+) -> mrsm.SuccessTuple:
+    """
+    Compress a pipe's target table to reduce disk usage.
+    See [`Pipe.compress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.compress).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot compress protected table '{pipe.target}'.",
+        )
+    success, msg = pipe.compress(debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg
+
+
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/decompress',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def decompress_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    no_policy: bool = False,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
+) -> mrsm.SuccessTuple:
+    """
+    Decompress a pipe's target table, the inverse of `compress`.
+    See [`Pipe.decompress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.decompress).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot decompress protected table '{pipe.target}'.",
+        )
+    success, msg = pipe.decompress(no_policy=no_policy, debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg
+
+
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/vacuum',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def vacuum_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    full: bool = False,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
+) -> mrsm.SuccessTuple:
+    """
+    Vacuum a pipe's target table to reclaim disk space.
+    See [`Pipe.vacuum()`](https://docs.meerschaum.io/meerschaum.html#Pipe.vacuum).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot vacuum protected table '{pipe.target}'.",
+        )
+    success, msg = pipe.vacuum(full=full, debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg
+
+
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/analyze',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def analyze_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
+) -> mrsm.SuccessTuple:
+    """
+    Analyze a pipe's target table to refresh planner statistics.
+    See [`Pipe.analyze()`](https://docs.meerschaum.io/meerschaum.html#Pipe.analyze).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot analyze protected table '{pipe.target}'.",
+        )
+    success, msg = pipe.analyze(debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg
+
+
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/partition',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def partition_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    chunk_minutes: Optional[int] = None,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
+) -> mrsm.SuccessTuple:
+    """
+    Repartition a pipe's target table to a new chunk width.
+    See [`Pipe.repartition()`](https://docs.meerschaum.io/meerschaum.html#Pipe.repartition).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot repartition protected table '{pipe.target}'.",
+        )
+    success, msg = pipe.repartition(chunk_minutes=chunk_minutes, debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg

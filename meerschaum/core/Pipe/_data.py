@@ -88,7 +88,7 @@ def get_data(
     chunk_interval: Union[timedelta, int, None], default None
         If `as_iterator`, then return chunks with `begin` and `end` separated by this interval.
         This may be set under `pipe.parameters['chunk_minutes']`.
-        By default, use a timedelta of 1440 minutes (1 day).
+        By default, use a timedelta of 43200 minutes (30 days).
         If `chunk_interval` is an integer and the `datetime` axis a timestamp,
         the use a timedelta with the number of minutes configured to this value.
         If the `datetime` axis is an integer, default to the configured chunksize.
@@ -594,6 +594,48 @@ def get_rowcount(
     return 0
 
 
+def get_size(
+    self,
+    debug: bool = False,
+    **kw: Any
+) -> Union[int, None]:
+    """
+    Return the on-disk size of the pipe's target table in bytes.
+
+    Parameters
+    ----------
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    An `int` of the number of bytes occupied by the pipe's target table,
+    or `None` if the size could not be determined (e.g. the connector does
+    not implement `get_pipe_size()` or the table does not exist).
+    """
+    from meerschaum.utils.warnings import warn
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+    from meerschaum.utils.misc import filter_keywords
+
+    connector = self.instance_connector
+    try:
+        with Venv(get_connector_plugin(connector)):
+            if not hasattr(connector, 'get_pipe_size'):
+                return None
+            kwargs = filter_keywords(
+                connector.get_pipe_size,
+                debug=debug,
+                **kw
+            )
+            return connector.get_pipe_size(self, **kwargs)
+    except NotImplementedError:
+        return None
+    except Exception as e:
+        warn(f"Failed to get the size of {self}:\n{e}", stack=False)
+    return None
+
+
 def get_chunk_interval(
     self,
     chunk_interval: Union[timedelta, int, None] = None,
@@ -602,46 +644,85 @@ def get_chunk_interval(
     """
     Get the chunk interval to use for this pipe.
 
+    The size is read from the `verify` parameters. Any one of these aliased keys may be used
+    (the first present, in this priority order, wins):
+
+        - `verify.chunk_minutes` (the default; 43200 — 30 days — if none is set)
+        - `verify.chunk_hours`
+        - `verify.chunk_days`
+        - `verify.chunk_weeks`
+        - `verify.chunk_years`
+        - `verify.chunk_seconds`
+
+    For an integer datetime axis, `verify.chunk_range` (if set) is used verbatim as the chunk size
+    in epoch units. Otherwise the time-based size above is converted to epoch units via the pipe's
+    `precision`, or — preserving legacy behavior when no `precision` is set — its minutes are used
+    verbatim.
+
     Parameters
     ----------
     chunk_interval: Union[timedelta, int, None], default None
-        If provided, coerce this value into the correct type.
-        For example, if the datetime axis is an integer, then
-        return the number of minutes.
+        If provided, coerce this value into the correct type (overriding the `verify` keys).
+        For example, if the datetime axis is an integer, then return the number of minutes.
 
     Returns
     -------
     The chunk interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
     """
     from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES
-    default_chunk_minutes = get_config('pipes', 'parameters', 'verify', 'chunk_minutes')
-    configured_chunk_minutes = self.parameters.get('verify', {}).get('chunk_minutes', None)
-    chunk_minutes = (
-        (configured_chunk_minutes or default_chunk_minutes)
-        if chunk_interval is None
-        else (
+
+    dt_col = self.columns.get('datetime', None)
+    dt_dtype = self.dtypes.get(dt_col, 'datetime') if dt_col is not None else 'datetime'
+    is_int_axis = 'int' in str(dt_dtype).lower()
+    verify_params = self.parameters.get('verify', {})
+
+    ### An explicit `chunk_interval` argument overrides everything (legacy behavior).
+    if chunk_interval is not None:
+        chunk_minutes = (
             chunk_interval
             if isinstance(chunk_interval, int)
             else int(chunk_interval.total_seconds() / 60)
         )
-    )
+        if dt_col is None:
+            return timedelta(minutes=chunk_minutes)
+        return chunk_minutes if is_int_axis else timedelta(minutes=chunk_minutes)
 
-    dt_col = self.columns.get('datetime', None)
+    ### Integer axis: an explicit `verify.chunk_range` is the chunk size in epoch units, verbatim.
+    if dt_col is not None and is_int_axis:
+        chunk_range = verify_params.get('chunk_range', None)
+        if chunk_range is not None:
+            return int(chunk_range)
+
+    ### Resolve the time-based chunk size from the aliased `verify.chunk_*` keys (priority order
+    ### matches the `bound_*` aliases). Falls back to the configured `chunk_minutes` default.
+    chunk_delta = None
+    for suffix in ('minutes', 'hours', 'days', 'weeks', 'years', 'seconds'):
+        val = verify_params.get('chunk_' + suffix, None)
+        if val is None:
+            continue
+        ### `timedelta` has no `years` kwarg; approximate a year as 365 days.
+        chunk_delta = timedelta(days=(val * 365)) if suffix == 'years' else timedelta(**{suffix: val})
+        break
+    if chunk_delta is None:
+        default_chunk_minutes = get_config('pipes', 'parameters', 'verify', 'chunk_minutes')
+        chunk_delta = timedelta(minutes=default_chunk_minutes)
+
     if dt_col is None:
-        return timedelta(minutes=chunk_minutes)
+        return chunk_delta
 
-    dt_dtype = self.dtypes.get(dt_col, 'datetime')
-    if 'int' in dt_dtype.lower():
-        if chunk_interval is not None or not self.parameters.get('precision', None):
-            return chunk_minutes
+    if is_int_axis:
+        ### Legacy: without `precision` (and without `chunk_range`), use the chunk's minutes
+        ### verbatim as the integer interval.
+        if not self.parameters.get('precision', None):
+            return int(chunk_delta.total_seconds() / 60)
         precision_unit = self.precision.get('unit', None)
         true_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
         scalar = MRSM_PRECISION_UNITS_SCALARS.get(true_unit, None)
         if scalar is not None:
-            return int(chunk_minutes * 60 * scalar)
-        return chunk_minutes
+            return int(chunk_delta.total_seconds() * scalar)
+        return int(chunk_delta.total_seconds() / 60)
 
-    return timedelta(minutes=chunk_minutes)
+    return chunk_delta
 
 
 def get_chunk_bounds(
@@ -650,6 +731,7 @@ def get_chunk_bounds(
     end: Union[datetime, int, None] = None,
     bounded: bool = False,
     chunk_interval: Union[timedelta, int, None] = None,
+    align: bool = False,
     debug: bool = False,
 ) -> List[
     Tuple[
@@ -677,6 +759,13 @@ def get_chunk_bounds(
         If provided, use this interval for the size of chunk boundaries.
         The default value for this pipe may be set
         under `pipe.parameters['verify']['chunk_minutes']`.
+
+    align: bool, default False
+        If `True`, anchor the interior chunk boundaries to a fixed Unix-epoch grid (the same
+        grid used for native range partitioning) rather than to `begin`. This makes the
+        boundaries deterministic across re-syncs and aligned with the pipe's partitions
+        (used by `Pipe.verify()`). The first chunk's lower bound and the last chunk's upper
+        bound are still clamped to `begin` / `end`.
 
     debug: bool, default False
         Verbosity toggle.
@@ -724,12 +813,28 @@ def get_chunk_bounds(
 
     ### Set the chunk interval under `pipe.parameters['verify']['chunk_minutes']`.
     chunk_interval = self.get_chunk_interval(chunk_interval, debug=debug)
-    
+
+    ### Anchor the interior boundaries to a fixed Unix-epoch grid (matching native range
+    ### partitioning, see `SQLConnector._partition_bounds`) so chunk edges line up with partition
+    ### edges and stay deterministic regardless of `begin`. The first chunk is clamped back to
+    ### `begin` below.
+    begin_cursor = begin
+    if align and begin is not None:
+        if isinstance(chunk_interval, int):
+            begin_cursor = (int(begin) // chunk_interval) * chunk_interval
+        else:
+            epoch = (
+                datetime(1970, 1, 1, tzinfo=begin.tzinfo)
+                if getattr(begin, 'tzinfo', None) is not None
+                else datetime(1970, 1, 1)
+            )
+            n = (begin - epoch) // chunk_interval
+            begin_cursor = epoch + (n * chunk_interval)
+
     ### Build a list of tuples containing the chunk boundaries
     ### so that we can sync multiple chunks in parallel.
     ### Run `verify pipes --workers 1` to sync chunks in series.
     chunk_bounds = []
-    begin_cursor = begin
     num_chunks = 0
     max_chunks = 1_000_000
     while begin_cursor < end:
@@ -759,6 +864,16 @@ def get_chunk_bounds(
     ### Pop the last chunk if its bounds are equal.
     if chunk_bounds[-1][0] == chunk_bounds[-1][1]:
         chunk_bounds = chunk_bounds[:-1]
+
+    ### Clamp the epoch-aligned first chunk's lower bound back to the requested `begin` so the
+    ### returned range still starts exactly at `begin` (only the interior edges are grid-aligned).
+    if (
+        align
+        and chunk_bounds
+        and chunk_bounds[0][0] is not None
+        and chunk_bounds[0][0] < begin
+    ):
+        chunk_bounds[0] = (begin, chunk_bounds[0][1])
 
     if include_less_than_begin:
         chunk_bounds = [(None, begin)] + chunk_bounds
@@ -828,7 +943,7 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None], debug: bool = 
     Given a date bound (begin, end), coerce a timezone if necessary.
     """
     from meerschaum.utils.misc import is_int
-    from meerschaum.utils.dtypes import coerce_timezone, MRSM_PD_DTYPES
+    from meerschaum.utils.dtypes import coerce_timezone, MRSM_PD_DTYPES, are_dtypes_equal
     from meerschaum.utils.warnings import warn
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
@@ -865,6 +980,16 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None], debug: bool = 
         _get_coercion_info()
         dt_col = _columns.get('datetime', None)
         dt_typ = str(_dtypes.get(dt_col, 'datetime'))
+        if are_dtypes_equal(dt_typ, 'int'):
+            if self.get_parameters(debug=debug).get('precision'):
+                from meerschaum.utils.dtypes import datetime_to_int
+                return datetime_to_int(dt_val, self.precision['unit'])
+            from meerschaum.utils.warnings import error
+            error(
+                f"Cannot use datetime bound '{dt_val}' on the non-epoch integer axis "
+                f"of {self}.\n    Pass an integer instead, or set the `precision` parameter.",
+                ValueError,
+            )
         if dt_typ == 'datetime':
             dt_typ = MRSM_PD_DTYPES['datetime']
         return coerce_timezone(dt_val, strip_utc=('utc' not in dt_typ.lower()))

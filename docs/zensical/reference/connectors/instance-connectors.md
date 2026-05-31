@@ -259,8 +259,12 @@ Values within filters are joined by `OR`, and filters are joined by `AND`.
 
 The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/misc.html#meerschaum.utils.misc.separate_negation_values) returns two sublists: regular values (`IN`) and values preceded by an underscore (`NOT IN`).
 
-You may return either a **list of tuples** or a **dictionary mapping pipe IDs to tuples**.
-Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 with parameters or tags as the fourth element.
+The recommended return value is a **dictionary mapping each pipe's ID to a tuple** of `(connector_keys, metric_key, location_key, parameters)`.
+Returning the parameters lets Meerschaum hydrate every pipe in a single round-trip instead of calling [`get_pipe_attributes()`](#get_pipe_attributes) per pipe.
+It also lets Meerschaum apply the `--targets` and `--datetime-dtypes` filters client-side (both are derived from `parameters`), so you only need to implement the `connector_keys`, `metric_keys`, `location_keys`, and `tags` filters here.
+
+!!! note "Legacy return values"
+    For backwards compatibility, you may also return a plain **list of tuples**, and tuples may be length 3 (omitting `parameters`). These forms are supported but lose the single-round-trip benefit above — prefer the dictionary form for new connectors.
 
 ??? example "`#!python def fetch_pipes_keys():`"
     ```python
@@ -272,12 +276,7 @@ Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 
         tags: list[str] | None = None,
         debug: bool = False,
         **kwargs: Any
-    ) -> (
-        list[tuple[str, str, str]]
-        | list[tuple[str, str, str, dict | list]]
-        | dict[int | str, tuple[str, str, str]]
-        | dict[int | str, tuple[str, str, str, dict | list]]
-    ):
+    ) -> dict[str | int, tuple[str, str, str, dict]]:
         """
         Return registered pipes' keys according to the provided filters.
 
@@ -297,9 +296,13 @@ Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 
 
         Returns
         -------
-        A list of tuples or a dictionary mapping pipe IDs to tuples.
+        A dictionary mapping each pipe's ID to a tuple of
+        `(connector_keys, metric_key, location_key, parameters)`.
         You may return the string `"None"` for location keys in place of nulls.
-        Tuples may include parameters or tags as a fourth element.
+
+        Including `parameters` in each tuple lets Meerschaum apply the `--targets`
+        and `--datetime-dtypes` filters client-side, so you do not need to handle
+        those filters here.
 
         Examples
         --------
@@ -312,13 +315,13 @@ Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 
         >>> pipe_b.register()
         >>>
         >>> conn.fetch_pipes_keys(['a', 'b'])
-        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        {1: ('a', 'demo', 'None', {'tags': ['foo']}), 2: ('b', 'demo', 'None', {'tags': ['bar']})}
         >>> conn.fetch_pipes_keys(metric_keys=['demo'])
-        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        {1: ('a', 'demo', 'None', {'tags': ['foo']}), 2: ('b', 'demo', 'None', {'tags': ['bar']})}
         >>> conn.fetch_pipes_keys(tags=['foo'])
-        [('a', 'demo', 'None')]
+        {1: ('a', 'demo', 'None', {'tags': ['foo']})}
         >>> conn.fetch_pipes_keys(location_keys=[None])
-        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        {1: ('a', 'demo', 'None', {'tags': ['foo']}), 2: ('b', 'demo', 'None', {'tags': ['bar']})}
         """
         from meerschaum.utils.misc import separate_negation_values
 
@@ -331,7 +334,7 @@ Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 
         ### The `tags` clause is an OR ("?|"), meaning any of the tags may match.
         ###
         ###
-        ### SELECT pipe_id, connector_keys, metric_key, location_key
+        ### SELECT pipe_id, connector_keys, metric_key, location_key, parameters
         ### FROM pipes
         ### WHERE connector_keys IN ({in_ck})
         ###   AND connector_keys NOT IN ({nin_ck})
@@ -342,11 +345,9 @@ Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 
         ###   AND (parameters->'tags')::JSONB ?| ARRAY[{tags}]
         ###   AND NOT (parameters->'tags')::JSONB ?| ARRAY[{nin_tags}]
 
-        ### Return a dict mapping pipe_id to (connector_keys, metric_key, location_key):
+        ### Return a dict mapping each pipe's ID to its keys and parameters, e.g.:
+        ### {1: ('a', 'demo', 'None', {'tags': ['foo']})}
         return {}
-
-        ### Or return a list of tuples (also accepted):
-        ### return []
     ```
 
 ## `#!python pipe_exists()`
@@ -796,4 +797,156 @@ Return the number of rows in the pipe's target table within the `begin`, `end`, 
         table_name = pipe.target
         count = 0
         return count
+    ```
+
+### `#!python get_pipe_size()` (optional)
+
+Return the on-disk size (in bytes) of a pipe's target table, or `None` if the size cannot be determined. This powers [`#!python Pipe.get_size()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_size) and the `Size` column of `show targets`. The default implementation raises `NotImplementedError`. See the [`#!python SQLConnector.get_pipe_size()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.get_pipe_size) method for reference.
+
+??? example "`#!python def get_pipe_size():`"
+    ```python
+    def get_pipe_size(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> int | None:
+        """
+        Return the on-disk size of a pipe's target table in bytes.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table size to measure.
+
+        Returns
+        -------
+        An `int` of the number of bytes occupied by the target table,
+        or `None` if the size cannot be determined.
+        """
+        table_name = pipe.target
+        ### TODO write a query to measure the size of `table_name` in bytes.
+        return None
+    ```
+
+### `#!python compress_pipe()` (optional)
+
+Compress a pipe's target table to reduce disk usage (for the action `compress pipes` and [`#!python Pipe.compress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.compress)). The default implementation returns a failure `SuccessTuple` indicating compression is unsupported. See the [`#!python SQLConnector.compress_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.compress_pipe) method for reference.
+
+??? example "`#!python def compress_pipe():`"
+    ```python
+    def compress_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        """
+        Compress a pipe's target table to reduce disk usage.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table to compress.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        """
+        ### TODO write the logic to compress `pipe.target` (if supported).
+        return False, f"Compression is not supported for instance connectors of type '{self.type}'."
+    ```
+
+### `#!python decompress_pipe()` (optional)
+
+The inverse of [`compress_pipe()`](#compress_pipe-optional) (for the action `decompress pipes` and [`#!python Pipe.decompress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.decompress)). Pass `no_policy=True` to decompress existing data now while leaving the compression policy in place (e.g. for a bulk backfill, after which data is recompressed on schedule). The default implementation returns a failure `SuccessTuple` indicating decompression is unsupported. See the [`#!python SQLConnector.decompress_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.decompress_pipe) method for reference.
+
+??? example "`#!python def decompress_pipe():`"
+    ```python
+    def decompress_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        no_policy: bool = False,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        """
+        Decompress a pipe's target table, the inverse of `compress_pipe()`.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table to decompress.
+
+        no_policy: bool, default False
+            If `True`, decompress existing data now but leave the compression policy in
+            place so future data is recompressed on schedule.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        """
+        ### TODO write the logic to decompress `pipe.target` (if supported).
+        return False, f"Decompression is not supported for instance connectors of type '{self.type}'."
+    ```
+
+### `#!python vacuum_pipe()` (optional)
+
+Reclaim dead-tuple disk space from a pipe's target table (for the action `vacuum pipes` and [`#!python Pipe.vacuum()`](https://docs.meerschaum.io/meerschaum.html#Pipe.vacuum)). Pass `full=True` to perform a heavier rewrite that returns freed space to the OS (where supported). The default implementation returns a failure `SuccessTuple` indicating vacuuming is unsupported. See the [`#!python SQLConnector.vacuum_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.vacuum_pipe) method for reference.
+
+??? example "`#!python def vacuum_pipe():`"
+    ```python
+    def vacuum_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        full: bool = False,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        """
+        Reclaim dead-tuple disk space from a pipe's target table.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table to vacuum.
+
+        full: bool, default False
+            If `True`, perform a heavier rewrite that returns freed space to the
+            operating system at the cost of an exclusive lock.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        """
+        ### TODO write the logic to vacuum `pipe.target` (if supported).
+        return False, f"Vacuuming is not supported for instance connectors of type '{self.type}'."
+    ```
+
+### `#!python analyze_pipe()` (optional)
+
+Refresh the database planner's statistics for a pipe's target table (for the action `analyze pipes` and [`#!python Pipe.analyze()`](https://docs.meerschaum.io/meerschaum.html#Pipe.analyze)). Unlike `vacuum_pipe()`, this does not reclaim disk space — it helps the query planner choose better plans after large syncs. The default implementation returns a failure `SuccessTuple` indicating analysis is unsupported. See the [`#!python SQLConnector.analyze_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.analyze_pipe) method for reference.
+
+??? example "`#!python def analyze_pipe():`"
+    ```python
+    def analyze_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        """
+        Refresh the database planner's statistics for a pipe's target table.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table to analyze.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        """
+        ### TODO write the logic to analyze `pipe.target` (if supported).
+        return False, f"Analysis is not supported for instance connectors of type '{self.type}'."
     ```

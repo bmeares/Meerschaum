@@ -14,6 +14,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Union, Any, Dict, Iterable
 from meerschaum.utils.formatting._shell import make_header
 from meerschaum.utils.formatting._pprint import pprint
+from meerschaum.utils.formatting._dataframe import pprint_df, format_dataframe
 from meerschaum.utils.formatting._pipes import (
     pprint_pipes,
     highlight_pipes,
@@ -40,12 +41,15 @@ __all__ = sorted([
     'print_options',
     'fill_ansi',
     'pprint',
+    'pprint_df',
+    'format_dataframe',
     'highlight_pipes',
     'pprint_pipes',
     'make_header',
     'pipe_repr',
     'print_pipes_results',
     'extract_stats_from_message',
+    'format_bytes',
 ])
 __pdoc__ = {}
 _locks = {
@@ -55,6 +59,51 @@ _locks = {
 
 def colored_fallback(*args, **kw):
     return ' '.join(args)
+
+
+def format_bytes(num_bytes: Optional[Union[int, float]], precision: int = 1) -> str:
+    """
+    Return a human-readable representation of a number of bytes.
+
+    Parameters
+    ----------
+    num_bytes: Optional[Union[int, float]]
+        The number of bytes to format. If `None`, return `'?'`.
+
+    precision: int, default 1
+        The number of decimal places to display for non-byte units.
+
+    Returns
+    -------
+    A human-readable string such as `'1.2 MB'` or `'340.0 kB'`.
+
+    Examples
+    --------
+    >>> format_bytes(0)
+    '0 B'
+    >>> format_bytes(1536)
+    '1.5 kB'
+    >>> format_bytes(None)
+    '?'
+    """
+    if num_bytes is None:
+        return '?'
+    try:
+        value = float(num_bytes)
+    except (TypeError, ValueError):
+        return '?'
+
+    sign = '-' if value < 0 else ''
+    value = abs(value)
+    units = ('B', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB')
+    unit_index = 0
+    while value >= 1000.0 and unit_index < len(units) - 1:
+        value /= 1000.0
+        unit_index += 1
+
+    if unit_index == 0:
+        return f"{sign}{int(value)} {units[unit_index]}"
+    return f"{sign}{value:.{precision}f} {units[unit_index]}"
 
 def translate_rich_to_termcolor(*colors) -> tuple:
     """Translate between rich and more_termcolor terminology."""

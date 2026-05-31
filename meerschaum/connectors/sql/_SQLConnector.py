@@ -40,6 +40,49 @@ class SQLConnector(InstanceConnector):
     from meerschaum.utils.sql import test_connection
     from ._fetch import fetch, get_pipe_metadef
     from ._cli import cli, _cli_exit
+    from ._compress import (
+        get_pipe_size,
+        compress_pipe,
+        decompress_pipe,
+        apply_compression_policy,
+        _get_compress_settings,
+        _is_hypertable,
+        _get_columnstore_settings_query,
+        _get_columnstore_policy_query,
+        _get_columnstore_remove_policy_query,
+        _get_columnstore_disable_query,
+    )
+    from ._maintenance import (
+        vacuum_pipe,
+        analyze_pipe,
+        _run_in_autocommit,
+        _get_vacuum_queries,
+        _get_analyze_query,
+    )
+    from ._partition import (
+        _should_partition,
+        _get_partition_column,
+        _get_partition_count,
+        _get_chunk_count_timescaledb,
+        get_partition_info,
+        partition_pipe,
+        _partition_bounds,
+        _partition_literal,
+        _partition_name,
+        _get_partition_ranges_for_df,
+        _get_initial_partition_bounds,
+        _create_missing_partitions,
+        _create_missing_partitions_pg,
+        _create_missing_partitions_mysql,
+        _get_mysql_max_partition_bound,
+        _partition_function_name,
+        _partition_scheme_name,
+        _get_partition_boundary_values,
+        _get_mssql_partition_creation_queries,
+        _get_mssql_max_partition_boundary,
+        _create_missing_partitions_mssql,
+        _get_partition_cleanup_queries,
+    )
     from ._pipes import (
         fetch_pipes_keys,
         create_indices,

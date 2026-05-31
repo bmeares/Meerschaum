@@ -22,11 +22,12 @@ def edit_config(
     import meerschaum.config.paths as paths
     from meerschaum.config import get_config, config
     from meerschaum.config._read_config import get_keyfile_path, read_config, revert_symlinks_config
+    from meerschaum.config._backup import backup_config_key, restore_config_backup
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.packages import reload_meerschaum
     from meerschaum.utils.misc import edit_file
-    from meerschaum.utils.warnings import warn
-    from meerschaum.utils.prompt import prompt
+    from meerschaum.utils.warnings import warn, info
+    from meerschaum.utils.prompt import prompt, yes_no
 
     if keys is None:
         keys = []
@@ -34,6 +35,9 @@ def edit_config(
     symlinks_key = STATIC_CONFIG['config']['symlinks_key']
     def _edit_key(key: str):
         new_key_config = None
+        ### Snapshot the pristine file before any edits or default-merging so it
+        ### can be rolled back if the edit corrupts it.
+        backup_path = backup_config_key(key, debug=debug)
         while True:
             ### If defined in default, create the config file.
             symlinks_key_config = config.get(symlinks_key, {}).get(key, {})
@@ -58,6 +62,23 @@ def edit_config(
                 if key_config:
                     config[key] = key_config
                 warn(f"Could not parse key '{key}'.", stack=False)
+                if backup_path is not None and yes_no(
+                    f"Restore '{key}' from the backup taken before editing?",
+                    default='n',
+                ):
+                    restore_success, restore_msg = restore_config_backup(
+                        key, backup_path=backup_path, reload=False, debug=debug,
+                    )
+                    if restore_success:
+                        info(restore_msg)
+                        new_key_config = read_config(
+                            paths.CONFIG_DIR_PATH,
+                            [key],
+                            write_missing=False,
+                            raise_parsing_errors=False,
+                        )
+                        break
+                    warn(restore_msg, stack=False)
                 _ = prompt(f"Press [Enter] to edit '{keyfile_path}', [CTRL+C] to exit.")
                 continue
 

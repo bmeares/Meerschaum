@@ -765,7 +765,13 @@ class Daemon:
         This method is injected into the `DaemonContext`.
         """
         from meerschaum.utils.process import signal_handler
+        from meerschaum.utils.threading import request_stop, interrupt_threads
         signal_handler(signal_number, stack_frame)
+
+        ### Tell cooperative loops (e.g. `sync pipes`) to stop, then actively unwind
+        ### any worker threads so they cannot keep the process alive as a zombie.
+        request_stop()
+        interrupt_threads(SystemExit)
 
         timer = self.__dict__.get('_log_refresh_timer', None)
         if timer is not None:
@@ -820,7 +826,7 @@ class Daemon:
         )
 
         if not timeout:
-            return True, f"Successfully sent '{signal}' to daemon '{self.daemon_id}'."
+            return True, f"Successfully sent '{signal_to_send}' to daemon '{self.daemon_id}'."
 
         begin = time.perf_counter()
         while (time.perf_counter() - begin) < timeout:

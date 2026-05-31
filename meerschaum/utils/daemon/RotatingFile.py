@@ -246,7 +246,7 @@ class RotatingFile(io.IOBase):
         self,
         potential_new_len: int = 0,
         start_interception: bool = False,
-    ) -> '_io.TextUIWrapper':
+    ) -> 'io.TextIOWrapper':
         """
         Check the state of the subfiles.
         If the latest subfile is too large, create a new file and delete old ones.

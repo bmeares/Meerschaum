@@ -1426,6 +1426,18 @@ def get_pipe_data_query(
     query = f"{select_cols_str}\nFROM {pipe_table_name}"
     where = ""
 
+    ### MariaDB 12.x optimizer bug: an ordered index scan with `LIMIT` over a `RANGE COLUMNS`-
+    ### partitioned table that must read a non-indexed column returns zero rows (see the
+    ### `get_sync_time` workaround in CLAUDE.md — same family, MariaDB-only). Wrapping the
+    ### datetime column in the `ORDER BY` with a no-op `COALESCE(col, col)` forces a filesort
+    ### over the fetched rows instead of the broken index walk, with identical ordering. Gated
+    ### on `LIMIT` (the bug's trigger) so unlimited ordered reads keep the index-ordered scan.
+    mariadb_partition_order_workaround = (
+        self.flavor == 'mariadb'
+        and isinstance(limit, int)
+        and self._should_partition(pipe)
+    )
+
     if order is not None:
         default_order = 'asc'
         if order not in ('asc', 'desc'):
@@ -1510,7 +1522,12 @@ def get_pipe_data_query(
         if quoted_indices:
             order_by += "\nORDER BY "
             if _dt and (_dt in existing_cols or skip_existing_cols_check):
-                order_by += dt + ' ' + order + ','
+                dt_order_expr = (
+                    f"COALESCE({dt}, {dt})"
+                    if mariadb_partition_order_workaround
+                    else dt
+                )
+                order_by += dt_order_expr + ' ' + order + ','
             for key, quoted_col_name in quoted_indices.items():
                 if dt == quoted_col_name:
                     continue
@@ -1673,23 +1690,103 @@ def create_pipe_table_from_df(
         _ = new_dtypes.pop(primary_key, None)
 
     schema = self.get_pipe_schema(pipe)
-    create_table_queries = get_create_table_queries(
-        new_dtypes,
-        pipe.target,
-        self.flavor,
-        schema=schema,
-        primary_key=primary_key,
-        primary_key_db_type=primary_key_db_type,
-        datetime_column=dt_col,
+
+    ### When supported (TimescaleDB 2.21+), create the hypertable declaratively via
+    ### `CREATE TABLE ... WITH (tsdb.hypertable, ...)`. Fall back to a plain `CREATE TABLE`
+    ### (and the `create_hypertable()` call in `get_create_index_queries`) if it fails.
+    hypertable = (
+        self.flavor in ('timescaledb', 'timescaledb-ha')
+        and pipe.parameters.get('hypertable', True)
+        and dt_col is not None
     )
-    if schema:
-        create_table_queries = (
-            get_create_schema_if_not_exists_queries(schema, self.flavor)
-            + create_table_queries
+
+    ### Use the declarative `CREATE TABLE ... WITH (tsdb.hypertable, ...)` path only when Hypercore
+    ### is enabled (the default). Declarative creation enables the columnstore (via the
+    ### `segmentby`/`orderby` options) AND makes TimescaleDB auto-install a columnstore policy —
+    ### exactly the Hypercore behavior we want. With `hypercore=False`, fall back to a plain table
+    ### plus the `create_hypertable()` call during index creation, which adds NO columnstore policy,
+    ### keeping `hypercore` a true opt-out (a plain row-store hypertable).
+    hypercore = hypertable and pipe.parameters.get('hypercore', True)
+    hypertable_chunk_interval = None
+    hypertable_segmentby = None
+    hypertable_orderby = None
+    if hypercore:
+        chunk_interval = pipe.get_chunk_interval(debug=debug)
+        hypertable_chunk_interval = (
+            f'{chunk_interval}'
+            if isinstance(chunk_interval, int)
+            else f'{int(chunk_interval.total_seconds() / 60)} minutes'
         )
-    success = all(
-        self.exec_queries(create_table_queries, break_on_error=True, rollback=True, debug=debug)
+        _compress_settings = self._get_compress_settings(pipe)
+        hypertable_segmentby = _compress_settings['segmentby'] or None
+        hypertable_orderby = _compress_settings['orderby'] or None
+
+    ### Native range partitioning (non-TimescaleDB flavors); a no-op column for others.
+    partition_by_column = self._get_partition_column(pipe)
+    ### MySQL/MariaDB require the initial partitions declared inline at `CREATE TABLE`
+    ### (an empty RANGE-partitioned table is invalid); compute them from the creation df.
+    partition_bounds = (
+        self._get_initial_partition_bounds(pipe, df, debug=debug)
+        if (partition_by_column is not None and self.flavor in ('mysql', 'mariadb'))
+        else None
     )
+    ### A MySQL RANGE table needs at least one inline partition; if the creation df has no
+    ### datetime values, fall back to a plain table (rare — `is_new` normally implies rows).
+    if partition_by_column is not None and self.flavor in ('mysql', 'mariadb') and not partition_bounds:
+        partition_by_column = None
+
+    ### MSSQL partitions via a function + scheme created before the table; its clustered index is
+    ### placed on the scheme (passed as `partition_scheme_name`).
+    partition_scheme_name = None
+    partition_creation_queries = []
+    if partition_by_column is not None and self.flavor == 'mssql':
+        partition_scheme_name = self._partition_scheme_name(pipe)
+        partition_creation_queries = self._get_mssql_partition_creation_queries(
+            pipe, df, debug=debug
+        )
+
+    def _build_create_table_queries(_hypertable_chunk_interval):
+        _queries = get_create_table_queries(
+            new_dtypes,
+            pipe.target,
+            self.flavor,
+            schema=schema,
+            primary_key=primary_key,
+            primary_key_db_type=primary_key_db_type,
+            datetime_column=dt_col,
+            hypertable_chunk_interval=_hypertable_chunk_interval,
+            hypertable_segmentby=(hypertable_segmentby if _hypertable_chunk_interval else None),
+            hypertable_orderby=(hypertable_orderby if _hypertable_chunk_interval else None),
+            partition_by_column=partition_by_column,
+            partition_bounds=partition_bounds,
+            partition_scheme_name=partition_scheme_name,
+        )
+        if partition_creation_queries:
+            _queries = partition_creation_queries + _queries
+        if schema:
+            _queries = (
+                get_create_schema_if_not_exists_queries(schema, self.flavor)
+                + _queries
+            )
+        return _queries
+
+    create_table_queries = _build_create_table_queries(hypertable_chunk_interval)
+    success = all(
+        self.exec_queries(
+            create_table_queries,
+            break_on_error=True,
+            rollback=True,
+            silent=hypercore,
+            debug=debug,
+        )
+    )
+    if not success and hypercore:
+        ### Declarative hypertable syntax unsupported; retry as a plain table.
+        ### `create_hypertable()` runs later during index creation.
+        create_table_queries = _build_create_table_queries(None)
+        success = all(
+            self.exec_queries(create_table_queries, break_on_error=True, rollback=True, debug=debug)
+        )
     target_name = sql_item_name(pipe.target, schema=self.get_pipe_schema(pipe), flavor=self.flavor)
     msg = (
         "Success"
@@ -1909,6 +2006,17 @@ def sync_pipe(
         if not create_success:
             return create_success, create_msg
 
+    ### Pre-create native range partitions (non-TimescaleDB) so the rows about to be written
+    ### land in an existing partition. No-op for non-partitioned pipes.
+    if self._should_partition(pipe):
+        for _part_df in (unseen_df, update_df):
+            if _part_df is not None and len(_part_df) > 0:
+                part_success, part_msg = self._create_missing_partitions(
+                    pipe, _part_df, debug=debug,
+                )
+                if not part_success:
+                    return part_success, part_msg
+
     do_identity_insert = bool(
         self.flavor in ('mssql',)
         and primary_key
@@ -2011,17 +2119,26 @@ def sync_pipe(
             return temp_success, temp_msg
 
         existing_cols = pipe.get_columns_types(debug=debug)
+        ### A partitioned table (TimescaleDB hypertable or a native range-partitioned table on
+        ### PostgreSQL/MySQL/MSSQL) folds the datetime column into its composite primary key, so the
+        ### upsert conflict target must include it too — `ON CONFLICT (primary_key)` alone has no
+        ### matching unique constraint. Non-partitioned tables keep the historical primary-key-only
+        ### semantics ("the primary key is the identity, regardless of datetime").
+        partition_upsert = bool(
+            dt_col
+            and dt_col in update_df.columns
+            and (
+                self.flavor in ('timescaledb', 'timescaledb-ha')
+                or self._should_partition(pipe)
+            )
+        )
         join_cols = [
             col
             for col_key, col in pipe.columns.items()
             if col and col in existing_cols
         ] if not primary_key or self.flavor == 'oracle' else (
             [dt_col, primary_key]
-            if (
-                self.flavor in ('timescaledb', 'timescaledb-ha')
-                and dt_col
-                and dt_col in update_df.columns
-            )
+            if partition_upsert
             else [primary_key]
         )
         update_queries = get_update_queries(
@@ -2776,6 +2893,18 @@ def get_sync_time(
             ") WHERE ROWNUM = 1"
         )
 
+    ### NOTE: MariaDB has an optimizer bug where `ORDER BY <dt> DESC/ASC LIMIT 1` against a
+    ### `RANGE COLUMNS` partitioned table combined with a `WHERE` clause performs a partition
+    ### index scan that stops early and returns zero rows (observed on MariaDB 12.x). The
+    ### equivalent `MIN`/`MAX` aggregate scans the pruned partitions correctly, so use it for
+    ### the bounds on partitioned MariaDB tables instead.
+    if self.flavor == 'mariadb' and not remote and self._should_partition(pipe):
+        agg_func = "MAX" if newest else "MIN"
+        base_query = (
+            f"SELECT {agg_func}({dt_col_name}) AS {dt_col_name}\n"
+            f"FROM {src_name}"
+        )
+
     query = wrap_query_with_cte(src_query, base_query, flavor)
 
     try:
@@ -3015,6 +3144,12 @@ def drop_pipe(
         success = self.exec(
             f"DROP TABLE {if_exists_str} {target_name}", silent=True, debug=debug
         ) is not None
+
+    ### Drop any MSSQL partition scheme + function the table referenced (no-op otherwise).
+    if success:
+        cleanup_queries = self._get_partition_cleanup_queries(pipe)
+        if cleanup_queries:
+            self.exec_queries(cleanup_queries, break_on_error=False, silent=True, debug=debug)
 
     msg = "Success" if success else f"Failed to drop {pipe}."
     return success, msg

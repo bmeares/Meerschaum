@@ -40,7 +40,7 @@ def deduplicate(
 
     chunk_interval: Union[timedelta, int, None], default None
         If provided, use this for the chunk bounds.
-        Defaults to the value set in `pipe.parameters['chunk_minutes']` (1440).
+        Defaults to the value set in `pipe.parameters['verify']['chunk_minutes']` (43200 — 30 days).
 
     bounded: Optional[bool], default None
         Only check outside the oldest and newest sync times if bounded is explicitly `False`.
@@ -255,12 +255,12 @@ def deduplicate(
     retry_bounds_success_tuples = dict(pool.map(process_chunk_bounds, retry_bounds))
     retry_bounds_successes = {
         bounds: success_tuple
-        for bounds, success_tuple in bounds_success_tuples.items()
+        for bounds, success_tuple in retry_bounds_success_tuples.items()
         if success_tuple[0]
     }
     retry_bounds_failures = {
         bounds: success_tuple
-        for bounds, success_tuple in bounds_success_tuples.items()
+        for bounds, success_tuple in retry_bounds_success_tuples.items()
         if not success_tuple[0]
     }
 

@@ -104,6 +104,11 @@ default_system_config = {
                     'transaction_id_length': 4,
                     'separator': '_',
                 },
+                ### Safety cap for native range partitioning: the most child partitions a single
+                ### sync may create for one dataframe. A guard against a pathological config (tiny
+                ### width over a huge range), not a per-table limit. Raise it for very wide
+                ### backfills with a small partition width.
+                'max_partitions_per_sync': 10_000,
             },
             'chunksize': 100_000,
             'poolclass': 'sqlalchemy.pool.QueuePool',

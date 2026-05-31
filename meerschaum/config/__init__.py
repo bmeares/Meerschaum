@@ -271,8 +271,14 @@ def get_config(
                     config,
                 )
             )
-            if patch and keys[0] != symlinks_key:
-                if write_missing:
+            if patch and keys[0] != symlinks_key and write_missing:
+                ### Only persist defaults when the key's file is genuinely absent.
+                ### Never overwrite an existing file (e.g. one that failed to parse) ─
+                ### doing so would clobber the user's config with default values.
+                ### Brand-new config files are still created by `read_config()`.
+                from meerschaum.config._read_config import get_keyfile_path
+                keyfile_exists = get_keyfile_path(keys[0], create_new=False) is not None
+                if not keyfile_exists:
                     write_config(config, debug=debug)
 
     if as_tuple:

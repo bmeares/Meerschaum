@@ -77,18 +77,40 @@ def get_parameters(
     -------
     The pipe's parameters dictionary.
     """
+    from copy import deepcopy
     from meerschaum.config._patch import apply_patch_to_config
     from meerschaum.config._read_config import search_and_substitute_config
 
+    is_top_level = _visited is None
     if _visited is None:
         _visited = {self}
 
     if refresh:
         _ = self._invalidate_cache(hard=True)
+        ### Drop any memoized resolution so a later non-refresh call recomputes from fresh state.
+        _ = self.__dict__.pop('_resolved_parameters_raw', None)
+        _ = self.__dict__.pop('_resolved_parameters', None)
+        _ = self.__dict__.pop('_resolved_parameters_symlinks', None)
 
     raw_parameters = self.attributes.get('parameters', {})
     if not apply_symlinks:
         return raw_parameters
+
+    ### Resolving references + `{{ Pipe() }}` / `MRSM{}` symlinks is pure-Python but expensive
+    ### (it walks reference pipes and may build connectors), and `get_parameters` is a hot path
+    ### hit by `.dtypes`, `.columns`, `.precision`, etc. Memoize the resolved result, keyed on the
+    ### identity of the raw parameters dict: every mutation path (`update_parameters`, the setter,
+    ### `edit`) reassigns `_attributes['parameters']` to a new object, so identity changing is a
+    ### reliable invalidation signal. Schema is *not* part of this — dynamic-schema freshness is
+    ### handled separately by `get_columns_types`' TTL cache, so this is safe for dynamic pipes.
+    ### Only memoize the top-level entry (not nested reference resolution, which threads `_visited`
+    ### for cycle detection) and only the default symlink-resolving, non-refreshing call.
+    can_memoize = is_top_level and not refresh
+    if can_memoize and self.__dict__.get('_resolved_parameters_raw', None) is raw_parameters:
+        self._symlinks = self.__dict__.get('_resolved_parameters_symlinks', {})
+        ### Return a copy so callers that mutate the result (e.g. `infer_dtypes(persist=True)`)
+        ### don't corrupt the memo.
+        return deepcopy(self.__dict__['_resolved_parameters'])
 
     parameters = {}
     for ref_pipe in self.references:
@@ -140,7 +162,17 @@ def get_parameters(
             return substituted_val
         return obj
 
-    return search_and_substitute_config(recursive_replace(parameters, tuple()))
+    resolved_parameters = search_and_substitute_config(recursive_replace(parameters, tuple()))
+
+    if can_memoize:
+        ### Hold a reference to the raw dict so its identity can't be reused by a freed object,
+        ### and stash the symlinks captured above alongside the resolved result.
+        self.__dict__['_resolved_parameters_raw'] = raw_parameters
+        self.__dict__['_resolved_parameters'] = resolved_parameters
+        self.__dict__['_resolved_parameters_symlinks'] = self._symlinks
+        return deepcopy(resolved_parameters)
+
+    return resolved_parameters
 
 
 @property

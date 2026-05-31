@@ -1574,7 +1574,7 @@ def import_html(warn=False, **kw) -> 'ModuleType':
 
 
 def get_modules_from_package(
-    package: 'package',
+    package: Any,
     names: bool = False,
     recursive: bool = False,
     lazy: bool = False,

@@ -304,6 +304,22 @@ groups['pipes'].add_argument(
         "\nMay be negated with `_`."
     )
 )
+groups['pipes'].add_argument(
+    '--no-policy', '--nopolicy', action='store_true',
+    help=(
+        "Leave the compression (columnstore) policy untouched. With `compress pipes`, compress "
+        "existing chunks now without installing a policy; with `decompress pipes`, decompress "
+        "existing chunks now without removing the policy (they will be recompressed on schedule). "
+        "TimescaleDB only."
+    )
+)
+groups['pipes'].add_argument(
+    '--full', action='store_true',
+    help=(
+        "When running `vacuum pipes`, run `VACUUM FULL` to return freed space to the OS. "
+        "Takes an exclusive lock. PostgreSQL family only."
+    )
+)
 
 
 ### Sync options
@@ -339,7 +355,8 @@ groups['sync'].add_argument(
 )
 groups['sync'].add_argument(
     '--chunk-minutes', type=int, help=(
-        "Specify the chunk interval in minutes for verification syncs. Defaults to 1440."
+        "Specify the chunk interval in minutes for verification syncs (and `partition pipes`). "
+        "Defaults to 43200 (30 days)."
     ),
 )
 groups['sync'].add_argument(
@@ -500,6 +517,10 @@ groups['misc'].add_argument(
 )
 groups['misc'].add_argument(
     '--nopretty', action="store_true", help="Print elements without 'pretty' formatting"
+)
+groups['misc'].add_argument(
+    '--rollback', '--restore', action="store_true",
+    help="When editing config, restore a key from its most recent backup instead of editing.",
 )
 groups['misc'].add_argument(
     '--skip-deps', action="store_true", help="Skip dependencies when installing plugins.",

@@ -262,6 +262,7 @@ STATIC_CONFIG: Dict[str, Any] = {
     'config': {
         'default_filetype': 'json',
         'symlinks_key': '_symlinks',
+        'max_backups_per_key': 10,
     },
     'system': {
         'arguments': {

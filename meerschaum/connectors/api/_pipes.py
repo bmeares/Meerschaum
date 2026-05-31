@@ -878,6 +878,272 @@ def get_pipe_docs(
         return []
 
 
+def get_pipe_size(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kw: Any
+) -> Union[int, None]:
+    """
+    Return the on-disk size of a pipe's target table in bytes via the API.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table size to measure.
+
+    Returns
+    -------
+    An `int` of the number of bytes occupied by the target table,
+    or `None` if the size could not be determined.
+    """
+    r_url = pipe_r_url(pipe) + '/size'
+    response = self.get(
+        r_url,
+        params={
+            'instance': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug,
+    )
+    if not response:
+        warn(f"Failed to get the size for {pipe}:\n{response.text}")
+        return None
+    try:
+        j = json.loads(response.text)
+    except Exception as e:
+        warn(f"Failed to parse the size for {pipe}:\n{e}")
+        return None
+    if j is None:
+        return None
+    if isinstance(j, dict) and 'detail' in j:
+        warn(j['detail'])
+        return None
+    try:
+        return int(j)
+    except Exception:
+        return None
+
+
+def compress_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Compress a pipe's target table via the API.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to compress.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    r_url = pipe_r_url(pipe) + '/compress'
+    response = self.post(
+        r_url,
+        params={
+            'instance_keys': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug,
+    )
+    if debug:
+        dprint(response.text)
+
+    try:
+        data = response.json()
+    except Exception:
+        return False, f"Failed to compress {pipe}."
+
+    if isinstance(data, list):
+        return data[0], data[1]
+    if isinstance(data, dict) and 'detail' in data:
+        return response.__bool__(), data['detail']
+    return response.__bool__(), response.text
+
+
+def decompress_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    no_policy: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Decompress a pipe's target table via the API, the inverse of `compress_pipe()`.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to decompress.
+
+    no_policy: bool, default False
+        If `True`, decompress existing data now but leave the compression policy in place.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    r_url = pipe_r_url(pipe) + '/decompress'
+    response = self.post(
+        r_url,
+        params={
+            'instance_keys': self.get_pipe_instance_keys(pipe),
+            'no_policy': no_policy,
+        },
+        debug=debug,
+    )
+    if debug:
+        dprint(response.text)
+
+    try:
+        data = response.json()
+    except Exception:
+        return False, f"Failed to decompress {pipe}."
+
+    if isinstance(data, list):
+        return data[0], data[1]
+    if isinstance(data, dict) and 'detail' in data:
+        return response.__bool__(), data['detail']
+    return response.__bool__(), response.text
+
+
+def vacuum_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    full: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Vacuum a pipe's target table via the API.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to vacuum.
+
+    full: bool, default False
+        If `True`, run `VACUUM FULL` (PostgreSQL family only).
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    r_url = pipe_r_url(pipe) + '/vacuum'
+    response = self.post(
+        r_url,
+        params={
+            'instance_keys': self.get_pipe_instance_keys(pipe),
+            'full': full,
+        },
+        debug=debug,
+    )
+    if debug:
+        dprint(response.text)
+
+    try:
+        data = response.json()
+    except Exception:
+        return False, f"Failed to vacuum {pipe}."
+
+    if isinstance(data, list):
+        return data[0], data[1]
+    if isinstance(data, dict) and 'detail' in data:
+        return response.__bool__(), data['detail']
+    return response.__bool__(), response.text
+
+
+def partition_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    chunk_minutes: Optional[int] = None,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Repartition a pipe's target table to a new chunk width via the API.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The partitioned pipe whose target table to repartition.
+
+    chunk_minutes: Optional[int], default None
+        The new partition width in minutes. Defaults to the pipe's `verify.chunk_minutes`.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    r_url = pipe_r_url(pipe) + '/partition'
+    response = self.post(
+        r_url,
+        params={
+            'instance_keys': self.get_pipe_instance_keys(pipe),
+            **({'chunk_minutes': chunk_minutes} if chunk_minutes is not None else {}),
+        },
+        debug=debug,
+    )
+    if debug:
+        dprint(response.text)
+
+    try:
+        data = response.json()
+    except Exception:
+        return False, f"Failed to repartition {pipe}."
+
+    if isinstance(data, list):
+        return data[0], data[1]
+    if isinstance(data, dict) and 'detail' in data:
+        return response.__bool__(), data['detail']
+    return response.__bool__(), response.text
+
+
+def analyze_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Analyze a pipe's target table via the API.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to analyze.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    r_url = pipe_r_url(pipe) + '/analyze'
+    response = self.post(
+        r_url,
+        params={
+            'instance_keys': self.get_pipe_instance_keys(pipe),
+        },
+        debug=debug,
+    )
+    if debug:
+        dprint(response.text)
+
+    try:
+        data = response.json()
+    except Exception:
+        return False, f"Failed to analyze {pipe}."
+
+    if isinstance(data, list):
+        return data[0], data[1]
+    if isinstance(data, dict) and 'detail' in data:
+        return response.__bool__(), data['detail']
+    return response.__bool__(), response.text
+
+
 def get_pipe_index_names(self, pipe: mrsm.Pipe, debug: bool = False) -> Dict[str, str]:
     """
     Return the templated index names.

@@ -72,7 +72,7 @@ def _pipes_lap(
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.formatting import print_tuple
     from meerschaum.utils.warnings import warn
-    from meerschaum.utils.threading import Lock, Thread, Event
+    from meerschaum.utils.threading import Lock, Thread, Event, stop_requested
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.packages import venv_exec
     from meerschaum.utils.process import poll_process
@@ -141,7 +141,7 @@ def _pipes_lap(
     ) if _progress is not None else None
 
     def worker_fn():
-        while not stop_event.is_set():
+        while not stop_event.is_set() and not stop_requested():
             try:
                 pipe = pipes_queue.get_nowait()
             except queue.Empty:
@@ -233,12 +233,22 @@ def _pipes_lap(
         )
         return _success_tuple
 
-    worker_threads = [Thread(target=worker_fn) for _ in range(min(workers, len(pipes)))]
+    ### Run workers as daemon threads so that, if the process is forced to exit
+    ### (e.g. `stop jobs` sends SIGTERM), they cannot block the interpreter from
+    ### exiting and leave a zombie process appending to the log.
+    worker_threads = [
+        Thread(target=worker_fn, daemon=True)
+        for _ in range(min(workers, len(pipes)))
+    ]
     for worker_thread in worker_threads:
         worker_thread.start()
 
     try:
         while any([t.is_alive() for t in worker_threads]):
+            ### A process-wide stop (from the daemon signal handler) ends the lap.
+            if stop_requested():
+                stop_event.set()
+                break
             time.sleep(0.1)
     except KeyboardInterrupt:
         stop_event.set()
@@ -290,6 +300,7 @@ def _sync_pipes(
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.misc import interval_str
     from meerschaum.utils.daemon import running_in_daemon
+    from meerschaum.utils.threading import stop_requested
 
     noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)
     noninteractive = str(noninteractive_val).lower() in ('1', 'true', 'yes')
@@ -302,6 +313,9 @@ def _sync_pipes(
     cooldown = 2 * (min_seconds + 1)
     success_pipes, failure_pipes = [], []
     while run:
+        if stop_requested():
+            loop, run = False, False
+            break
         _progress = (
             progress()
             if (shell and not noninteractive and not running_in_daemon())

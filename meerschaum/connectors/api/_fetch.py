@@ -17,7 +17,7 @@ def fetch(
         pipe: mrsm.Pipe,
         begin: Union[datetime, str, int] = '',
         end: Union[datetime, int] = None,
-        params: Optional[Dict, Any] = None,
+        params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         **kw: Any
     ) -> Iterator['pd.DataFrame']:

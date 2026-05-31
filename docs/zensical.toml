@@ -25,6 +25,7 @@ nav = [
       {"📖 Reading Data" = "reference/pipes/reading.md"},
       {"🔖 Tags" = "reference/pipes/tags.md"},
       {"🧩 Parameters" = "reference/pipes/parameters.md"},
+      {"🧹 Maintenance" = "reference/pipes/maintenance.md"},
     ]},
     {"🔌 Connectors" = [
       "reference/connectors/index.md",

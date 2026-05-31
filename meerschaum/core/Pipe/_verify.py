@@ -43,7 +43,7 @@ def verify(
 
     chunk_interval: Union[timedelta, int, None], default None
         If provided, use this as the size of the chunk boundaries.
-        Default to the value set in `pipe.parameters['chunk_minutes']` (1440).
+        Default to the value set in `pipe.parameters['verify']['chunk_minutes']` (43200 — 30 days).
 
     bounded: Optional[bool], default None
         If `True`, do not verify older than the oldest sync time or newer than the newest.
@@ -149,6 +149,7 @@ def verify(
         end=end,
         chunk_interval=chunk_interval,
         bounded=bounded,
+        align=True,
         debug=debug,
     )
 

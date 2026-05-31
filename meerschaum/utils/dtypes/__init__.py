@@ -1091,6 +1091,50 @@ def get_geometry_type_srid(
     return geometry_type, srid
 
 
+def datetime_to_int(
+    dt: 'Union[datetime, int]',
+    precision_unit: str = 'microsecond',
+) -> int:
+    """
+    Convert a timezone-aware (or naive UTC) `datetime` into an integer epoch value
+    at the given precision unit.
+
+    Parameters
+    ----------
+    dt: Union[datetime, int]
+        The datetime to convert. Naive datetimes are assumed to be UTC.
+        Integers are returned as-is.
+
+    precision_unit: str, default 'microsecond'
+        The precision of the epoch value (e.g. `'millisecond'`, `'second'`).
+        Aliases (`'ms'`, `'s'`, etc.) are accepted.
+
+    Returns
+    -------
+    An integer epoch value at the requested precision.
+
+    Examples
+    --------
+    >>> from datetime import datetime, timezone
+    >>> datetime_to_int(datetime(2026, 5, 30, tzinfo=timezone.utc), 'millisecond')
+    1779840000000
+    """
+    if isinstance(dt, int):
+        return dt
+
+    true_precision_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
+    if true_precision_unit not in MRSM_PRECISION_UNITS_SCALARS:
+        from meerschaum.utils.misc import items_str
+        raise ValueError(
+            f"Unknown precision unit '{precision_unit}'. "
+            "Accepted values are "
+            f"{items_str(list(MRSM_PRECISION_UNITS_SCALARS) + list(MRSM_PRECISION_UNITS_ALIASES))}."
+        )
+
+    dt = coerce_timezone(dt)
+    return int(dt.timestamp() * MRSM_PRECISION_UNITS_SCALARS[true_precision_unit])
+
+
 def get_current_timestamp(
     precision_unit: str = _STATIC_CONFIG['dtypes']['datetime']['default_precision_unit'],
     precision_interval: int = 1,
@@ -1169,7 +1213,7 @@ def get_current_timestamp(
     rounded_now = round_time(now, delta, to=round_to)
 
     if as_int:
-        return int(rounded_now.timestamp() * MRSM_PRECISION_UNITS_SCALARS[true_precision_unit])
+        return datetime_to_int(rounded_now, true_precision_unit)
 
     ts_val = (
         pd.to_datetime(rounded_now, utc=True)

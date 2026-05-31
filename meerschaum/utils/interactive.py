@@ -8,11 +8,14 @@ Interactive "wizards" to guide the user.
 
 from __future__ import annotations
 
+import meerschaum as mrsm
+from meerschaum.utils.typing import List
+
 def select_pipes(
         yes: bool = False,
         force: bool = False,
         debug: bool = False,
-    ) -> List[Pipe]:
+    ) -> List[mrsm.Pipe]:
     """Prompt the user for the keys to identify a list of pipes."""
     from meerschaum.utils.misc import get_connector_labels
     from meerschaum.utils.prompt import prompt, choose, yes_no
