@@ -62,6 +62,10 @@ class SQLConnector(InstanceConnector):
     from ._partition import (
         _should_partition,
         _get_partition_column,
+        _get_partition_count,
+        _get_chunk_count_timescaledb,
+        get_partition_info,
+        partition_pipe,
         _partition_bounds,
         _partition_literal,
         _partition_name,

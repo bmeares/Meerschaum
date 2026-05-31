@@ -1011,6 +1011,52 @@ def vacuum_pipe(
     return response.__bool__(), response.text
 
 
+def partition_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    chunk_minutes: Optional[int] = None,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Repartition a pipe's target table to a new chunk width via the API.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The partitioned pipe whose target table to repartition.
+
+    chunk_minutes: Optional[int], default None
+        The new partition width in minutes. Defaults to the pipe's `verify.chunk_minutes`.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    r_url = pipe_r_url(pipe) + '/partition'
+    response = self.post(
+        r_url,
+        params={
+            'instance_keys': self.get_pipe_instance_keys(pipe),
+            **({'chunk_minutes': chunk_minutes} if chunk_minutes is not None else {}),
+        },
+        debug=debug,
+    )
+    if debug:
+        dprint(response.text)
+
+    try:
+        data = response.json()
+    except Exception:
+        return False, f"Failed to repartition {pipe}."
+
+    if isinstance(data, list):
+        return data[0], data[1]
+    if isinstance(data, dict) and 'detail' in data:
+        return response.__bool__(), data['detail']
+    return response.__bool__(), response.text
+
+
 def analyze_pipe(
     self,
     pipe: mrsm.Pipe,

@@ -355,7 +355,8 @@ groups['sync'].add_argument(
 )
 groups['sync'].add_argument(
     '--chunk-minutes', type=int, help=(
-        "Specify the chunk interval in minutes for verification syncs. Defaults to 1440."
+        "Specify the chunk interval in minutes for verification syncs (and `partition pipes`). "
+        "Defaults to 43200 (30 days)."
     ),
 )
 groups['sync'].add_argument(

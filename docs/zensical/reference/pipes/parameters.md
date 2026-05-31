@@ -306,7 +306,34 @@ The base SQL query to be run when fetching new rows. Aliased as `sql` or `query`
 
 ## `hypertable`
 
-If `hypertable` is `False`, then the target table will not be created as a hypertable (TimescaleDB-only).
+On **TimescaleDB**, the target table is created as a hypertable by default. Set `hypertable` to `False` to create a plain table instead.
+
+On **PostgreSQL / PostGIS**, **MySQL / MariaDB**, and **MSSQL**, `hypertable` controls [native range partitioning](/reference/connectors/sql-connectors/#native-range-partitioning) and also **defaults to `True`** — so a pipe with a [`datetime`](#the-datetime-index) column partitions its target table by range on that column. Set `hypertable` to `False` to opt out (a plain table). Requires a `datetime` column; ignored on flavors without native range partitioning (e.g. SQLite, DuckDB, Oracle). Only newly created tables are affected — a pre-existing plain table is not retroactively partitioned (use `partition pipes` to rebuild it).
+
+The partition width is the pipe's chunk interval ([`verify.chunk_minutes`](#verifychunk_minutes) and its aliases, default 43200 — 30 days), and partition boundaries are epoch-aligned — the same datetime always maps to the same partition regardless of insert order, and verification chunks (`get_chunk_bounds(align=True)`) coincide with partition edges.
+
+`verify.chunk_minutes` is the **authoritative** partition width: editing it does not retroactively reshape an existing table, and changing it for a populated table can produce misaligned, overlapping partitions. To change an existing table's width, run the `partition pipes` action (or [`Pipe.repartition()`](https://docs.meerschaum.io/meerschaum.html#Pipe.repartition)), which rebuilds the table at the new width:
+
+```bash
+# Rebuild the table to 7-day partitions.
+mrsm partition pipes -i sql:main -m weather --chunk-minutes 10080
+```
+
+??? example
+
+    ```python
+    import meerschaum as mrsm
+
+    pipe = mrsm.Pipe(
+        'demo', 'partition',
+        instance='sql:main',  # a PostgreSQL/MySQL/MSSQL connector
+        columns={'datetime': 'ts', 'id': 'station'},
+        parameters={
+            'hypertable': True,
+            'verify': {'chunk_minutes': 43200},  # 30-day partitions (default)
+        },
+    )
+    ```
 
 ---------------
 
@@ -612,19 +639,43 @@ In addition to days, alias keys are allowed to specify other units of time. In o
 
 ### `verify.chunk_minutes`
 
-The key `verify.chunk_minutes` specifies the size of chunk intervals when verifying a pipe. See [`Pipe.get_chunk_bounds()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_chunk_bounds).
+The key `verify.chunk_minutes` specifies the size of chunk intervals when verifying a pipe (see [`Pipe.get_chunk_bounds()`](https://docs.meerschaum.io/meerschaum.html#Pipe.get_chunk_bounds)). It is also the **partition width** for [natively range-partitioned](/reference/connectors/sql-connectors/#native-range-partitioning) pipes. Defaults to 43200 (30 days).
+
+You may instead specify the size with one of these aliases (like the `bound_*` keys). If several are set, the first on this priority list wins:
+
+- `chunk_minutes`
+- `chunk_hours`
+- `chunk_days`
+- `chunk_weeks`
+- `chunk_years`
+- `chunk_seconds`
 
 ??? example
 
     ```python
     import meerschaum as mrsm
 
+    # These two pipes use the same chunk size.
+    mrsm.Pipe('foo', 'minutes', parameters={'verify': {'chunk_minutes': (1440 * 7)}})
+    mrsm.Pipe('foo', 'days', parameters={'verify': {'chunk_days': 7}})
+    ```
+
+### `verify.chunk_range`
+
+For a pipe with an **integer** [`datetime`](#the-datetime-index) axis, `verify.chunk_range` sets the chunk size directly in the axis's own units (used verbatim). This is the integer-axis counterpart to `chunk_minutes`.
+
+When `chunk_range` is not set, the time-based size above is converted to the axis's units using the pipe's [`precision`](#precision); if no `precision` is set, the chunk's value in minutes is used verbatim (legacy behavior).
+
+??? example
+
+    ```python
+    import meerschaum as mrsm
+
+    # An integer-axis pipe chunked 1000 units at a time.
     pipe = mrsm.Pipe(
-        'foo', 'bar',
-        parameters={
-            'verify': {
-                'chunk_minutes': (1440 * 7),
-            },
-        },
+        'foo', 'int_axis',
+        columns={'datetime': 'ts'},
+        dtypes={'ts': 'int'},
+        parameters={'verify': {'chunk_range': 1000}},
     )
     ```

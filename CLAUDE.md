@@ -80,14 +80,14 @@ Pipe = three string keys:
 | `dtypes` | `Dict[str, str]` | Explicit column dtypes. Values are Meerschaum dtype strings (see below). |
 | `tags` | `List[str]` | Labels for grouping pipes. |
 | `fetch` | `Dict` | Source-specific fetch config. `backtrack_minutes` (int) controls how far before sync time to re-fetch. |
-| `verify` | `Dict` | Config for verification syncs. `chunk_minutes` (default 1440), `bound_days`. |
+| `verify` | `Dict` | Config for verification syncs. `chunk_minutes` (default 43200 — 30 days) is also the authoritative native-partition width; aliases `chunk_hours`/`chunk_days`/`chunk_weeks`/`chunk_years`/`chunk_seconds` (first set wins, like `bound_*`). Integer axis: `chunk_range` is used verbatim (else convert via `precision`, else minutes verbatim — legacy). Also `bound_days`. Resolved by `Pipe.get_chunk_interval()`. |
 | `sql` | `str` | SQL definition for SQL-connector pipes. Supports `{{ Pipe(...) }}` syntax. |
 | `target` | `str` | Override the table name. |
 | `upsert` | `bool` | If `True`, create a unique index on `columns` and upsert rows. |
 | `static` | `bool` | If `True`, never alter the schema (no new columns added). |
 | `autoincrement` | `bool` | If `True`, add an auto-incrementing primary key column. |
 | `autotime` | `bool` | If `True`, automatically add a `datetime` timestamp column on insert. |
-| `hypertable` | `bool` | On TimescaleDB, `True` (default) creates the target as a hypertable. On other flavors supporting native range partitioning (`postgresql`/`postgis`, `mysql`/`mariadb`, `mssql`), set `True` to opt in to range partitioning on the datetime column (default off); width reuses `verify.chunk_minutes`, boundaries epoch-aligned (deterministic). `Pipe.verify()` calls `get_chunk_bounds(align=True)` so its chunk edges coincide with these partition edges (`get_chunk_bounds` defaults `align=False` — `begin`-anchored — elsewhere). Partitions auto-created in `sync_pipe` before insert (PostgreSQL: `PARTITION OF ... FOR VALUES FROM/TO`; MySQL: inline at create + `ALTER TABLE ADD PARTITION`; MSSQL: partition function+scheme + `SPLIT RANGE`, dropped with the table). |
+| `hypertable` | `bool` | Defaults to `True`. On TimescaleDB, creates the target as a hypertable. On other flavors supporting native range partitioning (`postgresql`/`postgis`, `mysql`/`mariadb`, `mssql`), datetime-axis pipes are range-partitioned on the datetime column by default; set `False` to opt out. Only newly created tables are affected — pre-existing plain tables aren't retroactively partitioned (`_create_missing_partitions_pg` skips a non-partitioned parent). Width reuses `verify.chunk_minutes`, boundaries epoch-aligned (deterministic). Per-sync partition-creation cap `system.connectors.sql.instance.max_partitions_per_sync` (default 10,000). `Pipe.verify()` calls `get_chunk_bounds(align=True)` so its chunk edges coincide with these partition edges (`get_chunk_bounds` defaults `align=False` — `begin`-anchored — elsewhere). Partitions auto-created in `sync_pipe` before insert (PostgreSQL: `PARTITION OF ... FOR VALUES FROM/TO`; MySQL: inline at create + `ALTER TABLE ADD PARTITION`; MSSQL: partition function+scheme + `SPLIT RANGE`, dropped with the table). |
 | `hypercore` | `bool` | TimescaleDB only. If `True` (default), enable the Hypercore columnstore at `CREATE TABLE` (`tsdb.segmentby`/`tsdb.orderby`), auto-creating a columnstore policy. `False` = plain row-store hypertable. |
 | `compress` | `bool\|Dict` | If truthy, install a columnstore (compression) policy. Dict overrides `segmentby`, `orderby`, `after`. The columnstore policy *is* the compression policy (`add_columnstore_policy` ≡ legacy `add_compression_policy`). |
 | `enforce` | `bool` | If `False`, skip dtype enforcement on incoming data. |
@@ -183,7 +183,7 @@ In-memory filtering: `meerschaum.utils.dataframe.query_df(df, params)` — same 
 
 ### Verification Syncs
 
-`pipe.verify(begin, end, chunk_interval, ...)` re-syncs historical range in chunks (default 1440 min). Uses `pipe.get_rowcount()` to compare remote vs local; re-syncs only mismatched chunks. Configured via `parameters['verify']`.
+`pipe.verify(begin, end, chunk_interval, ...)` re-syncs historical range in chunks (default 43200 min — 30 days). Uses `pipe.get_rowcount()` to compare remote vs local; re-syncs only mismatched chunks. Configured via `parameters['verify']`.
 
 ---
 

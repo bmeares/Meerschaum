@@ -9,9 +9,10 @@ TimescaleDB auto-creates chunks on insert; other flavors do not. These methods, 
 `SQLConnector`, declare a partitioned parent table (`PARTITION BY RANGE` on the datetime column)
 and pre-create the interval-aligned child partitions a dataframe needs before it is inserted.
 
-Partitioning is opt-in for non-TimescaleDB flavors: set `pipe.parameters['hypertable'] = True`
-(the same flag TimescaleDB uses). The partition width reuses the pipe's chunk interval
-(`pipe.parameters['verify']['chunk_minutes']`, default 1440).
+Partitioning is on by default for datetime-axis pipes on these flavors (`hypertable` defaults to
+`True`, the same flag TimescaleDB uses); set `pipe.parameters['hypertable'] = False` to opt out.
+The partition width reuses the pipe's chunk interval (`pipe.parameters['verify']['chunk_minutes']`,
+default 43200 — 30 days).
 """
 
 from __future__ import annotations
@@ -34,8 +35,27 @@ MSSQL_PARTITION_FLAVORS = {'mssql'}
 ### Non-TimescaleDB flavors supporting declarative range partitioning on a datetime column.
 PARTITIONABLE_FLAVORS = PG_PARTITION_FLAVORS | MYSQL_PARTITION_FLAVORS | MSSQL_PARTITION_FLAVORS
 
-### Safety cap on the number of partitions created for a single dataframe.
+### Safety cap on the number of partitions created for a single dataframe. This is a guard against
+### a pathological config (e.g. a tiny interval over a huge range) issuing a flood of DDL in one
+### sync — not a per-table limit (the database enforces its own, e.g. MySQL's 8192). Override it
+### under `system.connectors.sql.instance.max_partitions_per_sync`.
 _MAX_PARTITIONS_PER_SYNC = 10_000
+
+
+def _max_partitions_per_sync() -> int:
+    """Return the configured per-sync partition-creation cap (falls back to the default)."""
+    from meerschaum.config import get_config
+    try:
+        configured = get_config(
+            'system', 'connectors', 'sql', 'instance', 'max_partitions_per_sync',
+            warn=False,
+        )
+    except Exception:
+        configured = None
+    try:
+        return int(configured) if configured is not None else _MAX_PARTITIONS_PER_SYNC
+    except (TypeError, ValueError):
+        return _MAX_PARTITIONS_PER_SYNC
 
 ### Anchor interval-aligned partition boundaries to the Unix epoch so the same value always maps
 ### to the same partition, regardless of which rows happen to arrive first.
@@ -52,7 +72,11 @@ def _should_partition(self, pipe: mrsm.Pipe) -> bool:
         return False
     if pipe.columns.get('datetime', None) is None:
         return False
-    return bool(pipe.parameters.get('hypertable', False))
+    ### `hypertable` defaults to `True` (the same default the TimescaleDB create-table path uses),
+    ### so datetime-axis pipes on these flavors are partitioned by default. Set it to `False` to
+    ### opt out. Pre-existing non-partitioned tables are protected separately (see
+    ### `_create_missing_partitions_pg`, which skips a parent that isn't actually partitioned).
+    return bool(pipe.parameters.get('hypertable', True))
 
 
 def _get_partition_column(self, pipe: mrsm.Pipe) -> Optional[str]:
@@ -60,6 +84,111 @@ def _get_partition_column(self, pipe: mrsm.Pipe) -> Optional[str]:
     if not self._should_partition(pipe):
         return None
     return pipe.columns.get('datetime', None)
+
+
+def _get_partition_count(self, pipe: mrsm.Pipe, debug: bool = False) -> Optional[int]:
+    """Return the number of native range partitions for a pipe's target table, or `None`."""
+    from meerschaum.utils.sql import sql_item_name
+    flavor = self.flavor
+    schema = self.get_pipe_schema(pipe)
+    try:
+        if flavor in PG_PARTITION_FLAVORS:
+            full = sql_item_name(pipe.target, flavor, schema).replace("'", "''")
+            val = self.value(
+                f"SELECT COUNT(*) FROM pg_inherits WHERE inhparent = '{full}'::regclass",
+                silent=True, debug=debug,
+            )
+            return int(val) if val is not None else None
+        if flavor in MYSQL_PARTITION_FLAVORS:
+            db_name = (
+                schema or self.database or self.parse_uri(self.URI).get('database', None)
+            )
+            if not db_name:
+                return None
+            clean_db = db_name.replace("'", "''")
+            clean_target = pipe.target.replace("'", "''")
+            val = self.value(
+                "SELECT COUNT(*) FROM information_schema.PARTITIONS\n"
+                f"WHERE TABLE_SCHEMA = '{clean_db}' AND TABLE_NAME = '{clean_target}'\n"
+                "  AND PARTITION_NAME IS NOT NULL",
+                silent=True, debug=debug,
+            )
+            return int(val) if val is not None else None
+        if flavor in MSSQL_PARTITION_FLAVORS:
+            ### A `RANGE RIGHT` function with N boundaries yields N + 1 partitions.
+            func_name = self._partition_function_name(pipe).replace("'", "''")
+            val = self.value(
+                "SELECT COUNT(*) FROM sys.partition_functions pf\n"
+                "JOIN sys.partition_range_values prv ON pf.function_id = prv.function_id\n"
+                f"WHERE pf.name = '{func_name}'",
+                silent=True, debug=debug,
+            )
+            return (int(val) + 1) if val is not None else None
+    except Exception as e:
+        if debug:
+            dprint(f"[{self}] Could not count partitions for {pipe}: {e}")
+        return None
+    return None
+
+
+def _get_chunk_count_timescaledb(self, pipe: mrsm.Pipe, debug: bool = False) -> Optional[int]:
+    """Return the number of chunks in a TimescaleDB hypertable, or `None`."""
+    schema = self.get_pipe_schema(pipe)
+    clean_target = pipe.target.replace("'", "''")
+    schema_clause = (
+        f" AND hypertable_schema = '{schema.replace(chr(39), chr(39) * 2)}'" if schema else ""
+    )
+    query = (
+        "SELECT COUNT(*) FROM timescaledb_information.chunks\n"
+        f"WHERE hypertable_name = '{clean_target}'{schema_clause}"
+    )
+    try:
+        val = self.value(query, silent=True, debug=debug)
+        return int(val) if val is not None else None
+    except Exception as e:
+        if debug:
+            dprint(f"[{self}] Could not count chunks for {pipe}: {e}")
+        return None
+
+
+def get_partition_info(self, pipe: mrsm.Pipe, debug: bool = False) -> dict:
+    """
+    Return a summary of a pipe's target table partitioning for `show partitions`.
+
+    Keys:
+    - `flavor`: the connector flavor.
+    - `partitioned`: whether the table is range-partitioned (native) or a TimescaleDB hypertable.
+    - `count`: the number of partitions / chunks (`None` if unknown).
+    - `interval`: the physical partition width (`timedelta`, epoch-`int`, or `None`).
+    """
+    info = {'flavor': self.flavor, 'partitioned': False, 'count': None, 'interval': None}
+    try:
+        if not pipe.exists(debug=debug):
+            return info
+    except Exception:
+        return info
+
+    flavor = self.flavor
+    if flavor in _TIMESCALEDB_FLAVORS:
+        if not self._is_hypertable(pipe, debug=debug):
+            return info
+        info['partitioned'] = True
+        info['count'] = self._get_chunk_count_timescaledb(pipe, debug=debug)
+        info['interval'] = pipe.get_chunk_interval(debug=debug)
+        return info
+
+    if not self._should_partition(pipe):
+        return info
+    ### Report based on the table's ACTUAL state, not just the `hypertable` flag — a pre-existing
+    ### plain table (created before partitioning, or with `hypertable` only just enabled) has no
+    ### partitions and should not be reported as partitioned.
+    count = self._get_partition_count(pipe, debug=debug)
+    if not count:
+        return info
+    info['partitioned'] = True
+    info['count'] = count
+    info['interval'] = pipe.get_chunk_interval(debug=debug)
+    return info
 
 
 def _partition_bounds(
@@ -160,15 +289,16 @@ def _get_partition_ranges_for_df(
     lo, _ = self._partition_bounds(min_val, interval)
     cursor = lo
     count = 0
+    max_parts = _max_partitions_per_sync()
     while cursor <= max_val:
         lo_cursor, hi_cursor = self._partition_bounds(cursor, interval)
         ranges.append((lo_cursor, hi_cursor))
         cursor = hi_cursor
         count += 1
-        if count >= _MAX_PARTITIONS_PER_SYNC:
+        if count >= max_parts:
             from meerschaum.utils.warnings import warn
             warn(
-                f"Reached the {_MAX_PARTITIONS_PER_SYNC}-partition limit for {pipe}; "
+                f"Reached the {max_parts}-partition limit for {pipe}; "
                 "consider a larger `chunk_minutes`.",
                 stack=False,
             )
@@ -230,6 +360,21 @@ def _create_missing_partitions_pg(
 
     schema = self.get_pipe_schema(pipe)
     parent_name = sql_item_name(pipe.target, self.flavor, schema)
+
+    ### Guard against a pre-existing PLAIN table: `CREATE TABLE ... PARTITION OF` errors if the
+    ### parent isn't declaratively partitioned. With `hypertable` defaulting to `True`, an older
+    ### non-partitioned table would otherwise break on its next sync. (MySQL/MSSQL no-op naturally
+    ### when no partitions/function exist, so they need no equivalent guard.)
+    parent_regclass = parent_name.replace("'", "''")
+    try:
+        is_partitioned = self.value(
+            f"SELECT 1 FROM pg_partitioned_table WHERE partrelid = '{parent_regclass}'::regclass",
+            silent=True, debug=debug,
+        )
+    except Exception:
+        is_partitioned = None
+    if not is_partitioned:
+        return True, f"{pipe} target table is not partitioned; skipping partition creation."
 
     queries = []
     for lo, hi in ranges:
@@ -354,6 +499,7 @@ def _create_missing_partitions_mysql(
     queries = []
     cursor = max_bound
     count = 0
+    max_parts = _max_partitions_per_sync()
     while cursor <= max_val:
         lo = cursor
         hi = (lo + interval) if isinstance(lo, datetime) else (lo + interval)
@@ -364,10 +510,10 @@ def _create_missing_partitions_mysql(
         )
         cursor = hi
         count += 1
-        if count >= _MAX_PARTITIONS_PER_SYNC:
+        if count >= max_parts:
             from meerschaum.utils.warnings import warn
             warn(
-                f"Reached the {_MAX_PARTITIONS_PER_SYNC}-partition limit for {pipe}; "
+                f"Reached the {max_parts}-partition limit for {pipe}; "
                 "consider a larger `chunk_minutes`.",
                 stack=False,
             )
@@ -538,6 +684,7 @@ def _create_missing_partitions_mssql(
     queries = []
     cursor = max_bound + interval
     count = 0
+    max_parts = _max_partitions_per_sync()
     while cursor <= max_val:
         queries.append(f"ALTER PARTITION SCHEME {scheme_item} NEXT USED [PRIMARY]")
         queries.append(
@@ -545,10 +692,10 @@ def _create_missing_partitions_mssql(
         )
         cursor = cursor + interval
         count += 1
-        if count >= _MAX_PARTITIONS_PER_SYNC:
+        if count >= max_parts:
             from meerschaum.utils.warnings import warn
             warn(
-                f"Reached the {_MAX_PARTITIONS_PER_SYNC}-partition limit for {pipe}; "
+                f"Reached the {max_parts}-partition limit for {pipe}; "
                 "consider a larger `chunk_minutes`.",
                 stack=False,
             )
@@ -598,3 +745,158 @@ def _get_partition_cleanup_queries(self, pipe: mrsm.Pipe) -> List[str]:
             f"DROP PARTITION FUNCTION {func_item}"
         ),
     ]
+
+
+### TimescaleDB sets a hypertable's chunk interval natively; the change applies to FUTURE chunks
+### only (existing chunks keep their size), so no table rewrite is needed.
+_TIMESCALEDB_FLAVORS = {'timescaledb', 'timescaledb-ha'}
+
+
+def partition_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    chunk_minutes: Optional[int] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> SuccessTuple:
+    """
+    Rebuild a pipe's target table to a new partition (chunk) width.
+
+    The width is taken from `chunk_minutes` if provided, else the pipe's configured
+    `verify.chunk_minutes`. The new width is persisted to `verify.chunk_minutes`, which is the
+    authoritative partition width (see `Pipe.get_chunk_interval`).
+
+    Strategy by flavor:
+
+    - **TimescaleDB**: call `set_chunk_time_interval()`. This changes the width of FUTURE chunks
+      only; existing chunks are not rewritten.
+    - **PostgreSQL / PostGIS, MySQL / MariaDB, MSSQL**: rebuild the table by reading its data,
+      dropping it, and re-syncing at the new width. This reuses the tested `create_pipe_table_from_df`
+      and `_create_missing_partitions` paths, and (for MSSQL) frees the partition function/scheme
+      names so they can be recreated. The whole table is read into memory; for very large tables
+      consider a manual chunked rebuild.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The partitioned pipe whose target table to repartition.
+
+    chunk_minutes: Optional[int], default None
+        The new partition width in minutes. Defaults to the pipe's `verify.chunk_minutes`.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    from meerschaum.config import get_config
+    from meerschaum.utils.warnings import warn
+
+    flavor = self.flavor
+    if flavor not in (PARTITIONABLE_FLAVORS | _TIMESCALEDB_FLAVORS):
+        return False, f"Repartitioning is not supported for flavor '{flavor}'."
+
+    is_timescaledb = flavor in _TIMESCALEDB_FLAVORS
+    if not is_timescaledb and not self._should_partition(pipe):
+        return False, (
+            f"{pipe} is not partitioned. Set `hypertable` to `True` (and define a `datetime` "
+            "column) to enable native range partitioning."
+        )
+
+    if pipe.columns.get('datetime', None) is None:
+        return False, f"{pipe} has no `datetime` column to partition by."
+
+    if not pipe.exists(debug=debug):
+        return False, f"{pipe} does not exist; nothing to repartition."
+
+    new_minutes = (
+        chunk_minutes
+        if chunk_minutes is not None
+        else (
+            pipe.parameters.get('verify', {}).get('chunk_minutes', None)
+            or get_config('pipes', 'parameters', 'verify', 'chunk_minutes')
+        )
+    )
+    if not isinstance(new_minutes, int) or new_minutes <= 0:
+        return False, f"Invalid chunk interval '{new_minutes}'; must be a positive integer of minutes."
+
+    ### TimescaleDB: native, no rewrite. Future chunks adopt the new interval.
+    if is_timescaledb:
+        from meerschaum.utils.sql import sql_item_name
+        ### `set_chunk_time_interval` takes the hypertable as a `regclass`; pass the
+        ### schema-qualified, quoted name as a string literal so it resolves unambiguously.
+        pipe_name = sql_item_name(pipe.target, flavor, self.get_pipe_schema(pipe))
+        regclass_literal = "'" + pipe_name.replace("'", "''") + "'"
+        interval = pipe.get_chunk_interval(new_minutes, debug=debug)
+        chunk_time_interval = (
+            f"{interval}"
+            if isinstance(interval, int)
+            else f"INTERVAL '{int(interval.total_seconds() / 60)} MINUTES'"
+        )
+        query = f"SELECT set_chunk_time_interval({regclass_literal}, {chunk_time_interval})"
+        try:
+            success = self.exec(query, silent=(not debug), debug=debug) is not None
+        except Exception as e:
+            return False, f"Failed to set chunk interval for {pipe}:\n{e}"
+        if not success:
+            return False, f"Failed to set chunk interval for {pipe}."
+        pipe.update_parameters(
+            {'verify': {'chunk_minutes': new_minutes}}, persist=True, debug=debug
+        )
+        return True, (
+            f"Set chunk interval for {pipe} to {new_minutes} minutes "
+            "(applies to future chunks; existing chunks are unchanged)."
+        )
+
+    ### Non-TimescaleDB: rebuild via a drop + re-sync round-trip.
+    current_interval = pipe.get_chunk_interval(debug=debug)
+    new_interval = pipe.get_chunk_interval(new_minutes, debug=debug)
+    if current_interval == new_interval:
+        return True, f"{pipe} is already partitioned at {new_minutes} minutes."
+
+    rowcount_before = pipe.get_rowcount(debug=debug)
+
+    if debug:
+        dprint(f"[{self}] Reading {pipe} data to rebuild partitions at {new_minutes} minutes.")
+    df = pipe.get_data(debug=debug)
+    if df is None:
+        return False, f"Could not read data for {pipe}; aborting repartition."
+
+    ### Persist the new width BEFORE recreating so the rebuild lays partitions at the new size.
+    ### `verify.chunk_minutes` is the authoritative partition width.
+    update_success, update_msg = pipe.update_parameters(
+        {'verify': {'chunk_minutes': new_minutes}},
+        persist=True,
+        debug=debug,
+    )
+    if not update_success:
+        return False, f"Failed to persist new partition width for {pipe}:\n{update_msg}"
+
+    drop_success, drop_msg = pipe.drop(debug=debug)
+    if not drop_success:
+        return False, f"Failed to drop {pipe} during repartition:\n{drop_msg}"
+
+    ### Re-sync the data we read; `create_pipe_table_from_df` recreates the table at the new
+    ### width and `_create_missing_partitions` populates the partitions.
+    sync_success, sync_msg = pipe.sync(df, debug=debug)
+    if not sync_success:
+        return False, (
+            f"Repartition of {pipe} failed during re-sync; the table was dropped and must be "
+            f"resynced from its source:\n{sync_msg}"
+        )
+
+    rowcount_after = pipe.get_rowcount(debug=debug)
+    if (
+        rowcount_before is not None
+        and rowcount_after is not None
+        and rowcount_after != rowcount_before
+    ):
+        warn(
+            f"Row count changed during repartition of {pipe} "
+            f"({rowcount_before} -> {rowcount_after}).",
+            stack=False,
+        )
+
+    return True, f"Repartitioned {pipe} to {new_minutes} minutes."

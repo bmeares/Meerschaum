@@ -199,7 +199,7 @@ A verification sync divides a pipe's interval into chunks and resyncs those chun
 
     ```yaml
     verify:
-      chunk_minutes: 1440
+      chunk_minutes: 43200
     ```
 
 === "Python"
@@ -214,7 +214,7 @@ A verification sync divides a pipe's interval into chunks and resyncs those chun
                 'backtrack_minutes': 1440,
             },
             'verify': {
-                'chunk_minutes': 1440,
+                'chunk_minutes': 43200,
             },
             'noaa': {
                 'stations': ['KGMU', 'KCEU'],
@@ -244,7 +244,7 @@ When run without explicit date bounds, verification syncs are bounded to a maxim
                 'backtrack_minutes': 1440,
             },
             'verify': {
-                'chunk_minutes': 1440,
+                'chunk_minutes': 43200,
                 'bound_days': 366,
             },
             'noaa': {

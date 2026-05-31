@@ -7,7 +7,7 @@ Run maintenance operations (vacuum, analyze) on a Pipe's target table.
 """
 
 from __future__ import annotations
-from meerschaum.utils.typing import SuccessTuple, Any
+from meerschaum.utils.typing import SuccessTuple, Any, Optional
 
 
 def vacuum(
@@ -103,4 +103,59 @@ def analyze(
             )
         )
 
+    return result
+
+
+def repartition(
+    self,
+    chunk_minutes: Optional[int] = None,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Call the Pipe's instance connector's `partition_pipe()` method to rebuild the target table
+    to a new partition (chunk) width.
+
+    On TimescaleDB this changes the chunk interval for future chunks. On PostgreSQL / PostGIS,
+    MySQL / MariaDB, and MSSQL it rebuilds the natively range-partitioned table at the new width.
+
+    Parameters
+    ----------
+    chunk_minutes: Optional[int], default None
+        The new partition width in minutes. Defaults to the pipe's `verify.chunk_minutes`.
+
+    debug: bool, default False
+        Verbosity toggle.
+
+    Returns
+    -------
+    A `SuccessTuple` of success, message.
+    """
+    from meerschaum.utils.venv import Venv
+    from meerschaum.connectors import get_connector_plugin
+
+    try:
+        with Venv(get_connector_plugin(self.instance_connector)):
+            if hasattr(self.instance_connector, 'partition_pipe'):
+                result = self.instance_connector.partition_pipe(
+                    self, chunk_minutes=chunk_minutes, debug=debug, **kw
+                )
+            else:
+                result = (
+                    False,
+                    (
+                        "Cannot repartition pipes for instance connectors of type "
+                        f"'{self.instance_connector.type}'."
+                    )
+                )
+    except NotImplementedError:
+        result = (
+            False,
+            (
+                "Repartitioning is not implemented for instance connectors of type "
+                f"'{self.instance_connector.type}'."
+            )
+        )
+
+    self._clear_cache_key('_exists', debug=debug)
     return result

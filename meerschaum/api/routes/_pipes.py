@@ -1212,3 +1212,31 @@ def analyze_pipe(
     success, msg = pipe.analyze(debug=debug)
     _ = pipes(instance_keys, refresh=True)
     return success, msg
+
+
+@app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/partition',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def partition_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    chunk_minutes: Optional[int] = None,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
+) -> mrsm.SuccessTuple:
+    """
+    Repartition a pipe's target table to a new chunk width.
+    See [`Pipe.repartition()`](https://docs.meerschaum.io/meerschaum.html#Pipe.repartition).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot repartition protected table '{pipe.target}'.",
+        )
+    success, msg = pipe.repartition(chunk_minutes=chunk_minutes, debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg

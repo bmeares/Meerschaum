@@ -37,6 +37,7 @@ def show(
         'columns'    : _show_columns,
         'rowcounts'  : _show_rowcounts,
         'sizes'      : _show_sizes,
+        'partitions' : _show_partitions,
         'plugins'    : _show_plugins,
         'packages'   : _show_packages,
         'help'       : _show_help,
@@ -567,6 +568,129 @@ def _show_sizes(
         lines.append(f"    {highlighted}{padding}  {size_str:>{size_width}}")
     lines.append(sep)
     lines.append(f"    {'Total':<{name_width}}  {format_bytes(total_bytes):>{size_width}}")
+    print("\n" + "\n".join(lines) + "\n")
+
+    return True, "Success"
+
+
+def _show_partitions(
+    action: Optional[List[str]] = None,
+    shell: bool = False,
+    nopretty: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Show partitioning information for the selected pipes.
+
+    For natively range-partitioned pipes (PostgreSQL / PostGIS, MySQL / MariaDB, MSSQL) and
+    TimescaleDB hypertables, lists the partition / chunk count, the physical partition width, and
+    the approximate number of rows per partition (total rowcount ÷ partition count) — a useful
+    signal for tuning the width.
+    """
+    import os
+    import contextlib
+    from datetime import timedelta
+    from meerschaum import get_pipes
+    from meerschaum.utils.misc import interval_str
+    from meerschaum.utils.warnings import info
+    from meerschaum.utils.formatting._shell import progress
+    from meerschaum.utils.formatting._pipes import pipe_repr
+    from meerschaum.utils.daemon import running_in_daemon
+    from meerschaum._internal.static import STATIC_CONFIG
+
+    pipes = get_pipes(as_list=True, debug=debug, **kw)
+    if not pipes:
+        return False, "No pipes selected."
+
+    noninteractive_val = os.environ.get(STATIC_CONFIG['environment']['noninteractive'], None)
+    noninteractive = str(noninteractive_val).lower() in ('1', 'true', 'yes')
+    _progress = (
+        progress()
+        if (shell and not noninteractive and not running_in_daemon() and not nopretty and not debug)
+        else None
+    )
+
+    records = []
+    cm = _progress if _progress is not None else contextlib.nullcontext()
+    with cm:
+        task = (
+            _progress.add_task("Inspecting partitions...", total=len(pipes))
+            if _progress is not None
+            else None
+        )
+        for pipe in pipes:
+            if not nopretty and _progress is None:
+                info(f"Inspecting partitions for {pipe}...")
+            get_info = getattr(pipe.instance_connector, 'get_partition_info', None)
+            pinfo = (
+                get_info(pipe, debug=debug)
+                if get_info is not None
+                else {'partitioned': False, 'count': None, 'interval': None}
+            )
+            interval = pinfo.get('interval', None)
+            if isinstance(interval, timedelta):
+                interval_display = interval_str(interval)
+            elif isinstance(interval, int):
+                interval_display = f"{interval:,} (int axis)"
+            else:
+                interval_display = "-"
+
+            partitioned = pinfo.get('partitioned', False)
+            count = pinfo.get('count', None)
+
+            ### Approximate rows per partition (only meaningful for an actually-partitioned table).
+            rows_per_partition = None
+            if partitioned and count:
+                rowcount = pipe.get_rowcount(debug=debug)
+                if rowcount is not None:
+                    rows_per_partition = round(rowcount / count)
+
+            records.append({
+                'pipe': pipe,
+                'partitioned': partitioned,
+                'count': count,
+                'interval_display': interval_display,
+                'rows_per_partition': rows_per_partition,
+            })
+            if _progress is not None:
+                _progress.advance(task)
+
+    ### Most-partitioned pipes first; unpartitioned last.
+    records.sort(key=lambda r: (r['partitioned'], r['count'] or 0), reverse=True)
+
+    def _count_str(r):
+        return f"{r['count']:,}" if r['count'] is not None else "-"
+
+    def _rpp_str(r):
+        return f"{r['rows_per_partition']:,}" if r['rows_per_partition'] is not None else "-"
+
+    if nopretty:
+        for r in records:
+            print(f"{r['pipe']}\t{_count_str(r)}\t{r['interval_display']}\t{_rpp_str(r)}")
+        return True, "Success"
+
+    rows = [
+        (str(r['pipe']), pipe_repr(r['pipe']), _count_str(r), r['interval_display'], _rpp_str(r))
+        for r in records
+    ]
+    name_w = max([len("Pipe")] + [len(plain) for plain, _, _, _, _ in rows])
+    parts_w = max([len("Partitions")] + [len(c) for _, _, c, _, _ in rows])
+    interval_w = max([len("Interval")] + [len(i) for _, _, _, i, _ in rows])
+    rpp_w = max([len("Rows/Part")] + [len(rpp) for _, _, _, _, rpp in rows])
+
+    header = (
+        f"    {'Pipe':<{name_w}}  {'Partitions':>{parts_w}}  "
+        f"{'Interval':>{interval_w}}  {'Rows/Part':>{rpp_w}}"
+    )
+    sep = "    " + "-" * (len(header) - 4)
+    lines = [header, sep]
+    for plain, highlighted, count_str, interval_display, rpp in rows:
+        padding = ' ' * (name_w - len(plain))
+        lines.append(
+            f"    {highlighted}{padding}  {count_str:>{parts_w}}  "
+            f"{interval_display:>{interval_w}}  {rpp:>{rpp_w}}"
+        )
     print("\n" + "\n".join(lines) + "\n")
 
     return True, "Success"

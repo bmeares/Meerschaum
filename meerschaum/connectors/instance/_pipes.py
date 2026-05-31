@@ -640,3 +640,29 @@ def analyze_pipe(
     return False, (
         f"Analyzing is not supported for instance connectors of type '{self.type}'."
     )
+
+def partition_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    chunk_minutes: Optional[int] = None,
+    debug: bool = False,
+    **kwargs: Any
+) -> mrsm.SuccessTuple:
+    """
+    Rebuild a pipe's target table to a new partition (chunk) width.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The partitioned pipe whose target table to repartition.
+
+    chunk_minutes: Optional[int], default None
+        The new partition width in minutes. Defaults to the pipe's `verify.chunk_minutes`.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    return False, (
+        f"Repartitioning is not supported for instance connectors of type '{self.type}'."
+    )

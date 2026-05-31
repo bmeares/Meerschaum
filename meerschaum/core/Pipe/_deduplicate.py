@@ -40,7 +40,7 @@ def deduplicate(
 
     chunk_interval: Union[timedelta, int, None], default None
         If provided, use this for the chunk bounds.
-        Defaults to the value set in `pipe.parameters['chunk_minutes']` (1440).
+        Defaults to the value set in `pipe.parameters['verify']['chunk_minutes']` (43200 — 30 days).
 
     bounded: Optional[bool], default None
         Only check outside the oldest and newest sync times if bounded is explicitly `False`.

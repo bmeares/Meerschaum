@@ -64,6 +64,9 @@ class APIConnector(InstanceConnector):
         get_pipe_docs,
         get_pipe_size,
         compress_pipe,
+        vacuum_pipe,
+        analyze_pipe,
+        partition_pipe,
     )
     from ._fetch import fetch
     from ._plugins import (

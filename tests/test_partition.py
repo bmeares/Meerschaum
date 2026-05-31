@@ -126,6 +126,8 @@ def test_partitioned_sync_roundtrip(flavor: str):
         'test', 'partition', 'unpartitioned',
         instance=conn,
         columns=['datetime', 'id'],
+        ### Partitioning is on by default for these flavors, so opt out explicitly.
+        parameters={'hypertable': False},
     )
     assert not conn._should_partition(plain_pipe)
 
@@ -194,6 +196,152 @@ def test_partition_bounds_deterministic(flavor: str):
     ### Integer axis (epoch-int datetimes).
     lo_i, hi_i = conn._partition_bounds(1437, 1000)
     assert (lo_i, hi_i) == (1000, 2000)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_chunk_interval_aliases_and_range(flavor: str):
+    """
+    `verify.chunk_minutes` is the authoritative partition width, with `chunk_hours`/`chunk_days`/
+    etc. aliases and a `chunk_range` for integer axes. (`get_chunk_interval` is pure, so this runs
+    on any flavor.)
+    """
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+
+    ### Aliases resolve to the equivalent timedelta.
+    days_pipe = mrsm.Pipe(
+        'test', 'partition', 'alias_days',
+        instance=conn, columns={'datetime': 'ts'},
+        parameters={'verify': {'chunk_days': 7}},
+    )
+    assert days_pipe.get_chunk_interval() == timedelta(days=7)
+
+    ### `chunk_minutes` wins when multiple aliases are present (priority order).
+    multi_pipe = mrsm.Pipe(
+        'test', 'partition', 'alias_multi',
+        instance=conn, columns={'datetime': 'ts'},
+        parameters={'verify': {'chunk_minutes': 60, 'chunk_days': 7}},
+    )
+    assert multi_pipe.get_chunk_interval() == timedelta(minutes=60)
+
+    ### Integer axis: `chunk_range` is used verbatim; otherwise minutes are used verbatim (legacy).
+    range_pipe = mrsm.Pipe(
+        'test', 'partition', 'alias_range',
+        instance=conn, columns={'datetime': 'ts'}, dtypes={'ts': 'int'},
+        parameters={'verify': {'chunk_range': 1000, 'chunk_minutes': 5}},
+    )
+    assert range_pipe.get_chunk_interval() == 1000
+
+    legacy_int = mrsm.Pipe(
+        'test', 'partition', 'alias_legacy_int',
+        instance=conn, columns={'datetime': 'ts'}, dtypes={'ts': 'int'},
+        parameters={'verify': {'chunk_minutes': 500}},
+    )
+    assert legacy_int.get_chunk_interval() == 500
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_repartition_roundtrip(flavor: str):
+    """`Pipe.repartition()` changes the partition width while preserving the data."""
+    conn = conns[flavor]
+    if conn.type != 'sql' or conn.flavor not in PARTITIONABLE_FLAVORS:
+        return
+
+    data = _deterministic_data()
+    pipe = mrsm.Pipe('test', 'partition', 'repartition', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'partition', 'repartition',
+        instance=conn,
+        columns=['datetime', 'id'],
+        parameters={
+            'hypertable': True,
+            'verify': {'chunk_minutes': CHUNK_MINUTES},  # one-day partitions
+        },
+    )
+    success, msg = pipe.sync(data, debug=debug)
+    assert success, msg
+
+    ### The width is the pipe's `verify.chunk_minutes`.
+    assert pipe.get_chunk_interval(debug=debug) == timedelta(minutes=CHUNK_MINUTES)
+    rowcount_before = pipe.get_rowcount(debug=debug)
+    n_before = _count_partitions(conn, pipe)
+
+    ### Repartition to two-day chunks: data preserved, `verify.chunk_minutes` updated, fewer
+    ### partitions.
+    new_minutes = CHUNK_MINUTES * 2
+    success, msg = pipe.repartition(chunk_minutes=new_minutes, debug=debug)
+    assert success, msg
+    assert pipe.parameters.get('verify', {}).get('chunk_minutes', None) == new_minutes
+    assert pipe.get_rowcount(debug=debug) == rowcount_before
+
+    n_after = _count_partitions(conn, pipe)
+    if n_before != -1 and n_after != -1:
+        assert n_after < n_before, (
+            f"Expected fewer partitions after widening ({n_before} -> {n_after})."
+        )
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_get_partition_info(flavor: str):
+    """`get_partition_info` reports the partition count and physical width for a partitioned pipe."""
+    conn = conns[flavor]
+    if conn.type != 'sql' or conn.flavor not in PARTITIONABLE_FLAVORS:
+        return
+
+    data = _deterministic_data()
+    pipe = mrsm.Pipe('test', 'partition', 'info', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe(
+        'test', 'partition', 'info',
+        instance=conn,
+        columns=['datetime', 'id'],
+        parameters={
+            'hypertable': True,
+            'verify': {'chunk_minutes': CHUNK_MINUTES},
+        },
+    )
+    success, msg = pipe.sync(data, debug=debug)
+    assert success, msg
+
+    info = conn.get_partition_info(pipe, debug=debug)
+    assert info['partitioned'] is True
+    assert info['interval'] == timedelta(minutes=CHUNK_MINUTES)
+    if info['count'] is not None:
+        assert info['count'] > 1
+
+    ### An unpartitioned pipe reports `partitioned=False`.
+    plain = mrsm.Pipe('test', 'partition', 'info_plain', instance=conn)
+    plain.delete()
+    plain = mrsm.Pipe(
+        'test', 'partition', 'info_plain',
+        instance=conn,
+        columns=['datetime', 'id'],
+        parameters={'hypertable': False},
+    )
+    success, msg = plain.sync(data, debug=debug)
+    assert success, msg
+    assert conn.get_partition_info(plain, debug=debug)['partitioned'] is False
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_repartition_unpartitioned_errors(flavor: str):
+    """`Pipe.repartition()` fails clearly on a pipe that is not partitioned."""
+    conn = conns[flavor]
+    if conn.type != 'sql' or conn.flavor in PARTITIONABLE_FLAVORS:
+        return
+    ### Skip TimescaleDB, which supports `set_chunk_time_interval` instead.
+    if conn.flavor in ('timescaledb', 'timescaledb-ha'):
+        return
+
+    pipe = mrsm.Pipe('test', 'partition', 'noop', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe('test', 'partition', 'noop', instance=conn, columns=['datetime', 'id'])
+    success, _ = pipe.sync(_deterministic_data(), debug=debug)
+    assert success
+    repart_success, _ = pipe.repartition(debug=debug)
+    assert not repart_success
 
 
 @pytest.mark.parametrize("flavor", get_flavors())

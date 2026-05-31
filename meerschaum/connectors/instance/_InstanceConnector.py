@@ -86,4 +86,5 @@ class InstanceConnector(Connector):
         decompress_pipe,
         vacuum_pipe,
         analyze_pipe,
+        partition_pipe,
     )
