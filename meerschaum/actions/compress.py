@@ -71,7 +71,13 @@ def _compress_pipes(
     noninteractive = str(noninteractive_val).lower() in ('1', 'true', 'yes')
     _progress = (
         progress()
-        if (kw.get('shell', False) and not noninteractive and not running_in_daemon() and not nopretty)
+        if (
+            kw.get('shell', False)
+            and not noninteractive
+            and not running_in_daemon()
+            and not nopretty
+            and not debug
+        )
         else None
     )
 

@@ -255,12 +255,12 @@ def deduplicate(
     retry_bounds_success_tuples = dict(pool.map(process_chunk_bounds, retry_bounds))
     retry_bounds_successes = {
         bounds: success_tuple
-        for bounds, success_tuple in bounds_success_tuples.items()
+        for bounds, success_tuple in retry_bounds_success_tuples.items()
         if success_tuple[0]
     }
     retry_bounds_failures = {
         bounds: success_tuple
-        for bounds, success_tuple in bounds_success_tuples.items()
+        for bounds, success_tuple in retry_bounds_success_tuples.items()
         if not success_tuple[0]
     }
 

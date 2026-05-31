@@ -18,6 +18,9 @@ This is the current release cycle, so stay tuned for future releases!
     - **Add the `compress pipes` action and `Pipe.compress()`.**  
       Compress pipes' target tables to reclaim disk space. For TimescaleDB this enables native compression, installs a compression policy, and compresses existing chunks; MySQL/MariaDB and MSSQL use their native table compression. Backed by the new instance-connector method `compress_pipe()`.
 
+    - **Add the `decompress pipes` action and `Pipe.decompress()`.**  
+      The inverse of `compress pipes`. For TimescaleDB this removes the compression policy, converts compressed chunks back to row-store, and disables the columnstore so future synced chunks stay uncompressed; MySQL/MariaDB and MSSQL revert their native table compression. Pass `--no-policy` to decompress existing chunks now while leaving the policy in place (e.g. for a bulk backfill, after which chunks are recompressed on schedule). Backed by the new instance-connector method `decompress_pipe()`.
+
     - **Add the `compress` pipe parameter.**  
       Set `compress` (a `bool` or a dictionary of `after`/`segmentby`/`orderby` settings) to mark a pipe for compression. For TimescaleDB hypertables, a compression policy is installed automatically on sync.
 

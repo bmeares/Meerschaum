@@ -273,9 +273,12 @@ def _get_columnstore_policy_query(
     settings = self._get_compress_settings(pipe)
 
     ### Hypertables with an integer time dimension (int epoch datetime axis) require an integer
-    ### `after`; an `INTERVAL` raises `InvalidParameterValue`.
+    ### `after`; an `INTERVAL` raises `InvalidParameterValue`. Read the configured dtype only —
+    ### the inferring `pipe.dtypes` property walks references and queries the remote for column
+    ### types, which can add minutes of cold-connection overhead during query building.
     dt_col = pipe.columns.get('datetime', None)
-    dt_typ = str(pipe.dtypes.get(dt_col, 'datetime')) if dt_col else 'datetime'
+    configured_dtypes = pipe.parameters.get('dtypes', {})
+    dt_typ = str(configured_dtypes.get(dt_col, 'datetime')) if dt_col else 'datetime'
     dt_is_integer = are_dtypes_equal(dt_typ, 'int')
 
     after = settings['after']
