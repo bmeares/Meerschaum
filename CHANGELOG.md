@@ -19,10 +19,6 @@ This is the current release cycle, so stay tuned for future releases!
 - **Add `datetime_to_int()` to `meerschaum.utils.dtypes`.**  
   Convert a `datetime` to an integer epoch at a given precision unit (e.g. `'millisecond'`). Naive datetimes are treated as UTC and integers pass through unchanged. `get_current_timestamp(..., as_int=True)` now reuses this helper.
 
-## 3.3.0 Releases
-
-### v3.3.2
-
 - **Add disk usage and compression tools.**  
   New tooling helps manage how much space pipes occupy on disk:
 
@@ -71,6 +67,8 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fix `stop jobs` leaving zombie sync threads.**  
   Stopping a job now reliably terminates `sync pipes` worker threads. Previously the daemon's main thread could exit while non-daemon worker threads kept running and appending to the log, requiring a container restart. Workers now honor a process-wide stop signal and are interrupted when a job is stopped.
+
+## 3.3.0 Releases
 
 ### v3.3.1
 
