@@ -855,3 +855,97 @@ Compress a pipe's target table to reduce disk usage (for the action `compress pi
         ### TODO write the logic to compress `pipe.target` (if supported).
         return False, f"Compression is not supported for instance connectors of type '{self.type}'."
     ```
+
+### `#!python decompress_pipe()` (optional)
+
+The inverse of [`compress_pipe()`](#compress_pipe) (for the action `decompress pipes` and [`#!python Pipe.decompress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.decompress)). Pass `no_policy=True` to decompress existing data now while leaving the compression policy in place (e.g. for a bulk backfill, after which data is recompressed on schedule). The default implementation returns a failure `SuccessTuple` indicating decompression is unsupported. See the [`#!python SQLConnector.decompress_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.decompress_pipe) method for reference.
+
+??? example "`#!python def decompress_pipe():`"
+    ```python
+    def decompress_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        no_policy: bool = False,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        """
+        Decompress a pipe's target table, the inverse of `compress_pipe()`.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table to decompress.
+
+        no_policy: bool, default False
+            If `True`, decompress existing data now but leave the compression policy in
+            place so future data is recompressed on schedule.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        """
+        ### TODO write the logic to decompress `pipe.target` (if supported).
+        return False, f"Decompression is not supported for instance connectors of type '{self.type}'."
+    ```
+
+### `#!python vacuum_pipe()` (optional)
+
+Reclaim dead-tuple disk space from a pipe's target table (for the action `vacuum pipes` and [`#!python Pipe.vacuum()`](https://docs.meerschaum.io/meerschaum.html#Pipe.vacuum)). Pass `full=True` to perform a heavier rewrite that returns freed space to the OS (where supported). The default implementation returns a failure `SuccessTuple` indicating vacuuming is unsupported. See the [`#!python SQLConnector.vacuum_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.vacuum_pipe) method for reference.
+
+??? example "`#!python def vacuum_pipe():`"
+    ```python
+    def vacuum_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        full: bool = False,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        """
+        Reclaim dead-tuple disk space from a pipe's target table.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table to vacuum.
+
+        full: bool, default False
+            If `True`, perform a heavier rewrite that returns freed space to the
+            operating system at the cost of an exclusive lock.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        """
+        ### TODO write the logic to vacuum `pipe.target` (if supported).
+        return False, f"Vacuuming is not supported for instance connectors of type '{self.type}'."
+    ```
+
+### `#!python analyze_pipe()` (optional)
+
+Refresh the database planner's statistics for a pipe's target table (for the action `analyze pipes` and [`#!python Pipe.analyze()`](https://docs.meerschaum.io/meerschaum.html#Pipe.analyze)). Unlike `vacuum_pipe()`, this does not reclaim disk space — it helps the query planner choose better plans after large syncs. The default implementation returns a failure `SuccessTuple` indicating analysis is unsupported. See the [`#!python SQLConnector.analyze_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.analyze_pipe) method for reference.
+
+??? example "`#!python def analyze_pipe():`"
+    ```python
+    def analyze_pipe(
+        self,
+        pipe: mrsm.Pipe,
+        debug: bool = False,
+        **kwargs: Any
+    ) -> mrsm.SuccessTuple:
+        """
+        Refresh the database planner's statistics for a pipe's target table.
+
+        Parameters
+        ----------
+        pipe: mrsm.Pipe
+            The pipe whose target table to analyze.
+
+        Returns
+        -------
+        A `SuccessTuple` indicating success.
+        """
+        ### TODO write the logic to analyze `pipe.target` (if supported).
+        return False, f"Analysis is not supported for instance connectors of type '{self.type}'."
+    ```
