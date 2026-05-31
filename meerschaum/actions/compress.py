@@ -111,6 +111,7 @@ def _compress_pipes(
                 total_after += size_after
                 reclaimed = size_before - size_after
                 stats_rows.append((
+                    size_before,
                     str(pipe),
                     format_bytes(size_before),
                     format_bytes(size_after),
@@ -120,16 +121,19 @@ def _compress_pipes(
             if _progress is not None:
                 _progress.advance(task)
 
+    ### Sort by on-disk size descending (largest tables first).
+    stats_rows.sort(key=lambda row: row[0], reverse=True)
+
     if debug:
         dprint("Results for compressing pipes.")
         pprint(success_dict)
 
     if stats_rows and not nopretty:
         total_reclaimed = total_before - total_after
-        name_width = max([len("Pipe")] + [len(row[0]) for row in stats_rows])
-        before_width = max([len("Before")] + [len(row[1]) for row in stats_rows])
-        after_width = max([len("After")] + [len(row[2]) for row in stats_rows])
-        saved_width = max([len("Saved")] + [len(row[3]) for row in stats_rows])
+        name_width = max([len("Pipe")] + [len(row[1]) for row in stats_rows])
+        before_width = max([len("Before")] + [len(row[2]) for row in stats_rows])
+        after_width = max([len("After")] + [len(row[3]) for row in stats_rows])
+        saved_width = max([len("Saved")] + [len(row[4]) for row in stats_rows])
 
         header = (
             f"    {'Pipe':<{name_width}}  {'Before':>{before_width}}  "
@@ -137,7 +141,7 @@ def _compress_pipes(
         )
         sep = "    " + "-" * (len(header) - 4)
         lines = [header, sep]
-        for name, before, after, saved in stats_rows:
+        for _, name, before, after, saved in stats_rows:
             lines.append(
                 f"    {name:<{name_width}}  {before:>{before_width}}  "
                 f"{after:>{after_width}}  {saved:>{saved_width}}"

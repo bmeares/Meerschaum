@@ -21,6 +21,7 @@ from meerschaum.utils.dtypes import (
     get_geometry_type_srid,
     attempt_cast_to_geometry,
     get_next_precision_unit,
+    datetime_to_int,
 )
 DEBUG: bool = True
 pd = import_pandas(debug=DEBUG)
@@ -259,3 +260,48 @@ def test_get_next_precision_unit_raises_value_error_for_invalid_precision():
     """
     with pytest.raises(ValueError):
         get_next_precision_unit('invalid_precision')
+
+
+@pytest.mark.parametrize(
+    'precision_unit,expected',
+    [
+        ('second', 1780099200),
+        ('s', 1780099200),
+        ('millisecond', 1780099200000),
+        ('ms', 1780099200000),
+        ('microsecond', 1780099200000000),
+        ('us', 1780099200000000),
+        ('minute', 1780099200 // 60),
+        ('day', 1780099200 // 86400),
+    ]
+)
+def test_datetime_to_int(precision_unit: str, expected: int):
+    """
+    Test that `datetime_to_int()` scales an epoch by the given precision unit.
+    """
+    dt = datetime(2026, 5, 30, tzinfo=timezone.utc)
+    assert datetime_to_int(dt, precision_unit) == expected
+
+
+def test_datetime_to_int_naive_is_utc():
+    """
+    Test that naive datetimes are interpreted as UTC.
+    """
+    naive = datetime(2026, 5, 30)
+    aware = datetime(2026, 5, 30, tzinfo=timezone.utc)
+    assert datetime_to_int(naive, 'ms') == datetime_to_int(aware, 'ms')
+
+
+def test_datetime_to_int_passthrough():
+    """
+    Test that integer input is returned unchanged.
+    """
+    assert datetime_to_int(5, 'ms') == 5
+
+
+def test_datetime_to_int_invalid_precision():
+    """
+    Test that an invalid precision unit raises a `ValueError`.
+    """
+    with pytest.raises(ValueError):
+        datetime_to_int(datetime(2026, 5, 30, tzinfo=timezone.utc), 'invalid_precision')

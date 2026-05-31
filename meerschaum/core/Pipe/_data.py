@@ -904,7 +904,7 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None], debug: bool = 
     Given a date bound (begin, end), coerce a timezone if necessary.
     """
     from meerschaum.utils.misc import is_int
-    from meerschaum.utils.dtypes import coerce_timezone, MRSM_PD_DTYPES
+    from meerschaum.utils.dtypes import coerce_timezone, MRSM_PD_DTYPES, are_dtypes_equal
     from meerschaum.utils.warnings import warn
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
@@ -941,6 +941,16 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None], debug: bool = 
         _get_coercion_info()
         dt_col = _columns.get('datetime', None)
         dt_typ = str(_dtypes.get(dt_col, 'datetime'))
+        if are_dtypes_equal(dt_typ, 'int'):
+            if self.get_parameters(debug=debug).get('precision'):
+                from meerschaum.utils.dtypes import datetime_to_int
+                return datetime_to_int(dt_val, self.precision['unit'])
+            from meerschaum.utils.warnings import error
+            error(
+                f"Cannot use datetime bound '{dt_val}' on the non-epoch integer axis "
+                f"of {self}.\n    Pass an integer instead, or set the `precision` parameter.",
+                ValueError,
+            )
         if dt_typ == 'datetime':
             dt_typ = MRSM_PD_DTYPES['datetime']
         return coerce_timezone(dt_val, strip_utc=('utc' not in dt_typ.lower()))

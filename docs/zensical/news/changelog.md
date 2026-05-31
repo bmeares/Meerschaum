@@ -1,8 +1,25 @@
 # 🪵 Changelog
 
-## 3.3.0 Releases
+## 3.4.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v3.4.0
+
+- **Accept datetime bounds on epoch integer-axis pipes.**  
+  Actions like `show data`, `sync pipes`, `clear pipes`, and `deduplicate pipes` now accept a datetime `--begin` / `--end` for pipes whose datetime axis is an integer epoch. The bound is translated to the axis's integer value using the pipe's `precision`, so a single command can target both datetime- and integer-axis pipes at once.
+
+  ```bash
+  # The datetime is translated to an epoch (e.g. milliseconds) for the integer 'ts' axis.
+  mrsm show data --begin 2026-05-30 -c mqtt:sra -m test -l backup -i sql:main
+  ```
+
+  Integer bounds (`--begin 1780099200000`) still pass through unchanged. A datetime bound on a non-epoch integer axis (no `precision` set) now raises a clear error instead of producing an invalid query.
+
+- **Add `datetime_to_int()` to `meerschaum.utils.dtypes`.**  
+  Convert a `datetime` to an integer epoch at a given precision unit (e.g. `'millisecond'`). Naive datetimes are treated as UTC and integers pass through unchanged. `get_current_timestamp(..., as_int=True)` now reuses this helper.
+
+## 3.3.0 Releases
 
 ### v3.3.2
 

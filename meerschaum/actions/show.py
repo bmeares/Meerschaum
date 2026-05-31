@@ -476,7 +476,6 @@ def _show_sizes(
     """
     import os
     import contextlib
-    from meerschaum.utils.misc import print_options
     from meerschaum.utils.formatting import format_bytes
     from meerschaum.utils.formatting._shell import progress
     from meerschaum.utils.warnings import info
@@ -539,11 +538,36 @@ def _show_sizes(
         reverse=True,
     )
 
-    msgs = []
-    for p, size_bytes in sorted_items:
-        msgs.append(f'{p}\n{format_bytes(size_bytes)}\n')
+    total_bytes = sum(size for size in size_dict.values() if size is not None)
 
-    print_options(msgs, header="Pipe sizes:", **kw)
+    if nopretty:
+        for p, size_bytes in sorted_items:
+            print(f"{p}\t{format_bytes(size_bytes)}")
+        return True, "Success"
+
+    from meerschaum.utils.formatting._pipes import pipe_repr
+
+    ### Pad columns by the *plain* pipe string length since the highlighted
+    ### `pipe_repr()` contains ANSI escape codes that inflate `len()`.
+    rows = [
+        (str(p), pipe_repr(p), format_bytes(size_bytes))
+        for p, size_bytes in sorted_items
+    ]
+    name_width = max([len("Pipe")] + [len(plain) for plain, _, _ in rows])
+    size_width = max(
+        [len("Size"), len(format_bytes(total_bytes))]
+        + [len(size_str) for _, _, size_str in rows]
+    )
+
+    header = f"    {'Pipe':<{name_width}}  {'Size':>{size_width}}"
+    sep = "    " + "-" * (len(header) - 4)
+    lines = [header, sep]
+    for plain, highlighted, size_str in rows:
+        padding = ' ' * (name_width - len(plain))
+        lines.append(f"    {highlighted}{padding}  {size_str:>{size_width}}")
+    lines.append(sep)
+    lines.append(f"    {'Total':<{name_width}}  {format_bytes(total_bytes):>{size_width}}")
+    print("\n" + "\n".join(lines) + "\n")
 
     return True, "Success"
 
