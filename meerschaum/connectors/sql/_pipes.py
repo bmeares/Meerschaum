@@ -1426,6 +1426,18 @@ def get_pipe_data_query(
     query = f"{select_cols_str}\nFROM {pipe_table_name}"
     where = ""
 
+    ### MariaDB 12.x optimizer bug: an ordered index scan with `LIMIT` over a `RANGE COLUMNS`-
+    ### partitioned table that must read a non-indexed column returns zero rows (see the
+    ### `get_sync_time` workaround in CLAUDE.md — same family, MariaDB-only). Wrapping the
+    ### datetime column in the `ORDER BY` with a no-op `COALESCE(col, col)` forces a filesort
+    ### over the fetched rows instead of the broken index walk, with identical ordering. Gated
+    ### on `LIMIT` (the bug's trigger) so unlimited ordered reads keep the index-ordered scan.
+    mariadb_partition_order_workaround = (
+        self.flavor == 'mariadb'
+        and isinstance(limit, int)
+        and self._should_partition(pipe)
+    )
+
     if order is not None:
         default_order = 'asc'
         if order not in ('asc', 'desc'):
@@ -1510,7 +1522,12 @@ def get_pipe_data_query(
         if quoted_indices:
             order_by += "\nORDER BY "
             if _dt and (_dt in existing_cols or skip_existing_cols_check):
-                order_by += dt + ' ' + order + ','
+                dt_order_expr = (
+                    f"COALESCE({dt}, {dt})"
+                    if mariadb_partition_order_workaround
+                    else dt
+                )
+                order_by += dt_order_expr + ' ' + order + ','
             for key, quoted_col_name in quoted_indices.items():
                 if dt == quoted_col_name:
                     continue
