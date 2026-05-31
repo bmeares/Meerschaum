@@ -17,7 +17,7 @@ default 43200 — 30 days).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, date, timedelta, timezone
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Union, Any, Optional, List, Tuple, SuccessTuple
@@ -78,6 +78,24 @@ def _materialize_scalar(val: Any) -> Any:
             return compute()
         except Exception:
             return val
+    return val
+
+
+def _normalize_boundary(val: Any) -> Any:
+    """
+    Coerce a dataframe reduction result into a partition-boundary value.
+
+    Materializes lazy Dask scalars, unwraps pandas `Timestamp` to `datetime`, and promotes a plain
+    `date` (a `date`-dtype axis) to a midnight `datetime` so it flows through the timedelta-grid
+    path. Integers and other scalars pass through unchanged for the integer-axis branch.
+    """
+    val = _materialize_scalar(val)
+    if hasattr(val, 'to_pydatetime'):
+        val = val.to_pydatetime()
+    ### `date` is not a subclass of `datetime`; promote it to midnight so interval math (and the
+    ### `isinstance(..., datetime)` axis check) treat it like a timestamp boundary.
+    if isinstance(val, date) and not isinstance(val, datetime):
+        val = datetime(val.year, val.month, val.day)
     return val
 
 
@@ -294,12 +312,9 @@ def _get_partition_ranges_for_df(
     if len(series) == 0:
         return []
 
-    ### Dask reductions are lazy `Scalar`s; materialize them before any numeric/datetime coercion.
-    min_val, max_val = _materialize_scalar(series.min()), _materialize_scalar(series.max())
-    if hasattr(min_val, 'to_pydatetime'):
-        min_val = min_val.to_pydatetime()
-    if hasattr(max_val, 'to_pydatetime'):
-        max_val = max_val.to_pydatetime()
+    ### Normalize materializes lazy Dask scalars, unwraps Timestamps, and promotes `date` to a
+    ### midnight `datetime` so date-axis pipes don't fall through to the integer branch.
+    min_val, max_val = _normalize_boundary(series.min()), _normalize_boundary(series.max())
     if not isinstance(min_val, datetime):
         min_val, max_val = int(min_val), int(max_val)
 
@@ -494,9 +509,7 @@ def _create_missing_partitions_mysql(
     if len(series) == 0:
         return True, "No partitions to create."
 
-    max_val = _materialize_scalar(series.max())
-    if hasattr(max_val, 'to_pydatetime'):
-        max_val = max_val.to_pydatetime()
+    max_val = _normalize_boundary(series.max())
 
     max_bound = self._get_mysql_max_partition_bound(pipe, debug=debug)
     if max_bound is None:
@@ -678,9 +691,7 @@ def _create_missing_partitions_mssql(
     if len(series) == 0:
         return True, "No partitions to create."
 
-    max_val = _materialize_scalar(series.max())
-    if hasattr(max_val, 'to_pydatetime'):
-        max_val = max_val.to_pydatetime()
+    max_val = _normalize_boundary(series.max())
 
     max_bound = self._get_mssql_max_partition_boundary(pipe, debug=debug)
     if max_bound is None:
