@@ -23,7 +23,7 @@ This is the current release cycle, so stay tuned for future releases!
   New tooling helps manage how much space pipes occupy on disk:
 
     - **Add the `show sizes` action.**  
-      Lists pipes with each target table's on-disk size, sorted largest first. Sizes are fetched in parallel. `show rowcounts` now also sorts largest first.
+      Lists pipes with each target table's on-disk size, sorted largest first. Sizes are fetched in parallel when the instance connector is thread-safe (otherwise serially). `show rowcounts` now also sorts largest first.
 
     - **Add `Pipe.get_size()`.**  
       Returns a target table's on-disk size in bytes (or `None` if unavailable). Backed by the new instance-connector method `get_pipe_size()`, with per-flavor support for SQL connectors — TimescaleDB hypertables use `hypertable_size()`, PostgreSQL-like flavors use `pg_total_relation_size()`, and MySQL/MariaDB, MSSQL, and SQLite use their respective size queries.
@@ -33,6 +33,12 @@ This is the current release cycle, so stay tuned for future releases!
 
     - **Add the `decompress pipes` action and `Pipe.decompress()`.**  
       The inverse of `compress pipes`. For TimescaleDB this removes the compression policy, converts compressed chunks back to row-store, and disables the columnstore so future synced chunks stay uncompressed; MySQL/MariaDB and MSSQL revert their native table compression. Pass `--no-policy` to decompress existing chunks now while leaving the policy in place (e.g. for a bulk backfill, after which chunks are recompressed on schedule). Backed by the new instance-connector method `decompress_pipe()`.
+
+    - **Add the `vacuum pipes` and `analyze pipes` actions (and `Pipe.vacuum()` / `Pipe.analyze()`).**  
+      `vacuum pipes` reclaims disk space from dead rows (`--full` runs `VACUUM FULL` on PostgreSQL-family flavors; MySQL/MariaDB use `OPTIMIZE TABLE`, MSSQL rebuilds indices, SQLite runs `VACUUM`). `analyze pipes` refreshes the query planner's statistics without reclaiming space. Backed by the new instance-connector methods `vacuum_pipe()` and `analyze_pipe()`. See [Maintenance](/reference/pipes/maintenance/).
+
+    - **Add the `show sizes` companion `show partitions` action.**  
+      Lists each partitioned pipe's partition (or TimescaleDB chunk) count and physical width. Backed by the new instance-connector method `get_partition_info()`.
 
     - **Add the `compress` pipe parameter.**  
       Set `compress` (a `bool` or a dictionary of `after`/`segmentby`/`orderby` settings) to mark a pipe for compression. For TimescaleDB hypertables, a compression policy is installed automatically on sync.
@@ -47,6 +53,11 @@ This is the current release cycle, so stay tuned for future releases!
           compress={'after': '7 days'},
       )
       ```
+
+      `compress pipes --no-policy` also accepts `--no-policy`, to compress existing chunks immediately without installing an ongoing policy.
+
+    - **Add the `hypercore` pipe parameter (TimescaleDB).**  
+      `hypercore` (default `True`) enables the [Hypercore columnstore](https://www.tigerdata.com/docs/build/columnar-storage/setup-hypercore) at `CREATE TABLE` (declaring `tsdb.segmentby` / `tsdb.orderby`), so TimescaleDB auto-creates a columnstore policy that converts old chunks in the background. Set `hypercore` to `False` for a plain row-store hypertable. The columnstore policy *is* the compression policy — `add_columnstore_policy` is the modern equivalent of the legacy `add_compression_policy`.
 
 - **Add native range partitioning for non-TimescaleDB flavors.**  
   TimescaleDB auto-creates chunks on insert; PostgreSQL / PostGIS, MySQL / MariaDB, and MSSQL do not. The [`hypertable`](/reference/pipes/parameters/#hypertable) parameter (which **defaults to `True`**) now drives declarative range partitioning on the pipe's `datetime` column for these flavors too — so datetime-axis pipes are partitioned by default; set `hypertable` to `False` to opt out. Only newly created tables are affected (pre-existing plain tables are never retroactively partitioned). The partition width reuses the chunk interval (`verify.chunk_minutes`, default 43200 — 30 days), and boundaries are epoch-aligned so the same value always maps to the same partition (deterministic, value-independent). A single sync creates at most `system.connectors.sql.instance.max_partitions_per_sync` partitions (default 10,000) as a runaway guard.
@@ -112,8 +123,8 @@ This is the current release cycle, so stay tuned for future releases!
   !!! warning
       The non-TimescaleDB rebuild reads the whole table into memory and briefly drops it before re-syncing. Run it during a maintenance window for large tables.
 
-- **Wire `vacuum` / `analyze` / `partition` through `APIConnector`.**  
-  `APIConnector` now imports `vacuum_pipe`, `analyze_pipe`, and `partition_pipe`, so these maintenance actions work against `api:` instances (previously `vacuum` / `analyze` over the API reported "not supported").
+- **Wire the maintenance actions through `APIConnector`.**  
+  `APIConnector` now implements `get_pipe_size`, `compress_pipe`, `decompress_pipe`, `vacuum_pipe`, `analyze_pipe`, and `partition_pipe` (with matching `/size`, `/compress`, `/decompress`, `/vacuum`, `/analyze`, and `/partition` routes), so `show sizes`, `compress` / `decompress`, `vacuum` / `analyze`, and `partition` all work against `api:` instances (previously these reported "not supported" over the API).
 
 - **Print full, untruncated results from `mrsm sql`.**  
   Reading a table or query with `sql ... read` now prints the entire DataFrame as a Markdown table — no more `...` column or cell truncation. The format is friendly to both users and LLMs and ends with a `[rows x columns]` shape footer. The `--nopretty` JSON output is unchanged.
@@ -134,6 +145,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fix `stop jobs` leaving zombie sync threads.**  
   Stopping a job now reliably terminates `sync pipes` worker threads. Previously the daemon's main thread could exit while non-daemon worker threads kept running and appending to the log, requiring a container restart. Workers now honor a process-wide stop signal and are interrupted when a job is stopped.
+
+- **Fix `get_sync_time()` with `params` on partitioned MariaDB tables.**  
+  Because datetime-axis pipes are now range-partitioned by default, `get_sync_time(params=...)` could return `None` for a populated MariaDB pipe — a MariaDB optimizer quirk where `ORDER BY <dt> DESC LIMIT 1` over a `RANGE COLUMNS` table with a `WHERE` clause stops scanning early. Partitioned MariaDB pipes now compute the bound with `MAX()` / `MIN()`, which prunes partitions correctly. Other flavors are unaffected.
 
 ## 3.3.0 Releases
 

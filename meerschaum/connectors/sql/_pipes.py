@@ -2102,17 +2102,26 @@ def sync_pipe(
             return temp_success, temp_msg
 
         existing_cols = pipe.get_columns_types(debug=debug)
+        ### A partitioned table (TimescaleDB hypertable or a native range-partitioned table on
+        ### PostgreSQL/MySQL/MSSQL) folds the datetime column into its composite primary key, so the
+        ### upsert conflict target must include it too — `ON CONFLICT (primary_key)` alone has no
+        ### matching unique constraint. Non-partitioned tables keep the historical primary-key-only
+        ### semantics ("the primary key is the identity, regardless of datetime").
+        partition_upsert = bool(
+            dt_col
+            and dt_col in update_df.columns
+            and (
+                self.flavor in ('timescaledb', 'timescaledb-ha')
+                or self._should_partition(pipe)
+            )
+        )
         join_cols = [
             col
             for col_key, col in pipe.columns.items()
             if col and col in existing_cols
         ] if not primary_key or self.flavor == 'oracle' else (
             [dt_col, primary_key]
-            if (
-                self.flavor in ('timescaledb', 'timescaledb-ha')
-                and dt_col
-                and dt_col in update_df.columns
-            )
+            if partition_upsert
             else [primary_key]
         )
         update_queries = get_update_queries(
@@ -2865,6 +2874,18 @@ def get_sync_time(
             f"    FROM {src_name}\n"
             f"    ORDER BY {dt_col_name} {ASC_or_DESC}\n"
             ") WHERE ROWNUM = 1"
+        )
+
+    ### NOTE: MariaDB has an optimizer bug where `ORDER BY <dt> DESC/ASC LIMIT 1` against a
+    ### `RANGE COLUMNS` partitioned table combined with a `WHERE` clause performs a partition
+    ### index scan that stops early and returns zero rows (observed on MariaDB 12.x). The
+    ### equivalent `MIN`/`MAX` aggregate scans the pruned partitions correctly, so use it for
+    ### the bounds on partitioned MariaDB tables instead.
+    if self.flavor == 'mariadb' and not remote and self._should_partition(pipe):
+        agg_func = "MAX" if newest else "MIN"
+        base_query = (
+            f"SELECT {agg_func}({dt_col_name}) AS {dt_col_name}\n"
+            f"FROM {src_name}"
         )
 
     query = wrap_query_with_cte(src_query, base_query, flavor)

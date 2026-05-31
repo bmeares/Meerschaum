@@ -62,6 +62,25 @@ def _max_partitions_per_sync() -> int:
 _EPOCH_NAIVE = datetime(1970, 1, 1)
 
 
+def _materialize_scalar(val: Any) -> Any:
+    """
+    Return a concrete scalar from a possibly-lazy reduction result.
+
+    Dask reductions (`series.min()` / `series.max()`) return a lazy `Scalar` object rather than a
+    real number or `Timestamp`; `.compute()` materializes it. Pandas, NumPy, and built-in scalars
+    have no `.compute()` and are returned unchanged.
+    """
+    if isinstance(val, (datetime, int, float)):
+        return val
+    compute = getattr(val, 'compute', None)
+    if callable(compute):
+        try:
+            return compute()
+        except Exception:
+            return val
+    return val
+
+
 def _should_partition(self, pipe: mrsm.Pipe) -> bool:
     """
     Return whether a pipe's target table should use native range partitioning.
@@ -101,7 +120,7 @@ def _get_partition_count(self, pipe: mrsm.Pipe, debug: bool = False) -> Optional
             return int(val) if val is not None else None
         if flavor in MYSQL_PARTITION_FLAVORS:
             db_name = (
-                schema or self.database or self.parse_uri(self.URI).get('database', None)
+                schema or getattr(self, 'database', None) or self.parse_uri(self.URI).get('database', None)
             )
             if not db_name:
                 return None
@@ -275,7 +294,8 @@ def _get_partition_ranges_for_df(
     if len(series) == 0:
         return []
 
-    min_val, max_val = series.min(), series.max()
+    ### Dask reductions are lazy `Scalar`s; materialize them before any numeric/datetime coercion.
+    min_val, max_val = _materialize_scalar(series.min()), _materialize_scalar(series.max())
     if hasattr(min_val, 'to_pydatetime'):
         min_val = min_val.to_pydatetime()
     if hasattr(max_val, 'to_pydatetime'):
@@ -474,7 +494,7 @@ def _create_missing_partitions_mysql(
     if len(series) == 0:
         return True, "No partitions to create."
 
-    max_val = series.max()
+    max_val = _materialize_scalar(series.max())
     if hasattr(max_val, 'to_pydatetime'):
         max_val = max_val.to_pydatetime()
 
@@ -658,7 +678,7 @@ def _create_missing_partitions_mssql(
     if len(series) == 0:
         return True, "No partitions to create."
 
-    max_val = series.max()
+    max_val = _materialize_scalar(series.max())
     if hasattr(max_val, 'to_pydatetime'):
         max_val = max_val.to_pydatetime()
 

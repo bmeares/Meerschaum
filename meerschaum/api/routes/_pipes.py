@@ -1160,6 +1160,34 @@ def compress_pipe(
 
 
 @app.post(
+    pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/decompress',
+    tags=['Pipes: Data'],
+    response_model=SuccessTupleResponseModel,
+)
+def decompress_pipe(
+    connector_keys: str,
+    metric_key: str,
+    location_key: str,
+    no_policy: bool = False,
+    instance_keys: Optional[str] = None,
+    curr_user = fastapi.Security(ScopedAuth(['pipes:write'])),
+) -> mrsm.SuccessTuple:
+    """
+    Decompress a pipe's target table, the inverse of `compress`.
+    See [`Pipe.decompress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.decompress).
+    """
+    pipe = get_pipe(connector_keys, metric_key, location_key, instance_keys)
+    if pipe.target in ('mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens'):
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail=f"Cannot decompress protected table '{pipe.target}'.",
+        )
+    success, msg = pipe.decompress(no_policy=no_policy, debug=debug)
+    _ = pipes(instance_keys, refresh=True)
+    return success, msg
+
+
+@app.post(
     pipes_endpoint + '/{connector_keys}/{metric_key}/{location_key}/vacuum',
     tags=['Pipes: Data'],
     response_model=SuccessTupleResponseModel,

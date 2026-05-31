@@ -826,7 +826,7 @@ class Daemon:
         )
 
         if not timeout:
-            return True, f"Successfully sent '{signal}' to daemon '{self.daemon_id}'."
+            return True, f"Successfully sent '{signal_to_send}' to daemon '{self.daemon_id}'."
 
         begin = time.perf_counter()
         while (time.perf_counter() - begin) < timeout:

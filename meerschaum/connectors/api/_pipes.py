@@ -965,6 +965,52 @@ def compress_pipe(
     return response.__bool__(), response.text
 
 
+def decompress_pipe(
+    self,
+    pipe: mrsm.Pipe,
+    no_policy: bool = False,
+    debug: bool = False,
+    **kw: Any
+) -> SuccessTuple:
+    """
+    Decompress a pipe's target table via the API, the inverse of `compress_pipe()`.
+
+    Parameters
+    ----------
+    pipe: mrsm.Pipe
+        The pipe whose target table to decompress.
+
+    no_policy: bool, default False
+        If `True`, decompress existing data now but leave the compression policy in place.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating success.
+    """
+    r_url = pipe_r_url(pipe) + '/decompress'
+    response = self.post(
+        r_url,
+        params={
+            'instance_keys': self.get_pipe_instance_keys(pipe),
+            'no_policy': no_policy,
+        },
+        debug=debug,
+    )
+    if debug:
+        dprint(response.text)
+
+    try:
+        data = response.json()
+    except Exception:
+        return False, f"Failed to decompress {pipe}."
+
+    if isinstance(data, list):
+        return data[0], data[1]
+    if isinstance(data, dict) and 'detail' in data:
+        return response.__bool__(), data['detail']
+    return response.__bool__(), response.text
+
+
 def vacuum_pipe(
     self,
     pipe: mrsm.Pipe,

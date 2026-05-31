@@ -26,6 +26,17 @@ MRSM_TEST_FLAVORS=sqlite python -m pytest tests/ -v
 
 Test connectors in `tests/connectors.py`. Default flavor set: `api,timescaledb`; set `MRSM_TEST_FLAVORS=sqlite` for fast local runs without Docker.
 
+**Test-harness gotchas (learned the hard way):**
+- **⚠️ Plain `python -m pytest` imports the STALE `~/.local` install, not the repo.** There is a separate `meerschaum` installed at `~/.local/lib/pythonX.Y/site-packages/meerschaum` (e.g. v3.3.1) that shadows the working tree under a bare `python -m pytest`. It silently lacks new modules (`connectors/sql/_partition.py`) and has older behavior, so tests fail/pass for reasons that have nothing to do with your changes. **Always force the repo onto the path: prefix `PYTHONPATH=$(pwd)`** (or just use `scripts/test.sh`, which sets things up correctly). Verify with a throwaway test asserting `meerschaum.__file__` / `meerschaum.__version__`. This single confound can burn hours — check it FIRST when a test result seems impossible.
+- **Flavor keys ≠ SQL flavor names.** `tests/connectors.py` defines `timescaledb`, `timescaledb_ha`, `postgis`, `mariadb`, `mysql`, `mssql`, `oracle`, `sqlite`, `api`, `valkey`. There is **no `postgresql` key** — the PostgreSQL-family test connector is `postgis` (and `timescaledb`). `MRSM_TEST_FLAVORS=postgresql` resolves to an empty connector set and `test.sh` exits before pytest runs.
+- **`scripts/test.sh` hardcodes `--ff` and `-n=auto`** (line ~134-135), so it requires `pytest-cache` and `pytest-xdist`. Passing `-p no:cacheprovider` to it breaks `--ff` (`unrecognized arguments: --ff`). To run a single test with non-default pytest flags, invoke `PYTHONPATH=$(pwd) python -m pytest` directly with the `MRSM_*` env vars exported (don't go through `test.sh`).
+- **`test.sh` runs one flavor at a time** and shares `test_root` + the test-API port 8989 — never run two `test.sh` invocations (or a `test.sh` + a direct API-flavor pytest) concurrently; they collide on the API server and DB tables (the symptom is a flood of `Connection refused` / pool-exhaustion failures that look like real bugs but are pure contention).
+### Fixed in this cycle: `get_sync_time(params=...)` on partitioned MariaDB
+
+The v3.4.0 `hypertable=True` default auto-partitions datetime pipes. On **MariaDB** specifically, `SQLConnector.get_sync_time` returned `None` for a populated, partitioned pipe when `params` were passed (broke `test_parametrized_sync_time[mariadb]` and, via a `None` min bound, `test_get_data_iterator[mariadb]`). Root cause: a MariaDB 12.x optimizer bug where the CTE-wrapped `... ORDER BY <dt> DESC LIMIT 1` over a `RANGE COLUMNS`-partitioned table with a `WHERE` clause does a partition index scan that stops early and returns zero rows. (The data and DB are fine — raw `WHERE id='a'` returns the row; only the ordered-LIMIT-1 form on the partitioned table fails. MySQL/PostgreSQL/MSSQL/TimescaleDB do **not** exhibit it — MariaDB-only.) **Fix** (`meerschaum/connectors/sql/_pipes.py`, in `get_sync_time` just before `wrap_query_with_cte`): for `self.flavor == 'mariadb' and not remote and self._should_partition(pipe)`, compute the bound with `MAX(dt)` / `MIN(dt)` (which scans pruned partitions correctly) instead of `ORDER BY ... LIMIT 1`. Flavor-gated, so every other flavor and non-partitioned MariaDB keep the original path.
+
+**Test-running lesson:** `get_sync_time` drives every incremental sync — verify changes to it with the full sqlite `test_sync.py`+`test_verify.py`+`test_pipe_data.py` AND per-flavor partition runs, not just the failing tests. (And read pytest summaries carefully: "N passed, 2 warnings" is not "2 failed".)
+
 ### Docs
 
 ```bash
@@ -184,6 +195,18 @@ In-memory filtering: `meerschaum.utils.dataframe.query_df(df, params)` — same 
 ### Verification Syncs
 
 `pipe.verify(begin, end, chunk_interval, ...)` re-syncs historical range in chunks (default 43200 min — 30 days). Uses `pipe.get_rowcount()` to compare remote vs local; re-syncs only mismatched chunks. Configured via `parameters['verify']`.
+
+### Native Partitioning Internals (non-obvious)
+
+The `hypertable=True` default (v3.4.0) makes a *lot* of datetime-axis pipes partitioned on PG/MySQL/MSSQL. Two interactions are easy to break:
+
+- **Upsert conflict target must include the partition column.** A partitioned table (TimescaleDB hypertable *or* native range-partitioned PG/MySQL/MSSQL) folds the `datetime` column into a composite primary key (`_get_create_table_query_from_dtypes` in `meerschaum/utils/sql.py`). So the upsert `ON CONFLICT (...)` / join columns **must** include `dt_col` — `ON CONFLICT (primary_key)` alone has no matching unique constraint and PostgreSQL rejects it. The `join_cols` logic in `SQLConnector.sync_pipe` (`connectors/sql/_pipes.py`, the `partition_upsert` branch) extends the historical TimescaleDB-only `[dt_col, primary_key]` rule to any `self._should_partition(pipe)` table. A non-partitioned upsert pipe with a `primary` key keeps the historical primary-key-only conflict target.
+- **Dask DataFrames give lazy scalars.** In `connectors/sql/_partition.py`, `series.min()`/`series.max()` on a *Dask* DataFrame return a lazy `dask...Scalar` (no `to_pydatetime`, not a real number). Partition-range helpers must materialize them (`_materialize_scalar`, which calls `.compute()`) before `int()`/datetime coercion, or `_create_missing_partitions_*` raises `TypeError: int() argument must be ... not 'Scalar'`.
+- **`get_chunk_bounds(align=True)`** (used by `Pipe.verify()`) anchors interior chunk edges to the Unix-epoch grid so they coincide with partition boundaries; it defaults to `align=False` (begin-anchored) everywhere else.
+
+### Maintenance operations (v3.4.0)
+
+`vacuum` / `analyze` / `compress` / `decompress` / `get_size` / `repartition` are a uniform family: each is a `Pipe` method (`core/Pipe/_maintenance.py`, `_compress.py`, `_data.py`) delegating to an instance-connector `<op>_pipe()` method. Implemented for `SQLConnector` (per-flavor in `connectors/sql/_compress.py`, `_maintenance.py`, `_partition.py`), stubbed on the base `InstanceConnector` (return a failure `SuccessTuple`), and wired through `APIConnector` (`connectors/api/_pipes.py` + `api/routes/_pipes.py`, all six symmetric — `get_pipe_size`, `compress_pipe`, `decompress_pipe`, `vacuum_pipe`, `analyze_pipe`, `partition_pipe`). User-facing actions: `vacuum/analyze/compress/decompress/partition pipes`, `show sizes`, `show partitions`. Docs: `docs/zensical/reference/pipes/maintenance.md`.
 
 ---
 
