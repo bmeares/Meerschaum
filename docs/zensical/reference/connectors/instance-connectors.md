@@ -259,8 +259,12 @@ Values within filters are joined by `OR`, and filters are joined by `AND`.
 
 The function [`separate_negation_values()`](https://docs.meerschaum.io/utils/misc.html#meerschaum.utils.misc.separate_negation_values) returns two sublists: regular values (`IN`) and values preceded by an underscore (`NOT IN`).
 
-You may return either a **list of tuples** or a **dictionary mapping pipe IDs to tuples**.
-Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 with parameters or tags as the fourth element.
+The recommended return value is a **dictionary mapping each pipe's ID to a tuple** of `(connector_keys, metric_key, location_key, parameters)`.
+Returning the parameters lets Meerschaum hydrate every pipe in a single round-trip instead of calling [`get_pipe_attributes()`](#get_pipe_attributes) per pipe.
+It also lets Meerschaum apply the `--targets` and `--datetime-dtypes` filters client-side (both are derived from `parameters`), so you only need to implement the `connector_keys`, `metric_keys`, `location_keys`, and `tags` filters here.
+
+!!! note "Legacy return values"
+    For backwards compatibility, you may also return a plain **list of tuples**, and tuples may be length 3 (omitting `parameters`). These forms are supported but lose the single-round-trip benefit above — prefer the dictionary form for new connectors.
 
 ??? example "`#!python def fetch_pipes_keys():`"
     ```python
@@ -272,12 +276,7 @@ Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 
         tags: list[str] | None = None,
         debug: bool = False,
         **kwargs: Any
-    ) -> (
-        list[tuple[str, str, str]]
-        | list[tuple[str, str, str, dict | list]]
-        | dict[int | str, tuple[str, str, str]]
-        | dict[int | str, tuple[str, str, str, dict | list]]
-    ):
+    ) -> dict[str | int, tuple[str, str, str, dict]]:
         """
         Return registered pipes' keys according to the provided filters.
 
@@ -297,9 +296,13 @@ Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 
 
         Returns
         -------
-        A list of tuples or a dictionary mapping pipe IDs to tuples.
+        A dictionary mapping each pipe's ID to a tuple of
+        `(connector_keys, metric_key, location_key, parameters)`.
         You may return the string `"None"` for location keys in place of nulls.
-        Tuples may include parameters or tags as a fourth element.
+
+        Including `parameters` in each tuple lets Meerschaum apply the `--targets`
+        and `--datetime-dtypes` filters client-side, so you do not need to handle
+        those filters here.
 
         Examples
         --------
@@ -312,13 +315,13 @@ Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 
         >>> pipe_b.register()
         >>>
         >>> conn.fetch_pipes_keys(['a', 'b'])
-        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        {1: ('a', 'demo', 'None', {'tags': ['foo']}), 2: ('b', 'demo', 'None', {'tags': ['bar']})}
         >>> conn.fetch_pipes_keys(metric_keys=['demo'])
-        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        {1: ('a', 'demo', 'None', {'tags': ['foo']}), 2: ('b', 'demo', 'None', {'tags': ['bar']})}
         >>> conn.fetch_pipes_keys(tags=['foo'])
-        [('a', 'demo', 'None')]
+        {1: ('a', 'demo', 'None', {'tags': ['foo']})}
         >>> conn.fetch_pipes_keys(location_keys=[None])
-        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        {1: ('a', 'demo', 'None', {'tags': ['foo']}), 2: ('b', 'demo', 'None', {'tags': ['bar']})}
         """
         from meerschaum.utils.misc import separate_negation_values
 
@@ -331,7 +334,7 @@ Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 
         ### The `tags` clause is an OR ("?|"), meaning any of the tags may match.
         ###
         ###
-        ### SELECT pipe_id, connector_keys, metric_key, location_key
+        ### SELECT pipe_id, connector_keys, metric_key, location_key, parameters
         ### FROM pipes
         ### WHERE connector_keys IN ({in_ck})
         ###   AND connector_keys NOT IN ({nin_ck})
@@ -342,11 +345,9 @@ Tuples may be length 3 `(connector_keys, metric_key, location_key)` or length 4 
         ###   AND (parameters->'tags')::JSONB ?| ARRAY[{tags}]
         ###   AND NOT (parameters->'tags')::JSONB ?| ARRAY[{nin_tags}]
 
-        ### Return a dict mapping pipe_id to (connector_keys, metric_key, location_key):
+        ### Return a dict mapping each pipe's ID to its keys and parameters, e.g.:
+        ### {1: ('a', 'demo', 'None', {'tags': ['foo']})}
         return {}
-
-        ### Or return a list of tuples (also accepted):
-        ### return []
     ```
 
 ## `#!python pipe_exists()`
@@ -858,7 +859,7 @@ Compress a pipe's target table to reduce disk usage (for the action `compress pi
 
 ### `#!python decompress_pipe()` (optional)
 
-The inverse of [`compress_pipe()`](#compress_pipe) (for the action `decompress pipes` and [`#!python Pipe.decompress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.decompress)). Pass `no_policy=True` to decompress existing data now while leaving the compression policy in place (e.g. for a bulk backfill, after which data is recompressed on schedule). The default implementation returns a failure `SuccessTuple` indicating decompression is unsupported. See the [`#!python SQLConnector.decompress_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.decompress_pipe) method for reference.
+The inverse of [`compress_pipe()`](#compress_pipe-optional) (for the action `decompress pipes` and [`#!python Pipe.decompress()`](https://docs.meerschaum.io/meerschaum.html#Pipe.decompress)). Pass `no_policy=True` to decompress existing data now while leaving the compression policy in place (e.g. for a bulk backfill, after which data is recompressed on schedule). The default implementation returns a failure `SuccessTuple` indicating decompression is unsupported. See the [`#!python SQLConnector.decompress_pipe()`](https://docs.meerschaum.io/meerschaum/connectors.html#SQLConnector.decompress_pipe) method for reference.
 
 ??? example "`#!python def decompress_pipe():`"
     ```python

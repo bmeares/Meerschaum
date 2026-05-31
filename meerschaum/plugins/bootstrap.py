@@ -199,7 +199,7 @@ FEATURE_LINES: Dict[str, str] = {
         Parameters
         ----------
         pipe: mrsm.Pipe
-            The pipe whose ID to fetch.
+            The pipe whose ID to return.
 
         Returns
         -------
@@ -271,9 +271,9 @@ FEATURE_LINES: Dict[str, str] = {
         tags: list[str] | None = None,
         debug: bool = False,
         **kwargs: Any
-    ) -> list[tuple[str, str, str]]:
+    ) -> dict[str | int, tuple[str, str, str, dict]]:
         \"\"\"
-        Return a list of tuples for the registered pipes' keys according to the provided filters.
+        Return registered pipes' keys according to the provided filters.
 
         Parameters
         ----------
@@ -291,8 +291,14 @@ FEATURE_LINES: Dict[str, str] = {
 
         Returns
         -------
-        A list of connector, metric, and location keys in tuples.
+        A dictionary mapping each pipe's ID to a tuple of
+        `(connector_keys, metric_key, location_key, parameters)`.
         You may return the string "None" for location keys in place of nulls.
+
+        Including `parameters` in each tuple lets Meerschaum apply the `--targets`
+        and `--datetime-dtypes` filters client-side (the target table name and
+        datetime dtype are both derived from `parameters`), so you do not need to
+        handle those filters here.
 
         Examples
         --------
@@ -305,14 +311,14 @@ FEATURE_LINES: Dict[str, str] = {
         >>> pipe_b.register()
         >>> 
         >>> conn.fetch_pipes_keys(['a', 'b'])
-        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        {{1: ('a', 'demo', 'None', {{'tags': ['foo']}}), 2: ('b', 'demo', 'None', {{'tags': ['bar']}})}}
         >>> conn.fetch_pipes_keys(metric_keys=['demo'])
-        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
+        {{1: ('a', 'demo', 'None', {{'tags': ['foo']}}), 2: ('b', 'demo', 'None', {{'tags': ['bar']}})}}
         >>> conn.fetch_pipes_keys(tags=['foo'])
-        [('a', 'demo', 'None')]
+        {{1: ('a', 'demo', 'None', {{'tags': ['foo']}})}}
         >>> conn.fetch_pipes_keys(location_keys=[None])
-        [('a', 'demo', 'None'), ('b', 'demo', 'None')]
-        
+        {{1: ('a', 'demo', 'None', {{'tags': ['foo']}}), 2: ('b', 'demo', 'None', {{'tags': ['bar']}})}}
+
         \"\"\"
         from meerschaum.utils.misc import separate_negation_values
 
@@ -325,7 +331,7 @@ FEATURE_LINES: Dict[str, str] = {
         ### The `tags` clause is an OR ("?|"), meaning any of the tags may match.
         ### 
         ### 
-        ### SELECT connector_keys, metric_key, location_key
+        ### SELECT pipe_id, connector_keys, metric_key, location_key, parameters
         ### FROM pipes
         ### WHERE connector_keys IN ({{in_ck}})
         ###   AND connector_keys NOT IN ({{nin_ck}})
@@ -335,7 +341,10 @@ FEATURE_LINES: Dict[str, str] = {
         ###   AND location_key NOT IN ({{nin_lk}})
         ###   AND (parameters->'tags')::JSONB ?| ARRAY[{{tags}}]
         ###   AND NOT (parameters->'tags')::JSONB ?| ARRAY[{{nin_tags}}]
-        return []
+
+        ### Return a dict mapping each pipe's ID to its keys and parameters, e.g.:
+        ### {{1: ('a', 'demo', 'None', {{'tags': ['foo']}})}}
+        return {{}}
 
     def pipe_exists(
         self,
