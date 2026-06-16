@@ -57,6 +57,27 @@ dash_app = enrich.DashProxy(
     ],
 )
 
+### The `dbc_dark` theme is opt-in: dbc_dark.css scopes every rule under `.dbc_dark`.
+### Set it on <body> by default so the console (and its body-portaled dropdown menus)
+### stays dark; a plugin page can remove the class from <body> to opt out cleanly.
+dash_app.index_string = """<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+    </head>
+    <body class="dbc_dark">
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>"""
+
 dash_app.layout = html.Div([
     location,
     dcc.Store(id='session-store', storage_type='local', data={}),
