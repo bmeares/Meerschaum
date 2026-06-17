@@ -1216,18 +1216,25 @@ def sync_as_json_or_lines_click(
     Output('pages-offcanvas', 'is_open'),
     Output('pages-offcanvas', 'children'),
     Input('logo-img', 'n_clicks'),
+    Input('mrsm-location', 'pathname'),
     State('pages-offcanvas', 'is_open'),
-    State('mrsm-location', 'pathname'),
     prevent_initial_call=True,
 )
 def toggle_pages_offcanvas(
     n_clicks: Optional[int],
-    is_open: bool,
     pathname: Optional[str] = None,
+    is_open: bool = False,
 ):
     """
-    Toggle the pages sidebar.
+    Toggle the pages sidebar on logo click, and close it when a page is selected.
     """
+    ctx = dash.callback_context
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
+
+    ### Navigation (a page was selected) closes the sidebar.
+    if trigger == 'mrsm-location':
+        return False, dash.no_update
+
     pages_children = build_pages_offcanvas_children(active_path=pathname)
     if n_clicks:
         return not is_open, pages_children
