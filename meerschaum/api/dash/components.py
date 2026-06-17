@@ -311,6 +311,7 @@ def build_pages_offcanvas_children():
                 if page_group and not page_group[0].isupper()
                 else page_group
             ),
+            item_id=f'pages-offcanvas-accordion-{page_group}',
             class_name='pages-offcanvas-accordion',
         )
         plugins_accordion_items.append(plugin_accordion_item)

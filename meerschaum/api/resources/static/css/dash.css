@@ -169,16 +169,12 @@ a {
 .input-text {
   font-family: Consolas, Menlo, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace, serif !important;
 }
-/* Page-navigation sidebar (offcanvas): theme-aware links with a subtle, full-row
-   hover highlight (no per-button box; works in both the dark and light themes). */
-#pages-offcanvas .list-group-item {
+.pages-offcanvas-accordion div {
   padding: 0 !important;
-  background-color: transparent !important;
-  border: none !important;
 }
-#pages-offcanvas .list-group-item:hover {
-  background-color: rgba(127, 127, 127, 0.15) !important;
-}
+/* Page-navigation sidebar (offcanvas): theme-aware links with a subtle, full-row
+   hover highlight (no per-button box; works in both the dark and light themes).
+   Structure/borders/padding of the rows are left to Bootstrap. */
 #pages-offcanvas .btn {
   background-color: transparent !important;
   border: none !important;
@@ -187,8 +183,11 @@ a {
   width: 100%;
   text-align: left;
 }
-#pages-offcanvas .pages-offcanvas-accordion .accordion-body {
-  padding: 0 !important;
+#pages-offcanvas .list-group-item {
+  background-color: transparent !important;
+}
+#pages-offcanvas .list-group-item:hover {
+  background-color: rgba(127, 127, 127, 0.15) !important;
 }
 
 /* restyle radio items */
