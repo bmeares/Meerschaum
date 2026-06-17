@@ -28,51 +28,86 @@ TMUX_IS_ENABLED: bool = (
 
 _locks = {'webterm_thread': RLock()}
 
-### Termux-style extra keys for mobile: (index, label, tooltip).
-WEBTERM_EXTRA_KEYS = [
-    ('esc', 'ESC', 'Escape'),
-    ('ctrl', 'CTRL', 'Control (sticky — applies to next key)'),
-    ('shift', 'SHIFT', 'Shift (sticky — applies to next key)'),
-    ('tab', 'TAB', 'Tab'),
-    ('left', '←', 'Left arrow'),
-    ('down', '↓', 'Down arrow'),
-    ('up', '↑', 'Up arrow'),
-    ('right', '→', 'Right arrow'),
-]
+### Termux-style extra keys for mobile: index -> (label, tooltip).
+WEBTERM_EXTRA_KEYS = {
+    'esc': ('ESC', 'Escape'),
+    'ctrl': ('CTRL', 'Control (sticky — applies to next key)'),
+    'shift': ('SHIFT', 'Shift (sticky — applies to next key)'),
+    'tab': ('TAB', 'Tab'),
+    'up': ('↑', 'Up arrow'),
+    'down': ('↓', 'Down arrow'),
+    'left': ('←', 'Left arrow'),
+    'right': ('→', 'Right arrow'),
+}
+
+
+def _webterm_key_button(index: str, grid_area: Optional[str] = None) -> Any:
+    """
+    Return one Termux-style key button. `webterm-key-btn` lets the focus-preserving
+    listener (assets/webterm_keys.js) keep the soft keyboard up when tapped.
+    """
+    label, title = WEBTERM_EXTRA_KEYS[index]
+    style = {
+        'width': '100%',
+        'min-width': '0',
+        'padding': '2px 0',
+        'font-size': '0.7rem',
+        'line-height': '1.1',
+    }
+    if grid_area:
+        style['grid-area'] = grid_area
+    return dbc.Button(
+        label,
+        id={'type': 'webterm-key-button', 'index': index},
+        color='light',
+        outline=True,
+        size='sm',
+        title=title,
+        n_clicks=0,
+        className='webterm-key-btn',
+        style=style,
+    )
 
 
 def build_webterm_extra_keys_row() -> Any:
     """
-    Return a mobile-only grid of Termux-style keys (ESC, CTRL, SHIFT, TAB, arrows)
-    that send special keys to the webterm. Two rows of four, top-left (balancing the
-    controls on the top-right). Hidden on md+ screens (physical keyboard).
+    Return the mobile-only Termux key row, sitting right above the webterm: the
+    modifier/whitespace keys (ESC, CTRL, SHIFT, TAB) on the left, and the arrow keys
+    stacked like a real keyboard (↑ on top, ← ↓ → below) on the right, filling the
+    space up to the terminal controls. Hidden on md+ (physical keyboard).
     """
-    return html.Div(
+    mod_keys = html.Div(
+        [_webterm_key_button(index) for index in ('esc', 'ctrl', 'shift', 'tab')],
+        style={
+            'display': 'flex',
+            'gap': '3px',
+            'flex-wrap': 'wrap',
+            'align-items': 'flex-end',
+        },
+    )
+    arrow_keys = html.Div(
         [
-            dbc.Button(
-                label,
-                id={'type': 'webterm-key-button', 'index': index},
-                color='light',
-                outline=True,
-                size='sm',
-                title=title,
-                n_clicks=0,
-                style={
-                    'width': '100%',
-                    'min-width': '0',
-                    'padding': '2px 0',
-                    'font-size': '0.7rem',
-                    'line-height': '1.1',
-                },
-            )
-            for index, label, title in WEBTERM_EXTRA_KEYS
+            _webterm_key_button('up', grid_area='up'),
+            _webterm_key_button('left', grid_area='left'),
+            _webterm_key_button('down', grid_area='down'),
+            _webterm_key_button('right', grid_area='right'),
         ],
-        className='d-md-none',
         style={
             'display': 'grid',
-            'grid-template-columns': 'repeat(4, 1fr)',
+            'grid-template-columns': 'repeat(3, 1.4em)',
+            'grid-template-areas': '". up ." "left down right"',
             'gap': '3px',
-            'max-width': '300px',
+        },
+    )
+    return html.Div(
+        [mod_keys, arrow_keys],
+        className='d-md-none',
+        style={
+            'display': 'flex',
+            'justify-content': 'space-between',
+            'align-items': 'flex-end',
+            'gap': '8px',
+            'margin-top': '8px',  ### buffer above the key row
         },
     )
 
@@ -106,9 +141,7 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
                 [
                     html.Div(
                         [
-                            ### Termux-style keys on the left (mobile only).
-                            build_webterm_extra_keys_row(),
-                            ### Terminal controls on the right.
+                            ### Terminal controls on the top-right.
                             html.Div(
                                 [
                                     dbc.Button(
@@ -135,15 +168,13 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
                                     ),
                                 ] if TMUX_IS_ENABLED else [],
                                 id='webterm-controls-div',
-                                style={'margin-left': 'auto', 'text-align': 'right'},
+                                style={'text-align': 'right'},
                             ),
+                            ### Termux-style keys along the bottom, just above the
+                            ### webterm (mobile only).
+                            build_webterm_extra_keys_row(),
                         ],
-                        style={
-                            'display': 'flex',
-                            'justify-content': 'space-between',
-                            'align-items': 'flex-start',
-                            'gap': '6px',
-                        },
+                        style={'display': 'flex', 'flex-direction': 'column'},
                     ),
                     html.Iframe(
                         src=f"/webterm/{session_id}",
