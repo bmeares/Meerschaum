@@ -239,10 +239,14 @@ def update_content(*args):
         'get-jobs-button': 2,
     }
 
-    content, alerts = triggers[trigger](
+    ### Trigger functions return (content, alerts), but some return extra trailing
+    ### values (e.g. get_plugins_cards returns page/count for pagination) — take the
+    ### first two.
+    result = triggers[trigger](
         ctx.states,
         **filter_keywords(triggers[trigger], session_data=session_data)
     )
+    content, alerts = result[0], result[1]
     webterm_style = {
         'display': (
             'none'
