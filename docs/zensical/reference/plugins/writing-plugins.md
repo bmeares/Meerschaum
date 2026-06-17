@@ -533,6 +533,24 @@ Functions decorated with `#!python @web_page` return a [Dash layout](https://das
             return html.P(f"You're looking at item '{item_id}'.")
     ```
 
+#### Styling Your Page
+
+The Web Console is **dark** by default (the Bootswatch *Darkly* theme plus the `dbc_dark` component overrides), and your page inherits that look automatically — most plugins don't need to do anything.
+
+If you'd rather start from a clean **light** theme, opt out per page with `#!python @web_page(dark_theme=False)`:
+
+```python
+@web_page('/my-page', dark_theme=False)
+def my_page():
+    return dbc.Container([html.H1("My light-themed page")])
+```
+
+While that page is active, the Web Console switches the Bootstrap theme to the light *Flatly* build and drops the `dbc_dark` class — and switches back to dark for the console and every other page (including on in-app navigation). Both are Bootswatch themes, so standard `dash-bootstrap-components` markup looks right either way; you can layer your own CSS on top.
+
+??? note "How the theme switch works"
+
+    The dark (Darkly) and light (Flatly) Bootstrap stylesheets are both loaded, and exactly one is enabled at a time. The toggle is per route (it follows the URL as the user navigates), so it is a per-page setting — there is no plugin-wide switch. The dark theme also carries `#!html <body class="dbc_dark">`, under which `dbc_dark.css` scopes its extra component overrides; the light theme runs without that class.
+
 ### **The `#!python @pre_sync_hook` and `#!python @post_sync_hook` Decorators**
 
 You can tap into the built-in syncing engine via the `sync pipes` action by decorating callback functions with `#!python @pre_sync_hook` and/or `#!python @post_sync_hook`. Both callbacks accept a positional `pipe` argument, and other useful contextual arguments as passed as keyword arguments (if your function accepts them).

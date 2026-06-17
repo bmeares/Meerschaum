@@ -28,9 +28,8 @@ from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import (
     alert_from_success_tuple,
     build_cards_grid,
-    sign_out_button,
-    logo_row,
-    pages_offcanvas,
+    build_sign_out_button,
+    build_logo_row,
 )
 from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.config import get_config
@@ -589,8 +588,8 @@ def accordion_items_from_pipe(
             columns_body = [html.Tbody(columns_rows)]
             columns_table = dbc.Table(columns_header + columns_body, bordered=False, hover=True)
             items_bodies['columns'] = html.Div(columns_table, style={'overflowX': 'auto'})
-        except Exception:
-            items_bodies['columns'] = html.P("Could not retrieve columns ― please try again.")
+        except Exception as e:
+            items_bodies['columns'] = html.P(f"Could not retrieve columns:\n{e}")
 
     if 'parameters' in active_items:
         parameters_editor = dash_ace.DashAceEditor(
@@ -776,8 +775,8 @@ def accordion_items_from_pipe(
             df = pipe.get_backtrack_data(backtrack_minutes=10, limit=10, debug=debug).astype(str)
             table = dbc.Table.from_dataframe(df, bordered=False, hover=True)
             items_bodies['recent-data'] = html.Div(table, style={'overflowX': 'auto'})
-        except Exception:
-            items_bodies['recent-data'] = html.P("Could not retrieve recent data.")
+        except Exception as e:
+            items_bodies['recent-data'] = html.P(f"Could not retrieve recent data:\n{e}")
 
     if 'query-data' in active_items:
         query_editor = dash_ace.DashAceEditor(
@@ -1113,17 +1112,16 @@ def build_pipes_navbar(instance_keys: Optional[str] = None, with_instance_select
     instance_select_div = html.Div(instance_select, style=instance_select_div_style)
     return html.Div(
         [
-            pages_offcanvas,
             dbc.Navbar(
                 dbc.Container(
                     [
-                        logo_row,
+                        build_logo_row(),
                         dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
                         dbc.Collapse(
                             dbc.Row(
                                 [
                                     dbc.Col(instance_select_div, width='auto'),
-                                    dbc.Col(sign_out_button, width='auto'),
+                                    dbc.Col(build_sign_out_button(), width='auto'),
                                 ],
                                 className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
                                 align='center',

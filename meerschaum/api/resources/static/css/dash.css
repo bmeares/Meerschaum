@@ -169,12 +169,41 @@ a {
 .input-text {
   font-family: Consolas, Menlo, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace, serif !important;
 }
-.pages-offcanvas-accordion button {
-  background-color: var(--bs-dark) !important;
-  color: white !important;
-}
 .pages-offcanvas-accordion div {
   padding: 0 !important;
+}
+/* Page-navigation sidebar (offcanvas): theme-aware links with a subtle, full-row
+   hover highlight (no per-button box; works in both the dark and light themes).
+   Structure/borders/padding of the rows are left to Bootstrap. */
+#pages-offcanvas .btn {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  width: 100%;
+  text-align: left;
+}
+#pages-offcanvas .list-group-item {
+  background-color: transparent !important;
+}
+#pages-offcanvas .list-group-item:hover {
+  background-color: rgba(127, 127, 127, 0.15) !important;
+}
+/* Accordion group headers (e.g. "Settings") match the nav links, not a dark box. */
+#pages-offcanvas .accordion,
+#pages-offcanvas .accordion-item,
+#pages-offcanvas .accordion-button {
+  background-color: transparent !important;
+  color: inherit !important;
+  box-shadow: none !important;
+}
+#pages-offcanvas .accordion-button:hover {
+  background-color: rgba(127, 127, 127, 0.15) !important;
+}
+/* The current page is highlighted with a slightly darker "selected" shade. */
+#pages-offcanvas .sidebar-nav-active,
+#pages-offcanvas .sidebar-nav-active:hover {
+  background-color: rgba(127, 127, 127, 0.30) !important;
 }
 
 /* restyle radio items */

@@ -86,7 +86,8 @@ layout = dbc.Container([
                 html.Img(
                     src = endpoints['dash'] + "/assets/banner_1920x320.png",
                     width = '100%',
-                    className = 'center'
+                    className = 'center',
+                    alt = 'Meerschaum',
                 ),
             ),
             html.Br(),

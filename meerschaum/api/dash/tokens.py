@@ -13,7 +13,6 @@ from typing import Any, List, Optional
 
 import meerschaum as mrsm
 from meerschaum.api import debug, CHECK_UPDATE, get_api_connector
-from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import alert_from_success_tuple
 from meerschaum.api.dash.sessions import get_user_from_session
 from meerschaum.utils.typing import WebState, SuccessTuple, List, Tuple
@@ -62,13 +61,17 @@ def get_tokens_table(session_id: Optional[str] = None) -> Tuple[dbc.Table, List[
             html.Td(html.Pre(str(token.id))),
             html.Td(get_creation_string(token).replace('Created ', '')),
             html.Td(get_expiration_string(token).replace('Expires in ', '')),
-            html.Td("✅" if token.is_valid else "❌"),
+            html.Td(
+                "✅" if token.is_valid else "❌",
+                title=("Valid" if token.is_valid else "Invalid"),
+            ),
             html.Td([
                 dbc.Button(
                     html.B("⋮"),
                     color='link',
                     size='sm',
                     id={'type': 'tokens-context-button', 'index': str(token.id)},
+                    title='Manage token',
                     style={'text-decoration': 'none'},
                 ),
                 build_manage_token_popover(token),
@@ -81,7 +84,7 @@ def get_tokens_table(session_id: Optional[str] = None) -> Tuple[dbc.Table, List[
     ]
 
     table_body = [html.Tbody(rows)]
-    table = dbc.Table(table_header + table_body)
+    table = dbc.Table(table_header + table_body, responsive=True)
     return table, alerts
 
 
@@ -502,7 +505,6 @@ def build_register_table_from_token(token: Token) -> dbc.Table:
     """
     Return a table with the token's metadata.
     """
-    table_header = [html.Thead(html.Tr([html.Th("Attribute"), html.Th("Value")]))]
     table_header = []
     pre_style = {'white-space': 'pre-wrap', 'word-break': 'break-all'}
     rows = [

@@ -50,6 +50,7 @@ from meerschaum.utils.typing import Dict
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.utils.misc import filter_keywords, flatten_list, string_to_dict
 from meerschaum.utils.yaml import yaml
+from meerschaum.utils.warnings import warn
 from meerschaum.actions import get_subactions, actions
 from meerschaum.connectors.sql._fetch import set_pipe_query, get_pipe_query
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
@@ -98,6 +99,9 @@ _paths = {
     '/dash/jobs'    : pages.jobs.layout,
 }
 _required_login = {'', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes'}
+### Endpoints (plugin pages with `@web_page(dark_theme=False)`) that opt out of the
+### `dbc_dark` component theme; populated by `add_plugin_pages`.
+_paths_without_dbc_dark = set()
 _pages = {
     'Web Console': '/dash/',
     'Pipes': '/dash/pipes',
@@ -110,6 +114,7 @@ _pages = {
 @dash_app.callback(
     Output('page-layout-div', 'children'),
     Output('session-store', 'data'),
+    Output('dbc-dark-store', 'data'),
     Input('mrsm-location', 'pathname'),
     Input('session-store', 'data'),
     State('mrsm-location', 'href'),
@@ -118,7 +123,7 @@ def update_page_layout_div(
     pathname: str,
     session_store_data: Dict[str, Any],
     location_href: str,
-) -> Tuple[List[Any], Dict[str, Any]]:
+) -> Tuple[List[Any], Dict[str, Any], bool]:
     """
     Route the user to the correct page.
 
@@ -172,7 +177,38 @@ def update_page_layout_div(
         )
     )
     layout = _paths.get(path, pages.error.layout)
-    return layout, session_store_to_return
+    apply_dbc_dark = path not in _paths_without_dbc_dark
+
+    ### Wrap the page in a path-keyed container so React fully remounts the page on
+    ### navigation. React reconciles by type + position (not by Dash id), so without a
+    ### changing `key` it reuses the existing DOM nodes and only patches props — which
+    ### leaves a previous page's subtree (and its still-firing callbacks) lingering,
+    ### bleeding one page's content into another. A unique key forces a clean unmount.
+    keyed_layout = html.Div(layout, key=f'page-content::{path}')
+    return keyed_layout, session_store_to_return, apply_dbc_dark
+
+
+### Switch the Bootstrap theme per route: a plugin page registered with
+### `@web_page(dark_theme=False)` renders with the light (Flatly) theme, while the
+### console and all other pages stay dark (Darkly + dbc_dark). Exactly one of the two
+### theme stylesheets is enabled at a time.
+dash_app.clientside_callback(
+    """
+    function(apply_dark){
+        const dark = apply_dark !== false;
+        if (document.body){
+            document.body.classList.toggle('dbc_dark', dark);
+        }
+        const darkLink = document.getElementById('mrsm-theme-dark');
+        const lightLink = document.getElementById('mrsm-theme-light');
+        if (darkLink){ darkLink.disabled = !dark; }
+        if (lightLink){ lightLink.disabled = dark; }
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('dbc-dark-dummy', 'children'),
+    Input('dbc-dark-store', 'data'),
+)
 
 
 @dash_app.callback(
@@ -238,10 +274,14 @@ def update_content(*args):
         'get-jobs-button': 2,
     }
 
-    content, alerts = triggers[trigger](
+    ### Trigger functions return (content, alerts), but some return extra trailing
+    ### values (e.g. get_plugins_cards returns page/count for pagination) — take the
+    ### first two.
+    result = triggers[trigger](
         ctx.states,
         **filter_keywords(triggers[trigger], session_data=session_data)
     )
+    content, alerts = result[0], result[1]
     webterm_style = {
         'display': (
             'none'
@@ -638,27 +678,77 @@ dash_app.clientside_callback(
     """
     function(n_clicks){
         if (!n_clicks) { return dash_clientside.no_update; }
-        iframe = document.getElementById('webterm-iframe');
+        const iframe = document.getElementById('webterm-iframe');
         if (!iframe){ return dash_clientside.no_update; }
         const leftCol = document.getElementById('content-col-left');
         const rightCol = document.getElementById('content-col-right');
         const button = document.getElementById('webterm-fullscreen-button');
 
-        if (leftCol.style.display === 'none') {
+        // Track state explicitly and drive width via inline styles so the column's
+        // responsive classes (col-md-12 col-lg-6) are preserved, not clobbered.
+        const fullscreen = rightCol.getAttribute('data-fullscreen') === '1';
+        if (fullscreen) {
             leftCol.style.display = '';
-            rightCol.className = 'col-6';
+            rightCol.style.flex = '';
+            rightCol.style.maxWidth = '';
+            rightCol.style.width = '';
+            rightCol.removeAttribute('data-fullscreen');
             button.innerHTML = "⛶";
         } else {
             leftCol.style.display = 'none';
-            rightCol.className = 'col-12';
+            rightCol.style.flex = '0 0 100%';
+            rightCol.style.maxWidth = '100%';
+            rightCol.style.width = '100%';
+            rightCol.setAttribute('data-fullscreen', '1');
             button.innerHTML = "🀲";
         }
+
+        // The terminal sizes itself to its width on resize; nudge it to refit now
+        // that the column width changed, so it fills (or releases) the new space.
+        setTimeout(function(){
+            try { iframe.contentWindow.dispatchEvent(new Event('resize')); } catch (e) {}
+        }, 50);
 
         return dash_clientside.no_update;
     }
     """,
     Output('webterm-fullscreen-button', 'n_clicks'),
     Input('webterm-fullscreen-button', 'n_clicks'),
+)
+
+dash_app.clientside_callback(
+    """
+    function(n_clicks_arr, url){
+        const ctx = dash_clientside.callback_context;
+        if (!ctx.triggered || !ctx.triggered.length) { return dash_clientside.no_update; }
+        const t = ctx.triggered[0];
+        if (t.value == null) { return dash_clientside.no_update; }
+        const key = JSON.parse(t.prop_id.split('.n_clicks')[0]).index;
+        const iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return dash_clientside.no_update; }
+
+        if (key === 'ctrl' || key === 'shift') {
+            window._mod = window._mod || {ctrl: false, shift: false};
+            window._mod[key] = !window._mod[key];
+            iframe.contentWindow.postMessage(
+                {action: "__TOGGLE_MOD", mod: key, on: window._mod[key]}, url
+            );
+            dash_clientside.set_props(
+                {type: 'webterm-key-button', index: key}, {active: window._mod[key]}
+            );
+        } else {
+            const seqs = {
+                esc: "\\x1b", tab: "\\t",
+                up: "\\x1b[A", down: "\\x1b[B", right: "\\x1b[C", left: "\\x1b[D"
+            };
+            iframe.contentWindow.postMessage({action: "__SEND_KEY", key: seqs[key]}, url);
+        }
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('mrsm-location', 'href'),
+    Input({'type': 'webterm-key-button', 'index': ALL}, 'n_clicks'),
+    State('mrsm-location', 'href'),
 )
 
 @dash_app.callback(
@@ -757,7 +847,8 @@ def download_pipe_csv(n_clicks):
     filename = str(pipe.target) + f" {begin} - {end}.csv"
     try:
         df = pipe.get_data(begin=begin, end=end, debug=debug)
-    except Exception:
+    except Exception as e:
+        warn(f"Failed to fetch data for CSV download of {pipe}:\n{e}", stack=False)
         df = None
     if df is not None:
         return dcc.send_data_frame(df.to_csv, filename, index=False)
@@ -1133,16 +1224,38 @@ def sync_as_json_or_lines_click(
     Output('pages-offcanvas', 'children'),
     Input('logo-img', 'n_clicks'),
     State('pages-offcanvas', 'is_open'),
+    State('mrsm-location', 'pathname'),
     prevent_initial_call=True,
 )
-def toggle_pages_offcanvas(n_clicks: Optional[int], is_open: bool):
+def toggle_pages_offcanvas(
+    n_clicks: Optional[int],
+    is_open: bool = False,
+    pathname: Optional[str] = None,
+):
     """
-    Toggle the pages sidebar.
+    Toggle the pages sidebar when the logo is clicked.
     """
-    pages_children = build_pages_offcanvas_children()
+    pages_children = build_pages_offcanvas_children(active_path=pathname)
     if n_clicks:
         return not is_open, pages_children
-    return is_open, pages_children
+    ### The logo remounts on navigation (its n_clicks resets), which fires this
+    ### callback with a falsy n_clicks. Leave `is_open` alone then so it doesn't
+    ### fight the close-on-navigation callback and re-open the sidebar.
+    return dash.no_update, pages_children
+
+
+@dash_app.callback(
+    Output('pages-offcanvas', 'is_open'),
+    Input('mrsm-location', 'pathname'),
+    prevent_initial_call=True,
+)
+def close_pages_offcanvas_on_nav(pathname: Optional[str]):
+    """
+    Close the pages sidebar when a page is selected. Kept separate from the toggle
+    callback so navigation never references `logo-img`, which is not in the layout
+    on the initial load (it lives inside the routed page).
+    """
+    return False
 
 
 @dash_app.callback(

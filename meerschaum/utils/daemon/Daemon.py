@@ -1420,19 +1420,60 @@ class Daemon:
 
         return {key: val for key, val in target_kw.items()}
 
+    @staticmethod
+    def _get_target_reference(target) -> Union[Dict[str, str], None]:
+        """
+        If `target` is an importable, top-level function (e.g. `entry`), return a
+        ``{'module': ..., 'qualname': ...}`` reference so it can be re-imported in the
+        daemon process instead of pickled by value.
+
+        Pickling such a target by value serializes its entire global graph, which can
+        reach unpicklable live state (e.g. a connector caching an `_asyncio.Task`) and
+        raise `TypeError: cannot pickle '_asyncio.Task' object`. dill also falls back to
+        by-value pickling whenever it cannot match the function by identity — which
+        happens when two copies of a package are importable (a stale install shadowing
+        a venv), so `byref=True` alone is not enough. Returns `None` for closures,
+        lambdas, and anything not importable, which fall back to dill.
+        """
+        module = getattr(target, '__module__', None)
+        qualname = getattr(target, '__qualname__', None)
+        if not module or not qualname:
+            return None
+        if '<locals>' in qualname or '<lambda>' in qualname:
+            return None
+        return {'module': module, 'qualname': qualname}
+
+    @staticmethod
+    def _load_target_reference(target_ref: Dict[str, str]):
+        """
+        Re-import a target from a `{'module': ..., 'qualname': ...}` reference.
+        """
+        import importlib
+        obj = importlib.import_module(target_ref['module'])
+        for part in target_ref['qualname'].split('.'):
+            obj = getattr(obj, part)
+        return obj
+
     def __getstate__(self):
         """
         Pickle this Daemon.
         """
         dill = attempt_import('dill')
-        return {
-            'target': dill.dumps(self.target),
+        state = {
             'target_args': self.target_args,
             'target_kw': self.target_kw,
             'daemon_id': self.daemon_id,
             'label': self.label,
             'properties': self.properties,
         }
+        target_ref = self._get_target_reference(self.target)
+        if target_ref is not None:
+            ### Store by reference (re-imported in the daemon process), not by value.
+            state['target'] = None
+            state['target_ref'] = target_ref
+        else:
+            state['target'] = dill.dumps(self.target, byref=True)
+        return state
 
     def __setstate__(self, _state: Dict[str, Any]):
         """
@@ -1440,7 +1481,11 @@ class Daemon:
         If the properties file exists, skip the old pickled version.
         """
         dill = attempt_import('dill')
-        _state['target'] = dill.loads(_state['target'])
+        target_ref = _state.pop('target_ref', None)
+        if target_ref is not None and _state.get('target', None) is None:
+            _state['target'] = self._load_target_reference(target_ref)
+        else:
+            _state['target'] = dill.loads(_state['target'])
         self._pickle = True
         daemon_id = _state.get('daemon_id', None)
         if not daemon_id:

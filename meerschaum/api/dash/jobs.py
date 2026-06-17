@@ -126,6 +126,7 @@ def build_job_card(
             id={'type': 'manage-job-buttons-div', 'index': job.name},
         ),
         html.Div(id={'type': 'manage-job-alert-div', 'index': job.name}),
+        build_delete_job_modal(job),
     ]
 
     return dbc.Card([
@@ -197,8 +198,7 @@ def build_manage_job_buttons(job: Job):
         color='danger',
         style={'width': '100%'},
         id={
-            'type': 'manage-job-button',
-            'action': 'delete',
+            'type': 'job-delete-button',
             'index': job.name,
         },
     )
@@ -214,6 +214,36 @@ def build_manage_job_buttons(job: Job):
         buttons.append(stop_button)
 
     return buttons
+
+
+def build_delete_job_modal(job: Job) -> dbc.Modal:
+    """
+    Return the confirmation modal for deleting a job.
+    """
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(html.H4(["Delete job ", html.B(job.name), "?"])),
+            dbc.ModalBody([
+                html.Div(id={'type': 'job-delete-alert-div', 'index': job.name}),
+                html.P(["Are you sure you want to delete job ", html.B(job.name), "?"]),
+                html.P(html.B("This action cannot be undone!")),
+            ]),
+            dbc.ModalFooter([
+                dbc.Button(
+                    "Cancel",
+                    color='secondary',
+                    id={'type': 'job-delete-cancel-button', 'index': job.name},
+                ),
+                dbc.Button(
+                    "Delete",
+                    color='danger',
+                    id={'type': 'job-delete-confirm-button', 'index': job.name},
+                ),
+            ]),
+        ],
+        is_open=False,
+        id={'type': 'job-delete-modal', 'index': job.name},
+    )
 
 
 def build_status_children(job: Job) -> List[html.P]:

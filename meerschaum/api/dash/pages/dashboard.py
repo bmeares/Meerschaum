@@ -36,7 +36,6 @@ from meerschaum.api.dash.components import (
     console_div,
     download_dataframe,
     navbar,
-    pages_offcanvas,
     download_logs,
     refresh_jobs_interval,
 )
@@ -53,7 +52,6 @@ layout = html.Div(
         download_logs,
         refresh_jobs_interval,
         navbar,
-        pages_offcanvas,
         html.Div(
             dbc.Row(
                 id='content-row',

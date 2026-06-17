@@ -209,21 +209,32 @@ def web_page(
     login_required: bool = True,
     skip_navbar: bool = False,
     page_group: Optional[str] = None,
+    dark_theme: bool = True,
     **kwargs
 ) -> Any:
     """
     Quickly add pages to the dash application.
+
+    Parameters
+    ----------
+    dark_theme: bool, default True
+        If `True`, apply the Web Console's `dbc_dark` component theme to this page
+        (the default — most plugins want this). Set to `False` to opt out: the
+        `dbc_dark` class is removed from `<body>` while this page is active, so a
+        plugin's own styling applies without competing with the theme's overrides.
+        Note the global base Bootstrap theme (dark background) still applies, so an
+        opted-out page should paint its own background.
 
     Examples
     --------
     >>> import meerschaum as mrsm
     >>> from meerschaum.plugins import web_page
     >>> html = mrsm.attempt_import('dash.html')
-    >>> 
+    >>>
     >>> @web_page('foo/bar', login_required=False)
     >>> def foo_bar():
     ...     return html.Div([html.H1("Hello, World!")])
-    >>> 
+    >>>
     """
     page_str = None
 
@@ -261,6 +272,7 @@ def web_page(
             'login_required': login_required,
             'skip_navbar': skip_navbar,
             'page_key': page_key,
+            'dark_theme': dark_theme,
         }
         if plugin_name not in _plugins_web_pages:
             _plugins_web_pages[plugin_name] = []

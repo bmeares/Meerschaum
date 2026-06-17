@@ -11,10 +11,10 @@ from meerschaum.utils.packages import import_html, import_dcc
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 import dash_bootstrap_components as dbc
 
-from meerschaum.api.dash.components import download_logs, refresh_jobs_interval, pages_navbar
+from meerschaum.api.dash.components import download_logs, refresh_jobs_interval, build_pages_navbar
 
 layout = [
-    pages_navbar,
+    build_pages_navbar(),
     dbc.Container([
         dcc.Location('job-location'),
         html.Div(id='job-output-div'),

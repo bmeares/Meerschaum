@@ -9,7 +9,7 @@ Custom components are defined here.
 from __future__ import annotations
 
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
-from meerschaum.utils.typing import SuccessTuple, List
+from meerschaum.utils.typing import SuccessTuple, List, Optional
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.misc import remove_ansi
 from meerschaum._internal.shell.Shell import get_shell_intro
@@ -110,70 +110,85 @@ instance_select = dbc.Select(
     class_name='dbc_dark custom-select custom-select-sm instance-select',
 )
 
-sign_out_button = dbc.Button(
-    "Sign out",
-    color='link',
-    style={'margin-left': '30px'},
-    id='sign-out-button',
-)
+### NOTE: These navbar pieces are FACTORIES, not module-level singletons. Reusing
+### the same component object across multiple page layouts is a Dash anti-pattern:
+### React keeps the shared subtree mounted and mis-reconciles its siblings on
+### navigation, so a previous page's components linger (and their callbacks keep
+### firing). Building a fresh instance per page makes navigation fully remount.
+def build_sign_out_button():
+    return dbc.Button(
+        "Sign out",
+        color='link',
+        style={'margin-left': '30px'},
+        id='sign-out-button',
+    )
 
-logo_row = dbc.Row(
-    [
-        dbc.Col(
-            html.Img(
-                src=endpoints['dash'] + "/assets/logo_48x48.png",
-                title=doc,
-                id="logo-img",
-                style={'cursor': 'pointer'},
+
+def build_logo_row():
+    return dbc.Row(
+        [
+            dbc.Col(
+                html.Img(
+                    src=endpoints['dash'] + "/assets/logo_48x48.png",
+                    title=doc,
+                    alt="Meerschaum",
+                    id="logo-img",
+                    style={'cursor': 'pointer'},
+                ),
             ),
-        ),
-    ],
-    align='center',
-    className='g-0 navbar-logo-row',
-)
+        ],
+        align='center',
+        className='g-0 navbar-logo-row',
+    )
 
-pages_navbar = html.Div(
-    [
-        pages_offcanvas,
-        dbc.Navbar(
-            dbc.Container(
-                [
-                    logo_row,
-                    dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
-                    dbc.Collapse(
-                        dbc.Row(
-                            [
-                                dbc.Col(
-                                    sign_out_button,
-                                    className="ms-auto",
-                                ),
-                            ],
-                            className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
+
+def build_pages_navbar():
+    """
+    Return a fresh page-navigation navbar. `pages_offcanvas` is NOT included here —
+    it lives in the persistent top-level app layout (meerschaum/api/dash/__init__.py)
+    so its accordion isn't destroyed/recreated on navigation; the logo still toggles it.
+    """
+    return html.Div(
+        [
+            dbc.Navbar(
+                dbc.Container(
+                    [
+                        build_logo_row(),
+                        dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
+                        dbc.Collapse(
+                            dbc.Row(
+                                [
+                                    dbc.Col(
+                                        build_sign_out_button(),
+                                        className="ms-auto",
+                                    ),
+                                ],
+                                className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
+                            ),
+                            id='navbar-collapse',
+                            is_open=False,
+                            navbar=True,
                         ),
-                        id='navbar-collapse',
-                        is_open=False,
-                        navbar=True,
-                    ),
-                ]
+                    ]
+                ),
+                dark=True,
+                color='dark'
             ),
-            dark=True,
-            color='dark'
-        ),
-    ],
-    id='pages-navbar-div',
-)
+        ],
+        id='pages-navbar-div',
+    )
 
 
 navbar = dbc.Navbar(
     dbc.Container(
         [
-            logo_row,
+            build_logo_row(),
             dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
             dbc.Collapse(
                 dbc.Row(
                     [
                         dbc.Col(instance_select, width="auto"),
-                        dbc.Col(sign_out_button, width="auto"),
+                        dbc.Col(build_sign_out_button(), width="auto"),
                     ],
                     className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
                     align="center",
@@ -191,7 +206,7 @@ navbar = dbc.Navbar(
 
 refresh_jobs_interval = dcc.Interval(
     id='refresh-jobs-interval',
-    interval=(1 * 1000),
+    interval=(3 * 1000),
     n_intervals=0,
     disabled=False,
 )
@@ -233,12 +248,41 @@ def build_cards_grid(cards: List[dbc.Card], num_columns: int = 3) -> html.Div:
     return html.Div(rows)
 
 
-def build_pages_offcanvas_children():
+def build_pages_offcanvas_children(active_path: Optional[str] = None):
     """
     Return the contents of the pages offcanvas.
+
+    Parameters
+    ----------
+    active_path: Optional[str]
+        The current page's path; the matching nav item is marked as selected and
+        its accordion group (if any) is expanded.
     """
     from meerschaum.api.dash.callbacks.dashboard import _pages
     from meerschaum.api.dash.callbacks.custom import _plugin_endpoints_to_pages
+
+    norm_active = (active_path or '').rstrip('/')
+
+    def _is_active(href: str) -> bool:
+        return bool(norm_active) and norm_active == (href or '').rstrip('/')
+
+    def _nav_item(page_key: str, page_href: str):
+        item_kwargs = {'class_name': 'sidebar-nav-active'} if _is_active(page_href) else {}
+        return dbc.ListGroupItem(
+            dbc.Button(
+                ' '.join([word.capitalize() for word in page_key.split(' ')]),
+                style={
+                    'width': '100%',
+                    'text-align': 'left',
+                    'text-decoration': 'none',
+                    'padding-left': '0',
+                },
+                href=page_href,
+                color='dark',
+            ),
+            **item_kwargs,
+        )
+
     pages_listgroup_items = []
     custom_pages = []
     for pages_dicts in _plugin_endpoints_to_pages.values():
@@ -248,58 +292,18 @@ def build_pages_offcanvas_children():
     for page_key, page_href in _pages.items():
         if page_key in custom_pages:
             continue
-        pages_listgroup_items.append(
-            dbc.ListGroupItem(
-                dbc.Button(
-                    ' '.join([word.capitalize() for word in page_key.split(' ')]),
-                    style={
-                        'width': '100%',
-                        'text-align': 'left',
-                        'text-decoration': 'none',
-                        'padding-left': '0',
-                    },
-                    href=page_href,
-                    color='dark',
-                )
-            )
-        )
+        pages_listgroup_items.append(_nav_item(page_key, page_href))
 
     plugins_accordion_items = []
     for page_group, pages_dicts in _plugin_endpoints_to_pages.items():
         if len(pages_dicts) == 1:
             page_href, page_dict = list(pages_dicts.items())[0]
             if page_dict['page_key'].lower() == page_group.lower():
-                pages_listgroup_items.append(
-                    dbc.ListGroupItem(
-                        dbc.Button(
-                            ' '.join([word.capitalize() for word in page_dict['page_key'].split(' ')]),
-                            style={
-                                'width': '100%',
-                                'text-align': 'left',
-                                'text-decoration': 'none',
-                                'padding-left': '0',
-                            },
-                            href=page_href,
-                            color='dark',
-                        )
-                    )
-                )
+                pages_listgroup_items.append(_nav_item(page_dict['page_key'], page_href))
                 continue
 
         plugin_listgroup_items = [
-            dbc.ListGroupItem(
-                dbc.Button(
-                    ' '.join([word.capitalize() for word in page_dict['page_key'].split(' ')]),
-                    style={
-                        'width': '100%',
-                        'text-align': 'left',
-                        'text-decoration': 'none',
-                        'padding-left': '0',
-                    },
-                    href=page_href,
-                    color='dark',
-                )
-            )
+            _nav_item(page_dict['page_key'], page_href)
             for page_href, page_dict in pages_dicts.items()
         ]
         plugin_listgroup = dbc.ListGroup(plugin_listgroup_items, flush=True)
@@ -310,16 +314,20 @@ def build_pages_offcanvas_children():
                 if page_group and not page_group[0].isupper()
                 else page_group
             ),
+            item_id=f'pages-offcanvas-accordion-{page_group}',
             class_name='pages-offcanvas-accordion',
         )
         plugins_accordion_items.append(plugin_accordion_item)
 
     if plugins_accordion_items:
+        ### Mirror the (crash-free) pipe accordion: single-open, start collapsed, no
+        ### always_open/active_item. always_open made dbc read item_id/`.join` off an
+        ### undefined active_item during the mount/unmount on navigation.
         plugins_accordion = dbc.Accordion(
             plugins_accordion_items,
             start_collapsed=True,
             flush=True,
-            always_open=True,
+            id='pages-offcanvas-accordion',
         )
         pages_listgroup_items.append(plugins_accordion)
 
