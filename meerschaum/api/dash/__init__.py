@@ -37,8 +37,10 @@ with warnings.catch_warnings():
 html, dcc = import_html(), import_dcc()
 from meerschaum.api.dash.components import location
 
+### The dark (Darkly) and light (Flatly) Bootstrap themes are loaded in index_string
+### with ids so exactly one can be enabled per route (see the dbc-dark-store callback).
+### `dbc_dark.css`/`dash.css` load after them via {%css%}.
 stylesheets = [
-    '/static/css/bootstrap.min.css',
     '/static/css/dbc_dark.css',
     '/static/css/dash.css',
     dbc.icons.FONT_AWESOME,
@@ -57,15 +59,21 @@ dash_app = enrich.DashProxy(
     ],
 )
 
-### The `dbc_dark` theme is opt-in: dbc_dark.css scopes every rule under `.dbc_dark`.
-### Set it on <body> by default so the console (and its body-portaled dropdown menus)
-### stays dark; a plugin page can remove the class from <body> to opt out cleanly.
+### The console is dark by default: the Darkly theme is enabled, the light (Flatly)
+### theme is disabled, and <body> carries `dbc_dark` (dbc_dark.css scopes its overrides
+### under that class). A plugin page registered with `@web_page(dark_theme=False)` flips
+### this per route — the dbc-dark-store callback disables Darkly, enables Flatly, and
+### removes the `dbc_dark` class — so the page renders with the light theme. The inline
+### script disables the light sheet before first paint to avoid a flash.
 dash_app.index_string = """<!DOCTYPE html>
 <html>
     <head>
         {%metas%}
         <title>{%title%}</title>
         {%favicon%}
+        <link rel="stylesheet" href="/static/css/bootstrap.min.css" id="mrsm-theme-dark">
+        <link rel="stylesheet" href="/static/css/bootstrap_light.min.css" id="mrsm-theme-light">
+        <script>document.getElementById('mrsm-theme-light').disabled = true;</script>
         {%css%}
     </head>
     <body class="dbc_dark">

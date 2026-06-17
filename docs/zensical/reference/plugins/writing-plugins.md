@@ -535,22 +535,21 @@ Functions decorated with `#!python @web_page` return a [Dash layout](https://das
 
 #### Styling Your Page
 
-The Web Console is dark by default, and your page inherits that look automatically — most plugins don't need to do anything. Two separate stylesheets are involved:
+The Web Console is **dark** by default (the Bootswatch *Darkly* theme plus the `dbc_dark` component overrides), and your page inherits that look automatically — most plugins don't need to do anything.
 
-- **The base Bootstrap theme** (a dark "Darkly" build) is applied **globally** to every Dash page. This is the dark background, dark cards, and light text you see. It is the foundation every page sits on and is not opt-out-able with a class.
-- **The `dbc_dark` theme** (`dbc_dark.css`) adds extra overrides for specific components (dropdowns, `.form-control`, options lists). Its rules are **scoped under the `dbc_dark` class**, and the app sets `#!html <body class="dbc_dark">` by default — so your page inherits these too.
-
-If your plugin ships its own styling and the `dbc_dark` component overrides get in your way, opt out per page with `#!python @web_page(dark_theme=False)`. The Web Console removes the `dbc_dark` class from `#!html <body>` while that page is active (and restores it elsewhere, including on in-app navigation), so your own CSS applies cleanly.
+If you'd rather start from a clean **light** theme, opt out per page with `#!python @web_page(dark_theme=False)`:
 
 ```python
 @web_page('/my-page', dark_theme=False)
 def my_page():
-    return dbc.Container([html.H1("My custom-styled page")])
+    return dbc.Container([html.H1("My light-themed page")])
 ```
 
-??? tip "What `dark_theme=False` does (and doesn't do)"
+While that page is active, the Web Console switches the Bootstrap theme to the light *Flatly* build and drops the `dbc_dark` class — and switches back to dark for the console and every other page (including on in-app navigation). Both are Bootswatch themes, so standard `dash-bootstrap-components` markup looks right either way; you can layer your own CSS on top.
 
-    `dark_theme=False` only drops the **scoped `dbc_dark` component overrides** for your route. The **global** Darkly base theme (including the dark body background) still applies, so an opted-out page should paint its own background and colors. This is a per-page setting because the body class is toggled per route as the user navigates — there is no plugin-wide switch.
+??? note "How the theme switch works"
+
+    The dark (Darkly) and light (Flatly) Bootstrap stylesheets are both loaded, and exactly one is enabled at a time. The toggle is per route (it follows the URL as the user navigates), so it is a per-page setting — there is no plugin-wide switch. The dark theme also carries `#!html <body class="dbc_dark">`, under which `dbc_dark.css` scopes its extra component overrides; the light theme runs without that class.
 
 ### **The `#!python @pre_sync_hook` and `#!python @post_sync_hook` Decorators**
 

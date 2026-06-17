@@ -181,14 +181,21 @@ def update_page_layout_div(
     return layout, session_store_to_return, apply_dbc_dark
 
 
-### Toggle the `dbc_dark` component theme on <body> per route, so a plugin page
-### registered with `@web_page(dark_theme=False)` renders without the theme.
+### Switch the Bootstrap theme per route: a plugin page registered with
+### `@web_page(dark_theme=False)` renders with the light (Flatly) theme, while the
+### console and all other pages stay dark (Darkly + dbc_dark). Exactly one of the two
+### theme stylesheets is enabled at a time.
 dash_app.clientside_callback(
     """
     function(apply_dark){
+        const dark = apply_dark !== false;
         if (document.body){
-            document.body.classList.toggle('dbc_dark', apply_dark !== false);
+            document.body.classList.toggle('dbc_dark', dark);
         }
+        const darkLink = document.getElementById('mrsm-theme-dark');
+        const lightLink = document.getElementById('mrsm-theme-light');
+        if (darkLink){ darkLink.disabled = !dark; }
+        if (lightLink){ lightLink.disabled = dark; }
         return dash_clientside.no_update;
     }
     """,
