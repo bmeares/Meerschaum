@@ -1217,13 +1217,18 @@ def sync_as_json_or_lines_click(
     Output('pages-offcanvas', 'children'),
     Input('logo-img', 'n_clicks'),
     State('pages-offcanvas', 'is_open'),
+    State('mrsm-location', 'pathname'),
     prevent_initial_call=True,
 )
-def toggle_pages_offcanvas(n_clicks: Optional[int], is_open: bool):
+def toggle_pages_offcanvas(
+    n_clicks: Optional[int],
+    is_open: bool,
+    pathname: Optional[str] = None,
+):
     """
     Toggle the pages sidebar.
     """
-    pages_children = build_pages_offcanvas_children()
+    pages_children = build_pages_offcanvas_children(active_path=pathname)
     if n_clicks:
         return not is_open, pages_children
     return is_open, pages_children

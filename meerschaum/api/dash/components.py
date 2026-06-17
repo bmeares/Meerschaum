@@ -9,7 +9,7 @@ Custom components are defined here.
 from __future__ import annotations
 
 from meerschaum.utils.packages import attempt_import, import_dcc, import_html
-from meerschaum.utils.typing import SuccessTuple, List
+from meerschaum.utils.typing import SuccessTuple, List, Optional
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.misc import remove_ansi
 from meerschaum._internal.shell.Shell import get_shell_intro
@@ -234,12 +234,41 @@ def build_cards_grid(cards: List[dbc.Card], num_columns: int = 3) -> html.Div:
     return html.Div(rows)
 
 
-def build_pages_offcanvas_children():
+def build_pages_offcanvas_children(active_path: Optional[str] = None):
     """
     Return the contents of the pages offcanvas.
+
+    Parameters
+    ----------
+    active_path: Optional[str]
+        The current page's path; the matching nav item is marked as selected and
+        its accordion group (if any) is expanded.
     """
     from meerschaum.api.dash.callbacks.dashboard import _pages
     from meerschaum.api.dash.callbacks.custom import _plugin_endpoints_to_pages
+
+    norm_active = (active_path or '').rstrip('/')
+
+    def _is_active(href: str) -> bool:
+        return bool(norm_active) and norm_active == (href or '').rstrip('/')
+
+    def _nav_item(page_key: str, page_href: str):
+        item_kwargs = {'class_name': 'sidebar-nav-active'} if _is_active(page_href) else {}
+        return dbc.ListGroupItem(
+            dbc.Button(
+                ' '.join([word.capitalize() for word in page_key.split(' ')]),
+                style={
+                    'width': '100%',
+                    'text-align': 'left',
+                    'text-decoration': 'none',
+                    'padding-left': '0',
+                },
+                href=page_href,
+                color='dark',
+            ),
+            **item_kwargs,
+        )
+
     pages_listgroup_items = []
     custom_pages = []
     for pages_dicts in _plugin_endpoints_to_pages.values():
@@ -249,60 +278,23 @@ def build_pages_offcanvas_children():
     for page_key, page_href in _pages.items():
         if page_key in custom_pages:
             continue
-        pages_listgroup_items.append(
-            dbc.ListGroupItem(
-                dbc.Button(
-                    ' '.join([word.capitalize() for word in page_key.split(' ')]),
-                    style={
-                        'width': '100%',
-                        'text-align': 'left',
-                        'text-decoration': 'none',
-                        'padding-left': '0',
-                    },
-                    href=page_href,
-                    color='dark',
-                )
-            )
-        )
+        pages_listgroup_items.append(_nav_item(page_key, page_href))
 
     plugins_accordion_items = []
+    active_item_ids = []
     for page_group, pages_dicts in _plugin_endpoints_to_pages.items():
         if len(pages_dicts) == 1:
             page_href, page_dict = list(pages_dicts.items())[0]
             if page_dict['page_key'].lower() == page_group.lower():
-                pages_listgroup_items.append(
-                    dbc.ListGroupItem(
-                        dbc.Button(
-                            ' '.join([word.capitalize() for word in page_dict['page_key'].split(' ')]),
-                            style={
-                                'width': '100%',
-                                'text-align': 'left',
-                                'text-decoration': 'none',
-                                'padding-left': '0',
-                            },
-                            href=page_href,
-                            color='dark',
-                        )
-                    )
-                )
+                pages_listgroup_items.append(_nav_item(page_dict['page_key'], page_href))
                 continue
 
-        plugin_listgroup_items = [
-            dbc.ListGroupItem(
-                dbc.Button(
-                    ' '.join([word.capitalize() for word in page_dict['page_key'].split(' ')]),
-                    style={
-                        'width': '100%',
-                        'text-align': 'left',
-                        'text-decoration': 'none',
-                        'padding-left': '0',
-                    },
-                    href=page_href,
-                    color='dark',
-                )
-            )
-            for page_href, page_dict in pages_dicts.items()
-        ]
+        item_id = f'pages-offcanvas-accordion-{page_group}'
+        plugin_listgroup_items = []
+        for page_href, page_dict in pages_dicts.items():
+            plugin_listgroup_items.append(_nav_item(page_dict['page_key'], page_href))
+            if _is_active(page_href) and item_id not in active_item_ids:
+                active_item_ids.append(item_id)
         plugin_listgroup = dbc.ListGroup(plugin_listgroup_items, flush=True)
         plugin_accordion_item = dbc.AccordionItem(
             plugin_listgroup,
@@ -311,7 +303,7 @@ def build_pages_offcanvas_children():
                 if page_group and not page_group[0].isupper()
                 else page_group
             ),
-            item_id=f'pages-offcanvas-accordion-{page_group}',
+            item_id=item_id,
             class_name='pages-offcanvas-accordion',
         )
         plugins_accordion_items.append(plugin_accordion_item)
@@ -322,6 +314,10 @@ def build_pages_offcanvas_children():
             start_collapsed=True,
             flush=True,
             always_open=True,
+            ### `always_open` needs a list `active_item`; without it dbc's accordion
+            ### calls `.join` on undefined and reads `item_id` off nothing, crashing
+            ### on render. Expand the group holding the active page (else none).
+            active_item=active_item_ids,
         )
         pages_listgroup_items.append(plugins_accordion)
 
