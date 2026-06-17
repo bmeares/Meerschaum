@@ -281,7 +281,6 @@ def build_pages_offcanvas_children(active_path: Optional[str] = None):
         pages_listgroup_items.append(_nav_item(page_key, page_href))
 
     plugins_accordion_items = []
-    active_item_ids = []
     for page_group, pages_dicts in _plugin_endpoints_to_pages.items():
         if len(pages_dicts) == 1:
             page_href, page_dict = list(pages_dicts.items())[0]
@@ -289,12 +288,10 @@ def build_pages_offcanvas_children(active_path: Optional[str] = None):
                 pages_listgroup_items.append(_nav_item(page_dict['page_key'], page_href))
                 continue
 
-        item_id = f'pages-offcanvas-accordion-{page_group}'
-        plugin_listgroup_items = []
-        for page_href, page_dict in pages_dicts.items():
-            plugin_listgroup_items.append(_nav_item(page_dict['page_key'], page_href))
-            if _is_active(page_href) and item_id not in active_item_ids:
-                active_item_ids.append(item_id)
+        plugin_listgroup_items = [
+            _nav_item(page_dict['page_key'], page_href)
+            for page_href, page_dict in pages_dicts.items()
+        ]
         plugin_listgroup = dbc.ListGroup(plugin_listgroup_items, flush=True)
         plugin_accordion_item = dbc.AccordionItem(
             plugin_listgroup,
@@ -303,21 +300,20 @@ def build_pages_offcanvas_children(active_path: Optional[str] = None):
                 if page_group and not page_group[0].isupper()
                 else page_group
             ),
-            item_id=item_id,
+            item_id=f'pages-offcanvas-accordion-{page_group}',
             class_name='pages-offcanvas-accordion',
         )
         plugins_accordion_items.append(plugin_accordion_item)
 
     if plugins_accordion_items:
+        ### Mirror the (crash-free) pipe accordion: single-open, start collapsed, no
+        ### always_open/active_item. always_open made dbc read item_id/`.join` off an
+        ### undefined active_item during the mount/unmount on navigation.
         plugins_accordion = dbc.Accordion(
             plugins_accordion_items,
             start_collapsed=True,
             flush=True,
-            always_open=True,
-            ### `always_open` needs a list `active_item`; without it dbc's accordion
-            ### calls `.join` on undefined and reads `item_id` off nothing, crashing
-            ### on render. Expand the group holding the active page (else none).
-            active_item=active_item_ids,
+            id='pages-offcanvas-accordion',
         )
         pages_listgroup_items.append(plugins_accordion)
 

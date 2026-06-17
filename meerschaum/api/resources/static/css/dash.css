@@ -190,6 +190,8 @@ a {
   background-color: rgba(127, 127, 127, 0.15) !important;
 }
 /* Accordion group headers (e.g. "Settings") match the nav links, not a dark box. */
+#pages-offcanvas .accordion,
+#pages-offcanvas .accordion-item,
 #pages-offcanvas .accordion-button {
   background-color: transparent !important;
   color: inherit !important;
