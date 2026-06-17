@@ -9,7 +9,10 @@ This is the current release cycle, so stay tuned for future releases!
 - **Scope the `dbc_dark` theme so it no longer leaks onto every Dash page.**  
   Several rule blocks in `dbc_dark.css` (`.form-control`, the `.dash-dropdown-*` family, and `.dash-options-list`) were unscoped, so their `background-color: var(--bs-dark) !important` declarations applied to *every* Dash app served by the API — forcing plugins to fight each one with higher-specificity `!important` overrides. These blocks are now scoped under `.dbc_dark`, making the dark theme opt-in.
 
-  To keep the web console (including its body-portaled dropdown menus) unchanged, the Dash app now sets `class="dbc_dark"` on `<body>` by default. A plugin page can remove the class from `<body>` to render cleanly without the theme's `!important` overrides.
+  To keep the web console (including its body-portaled dropdown menus) unchanged, the Dash app now sets `class="dbc_dark"` on `<body>` by default.
+
+- **Add a light theme for plugin pages via `@web_page(dark_theme=False)`.**  
+  Plugin pages render with the console's dark theme by default. A page can now opt into a light theme with `@web_page(dark_theme=False)`: the Web Console loads both the dark (Bootswatch *Darkly*) and light (*Flatly*) Bootstrap themes and enables exactly one per route — switching to light (and dropping the `dbc_dark` class) while an opted-out page is active, and back to dark for the console and every other page, including on in-app navigation. See [Styling Your Page](/reference/plugins/writing-plugins/#styling-your-page).
 
 - **Fix starting jobs whose target reaches unpicklable state (e.g. an `asyncio.Task`).**  
   Starting a job (e.g. `sync pipes ... --loop --name foo`) could fail with `TypeError: cannot pickle '_asyncio.Task' object` when a connector cached a live async task. The daemon pickled its target function *by value*, dragging in the target's global graph; that walk reached the unpicklable state. Importable, top-level targets are now pickled *by reference* (re-imported in the daemon process), so the global graph is never serialized. Closures still pickle by value, unchanged.
