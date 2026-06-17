@@ -43,25 +43,37 @@ WEBTERM_EXTRA_KEYS = [
 
 def build_webterm_extra_keys_row() -> Any:
     """
-    Return a mobile-only row of Termux-style keys (ESC, CTRL, SHIFT, TAB, arrows)
-    that send special keys to the webterm. Hidden on md+ screens (physical keyboard).
+    Return a mobile-only grid of Termux-style keys (ESC, CTRL, SHIFT, TAB, arrows)
+    that send special keys to the webterm. Two rows of four, top-left (balancing the
+    controls on the top-right). Hidden on md+ screens (physical keyboard).
     """
     return html.Div(
         [
             dbc.Button(
                 label,
                 id={'type': 'webterm-key-button', 'index': index},
-                color='secondary',
+                color='light',
                 outline=True,
                 size='sm',
                 title=title,
                 n_clicks=0,
-                style={'flex': '1 1 0', 'margin': '1px', 'min-width': '0'},
+                style={
+                    'width': '100%',
+                    'min-width': '0',
+                    'padding': '2px 0',
+                    'font-size': '0.7rem',
+                    'line-height': '1.1',
+                },
             )
             for index, label, title in WEBTERM_EXTRA_KEYS
         ],
         className='d-md-none',
-        style={'display': 'flex', 'flex-wrap': 'wrap', 'margin-top': '2px'},
+        style={
+            'display': 'grid',
+            'grid-template-columns': 'repeat(4, 1fr)',
+            'gap': '3px',
+            'max-width': '300px',
+        },
     )
 
 
@@ -94,33 +106,45 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
                 [
                     html.Div(
                         [
-                            dbc.Button(
-                                "⟳",
-                                color='black',
-                                size='sm',
-                                id='webterm-refresh-button',
-                                title='Refresh terminal',
+                            ### Termux-style keys on the left (mobile only).
+                            build_webterm_extra_keys_row(),
+                            ### Terminal controls on the right.
+                            html.Div(
+                                [
+                                    dbc.Button(
+                                        "⟳",
+                                        color='black',
+                                        size='sm',
+                                        id='webterm-refresh-button',
+                                        title='Refresh terminal',
+                                    ),
+                                    dbc.Button(
+                                        '⛶',
+                                        color='black',
+                                        size='sm',
+                                        id='webterm-fullscreen-button',
+                                        title='Toggle fullscreen',
+                                    ),
+                                ] + [
+                                    dbc.Button(
+                                        html.B('+'),
+                                        color='black',
+                                        size='sm',
+                                        id='webterm-new-tab-button',
+                                        title='New terminal tab',
+                                    ),
+                                ] if TMUX_IS_ENABLED else [],
+                                id='webterm-controls-div',
+                                style={'margin-left': 'auto', 'text-align': 'right'},
                             ),
-                            dbc.Button(
-                                '⛶',
-                                color='black',
-                                size='sm',
-                                id='webterm-fullscreen-button',
-                                title='Toggle fullscreen',
-                            ),
-                        ] + [
-                            dbc.Button(
-                                html.B('+'),
-                                color='black',
-                                size='sm',
-                                id='webterm-new-tab-button',
-                                title='New terminal tab',
-                            ),
-                        ] if TMUX_IS_ENABLED else [],
-                        id='webterm-controls-div',
-                        style={'text-align': 'right'},
+                        ],
+                        style={
+                            'display': 'flex',
+                            'justify-content': 'space-between',
+                            'align-items': 'flex-start',
+                            'gap': '6px',
+                        },
                     ),
-                    build_webterm_extra_keys_row(),
                     html.Iframe(
                         src=f"/webterm/{session_id}",
                         id="webterm-iframe",
