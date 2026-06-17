@@ -1216,29 +1216,36 @@ def sync_as_json_or_lines_click(
     Output('pages-offcanvas', 'is_open'),
     Output('pages-offcanvas', 'children'),
     Input('logo-img', 'n_clicks'),
-    Input('mrsm-location', 'pathname'),
     State('pages-offcanvas', 'is_open'),
+    State('mrsm-location', 'pathname'),
     prevent_initial_call=True,
 )
 def toggle_pages_offcanvas(
     n_clicks: Optional[int],
-    pathname: Optional[str] = None,
     is_open: bool = False,
+    pathname: Optional[str] = None,
 ):
     """
-    Toggle the pages sidebar on logo click, and close it when a page is selected.
+    Toggle the pages sidebar when the logo is clicked.
     """
-    ctx = dash.callback_context
-    trigger = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
-
-    ### Navigation (a page was selected) closes the sidebar.
-    if trigger == 'mrsm-location':
-        return False, dash.no_update
-
     pages_children = build_pages_offcanvas_children(active_path=pathname)
     if n_clicks:
         return not is_open, pages_children
     return is_open, pages_children
+
+
+@dash_app.callback(
+    Output('pages-offcanvas', 'is_open'),
+    Input('mrsm-location', 'pathname'),
+    prevent_initial_call=True,
+)
+def close_pages_offcanvas_on_nav(pathname: Optional[str]):
+    """
+    Close the pages sidebar when a page is selected. Kept separate from the toggle
+    callback so navigation never references `logo-img`, which is not in the layout
+    on the initial load (it lives inside the routed page).
+    """
+    return False
 
 
 @dash_app.callback(
