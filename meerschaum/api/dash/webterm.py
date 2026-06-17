@@ -104,10 +104,8 @@ def build_webterm_extra_keys_row() -> Any:
         className='d-md-none',
         style={
             'display': 'flex',
-            'justify-content': 'space-between',
             'align-items': 'flex-end',
-            'gap': '8px',
-            'margin-top': '8px',  ### buffer above the key row
+            'gap': '12px',  ### a little space between the mod keys and the arrows
         },
     )
 
@@ -141,7 +139,10 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
                 [
                     html.Div(
                         [
-                            ### Terminal controls on the top-right.
+                            ### Termux-style keys on the left (mobile only): ESC/CTRL/
+                            ### SHIFT/TAB then the arrow keys.
+                            build_webterm_extra_keys_row(),
+                            ### Terminal controls on the right, same row.
                             html.Div(
                                 [
                                     dbc.Button(
@@ -168,13 +169,14 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
                                     ),
                                 ] if TMUX_IS_ENABLED else [],
                                 id='webterm-controls-div',
-                                style={'text-align': 'right'},
+                                style={'margin-left': 'auto', 'text-align': 'right'},
                             ),
-                            ### Termux-style keys along the bottom, just above the
-                            ### webterm (mobile only).
-                            build_webterm_extra_keys_row(),
                         ],
-                        style={'display': 'flex', 'flex-direction': 'column'},
+                        style={
+                            'display': 'flex',
+                            'align-items': 'flex-end',
+                            'gap': '8px',
+                        },
                     ),
                     html.Iframe(
                         src=f"/webterm/{session_id}",
