@@ -4,6 +4,13 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.4.1
+
+- **Scope the `dbc_dark` theme so it no longer leaks onto every Dash page.**  
+  Several rule blocks in `dbc_dark.css` (`.form-control`, the `.dash-dropdown-*` family, and `.dash-options-list`) were unscoped, so their `background-color: var(--bs-dark) !important` declarations applied to *every* Dash app served by the API — forcing plugins to fight each one with higher-specificity `!important` overrides. These blocks are now scoped under `.dbc_dark`, making the dark theme opt-in.
+
+  To keep the web console (including its body-portaled dropdown menus) unchanged, the Dash app now sets `class="dbc_dark"` on `<body>` by default. A plugin page can remove the class from `<body>` to render cleanly without the theme's `!important` overrides.
+
 ### v3.4.0
 
 - **Accept datetime bounds on epoch integer-axis pipes.**  
