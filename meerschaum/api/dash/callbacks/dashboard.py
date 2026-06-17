@@ -99,6 +99,9 @@ _paths = {
     '/dash/jobs'    : pages.jobs.layout,
 }
 _required_login = {'', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes'}
+### Endpoints (plugin pages with `@web_page(dark_theme=False)`) that opt out of the
+### `dbc_dark` component theme; populated by `add_plugin_pages`.
+_paths_without_dbc_dark = set()
 _pages = {
     'Web Console': '/dash/',
     'Pipes': '/dash/pipes',
@@ -111,6 +114,7 @@ _pages = {
 @dash_app.callback(
     Output('page-layout-div', 'children'),
     Output('session-store', 'data'),
+    Output('dbc-dark-store', 'data'),
     Input('mrsm-location', 'pathname'),
     Input('session-store', 'data'),
     State('mrsm-location', 'href'),
@@ -119,7 +123,7 @@ def update_page_layout_div(
     pathname: str,
     session_store_data: Dict[str, Any],
     location_href: str,
-) -> Tuple[List[Any], Dict[str, Any]]:
+) -> Tuple[List[Any], Dict[str, Any], bool]:
     """
     Route the user to the correct page.
 
@@ -173,7 +177,24 @@ def update_page_layout_div(
         )
     )
     layout = _paths.get(path, pages.error.layout)
-    return layout, session_store_to_return
+    apply_dbc_dark = path not in _paths_without_dbc_dark
+    return layout, session_store_to_return, apply_dbc_dark
+
+
+### Toggle the `dbc_dark` component theme on <body> per route, so a plugin page
+### registered with `@web_page(dark_theme=False)` renders without the theme.
+dash_app.clientside_callback(
+    """
+    function(apply_dark){
+        if (document.body){
+            document.body.classList.toggle('dbc_dark', apply_dark !== false);
+        }
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('dbc-dark-dummy', 'children'),
+    Input('dbc-dark-store', 'data'),
+)
 
 
 @dash_app.callback(

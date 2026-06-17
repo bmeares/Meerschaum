@@ -11,7 +11,12 @@ import traceback
 from meerschaum.api.dash import dash_app
 from meerschaum.plugins import _dash_plugins, _plugin_endpoints_to_pages
 from meerschaum.utils.warnings import warn, dprint
-from meerschaum.api.dash.callbacks.dashboard import _paths, _required_login, _pages
+from meerschaum.api.dash.callbacks.dashboard import (
+    _paths,
+    _required_login,
+    _pages,
+    _paths_without_dbc_dark,
+)
 from meerschaum.api.dash.components import pages_navbar
 
 
@@ -51,3 +56,5 @@ def add_plugin_pages(debug: bool = False):
             _paths[_endpoint] = page_layout
             if _page_dict['login_required']:
                 _required_login.add(_endpoint)
+            if not _page_dict.get('dark_theme', True):
+                _paths_without_dbc_dark.add(_endpoint)

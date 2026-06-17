@@ -537,37 +537,20 @@ Functions decorated with `#!python @web_page` return a [Dash layout](https://das
 
 The Web Console is dark by default, and your page inherits that look automatically — most plugins don't need to do anything. Two separate stylesheets are involved:
 
-- **The base Bootstrap theme** (a dark "Darkly" build) is applied **globally** to every Dash page. This is the dark `#222` background, dark cards, and light text you see. It is *not* opt-out-able with a class — it is the foundation every page sits on.
-- **The `dbc_dark` theme** (`dbc_dark.css`) adds extra `!important` overrides for specific components (dropdowns, `.form-control`, options lists). Its rules are **scoped under the `dbc_dark` class**, and the app sets `#!html <body class="dbc_dark">` by default — so your page inherits these too.
+- **The base Bootstrap theme** (a dark "Darkly" build) is applied **globally** to every Dash page. This is the dark background, dark cards, and light text you see. It is the foundation every page sits on and is not opt-out-able with a class.
+- **The `dbc_dark` theme** (`dbc_dark.css`) adds extra overrides for specific components (dropdowns, `.form-control`, options lists). Its rules are **scoped under the `dbc_dark` class**, and the app sets `#!html <body class="dbc_dark">` by default — so your page inherits these too.
 
-!!! tip "Opting out of the dark theme"
+If your plugin ships its own styling and the `dbc_dark` component overrides get in your way, opt out per page with `#!python @web_page(dark_theme=False)`. The Web Console removes the `dbc_dark` class from `#!html <body>` while that page is active (and restores it elsewhere, including on in-app navigation), so your own CSS applies cleanly.
 
-    If your plugin ships its own styling and the `dbc_dark` `!important` overrides get in your way, remove the class from `#!html <body>` so your own CSS can win without fighting `!important`:
+```python
+@web_page('/my-page', dark_theme=False)
+def my_page():
+    return dbc.Container([html.H1("My custom-styled page")])
+```
 
-    ```python
-    @dash_plugin
-    def init_dash(dash_app):
-        ### Toggle `dbc_dark` off on this plugin's routes (and back on elsewhere),
-        ### updating on SPA navigation too. Injected into <head> via index_string.
-        dash_app.index_string = dash_app.index_string.replace(
-            '{%favicon%}',
-            '''<script>(function(){
-                function u(){
-                    var on = (location.pathname || "").indexOf("/dash/my-plugin") !== 0;
-                    if (document.body){ document.body.classList.toggle("dbc_dark", on); }
-                }
-                ["pushState","replaceState"].forEach(function(m){
-                    var o = history[m];
-                    history[m] = function(){ var r = o.apply(this, arguments); u(); return r; };
-                });
-                window.addEventListener("popstate", u);
-                document.addEventListener("DOMContentLoaded", u);
-                u();
-            })();</script>{%favicon%}''',
-        )
-    ```
+??? tip "What `dark_theme=False` does (and doesn't do)"
 
-    Removing `dbc_dark` only drops the scoped component overrides — the **global** Darkly base theme (including the dark body background) still applies, so an opted-out page must paint its own background and colors over it.
+    `dark_theme=False` only drops the **scoped `dbc_dark` component overrides** for your route. The **global** Darkly base theme (including the dark body background) still applies, so an opted-out page should paint its own background and colors. This is a per-page setting because the body class is toggled per route as the user navigates — there is no plugin-wide switch.
 
 ### **The `#!python @pre_sync_hook` and `#!python @post_sync_hook` Decorators**
 

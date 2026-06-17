@@ -81,6 +81,9 @@ dash_app.index_string = """<!DOCTYPE html>
 dash_app.layout = html.Div([
     location,
     dcc.Store(id='session-store', storage_type='local', data={}),
+    ### Drives the per-route `dbc_dark` body class (see update_page_layout_div).
+    dcc.Store(id='dbc-dark-store', data=True),
+    html.Div(id='dbc-dark-dummy', style={'display': 'none'}),
     html.Div([], id='page-layout-div'),
 ])
 
