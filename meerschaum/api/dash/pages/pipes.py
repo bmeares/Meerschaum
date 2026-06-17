@@ -23,7 +23,6 @@ layout = [
             html.Div(id='pipe-output-div'),
             id='pipes-loading',
             type='circle',
-            delay_hide=1000,
             delay_show=1000,
             style={
                 'padding-top': '100px',

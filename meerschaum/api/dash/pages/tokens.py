@@ -54,7 +54,6 @@ layout = [
             html.Div(id='tokens-output-div'),
             id='tokens-loading',
             type='circle',
-            delay_hide=1000,
             delay_show=1000,
         ),
     ]),
