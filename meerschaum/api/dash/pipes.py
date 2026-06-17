@@ -30,7 +30,6 @@ from meerschaum.api.dash.components import (
     build_cards_grid,
     sign_out_button,
     logo_row,
-    pages_offcanvas,
 )
 from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.config import get_config
@@ -1113,7 +1112,6 @@ def build_pipes_navbar(instance_keys: Optional[str] = None, with_instance_select
     instance_select_div = html.Div(instance_select, style=instance_select_div_style)
     return html.Div(
         [
-            pages_offcanvas,
             dbc.Navbar(
                 dbc.Container(
                     [
