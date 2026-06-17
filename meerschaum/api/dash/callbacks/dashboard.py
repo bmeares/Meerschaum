@@ -178,7 +178,14 @@ def update_page_layout_div(
     )
     layout = _paths.get(path, pages.error.layout)
     apply_dbc_dark = path not in _paths_without_dbc_dark
-    return layout, session_store_to_return, apply_dbc_dark
+
+    ### Wrap the page in a path-keyed container so React fully remounts the page on
+    ### navigation. React reconciles by type + position (not by Dash id), so without a
+    ### changing `key` it reuses the existing DOM nodes and only patches props — which
+    ### leaves a previous page's subtree (and its still-firing callbacks) lingering,
+    ### bleeding one page's content into another. A unique key forces a clean unmount.
+    keyed_layout = html.Div(layout, key=f'page-content::{path}')
+    return keyed_layout, session_store_to_return, apply_dbc_dark
 
 
 ### Switch the Bootstrap theme per route: a plugin page registered with
@@ -1231,7 +1238,10 @@ def toggle_pages_offcanvas(
     pages_children = build_pages_offcanvas_children(active_path=pathname)
     if n_clicks:
         return not is_open, pages_children
-    return is_open, pages_children
+    ### The logo remounts on navigation (its n_clicks resets), which fires this
+    ### callback with a falsy n_clicks. Leave `is_open` alone then so it doesn't
+    ### fight the close-on-navigation callback and re-open the sidebar.
+    return dash.no_update, pages_children
 
 
 @dash_app.callback(
