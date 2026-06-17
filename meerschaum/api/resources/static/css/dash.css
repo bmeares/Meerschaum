@@ -169,11 +169,25 @@ a {
 .input-text {
   font-family: Consolas, Menlo, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace, serif !important;
 }
-.pages-offcanvas-accordion button {
-  background-color: var(--bs-dark) !important;
-  color: white !important;
+/* Page-navigation sidebar (offcanvas): theme-aware links with a subtle, full-row
+   hover highlight (no per-button box; works in both the dark and light themes). */
+#pages-offcanvas .list-group-item {
+  padding: 0 !important;
+  background-color: transparent !important;
+  border: none !important;
 }
-.pages-offcanvas-accordion div {
+#pages-offcanvas .list-group-item:hover {
+  background-color: rgba(127, 127, 127, 0.15) !important;
+}
+#pages-offcanvas .btn {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  width: 100%;
+  text-align: left;
+}
+#pages-offcanvas .pages-offcanvas-accordion .accordion-body {
   padding: 0 !important;
 }
 
