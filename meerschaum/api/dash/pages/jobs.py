@@ -21,7 +21,6 @@ layout = [
             html.Div(id='job-output-div'),
             id='jobs-loading',
             type='circle',
-            delay_hide=1000,
             delay_show=1000,
         ),
         download_logs,

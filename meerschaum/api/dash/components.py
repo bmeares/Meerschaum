@@ -206,7 +206,7 @@ navbar = dbc.Navbar(
 
 refresh_jobs_interval = dcc.Interval(
     id='refresh-jobs-interval',
-    interval=(1 * 1000),
+    interval=(3 * 1000),
     n_intervals=0,
     disabled=False,
 )
