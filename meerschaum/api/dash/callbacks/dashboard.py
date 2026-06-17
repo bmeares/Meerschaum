@@ -643,21 +643,36 @@ dash_app.clientside_callback(
     """
     function(n_clicks){
         if (!n_clicks) { return dash_clientside.no_update; }
-        iframe = document.getElementById('webterm-iframe');
+        const iframe = document.getElementById('webterm-iframe');
         if (!iframe){ return dash_clientside.no_update; }
         const leftCol = document.getElementById('content-col-left');
         const rightCol = document.getElementById('content-col-right');
         const button = document.getElementById('webterm-fullscreen-button');
 
-        if (leftCol.style.display === 'none') {
+        // Track state explicitly and drive width via inline styles so the column's
+        // responsive classes (col-md-12 col-lg-6) are preserved, not clobbered.
+        const fullscreen = rightCol.getAttribute('data-fullscreen') === '1';
+        if (fullscreen) {
             leftCol.style.display = '';
-            rightCol.className = 'col-6';
+            rightCol.style.flex = '';
+            rightCol.style.maxWidth = '';
+            rightCol.style.width = '';
+            rightCol.removeAttribute('data-fullscreen');
             button.innerHTML = "⛶";
         } else {
             leftCol.style.display = 'none';
-            rightCol.className = 'col-12';
+            rightCol.style.flex = '0 0 100%';
+            rightCol.style.maxWidth = '100%';
+            rightCol.style.width = '100%';
+            rightCol.setAttribute('data-fullscreen', '1');
             button.innerHTML = "🀲";
         }
+
+        // The terminal sizes itself to its width on resize; nudge it to refit now
+        // that the column width changed, so it fills (or releases) the new space.
+        setTimeout(function(){
+            try { iframe.contentWindow.dispatchEvent(new Event('resize')); } catch (e) {}
+        }, 50);
 
         return dash_clientside.no_update;
     }
