@@ -324,7 +324,7 @@ def invalidate_token_click(n_clicks: int):
     Input({'type': 'tokens-delete-button', 'index': MATCH}, 'n_clicks'),
     prevent_initial_call=True,
 )
-def invalidate_token_click(n_clicks: int):
+def delete_token_click(n_clicks: int):
     if not n_clicks:
         raise PreventUpdate
     return True

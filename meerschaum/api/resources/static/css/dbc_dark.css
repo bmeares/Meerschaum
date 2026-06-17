@@ -36,25 +36,31 @@
  *     Black background for a dark theme
  */
 
-/* input box */
-.dbc_dark .Select-control, .dash-dropdown-grid-container, .dash-dropdown-value-item, .dash-dropdown-placeholder, .dash-dropdown-content, .dash-dropdown-value-count, .dash-dropdown-clear, .dash-dropdown-trigger-icon, .dash-options-list, .dash-options-list-option-text, .dash-dropdown-action-button, .dash-dropdown-search {
+/* input box
+ *
+ * NOTE: every selector is scoped under `.dbc_dark` so the dark theme is opt-in
+ * and does not leak onto pages/plugins that don't request it. The Dash app sets
+ * `class="dbc_dark"` on <body> by default (see meerschaum/api/dash/__init__.py),
+ * which keeps the console — including body-portaled dropdown menus — dark.
+ */
+.dbc_dark .Select-control, .dbc_dark .dash-dropdown-grid-container, .dbc_dark .dash-dropdown-value-item, .dbc_dark .dash-dropdown-placeholder, .dbc_dark .dash-dropdown-content, .dbc_dark .dash-dropdown-value-count, .dbc_dark .dash-dropdown-clear, .dbc_dark .dash-dropdown-trigger-icon, .dbc_dark .dash-options-list, .dbc_dark .dash-options-list-option-text, .dbc_dark .dash-dropdown-action-button, .dbc_dark .dash-dropdown-search {
     background-color: var(--bs-dark) !important;
     color: white;
 }
-.dash-dropdown-placeholder {
+.dbc_dark .dash-dropdown-placeholder {
   color: var(--bs-gray);
 }
-.dash-dropdown {
+.dbc_dark .dash-dropdown {
   border: 1px solid grey;
 }
 
-.form-control {
+.dbc_dark .form-control {
   background-color: var(--bs-dark) !important;
   color: white;
   border: 1px solid grey !important;
   /* background-color: var(--dark) !important; */
 }
-.form-control:focus {
+.dbc_dark .form-control:focus {
   background-color: var(--bs-dark) !important;
   color: white;
 }

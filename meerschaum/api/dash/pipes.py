@@ -589,8 +589,8 @@ def accordion_items_from_pipe(
             columns_body = [html.Tbody(columns_rows)]
             columns_table = dbc.Table(columns_header + columns_body, bordered=False, hover=True)
             items_bodies['columns'] = html.Div(columns_table, style={'overflowX': 'auto'})
-        except Exception:
-            items_bodies['columns'] = html.P("Could not retrieve columns ― please try again.")
+        except Exception as e:
+            items_bodies['columns'] = html.P(f"Could not retrieve columns:\n{e}")
 
     if 'parameters' in active_items:
         parameters_editor = dash_ace.DashAceEditor(
@@ -776,8 +776,8 @@ def accordion_items_from_pipe(
             df = pipe.get_backtrack_data(backtrack_minutes=10, limit=10, debug=debug).astype(str)
             table = dbc.Table.from_dataframe(df, bordered=False, hover=True)
             items_bodies['recent-data'] = html.Div(table, style={'overflowX': 'auto'})
-        except Exception:
-            items_bodies['recent-data'] = html.P("Could not retrieve recent data.")
+        except Exception as e:
+            items_bodies['recent-data'] = html.P(f"Could not retrieve recent data:\n{e}")
 
     if 'query-data' in active_items:
         query_editor = dash_ace.DashAceEditor(

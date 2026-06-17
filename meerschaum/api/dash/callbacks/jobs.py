@@ -124,7 +124,6 @@ def manage_job_button_click(
         'start': job.start,
         'stop': job.stop,
         'pause': job.pause,
-        'delete': job.delete,
     }
     if manage_job_action not in manage_functions:
         return (
@@ -155,6 +154,65 @@ def manage_job_button_click(
         build_status_children(job),
         build_process_timestamps_children(job),
     )
+
+@dash_app.callback(
+    Output({'type': 'job-delete-modal', 'index': MATCH}, 'is_open'),
+    Output({'type': 'job-delete-alert-div', 'index': MATCH}, 'children'),
+    Input({'type': 'job-delete-button', 'index': MATCH}, 'n_clicks'),
+    Input({'type': 'job-delete-cancel-button', 'index': MATCH}, 'n_clicks'),
+    Input({'type': 'job-delete-confirm-button', 'index': MATCH}, 'n_clicks'),
+    State('session-store', 'data'),
+    State({'type': 'job-label-p', 'index': MATCH}, 'children'),
+    prevent_initial_call=True,
+)
+def job_delete_modal(
+    open_clicks: Optional[int] = None,
+    cancel_clicks: Optional[int] = None,
+    confirm_clicks: Optional[int] = None,
+    session_data: Optional[Dict[str, Any]] = None,
+    job_label: Optional[str] = None,
+):
+    """
+    Open the delete-job confirmation modal, cancel it, or perform the deletion on confirm.
+    """
+    ctx = dash.callback_context.triggered
+    if not ctx or ctx[0]['value'] is None:
+        raise PreventUpdate
+
+    prop_id = ctx[0]['prop_id']
+    if 'job-delete-button' in prop_id:
+        return True, no_update
+    if 'job-delete-cancel-button' in prop_id:
+        return False, no_update
+
+    ### Confirm button: actually delete the job.
+    session_id = (session_data or {}).get('session-id', None)
+    if not is_session_authenticated(session_id):
+        username = get_username_from_session(session_id)
+        return True, alert_from_success_tuple(
+            (False, f"User '{username}' is not authenticated to manage jobs.")
+        )
+
+    component_dict = json.loads(prop_id.split('.' + 'n_clicks')[0])
+    job_name = component_dict['index']
+    try:
+        job = _get_job(job_name, job_label.replace('\n', ' ') if job_label else None)
+    except Exception:
+        job = None
+    if job is None or not job.exists():
+        return False, no_update
+
+    try:
+        success, msg = job.delete()
+    except Exception:
+        success, msg = False, traceback.format_exc()
+
+    if not success:
+        return True, alert_from_success_tuple((success, msg))
+
+    ### Card is removed on the next refresh-jobs-interval tick.
+    return False, no_update
+
 
 dash_app.clientside_callback(
     """

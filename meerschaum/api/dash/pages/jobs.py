@@ -17,7 +17,13 @@ layout = [
     pages_navbar,
     dbc.Container([
         dcc.Location('job-location'),
-        html.Div(id='job-output-div'),
+        dcc.Loading(
+            html.Div(id='job-output-div'),
+            id='jobs-loading',
+            type='circle',
+            delay_hide=1000,
+            delay_show=1000,
+        ),
         download_logs,
         refresh_jobs_interval,
     ]),
