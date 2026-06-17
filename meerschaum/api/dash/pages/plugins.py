@@ -13,7 +13,7 @@ html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHEC
 import dash_bootstrap_components as dbc
 from meerschaum.core import Plugin
 from meerschaum.utils.typing import Optional
-from meerschaum.api.dash.components import pages_navbar
+from meerschaum.api.dash.components import build_pages_navbar
 
 search_box = dbc.Input(
     id="search-plugins-input",
@@ -23,7 +23,7 @@ search_box = dbc.Input(
 )
 
 layout = [
-    pages_navbar,
+    build_pages_navbar(),
     dcc.Location(id='plugins-location'),
     dbc.Container([
         html.Div([

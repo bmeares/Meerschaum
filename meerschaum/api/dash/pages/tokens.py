@@ -9,11 +9,11 @@ import dash_bootstrap_components as dbc
 import dash.html as html
 import dash.dcc as dcc
 from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum.api.dash.components import pages_navbar
+from meerschaum.api.dash.components import build_pages_navbar
 
 
 layout = [
-    pages_navbar,
+    build_pages_navbar(),
     dbc.Container([
         html.Br(), 
         html.H3('Tokens'),

@@ -28,8 +28,8 @@ from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.dash.components import (
     alert_from_success_tuple,
     build_cards_grid,
-    sign_out_button,
-    logo_row,
+    build_sign_out_button,
+    build_logo_row,
 )
 from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.config import get_config
@@ -1115,13 +1115,13 @@ def build_pipes_navbar(instance_keys: Optional[str] = None, with_instance_select
             dbc.Navbar(
                 dbc.Container(
                     [
-                        logo_row,
+                        build_logo_row(),
                         dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
                         dbc.Collapse(
                             dbc.Row(
                                 [
                                     dbc.Col(instance_select_div, width='auto'),
-                                    dbc.Col(sign_out_button, width='auto'),
+                                    dbc.Col(build_sign_out_button(), width='auto'),
                                 ],
                                 className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
                                 align='center',

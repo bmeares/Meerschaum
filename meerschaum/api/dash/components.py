@@ -110,74 +110,85 @@ instance_select = dbc.Select(
     class_name='dbc_dark custom-select custom-select-sm instance-select',
 )
 
-sign_out_button = dbc.Button(
-    "Sign out",
-    color='link',
-    style={'margin-left': '30px'},
-    id='sign-out-button',
-)
+### NOTE: These navbar pieces are FACTORIES, not module-level singletons. Reusing
+### the same component object across multiple page layouts is a Dash anti-pattern:
+### React keeps the shared subtree mounted and mis-reconciles its siblings on
+### navigation, so a previous page's components linger (and their callbacks keep
+### firing). Building a fresh instance per page makes navigation fully remount.
+def build_sign_out_button():
+    return dbc.Button(
+        "Sign out",
+        color='link',
+        style={'margin-left': '30px'},
+        id='sign-out-button',
+    )
 
-logo_row = dbc.Row(
-    [
-        dbc.Col(
-            html.Img(
-                src=endpoints['dash'] + "/assets/logo_48x48.png",
-                title=doc,
-                alt="Meerschaum",
-                id="logo-img",
-                style={'cursor': 'pointer'},
+
+def build_logo_row():
+    return dbc.Row(
+        [
+            dbc.Col(
+                html.Img(
+                    src=endpoints['dash'] + "/assets/logo_48x48.png",
+                    title=doc,
+                    alt="Meerschaum",
+                    id="logo-img",
+                    style={'cursor': 'pointer'},
+                ),
             ),
-        ),
-    ],
-    align='center',
-    className='g-0 navbar-logo-row',
-)
+        ],
+        align='center',
+        className='g-0 navbar-logo-row',
+    )
 
-pages_navbar = html.Div(
-    [
-        ### NOTE: `pages_offcanvas` lives in the persistent top-level app layout
-        ### (meerschaum/api/dash/__init__.py), not here — otherwise it (and its
-        ### accordion) would be destroyed and recreated on every page navigation,
-        ### crashing dbc's accordion. The logo in this navbar still toggles it.
-        dbc.Navbar(
-            dbc.Container(
-                [
-                    logo_row,
-                    dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
-                    dbc.Collapse(
-                        dbc.Row(
-                            [
-                                dbc.Col(
-                                    sign_out_button,
-                                    className="ms-auto",
-                                ),
-                            ],
-                            className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
+
+def build_pages_navbar():
+    """
+    Return a fresh page-navigation navbar. `pages_offcanvas` is NOT included here —
+    it lives in the persistent top-level app layout (meerschaum/api/dash/__init__.py)
+    so its accordion isn't destroyed/recreated on navigation; the logo still toggles it.
+    """
+    return html.Div(
+        [
+            dbc.Navbar(
+                dbc.Container(
+                    [
+                        build_logo_row(),
+                        dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
+                        dbc.Collapse(
+                            dbc.Row(
+                                [
+                                    dbc.Col(
+                                        build_sign_out_button(),
+                                        className="ms-auto",
+                                    ),
+                                ],
+                                className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
+                            ),
+                            id='navbar-collapse',
+                            is_open=False,
+                            navbar=True,
                         ),
-                        id='navbar-collapse',
-                        is_open=False,
-                        navbar=True,
-                    ),
-                ]
+                    ]
+                ),
+                dark=True,
+                color='dark'
             ),
-            dark=True,
-            color='dark'
-        ),
-    ],
-    id='pages-navbar-div',
-)
+        ],
+        id='pages-navbar-div',
+    )
 
 
 navbar = dbc.Navbar(
     dbc.Container(
         [
-            logo_row,
+            build_logo_row(),
             dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
             dbc.Collapse(
                 dbc.Row(
                     [
                         dbc.Col(instance_select, width="auto"),
-                        dbc.Col(sign_out_button, width="auto"),
+                        dbc.Col(build_sign_out_button(), width="auto"),
                     ],
                     className="g-0 ms-auto flex-nowrap mt-3 mt-md-0",
                     align="center",
