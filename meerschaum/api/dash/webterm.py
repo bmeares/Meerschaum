@@ -79,10 +79,10 @@ def build_webterm_extra_keys_row() -> Any:
     mod_keys = html.Div(
         [_webterm_key_button(index) for index in ('esc', 'ctrl', 'shift', 'tab')],
         style={
-            'display': 'flex',
+            'display': 'grid',
+            'grid-template-columns': 'repeat(2, 3.6em)',
             'gap': '3px',
-            'flex-wrap': 'wrap',
-            'align-items': 'flex-end',
+            'align-content': 'flex-end',
         },
     )
     arrow_keys = html.Div(
