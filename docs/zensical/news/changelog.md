@@ -11,6 +11,26 @@ This is the current release cycle, so stay tuned for future releases!
 
   To keep the web console (including its body-portaled dropdown menus) unchanged, the Dash app now sets `class="dbc_dark"` on `<body>` by default. A plugin page can remove the class from `<body>` to render cleanly without the theme's `!important` overrides.
 
+- **Fix starting jobs whose target reaches unpicklable state (e.g. an `asyncio.Task`).**  
+  Starting a job (e.g. `sync pipes ... --loop --name foo`) could fail with `TypeError: cannot pickle '_asyncio.Task' object` when a connector cached a live async task. The daemon pickled its target function *by value*, dragging in the target's global graph; that walk reached the unpicklable state. Importable, top-level targets are now pickled *by reference* (re-imported in the daemon process), so the global graph is never serialized. Closures still pickle by value, unchanged.
+
+- **Add a Termux-style on-screen key row to the web console terminal (mobile).**  
+  On small screens the Webterm now shows a row of keys above the terminal — `ESC`, `CTRL`, `SHIFT`, `TAB`, and arrow keys laid out like a physical keyboard. `CTRL`/`SHIFT` are sticky modifiers that apply to the next keypress (tap again to toggle off), and tapping a key keeps the soft keyboard open. The row is hidden on larger screens with a physical keyboard.
+
+- **Web console UX and accessibility improvements.**
+
+    - Loading spinners while pipes, jobs, and tokens load.
+    - A confirmation dialog before deleting a job.
+    - The tokens table is now horizontally scrollable on small screens.
+    - Tooltips/labels on icon-only buttons and `alt` text on the logo and banner images.
+    - Errors that were previously swallowed (CSV download, a pipe's columns / recent-data accordion) now surface their message.
+
+- **Fix the web console fullscreen terminal rendering at half width.**  
+  Toggling the Webterm's fullscreen button clobbered the column's responsive classes and left the terminal narrow without refitting. Fullscreen now preserves the responsive layout and the terminal refits to fill the width.
+
+- **Fix the web console "Plugins" button raising a `ValueError`.**  
+  Clicking **Plugins** in the dashboard raised `too many values to unpack` after the plugins view started returning pagination metadata. The dashboard now ignores the extra trailing values.
+
 ### v3.4.0
 
 - **Accept datetime bounds on epoch integer-axis pipes.**  
