@@ -533,6 +533,42 @@ Functions decorated with `#!python @web_page` return a [Dash layout](https://das
             return html.P(f"You're looking at item '{item_id}'.")
     ```
 
+#### Styling Your Page
+
+The Web Console is dark by default, and your page inherits that look automatically — most plugins don't need to do anything. Two separate stylesheets are involved:
+
+- **The base Bootstrap theme** (a dark "Darkly" build) is applied **globally** to every Dash page. This is the dark `#222` background, dark cards, and light text you see. It is *not* opt-out-able with a class — it is the foundation every page sits on.
+- **The `dbc_dark` theme** (`dbc_dark.css`) adds extra `!important` overrides for specific components (dropdowns, `.form-control`, options lists). Its rules are **scoped under the `dbc_dark` class**, and the app sets `#!html <body class="dbc_dark">` by default — so your page inherits these too.
+
+!!! tip "Opting out of the dark theme"
+
+    If your plugin ships its own styling and the `dbc_dark` `!important` overrides get in your way, remove the class from `#!html <body>` so your own CSS can win without fighting `!important`:
+
+    ```python
+    @dash_plugin
+    def init_dash(dash_app):
+        ### Toggle `dbc_dark` off on this plugin's routes (and back on elsewhere),
+        ### updating on SPA navigation too. Injected into <head> via index_string.
+        dash_app.index_string = dash_app.index_string.replace(
+            '{%favicon%}',
+            '''<script>(function(){
+                function u(){
+                    var on = (location.pathname || "").indexOf("/dash/my-plugin") !== 0;
+                    if (document.body){ document.body.classList.toggle("dbc_dark", on); }
+                }
+                ["pushState","replaceState"].forEach(function(m){
+                    var o = history[m];
+                    history[m] = function(){ var r = o.apply(this, arguments); u(); return r; };
+                });
+                window.addEventListener("popstate", u);
+                document.addEventListener("DOMContentLoaded", u);
+                u();
+            })();</script>{%favicon%}''',
+        )
+    ```
+
+    Removing `dbc_dark` only drops the scoped component overrides — the **global** Darkly base theme (including the dark body background) still applies, so an opted-out page must paint its own background and colors over it.
+
 ### **The `#!python @pre_sync_hook` and `#!python @post_sync_hook` Decorators**
 
 You can tap into the built-in syncing engine via the `sync pipes` action by decorating callback functions with `#!python @pre_sync_hook` and/or `#!python @post_sync_hook`. Both callbacks accept a positional `pipe` argument, and other useful contextual arguments as passed as keyword arguments (if your function accepts them).
