@@ -123,6 +123,7 @@ logo_row = dbc.Row(
             html.Img(
                 src=endpoints['dash'] + "/assets/logo_48x48.png",
                 title=doc,
+                alt="Meerschaum",
                 id="logo-img",
                 style={'cursor': 'pointer'},
             ),

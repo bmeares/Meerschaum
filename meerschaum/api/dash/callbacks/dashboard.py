@@ -50,6 +50,7 @@ from meerschaum.utils.typing import Dict
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
 from meerschaum.utils.misc import filter_keywords, flatten_list, string_to_dict
 from meerschaum.utils.yaml import yaml
+from meerschaum.utils.warnings import warn
 from meerschaum.actions import get_subactions, actions
 from meerschaum.connectors.sql._fetch import set_pipe_query, get_pipe_query
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
@@ -757,7 +758,8 @@ def download_pipe_csv(n_clicks):
     filename = str(pipe.target) + f" {begin} - {end}.csv"
     try:
         df = pipe.get_data(begin=begin, end=end, debug=debug)
-    except Exception:
+    except Exception as e:
+        warn(f"Failed to fetch data for CSV download of {pipe}:\n{e}", stack=False)
         df = None
     if df is not None:
         return dcc.send_data_frame(df.to_csv, filename, index=False)

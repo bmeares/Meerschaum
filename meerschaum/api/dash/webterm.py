@@ -62,12 +62,14 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
                                 color='black',
                                 size='sm',
                                 id='webterm-refresh-button',
+                                title='Refresh terminal',
                             ),
                             dbc.Button(
                                 '⛶',
                                 color='black',
                                 size='sm',
                                 id='webterm-fullscreen-button',
+                                title='Toggle fullscreen',
                             ),
                         ] + [
                             dbc.Button(
@@ -75,6 +77,7 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
                                 color='black',
                                 size='sm',
                                 id='webterm-new-tab-button',
+                                title='New terminal tab',
                             ),
                         ] if TMUX_IS_ENABLED else [],
                         id='webterm-controls-div',

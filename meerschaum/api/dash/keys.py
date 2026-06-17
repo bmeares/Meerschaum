@@ -84,6 +84,7 @@ def build_flags_row(
                         color = 'link',
                         id = {'type': 'input-flags-remove-button', 'index': index},
                         size = 'sm',
+                        title = 'Remove flag',
                         style = {'text-decoration': 'none'},
                     ),
                     dcc.Dropdown(
