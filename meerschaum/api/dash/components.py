@@ -135,7 +135,10 @@ logo_row = dbc.Row(
 
 pages_navbar = html.Div(
     [
-        pages_offcanvas,
+        ### NOTE: `pages_offcanvas` lives in the persistent top-level app layout
+        ### (meerschaum/api/dash/__init__.py), not here — otherwise it (and its
+        ### accordion) would be destroyed and recreated on every page navigation,
+        ### crashing dbc's accordion. The logo in this navbar still toggles it.
         dbc.Navbar(
             dbc.Container(
                 [

@@ -35,7 +35,7 @@ with warnings.catch_warnings():
     _ = attempt_import('dataclass_wizard', lazy=False)
     enrich = attempt_import('dash_extensions.enrich', lazy=False)
 html, dcc = import_html(), import_dcc()
-from meerschaum.api.dash.components import location
+from meerschaum.api.dash.components import location, pages_offcanvas
 
 ### The dark (Darkly) and light (Flatly) Bootstrap themes are loaded in index_string
 ### with ids so exactly one can be enabled per route (see the dbc-dark-store callback).
@@ -92,6 +92,9 @@ dash_app.layout = html.Div([
     ### Drives the per-route `dbc_dark` body class (see update_page_layout_div).
     dcc.Store(id='dbc-dark-store', data=True),
     html.Div(id='dbc-dark-dummy', style={'display': 'none'}),
+    ### Persistent across navigation so its accordion isn't destroyed/recreated
+    ### (which crashed dbc's accordion). Toggled by the logo in the page navbars.
+    pages_offcanvas,
     html.Div([], id='page-layout-div'),
 ])
 
