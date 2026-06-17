@@ -7,7 +7,6 @@ Define the tokens page layout.
 
 import dash_bootstrap_components as dbc
 import dash.html as html
-import dash.dcc as dcc
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.api.dash.components import build_pages_navbar
 
@@ -50,11 +49,6 @@ layout = [
             id='tokens-controls-div',
             style={'text-align': 'right'},
         ),
-        dcc.Loading(
-            html.Div(id='tokens-output-div'),
-            id='tokens-loading',
-            type='circle',
-            delay_show=1000,
-        ),
+        html.Div(id='tokens-output-div'),
     ]),
 ]
