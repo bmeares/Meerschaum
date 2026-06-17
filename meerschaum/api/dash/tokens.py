@@ -84,7 +84,7 @@ def get_tokens_table(session_id: Optional[str] = None) -> Tuple[dbc.Table, List[
     ]
 
     table_body = [html.Tbody(rows)]
-    table = dbc.Table(table_header + table_body)
+    table = dbc.Table(table_header + table_body, responsive=True)
     return table, alerts
 
 

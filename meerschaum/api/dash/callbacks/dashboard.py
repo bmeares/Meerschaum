@@ -662,6 +662,41 @@ dash_app.clientside_callback(
     Input('webterm-fullscreen-button', 'n_clicks'),
 )
 
+dash_app.clientside_callback(
+    """
+    function(n_clicks_arr, url){
+        const ctx = dash_clientside.callback_context;
+        if (!ctx.triggered || !ctx.triggered.length) { return dash_clientside.no_update; }
+        const t = ctx.triggered[0];
+        if (t.value == null) { return dash_clientside.no_update; }
+        const key = JSON.parse(t.prop_id.split('.n_clicks')[0]).index;
+        const iframe = document.getElementById('webterm-iframe');
+        if (!iframe){ return dash_clientside.no_update; }
+
+        if (key === 'ctrl' || key === 'shift') {
+            window._mod = window._mod || {ctrl: false, shift: false};
+            window._mod[key] = !window._mod[key];
+            iframe.contentWindow.postMessage(
+                {action: "__TOGGLE_MOD", mod: key, on: window._mod[key]}, url
+            );
+            dash_clientside.set_props(
+                {type: 'webterm-key-button', index: key}, {active: window._mod[key]}
+            );
+        } else {
+            const seqs = {
+                esc: "\\x1b", tab: "\\t",
+                up: "\\x1b[A", down: "\\x1b[B", right: "\\x1b[C", left: "\\x1b[D"
+            };
+            iframe.contentWindow.postMessage({action: "__SEND_KEY", key: seqs[key]}, url);
+        }
+        return dash_clientside.no_update;
+    }
+    """,
+    Output('mrsm-location', 'href'),
+    Input({'type': 'webterm-key-button', 'index': ALL}, 'n_clicks'),
+    State('mrsm-location', 'href'),
+)
+
 @dash_app.callback(
     Output(component_id='connector-keys-input', component_property='value'),
     Input(component_id='clear-connector-keys-input-button', component_property='n_clicks'),

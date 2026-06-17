@@ -28,6 +28,43 @@ TMUX_IS_ENABLED: bool = (
 
 _locks = {'webterm_thread': RLock()}
 
+### Termux-style extra keys for mobile: (index, label, tooltip).
+WEBTERM_EXTRA_KEYS = [
+    ('esc', 'ESC', 'Escape'),
+    ('ctrl', 'CTRL', 'Control (sticky — applies to next key)'),
+    ('shift', 'SHIFT', 'Shift (sticky — applies to next key)'),
+    ('tab', 'TAB', 'Tab'),
+    ('left', '←', 'Left arrow'),
+    ('down', '↓', 'Down arrow'),
+    ('up', '↑', 'Up arrow'),
+    ('right', '→', 'Right arrow'),
+]
+
+
+def build_webterm_extra_keys_row() -> Any:
+    """
+    Return a mobile-only row of Termux-style keys (ESC, CTRL, SHIFT, TAB, arrows)
+    that send special keys to the webterm. Hidden on md+ screens (physical keyboard).
+    """
+    return html.Div(
+        [
+            dbc.Button(
+                label,
+                id={'type': 'webterm-key-button', 'index': index},
+                color='secondary',
+                outline=True,
+                size='sm',
+                title=title,
+                n_clicks=0,
+                style={'flex': '1 1 0', 'margin': '1px', 'min-width': '0'},
+            )
+            for index, label, title in WEBTERM_EXTRA_KEYS
+        ],
+        className='d-md-none',
+        style={'display': 'flex', 'flex-wrap': 'wrap', 'margin-top': '2px'},
+    )
+
+
 def get_webterm(state: WebState) -> Tuple[Any, Any]:
     """
     Start the webterm and return its iframe.
@@ -83,6 +120,7 @@ def get_webterm(state: WebState) -> Tuple[Any, Any]:
                         id='webterm-controls-div',
                         style={'text-align': 'right'},
                     ),
+                    build_webterm_extra_keys_row(),
                     html.Iframe(
                         src=f"/webterm/{session_id}",
                         id="webterm-iframe",

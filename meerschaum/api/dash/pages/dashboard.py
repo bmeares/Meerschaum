@@ -79,15 +79,9 @@ layout = html.Div(
                                 width={'size': 8, 'offset': 2}
                             ),
                             html.Div(id='webterm-div'),
-                            dcc.Loading(
-                                html.Div(
-                                    id='content-div-right',
-                                    children=[console_div],
-                                ),
-                                id='content-loading',
-                                type='circle',
-                                delay_hide=1000,
-                                delay_show=1000,
+                            html.Div(
+                                id='content-div-right',
+                                children=[console_div],
                             ),
                             html.Div(id='terminal'),
                         ],
