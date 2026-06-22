@@ -4,27 +4,12 @@ Though the [SQL Connector](/reference/connectors/sql-connectors/) is the premier
 
 ## 🗝️ Valkey Connectors
 
-Syncs pipes to a [Valkey](https://valkey.io/) instance. Because Valkey is a fork of Redis, you may also use the [`ValkeyConnector`](https://docs.meerschaum.io/meerschaum/connectors/valkey.html#ValkeyConnector) to connect to your Redis instance.
+Syncs pipes to a [Valkey](https://valkey.io/) (or Redis) instance. The built-in `valkey:main` connector points at the Valkey instance in the [Meerschaum stack](/reference/stack/).
 
-Similar to `sql:main`, the built-in connector `valkey:main` connects to the Valkey instance in the [Meerschaum stack](/reference/stack/).
+See the dedicated [Valkey Connectors](/reference/connectors/valkey/) page for configuration, data layout, and examples.
 
 - **Implementation:** built-in ([docs](https://docs.meerschaum.io/meerschaum/connectors/valkey.html#ValkeyConnector))
 - **Type:** `valkey`
-
-!!! example "Connector config"
-
-    ```yaml
-    username: default
-    password: mrsm
-    host: localhost
-    port: 6379
-    db: 0
-    socket_timeout: 300
-    ```
-
-    ```yaml
-    uri: valkey://default:mrsm@localhost:6379/0?timeout=300s 
-    ```
 
 ## 🌐 API Connector
 

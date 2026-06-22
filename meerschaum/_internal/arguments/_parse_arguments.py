@@ -73,6 +73,23 @@ def split_chained_sysargs(sysargs: List[str]) -> List[List[str]]:
     return chained_sysargs
 
 
+def _rewrite_python_code_flag(sysargs: List[str]) -> List[str]:
+    """
+    Let the `python` action accept Python's own `-c CODE` idiom for inline execution.
+
+    Globally `-c` means `--connector-keys`, so for the `python` action only we rewrite
+    `python -c CODE` -> `python CODE --noask` (run with `meerschaum` imported, then exit).
+    """
+    if not sysargs or sysargs[0] != 'python' or '-c' not in sysargs:
+        return sysargs
+    ix = sysargs.index('-c')
+    if ix + 1 >= len(sysargs):
+        return sysargs
+    code = sysargs[ix + 1]
+    rest = sysargs[1:ix] + sysargs[ix + 2:]
+    return ['python', code] + rest + (['--noask'] if '--noask' not in rest else [])
+
+
 def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     """
     Parse a list of arguments into standard Meerschaum arguments.
@@ -92,6 +109,8 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
     import shlex
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum._internal.arguments._parser import parser
+
+    sysargs = _rewrite_python_code_flag(sysargs)
 
     global _loaded_plugins_args
     with _locks['_loaded_plugins_args']:

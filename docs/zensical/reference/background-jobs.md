@@ -236,23 +236,66 @@ Next 5 timestamps for schedule 'daily and mon-fri starting May 2, 2024':
 
 Executors are to jobs as connectors are to pipes; all jobs run on an executor. There are three built-in kinds of executors:
 
-- `systemd` (services)  
-  Run jobs as `systemd` user services. This only the case if `systemd` is available (and using the default root directory).
-
 - `local` (daemons)  
-  Run jobs as Unix daemons. The API server creates all jobs as `local` and restarts killed jobs.
+  Run jobs as managed Unix daemon processes.
+
+- `systemd` (services)  
+  Run jobs as `systemd` *user* services.
 
 - `api:{label}` (remote)  
-  Run jobs remotely. You can "remote into" your API instances by specifying the connector keys for your API instance (e.g. `-e api:prod`).
+  Run jobs remotely on another Meerschaum API instance.
 
-Add the flag `-e` (`--executor-keys`) to your commands to specify the executor, e.g.:
+Add the flag `-e` (`--executor-keys`) to any command to choose the executor:
 
-```
-# Create the job 'syncing engine' on 'api:prod':
+```bash
+# Create the job 'syncing-engine' on 'api:prod':
 sync pipes --name syncing-engine -e api:prod -d
 
 # Run `show pipes` on 'api:prod':
 show pipes -e api:prod
+```
+
+### Choosing an Executor
+
+When `-e` is omitted, Meerschaum picks a default based on your environment:
+
+- If `systemd` is available **and** you are using the default root directory (`~/.config/meerschaum`) **and** Meerschaum is installed (not run from source), the default is `systemd`.
+- Otherwise, the default is `local`.
+
+You can override the default for all commands by setting `meerschaum:executor` in your configuration (`edit config`), or per-command with `-e`.
+
+!!! tip "Comparison"
+    | Executor    | Where it runs                        | Survives reboot                          | Logs                                                  | Requires                              |
+    |-------------|--------------------------------------|------------------------------------------|-------------------------------------------------------|---------------------------------------|
+    | `local`     | Local managed daemon process         | No (unless restarted by a supervisor)    | `$MRSM_ROOT_DIR/logs/`                                | Nothing (always available)            |
+    | `systemd`   | Local `systemd` user service         | Yes (when the service is enabled)        | `journalctl --user` + `$MRSM_ROOT_DIR/systemd/logs/`  | `systemd` user session                |
+    | `api:{label}` | The remote API instance            | Depends on the remote executor           | Streamed back from the remote instance                | Reachable API connector (`api:label`) |
+
+### `local` (Default Daemons)
+
+A `local` job runs as a self-managed Unix daemon process. Its state — `pid`, logs, start/stop timestamps, and the captured `SuccessTuple` result — is written under `$MRSM_ROOT_DIR/jobs/<name>/`, and its rotating log files live under `$MRSM_ROOT_DIR/logs/`.
+
+- **Lifecycle:** `start jobs` launches the daemon, `stop jobs` terminates it, `pause jobs` suspends it, and `delete jobs` stops it and removes its directory.
+- **Restarts:** jobs created with `--restart` (or `--loop`) are restored by a periodic check. The API server, for example, creates all of its jobs as `local` and restarts any that were killed. A `local` job does **not** survive a host reboot on its own unless something (such as the API server or a `systemd` healthcheck) restarts it.
+
+### `systemd` (User Services)
+
+A `systemd` job is registered as a `systemd` *user* service named `mrsm-<name>.service`. The unit file is written to the user service directory and the service is enabled (`WantedBy=default.target`), so the job is restarted automatically on reboot once the user session starts.
+
+- **Availability:** `systemd` is only used when a user `systemd` session is present (and is the default only under the conditions described in [Choosing an Executor](#choosing-an-executor)).
+- **Persistence across reboots:** because the unit is enabled, the job comes back after a reboot. To keep user services running even while you are logged out, enable lingering for your user (`loginctl enable-linger $USER`).
+- **Logs:** output is available through the journal (`journalctl --user -u mrsm-<name>.service`) and is also mirrored to `$MRSM_ROOT_DIR/systemd/logs/`, so `show logs` works the same way as for `local` jobs.
+
+### `api:{label}` (Remote)
+
+Specifying `-e api:{label}` "remotes into" another Meerschaum API instance: the job is posted to that server and runs *there*, on that server's own executor. Output is streamed back to your terminal. This lets you manage and observe jobs on a remote host as if they were local.
+
+```bash
+# Create the job 'syncing-engine' on 'api:prod':
+sync pipes --loop --name syncing-engine -e api:prod -d
+
+# Tail its logs from the remote instance:
+show logs syncing-engine -e api:prod
 ```
 
 ### Instance vs Executor

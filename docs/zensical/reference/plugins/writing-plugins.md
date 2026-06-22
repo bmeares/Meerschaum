@@ -188,6 +188,78 @@ def fetch(pipe: mrsm.Pipe, **kw) -> Iterator['pd.DataFrame']:
         yield pd.read_csv(file_name)
 ```
 
+#### Robust Fetch Patterns
+
+Real-world data sources fail intermittently, rate-limit, and page their responses. The patterns below keep a `#!python fetch()` resilient. They're plain Python — Meerschaum doesn't impose a retry helper — so adapt them to your source.
+
+**Retry with exponential backoff.**
+Wrap transient failures (timeouts, `5xx` responses) in a bounded retry loop. Raising from `#!python fetch()` lets Meerschaum mark the sync as failed; only raise once retries are exhausted.
+
+```python
+def fetch(pipe: mrsm.Pipe, **kw):
+    import time
+    import requests
+
+    url = "https://api.example.com/data"
+    last_exc = None
+    for attempt in range(5):
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            last_exc = e
+            time.sleep(2 ** attempt)  ### 1s, 2s, 4s, 8s, 16s
+    raise RuntimeError(f"Failed to fetch from {url} after retries: {last_exc}")
+```
+
+**Respect rate limits.**
+When the API signals throttling (commonly HTTP `429` with a `Retry-After` header), wait the indicated time instead of failing.
+
+```python
+def fetch(pipe: mrsm.Pipe, **kw):
+    import time
+    import requests
+
+    url = "https://api.example.com/data"
+    while True:
+        response = requests.get(url, timeout=30)
+        if response.status_code == 429:
+            wait_s = int(response.headers.get('Retry-After', 5))
+            time.sleep(wait_s)
+            continue
+        response.raise_for_status()
+        return response.json()
+```
+
+**Stream paginated results as a generator.**
+For large or paged endpoints, `#!python yield` each page so Meerschaum syncs chunk-by-chunk and memory stays flat. Use `begin`/`end` to fetch only the needed window for incremental syncs.
+
+```python
+def fetch(pipe: mrsm.Pipe, begin=None, end=None, **kw):
+    import requests
+
+    url = "https://api.example.com/data"
+    params = {'page': 1}
+    if begin is not None:
+        params['begin'] = begin.isoformat()
+    if end is not None:
+        params['end'] = end.isoformat()
+
+    while True:
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+        rows = payload.get('rows', [])
+        if not rows:
+            break
+        yield rows  ### a chunk (list of dicts); Meerschaum syncs it before the next page
+        params['page'] += 1
+```
+
+!!! tip "Handle partial data gracefully"
+    If you've already `#!python yield`ed several chunks and a later page fails, those earlier chunks are *already synced* — Meerschaum processes each yielded chunk as it arrives. On the next sync run, the `datetime`-axis [incremental window](/reference/pipes/syncing/) picks up where the last successful chunk left off, so transient failures self-heal without duplicating committed rows.
+
 <a id="sync-plugins"></a>
 
 ### **The `#!python sync()` Function**
@@ -586,7 +658,70 @@ All other keyword arguments correspond to the flags used to initiate the sync. S
 
 Sync hooks don't need to return anything, but if a `SuccessTuple` is returned from your callback function, it will be pretty-printed alongside the normal success messages.
 
-??? example "`#!python @pre_sync_hook` and `#!python @post_sync_hook` example"
+#### When the hooks fire and in what order
+
+For each pipe synced by `sync pipes`, the engine:
+
+1. Captures `sync_timestamp` (UTC), then runs **all** registered `#!python @pre_sync_hook` callbacks and prints any returned `SuccessTuple`s.
+2. Runs the chosen `sync_method` (`pipe.sync`, `pipe.verify`, or `pipe.deduplicate` — verification and deduplication are selected by the `--verify` / `--deduplicate` flags).
+3. Computes `sync_duration` and captures `sync_complete_timestamp`, then runs **all** registered `#!python @post_sync_hook` callbacks and prints any returned `SuccessTuple`s.
+
+!!! note "Hooks run concurrently and are isolated"
+    Hooks are dispatched through a worker pool, so callbacks from different plugins (and multiple hooks within one plugin) run **concurrently** — don't rely on ordering between separate hooks. Each hook executes inside its plugin's virtual environment. Your callback only receives the keyword arguments it actually declares (arguments are filtered to your function's signature), so it's safe to accept just the few you need plus `**kwargs`.
+
+    If a hook raises an exception, it is caught and converted to a failure `SuccessTuple` (and a warning) — a misbehaving hook will **not** abort the sync. Hooks are also skipped entirely when the sync is invoked with `skip_hooks=True`.
+
+Because the same function may be registered as both a pre- and a post-hook, branch on whether `success_tuple` is `None` (it is only set for post-syncs) to tell the two phases apart.
+
+??? example "`#!python @pre_sync_hook` — validate / log before syncing"
+
+    A pre-sync hook is a good place to log intent, enforce a precondition, or record a start time. Returning a failure `SuccessTuple` does not cancel the sync (it is only printed), so use it for observability rather than as a gate.
+
+    ```python
+    from datetime import datetime
+    import meerschaum as mrsm
+    from meerschaum.plugins import pre_sync_hook
+
+    @pre_sync_hook
+    def announce_sync(
+            pipe: mrsm.Pipe,
+            sync_timestamp: datetime | None = None,
+            begin=None,
+            end=None,
+            **kwargs
+        ) -> mrsm.SuccessTuple:
+        """Log the pipe and requested window right before syncing."""
+        print(f"About to sync {pipe} at {sync_timestamp} (begin={begin}, end={end}).")
+        return True, "Success"
+    ```
+
+??? example "`#!python @post_sync_hook` — notify on the result"
+
+    A post-sync hook receives the `success_tuple` returned by the sync plus timing context, making it ideal for notifications, metrics, or alerting on failure.
+
+    ```python
+    from datetime import datetime
+    import meerschaum as mrsm
+    from meerschaum.plugins import post_sync_hook
+
+    @post_sync_hook
+    def notify_on_result(
+            pipe: mrsm.Pipe,
+            success_tuple: mrsm.SuccessTuple,
+            sync_duration: float | None = None,
+            **kwargs
+        ) -> mrsm.SuccessTuple:
+        """Send an alert if a sync failed."""
+        success, message = success_tuple
+        if not success:
+            ### Replace with your real notifier (email, Slack, etc.).
+            print(f"ALERT: {pipe} failed after {sync_duration:.2f}s: {message}")
+        return True, f"Handled result for {pipe}."
+    ```
+
+??? example "Registering one function for both phases"
+
+    The same callback may be stacked with both decorators; branch on `success_tuple`.
 
     ```python
     from datetime import datetime
@@ -622,7 +757,20 @@ Sync hooks don't need to return anything, but if a `SuccessTuple` is returned fr
 
 ### **The `#!python setup()` Function**
 
-When your plugin is first installed, its `required` list will be installed, but in case you need to do any extra setup upon installation, you can write a `#!python setup()` function which returns a tuple of a boolean and a message.
+`#!python setup()` is a one-time initialization hook. It runs **after** your plugin's `required` dependencies are installed into its virtual environment, specifically:
+
+- when the plugin is first **installed** (`mrsm install plugin <plugin>`), and
+- when you explicitly re-run it with `mrsm setup plugins <plugin>`.
+
+It is **not** called on every sync or action — use it strictly for work that should happen once at install time. It must return a `SuccessTuple` (a `#!python (bool, str)` tuple); a `#!python False` result is reported to the user and signals that setup failed.
+
+Typical uses:
+
+- **Verify dependencies / external tooling** that `required` can't express (a system binary, a driver, a service being reachable).
+- **One-time initialization** such as downloading a model, creating a working directory, or seeding default plugin config via [`#!python write_plugin_config()`](https://docs.meerschaum.io/config/index.html#meerschaum.config.write_plugin_config).
+
+!!! tip "Keep heavy imports inside `#!python setup()`"
+    As with the other special functions, import heavy packages *inside* the function body rather than at module level so importing the plugin stays fast.
 
 Below is a snippet from the `apex` plugin which initializes a Selenium WebDriver.
 

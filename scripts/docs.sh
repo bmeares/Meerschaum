@@ -16,6 +16,9 @@ cat "$PARENT"/docs/zensical/news/acknowledgements.md > "$PARENT"/ACKNOWLEDGEMENT
 ### Build technical documentation.
 PDOC_ALLOW_EXEC=1 $PYTHON_BIN -m pdoc -o docs/pdoc -d numpy -n --favicon https://meerschaum.io/assets/logo.ico --logo https://meerschaum.io/assets/logo_48x48.png ./meerschaum/
 
+### Generate llms.txt / llms-full.txt for agents (before the site build copies them).
+$PYTHON_BIN "$PARENT"/scripts/gen_llms_txt.py
+
 ### Build general documentation.
 cd "$PARENT"/docs
 $PYTHON_BIN -m zensical build

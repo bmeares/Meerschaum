@@ -492,6 +492,21 @@ def _start_webterm(
 
     tornado_app.listen(port, host)
     loop = tornado_ioloop.IOLoop.instance()
+
+    ### Stop cleanly on SIGTERM too (e.g. `proc.terminate()` from the API's
+    ### `stop_webterm`), not just SIGINT/CTRL+C — otherwise the loop is killed before
+    ### the tmux-session cleanup below runs and the webterm orphans. `add_callback` is
+    ### the signal-safe way to stop the IOLoop from a handler (tornado >= 6).
+    import signal
+    def _stop_loop(_signum, _frame):
+        loop.add_callback(loop.stop)
+    try:
+        signal.signal(signal.SIGTERM, _stop_loop)
+    except (ValueError, OSError):
+        ### signal.signal only works on the main thread; skip if not (cleanup still
+        ### happens via the API's direct tmux kill in stop_webterm).
+        pass
+
     try:
         loop.start()
     except KeyboardInterrupt:

@@ -366,14 +366,14 @@ class Shell(cmd.Cmd):
         """
         from meerschaum.utils.misc import remove_ansi
         from meerschaum.utils.formatting import CHARSET, ANSI, colored
-        from meerschaum._internal.shell.updates import get_update_message
+        from meerschaum._internal.shell.updates import get_update_message, get_plugins_update_message
 
         if shell_attrs.get('intro', None) != '':
             self.intro = (
                 get_shell_intro(with_color=False)
                 if shell_attrs.get('intro', None) != ''
                 else ""
-            ) + get_update_message()
+            ) + get_update_message() + get_plugins_update_message()
 
         shell_attrs['intro'] = self.intro
         shell_attrs['_prompt'] = get_config('shell', CHARSET, 'prompt', patch=patch)

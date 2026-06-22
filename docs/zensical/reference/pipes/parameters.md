@@ -77,6 +77,71 @@ This page catalogs useful keys in the `parameters` dictionary.
 
 ---------------
 
+## Quick Start
+
+Most pipes only need `columns`. Everything else is opt-in.
+
+### Minimal pipe
+
+The smallest useful pipe just defines its `columns` (a `datetime` and `id` axis):
+
+=== "Python"
+
+    ```python
+    import meerschaum as mrsm
+
+    pipe = mrsm.Pipe(
+        'plugin:noaa', 'weather',
+        instance='sql:main',
+        columns={'datetime': 'timestamp', 'id': 'station'},
+    )
+    ```
+
+=== "CLI"
+
+    ```bash
+    mrsm register pipe -c plugin:noaa -m weather -i sql:main \
+        --params '{"columns": {"datetime": "timestamp", "id": "station"}}'
+    ```
+
+See [`columns`](#columns) for the available index roles and [dtypes](/reference/pipes/dtypes/) for column types.
+
+### Parameter reference
+
+**Essential** — the keys most pipes use:
+
+| Parameter | Purpose | Section |
+|---|---|---|
+| `columns` | Map semantic roles (`datetime`, `id`, `primary`, `value`) to column names | [`columns`](#columns) |
+| `dtypes` | Explicit column data types | [`dtypes`](#dtypes) |
+| `tags` | Labels for grouping and filtering pipes | [`tags`](#tags) |
+| `target` | Override the destination table name | [`columns`](#columns) |
+
+**Advanced / opt-in** — enable only when you need them:
+
+| Parameter | Purpose | Section |
+|---|---|---|
+| `upsert` | Update existing rows in place via a unique index | [`upsert`](#upsert) |
+| `autoincrement` | Add an auto-incrementing integer primary key | [`autoincrement`](#autoincrement) |
+| `autotime` | Auto-populate a `datetime` timestamp on insert | [`autotime`](#autotime) |
+| `static` | Never alter the schema (no new columns) | [`static`](#static) |
+| `enforce` | Toggle dtype enforcement on incoming data | [`enforce`](#enforce) |
+| `null_indices` | Allow `NULL` values in index columns | [`null_indices`](#null_indices) |
+| `hypertable` | Native range partitioning / TimescaleDB hypertable | [`hypertable`](#hypertable) |
+| `hypercore` | TimescaleDB Hypercore columnstore | [`hypercore`](#hypercore) |
+| `compress` | Install a columnstore (compression) policy | [`compress`](#compress) |
+| `mixed_numerics` | Control int→float→numeric coercion | [`mixed_numerics`](#mixed_numerics) |
+| `precision` | Datetime precision unit | [`precision`](#precision) |
+| `indices` | Additional non-unique performance indices | [`indices`](#indices) |
+| `fetch` | Source-specific fetch config (e.g. `backtrack_minutes`) | [`fetch`](#fetch) |
+| `sql` / `query` | SQL definition for SQL-connector pipes | [`sql`, `query`](#sql-query) |
+| `reference` / `references` / `parents` / `children` | Inherit or relate other pipes' parameters | [`reference`](#reference), [`parents`](#parents) |
+| `verify` | Verification-sync config (e.g. `chunk_minutes`) | [`verify`](#verify) |
+
+For more, see the full reference below or [docs.meerschaum.io](https://docs.meerschaum.io).
+
+---------------
+
 ## `autoincrement`
 
 If a `primary` index is defined (see [columns](#columns) below) and `autoincrement` is set, create the primary key as an auto-incrementing integer column.

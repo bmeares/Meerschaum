@@ -88,7 +88,11 @@ def _build_plugin_card(
         html.Div(
             [
                 html.Span('👤 ', className='text-muted'),
-                html.Span(str(plugin_username), className='text-muted'),
+                html.A(
+                    str(plugin_username),
+                    href='/dash/users/' + str(plugin_username),
+                    className='text-muted',
+                ),
             ],
             className='plugin-author',
         ),

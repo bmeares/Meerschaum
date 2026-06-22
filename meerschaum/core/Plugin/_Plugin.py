@@ -434,6 +434,29 @@ class Plugin:
         init_venv(venv=self.name, force=True, debug=debug)
         reload_meerschaum(debug=debug)
 
+        ### Record the origin repository (only if explicitly known) so the update
+        ### checker knows where to look for newer versions. Locally-installed plugins
+        ### have no explicit repo and are intentionally skipped.
+        if success or abort:
+            _origin_repo_keys = None
+            if self._repo_connector is not None:
+                _origin_repo_keys = str(self._repo_connector)
+            elif self._repo_keys:
+                _origin_repo_keys = self._repo_keys
+            elif self._repo_in_name:
+                _origin_repo_keys = self._repo_in_name
+            if _origin_repo_keys:
+                try:
+                    from meerschaum.plugins._origins import write_plugin_origin
+                    write_plugin_origin(
+                        self.name,
+                        _origin_repo_keys,
+                        plugin_installation_dir_path,
+                        debug=debug,
+                    )
+                except Exception:
+                    pass
+
         ### if we've already failed, return here
         if not success or abort:
             _ongoing_installations.remove(self.full_name)
@@ -544,6 +567,11 @@ class Plugin:
                 info(f"Removed virtual environment from plugin '{self.name}'.")
 
         success = warnings_thrown_count < max_warnings
+        try:
+            from meerschaum.plugins._origins import remove_plugin_origin
+            remove_plugin_origin(self.name, debug=debug)
+        except Exception:
+            pass
         sync_plugins_symlinks(debug=debug)
         self.deactivate_venv(force=True, debug=debug)
         reload_meerschaum(debug=debug)

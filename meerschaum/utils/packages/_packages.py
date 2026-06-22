@@ -157,6 +157,7 @@ packages['dash'] = {
     'dash_daq'                       : 'dash-daq>=0.6.0',
     'terminado'                      : 'terminado>=0.18.1',
     'tornado'                        : 'tornado>=6.5.1',
+    'a2wsgi'                         : 'a2wsgi>=1.10.0',
 }
 packages['api'] = {
     'uvicorn'                        : 'uvicorn[standard]>=0.35.0',
