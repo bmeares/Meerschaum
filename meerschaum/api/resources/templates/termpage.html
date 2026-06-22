@@ -243,6 +243,52 @@ document.addEventListener('DOMContentLoaded', function() {
 
     xterm_div = document.getElementById("xterm-div");
 
+    // Fit the terminal to the current viewport and tell the backend PTY the new size.
+    // Used both on init and on every resize so the two paths can't drift.
+    function fit_terminal() {
+      if (!window.terminal || !window.terminal.term) { return null; }
+      var size = calculate_size();
+      window.terminal.term.resize(size.cols, size.rows);
+      // xterm's real cell size doesn't exactly match calculate_size()'s estimate.
+      // Measure the rendered .xterm-screen and refine so rows/cols fill the viewport.
+      var screen = xterm_div.querySelector('.xterm-screen');
+      if (screen) {
+        var screenRect = screen.getBoundingClientRect();
+        if (screenRect.height > 0 && screenRect.width > 0) {
+          var actualCellH = screenRect.height / size.rows;
+          var actualCellW = screenRect.width / size.cols;
+          var fitRows = Math.max(2, Math.floor((window.innerHeight - 10) / actualCellH));
+          var fitCols = Math.max(3, Math.floor((window.innerWidth - 10) / actualCellW));
+          if (fitRows !== size.rows || fitCols !== size.cols) {
+            window.terminal.term.resize(fitCols, fitRows);
+            size = {rows: fitRows, cols: fitCols};
+          }
+        }
+      }
+      if (window.terminal.socket && window.terminal.socket.readyState === WebSocket.OPEN) {
+        window.terminal.socket.send(
+          JSON.stringify(["set_size", size.rows, size.cols, window.innerHeight, window.innerWidth])
+        );
+      }
+      return size;
+    }
+
+    // Coalesce resize triggers and, crucially, measure AFTER layout has settled.
+    // Two rAFs guarantee the CSS reflow from the parent's column toggle is applied
+    // before we read .xterm-screen — without this, fits compute against stale sizes
+    // (the bug that required a manual refresh after expand/collapse).
+    var fitScheduled = false;
+    function schedule_fit() {
+      if (fitScheduled) { return; }
+      fitScheduled = true;
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          fitScheduled = false;
+          fit_terminal();
+        });
+      });
+    }
+
     function init_webterm() {
       if (window.terminal_initialized) { return; }
       let startTime = performance.now();
@@ -263,25 +309,10 @@ document.addEventListener('DOMContentLoaded', function() {
           reconnectTimeout = setTimeout(init_webterm, 1000);
         }
       }
-      // After term.open(), xterm inserts .xterm-screen sized to rows*cellHeight.
-      // Measure it to get xterm's actual cell dimensions and resize to fill the viewport.
-      var screen = xterm_div.querySelector('.xterm-screen');
-      if (screen) {
-        var screenRect = screen.getBoundingClientRect();
-        if (screenRect.height > 0 && screenRect.width > 0) {
-          var actualCellH = screenRect.height / size.rows;
-          var actualCellW = screenRect.width / size.cols;
-          var fitRows = Math.max(2, Math.floor((window.innerHeight - 10) / actualCellH));
-          var fitCols = Math.max(3, Math.floor((window.innerWidth - 10) / actualCellW));
-          if (fitRows !== size.rows || fitCols !== size.cols) {
-            window.terminal.term.resize(fitCols, fitRows);
-            size = {rows: fitRows, cols: fitCols};
-          }
-        }
-      }
+      var fitted = fit_terminal() || size;
       window.terminal_initialized = true;
       let endTime = performance.now();
-      console.log(`Terminal initialized in ${endTime - startTime}ms with size ${size.cols}x${size.rows}`);
+      console.log(`Terminal initialized in ${endTime - startTime}ms with size ${fitted.cols}x${fitted.rows}`);
     }
 
     // Wait for fonts to be ready if possible, otherwise just go
@@ -291,21 +322,15 @@ document.addEventListener('DOMContentLoaded', function() {
         window.onload = init_webterm;
     }
 
-    window.onresize = function() {
-      var geom = calculate_size();
-      rows = geom.rows;
-      cols = geom.cols;
-      if (window.terminal && window.terminal.term) {
-        window.terminal.term.resize(cols, rows);
-      }
-      if (window.terminal && window.terminal.socket) {
-        window.terminal.socket.send(
-            JSON.stringify(
-                ["set_size", rows, cols, window.innerHeight, window.innerWidth]
-            )
-        );
-      }
-    };
+    // Refit whenever the iframe's own box actually changes — this fires after the
+    // parent dashboard toggles the web-console column (expand/collapse), regardless
+    // of timing, so we no longer depend on a synthetic resize event landing at the
+    // right moment. window.onresize stays as a fallback for true viewport changes.
+    window.onresize = schedule_fit;
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(schedule_fit);
+      ro.observe(document.documentElement);
+    }
 });
 </script>
 </body>

@@ -320,7 +320,7 @@ def _show_data(
     from meerschaum import get_pipes
     from meerschaum.utils.packages import attempt_import, import_pandas
     from meerschaum.utils.warnings import warn, info
-    from meerschaum.utils.formatting import pprint
+    from meerschaum.utils.formatting import pprint, pprint_df
     from meerschaum.utils.dataframe import to_json
     pd = import_pandas()
 
@@ -383,11 +383,11 @@ def _show_data(
 
         if not nopretty:
             info(info_msg)
+            pprint_df(df)
         else:
             print(json.dumps(p.__getstate__()))
             df = to_json(df, orient='columns')
-
-        pprint(df, nopretty=nopretty)
+            pprint(df, nopretty=nopretty)
 
     return True, "Success"
 

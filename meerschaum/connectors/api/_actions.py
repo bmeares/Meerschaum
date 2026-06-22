@@ -45,7 +45,13 @@ async def do_action_async(
     sysargs = remove_api_executor_keys(sysargs)
 
     job_name = TEMP_PREFIX + generate_password(12)
-    job = mrsm.Job(job_name, sysargs, executor_keys=str(self))
+    job = mrsm.Job(
+        job_name,
+        sysargs,
+        executor_keys=str(self),
+        ### Emit the entire output, not just the last `lines_to_show` (default 30) lines.
+        _properties={'logs': {'lines_to_show': 0}},
+    )
 
     start_success, start_msg = job.start()
     if not start_success:

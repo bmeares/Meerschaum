@@ -133,5 +133,9 @@ mrsm partition pipes -i sql:main -m weather --chunk-minutes 10080
 Like any action, maintenance can be scheduled as a [background job](/reference/background-jobs/). For example, compress and vacuum nightly:
 
 ```bash
-mrsm compress pipes -i sql:main -f + vacuum pipes -i sql:main -f : -s daily --name nightly_maintenance -d
+mrsm compress pipes -i sql:main -f \
+    + vacuum pipes -i sql:main -f \
+    : -s daily \
+    --name nightly_maintenance \
+    -d
 ```

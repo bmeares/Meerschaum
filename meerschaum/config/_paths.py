@@ -137,6 +137,7 @@ paths = {
 
     'UPDATES_RESOURCES_PATH'         : ('{INTERNAL_RESOURCES_PATH}', 'updates'),
     'UPDATES_CACHE_PATH'             : ('{UPDATES_RESOURCES_PATH}', 'cache.json'),
+    'PLUGIN_UPDATES_CACHE_PATH'      : ('{UPDATES_RESOURCES_PATH}', 'plugins.json'),
     'UPDATES_LOCK_PATH'              : ('{UPDATES_RESOURCES_PATH}', '.updates.lock'),
 
     'STACK_RESOURCES_PATH'           : ('{ROOT_DIR_PATH}', 'stack'),

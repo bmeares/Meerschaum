@@ -325,6 +325,7 @@ STATIC_CONFIG: Dict[str, Any] = {
         'repo_separator': '@',
         'lock_sleep_total': 1.0,
         'lock_sleep_increment': 0.1,
+        'origins_filename': '.mrsm_origins.json',
     },
     'pipes': {
         'dtypes': {

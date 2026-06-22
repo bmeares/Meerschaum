@@ -111,7 +111,7 @@ def _skip_sourcemap_requests():
 import meerschaum.api.dash.pages as pages
 import meerschaum.api.dash.callbacks as callbacks
 
-fastapi_middleware_wsgi = attempt_import('fastapi.middleware.wsgi')
+a2wsgi = attempt_import('a2wsgi', lazy=False)
 fastapi_app.mount(
-    endpoints['dash'], fastapi_middleware_wsgi.WSGIMiddleware(dash_app.server)
+    endpoints['dash'], a2wsgi.WSGIMiddleware(dash_app.server)
 )

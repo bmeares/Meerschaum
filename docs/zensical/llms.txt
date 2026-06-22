@@ -1,0 +1,55 @@
+# Meerschaum Documentation
+
+> Craft elegant data pipes with Meerschaum.
+
+## Home
+- [Home](https://meerschaum.io/): Want to use Meerschaum in your code? Check out the <a href="https://docs.meerschaum.io">package documentation</a>!
+
+## Get Started
+- [🛠️ Setup](https://meerschaum.io/get-started/): Run Meerschaum commands with mrsm (or python -m meerschaum if ~/.local/bin/ isn't in your PATH).
+- [🏗️ Building a Pipe](https://meerschaum.io/get-started/bootstrap/): Pipes fetch and sync data from connectors. For this example, we will be using the connector plugin:noaa from the data plugin noaa. Type the commands below to bootstrap an example pipe.
+- [📦️ Compose Projects](https://meerschaum.io/get-started/compose-projects/): Now that you've got the idea behind pipes, let's write our own plugins and put together a project using <a href="/reference/compose">Meerschaum Compose</a>.
+- [🖥️ Web Console](https://meerschaum.io/get-started/start-api/): You can use Meerschaum from its web interface. From within a mrsm shell, type to commands below to see how:
+
+## Reference
+- [📚 Meerschaum Reference Wiki](https://meerschaum.io/reference/): So you've just completed the Getting Started guide ― congratulations! 🥳 "What's next?", you might ask.
+- [🚰 Pipes](https://meerschaum.io/reference/pipes/): A Meerschaum pipe represents a data stream into a table and the necessary parameters to sync new data.
+- [🥾 Bootstrapping](https://meerschaum.io/reference/pipes/bootstrapping/): The bootstrap pipes action includes a setup wizard to guide you through the process of creating new pipes. In this tutorial, we'll be looking at the prompts you'll encounter to help you better underst
+- [📥 Syncing](https://meerschaum.io/reference/pipes/syncing/): I wrote my master's thesis on comparing syncing strategies. Here are the presentation slides which summarize my findings.
+- [📖 Reading Data](https://meerschaum.io/reference/pipes/reading/): Use Pipe.getdata() and its convenience wrappers to read rows from the instance.
+- [🔖 Tags](https://meerschaum.io/reference/pipes/tags/): You can define custom groupings of pipes with tags. Consider the example below:
+- [🧩 Parameters](https://meerschaum.io/reference/pipes/parameters/): This page catalogs useful keys in the parameters dictionary.
+- [🔤 Data Types](https://meerschaum.io/reference/pipes/dtypes/): This page explains what Meerschaum data types (dtypes) are, when to use each one, and how dtype coercion behaves during syncs. For the dtype table in context with the rest of the metadata, see paramet
+- [🧹 Maintenance](https://meerschaum.io/reference/pipes/maintenance/): Over time a pipe's target table accumulates dead rows, stale planner statistics, and uncompressed history. Meerschaum provides a family of maintenance actions to keep tables lean and queries fast. Eac
+- [🔌 Connectors](https://meerschaum.io/reference/connectors/): Meerschaum coordinates everything via connectors. Use cases for Connectors include fetching and inserting data when syncing pipes.
+- [🗂️ SQL Connectors](https://meerschaum.io/reference/connectors/sql-connectors/): Meerschaum's first-class connector is the SQLConnector. Several built-in sql connectors are defined by default:
+- [🗄️ Instance Connectors](https://meerschaum.io/reference/connectors/instance-connectors/): Instance connectors store pipes' metadata (and may also be used as a source connector, e.g. the #!python SQLConnector).
+- [🗝️ Valkey Connectors](https://meerschaum.io/reference/connectors/valkey/): The ValkeyConnector syncs pipes to a Valkey instance. Valkey is an in-memory key-value store forked from Redis, so the same connector also works against a Redis server.
+- [❓ Other Connector Types](https://meerschaum.io/reference/connectors/other-connectors/): Though the SQL Connector is the premier Meerschaum connector type, there are plenty of other implementations of the instance connector interface.
+- [🐍 Python API](https://meerschaum.io/reference/python-api/): Most of this documentation is written from the perspective of the mrsm command-line interface, but everything you can do from the CLI you can also do from Python. This page is a practical cheat sheet 
+- [🥞 Stack](https://meerschaum.io/reference/stack/): The Meerschaum stack is an integrated collection of services designed to help you start visualizing your data as quickly as possible.
+- [🌐 API Instance](https://meerschaum.io/reference/api-instance/): The Meerschaum API instance (and Web Console) lets you manage pipes, jobs, and connectors over the Internet. Start the API server with the stack or via start api; see Deployment below for ways to run 
+- [Security and Tokens](https://meerschaum.io/reference/api-instance/tokens/): Meerschaum tokens are long-lived API keys that grant programmatic access to a Meerschaum instance. They are a secure way to authenticate for services like IoT devices or CI/CD pipelines without using 
+- [NGINX](https://meerschaum.io/reference/api-instance/nginx/): Hosting Meerschaum behind NGINX is a great way set up TLS/SSL with Let's Encrypt (certbot). There are several important goals when setting up forwarding:
+- [Web Console](https://meerschaum.io/reference/api-instance/web-console/): The Meerschaum Web Console provides a graphical interface for managing your Meerschaum instance, served by the API instance. To access it, start the API (mrsm start api) and navigate to your host URL 
+- [🎼 Compose](https://meerschaum.io/reference/compose/): The compose plugin does the same for Meerschaum as Docker Compose does for Docker: with Meerschaum Compose, you can consolidate everything into a single YAML file ― that includes all of the pipes and 
+- [⏯️ Actions](https://meerschaum.io/reference/actions/): To see available actions, run help or show actions.
+- [👷 Background Jobs](https://meerschaum.io/reference/background-jobs/): Meerschaum's job management system lets you run any process in the background ― just add -d to any command. Thanks to the built-in scheduler, you no longer have to worry about manually configuring cro
+- [🔧 Data Analysis Tools](https://meerschaum.io/reference/data-analysis-tools/): Meerschaum comes with a pre-configured data visualization stack so that you can spend your time on analysis rather than configuring servers.
+- [➕ Plugins](https://meerschaum.io/reference/plugins/): Meerschaum plugins let you ingest any data source into pipes as well as defining custom actions, connectors, API endpoints, dash apps, and more.
+- [✍️ Writing Your Own](https://meerschaum.io/reference/plugins/writing-plugins/): > This tutorial explains how to extend Meerschaum with plugins. For general information, consult the Types of Plugins reference page.
+- [🤔 Types of Plugins](https://meerschaum.io/reference/plugins/types-of-plugins/): > This page introduces the different types of Meerschaum plugins. For technical information, consult the Writing Your Own Plugins tutorial.
+- [🚀 Repositories](https://meerschaum.io/reference/plugins/repositories/): Meerschaum gives you the ability to easily install and create plugins. Refer to the guide below on how to install, write, and publish plugins.
+- [🌳 Environment Variables](https://meerschaum.io/reference/environment/): You can manage the behavior of Meerschaum and emulate multiple installations with environment variables.
+- [🩺 Troubleshooting](https://meerschaum.io/reference/troubleshooting/): A symptom-driven guide to the most common Meerschaum issues. Each entry follows Symptom → Cause → Fix.
+- [📖 Glossary](https://meerschaum.io/reference/glossary/): This page defines the core Meerschaum domain terms in one place. Each entry links to its reference documentation where one exists. Other pages can deep-link to any term by its heading anchor, e.g. #up
+- [💼 Portable](https://meerschaum.io/reference/meerschaum-portable/): Sometimes, it's not worth the hassle setting up a complete Python environment. If you're using a non-administrative account or just want to test out Meerschaum, Meerschaum Portable might be right for 
+
+## Tutorials
+- [📚 Tutorials](https://meerschaum.io/tutorials/): Want to learn Meerschaum hands-on? Follow the written, end-to-end walkthrough below, or scroll down to the video tutorials if you're more of a visual learner.
+
+## News
+- [🪵 Changelog](https://meerschaum.io/news/changelog/): This is the current release cycle, so stay tuned for future releases!
+- [📢 Announcements](https://meerschaum.io/news/announcements/): > 27 June 2022
+- [🌠 To-Do / Wish List](https://meerschaum.io/news/to-do/): Below are some ongoing tasks I have planned for Meerschaum. This is not an exhaustive list, and if you would like to contribute a feature idea or point out a bug, please start a discussion or open an 
+- [🤗 Acknowledgements](https://meerschaum.io/news/acknowledgements/): Meerschaum is built with the help of many incredible open source libraries. In the spirit of open source, I've chosen to release the project under the permissive Apache 2.0 license.

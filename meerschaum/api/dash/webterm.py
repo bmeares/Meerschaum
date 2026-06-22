@@ -224,12 +224,34 @@ def start_webterm(webterm_port: Optional[int] = None) -> None:
 
 def stop_webterm() -> None:
     """
-    Stop the webterm thread.
+    Stop the webterm thread and tear down its tmux session (if any).
+
+    `webterm_proc.terminate()` only signals the `start webterm` tornado process. When
+    tmux is enabled the shell runs inside a detached tmux session (`...--<port>`) owned
+    by the tmux server, which OUTLIVES that process — so the webterm keeps serving after
+    the API stops and blocks the next start. Kill the Meerschaum tmux session(s) bound to
+    the webterm port directly; this is robust even if the process was already gone or
+    `SIGKILL`ed. No-ops cleanly when tmux is unavailable (`tmux ls` fails → no sessions).
     """
+    from meerschaum.api import webterm_port
+    from meerschaum._internal.term.tools import get_mrsm_tmux_sessions, kill_tmux_session
+
     webterm_thread = webterm_procs.get('thread', None)
     webterm_proc = webterm_procs.get('process', None)
     with _locks['webterm_thread']:
         if webterm_proc is not None:
             webterm_proc.terminate()
+            try:
+                webterm_proc.wait(timeout=5)
+            except Exception:
+                try:
+                    webterm_proc.kill()
+                except Exception:
+                    pass
         if webterm_thread is not None:
             webterm_thread.join()
+        try:
+            for session in get_mrsm_tmux_sessions(port=webterm_port):
+                kill_tmux_session(session)
+        except Exception:
+            pass

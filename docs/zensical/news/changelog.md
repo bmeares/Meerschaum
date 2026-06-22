@@ -4,6 +4,23 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.4.2
+
+- **Fix truncated output for actions run on a remote `api:` executor.**  
+  Running a long-output action (e.g. `show pipes`) on an `api:` executor only showed the last 30 lines — the beginning was silently dropped. The remote job's log monitor defaults to emitting only the last `lines_to_show` (30) lines, which is the right behavior when *attaching* to a long-running job but wrong for a one-shot action whose entire output matters. Temporary action jobs created by `APIConnector.do_action_async` now set `logs.lines_to_show = 0` (emit everything), mirroring the local CLI worker.
+
+- **Add a Users page to the web console.**  
+  A new `/dash/users` page lists the instance's registered users (paginated and searchable, mirroring the Plugins page), with a shareable per-user detail page at `/dash/users/<username>` that lists the plugins they've published. A plugin card's author now links to its owner's user page. A user's type (admin vs. normal) is intentionally never exposed.
+
+- **Format `show data` output as a table.**  
+  `mrsm show data` now renders each pipe's DataFrame as a Markdown table (the same `pprint_df()` formatter used by `mrsm sql`) instead of the raw Pandas repr. The `--nopretty` JSON output is unchanged.
+
+- **Add a plugins update checker.**  
+  Plugins installed from a repository now record their origin (e.g. `api:mrsm`) in a per-directory `.mrsm_origins.json` manifest that travels with the plugins directory (so it survives being mounted into another environment). On shell launch a background thread caches the latest versions from each plugin's origin repo, and the interactive prompt prints a banner listing any plugins that have fallen behind, suggesting `upgrade plugins`. Locally-authored plugins (no recorded origin) are skipped. Reuses the existing `shell:updates` config (`check_remote`, `refresh_minutes`).
+
+- **Silence the `starlette.middleware.wsgi` deprecation warning during `start api`.**  
+  The Dash app is now mounted with [`a2wsgi`](https://github.com/abersheeran/a2wsgi)'s `WSGIMiddleware` instead of the deprecated `fastapi.middleware.wsgi.WSGIMiddleware`. `a2wsgi` is added to the `dash` dependency group.
+
 ### v3.4.1
 
 - **Scope the `dbc_dark` theme so it no longer leaks onto every Dash page.**  

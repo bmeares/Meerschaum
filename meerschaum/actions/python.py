@@ -27,6 +27,7 @@ def python(
     
     Examples:
         mrsm python
+        mrsm python -c "print(mrsm.__version__)"
         mrsm python [-m pip -V]
 
     Flags:

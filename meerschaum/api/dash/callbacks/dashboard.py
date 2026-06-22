@@ -93,6 +93,7 @@ _paths = {
     '/dash/login'   : pages.login.layout,
     '/dash'         : pages.dashboard.layout,
     '/dash/plugins' : pages.plugins.layout,
+    '/dash/users'   : pages.users.layout,
     '/dash/tokens'  : pages.tokens.layout,
     '/dash/register': pages.register.layout,
     '/dash/pipes'   : pages.pipes.layout,
@@ -106,6 +107,7 @@ _pages = {
     'Web Console': '/dash/',
     'Pipes': '/dash/pipes',
     'Plugins': '/dash/plugins',
+    'Users': '/dash/users',
     'Tokens': '/dash/tokens',
     'Jobs': '/dash/jobs',
 }

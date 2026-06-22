@@ -9,6 +9,7 @@ import meerschaum.api.dash.pages.error
 import meerschaum.api.dash.pages.login
 import meerschaum.api.dash.pages.dashboard
 import meerschaum.api.dash.pages.plugins
+import meerschaum.api.dash.pages.users
 import meerschaum.api.dash.pages.tokens
 import meerschaum.api.dash.pages.register
 import meerschaum.api.dash.pages.pipes
