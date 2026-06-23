@@ -816,7 +816,9 @@ def unload_plugins(
     Unload the specified plugins from memory.
     """
     global _loaded_plugins, _synced_symlinks
+    import os
     import sys
+    import pathlib
     import meerschaum.config.paths as paths
     from meerschaum.connectors import unload_plugin_connectors
     if debug:
@@ -885,14 +887,38 @@ def unload_plugins(
             file_symlink_path = paths.PLUGINS_RESOURCES_PATH / f"{plugin_name}.py"
             file_symlink_injected_path = paths.PLUGINS_INJECTED_RESOURCES_PATH / f"{plugin_name}.py"
 
+            ### Only remove a symlink whose target NO LONGER EXISTS (a genuinely stale
+            ### plugin). The per-root `.internal/plugins` directory is SHARED by every
+            ### process operating on that root — including a `plugin:<name>`-backed
+            ### background job that may have been started moments earlier (e.g. by
+            ### `mrsm compose start jobs`, which loads project plugins, starts the job
+            ### daemon, then unloads). Removing a still-valid plugin symlink here deletes
+            ### it out from under that daemon, so its plugin import fails with
+            ### "Plugin '<name>' cannot be found". In-memory unloading (popping
+            ### `sys.modules` above) is process-local and is all that unloading needs;
+            ### the symlink lifecycle is owned by `sync_plugins_symlinks`.
+            def _target_exists(symlink_path):
+                try:
+                    return pathlib.Path(os.path.realpath(symlink_path)).exists()
+                except Exception:
+                    return False
+
             try:
-                if dir_symlink_path.exists() and not dir_symlink_injected_path.exists():
+                if (
+                    dir_symlink_path.exists()
+                    and not dir_symlink_injected_path.exists()
+                    and not _target_exists(dir_symlink_path)
+                ):
                     dir_symlink_path.unlink()
             except Exception:
                 pass
 
             try:
-                if file_symlink_path.exists() and not file_symlink_injected_path.exists():
+                if (
+                    file_symlink_path.exists()
+                    and not file_symlink_injected_path.exists()
+                    and not _target_exists(file_symlink_path)
+                ):
                     file_symlink_path.unlink()
             except Exception:
                 pass
