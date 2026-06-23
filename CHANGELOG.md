@@ -4,6 +4,18 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.4.5
+
+- **Invalidate the cached `plugins` package when the root / plugins-dir scope changes.**  
+  When `replace_env` switches the active root or plugins directory (and on exit when it
+  restores the previous one), the `plugins` package lingered in `sys.modules` with a
+  `__path__` pointing at the prior scope's `.internal/plugins`. A subsequent plugin
+  import then re-discovered plugins under the wrong scope, so a plugin doing a
+  module-level `from_plugin_import` of a sibling failed with `Unable to import plugin
+  'X'`, and connector-providing plugins could fail to register. `replace_env` now drops
+  the stale package (new `meerschaum.plugins.invalidate_plugins_cache`) so the next
+  import rebuilds against the current `PLUGINS_RESOURCES_PATH`.
+
 ### v3.4.3 – v3.4.4
 
 - **Add a plugin version API endpoint.**  
