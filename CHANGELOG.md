@@ -4,7 +4,7 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.4.3
+### v3.4.3 – v3.4.4
 
 - **Add a plugin version API endpoint.**  
   The endpoint `/plugins/{name}/version` now returns a plugin's version string.
@@ -27,6 +27,21 @@ This is the current release cycle, so stay tuned for future releases!
   print(now)
   # 2026-06-23 04:30:30+00:00
   ```
+
+- **Don't remove valid plugin symlinks during sync.**  
+  `sync_plugins_symlinks()` now only reaps symlinks whose target no longer exists. A
+  symlink to a still-existing plugin from another configured plugins directory is left
+  in place, so a process whose `MRSM_PLUGINS_DIR` is momentarily absent (e.g. a daemon
+  thread) can no longer delete another root's plugin symlinks from the shared
+  `.internal/plugins` — which previously made a `plugin:`-backed background job fail to
+  import its plugin.
+
+- **Stop detached daemons that have lost their PID file.**  
+  A daemon is launched with `Daemon(daemon_id='<id>')` embedded in its command line, so
+  when the PID file is lost (orphaned/detached daemon) the process can still be found by
+  its `daemon_id`. `Daemon.pid` now recovers it, and `stop`/`kill`/`quit` reap every
+  matching process — no more resorting to `pkill meerschaum` or hunting the daemon_id in
+  `htop`.
 
 ### v3.4.2
 

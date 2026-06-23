@@ -523,19 +523,41 @@ class Daemon:
         -------
         A SuccessTuple indicating success.
         """
+        ### A lost PID file means a detached/orphaned daemon — possibly SEVERAL processes
+        ### sharing this daemon_id (e.g. accumulated across crashed restarts). Reap them
+        ### ALL by daemon_id rather than reporting a false "stopped" and stranding them
+        ### (which forces a manual `pkill meerschaum` or hunting the daemon_id in htop).
+        if not self.pid_path.exists():
+            reaped = self._kill_detached_processes(timeout)
+            self._write_stop_file('kill')
+            self.stdin_file.close()
+            self._remove_blocking_stdin_file()
+            return True, (
+                (f"Reaped {reaped} detached process" + ('es' if reaped != 1 else '') + '.')
+                if reaped
+                else "Process has already stopped."
+            )
+
         if self.status != 'paused':
             success, msg = self._send_signal(signal.SIGTERM, timeout=timeout)
             if success:
+                ### Sweep any sibling/detached processes left over for this daemon_id.
+                self._kill_detached_processes(timeout)
                 self._write_stop_file('kill')
                 self.stdin_file.close()
                 self._remove_blocking_stdin_file()
                 return success, msg
 
         if self.status == 'stopped':
+            reaped = self._kill_detached_processes(timeout)
             self._write_stop_file('kill')
             self.stdin_file.close()
             self._remove_blocking_stdin_file()
-            return True, "Process has already stopped."
+            return True, (
+                (f"Reaped {reaped} detached process" + ('es' if reaped != 1 else '') + '.')
+                if reaped
+                else "Process has already stopped."
+            )
 
         psutil = attempt_import('psutil')
         process = self.process
@@ -567,6 +589,20 @@ class Daemon:
         """Gracefully quit a running daemon."""
         if self.status == 'paused':
             return self.kill(timeout)
+
+        ### A lost PID file means a detached/orphaned daemon (possibly several processes);
+        ### the normal signal path can't see them, so reap them all by daemon_id instead
+        ### of returning a false "not running".
+        if not self.pid_path.exists():
+            reaped = self._kill_detached_processes(timeout)
+            self._write_stop_file('quit')
+            self.stdin_file.close()
+            self._remove_blocking_stdin_file()
+            return True, (
+                (f"Reaped {reaped} detached process" + ('es' if reaped != 1 else '') + '.')
+                if reaped
+                else "Process is not running."
+            )
 
         signal_success, signal_msg = self._send_signal(signal.SIGINT, timeout=timeout)
         if signal_success:
@@ -838,6 +874,68 @@ class Daemon:
             f"Failed to stop daemon '{self.daemon_id}' (PID: {pid}) within {timeout} second"
             + ('s' if timeout != 1 else '') + '.'
         )
+
+    def _find_detached_pids(self) -> List[int]:
+        """
+        Return the PIDs of any processes whose command line references this daemon_id.
+
+        A daemon is launched via `venv_exec` with `Daemon(daemon_id='<id>')` embedded in
+        the executed code, so the daemon_id stays visible in the process's command line.
+        When the PID file is lost (e.g. the launcher exited without cleanup, leaving an
+        orphaned/detached daemon), this is the only reliable way to find the process —
+        otherwise stopping the job reports a false "already stopped" and the user must
+        resort to `pkill meerschaum` or hunting the daemon_id in `htop`.
+        """
+        psutil = attempt_import('psutil')
+        marker = f"daemon_id='{self.daemon_id}'"
+        my_pid = os.getpid()
+        pids = []
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                if proc.info['pid'] == my_pid:
+                    continue
+                cmdline = proc.info.get('cmdline') or []
+                if any(marker in (part or '') for part in cmdline):
+                    pids.append(int(proc.info['pid']))
+            except Exception:
+                continue
+        return pids
+
+    def _kill_detached_processes(self, timeout: Union[int, float, None] = None) -> int:
+        """
+        SIGTERM then SIGKILL any detached processes referencing this daemon_id.
+
+        Fallback for when the PID file is gone but the daemon (or its threads) are still
+        alive. Returns the number of processes that were targeted.
+        """
+        psutil = attempt_import('psutil')
+        pids = self._find_detached_pids()
+        if not pids:
+            return 0
+
+        procs = []
+        for pid in pids:
+            try:
+                procs.append(psutil.Process(pid))
+            except Exception:
+                continue
+        for proc in procs:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+        timeout = self.get_timeout_seconds(timeout)
+        try:
+            _, alive = psutil.wait_procs(procs, timeout=(timeout or 8))
+        except Exception:
+            alive = procs
+        for proc in alive:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        return len(procs)
 
     def mkdir_if_not_exists(self, allow_dirty_run: bool = False):
         """Create the Daemon's directory.
@@ -1132,7 +1230,13 @@ class Daemon:
         Returns `None` if the PID file does not exist.
         """
         if not self.pid_path.exists():
-            return None
+            ### The PID file can be lost while a detached daemon keeps running (e.g. the
+            ### launcher exited without cleanup). Recover the PID by finding the process
+            ### whose command line embeds this daemon_id, so `status`/`stop`/`kill` see the
+            ### live process instead of reporting a false "stopped" (which would strand the
+            ### orphan, forcing a manual `pkill meerschaum`).
+            detached_pids = self._find_detached_pids()
+            return detached_pids[0] if detached_pids else None
         try:
             with open(self.pid_path, 'r', encoding='utf-8') as f:
                 text = f.read()
