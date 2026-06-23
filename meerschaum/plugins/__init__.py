@@ -465,6 +465,20 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                     continue
                 if real_path in injected_symlinked_paths.values():
                     continue
+                ### Only reap a symlink whose target NO LONGER EXISTS (a genuinely stale
+                ### plugin). A symlink whose target still exists is a valid plugin from
+                ### another configured plugins directory and must not be removed here:
+                ### `PLUGINS_DIR_PATHS` is process-global and can transiently fall back to
+                ### the host default when `MRSM_PLUGINS_DIR` is momentarily absent from the
+                ### environment (e.g. a daemon thread or a `replace_env` context). Removing
+                ### valid cross-dir symlinks in that window deletes a project's plugin
+                ### links from the shared per-root `.internal/plugins`, so a
+                ### `plugin:<name>`-backed background job then fails to import its plugin.
+                try:
+                    if real_path.exists():
+                        continue
+                except Exception:
+                    pass
                 try:
                     plugin_symlink_path.unlink()
                 except Exception:

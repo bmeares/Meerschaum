@@ -8241,7 +8241,7 @@ Source: https://meerschaum.io/news/changelog/
 
 This is the current release cycle, so stay tuned for future releases!
 
-### v3.4.3
+### v3.4.3 – v3.4.4
 
 - **Add a plugin version API endpoint.**  
   The endpoint `/plugins/{name}/version` now returns a plugin's version string.
@@ -8264,6 +8264,9 @@ This is the current release cycle, so stay tuned for future releases!
   print(now)
   # 2026-06-23 04:30:30+00:00
   ```
+
+- **Sync plugins symlinks on daemon fork.**  
+  To mitigate isolation issues with Meerschaum Compose, Daemons now sync plugins' symlinks before forking.
 
 ### v3.4.2
 
