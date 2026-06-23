@@ -269,6 +269,14 @@ def replace_env(env: Union[Dict[str, Any], None]):
         apply_environment_patches(env)
         apply_environment_uris(env)
 
+        ### A change to the root / plugins-dir scope makes a cached `plugins` package
+        ### (in `sys.modules`) stale: its `__path__` still points at the previous
+        ### scope's `.internal/plugins`. Drop it so any subsequent plugin import
+        ### re-discovers against the new `PLUGINS_RESOURCES_PATH`.
+        if replaced_root or replaced_plugins:
+            from meerschaum.plugins import invalidate_plugins_cache
+            invalidate_plugins_cache()
+
     try:
         yield
     finally:
@@ -297,6 +305,15 @@ def replace_env(env: Union[Dict[str, Any], None]):
 
             if replaced_config_dir:
                 paths.set_config_dir_path(old_config_dir_path)
+
+            ### Mirror the enter-side invalidation: restoring the previous scope makes
+            ### the `plugins` package loaded under the temporary scope stale, so drop it
+            ### and let the next import rebuild against the restored scope. Without this,
+            ### a caller that loads plugins after the `with` block (e.g. compose's
+            ### "load back existing plugins") re-imports plugins under the wrong scope.
+            if replaced_root or replaced_plugins:
+                from meerschaum.plugins import invalidate_plugins_cache
+                invalidate_plugins_cache()
 
             _config().clear()
             set_config(old_config)

@@ -42,6 +42,7 @@ __all__ = (
     "import_plugins",
     "from_plugin_import",
     "reload_plugins",
+    "invalidate_plugins_cache",
     "get_plugins",
     "get_data_plugins",
     "add_plugin_argument",
@@ -939,6 +940,38 @@ def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> 
     _synced_symlinks = 0
     sync_plugins_symlinks(debug=debug)
     load_plugins(skip_if_loaded=False, debug=debug)
+
+
+def invalidate_plugins_cache(debug: bool = False) -> None:
+    """
+    Drop the cached `plugins` package (and its submodules) from `sys.modules` and reset
+    the load flag so the next plugin import re-discovers plugins against the CURRENT
+    `PLUGINS_RESOURCES_PATH`.
+
+    This must be called whenever the active root / plugins-dir scope changes (e.g. on
+    `replace_env` enter and exit). Otherwise the `plugins` package lingers in
+    `sys.modules` with a `__path__` pointing at the previous scope's `.internal/plugins`,
+    so plugins get re-imported under the wrong scope — a plugin doing a module-level
+    `from_plugin_import` of a sibling then fails with "Unable to import plugin 'X'", and
+    a connector-providing plugin can fail to register.
+    """
+    global _loaded_plugins
+    import sys
+    import meerschaum.config.paths as paths
+    from meerschaum.utils.warnings import dprint
+
+    stem = paths.PLUGINS_RESOURCES_PATH.stem
+    stale_mod_names = [
+        mod_name
+        for mod_name in list(sys.modules)
+        if mod_name == stem or mod_name.startswith(stem + '.')
+    ]
+    if debug and stale_mod_names:
+        dprint(f"Invalidating cached plugins modules: {stale_mod_names}")
+    for mod_name in stale_mod_names:
+        sys.modules.pop(mod_name, None)
+
+    _loaded_plugins = False
 
 
 def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugin]:
