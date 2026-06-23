@@ -12,9 +12,17 @@ import json
 import contextlib
 import copy
 import pathlib
+import threading
 
 from meerschaum.utils.typing import List, Union, Dict, Any, Optional
 from meerschaum._internal.static import STATIC_CONFIG
+
+### Serialize the process-global swap of `os.environ` and `meerschaum.config.paths`
+### globals performed by `replace_env`. A daemon process runs several threads
+### concurrently (the job target plus the `check-jobs` `RepeatTimer`), so two
+### overlapping `replace_env` calls could otherwise leave these globals in a torn
+### state.
+_replace_env_lock = threading.RLock()
 
 
 def apply_environment_patches(env: Optional[Dict[str, Any]] = None) -> None:
@@ -222,57 +230,73 @@ def replace_env(env: Union[Dict[str, Any], None]):
     old_venvs_dir_path = paths.VIRTENV_RESOURCES_PATH
     old_config_dir_path = paths.CONFIG_DIR_PATH
 
-    os.environ.update(env)
-
     root_dir_env_var = STATIC_CONFIG['environment']['root']
     plugins_dir_env_var = STATIC_CONFIG['environment']['plugins']
     config_dir_env_var = STATIC_CONFIG['environment']['config_dir']
     venvs_dir_env_var = STATIC_CONFIG['environment']['venvs']
 
     replaced_root = False
-    if root_dir_env_var in env:
-        root_dir_path = pathlib.Path(env[root_dir_env_var])
-        paths.set_root(root_dir_path)
-        replaced_root = True
-
     replaced_plugins = False
-    if plugins_dir_env_var in env:
-        plugins_dir_paths = env[plugins_dir_env_var]
-        paths.set_plugins_dir_paths(plugins_dir_paths)
-        replaced_plugins = True
-
     replaced_venvs = False
-    if venvs_dir_env_var in env:
-        venv_dir_path = pathlib.Path(env[venvs_dir_env_var])
-        paths.set_venvs_dir_path(venv_dir_path)
-        replaced_venvs = True
-
     replaced_config_dir = False
-    if config_dir_env_var in env:
-        config_dir_path = pathlib.Path(env[config_dir_env_var])
-        paths.set_config_dir_path(config_dir_path)
-        replaced_config_dir = True
 
-    apply_environment_patches(env)
-    apply_environment_uris(env)
+    ### Hold the lock only while swapping the process-global state, not across the
+    ### `yield` (which runs arbitrary user code and could deadlock or serialize the
+    ### whole daemon).
+    with _replace_env_lock:
+        os.environ.update(env)
+
+        if root_dir_env_var in env:
+            root_dir_path = pathlib.Path(env[root_dir_env_var])
+            paths.set_root(root_dir_path)
+            replaced_root = True
+
+        if plugins_dir_env_var in env:
+            plugins_dir_paths = env[plugins_dir_env_var]
+            paths.set_plugins_dir_paths(plugins_dir_paths)
+            replaced_plugins = True
+
+        if venvs_dir_env_var in env:
+            venv_dir_path = pathlib.Path(env[venvs_dir_env_var])
+            paths.set_venvs_dir_path(venv_dir_path)
+            replaced_venvs = True
+
+        if config_dir_env_var in env:
+            config_dir_path = pathlib.Path(env[config_dir_env_var])
+            paths.set_config_dir_path(config_dir_path)
+            replaced_config_dir = True
+
+        apply_environment_patches(env)
+        apply_environment_uris(env)
 
     try:
         yield
     finally:
-        os.environ.clear()
-        os.environ.update(old_environ)
+        with _replace_env_lock:
+            ### Restore `os.environ` by diffing, NOT `clear()` + `update()`.
+            ### `clear()` blanks the entire environment for a window during which a
+            ### concurrent thread (e.g. a daemon's `sync_plugins_symlinks`) sees
+            ### `MRSM_PLUGINS_DIR` as absent and falls back to the host plugins dir,
+            ### so it never creates a project's plugin symlinks (the `plugin:<name>`
+            ### job then fails to import). Keys present in `old_environ` are never
+            ### removed, so vars like `MRSM_PLUGINS_DIR` never momentarily vanish.
+            for key in [k for k in os.environ if k not in old_environ]:
+                del os.environ[key]
+            for key, val in old_environ.items():
+                if os.environ.get(key) != val:
+                    os.environ[key] = val
 
-        if replaced_root:
-            paths.set_root(old_root_dir_path)
+            if replaced_root:
+                paths.set_root(old_root_dir_path)
 
-        if replaced_plugins:
-            paths.set_plugins_dir_paths(old_plugins_dir_paths)
+            if replaced_plugins:
+                paths.set_plugins_dir_paths(old_plugins_dir_paths)
 
-        if replaced_venvs:
-            paths.set_venvs_dir_path(old_venvs_dir_path)
+            if replaced_venvs:
+                paths.set_venvs_dir_path(old_venvs_dir_path)
 
-        if replaced_config_dir:
-            paths.set_config_dir_path(old_config_dir_path)
+            if replaced_config_dir:
+                paths.set_config_dir_path(old_config_dir_path)
 
-        _config().clear()
-        set_config(old_config)
+            _config().clear()
+            set_config(old_config)
