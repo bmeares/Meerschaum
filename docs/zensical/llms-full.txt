@@ -8241,6 +8241,30 @@ Source: https://meerschaum.io/news/changelog/
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.4.3
+
+- **Add a plugin version API endpoint.**  
+  The endpoint `/plugins/{name}/version` now returns a plugin's version string.
+
+- **Hide login warning on plugin updater thread.**  
+  The plugins updater thread no longer will raise a login warning.
+
+- **Add precision kwarg aliases to `get_current_timestamp()`.**  
+  You may now treat `Pipe.precision` as kwargs for `get_current_timestamp()`:
+
+  ```python
+  import meerschaum as mrsm
+  from meerschaum.utils.dtypes import get_current_timestamp
+
+  pipe = mrsm.Pipe(
+      'demo', 'precision', 'timestamp', instance='sql:local',
+      precision={'unit': 's', 'interval': 30},
+  )
+  now = get_current_timestamp(**pipe.precision)
+  print(now)
+  # 2026-06-23 04:30:30+00:00
+  ```
+
 ### v3.4.2
 
 - **Run inline Python with `mrsm python -c`.**  

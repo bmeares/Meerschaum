@@ -22,6 +22,8 @@ def login(
     **kw: Any
 ) -> SuccessTuple:
     """Log in and set the session token."""
+    if warn and self.__dict__.get('_warn', None) is False:
+        warn = False
     if self.login_scheme == 'api_key':
         validate_response = self.post(
             STATIC_CONFIG['api']['endpoints']['tokens'] + '/validate',

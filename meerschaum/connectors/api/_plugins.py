@@ -152,6 +152,27 @@ def get_plugin_attributes(
     return attributes
 
 
+def get_plugin_version(
+    self,
+    plugin: mrsm.core.Plugin,
+    debug: bool = False
+) -> Union[str, None]:
+    """
+    Return a plugin's version.
+    """
+    from meerschaum.utils.warnings import warn
+    r_url = plugin_r_url(plugin) + '/version'
+    response = self.get(r_url, use_token=True, debug=debug)
+    if not response:
+        return None
+    try:
+        version = response.json()
+    except Exception as e:
+        warn(f"Cannot parse version for {plugin}:\n{e}")
+        version = None
+    return version or None
+
+
 def delete_plugin(
     self,
     plugin: mrsm.core.Plugin,

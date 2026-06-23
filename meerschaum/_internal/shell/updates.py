@@ -164,19 +164,21 @@ def _get_remote_plugin_version(
     name: str,
     repo_keys: str,
     debug: bool = False,
-) -> Optional[str]:
+) -> Union[str, None]:
     """Return the latest version of a plugin from its origin repository."""
     try:
         from meerschaum.core import Plugin
         from meerschaum.connectors.parse import parse_repo_keys
         conn = parse_repo_keys(repo_keys)
+        _warn = conn.__dict__.pop('_warn', None)
+        conn._warn = False
         plugin = Plugin(name, repo=repo_keys)
-        attributes = conn.get_plugin_attributes(plugin, debug=debug)
+        version = conn.get_plugin_version(plugin, debug=debug)
+        if _warn is not None:
+            conn._warn = _warn
     except Exception:
         return None
-    if not isinstance(attributes, dict):
-        return None
-    return attributes.get('version')
+    return version
 
 
 def run_version_check_thread(debug: bool = False) -> Union[Thread, None]:

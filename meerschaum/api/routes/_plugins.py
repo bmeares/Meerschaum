@@ -12,9 +12,8 @@ import shutil
 import pathlib
 import os
 
-import meerschaum as mrsm
 from meerschaum.core import User
-from meerschaum.utils.typing import Optional, List, SuccessTuple, Any, Dict
+from meerschaum.utils.typing import Optional, List, SuccessTuple, Any, Dict, Union
 
 from meerschaum.api import (
     fastapi,
@@ -24,7 +23,6 @@ from meerschaum.api import (
     manager,
     debug,
     private,
-    no_auth,
     default_instance_keys,
     ScopedAuth,
 )
@@ -110,7 +108,11 @@ def register_plugin(
 
     if curr_user is not None:
         plugin_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_plugin_user_id(plugin, debug=debug)
-        curr_user_id = get_api_connector(PLUGINS_INSTANCE_KEYS).get_user_id(curr_user, debug=debug) if curr_user is not None else -1
+        curr_user_id = (
+            get_api_connector(PLUGINS_INSTANCE_KEYS).get_user_id(curr_user, debug=debug)
+            if curr_user is not None
+            else -1
+        )
         if plugin_user_id is not None and plugin_user_id != curr_user_id:
             return False, f"User '{curr_user.username}' cannot edit plugin '{plugin}'."
         plugin.user_id = curr_user_id
@@ -154,7 +156,18 @@ def get_plugin_attributes(
     """
     Get a plugin's attributes.
     """
-    return get_api_connector(PLUGINS_INSTANCE_KEYS).get_plugin_attributes(Plugin(name))
+    return get_api_connector(PLUGINS_INSTANCE_KEYS).get_plugin_attributes(Plugin(name), debug=debug)
+
+
+@app.get(plugins_endpoint + '/{name}/version')
+def get_plugin_version(
+    name: str,
+    curr_user = fastapi.Depends(ScopedAuth(['plugins:read'])) if private else None,
+) -> Union[str, None]:
+    """
+    Get a plugin's version.
+    """
+    return get_api_connector(PLUGINS_INSTANCE_KEYS).get_plugin_version(Plugin(name), debug=debug) or None
 
 
 @app.get(plugins_endpoint, tags=['Plugins'])
