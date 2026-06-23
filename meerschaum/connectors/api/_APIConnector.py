@@ -76,6 +76,7 @@ class APIConnector(InstanceConnector):
         delete_plugin,
         get_plugins,
         get_plugin_attributes,
+        get_plugin_version,
     )
     from ._login import login, test_connection
     from ._users import (

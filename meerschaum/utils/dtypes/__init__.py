@@ -1141,6 +1141,8 @@ def get_current_timestamp(
     round_to: str = 'down',
     as_pandas: bool = False,
     as_int: bool = False,
+    unit: str = _STATIC_CONFIG['dtypes']['datetime']['default_precision_unit'],
+    interval: int = 1,
     _now: Union[datetime, int, None] = None,
 ) -> 'Union[datetime, pd.Timestamp, int]':
     """
@@ -1176,6 +1178,12 @@ def get_current_timestamp(
         If `True`, return the timestamp to an integer.
         Overrides `as_pandas`.
 
+    unit: str, default 'us'
+        Alias for `precision_unit`.
+
+    interval: int, default 1
+        Alias for `precision_interval`.
+
     Returns
     -------
     A Pandas Timestamp, datetime object, or integer with precision to the provided unit.
@@ -1187,6 +1195,13 @@ def get_current_timestamp(
     >>> get_current_timestamp('ms')
     Timestamp('2025-07-17 17:59:16.424000+0000', tz='UTC')
     """
+    default_unit = _STATIC_CONFIG['dtypes']['datetime']['default_precision_unit']
+    if unit != precision_unit and precision_unit == default_unit:
+        precision_unit = unit
+
+    if interval != precision_interval and precision_interval == 1:
+        precision_interval = interval
+
     true_precision_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
     if true_precision_unit not in MRSM_PRECISION_UNITS_SCALARS:
         from meerschaum.utils.misc import items_str
