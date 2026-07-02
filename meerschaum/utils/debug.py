@@ -33,7 +33,7 @@ def dprint(
     leader: bool = True,
     timestamp: bool = True,
     package: bool = True,
-    color: Optional[Union[str, List[str]]] = None,
+    color: Optional[Union[str, List[str]], bool] = None,
     attrs: Optional[List[str]] = None,
     nopretty: bool = False,
     _progress: Optional['rich.progress.Progress'] = None,
