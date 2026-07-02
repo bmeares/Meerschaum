@@ -4,6 +4,17 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.4.5
+
+- **Fix a breaking bug in `bootstrap plugin`.**  
+  A bug in `package_venv()` has been fixed, unblocking `bootstrap plugin`.
+
+- **Fix warning bug on shell launch.**  
+  The plugin updater thread was throwing a login warning for `api:mrsm`; this warning has been surpressed.
+
+- **Require `importlib_metadata` when starting the API.**  
+  Some `dash` dependencies require the legacy `importlib_metadata`, so this behavior has been accounted for.
+
 ### v3.4.3 – v3.4.4
 
 - **Add a plugin version API endpoint.**  

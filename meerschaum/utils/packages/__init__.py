@@ -1853,7 +1853,7 @@ def package_venv(package: 'ModuleType') -> Union[str, None]:
     Inspect a package and return the virtual environment in which it presides.
     """
     import os
-    import meerschaum.confing.paths as paths
+    import meerschaum.config.paths as paths
     if str(paths.VIRTENV_RESOURCES_PATH) not in package.__file__:
         return None
     return package.__file__.split(str(paths.VIRTENV_RESOURCES_PATH))[1].split(os.path.sep)[1]

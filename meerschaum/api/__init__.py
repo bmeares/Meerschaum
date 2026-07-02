@@ -42,12 +42,14 @@ uv = attempt_import('uv', lazy=False, check_update=CHECK_UPDATE)
     starlette_responses,
     multipart,
     packaging_version,
+    importlib_metadata,
 ) = attempt_import(
     'fastapi',
     'aiofiles',
     'starlette.responses',
     'multipart',
     'packaging.version',
+    'importlib_metadata',
     lazy=False,
     check_update=CHECK_UPDATE,
 )
