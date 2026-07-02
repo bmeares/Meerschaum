@@ -15,6 +15,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Require `importlib_metadata` when starting the API.**  
   Some `dash` dependencies require the legacy `importlib_metadata`, so this behavior has been accounted for.
 
+- **Fix plugins environment scope for `compose`.**  
+  The `plugins` namespace scope has been fixed to harden the isolation of `compose`.
+
 ### v3.4.3 – v3.4.4
 
 - **Add a plugin version API endpoint.**  
