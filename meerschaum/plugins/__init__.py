@@ -41,6 +41,7 @@ __all__ = (
     "web_page",
     "import_plugins",
     "from_plugin_import",
+    "invalidate_plugins_cache",
     "reload_plugins",
     "get_plugins",
     "get_data_plugins",
@@ -922,6 +923,40 @@ def unload_plugins(
                     file_symlink_path.unlink()
             except Exception:
                 pass
+
+
+def invalidate_plugins_cache() -> None:
+    """
+    Pop the cached `plugins` package and its submodules from `sys.modules`
+    and reset the loaded-plugins state.
+
+    The `plugins` package caches its `__path__` (the resolved
+    `PLUGINS_RESOURCES_PATH`) at import time. When the active root or
+    plugins-dir scope changes in-process (e.g. via
+    `meerschaum.config.environment.replace_env`), that stale `__path__`
+    makes subsequent plugin imports re-discover plugins under the previous
+    scope's `.internal/plugins` directory. Call this whenever the plugins
+    scope changes so the next import rebuilds against the current
+    `PLUGINS_RESOURCES_PATH`.
+    """
+    global _loaded_plugins, _synced_symlinks
+    import sys
+    import meerschaum.config.paths as paths
+
+    plugins_stem = paths.PLUGINS_RESOURCES_PATH.stem
+    module_prefix = plugins_stem + '.'
+    for mod_name in [
+        mod_name
+        for mod_name in sys.modules
+        if mod_name == plugins_stem or mod_name.startswith(module_prefix)
+    ]:
+        _ = sys.modules.pop(mod_name, None)
+
+    _loaded_plugins = False
+    ### Also reset the symlinks counter — it's per-scope state, and leaving it
+    ### >1 makes `sync_plugins_symlinks` skip creating the new scope's
+    ### `.internal/plugins` (so `plugins` imports as an empty namespace package).
+    _synced_symlinks = 0
 
 
 def reload_plugins(plugins: Optional[List[str]] = None, debug: bool = False) -> None:
