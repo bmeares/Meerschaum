@@ -56,6 +56,7 @@ packages: Dict[str, Dict[str, str]] = {
         'uv'                         : 'uv>=0.2.11',
         'pydantic'                   : 'pydantic>=2.11.7',
         'annotated-types'            : 'annotated-types>=0.7.0',
+        'importlib_metadata'         : 'importlib-metadata>=4.12.0',
     },
     '_internal'                      : {
         'apscheduler'                : (
@@ -128,7 +129,6 @@ packages: Dict[str, Dict[str, str]] = {
         'ruamel.yaml'                : 'ruamel.yaml>=0.16.12',
         'modin'                      : 'modin[ray]>=0.8.3',
         'nanoid'                     : 'nanoid>=2.0.0',
-        'importlib_metadata'         : 'importlib-metadata>=4.12.0',
     },
 }
 packages['sql'] = {

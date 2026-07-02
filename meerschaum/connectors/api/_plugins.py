@@ -162,7 +162,7 @@ def get_plugin_version(
     """
     from meerschaum.utils.warnings import warn
     r_url = plugin_r_url(plugin) + '/version'
-    response = self.get(r_url, use_token=True, debug=debug)
+    response = self.get(r_url, use_token=(self.label != 'mrsm'), debug=debug)
     if not response:
         return None
     try:
