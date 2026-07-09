@@ -55,9 +55,11 @@ Never run two test.sh invocations concurrently (shared `test_root` + API port 89
 
 ## 5. Merge, build, publish to PyPI
 
-Once CI is green and the PR is merged:
+Once CI is green, mark the PR ready (release PRs often start as drafts) and merge:
 
 ```bash
+gh pr ready <number>
+gh pr merge <number> --squash
 git checkout main && git pull
 ./scripts/build.sh          # cleans, builds docs, regenerates requirements, builds wheel + sdist into dist/
 ```
@@ -72,7 +74,7 @@ TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_TOKEN" twine upload dist/*
 ## 6. Tag and GitHub release
 
 ```bash
-git tag vX.Y.Z
+git tag -m "vX.Y.Z" vX.Y.Z   # -m required: git config forces annotated tags
 git push origin main --tags
 ```
 
