@@ -123,10 +123,18 @@ if ENVIRONMENT_VENVS_DIR in os.environ:
 else:
     _VENVS_DIR_PATH = _ROOT_DIR_PATH / 'venvs'
 
+### When MRSM_VENVS_DIR is unset, keep the venvs path derived from the root so
+### `set_root()` (e.g. compose running actions in-process) re-derives it too.
+_VENVS_DIR_PATH_VALUE = (
+    _VENVS_DIR_PATH.as_posix()
+    if ENVIRONMENT_VENVS_DIR in os.environ
+    else ('{ROOT_DIR_PATH}', 'venvs')
+)
+
 paths = {
     'PACKAGE_ROOT_PATH'              : Path(__file__).parent.parent.resolve().as_posix(),
     'ROOT_DIR_PATH'                  : _ROOT_DIR_PATH.as_posix(),
-    'VIRTENV_RESOURCES_PATH'         : _VENVS_DIR_PATH.as_posix(),
+    'VIRTENV_RESOURCES_PATH'         : _VENVS_DIR_PATH_VALUE,
     'CONFIG_DIR_PATH'                : _CONFIG_DIR_PATH.as_posix(),
     'DEFAULT_CONFIG_DIR_PATH'        : ('{ROOT_DIR_PATH}', 'default_config'),
     'PATCH_DIR_PATH'                 : ('{ROOT_DIR_PATH}', 'patch_config'),
@@ -239,6 +247,9 @@ def set_plugins_dir_paths(plugins_dir_paths: Union[List[Path], Path, str]):
 def set_venvs_dir_path(venvs_dir_path: Union[str, Path]):
     """Modify the value of `VIRTENV_RESOURCES_PATH`."""
     paths['VIRTENV_RESOURCES_PATH'] = Path(venvs_dir_path).resolve().as_posix()
+    ### `set_root()` may have cached the resolved path as a module global,
+    ### which shadows `__getattr__` — drop it so lookups hit `paths` again.
+    globals().pop('VIRTENV_RESOURCES_PATH', None)
 
 def set_config_dir_path(config_dir_path: Union[str, Path]):
     paths['CONFIG_DIR_PATH'] = Path(config_dir_path).resolve().as_posix()
@@ -302,7 +313,10 @@ def replace_venvs_dir_path(venvs_dir_path: Union[Path, None]):
     try:
         yield
     finally:
-        set_venvs_dir_path(old_venvs_dir_path)
+        ### Restore the raw value — it may be a ('{ROOT_DIR_PATH}', 'venvs')
+        ### template, which `set_venvs_dir_path` would mangle via `Path()`.
+        paths['VIRTENV_RESOURCES_PATH'] = old_venvs_dir_path
+        globals().pop('VIRTENV_RESOURCES_PATH', None)
 
 @contextlib.contextmanager
 def replace_config_dir_path(config_dir_path: Union[Path, None]):
