@@ -8241,6 +8241,11 @@ Source: https://meerschaum.io/news/changelog/
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.4.6
+
+- **Fix venvs path not following `set_root()`.**  
+  When `MRSM_VENVS_DIR` is unset, `VIRTENV_RESOURCES_PATH` now derives from `ROOT_DIR_PATH` dynamically, so in-process root swaps (e.g. `compose` running custom actions under `replace_root_dir()`) activate venvs from `{root}/venvs` — matching where subprocess-mode commands like `install required` install packages. Previously the path was frozen at import time, so custom plugin actions run through `compose` could not import their own `required` dependencies.
+
 ### v3.4.5
 
 - **Fix a breaking bug in `bootstrap plugin`.**  
