@@ -6,6 +6,9 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v3.4.7
 
+- **Reduce CPU usage while watching job logs.**  
+  Rich console formatting is now reused across log lines instead of being rebuilt for every line.
+
 - **Clear the plugins update cache after upgrading plugins.**  
   `upgrade plugins` now removes its cached remote-version results after a successful install, so the next shell does not show an outdated upgrade notice.
 
