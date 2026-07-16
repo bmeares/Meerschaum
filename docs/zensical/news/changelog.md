@@ -4,6 +4,20 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.4.7
+
+- **Reduce CPU usage while watching job logs.**  
+  Rich console formatting is now reused across log lines instead of being rebuilt for every line.
+
+- **Clear the plugins update cache after upgrading plugins.**  
+  `upgrade plugins` now removes its cached remote-version results after a successful install, so the next shell does not show an outdated upgrade notice.
+
+- **Re-sync plugins symlinks after `clear cache`.**  
+  The action `clear cache` now delete and rebuilds internal plugins symlinks (clearing out symlinked plugins from other plugins dirs).
+
+- **Move plugins update cache to `.internal/cache`.**  
+  The plugins update checker files now reside within `.internal/cache`.
+
 ### v3.4.6
 
 - **Fix venvs path not following `set_root()`.**  
@@ -5571,4 +5585,3 @@ Meerschaum's first point release focused on a lot, but mainly stability and impr
 ## 0.0.x Releases
 
 A lot was accomplished in the first 60 releases of Meerschaum. For the most part, the groundwork for core concepts like pipes, syncing, the config system, SQL and API connectors, bulk inserts, and more was laid.
-

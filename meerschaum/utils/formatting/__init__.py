@@ -252,6 +252,8 @@ console = None
 def get_console():
     """Get the rich console."""
     global console
+    if console is not None:
+        return console
     from meerschaum.utils.packages import import_rich, attempt_import
     rich = import_rich()
     rich_console = attempt_import('rich.console')

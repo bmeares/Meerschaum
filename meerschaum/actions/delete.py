@@ -633,12 +633,14 @@ def _delete_cache(
     delete cache
     delete cache valkey:main sql:main
     """
+    import os
     import shutil
     import meerschaum.config.paths as paths
     from meerschaum.utils.prompt import yes_no
     from meerschaum.utils.warnings import info, dprint, warn
     from meerschaum.utils.formatting import make_header
-    from meerschaum.utils.misc import get_directory_size
+    from meerschaum.utils.misc import get_directory_size, is_symlink
+    import meerschaum.plugins
     humanize = mrsm.attempt_import('humanize')
 
     chunksize = 1000 if not chunksize or chunksize < 1 else chunksize
@@ -658,6 +660,13 @@ def _delete_cache(
         try:
             shutil.rmtree(paths.CACHE_RESOURCES_PATH)
             paths.CACHE_RESOURCES_PATH.mkdir(exist_ok=True, parents=True)
+            for filename in os.listdir(paths.PLUGINS_RESOURCES_PATH):
+                path = paths.PLUGINS_RESOURCES_PATH / filename
+                if not is_symlink(path):
+                    continue
+                path.unlink(missing_ok=True)
+            meerschaum.plugins._synced_symlinks = 0
+            meerschaum.plugins.sync_plugins_symlinks(debug=debug)
         except Exception as e:
             return False, f"Failed to clean up cache:\n{e}"
 

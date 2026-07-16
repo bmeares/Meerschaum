@@ -344,9 +344,9 @@ def get_plugins_update_message() -> str:
         return ''
 
     header = (
-        colored("The following plugins are out of date:", 'yellow')
+        colored(" The following plugins are out of date:", 'yellow')
         if ANSI
-        else "The following plugins are out of date:"
+        else " The following plugins are out of date:"
     )
     lines = [header]
     for name, local_version, remote_version in stale_plugins:
@@ -356,14 +356,14 @@ def get_plugins_update_message() -> str:
             if ANSI
             else f'v{local_version} → v{remote_version}'
         )
-        lines.append(f"  - {plugin_label} ({version_label})")
+        lines.append(f"   - {plugin_label} ({version_label})")
 
     instruction = (
-        colored("Run ", 'white')
+        colored(" Run ", 'white')
         + colored("upgrade plugins", 'green')
         + colored(" to update.", 'white')
         if ANSI
-        else "Run upgrade plugins to update."
+        else " Run upgrade plugins to update."
     )
     lines.append(instruction)
 
