@@ -8249,6 +8249,12 @@ This is the current release cycle, so stay tuned for future releases!
 - **Clear the plugins update cache after upgrading plugins.**  
   `upgrade plugins` now removes its cached remote-version results after a successful install, so the next shell does not show an outdated upgrade notice.
 
+- **Re-sync plugins symlinks after `clear cache`.**  
+  The action `clear cache` now delete and rebuilds internal plugins symlinks (clearing out symlinked plugins from other plugins dirs).
+
+- **Move plugins update cache to `.internal/cache`.**  
+  The plugins update checker files now reside within `.internal/cache`.
+
 ### v3.4.6
 
 - **Fix venvs path not following `set_root()`.**  

@@ -143,11 +143,6 @@ paths = {
 
     'CONFIG_BACKUPS_RESOURCES_PATH'  : ('{INTERNAL_RESOURCES_PATH}', 'config_backups'),
 
-    'UPDATES_RESOURCES_PATH'         : ('{INTERNAL_RESOURCES_PATH}', 'updates'),
-    'UPDATES_CACHE_PATH'             : ('{UPDATES_RESOURCES_PATH}', 'cache.json'),
-    'PLUGIN_UPDATES_CACHE_PATH'      : ('{UPDATES_RESOURCES_PATH}', 'plugins.json'),
-    'UPDATES_LOCK_PATH'              : ('{UPDATES_RESOURCES_PATH}', '.updates.lock'),
-
     'STACK_RESOURCES_PATH'           : ('{ROOT_DIR_PATH}', 'stack'),
     'STACK_COMPOSE_FILENAME'         : 'docker-compose.yaml',
     'STACK_COMPOSE_PATH'             : ('{STACK_RESOURCES_PATH}', '{STACK_COMPOSE_FILENAME}'),
@@ -173,6 +168,11 @@ paths = {
     'USERS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'users'),
     'VENVS_CACHE_RESOURCES_PATH'     : ('{CACHE_RESOURCES_PATH}', 'venvs'),
     'SQL_CONN_CACHE_RESOURCES_PATH'  : ('{CACHE_RESOURCES_PATH}', 'sql'),
+
+    'UPDATES_RESOURCES_PATH'         : ('{CACHE_RESOURCES_PATH}', 'updates'),
+    'UPDATES_CACHE_PATH'             : ('{UPDATES_RESOURCES_PATH}', 'cache.json'),
+    'PLUGIN_UPDATES_CACHE_PATH'      : ('{UPDATES_RESOURCES_PATH}', 'plugins.json'),
+    'UPDATES_LOCK_PATH'              : ('{UPDATES_RESOURCES_PATH}', '.updates.lock'),
 
     'CLI_RESOURCES_PATH'             : ('{INTERNAL_RESOURCES_PATH}', 'cli'),
     'CLI_LOGS_RESOURCES_PATH'        : ('{CLI_RESOURCES_PATH}', 'logs'),

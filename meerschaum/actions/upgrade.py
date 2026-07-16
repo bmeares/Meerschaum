@@ -210,9 +210,6 @@ def _upgrade_plugins(
             **kw
         )
 
-        if install_success:
-            from meerschaum.config import paths
-            paths.PLUGIN_UPDATES_CACHE_PATH.unlink(missing_ok=True)
         return install_success, install_msg
 
     return False, "No plugins upgraded."

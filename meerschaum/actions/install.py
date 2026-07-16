@@ -93,6 +93,9 @@ def _install_plugins(
             debug = debug,
         )
         print_tuple((success, msg))
+        if success:
+            from meerschaum.config import paths
+            paths.PLUGIN_UPDATES_CACHE_PATH.unlink(missing_ok=True)
 
     return actions['reload'](debug=debug)
 
