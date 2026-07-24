@@ -76,5 +76,11 @@ def register(
             'columns': cols,
         }
 
+    ### Refuse an index column which cannot be sorted or deduplicated, rather than
+    ### registering a pipe whose second sync is guaranteed to fail.
+    indices_success, indices_msg = self.validate_indices(debug=debug)
+    if not indices_success:
+        return indices_success, indices_msg
+
     with Venv(get_connector_plugin(self.instance_connector)):
         return self.instance_connector.register_pipe(self, debug=debug, **kw)

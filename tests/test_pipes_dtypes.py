@@ -1318,3 +1318,95 @@ def test_date_inferred(flavor: str):
 
     df = pipe.get_data(debug=debug)
     assert 'date32' in str(df.dtypes['day'])
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_json_index_column_is_rejected(flavor: str):
+    """
+    A `json` column cannot be an index column: its values are dictionaries or
+    lists, which Pandas cannot hash when sorting or deduplicating during a sync.
+    The failure would otherwise surface on the *second* sync as
+    `TypeError: unhashable type: 'dict'`, so it is refused up front.
+    """
+    conn = conns[flavor]
+    for col_ix in ('datetime', 'id', 'primary'):
+        pipe = Pipe(
+            'test', 'json_index', col_ix,
+            instance=conn,
+            parameters={
+                'columns': (
+                    {'datetime': 'attrs'}
+                    if col_ix == 'datetime'
+                    else {'datetime': 'ts', col_ix: 'attrs'}
+                ),
+                'dtypes': {'attrs': 'json'},
+            },
+        )
+        pipe.delete(debug=debug)
+
+        success, msg = pipe.register(debug=debug)
+        assert not success, f"Registered a '{col_ix}' index on a json column: {msg}"
+        assert 'json' in msg.lower()
+
+        ### Syncing must report the same reason rather than raising from Pandas.
+        success, msg = pipe.sync(
+            [{'ts': datetime(2024, 1, 1, tzinfo=timezone.utc), 'attrs': {'a': 1}}],
+            debug=debug,
+        )
+        assert not success, f"Synced a '{col_ix}' index on a json column: {msg}"
+        assert 'json' in msg.lower()
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_json_column_not_indexed_syncs_repeatedly(flavor: str):
+    """
+    A `json` column which is *not* an index column must sync more than once.
+    """
+    conn = conns[flavor]
+    pipe = Pipe(
+        'test', 'json_value_col',
+        instance=conn,
+        parameters={
+            'columns': {'datetime': 'ts', 'id': 'sid'},
+            'dtypes': {'sid': 'int', 'attrs': 'json'},
+        },
+    )
+    pipe.delete(debug=debug)
+
+    ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    success, msg = pipe.sync([{'ts': ts, 'sid': 1, 'attrs': {'a': 1}}], debug=debug)
+    assert success, msg
+
+    ### The second sync is what exercises the dedup path against existing rows.
+    success, msg = pipe.sync([{'ts': ts, 'sid': 1, 'attrs': {'a': 2}}], debug=debug)
+    assert success, msg
+
+    df = pipe.get_data(debug=debug)
+    assert len(df) == 1
+    assert df['attrs'][0] == {'a': 2}
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_json_column_allowed_under_indices(flavor: str):
+    """
+    A `json` column may be declared under `indices` — a non-unique database index
+    is pure DDL and never hashes values client-side. On PostgreSQL the column is
+    stored as `JSONB`, which supports B-tree, hash, and GIN indices.
+    """
+    conn = conns[flavor]
+    pipe = Pipe(
+        'test', 'json_perf_index',
+        instance=conn,
+        parameters={
+            'columns': {'datetime': 'ts', 'id': 'sid'},
+            'indices': {'cfg': 'attrs'},
+            'dtypes': {'sid': 'int', 'attrs': 'json'},
+        },
+    )
+    pipe.delete(debug=debug)
+
+    ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    success, msg = pipe.sync([{'ts': ts, 'sid': 1, 'attrs': {'a': 1}}], debug=debug)
+    assert success, msg
+    success, msg = pipe.sync([{'ts': ts, 'sid': 1, 'attrs': {'a': 2}}], debug=debug)
+    assert success, msg

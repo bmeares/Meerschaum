@@ -28,6 +28,11 @@ This is the current release cycle, so stay tuned for future releases!
 - **Fix `--no-auth` rejecting every authenticated route.**  
   `ScopedAuth` resolved its principal as a sub-dependency, and that raised a 401 on a missing `Authorization` header before the `no_auth` check could run. Starting the API with `--no-auth` now works as documented.
 
+- **Reject `json` columns used as index columns.**  
+  A `json` column holds `dict` or `list` values, and syncing sorts and deduplicates on the index columns in Pandas, where containers are unhashable. Previously the first sync succeeded and the *second* one raised `TypeError: unhashable type: 'dict'` from deep inside Pandas. `register()`, `edit()`, and `sync()` now refuse it up front with the reason and the fix.
+
+    This is a client-side limit, not a database one, so declaring a `json` column under `indices` (a non-unique performance index) is still allowed — on PostgreSQL-like flavors the column is `JSONB`, which supports B-tree, hash, and GIN indices. See [Data Types](/reference/pipes/dtypes/#json-columns-cannot-be-index-columns).
+
 - **Add Plotly Dash's MCP server as an opt-in development aid.**  
   Dash can expose the web console's layout at `/dash/_mcp` so an agent can inspect the component tree while you write a web page plugin. It is disabled by default (`api:dash:mcp:enabled`) because it is served inside the Dash WSGI app where token auth does not apply. When enabled, Meerschaum limits it to layout introspection and opts every callback out, requiring `mcp_enabled=True` per callback. Requires `dash>=4.3.0`; older versions are detected and warned about instead of crashing the app.
 

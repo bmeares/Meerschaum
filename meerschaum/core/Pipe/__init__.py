@@ -129,6 +129,7 @@ class Pipe:
         get_parameters,
         get_dtypes,
         update_parameters,
+        validate_indices,
         tags,
         get_id,
         id,

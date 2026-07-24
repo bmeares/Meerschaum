@@ -57,6 +57,11 @@ def edit(
                 set_val_in_dict_path(self.parameters, path, vals['original'])
 
     if not interactive:
+        ### Refuse an index column which cannot be sorted or deduplicated.
+        indices_success, indices_msg = self.validate_indices(debug=debug)
+        if not indices_success:
+            return indices_success, indices_msg
+
         with Venv(get_connector_plugin(self.instance_connector)):
             return self.instance_connector.edit_pipe(self, patch=patch, debug=debug, **kw)
 

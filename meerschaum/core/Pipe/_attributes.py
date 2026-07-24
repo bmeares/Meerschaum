@@ -381,6 +381,56 @@ def get_dtypes(
     return _dtypes
 
 
+### Dtypes whose values are containers (`dict` / `list`), which Pandas cannot hash.
+UNHASHABLE_DTYPES: Tuple[str, ...] = ('json',)
+
+
+def validate_indices(self, debug: bool = False) -> mrsm.SuccessTuple:
+    """
+    Return whether this pipe's index columns can actually be used as indices.
+
+    A `json` column holds `dict` or `list` values. Syncing sorts and deduplicates
+    on the index columns in Pandas (`Series.unique()`, `DataFrame.sort_values()`),
+    and both raise `TypeError: unhashable type: 'dict'` on container values. The
+    failure surfaces on the *second* sync — the first one has nothing to diff
+    against — so it is worth reporting up front instead of at that point.
+
+    Note this is a client-side limitation, not a database one: on PostgreSQL the
+    `json` dtype is stored as `JSONB`, which does support B-tree, hash, and GIN
+    indices. Non-unique performance indices declared under `indices` are pure
+    DDL and are not affected; only the index *roles* in `columns` are.
+
+    Returns
+    -------
+    A `SuccessTuple` of whether the index columns are valid.
+    """
+    columns = self.columns or {}
+    if not columns:
+        return True, "Success"
+
+    dtypes = self.get_dtypes(infer=False, debug=debug)
+    offenders = {
+        col_ix: col
+        for col_ix, col in columns.items()
+        if col and str(dtypes.get(col, '')).lower() in UNHASHABLE_DTYPES
+    }
+    if not offenders:
+        return True, "Success"
+
+    listing = ', '.join(
+        f"'{col}' (as the '{col_ix}' index)"
+        for col_ix, col in sorted(offenders.items())
+    )
+    return False, (
+        f"Cannot use a 'json' column as an index column: {listing}.\n"
+        "    JSON values are dictionaries or lists, which cannot be sorted or "
+        "deduplicated when syncing.\n"
+        "    Either give the column a scalar dtype (e.g. 'str'), or move it out of "
+        "`columns` and\n"
+        "    declare it under `indices` if you only need a database index on it."
+    )
+
+
 @property
 def upsert(self) -> bool:
     """
