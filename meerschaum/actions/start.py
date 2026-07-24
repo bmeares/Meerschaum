@@ -28,6 +28,7 @@ def start(
         'connectors': _start_connectors,
         'pipeline': _start_pipeline,
         'daemons': _start_daemons,
+        'mcp': _start_mcp,
     }
     return choose_subaction(action, options, **kw)
 
@@ -850,6 +851,26 @@ def _start_worker(action: Optional[List[str]] = None, **kwargs: Any) -> SuccessT
     ix = int(action[0])
     worker = ActionWorker(ix)
     return worker.run()
+
+
+def _start_mcp(action: Optional[List[str]] = None, **kwargs: Any) -> SuccessTuple:
+    """
+    Start an MCP (Model Context Protocol) server on stdin and stdout.
+
+    An MCP client spawns this as a subprocess and speaks JSON-RPC over the pipe,
+    so it exposes this Meerschaum installation with no API server and no token.
+    It runs with the privileges of the shell which launched it, the same as any
+    other Meerschaum command — use the API's `/mcp` endpoint instead when the
+    client is remote.
+
+    Usage:
+        `start mcp`
+
+    Example client configuration:
+        {"mcpServers": {"meerschaum": {"command": "mrsm", "args": ["start", "mcp"]}}}
+    """
+    from meerschaum.mcp._stdio import serve_stdio
+    return serve_stdio()
 
 
 ### NOTE: This must be the final statement of the module.

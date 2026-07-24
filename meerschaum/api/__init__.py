@@ -102,6 +102,15 @@ production = get_uvicorn_config().get('production', False)
 _include_dash = (not no_dash)
 _include_webterm = (not no_webterm) and _include_dash
 docs_enabled = not production or sys_config.get('endpoints', {}).get('docs_in_production', True)
+
+### Meerschaum's own MCP server at `/mcp`, authenticated per-tool by OAuth2 scope.
+mcp_enabled = sys_config.get('mcp', {}).get('enabled', True)
+
+### Plotly Dash's MCP server, which exposes the web console's layout and callbacks.
+### Off by default: it is served from inside the Dash WSGI app, where FastAPI's
+### token auth does not apply, so every Dash callback it advertises is reachable
+### without credentials.
+dash_mcp_enabled = sys_config.get('dash', {}).get('mcp', {}).get('enabled', False)
 webterm_port = (
     get_uvicorn_config().get('webterm_port', None)
     or mrsm.get_config('api', 'webterm', 'port')
@@ -292,6 +301,13 @@ app = fastapi.FastAPI(
             'name': 'Version',
             'description': 'Version information.',
         },
+        {
+            'name': 'MCP',
+            'description': (
+                "Model Context Protocol server (Streamable HTTP transport). "
+                "Each tool requires the same scope as its equivalent REST route."
+            ),
+        },
     ],
 )
 
@@ -330,6 +346,20 @@ import meerschaum.api._websockets
 ### Skip importing the dash if `--no-dash` is provided.
 if _include_dash:
     import meerschaum.api.dash
+
+### The `mcp` plugin predates the built-in `/mcp` endpoint and registers a route
+### at the same path. Routes registered above win, so the plugin's route is
+### unreachable rather than conflicting — but say so plainly instead of leaving
+### two implementations installed.
+if mcp_enabled:
+    from meerschaum.mcp import has_mcp_plugin
+    if has_mcp_plugin():
+        warn(
+            "The 'mcp' plugin is superseded by Meerschaum's built-in MCP endpoint, "
+            "which is now serving '/mcp'. The plugin's route is unreachable; "
+            "uninstall it with `mrsm uninstall plugin mcp`.",
+            stack=False,
+        )
 
 ### Execute the API plugins functions.
 for module_name, functions_list in _api_plugins.items():

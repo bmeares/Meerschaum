@@ -45,6 +45,7 @@ STATIC_CONFIG: Dict[str, Any] = {
             'chaining': '/chaining',
             'websocket': '/ws',
             'dash': '/dash',
+            'mcp': '/mcp',
             'webterm': r'/webterm/{session_id}',
             'webterm_websocket': r'/websocket/{session_id}',
             'info': '/info',

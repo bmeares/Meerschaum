@@ -112,59 +112,109 @@ async def load_user_or_token(
     return get_token_from_authorization(authorization)
 
 
+def get_granted_scopes(
+    request: Request,
+    user_or_token: Union[User, Token, None],
+) -> List[str]:
+    """
+    Return the scopes granted to an authenticated principal.
+
+    Long-lived API tokens are always resolved against the database so that a
+    revoked or edited token takes effect immediately; JWTs are trusted to carry
+    their own scopes.
+
+    Parameters
+    ----------
+    request: Request
+        The incoming request, for its `Authorization` header.
+
+    user_or_token: Union[User, Token, None]
+        The principal resolved by `load_user_or_token()`.
+
+    Returns
+    -------
+    A list of scope strings. `['*']` grants everything.
+    """
+    if no_auth:
+        return ['*']
+
+    if not user_or_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated.",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    authorization = request.headers.get(
+        'authorization', request.headers.get('Authorization', None)
+    )
+
+    ### For long-lived API tokens, always hit the database.
+    if authorization and 'mrsm-key:' in authorization:
+        return user_or_token.get_scopes(refresh=True, debug=debug)
+
+    ### For JWTs, trust the scopes in the token.
+    if not authorization:
+        # This should be caught by `load_user_or_token` but we can be safe.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated.",
+        )
+
+    scheme, _, token_str = authorization.partition(' ')
+    if not token_str or scheme.lower() != 'bearer':
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unsupported authentication scheme.",
+        )
+
+    try:
+        payload = jose_jwt.decode(token_str, SECRET, algorithms=['HS256'])
+    except jose_exceptions.JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid access token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return payload.get('scopes', [])
+
+
+async def CurrentScopes(request: Request) -> List[str]:
+    """
+    Dependency which returns the caller's granted scopes without requiring any
+    particular one.
+
+    Used by endpoints which multiplex many operations behind a single route (the
+    MCP server), where the required scope depends on which operation was
+    requested. Every other endpoint should use `ScopedAuth` instead.
+
+    `load_user_or_token` is awaited directly rather than declared as a
+    sub-dependency so that the `no_auth` check happens first: it raises a 401 on
+    a missing `Authorization` header, which would otherwise fire even when the
+    server is running without authentication.
+    """
+    if no_auth:
+        return ['*']
+
+    return get_granted_scopes(request, await load_user_or_token(request))
+
+
 def ScopedAuth(scopes: List[str]):
     """
     Dependency factory for authenticating with either a user session or a scoped token.
     """
     async def _authenticate(
         request: Request,
-        user_or_token: Union[User, Token, None] = Depends(
-            load_user_or_token,
-        ),
     ) -> Union[User, Token, None]:
+        ### Checked before resolving a principal: `load_user_or_token` raises a
+        ### 401 on a missing `Authorization` header, which would defeat
+        ### `--no-auth` entirely if it ran as a sub-dependency.
         if no_auth:
             return None
 
-        if not user_or_token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Not authenticated.",
-                headers={"WWW-Authenticate": "Basic"},
-            )
-
-        authorization = request.headers.get('authorization', request.headers.get('Authorization', None))
-        is_long_lived = authorization and 'mrsm-key:' in authorization
-
-        current_scopes = []
-        ### For long-lived API tokens, always hit the database.
-        if is_long_lived:
-            current_scopes = user_or_token.get_scopes(refresh=True, debug=debug)
-        
-        ### For JWTs, trust the scopes in the token.
-        else:
-            if not authorization:
-                # This should be caught by `load_user_or_token` but we can be safe.
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Not authenticated.",
-                )
-            
-            scheme, _, token_str = authorization.partition(' ')
-            if not token_str or scheme.lower() != 'bearer':
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Unsupported authentication scheme.",
-                )
-
-            try:
-                payload = jose_jwt.decode(token_str, SECRET, algorithms=['HS256'])
-                current_scopes = payload.get('scopes', [])
-            except jose_exceptions.JWTError:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid access token.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+        user_or_token = await load_user_or_token(request)
+        current_scopes = get_granted_scopes(request, user_or_token)
 
         if '*' in current_scopes:
             return user_or_token
@@ -175,7 +225,7 @@ def ScopedAuth(scopes: List[str]):
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Missing required scope: '{scope}'",
                 )
-        
+
         return user_or_token
     return _authenticate
 

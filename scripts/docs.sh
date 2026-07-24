@@ -13,6 +13,9 @@ cat "$PARENT"/docs/zensical/news/changelog.md > "$PARENT"/CHANGELOG.md
 ### Update the root acknowledgements to match the zensical acknowledgements.
 cat "$PARENT"/docs/zensical/news/acknowledgements.md > "$PARENT"/ACKNOWLEDGEMENTS.md
 
+### Regenerate the MCP tool reference from the registry in `meerschaum.mcp`.
+$PYTHON_BIN "$PARENT"/scripts/generate_mcp_docs.py
+
 ### Build technical documentation.
 PDOC_ALLOW_EXEC=1 $PYTHON_BIN -m pdoc -o docs/pdoc -d numpy -n --favicon https://meerschaum.io/assets/logo.ico --logo https://meerschaum.io/assets/logo_48x48.png ./meerschaum/
 

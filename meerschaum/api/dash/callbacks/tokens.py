@@ -26,6 +26,7 @@ from meerschaum.api.dash.tokens import (
     get_tokens_table,
     build_tokens_register_input_modal,
     build_tokens_register_output_modal,
+    check_token_access,
 )
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.daemon import get_new_daemon_name
@@ -273,6 +274,7 @@ def edit_token_button_click(n_clicks: int):
     State({'type': 'tokens-expiration-datepickersingle', 'index': MATCH}, 'date'),
     State({'type': 'tokens-scopes-checklist', 'index': MATCH}, 'value'),
     State({'type': 'tokens-name-input', 'index': MATCH}, 'value'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
 def edit_token_submit_button_click(
@@ -280,6 +282,7 @@ def edit_token_submit_button_click(
     expiration: Optional[datetime],
     scopes: List[str],
     label: str,
+    session_store_data: Optional[Dict[str, Any]] = None,
 ):
     if not n_clicks:
         raise PreventUpdate
@@ -290,6 +293,10 @@ def edit_token_submit_button_click(
 
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     token_id = component_dict['index']
+
+    allowed, reason = check_token_access(token_id, session_store_data)
+    if not allowed:
+        return dash.no_update, alert_from_success_tuple((False, reason))
 
     expiration_date = datetime.fromisoformat(expiration) if expiration is not None else None
 
@@ -336,9 +343,13 @@ def delete_token_click(n_clicks: int):
     Output({'type': 'tokens-invalidate-modal', 'index': MATCH}, 'is_open'),
     Output({'type': 'tokens-invalidate-alerts-div', 'index': MATCH}, 'children'),
     Input({'type': 'tokens-invalidate-confirm-button', 'index': MATCH}, 'n_clicks'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def invalidate_token_confirm_click(n_clicks: int):
+def invalidate_token_confirm_click(
+    n_clicks: int,
+    session_store_data: Optional[Dict[str, Any]] = None,
+):
     if not n_clicks:
         raise PreventUpdate
 
@@ -348,6 +359,10 @@ def invalidate_token_confirm_click(n_clicks: int):
 
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     token_id = component_dict['index']
+
+    allowed, reason = check_token_access(token_id, session_store_data)
+    if not allowed:
+        return dash.no_update, dash.no_update, alert_from_success_tuple((False, reason))
 
     token = Token(
         id=token_id,
@@ -366,9 +381,13 @@ def invalidate_token_confirm_click(n_clicks: int):
     Output({'type': 'tokens-delete-modal', 'index': MATCH}, 'is_open'),
     Output({'type': 'tokens-delete-alerts-div', 'index': MATCH}, 'children'),
     Input({'type': 'tokens-delete-confirm-button', 'index': MATCH}, 'n_clicks'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def delete_token_confirm_click(n_clicks: int):
+def delete_token_confirm_click(
+    n_clicks: int,
+    session_store_data: Optional[Dict[str, Any]] = None,
+):
     if not n_clicks:
         raise PreventUpdate
 
@@ -378,6 +397,10 @@ def delete_token_confirm_click(n_clicks: int):
 
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     token_id = component_dict['index']
+
+    allowed, reason = check_token_access(token_id, session_store_data)
+    if not allowed:
+        return dash.no_update, dash.no_update, alert_from_success_tuple((False, reason))
 
     token = Token(
         id=token_id,

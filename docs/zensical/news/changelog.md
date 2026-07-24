@@ -1,8 +1,37 @@
 # 🪵 Changelog
 
-## 3.4.0 Releases
+## 3.5.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v3.5.0
+
+- **Add a first-class MCP server.**  
+  Meerschaum now ships a [Model Context Protocol](/reference/mcp/) server, so an AI agent can discover pipes, read their data, and run actions with no glue code. It replaces the community `mcp` plugin.
+
+    Two transports share one tool registry:
+
+    - **stdio** — `mrsm start mcp`, for a local install with no API server and no token. Point a client at it with `{"command": "mrsm", "args": ["start", "mcp"]}`.
+    - **HTTP** — `/mcp` on the API (Streamable HTTP), where every tool requires the same OAuth2 scope as its equivalent REST route. Tools a token's scopes do not cover are hidden from `tools/list` rather than advertised and then refused.
+
+    The server exposes 15 tools, 5 resources (`mrsm://pipes`, `mrsm://pipes/{ck}/{mk}/{lk}`, `mrsm://actions`, `mrsm://connectors`, and `mrsm://docs` — the full reference, served locally), and 3 prompts (`bootstrap_pipe`, `diagnose_sync_failure`, `explain_pipe`). Tools carry MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so clients can prompt before destructive calls, declare output schemas and return `structuredContent`, and paginate with opaque cursors.
+
+- **Add read-only mode and an action denylist to the MCP server.**  
+  Set `api:mcp:read_only` to hide every data-modifying tool regardless of a token's scopes. `execute_action` refuses `sh`, `os`, and `python` by default (configurable via `api:mcp:actions:denylist`, or inverted with `allowlist`), since those execute arbitrary code on the API host.
+
+- **Enforce read-only SQL in the MCP `read_sql` tool.**  
+  `read_sql` runs under `connectors:read`, but `SQLConnector.read()` executes whatever it is given. The tool now refuses stacked statements, any statement that is not a read, and queries containing mutating keywords (including `SELECT ... INTO` and `COPY ... TO PROGRAM`). Comments and string literals are stripped first. Back untrusted connectors with a read-only database role as well — see [MCP security](/reference/mcp/security/).
+
+- **Require authentication for Dash callbacks which read or write data.**  
+  Twelve web console callbacks were reachable unauthenticated by POSTing directly to `/dash/_dash-update-component`, because the Dash app is WSGI-mounted outside FastAPI's auth and the session ID arrives as callback state. Pipe data reads and writes (`query_data_click`, `download_pipe_csv`, `sync_documents_click`, `update_pipe_parameters_click`, `update_pipe_sql_click`, `toggle_sql_symlinks`, `calculate_rowcount_button_click`), the users listing, job-log downloads, and token edit/invalidate/delete now check the session first. Token operations additionally enforce the same ownership rule as the REST routes, so one user cannot modify another's token.
+
+- **Fix `--no-auth` rejecting every authenticated route.**  
+  `ScopedAuth` resolved its principal as a sub-dependency, and that raised a 401 on a missing `Authorization` header before the `no_auth` check could run. Starting the API with `--no-auth` now works as documented.
+
+- **Add Plotly Dash's MCP server as an opt-in development aid.**  
+  Dash can expose the web console's layout at `/dash/_mcp` so an agent can inspect the component tree while you write a web page plugin. It is disabled by default (`api:dash:mcp:enabled`) because it is served inside the Dash WSGI app where token auth does not apply. When enabled, Meerschaum limits it to layout introspection and opts every callback out, requiring `mcp_enabled=True` per callback. Requires `dash>=4.3.0`; older versions are detected and warned about instead of crashing the app.
+
+## 3.4.0 Releases
 
 ### v3.4.7
 

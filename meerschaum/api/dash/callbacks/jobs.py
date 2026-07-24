@@ -28,7 +28,7 @@ from meerschaum.api.dash.jobs import (
     build_process_timestamps_children,
 )
 from meerschaum.api.routes._jobs import _get_job
-from meerschaum.api.dash.sessions import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated, is_state_authenticated
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
 html, dcc = import_html(check_update=CHECK_UPDATE), import_dcc(check_update=CHECK_UPDATE)
 from dash.exceptions import PreventUpdate
@@ -40,9 +40,10 @@ from dash import no_update
 @dash_app.callback(
     Output("download-logs", "data"),
     Input({'type': 'job-download-logs-button', 'index': ALL}, 'n_clicks'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def download_job_logs(n_clicks):
+def download_job_logs(n_clicks, session_store_data):
     """
     When the download logs button is clicked, download the logs as one text file.
 
@@ -50,6 +51,10 @@ def download_job_logs(n_clicks):
     but because the rotating log will keep file sizes down, this should not grow too large.
     """
     if not n_clicks:
+        raise PreventUpdate
+
+    ### Job logs may contain connector URIs and query text.
+    if not is_state_authenticated(session_store_data):
         raise PreventUpdate
 
     ctx = dash.callback_context.triggered

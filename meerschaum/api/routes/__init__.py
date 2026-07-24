@@ -18,6 +18,13 @@ import meerschaum.api.routes._users
 import meerschaum.api.routes._tokens
 import meerschaum.api.routes._version
 
-from meerschaum.api import _include_dash
+from meerschaum.api import _include_dash, mcp_enabled
+
+### Registered before the API plugins run so that the built-in `/mcp` route
+### takes precedence over the route registered by the third-party `mcp` plugin
+### (which this endpoint supersedes).
+if mcp_enabled:
+    import meerschaum.api.routes._mcp
+
 if _include_dash:
     import meerschaum.api.routes._webterm

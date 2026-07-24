@@ -163,6 +163,37 @@ def is_session_authenticated(session_id: Optional[str]) -> bool:
     return is_auth
 
 
+def is_state_authenticated(session_store_data: Optional[Dict[str, Any]]) -> bool:
+    """
+    Return whether a callback's `session-store` state belongs to an
+    authenticated session.
+
+    Dash callbacks are reachable by anyone who can POST to
+    `/dash/_dash-update-component` — the WSGI-mounted Dash app sits outside
+    FastAPI's auth, and the session ID arrives as callback state rather than as a
+    header or cookie. So any callback which reads or writes pipes, users,
+    tokens, or job logs must take `State('session-store', 'data')` and check it
+    through this function before doing any work.
+
+    Parameters
+    ----------
+    session_store_data: Optional[Dict[str, Any]]
+        The `session-store` component's `data` dict, as passed into the callback.
+
+    Returns
+    -------
+    A `bool` indicating whether the session may perform actions.
+    """
+    if not isinstance(session_store_data, dict):
+        return False
+
+    session_id = session_store_data.get('session-id', None)
+    if not session_id:
+        return is_session_authenticated(None)
+
+    return is_session_authenticated(str(session_id))
+
+
 def session_is_admin(session_id: str) -> bool:
     """
     Check whether a session ID corresponds to an admin user.
