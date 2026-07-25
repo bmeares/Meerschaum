@@ -8876,77 +8876,30 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v3.5.0
 
-- **Add a first-class MCP server.**  
-  Meerschaum now ships a [Model Context Protocol](/reference/mcp/) server, so an AI assistant can discover your pipes, read their data, and run actions. It replaces the community `mcp` plugin — uninstall it with `mrsm uninstall plugin mcp`.
+- **Add a first-class [MCP server](/reference/mcp/).**  
+  AI assistants can now discover your pipes, read their data, and run actions — 15 [tools](/reference/mcp/tools/), 5 resources, and 3 prompts. Run it locally over stdio with `mrsm start mcp`, or remotely at an API instance's `/mcp` endpoint (where each tool requires the same [scope](/reference/api-instance/tokens/) as its REST equivalent, and tools your token can't call are hidden).
 
-    - **Run it locally over stdio.**  
-      `mrsm start mcp` speaks MCP on stdin/stdout, for a local install with no API server and no token:
-
-      ```json
-      {
-        "mcpServers": {
-          "meerschaum": {"command": "mrsm", "args": ["start", "mcp"]}
-        }
-      }
-      ```
-
-    - **Or remotely over HTTP.**  
-      An API instance serves the same tools at `/mcp`, where each one requires the same [scope](/reference/api-instance/tokens/) as its equivalent REST route. Tools your token cannot call are hidden entirely, so an assistant with a `pipes:read` token only ever sees the read tools:
-
-      ```bash
-      mrsm register token --label agent --scopes pipes:read
-      ```
-
-    - **15 tools, 5 resources, and 3 prompts.**  
-      Read and write pipes (`list_pipes`, `get_pipe_data`, `get_pipe_stats`, `sync_pipe`, `register_pipe`, …), query a connector with `read_sql`, or run any action with `execute_action`. Resources expose the pipe registry and a local copy of this reference at `mrsm://docs`; prompts add guided `bootstrap_pipe`, `diagnose_sync_failure`, and `explain_pipe` workflows. See the [tool reference](/reference/mcp/tools/).
-
-    - **Lock it down for shared deployments.**  
-      Set `read_only` to expose only tools which never modify data, whatever a token allows. `execute_action` refuses `sh`, `os`, and `python` by default, and `read_sql` refuses anything that is not a single read-only statement:
-
-      ```yaml
-      api:
-        mcp:
-          read_only: true
-          actions:
-            denylist: ['sh', 'os', 'python']
-      ```
-
-      See [MCP security](/reference/mcp/security/) before exposing `/mcp` to untrusted callers.
-
-- **Reject `json` columns used as index columns.**  
-  JSON values are dictionaries or lists, which cannot be sorted or deduplicated when syncing — previously the first sync succeeded and the second failed with `TypeError: unhashable type: 'dict'`. Registering, editing, or syncing such a pipe now fails immediately with the reason:
-
-  ```python
-  import meerschaum as mrsm
-
-  pipe = mrsm.Pipe(
-      'demo', 'satellites', instance='sql:main',
-      columns={'datetime': 'ts', 'id': 'display_config'},
-      dtypes={'display_config': 'json'},
-  )
-  pipe.register()
-  # (False, "Cannot use a 'json' column as an index column: ...")
+  ```json
+  {
+    "mcpServers": {
+      "meerschaum": {"command": "mrsm", "args": ["start", "mcp"]}
+    }
+  }
   ```
 
-  Declare the column under [`indices`](/reference/pipes/parameters/#indices) instead if you only need a database index on it — on PostgreSQL-like flavors it is stored as `JSONB`, which supports B-tree, hash, and GIN indices. See [Data Types](/reference/pipes/dtypes/#json-columns-cannot-be-index-columns).
+  This replaces the community `mcp` plugin — uninstall it with `mrsm uninstall plugin mcp`. Read [MCP security](/reference/mcp/security/) before exposing `/mcp`: `api:mcp:read_only` hides every modifying tool, `execute_action` denies `sh`, `os`, and `python` by default, and `read_sql` accepts only a single read-only statement.
+
+- **Reject `json` columns used as index columns.**  
+  JSON values can't be sorted or deduplicated, so such a pipe synced once and then failed with `TypeError: unhashable type: 'dict'`. Registering, editing, or syncing now fails immediately instead. Use [`indices`](/reference/pipes/parameters/#indices) if you only want a database index on the column. See [Data Types](/reference/pipes/dtypes/#json-columns-cannot-be-index-columns).
 
 - **Require authentication for web console actions which read or write data.**  
-  Twelve Dash callbacks — querying and downloading pipe data, editing parameters and SQL definitions, syncing documents, the users listing, job log downloads, and token management — could be triggered without a session by posting directly to the web console's callback endpoint. They now check the session first, and token operations enforce the same ownership rule as the REST routes.
+  Twelve Dash callbacks (pipe data, parameter and SQL edits, syncing documents, the users listing, job logs, and tokens) could be triggered without a session by posting to the callback endpoint directly.
 
 - **Fix `--no-auth` rejecting every authenticated route.**  
   `mrsm start api --no-auth` returned `401 Not authenticated` for all endpoints instead of skipping authentication.
 
 - **Add Plotly Dash's MCP server for plugin authors.**  
-  Dash can expose the web console's layout at `/dash/_mcp` so an assistant can inspect the component tree while you write a [web page plugin](/reference/plugins/types-of-plugins/). It is a development aid, separate from Meerschaum's own MCP server, and disabled by default because it is served without authentication:
-
-  ```yaml
-  api:
-    dash:
-      mcp:
-        enabled: true   # requires dash>=4.3.0
-  ```
-
-  Only layout introspection is exposed; a callback must opt in with `@dash_app.callback(..., mcp_enabled=True)`. See [Web Console](/reference/api-instance/web-console/#dash-mcp-server).
+  Set `api:dash:mcp:enabled` (requires `dash>=4.3.0`) to expose the web console's layout at `/dash/_mcp`, so an assistant can inspect the component tree while you write a [web page plugin](/reference/plugins/types-of-plugins/). Off by default because it's served without authentication. See [Web Console](/reference/api-instance/web-console/#dash-mcp-server).
 
 ## 3.4.0 Releases
 
