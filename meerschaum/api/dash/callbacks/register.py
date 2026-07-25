@@ -82,9 +82,17 @@ def register_button_click(
         raise PreventUpdate
     form_class = 'form-control'
     from meerschaum.api.routes._login import login
+    from meerschaum.config import get_config
     conn = get_api_connector()
     if not username or not password:
         success, msg = False, "Invalid username or password."
+        form_class += ' is-invalid'
+        return {}, form_class, dash.no_update
+
+    ### Enforce the same registration permission as the REST route
+    ### (`meerschaum.api.routes._users.register_user`).
+    allow_users = get_config('api', 'permissions', 'registration', 'users')
+    if not allow_users:
         form_class += ' is-invalid'
         return {}, form_class, dash.no_update
 

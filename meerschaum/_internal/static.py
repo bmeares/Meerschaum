@@ -351,6 +351,7 @@ STATIC_CONFIG: Dict[str, Any] = {
             'pipes:delete': "Delete pipes' parameters and drop target tables.",
             'actions:execute': "Execute arbitrary actions.",
             'connectors:read': "Read the available connectors.",
+            'sql:read': "Execute read-only SQL queries against SQL connectors.",
             'jobs:read': "Read jobs' properties",
             'jobs:write': "Write jobs' properties",
             'jobs:execute': "Run jobs.",

@@ -16,12 +16,27 @@ import json
 
 import meerschaum as mrsm
 from meerschaum.mcp._registry import tool, paginate, encode_cursor, decode_cursor
-from meerschaum.mcp._security import is_read_only_query, is_action_permitted
+from meerschaum.mcp._security import (
+    is_read_only_query,
+    is_action_permitted,
+    check_action_chain,
+    check_action_execution_allowed,
+    check_instance_keys,
+    get_mcp_context,
+)
 from meerschaum.utils.typing import Any, Dict, List, Optional
 
 DEFAULT_ROW_LIMIT: int = 200
 MAX_ROW_LIMIT: int = 10_000
 DEFAULT_PAGE_SIZE: int = 100
+
+### Instance tables which hold credentials and metadata. The REST routes refuse
+### to read or write a pipe pointing at one of these, and so do the MCP tools:
+### otherwise `pipes:read` on a pipe registered with `target: mrsm_users` would
+### return password hashes.
+PROTECTED_TABLES: frozenset = frozenset({
+    'mrsm_users', 'mrsm_plugins', 'mrsm_pipes', 'mrsm_tokens',
+})
 
 _CONNECTOR_KEYS_SCHEMA = {
     'type': 'string',
@@ -103,20 +118,46 @@ _SUCCESS_TUPLE_OUTPUT_SCHEMA = {
 }
 
 
+def _check_instance_keys(args: Dict[str, Any]) -> None:
+    """
+    Raise a `PermissionError` when the caller may not reach `instance_keys`.
+    """
+    permitted, reason = check_instance_keys(args.get('instance_keys') or None)
+    if not permitted:
+        raise PermissionError(reason)
+
+
+def _check_protected_target(pipe: mrsm.Pipe) -> None:
+    """
+    Raise a `PermissionError` when a pipe points at a protected instance table.
+    """
+    if pipe.target in PROTECTED_TABLES:
+        raise PermissionError(
+            f"Refusing to access protected table '{pipe.target}'."
+        )
+
+
 def _resolve_pipe(args: Dict[str, Any]) -> mrsm.Pipe:
     """
     Return the `Pipe` addressed by a tool call's arguments.
+
+    Raises a `PermissionError` when the caller's instance permissions do not
+    cover `instance_keys`, or when the pipe targets a protected instance table.
     """
     location_key = args.get('location_key', None)
     if location_key in ('None', '', 'null', None):
         location_key = None
 
-    return mrsm.Pipe(
+    _check_instance_keys(args)
+
+    pipe = mrsm.Pipe(
         args['connector_keys'],
         args['metric_key'],
         location_key,
         instance=(args.get('instance_keys') or None),
     )
+    _check_protected_target(pipe)
+    return pipe
 
 
 def _pipe_summary(pipe: mrsm.Pipe) -> Dict[str, Any]:
@@ -216,6 +257,7 @@ def _clamp_limit(value: Any) -> int:
     },
 )
 def _list_pipes(**args) -> Dict[str, Any]:
+    _check_instance_keys(args)
     kwargs: Dict[str, Any] = {'as_list': True}
     for key in ('connector_keys', 'metric_keys', 'location_keys', 'tags'):
         if args.get(key):
@@ -223,7 +265,10 @@ def _list_pipes(**args) -> Dict[str, Any]:
     if args.get('instance_keys'):
         kwargs['instance'] = args['instance_keys']
 
-    pipes = mrsm.get_pipes(**kwargs)
+    pipes = [
+        pipe for pipe in mrsm.get_pipes(**kwargs)
+        if pipe.target not in PROTECTED_TABLES
+    ]
     page, next_cursor = paginate(pipes, args.get('cursor'), page_size=DEFAULT_PAGE_SIZE)
     return {
         'pipes': [_pipe_summary(pipe) for pipe in page],
@@ -450,6 +495,8 @@ def _register_pipe(**args) -> Dict[str, Any]:
     if location_key in ('None', '', 'null', None):
         location_key = None
 
+    _check_instance_keys(args)
+
     pipe = mrsm.Pipe(
         args['connector_keys'],
         args['metric_key'],
@@ -460,6 +507,8 @@ def _register_pipe(**args) -> Dict[str, Any]:
         tags=(args.get('tags') or None),
         parameters=(args.get('parameters') or None),
     )
+    ### Checked after construction because `target` may be set in `parameters`.
+    _check_protected_target(pipe)
     success, message = pipe.register()
     return {'success': success, 'message': message}
 
@@ -493,8 +542,16 @@ def _register_pipe(**args) -> Dict[str, Any]:
     output_schema=_SUCCESS_TUPLE_OUTPUT_SCHEMA,
 )
 def _edit_pipe(**args) -> Dict[str, Any]:
-    pipe = _resolve_pipe(args)
     parameters = dict(args.get('parameters') or {})
+
+    ### Don't let an edit re-point a pipe at a protected table.
+    for target_key in ('target', 'target_name', 'target_table'):
+        if str(parameters.get(target_key, '')) in PROTECTED_TABLES:
+            raise PermissionError(
+                f"Refusing to target protected table '{parameters[target_key]}'."
+            )
+
+    pipe = _resolve_pipe(args)
     if args.get('replace'):
         pipe.parameters = parameters
         success, message = pipe.edit(patch=False)
@@ -588,7 +645,8 @@ def _verify_pipe(**args) -> Dict[str, Any]:
         "Rows are deleted and rewritten, so scope it with `begin`/`end`/`params` when you can."
     ),
     title='Deduplicate pipe',
-    scopes=['pipes:write'],
+    ### Rows are deleted and rewritten, so this needs the same scope as `clear_pipe`.
+    scopes=['pipes:write', 'pipes:delete'],
     destructive=True,
     input_schema=_pipe_schema({
         'begin': _BEGIN_SCHEMA,
@@ -615,7 +673,8 @@ def _deduplicate_pipe(**args) -> Dict[str, Any]:
         "`begin`/`end`/`params` to scope it, and note that omitting all three deletes every row."
     ),
     title='Clear pipe rows',
-    scopes=['pipes:write'],
+    ### Matches the REST route `DELETE /pipes/.../clear`, which requires `pipes:delete`.
+    scopes=['pipes:delete'],
     destructive=True,
     input_schema=_pipe_schema({
         'begin': _BEGIN_SCHEMA,
@@ -681,7 +740,10 @@ def _delete_pipe(**args) -> Dict[str, Any]:
         "available connector keys."
     ),
     title='Read SQL',
-    scopes=['connectors:read'],
+    ### `sql:read` and not `connectors:read`: listing connector labels (what the
+    ### REST `/connectors` route grants) is a much smaller privilege than running
+    ### `SELECT` against every database configured on the host.
+    scopes=['sql:read'],
     read_only=True,
     idempotent=True,
     input_schema={
@@ -714,10 +776,21 @@ def _delete_pipe(**args) -> Dict[str, Any]:
     },
 )
 def _read_sql(**args) -> Dict[str, Any]:
+    import re
+    from meerschaum.mcp._security import strip_sql_noise
+
     query = args['query']
     permitted, reason = is_read_only_query(query)
     if not permitted:
         raise ValueError(reason)
+
+    ### Protected instance tables are off-limits here too, not just to the pipe tools.
+    stripped, _ = strip_sql_noise(query)
+    for word in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", (stripped or query)):
+        if word.lower() in PROTECTED_TABLES:
+            raise PermissionError(
+                f"Refusing to query protected table '{word}'."
+            )
 
     connector = mrsm.get_connector(args['connector_keys'])
     if not hasattr(connector, 'read'):
@@ -728,7 +801,20 @@ def _read_sql(**args) -> Dict[str, Any]:
     limit = _clamp_limit(args.get('limit', DEFAULT_ROW_LIMIT))
     offset = decode_cursor(args.get('cursor'))
 
-    df = connector.read(query)
+    ### Read one bounded chunk instead of the whole result set: an unqualified
+    ### `SELECT * FROM big_table` must not materialize in the API worker.
+    ### `silent=True` keeps a failed query from printing a traceback to stdout,
+    ### which is the protocol channel under the stdio transport.
+    fetch_limit = offset + limit + 1
+    df = connector.read(query, chunksize=fetch_limit, chunks=1, silent=True)
+    if df is None:
+        ### `read()` warns and returns `None` on a database error. Without this the
+        ### model would be told there were no rows.
+        raise ValueError(
+            "The query could not be executed. Check it for syntax errors, a missing "
+            "table, or insufficient database privileges."
+        )
+
     records = _df_to_records(df)
     window = records[offset:(offset + limit)]
     has_more = len(records) > (offset + limit)
@@ -794,9 +880,39 @@ def _execute_action(**args) -> Dict[str, Any]:
     if not permitted:
         return {'success': False, 'message': reason}
 
+    ### Same check the REST `/actions` route makes: a non-admin may be barred
+    ### from running actions entirely (`system:api:permissions:actions:non_admin`).
+    allowed, allowed_message = check_action_execution_allowed()
+    if not allowed:
+        return {'success': False, 'message': allowed_message}
+
     kwargs = dict(args.get('kwargs') or {})
     if len(parts) > 1:
         kwargs.setdefault('action', parts[1:])
+
+    ### A denylisted action must not be reachable as another action's subaction,
+    ### e.g. `start job` with `{"action": ["sh", "..."]}`.
+    chain = list(parts[1:]) + [
+        str(word) for word in (
+            kwargs.get('action')
+            if isinstance(kwargs.get('action'), (list, tuple))
+            else [kwargs['action']] if kwargs.get('action') else []
+        )
+    ]
+    chain_permitted, chain_reason = check_action_chain(chain)
+    if not chain_permitted:
+        return {'success': False, 'message': chain_reason}
+
+    ### Pin the action to the API's own instance, as the REST route does, so an
+    ### action cannot reach an instance the caller isn't allowed to address.
+    context = get_mcp_context()
+    if context and context.get('api'):
+        from meerschaum.api import get_api_connector
+        instance_keys = kwargs.get('mrsm_instance', None)
+        permitted, reason = check_instance_keys(instance_keys)
+        if not permitted:
+            return {'success': False, 'message': reason}
+        kwargs['mrsm_instance'] = instance_keys or str(get_api_connector())
 
     success, message = mrsm_actions[action_name](**kwargs)
     return {'success': success, 'message': message}

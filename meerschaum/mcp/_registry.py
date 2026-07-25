@@ -250,6 +250,10 @@ class MCPPrompt:
         return f"MCPPrompt('{self.name}')"
 
 
+### Cursors are offsets, and an offset is handed to the database as part of a row
+### limit, so cap it: a hand-crafted cursor must not turn into `LIMIT 1000000001`.
+MAX_CURSOR_OFFSET: int = 1_000_000
+
 _TOOLS: Dict[str, MCPTool] = {}
 _RESOURCES: List[MCPResource] = []
 _PROMPTS: Dict[str, MCPPrompt] = {}
@@ -404,7 +408,7 @@ def decode_cursor(cursor: Optional[str]) -> int:
     except Exception as e:
         raise ValueError(f"Invalid cursor: {cursor}") from e
 
-    if not isinstance(offset, int) or offset < 0:
+    if not isinstance(offset, int) or offset < 0 or offset > MAX_CURSOR_OFFSET:
         raise ValueError(f"Invalid cursor: {cursor}")
 
     return offset

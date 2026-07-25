@@ -193,11 +193,18 @@ async def CurrentScopes(request: Request) -> List[str]:
     sub-dependency so that the `no_auth` check happens first: it raises a 401 on
     a missing `Authorization` header, which would otherwise fire even when the
     server is running without authentication.
+
+    The resolved principal is stashed on `request.state.user_or_token` so a route
+    which needs it (the MCP endpoint, for its permission checks) doesn't have to
+    resolve the token a second time.
     """
+    request.state.user_or_token = None
     if no_auth:
         return ['*']
 
-    return get_granted_scopes(request, await load_user_or_token(request))
+    user_or_token = await load_user_or_token(request)
+    request.state.user_or_token = user_or_token
+    return get_granted_scopes(request, user_or_token)
 
 
 def ScopedAuth(scopes: List[str]):

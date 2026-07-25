@@ -201,9 +201,12 @@ default_api_config = {
         ### the caller's token scopes.
         'read_only': False,
         'actions': {
-            ### Actions which `execute_action` refuses to run. These three
-            ### execute arbitrary code on the API host.
-            'denylist': ['sh', 'os', 'python'],
+            ### Actions which `execute_action` refuses to run, because each one
+            ### executes arbitrary code or SQL on the API host: `sh`, `os`, and
+            ### `python` directly, `stack` through Docker Compose, `sql` through
+            ### a connector, and `install` by fetching a plugin and importing it.
+            ### Also refused as another action's subaction (e.g. `start job`).
+            'denylist': ['sh', 'os', 'python', 'stack', 'sql', 'install'],
             ### If non-empty, the only actions `execute_action` may run.
             'allowlist': [],
         },

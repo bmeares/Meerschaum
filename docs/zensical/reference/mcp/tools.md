@@ -18,8 +18,8 @@ transport grants everything, because it runs as the user who launched it.
 
 | Tool | Scope | Read-only | Destructive | Description |
 | --- | --- | :-: | :-: | --- |
-| `clear_pipe` | `pipes:write` |  | ⚠️ | Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. |
-| `deduplicate_pipe` | `pipes:write` |  | ⚠️ | Find and remove duplicate rows in a pipe by re-syncing the affected chunks. |
+| `clear_pipe` | `pipes:delete` |  | ⚠️ | Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. |
+| `deduplicate_pipe` | `pipes:write`, `pipes:delete` |  | ⚠️ | Find and remove duplicate rows in a pipe by re-syncing the affected chunks. |
 | `delete_pipe` | `pipes:delete` |  | ⚠️ | Delete a pipe entirely: drop its target table and remove its registration and parameters. |
 | `drop_pipe` | `pipes:drop` |  | ⚠️ | Drop a pipe's target table while keeping its registration, so it can be re-synced from its source. |
 | `edit_pipe` | `pipes:write` |  |  | Edit a registered pipe's parameters (columns, dtypes, tags, fetch definition, verify settings). |
@@ -28,7 +28,7 @@ transport grants everything, because it runs as the user who launched it.
 | `get_pipe_data` | `pipes:read` | ✅ |  | Read rows from a pipe. |
 | `get_pipe_stats` | `pipes:read` | ✅ |  | Return a pipe's shape in one call: whether its table exists, its rowcount, its newest and oldest datetime values (sync time), its verification bound time, and the column types as they actually exist in the database. |
 | `list_pipes` | `pipes:read` | ✅ |  | List registered Meerschaum pipes and their keys, tags, index columns, and dtypes. |
-| `read_sql` | `connectors:read` | ✅ |  | Run a read-only SQL query (or read a whole table by name) through a SQL connector and return the rows. |
+| `read_sql` | `sql:read` | ✅ |  | Run a read-only SQL query (or read a whole table by name) through a SQL connector and return the rows. |
 | `register_pipe` | `pipes:write` |  |  | Create and register a new pipe (the programmatic equivalent of 'bootstrap pipe'). |
 | `sync_documents` | `pipes:write` |  |  | Insert or update rows in a pipe from a list of records you supply. |
 | `sync_pipe` | `pipes:write` |  |  | Sync a pipe: fetch new data from its source connector and store it on its instance. |
@@ -57,11 +57,11 @@ transport grants everything, because it runs as the user who launched it.
 | Scope | Unlocks | Meaning |
 | --- | --- | --- |
 | `actions:execute` | `execute_action` | Execute arbitrary actions. |
-| `connectors:read` | `read_sql` | Read the available connectors. |
-| `pipes:delete` | `delete_pipe` | Delete pipes' parameters and drop target tables. |
+| `pipes:delete` | `clear_pipe`, `deduplicate_pipe`, `delete_pipe` | Delete pipes' parameters and drop target tables. |
 | `pipes:drop` | `drop_pipe` | Drop target tables. |
 | `pipes:read` | `get_pipe_attributes`, `get_pipe_data`, `get_pipe_stats`, `list_pipes` | Read pipes' parameters and the contents of target tables. |
-| `pipes:write` | `clear_pipe`, `deduplicate_pipe`, `edit_pipe`, `register_pipe`, `sync_documents`, `sync_pipe`, `verify_pipe` | Update pipes' parameters and sync to target tables. |
+| `pipes:write` | `deduplicate_pipe`, `edit_pipe`, `register_pipe`, `sync_documents`, `sync_pipe`, `verify_pipe` | Update pipes' parameters and sync to target tables. |
+| `sql:read` | `read_sql` | Execute read-only SQL queries against SQL connectors. |
 
 ## Tool details
 
@@ -69,7 +69,7 @@ transport grants everything, because it runs as the user who launched it.
 
 Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. Deleted rows are not recoverable — pass `begin`/`end`/`params` to scope it, and note that omitting all three deletes every row.
 
-**Scope:** `pipes:write`
+**Scope:** `pipes:delete`
 
 **Annotations:** destructive
 
@@ -87,7 +87,7 @@ Delete rows from a pipe's table within an optional datetime range and filter, ke
 
 Find and remove duplicate rows in a pipe by re-syncing the affected chunks. Rows are deleted and rewritten, so scope it with `begin`/`end`/`params` when you can.
 
-**Scope:** `pipes:write`
+**Scope:** `pipes:write`, `pipes:delete`
 
 **Annotations:** destructive
 
@@ -239,7 +239,7 @@ List registered Meerschaum pipes and their keys, tags, index columns, and dtypes
 
 Run a read-only SQL query (or read a whole table by name) through a SQL connector and return the rows. Only single read-only statements are accepted: anything that writes, or more than one statement, is refused. Read the `mrsm://connectors` resource for the available connector keys.
 
-**Scope:** `connectors:read`
+**Scope:** `sql:read`
 
 **Annotations:** read-only, idempotent
 

@@ -14,13 +14,16 @@ stdio server runs as the user who launched it and can already do anything that
 user's shell can. Scopes are therefore `['*']`, matching the CLI's trust model.
 Use the HTTP transport (`/mcp` on the API) whenever the caller is remote.
 
-Because stdout *is* the protocol channel, nothing may be printed to it. Meerschaum
-writes its warnings and info messages to stderr, which MCP clients surface as
-server logs.
+Because stdout *is* the protocol channel, nothing may be printed to it. Not every
+Meerschaum code path cooperates — `info()` and action output use plain `print()`,
+and a rich traceback renders to a stdout console — so dispatch runs with stdout
+redirected to stderr, where MCP clients surface it as server logs. Responses are
+written to the real stdout handle, captured before the redirect.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 
@@ -83,7 +86,9 @@ def serve_stdio(
             continue
 
         try:
-            response = handle_payload(payload, scopes)
+            ### Anything the tool prints goes to stderr, not the protocol channel.
+            with contextlib.redirect_stdout(sys.stderr):
+                response = handle_payload(payload, scopes)
         except Exception as e:
             ### A crash in dispatch must not kill the server: report it and keep
             ### reading, or the client loses the session over one bad call.

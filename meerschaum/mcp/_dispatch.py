@@ -359,9 +359,9 @@ def handle_message(
     if not isinstance(params, dict):
         return jsonrpc_error(request_id, INVALID_PARAMS, "'params' must be an object.")
 
-    ### Notifications carry no `id` and get no response.
-    is_notification = 'id' not in message
-    if method.startswith('notifications/'):
+    ### Notifications carry no `id` and get no response — a client which receives
+    ### an unsolicited response (`"id": null`) may treat it as a protocol error.
+    if 'id' not in message or method.startswith('notifications/'):
         return None
 
     if method == 'initialize':
@@ -416,9 +416,6 @@ def handle_message(
 
     if method == 'prompts/get':
         return _get_prompt(params, current_scopes, request_id)
-
-    if is_notification:
-        return None
 
     return jsonrpc_error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
 

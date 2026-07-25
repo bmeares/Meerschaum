@@ -55,6 +55,7 @@ def check_token_access(
     """
     import uuid
     from meerschaum.utils.misc import is_uuid
+    from meerschaum.api import no_auth
     from meerschaum.api.dash.sessions import is_state_authenticated
 
     if not is_state_authenticated(session_store_data):
@@ -67,6 +68,11 @@ def check_token_access(
     token_model = conn.get_token_model(uuid.UUID(str(token_id)))
     if token_model is None:
         return False, "Token does not exist."
+
+    ### Under `--no-auth`, the session has no real user (`get_user_from_session`
+    ### returns `None`), so ownership cannot (and need not) be enforced.
+    if no_auth:
+        return True, "Success"
 
     session_id = (session_store_data or {}).get('session-id', None)
     user = get_user_from_session(session_id)

@@ -378,6 +378,19 @@ def test_read_sql_allows_reads(query: str):
         'WITH x AS (SELECT 1) INSERT INTO y SELECT * FROM x',
         'SELECT * INTO newtbl FROM t',
         "COPY t TO PROGRAM 'sh -c whoami'",
+        ### A comment marker inside a string literal must not hide what follows it.
+        "SELECT '-- x' ; DROP TABLE t",
+        "SELECT '#' ; DROP TABLE t",
+        'SELECT $$--$$; DROP TABLE t',
+        ### MySQL executes the body of `/*! ... */`.
+        "SELECT 1 /*! INTO OUTFILE '/tmp/pwn' */",
+        ### Mutations expressed as function calls.
+        "SELECT dblink_exec('dbname=x', 'DROP TABLE t')",
+        "SELECT lo_export(1, '/tmp/x')",
+        "SELECT pg_read_file('/etc/passwd')",
+        "SELECT setval('s', 1)",
+        "EXEC xp_cmdshell 'whoami'",
+        "SELECT * FROM t WHERE a = 'unterminated",
         'GRANT ALL ON t TO PUBLIC',
         'SET ROLE postgres',
         'ALTER TABLE t ADD COLUMN c int',
@@ -409,6 +422,156 @@ def test_read_sql_tool_refuses_writes_before_connecting():
     )
     assert response['result']['isError'] is True
     assert 'DROP' in response['result']['content'][0]['text']
+
+
+@pytest.fixture(scope='module')
+def sqlite_instance(tmp_path_factory):
+    """
+    Return a throwaway SQLite instance connector, so these tests need no server.
+    """
+    return mrsm.get_connector(
+        'sql',
+        'test_mcp_protected',
+        flavor='sqlite',
+        database=(tmp_path_factory.mktemp('mcp') / 'mcp.db').as_posix(),
+    )
+
+
+@pytest.mark.parametrize('table', ['mrsm_users', 'mrsm_tokens', 'mrsm_pipes', 'mrsm_plugins'])
+def test_pipe_tools_refuse_protected_tables(table: str, sqlite_instance):
+    """
+    A pipe pointing at an instance table must not be read, written, or
+    registered through MCP: `mrsm_users` holds password hashes.
+    """
+    from meerschaum.mcp._tools import _check_protected_target
+    with pytest.raises(PermissionError, match=table):
+        _check_protected_target(
+            mrsm.Pipe(
+                'mcp', 'protected',
+                instance=sqlite_instance,
+                parameters={'target': table},
+            )
+        )
+
+    ### Registering a pipe which targets a protected table must be refused.
+    register_response = rpc(
+        'tools/call',
+        {'name': 'register_pipe', 'arguments': {
+            'connector_keys': 'mcp',
+            'metric_key': 'protected',
+            'instance_keys': str(sqlite_instance),
+            'parameters': {'target': table},
+        }},
+        ['*'],
+    )
+    assert register_response['result']['isError'] is True
+    assert table in register_response['result']['content'][0]['text']
+
+    ### An edit must not be able to re-point a pipe at a protected table either.
+    edit_response = rpc(
+        'tools/call',
+        {'name': 'edit_pipe', 'arguments': {
+            'connector_keys': 'mcp',
+            'metric_key': 'protected',
+            'instance_keys': str(sqlite_instance),
+            'parameters': {'target': table},
+        }},
+        ['*'],
+    )
+    assert edit_response['result']['isError'] is True
+    assert table in edit_response['result']['content'][0]['text']
+
+
+def test_read_sql_refuses_protected_tables():
+    """
+    `read_sql` must not be a way around the protected-table guard.
+    """
+    response = rpc(
+        'tools/call',
+        {'name': 'read_sql', 'arguments': {
+            'connector_keys': 'sql:local', 'query': 'SELECT * FROM mrsm_users',
+        }},
+        ['*'],
+    )
+    assert response['result']['isError'] is True
+    assert 'mrsm_users' in response['result']['content'][0]['text']
+
+
+def test_clear_and_deduplicate_require_delete_scope():
+    """
+    Both tools delete rows, so `pipes:write` alone must not reach them —
+    the REST route for clearing rows requires `pipes:delete`.
+    """
+    for tool_name in ('clear_pipe', 'deduplicate_pipe'):
+        assert 'pipes:delete' in get_tools()[tool_name].scopes
+
+    write_only_tools = set(_visible_tool_names(['pipes:write']))
+    assert 'clear_pipe' not in write_only_tools
+    assert 'deduplicate_pipe' not in write_only_tools
+
+
+def test_read_sql_requires_its_own_scope():
+    """
+    Executing SQL is a larger privilege than listing connector labels, which is
+    all `connectors:read` grants over REST.
+    """
+    assert get_tools()['read_sql'].scopes == ['sql:read']
+    assert 'read_sql' not in set(_visible_tool_names(['connectors:read']))
+    assert 'read_sql' in set(_visible_tool_names(['sql:read']))
+
+
+def _visible_tool_names(scopes):
+    """
+    Return the names of the tools visible to `scopes`.
+    """
+    from meerschaum.mcp import get_visible_tools
+    return list(get_visible_tools(scopes).keys())
+
+
+def test_execute_action_refuses_denied_subactions():
+    """
+    A denylisted action must not be reachable as another action's subaction,
+    e.g. `start job` with `{"action": ["sh", ...]}`.
+    """
+    for arguments in (
+        {'action': 'start job', 'kwargs': {'action': ['sh', 'whoami'], 'name': 'x', 'yes': True}},
+        {'action': 'start jobs sh whoami', 'kwargs': {'yes': True}},
+    ):
+        response = rpc('tools/call', {'name': 'execute_action', 'arguments': arguments}, ['*'])
+        result = json.loads(response['result']['content'][0]['text'])
+        assert result['success'] is False, f"Wrongly allowed: {arguments}"
+        assert 'denylist' in result['message']
+
+
+def test_stdio_transport_keeps_stdout_clean():
+    """
+    stdout is the protocol channel, so a tool which prints (actions and `info()`
+    use plain `print()`) must not corrupt it.
+    """
+    import io
+    from meerschaum.mcp._stdio import serve_stdio
+
+    request = {
+        'jsonrpc': '2.0',
+        'id': 1,
+        'method': 'tools/call',
+        'params': {'name': 'execute_action', 'arguments': {'action': 'show version'}},
+    }
+    stdout = io.StringIO()
+    success, _ = serve_stdio(stdin=io.StringIO(json.dumps(request) + '\n'), stdout=stdout)
+    assert success
+
+    lines = [line for line in stdout.getvalue().splitlines() if line.strip()]
+    assert len(lines) == 1, f"Non-protocol output on stdout: {lines}"
+    assert json.loads(lines[0])['id'] == 1
+
+
+def test_notification_shaped_request_gets_no_response():
+    """
+    A message without an `id` is a notification: responding to it with
+    `"id": null` is a protocol error for strict clients.
+    """
+    assert handle_message({'jsonrpc': '2.0', 'method': 'tools/list'}, ['*']) is None
 
 
 def test_code_execution_actions_are_denied_by_default():

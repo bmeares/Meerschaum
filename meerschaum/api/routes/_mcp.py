@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import fastapi
 from fastapi import Request
+from fastapi.concurrency import run_in_threadpool
 
 import meerschaum as mrsm
 from meerschaum.api import app, endpoints
 from meerschaum.api._oauth2 import CurrentScopes
+from meerschaum.mcp._security import set_mcp_context, reset_mcp_context
 from meerschaum.mcp import (
     handle_payload,
     get_visible_tools,
@@ -57,7 +59,7 @@ async def mcp_endpoint(
     requires the same scope as its equivalent REST route: reads need
     `pipes:read`, writes need `pipes:write`, `drop_pipe` needs `pipes:drop`,
     `delete_pipe` needs `pipes:delete`, `execute_action` needs
-    `actions:execute`, and `read_sql` needs `connectors:read`.
+    `actions:execute`, and `read_sql` needs `sql:read`.
     """
     try:
         payload = await request.json()
@@ -67,7 +69,17 @@ async def mcp_endpoint(
             content=jsonrpc_error(None, PARSE_ERROR, "Parse error"),
         )
 
-    response = handle_payload(payload, current_scopes)
+    ### Tools do blocking work (syncs, queries, actions) which can run for
+    ### minutes, so run them off the event loop or every other request stalls.
+    ### The context marks this as an API call so tools apply the server's
+    ### instance and action permissions; it rides along because `contextvars`
+    ### are copied into the threadpool worker.
+    user_or_token = getattr(request.state, 'user_or_token', None)
+    context_token = set_mcp_context({'api': True, 'user': user_or_token})
+    try:
+        response = await run_in_threadpool(handle_payload, payload, current_scopes)
+    finally:
+        reset_mcp_context(context_token)
 
     ### Notifications get no body.
     if response is None:

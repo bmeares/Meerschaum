@@ -24,6 +24,9 @@ mrsm register token --label reader --scopes pipes:read
 
 ### An agent that reads and ingests, but cannot drop or delete.
 mrsm register token --label writer --scopes pipes:read,pipes:write
+
+### An agent that may run read-only SQL through a connector.
+mrsm register token --label analyst --scopes pipes:read,sql:read
 ```
 
 ## Read-only mode
@@ -42,14 +45,16 @@ every tool that modifies anything is hidden and refused, **even for a `*`-scoped
 
 `execute_action` runs Meerschaum actions, which is the whole CLI. The `actions:execute` scope has always meant this — the REST `/actions` route behaves identically.
 
-Three actions execute arbitrary code on the host and are refused by default:
+The actions which execute arbitrary code or SQL on the host are refused by default:
 
 ```yaml
 api:
   mcp:
     actions:
-      denylist: ['sh', 'os', 'python']
+      denylist: ['sh', 'os', 'python', 'stack', 'sql', 'install']
 ```
+
+The denylist applies to subactions too, so a denied action cannot be smuggled in through a wrapper (`start job` with `{"action": ["sh", …]}` is refused).
 
 For a locked-down deployment, invert it with an allowlist, which takes precedence:
 
@@ -64,13 +69,20 @@ Do not grant `actions:execute` to a token you would not grant a shell to. If an 
 
 ## `read_sql` and read-only enforcement
 
-`read_sql` runs under `connectors:read`. Because `SQLConnector.read()` executes whatever it is given, the tool checks the statement first and refuses:
+`read_sql` runs under its own `sql:read` scope — running `SELECT` against every database the host can reach is a much larger privilege than `connectors:read`, which only lists connector labels. Because `SQLConnector.read()` executes whatever it is given, the tool checks the statement first and refuses:
 
 - anything whose leading keyword is not `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `VALUES`, or `TABLE`
 - more than one statement (`SELECT 1; DROP TABLE users`)
 - any query containing a mutating keyword, including `SELECT ... INTO` and `COPY ... TO PROGRAM`
+- mutating or filesystem functions inside an otherwise ordinary `SELECT` (`dblink_exec()`, `lo_export()`, `pg_read_file()`, `xp_cmdshell`)
+- MySQL executable comments (`/*! … */`), which the server runs as SQL
+- any query naming a protected instance table (`mrsm_users`, `mrsm_tokens`, `mrsm_pipes`, `mrsm_plugins`)
 
-Comments and string literals are stripped first, so `WHERE note = 'please delete'` is fine and `-- ; DROP TABLE u` is not a bypass.
+Comments, string literals, and quoted identifiers are stripped in a single quote-aware pass, so `WHERE note = 'please delete'` is fine while neither `-- ; DROP TABLE u` nor `SELECT '--' ; DROP TABLE u` is a bypass. Results are read one bounded chunk at a time, so an unqualified `SELECT * FROM big_table` cannot exhaust the server's memory.
+
+## Protected instance tables
+
+The pipe tools refuse any pipe whose `target` is `mrsm_users`, `mrsm_tokens`, `mrsm_pipes`, or `mrsm_plugins`, matching the REST routes: registering, editing, reading, syncing, clearing, and dropping are all blocked, and such pipes are omitted from `list_pipes`. Without this, `pipes:read` on a pipe pointed at `mrsm_users` would return password hashes.
 
 !!! warning "This is a keyword check, not a SQL parser"
     It blocks the realistic escalation paths from a read scope, but a sufficiently exotic flavor-specific construct could slip through. **If `read_sql` is reachable by anyone you do not trust, back the connector with a read-only database role.** That is the only durable guarantee; the statement check is defense in depth.

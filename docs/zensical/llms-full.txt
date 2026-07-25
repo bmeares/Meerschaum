@@ -5207,8 +5207,8 @@ transport grants everything, because it runs as the user who launched it.
 
 | Tool | Scope | Read-only | Destructive | Description |
 | --- | --- | :-: | :-: | --- |
-| `clear_pipe` | `pipes:write` |  | ⚠️ | Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. |
-| `deduplicate_pipe` | `pipes:write` |  | ⚠️ | Find and remove duplicate rows in a pipe by re-syncing the affected chunks. |
+| `clear_pipe` | `pipes:delete` |  | ⚠️ | Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. |
+| `deduplicate_pipe` | `pipes:write`, `pipes:delete` |  | ⚠️ | Find and remove duplicate rows in a pipe by re-syncing the affected chunks. |
 | `delete_pipe` | `pipes:delete` |  | ⚠️ | Delete a pipe entirely: drop its target table and remove its registration and parameters. |
 | `drop_pipe` | `pipes:drop` |  | ⚠️ | Drop a pipe's target table while keeping its registration, so it can be re-synced from its source. |
 | `edit_pipe` | `pipes:write` |  |  | Edit a registered pipe's parameters (columns, dtypes, tags, fetch definition, verify settings). |
@@ -5217,7 +5217,7 @@ transport grants everything, because it runs as the user who launched it.
 | `get_pipe_data` | `pipes:read` | ✅ |  | Read rows from a pipe. |
 | `get_pipe_stats` | `pipes:read` | ✅ |  | Return a pipe's shape in one call: whether its table exists, its rowcount, its newest and oldest datetime values (sync time), its verification bound time, and the column types as they actually exist in the database. |
 | `list_pipes` | `pipes:read` | ✅ |  | List registered Meerschaum pipes and their keys, tags, index columns, and dtypes. |
-| `read_sql` | `connectors:read` | ✅ |  | Run a read-only SQL query (or read a whole table by name) through a SQL connector and return the rows. |
+| `read_sql` | `sql:read` | ✅ |  | Run a read-only SQL query (or read a whole table by name) through a SQL connector and return the rows. |
 | `register_pipe` | `pipes:write` |  |  | Create and register a new pipe (the programmatic equivalent of 'bootstrap pipe'). |
 | `sync_documents` | `pipes:write` |  |  | Insert or update rows in a pipe from a list of records you supply. |
 | `sync_pipe` | `pipes:write` |  |  | Sync a pipe: fetch new data from its source connector and store it on its instance. |
@@ -5246,11 +5246,11 @@ transport grants everything, because it runs as the user who launched it.
 | Scope | Unlocks | Meaning |
 | --- | --- | --- |
 | `actions:execute` | `execute_action` | Execute arbitrary actions. |
-| `connectors:read` | `read_sql` | Read the available connectors. |
-| `pipes:delete` | `delete_pipe` | Delete pipes' parameters and drop target tables. |
+| `pipes:delete` | `clear_pipe`, `deduplicate_pipe`, `delete_pipe` | Delete pipes' parameters and drop target tables. |
 | `pipes:drop` | `drop_pipe` | Drop target tables. |
 | `pipes:read` | `get_pipe_attributes`, `get_pipe_data`, `get_pipe_stats`, `list_pipes` | Read pipes' parameters and the contents of target tables. |
-| `pipes:write` | `clear_pipe`, `deduplicate_pipe`, `edit_pipe`, `register_pipe`, `sync_documents`, `sync_pipe`, `verify_pipe` | Update pipes' parameters and sync to target tables. |
+| `pipes:write` | `deduplicate_pipe`, `edit_pipe`, `register_pipe`, `sync_documents`, `sync_pipe`, `verify_pipe` | Update pipes' parameters and sync to target tables. |
+| `sql:read` | `read_sql` | Execute read-only SQL queries against SQL connectors. |
 
 ## Tool details
 
@@ -5258,7 +5258,7 @@ transport grants everything, because it runs as the user who launched it.
 
 Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. Deleted rows are not recoverable — pass `begin`/`end`/`params` to scope it, and note that omitting all three deletes every row.
 
-**Scope:** `pipes:write`
+**Scope:** `pipes:delete`
 
 **Annotations:** destructive
 
@@ -5276,7 +5276,7 @@ Delete rows from a pipe's table within an optional datetime range and filter, ke
 
 Find and remove duplicate rows in a pipe by re-syncing the affected chunks. Rows are deleted and rewritten, so scope it with `begin`/`end`/`params` when you can.
 
-**Scope:** `pipes:write`
+**Scope:** `pipes:write`, `pipes:delete`
 
 **Annotations:** destructive
 
@@ -5428,7 +5428,7 @@ List registered Meerschaum pipes and their keys, tags, index columns, and dtypes
 
 Run a read-only SQL query (or read a whole table by name) through a SQL connector and return the rows. Only single read-only statements are accepted: anything that writes, or more than one statement, is refused. Read the `mrsm://connectors` resource for the available connector keys.
 
-**Scope:** `connectors:read`
+**Scope:** `sql:read`
 
 **Annotations:** read-only, idempotent
 
@@ -5556,6 +5556,9 @@ mrsm register token --label reader --scopes pipes:read
 
 ### An agent that reads and ingests, but cannot drop or delete.
 mrsm register token --label writer --scopes pipes:read,pipes:write
+
+### An agent that may run read-only SQL through a connector.
+mrsm register token --label analyst --scopes pipes:read,sql:read
 ```
 
 ## Read-only mode
@@ -5574,14 +5577,16 @@ every tool that modifies anything is hidden and refused, **even for a `*`-scoped
 
 `execute_action` runs Meerschaum actions, which is the whole CLI. The `actions:execute` scope has always meant this — the REST `/actions` route behaves identically.
 
-Three actions execute arbitrary code on the host and are refused by default:
+The actions which execute arbitrary code or SQL on the host are refused by default:
 
 ```yaml
 api:
   mcp:
     actions:
-      denylist: ['sh', 'os', 'python']
+      denylist: ['sh', 'os', 'python', 'stack', 'sql', 'install']
 ```
+
+The denylist applies to subactions too, so a denied action cannot be smuggled in through a wrapper (`start job` with `{"action": ["sh", …]}` is refused).
 
 For a locked-down deployment, invert it with an allowlist, which takes precedence:
 
@@ -5596,13 +5601,20 @@ Do not grant `actions:execute` to a token you would not grant a shell to. If an 
 
 ## `read_sql` and read-only enforcement
 
-`read_sql` runs under `connectors:read`. Because `SQLConnector.read()` executes whatever it is given, the tool checks the statement first and refuses:
+`read_sql` runs under its own `sql:read` scope — running `SELECT` against every database the host can reach is a much larger privilege than `connectors:read`, which only lists connector labels. Because `SQLConnector.read()` executes whatever it is given, the tool checks the statement first and refuses:
 
 - anything whose leading keyword is not `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `VALUES`, or `TABLE`
 - more than one statement (`SELECT 1; DROP TABLE users`)
 - any query containing a mutating keyword, including `SELECT ... INTO` and `COPY ... TO PROGRAM`
+- mutating or filesystem functions inside an otherwise ordinary `SELECT` (`dblink_exec()`, `lo_export()`, `pg_read_file()`, `xp_cmdshell`)
+- MySQL executable comments (`/*! … */`), which the server runs as SQL
+- any query naming a protected instance table (`mrsm_users`, `mrsm_tokens`, `mrsm_pipes`, `mrsm_plugins`)
 
-Comments and string literals are stripped first, so `WHERE note = 'please delete'` is fine and `-- ; DROP TABLE u` is not a bypass.
+Comments, string literals, and quoted identifiers are stripped in a single quote-aware pass, so `WHERE note = 'please delete'` is fine while neither `-- ; DROP TABLE u` nor `SELECT '--' ; DROP TABLE u` is a bypass. Results are read one bounded chunk at a time, so an unqualified `SELECT * FROM big_table` cannot exhaust the server's memory.
+
+## Protected instance tables
+
+The pipe tools refuse any pipe whose `target` is `mrsm_users`, `mrsm_tokens`, `mrsm_pipes`, or `mrsm_plugins`, matching the REST routes: registering, editing, reading, syncing, clearing, and dropping are all blocked, and such pipes are omitted from `list_pipes`. Without this, `pipes:read` on a pipe pointed at `mrsm_users` would return password hashes.
 
 !!! warning "This is a keyword check, not a SQL parser"
     It blocks the realistic escalation paths from a read scope, but a sufficiently exotic flavor-specific construct could slip through. **If `read_sql` is reachable by anyone you do not trust, back the connector with a read-only database role.** That is the only durable guarantee; the statement check is defense in depth.
@@ -8887,7 +8899,9 @@ This is the current release cycle, so stay tuned for future releases!
   }
   ```
 
-  This replaces the community `mcp` plugin — uninstall it with `mrsm uninstall plugin mcp`. Read [MCP security](/reference/mcp/security/) before exposing `/mcp`: `api:mcp:read_only` hides every modifying tool, `execute_action` denies `sh`, `os`, and `python` by default, and `read_sql` accepts only a single read-only statement.
+  This replaces the community `mcp` plugin — uninstall it with `mrsm uninstall plugin mcp`. Read [MCP security](/reference/mcp/security/) before exposing `/mcp`: `api:mcp:read_only` hides every modifying tool, `execute_action` denies the code-executing actions by default, and `read_sql` accepts only a single read-only statement under its own `sql:read` scope.
+
+  The MCP tools enforce the same guardrails as the REST routes: pipes targeting the protected instance tables (`mrsm_users`, `mrsm_tokens`, `mrsm_pipes`, `mrsm_plugins`) can't be registered, read, or written; `clear_pipe` and `deduplicate_pipe` require `pipes:delete`; `instance_keys` is checked against the API's allowed instances; and `execute_action` applies the server's action permissions, pins the instance, and refuses a denied action passed as another action's subaction. Tool calls run off the event loop, so a long sync no longer stalls other requests.
 
 - **Reject `json` columns used as index columns.**  
   JSON values can't be sorted or deduplicated, so such a pipe synced once and then failed with `TypeError: unhashable type: 'dict'`. Registering, editing, or syncing now fails immediately instead. Use [`indices`](/reference/pipes/parameters/#indices) if you only want a database index on the column. See [Data Types](/reference/pipes/dtypes/#json-columns-cannot-be-index-columns).
@@ -8897,6 +8911,15 @@ This is the current release cycle, so stay tuned for future releases!
 
 - **Fix `--no-auth` rejecting every authenticated route.**  
   `mrsm start api --no-auth` returned `401 Not authenticated` for all endpoints instead of skipping authentication.
+
+- **Require authentication to list API tokens in the web console.**  
+  The tokens page's refresh callback could be triggered without a session, returning every token's client ID, label, and expiration.
+
+- **Fix the web console minting tokens with all scopes.**  
+  Deselecting "Grant all scopes" and choosing individual scopes had no effect — the registered token always carried every scope.
+
+- **Enforce the registration permission in the web console.**  
+  With `api:permissions:registration:users` disabled, the web console's register form still created accounts; only the REST route checked it.
 
 - **Add Plotly Dash's MCP server for plugin authors.**  
   Set `api:dash:mcp:enabled` (requires `dash>=4.3.0`) to expose the web console's layout at `/dash/_mcp`, so an assistant can inspect the component tree while you write a [web page plugin](/reference/plugins/types-of-plugins/). Off by default because it's served without authentication. See [Web Console](/reference/api-instance/web-console/#dash-mcp-server).
