@@ -39,13 +39,21 @@ def doc_title_and_desc(md_path: Path) -> tuple[str, str]:
     ### Strip YAML frontmatter.
     if text.startswith("---"):
         text = text.split("---", 2)[-1]
-    title, desc, in_block, in_fence = "", "", False, False
+    title, desc, in_block, in_fence, in_comment = "", "", False, False, False
     for line in text.splitlines():
         s = line.strip()
         if s.startswith("```"):
             in_fence = not in_fence
             continue
         if in_fence:
+            continue
+        ### Skip HTML comments, which may span several lines. Without this, the
+        ### second line of a comment becomes the description.
+        if s.startswith("<!--"):
+            in_comment = "-->" not in s
+            continue
+        if in_comment:
+            in_comment = "-->" not in s
             continue
         if "<style" in s or "<script" in s:
             in_block = True

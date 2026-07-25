@@ -2424,8 +2424,37 @@ pipe.edit()           # persist the change
 !!! warning "Changing a dtype is not a backfill"
     Editing a dtype updates the metadata and affects how *future* rows are written; it does not retroactively rewrite existing rows. To rebuild a column's stored values under the new type, re-sync the historical range (e.g. `Pipe.verify()` or `sync pipes --begin ...`).
 
+## `json` columns cannot be index columns
+
+A `json` column holds `dict` or `list` values. Syncing sorts and deduplicates on the [index columns](/reference/pipes/parameters/#columns) in Pandas, and containers are unhashable there — so a `json` column in `columns` is refused when the pipe is registered, edited, or synced:
+
+```python
+mrsm.Pipe(
+    'sql:main', 'satellites',
+    columns={'datetime': 'ts', 'id': 'display_config'},   # <- rejected
+    dtypes={'display_config': 'json'},
+).register()
+# (False, "Cannot use a 'json' column as an index column: ...")
+```
+
+This is a client-side limit, not a database one. If you only need a database index on the column for query performance, declare it under [`indices`](/reference/pipes/parameters/#indices) instead, which is allowed:
+
+```python
+mrsm.Pipe(
+    'sql:main', 'satellites',
+    columns={'datetime': 'ts', 'id': 'sat_id'},
+    indices={'cfg': 'display_config'},                    # <- fine
+    dtypes={'display_config': 'json'},
+)
+```
+
+On PostgreSQL-like flavors the column is stored as `JSONB`, which supports B-tree, hash, and GIN indices, so a real index is created. On MySQL/MariaDB the dtype maps to `TEXT`, which cannot be indexed without a prefix length, so no index is built.
+
+If you need to identify rows by the contents of a JSON column, give it a scalar dtype (`str`) so it can be compared as text, or extract the identifying field into its own column.
+
 ## Common dtype issues
 
+- **`Cannot use a 'json' column as an index column`.** Give the column a scalar dtype (e.g. `str`), or move it out of `columns` and into `indices` — see [above](#json-columns-cannot-be-index-columns).
 - **A column became `numeric` (or `string`) unexpectedly.** A later sync sent a float into an `int` column (promoted to `numeric`), or text into a numeric column (promoted to `string`). Set the dtype explicitly up front, or use [`mixed_numerics=False`](/reference/pipes/parameters/#mixed_numerics) / [`static=True`](/reference/pipes/parameters/#static) to lock the schema.
 - **`Unknown Pandas data type '...'. Falling back to 'TEXT'.`** The dtype string isn't recognized. Use a base Meerschaum dtype or a valid Pandas dtype string.
 - **Timezone offsets disappeared / shifted.** The `datetime` dtype is tz-aware and coerces everything to UTC. For tz-naive storage, use `datetime64[us]` (no timezone).
@@ -4995,6 +5024,610 @@ Visit the `/dash/plugins` page to see and download the plugins registered to the
 Create manage long-lived [tokens](/reference/api-instance/tokens/) on the page `/dash/tokens`.
 
 <img src="/assets/screenshots/web-console-tokens-register.png" alt="Register token popup">
+
+## Dash MCP server
+
+Plotly Dash can expose the web console's layout over its own [MCP](../mcp/index.md) server at `/dash/_mcp`, which lets an AI agent inspect the component tree while you build a [web page plugin](../plugins/types-of-plugins.md). It is a development aid, **not** part of Meerschaum's MCP server, and it is disabled by default:
+
+```yaml
+api:
+  dash:
+    mcp:
+      enabled: true   # requires dash>=4.3.0
+```
+
+!!! danger "Do not enable this on a public instance"
+    Dash's MCP server is served from inside the Dash WSGI app, which sits outside FastAPI's authentication — nothing it exposes is token- or scope-checked. Meerschaum limits it to layout introspection (`dash://layout`, `dash://components`, and the `get_dash_component` tool) and opts every callback out, so a callback must opt in explicitly:
+
+    ```python
+    @dash_app.callback(..., mcp_enabled=True)
+    def my_callback(...):
+        ...
+    ```
+
+    Only opt in callbacks that are safe to run unauthenticated. Use Meerschaum's own [`/mcp` endpoint](../mcp/index.md) for anything that touches data.
+
+
+---
+
+# 🤖 MCP Server
+
+Source: https://meerschaum.io/reference/mcp/
+
+# 🤖 MCP Server
+
+Meerschaum ships a [Model Context Protocol](https://modelcontextprotocol.io) server, so an AI agent can discover your pipes, read their data, and run actions without you writing any glue code.
+
+There are two transports. They expose the same tools, resources, and prompts:
+
+| Transport | Where | Auth | Use it when |
+| --- | --- | --- | --- |
+| **stdio** | `mrsm start mcp` | None — inherits your shell | The client runs on the same machine as Meerschaum |
+| **HTTP** | `/mcp` on the API | OAuth2 scopes per tool | The client is remote |
+
+## Quick start: local (stdio)
+
+Point your MCP client at the `mrsm` executable. For Claude Desktop or Claude Code, add this to your MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "meerschaum": {
+      "command": "mrsm",
+      "args": ["start", "mcp"]
+    }
+  }
+}
+```
+
+That's it — no API server, no token. The stdio server runs as the user who launched it and can do anything that user's `mrsm` command can, exactly like the CLI.
+
+!!! note "Isolate a project"
+    Set `MRSM_ROOT_DIR` in the client's `env` to scope the server to one Meerschaum root:
+
+    ```json
+    {
+      "mcpServers": {
+        "meerschaum": {
+          "command": "mrsm",
+          "args": ["start", "mcp"],
+          "env": {"MRSM_ROOT_DIR": "/path/to/project/root"}
+        }
+      }
+    }
+    ```
+
+## Quick start: remote (HTTP)
+
+Start an API instance and [register a token](../api-instance/tokens.md) with only the scopes the agent needs:
+
+```bash
+mrsm start api
+mrsm register token --label agent --scopes pipes:read
+```
+
+Then point the client at `/mcp` with the token as a bearer credential:
+
+```json
+{
+  "mcpServers": {
+    "meerschaum": {
+      "url": "https://your-api-host/mcp",
+      "headers": {"Authorization": "Bearer mrsm-key:<client-id>:<client-secret>"}
+    }
+  }
+}
+```
+
+To see exactly what a token can reach, `GET /mcp` with it:
+
+```bash
+curl -H "Authorization: Bearer mrsm-key:..." https://your-api-host/mcp
+```
+
+## What the agent gets
+
+**Tools** — the operations. Discovering and reading pipes (`list_pipes`, `get_pipe_data`, `get_pipe_attributes`, `get_pipe_stats`), writing to them (`sync_pipe`, `sync_documents`, `register_pipe`, `edit_pipe`, `verify_pipe`, `deduplicate_pipe`), removing data (`clear_pipe`, `drop_pipe`, `delete_pipe`), and two escape hatches (`read_sql`, `execute_action`). See the [tool reference](tools.md).
+
+**Resources** — documents the agent can fetch once and cache: `mrsm://pipes`, `mrsm://pipes/{ck}/{mk}/{lk}`, `mrsm://actions`, `mrsm://connectors`, and `mrsm://docs` (this reference, served locally, no network needed).
+
+**Prompts** — guided workflows the client surfaces as commands: `bootstrap_pipe`, `diagnose_sync_failure`, and `explain_pipe`.
+
+Every tool carries MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`), so a well-behaved client asks before it deletes anything.
+
+## Configuration
+
+```yaml
+api:
+  mcp:
+    enabled: true
+    ### Expose only tools which never modify data, whatever the token allows.
+    read_only: false
+    actions:
+      ### Actions `execute_action` refuses to run.
+      denylist: ['sh', 'os', 'python']
+      ### If non-empty, the only actions `execute_action` may run.
+      allowlist: []
+```
+
+Set `api:mcp:enabled` to `false` to drop the `/mcp` route entirely. The stdio transport is unaffected — it is only ever started explicitly.
+
+## Security
+
+Read [MCP security](security.md) before exposing `/mcp` to anything you do not control. The short version:
+
+- Scope your tokens. A token with `pipes:read` cannot write, drop, or run actions, and the tools it cannot call are hidden from it entirely.
+- `actions:execute` is broad by design — it is the CLI. Do not hand it out casually.
+- Use `read_only: true` for any deployment where an agent should only ever look.
+
+## Migrating from the `mcp` plugin
+
+The community `mcp` plugin is superseded by this endpoint. The built-in route is registered before plugins load, so it takes precedence automatically and the API warns you at startup. Uninstall the plugin to clear the warning:
+
+```bash
+mrsm uninstall plugin mcp
+```
+
+The tools are broadly the same, with a few changes:
+
+- `get_sync_time`, `get_bound_time`, `get_pipe_rowcount`, `pipe_exists`, and `get_pipe_columns_types` are consolidated into **`get_pipe_stats`**, which returns all of it in one call.
+- `get_pipe_doc` and `get_pipe_value` are gone — use `get_pipe_data` with `limit: 1` and `select_columns`.
+- `get_backtrack_data` is now `get_pipe_data`'s `backtrack_minutes` argument.
+- `list_actions` and `list_connectors` are now the `mrsm://actions` and `mrsm://connectors` resources.
+- `read_sql` now refuses anything that is not a single read-only statement.
+
+## Dash's MCP server
+
+Plotly Dash has [its own MCP server](../plugins/types-of-plugins.md#web-pages), separate from this one, which exposes the web console's layout so an agent can understand the page it is building. It is **off by default** and is a development aid, not an API — see the [web console docs](../api-instance/web-console.md#dash-mcp-server).
+
+
+---
+
+# Tool Reference
+
+Source: https://meerschaum.io/reference/mcp/tools/
+
+<!--
+    GENERATED FILE — DO NOT EDIT.
+    Regenerate with `python scripts/generate_mcp_docs.py` after changing
+    `meerschaum/mcp/_tools.py`, `_resources.py`, or `_prompts.py`.
+-->
+
+# MCP Tool Reference
+
+Every tool, resource, and prompt the [MCP server](index.md) exposes, generated
+from the registry in `meerschaum.mcp`.
+
+Over HTTP each tool requires an OAuth2 scope, and tools your token does not
+cover are hidden from `tools/list` rather than refused at call time. The stdio
+transport grants everything, because it runs as the user who launched it.
+
+
+## Tools
+
+| Tool | Scope | Read-only | Destructive | Description |
+| --- | --- | :-: | :-: | --- |
+| `clear_pipe` | `pipes:write` |  | ⚠️ | Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. |
+| `deduplicate_pipe` | `pipes:write` |  | ⚠️ | Find and remove duplicate rows in a pipe by re-syncing the affected chunks. |
+| `delete_pipe` | `pipes:delete` |  | ⚠️ | Delete a pipe entirely: drop its target table and remove its registration and parameters. |
+| `drop_pipe` | `pipes:drop` |  | ⚠️ | Drop a pipe's target table while keeping its registration, so it can be re-synced from its source. |
+| `edit_pipe` | `pipes:write` |  |  | Edit a registered pipe's parameters (columns, dtypes, tags, fetch definition, verify settings). |
+| `execute_action` | `actions:execute` |  | ⚠️ | Run any Meerschaum CLI action, for anything without a dedicated tool. |
+| `get_pipe_attributes` | `pipes:read` | ✅ |  | Return a pipe's full attributes: its parameters dict (columns, dtypes, tags, fetch definition, verify settings) as registered on the instance. |
+| `get_pipe_data` | `pipes:read` | ✅ |  | Read rows from a pipe. |
+| `get_pipe_stats` | `pipes:read` | ✅ |  | Return a pipe's shape in one call: whether its table exists, its rowcount, its newest and oldest datetime values (sync time), its verification bound time, and the column types as they actually exist in the database. |
+| `list_pipes` | `pipes:read` | ✅ |  | List registered Meerschaum pipes and their keys, tags, index columns, and dtypes. |
+| `read_sql` | `connectors:read` | ✅ |  | Run a read-only SQL query (or read a whole table by name) through a SQL connector and return the rows. |
+| `register_pipe` | `pipes:write` |  |  | Create and register a new pipe (the programmatic equivalent of 'bootstrap pipe'). |
+| `sync_documents` | `pipes:write` |  |  | Insert or update rows in a pipe from a list of records you supply. |
+| `sync_pipe` | `pipes:write` |  |  | Sync a pipe: fetch new data from its source connector and store it on its instance. |
+| `verify_pipe` | `pipes:write` |  |  | Re-sync a pipe's historical range in chunks, refetching any chunk whose local rowcount disagrees with its source. |
+
+## Resources
+
+| URI | Scope | Description |
+| --- | --- | --- |
+| `mrsm://pipes` | `pipes:read` | Every registered pipe on the default instance, with its keys, tags, index columns, and dtypes. |
+| `mrsm://pipes/{connector_keys}/{metric_key}/{location_key}` | `pipes:read` | A single pipe's attributes. |
+| `mrsm://actions` | `actions:execute` | The names of every available Meerschaum action, for use with the `execute_action` tool. |
+| `mrsm://connectors` | `connectors:read` | The keys (type:label) of the connectors configured on this instance, e.g. 'sql:main'. |
+| `mrsm://docs` | none | How to use this MCP server: Meerschaum's data model, the tools available here, and the OAuth2 scope each one requires. |
+
+## Prompts
+
+| Prompt | Arguments | Description |
+| --- | --- | --- |
+| `bootstrap_pipe` | `source`, `instance_keys` *(optional)* | Walk through designing and registering a new pipe for a described data source, choosing index columns and dtypes before writing anything. |
+| `diagnose_sync_failure` | `connector_keys`, `metric_key`, `location_key` *(optional)*, `symptom` *(optional)* | Systematically diagnose why a pipe is not syncing, or is syncing the wrong rows, working from its configuration and current state rather than guesses. |
+| `explain_pipe` | `connector_keys`, `metric_key`, `location_key` *(optional)* | Explain what a pipe contains and how it is configured, in terms someone unfamiliar with the instance can follow. |
+
+## Scopes
+
+| Scope | Unlocks | Meaning |
+| --- | --- | --- |
+| `actions:execute` | `execute_action` | Execute arbitrary actions. |
+| `connectors:read` | `read_sql` | Read the available connectors. |
+| `pipes:delete` | `delete_pipe` | Delete pipes' parameters and drop target tables. |
+| `pipes:drop` | `drop_pipe` | Drop target tables. |
+| `pipes:read` | `get_pipe_attributes`, `get_pipe_data`, `get_pipe_stats`, `list_pipes` | Read pipes' parameters and the contents of target tables. |
+| `pipes:write` | `clear_pipe`, `deduplicate_pipe`, `edit_pipe`, `register_pipe`, `sync_documents`, `sync_pipe`, `verify_pipe` | Update pipes' parameters and sync to target tables. |
+
+## Tool details
+
+### `clear_pipe`
+
+Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. Deleted rows are not recoverable — pass `begin`/`end`/`params` to scope it, and note that omitting all three deletes every row.
+
+**Scope:** `pipes:write`
+
+**Annotations:** destructive
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+| `begin` | string |  | Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound. |
+| `end` | string |  | Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound. |
+| `params` | object |  | Additional WHERE filters, e.g. {"station": "KGMU"}. A list means IN, a leading '_' negates, and null means IS NULL. |
+
+### `deduplicate_pipe`
+
+Find and remove duplicate rows in a pipe by re-syncing the affected chunks. Rows are deleted and rewritten, so scope it with `begin`/`end`/`params` when you can.
+
+**Scope:** `pipes:write`
+
+**Annotations:** destructive
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+| `begin` | string |  | Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound. |
+| `end` | string |  | Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound. |
+| `params` | object |  | Additional WHERE filters, e.g. {"station": "KGMU"}. A list means IN, a leading '_' negates, and null means IS NULL. |
+
+### `delete_pipe`
+
+Delete a pipe entirely: drop its target table and remove its registration and parameters. This is irreversible and cannot be re-synced afterwards.
+
+**Scope:** `pipes:delete`
+
+**Annotations:** destructive, idempotent
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+
+### `drop_pipe`
+
+Drop a pipe's target table while keeping its registration, so it can be re-synced from its source. All stored rows are lost.
+
+**Scope:** `pipes:drop`
+
+**Annotations:** destructive, idempotent
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+
+### `edit_pipe`
+
+Edit a registered pipe's parameters (columns, dtypes, tags, fetch definition, verify settings). By default the supplied parameters are deep-merged into the existing ones; set `replace` to true to overwrite the whole parameters dict.
+
+**Scope:** `pipes:write`
+
+**Annotations:** idempotent
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+| `parameters` | object | ✅ | Parameters to merge into (or replace) the pipe's parameters. |
+| `replace` | boolean |  | Overwrite every parameter instead of deep-merging. Defaults to false. |
+
+### `execute_action`
+
+Run any Meerschaum CLI action, for anything without a dedicated tool. The `mrsm://actions` resource lists the available action names. This grants broad control over the Meerschaum instance and its host, so prefer a dedicated tool when one exists. Actions which execute arbitrary code are blocked by the server's denylist.
+
+**Scope:** `actions:execute`
+
+**Annotations:** destructive, open-world
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `action` | string | ✅ | The action to run, e.g. 'sync pipes' or 'show pipes'. The first word is the action; the rest become subactions. |
+| `kwargs` | object |  | Keyword arguments for the action, e.g. {"connector_keys": ["sql:main"], "yes": true}. |
+
+### `get_pipe_attributes`
+
+Return a pipe's full attributes: its parameters dict (columns, dtypes, tags, fetch definition, verify settings) as registered on the instance.
+
+**Scope:** `pipes:read`
+
+**Annotations:** read-only, idempotent
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+
+### `get_pipe_data`
+
+Read rows from a pipe. Narrow the result with `begin`/`end` (the datetime axis) and `params` (a WHERE filter) — on a datetime-axis pipe a time window is much cheaper than paging. Set `backtrack_minutes` to read the most recent rows relative to the pipe's sync time without knowing its bounds. Pass the returned `next_cursor` back as `cursor` for the next page.
+
+**Scope:** `pipes:read`
+
+**Annotations:** read-only, idempotent
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+| `begin` | string |  | Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound. |
+| `end` | string |  | Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound. |
+| `params` | object |  | Additional WHERE filters, e.g. {"station": "KGMU"}. A list means IN, a leading '_' negates, and null means IS NULL. |
+| `select_columns` | array |  | Only return these columns. Omit for all. |
+| `omit_columns` | array |  | Return every column except these. |
+| `backtrack_minutes` | integer |  | Read the rows within this many minutes before the pipe's newest sync time. Mutually exclusive with `begin`/`end`. |
+| `order` | `asc` \| `desc` |  | Sort direction on the datetime axis. Defaults to 'asc'. |
+| `limit` | integer |  | Maximum rows per page (default 200). |
+| `cursor` | string |  | Opaque cursor from a previous call's `next_cursor`. Omit to start from the beginning. |
+
+### `get_pipe_stats`
+
+Return a pipe's shape in one call: whether its table exists, its rowcount, its newest and oldest datetime values (sync time), its verification bound time, and the column types as they actually exist in the database. Prefer this over several separate lookups.
+
+**Scope:** `pipes:read`
+
+**Annotations:** read-only, idempotent
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+| `begin` | string |  | Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound. |
+| `end` | string |  | Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound. |
+| `params` | object |  | Additional WHERE filters, e.g. {"station": "KGMU"}. A list means IN, a leading '_' negates, and null means IS NULL. |
+
+### `list_pipes`
+
+List registered Meerschaum pipes and their keys, tags, index columns, and dtypes. Start here to discover what data is available. Results are paginated — pass the returned `next_cursor` back as `cursor` to continue.
+
+**Scope:** `pipes:read`
+
+**Annotations:** read-only, idempotent
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | array |  | Only include pipes with these connector keys. Omit for all. |
+| `metric_keys` | array |  | Only include pipes with these metric keys. Omit for all. |
+| `location_keys` | array |  | Only include pipes with these location keys. Use 'None' to match a null location. |
+| `tags` | array |  | Only include pipes carrying at least one of these tags. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+| `cursor` | string |  | Opaque cursor from a previous call's `next_cursor`. Omit to start from the beginning. |
+
+### `read_sql`
+
+Run a read-only SQL query (or read a whole table by name) through a SQL connector and return the rows. Only single read-only statements are accepted: anything that writes, or more than one statement, is refused. Read the `mrsm://connectors` resource for the available connector keys.
+
+**Scope:** `connectors:read`
+
+**Annotations:** read-only, idempotent
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | SQL connector keys, e.g. 'sql:main'. |
+| `query` | string | ✅ | A single read-only SQL statement, or a table name. |
+| `limit` | integer |  | Maximum rows per page (default 200). |
+| `cursor` | string |  | Opaque cursor from a previous call's `next_cursor`. Omit to start from the beginning. |
+
+### `register_pipe`
+
+Create and register a new pipe (the programmatic equivalent of 'bootstrap pipe'). Declare its index columns (`datetime` drives incremental sync, `id`/`primary` give uniqueness) and optional dtypes and tags. For a SQL-fetch pipe, set `parameters.fetch.definition` to the source query.
+
+**Scope:** `pipes:write`
+
+**Annotations:** idempotent
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+| `columns` | object |  | Index columns by role, e.g. {"datetime": "ts", "id": "station", "primary": "id"}. |
+| `dtypes` | object |  | Explicit column dtypes, e.g. {"val": "float64", "attrs": "json"}. |
+| `tags` | array |  | Tags for grouping and selecting this pipe. |
+| `parameters` | object |  | The full parameters dict, merged with `columns`/`dtypes`/`tags`. Common keys: `fetch.definition` (source SQL), `fetch.backtrack_minutes`, `upsert`, `autotime`, `autoincrement`, `verify.chunk_minutes`. |
+
+### `sync_documents`
+
+Insert or update rows in a pipe from a list of records you supply. No source connector is consulted — Meerschaum filters duplicates and upserts according to the pipe's configuration.
+
+**Scope:** `pipes:write`
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+| `documents` | array | ✅ | Rows as dicts, e.g. [{"ts": "2024-01-01", "station": "KGMU", "val": 1.1}]. |
+
+### `sync_pipe`
+
+Sync a pipe: fetch new data from its source connector and store it on its instance. This is the normal incremental ingest path. Use `sync_documents` instead to insert rows you already have.
+
+**Scope:** `pipes:write`
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+| `begin` | string |  | Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound. |
+| `end` | string |  | Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound. |
+
+### `verify_pipe`
+
+Re-sync a pipe's historical range in chunks, refetching any chunk whose local rowcount disagrees with its source. Use this to fill gaps after an outage.
+
+**Scope:** `pipes:write`
+
+| Argument | Type | Required | Description |
+| --- | --- | :-: | --- |
+| `connector_keys` | string | ✅ | The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'. |
+| `metric_key` | string | ✅ | The pipe's metric key, e.g. 'weather'. |
+| `location_key` | string |  | The pipe's location key. Omit (or pass 'None') for a null location. |
+| `instance_keys` | string |  | Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance. |
+| `begin` | string |  | Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound. |
+| `end` | string |  | Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound. |
+
+
+## Annotations
+
+Every tool carries the MCP annotations a client uses to decide whether to prompt
+before calling:
+
+| Annotation | Meaning |
+| --- | --- |
+| `readOnlyHint` | The tool never modifies anything. |
+| `destructiveHint` | The tool deletes or overwrites data. |
+| `idempotentHint` | Calling it twice with the same arguments has the same effect as once. |
+| `openWorldHint` | The tool can reach beyond this Meerschaum instance. |
+
+## Pagination
+
+`list_pipes`, `get_pipe_data`, and `read_sql` return a `next_cursor`. Pass it
+back as `cursor` for the next page; a `null` cursor means there is nothing more.
+
+On a pipe with a datetime axis, narrowing with `begin` and `end` is far cheaper
+than paging — cursors re-read the rows they skip.
+
+
+---
+
+# Security
+
+Source: https://meerschaum.io/reference/mcp/security/
+
+# MCP Security
+
+The MCP server hands an AI agent the same capabilities a person has at the CLI or web console. Treat a token for it exactly as you would a Meerschaum login.
+
+## The two trust models
+
+**stdio (`mrsm start mcp`) has no authentication and needs none.** It is spawned by a client on your machine and runs as you. It can do anything your `mrsm` command can. There is no scope enforcement because there is no principal to scope — this is the CLI's trust model.
+
+Never expose the stdio server over a network shim (`socat`, an SSH tunnel to an untrusted peer, a container port). Use the HTTP transport, which authenticates.
+
+**HTTP (`/mcp`) authenticates every request and checks a scope per tool.** The scopes are the same ones the REST routes enforce, so a token cannot do more through MCP than through the API.
+
+## Scope enforcement
+
+Each tool declares the scope it needs. Tools your token does not cover are **omitted from `tools/list`**, not advertised and then refused — an agent never sees a capability it cannot use.
+
+See the [tool reference](tools.md#scopes) for the generated scope-to-tool matrix.
+
+A token with the `*` scope can call everything. Mint narrow tokens instead:
+
+```bash
+### An agent that only reads.
+mrsm register token --label reader --scopes pipes:read
+
+### An agent that reads and ingests, but cannot drop or delete.
+mrsm register token --label writer --scopes pipes:read,pipes:write
+```
+
+## Read-only mode
+
+Scopes are per-token; read-only mode is per-deployment. With
+
+```yaml
+api:
+  mcp:
+    read_only: true
+```
+
+every tool that modifies anything is hidden and refused, **even for a `*`-scoped token**. Use it for a public or shared analytics deployment where no agent should ever write. It is a second lock, not a replacement for scoping tokens.
+
+## `execute_action` is broad by design
+
+`execute_action` runs Meerschaum actions, which is the whole CLI. The `actions:execute` scope has always meant this — the REST `/actions` route behaves identically.
+
+Three actions execute arbitrary code on the host and are refused by default:
+
+```yaml
+api:
+  mcp:
+    actions:
+      denylist: ['sh', 'os', 'python']
+```
+
+For a locked-down deployment, invert it with an allowlist, which takes precedence:
+
+```yaml
+api:
+  mcp:
+    actions:
+      allowlist: ['sync', 'show', 'verify']
+```
+
+Do not grant `actions:execute` to a token you would not grant a shell to. If an agent only needs to sync, give it `pipes:write` and let it call `sync_pipe`.
+
+## `read_sql` and read-only enforcement
+
+`read_sql` runs under `connectors:read`. Because `SQLConnector.read()` executes whatever it is given, the tool checks the statement first and refuses:
+
+- anything whose leading keyword is not `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `VALUES`, or `TABLE`
+- more than one statement (`SELECT 1; DROP TABLE users`)
+- any query containing a mutating keyword, including `SELECT ... INTO` and `COPY ... TO PROGRAM`
+
+Comments and string literals are stripped first, so `WHERE note = 'please delete'` is fine and `-- ; DROP TABLE u` is not a bypass.
+
+!!! warning "This is a keyword check, not a SQL parser"
+    It blocks the realistic escalation paths from a read scope, but a sufficiently exotic flavor-specific construct could slip through. **If `read_sql` is reachable by anyone you do not trust, back the connector with a read-only database role.** That is the only durable guarantee; the statement check is defense in depth.
+
+## Deployment checklist
+
+- [ ] Tokens are scoped to the minimum each agent needs — no `*` in production.
+- [ ] `api:mcp:read_only` is `true` anywhere agents should only look.
+- [ ] `actions:execute` is granted deliberately, if at all.
+- [ ] Connectors reachable via `read_sql` use read-only database roles.
+- [ ] The API is behind TLS ([NGINX](../api-instance/nginx.md)) — bearer tokens must not cross plaintext.
+- [ ] `api:dash:mcp:enabled` is left `false` on any public instance.
+
+## Dash's MCP server is not authenticated
+
+Dash's own MCP server is served from inside the Dash WSGI app, which sits **outside** FastAPI's authentication. Nothing it exposes is scope-checked. Meerschaum therefore ships it disabled, and when you do enable it, limits it to layout introspection — callbacks must opt in individually rather than all being exposed by default.
+
+Enable `api:dash:mcp:enabled` only on a local development instance:
+
+```yaml
+api:
+  dash:
+    mcp:
+      enabled: false   # leave this off on anything reachable
+```
 
 
 ---
@@ -8237,9 +8870,43 @@ Source: https://meerschaum.io/news/changelog/
 
 # 🪵 Changelog
 
-## 3.4.0 Releases
+## 3.5.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v3.5.0
+
+- **Add a first-class MCP server.**  
+  Meerschaum now ships a [Model Context Protocol](/reference/mcp/) server, so an AI agent can discover pipes, read their data, and run actions with no glue code. It replaces the community `mcp` plugin.
+
+    Two transports share one tool registry:
+
+    - **stdio** — `mrsm start mcp`, for a local install with no API server and no token. Point a client at it with `{"command": "mrsm", "args": ["start", "mcp"]}`.
+    - **HTTP** — `/mcp` on the API (Streamable HTTP), where every tool requires the same OAuth2 scope as its equivalent REST route. Tools a token's scopes do not cover are hidden from `tools/list` rather than advertised and then refused.
+
+    The server exposes 15 tools, 5 resources (`mrsm://pipes`, `mrsm://pipes/{ck}/{mk}/{lk}`, `mrsm://actions`, `mrsm://connectors`, and `mrsm://docs` — the full reference, served locally), and 3 prompts (`bootstrap_pipe`, `diagnose_sync_failure`, `explain_pipe`). Tools carry MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so clients can prompt before destructive calls, declare output schemas and return `structuredContent`, and paginate with opaque cursors.
+
+- **Add read-only mode and an action denylist to the MCP server.**  
+  Set `api:mcp:read_only` to hide every data-modifying tool regardless of a token's scopes. `execute_action` refuses `sh`, `os`, and `python` by default (configurable via `api:mcp:actions:denylist`, or inverted with `allowlist`), since those execute arbitrary code on the API host.
+
+- **Enforce read-only SQL in the MCP `read_sql` tool.**  
+  `read_sql` runs under `connectors:read`, but `SQLConnector.read()` executes whatever it is given. The tool now refuses stacked statements, any statement that is not a read, and queries containing mutating keywords (including `SELECT ... INTO` and `COPY ... TO PROGRAM`). Comments and string literals are stripped first. Back untrusted connectors with a read-only database role as well — see [MCP security](/reference/mcp/security/).
+
+- **Require authentication for Dash callbacks which read or write data.**  
+  Twelve web console callbacks were reachable unauthenticated by POSTing directly to `/dash/_dash-update-component`, because the Dash app is WSGI-mounted outside FastAPI's auth and the session ID arrives as callback state. Pipe data reads and writes (`query_data_click`, `download_pipe_csv`, `sync_documents_click`, `update_pipe_parameters_click`, `update_pipe_sql_click`, `toggle_sql_symlinks`, `calculate_rowcount_button_click`), the users listing, job-log downloads, and token edit/invalidate/delete now check the session first. Token operations additionally enforce the same ownership rule as the REST routes, so one user cannot modify another's token.
+
+- **Fix `--no-auth` rejecting every authenticated route.**  
+  `ScopedAuth` resolved its principal as a sub-dependency, and that raised a 401 on a missing `Authorization` header before the `no_auth` check could run. Starting the API with `--no-auth` now works as documented.
+
+- **Reject `json` columns used as index columns.**  
+  A `json` column holds `dict` or `list` values, and syncing sorts and deduplicates on the index columns in Pandas, where containers are unhashable. Previously the first sync succeeded and the *second* one raised `TypeError: unhashable type: 'dict'` from deep inside Pandas. `register()`, `edit()`, and `sync()` now refuse it up front with the reason and the fix.
+
+    This is a client-side limit, not a database one, so declaring a `json` column under `indices` (a non-unique performance index) is still allowed — on PostgreSQL-like flavors the column is `JSONB`, which supports B-tree, hash, and GIN indices. See [Data Types](/reference/pipes/dtypes/#json-columns-cannot-be-index-columns).
+
+- **Add Plotly Dash's MCP server as an opt-in development aid.**  
+  Dash can expose the web console's layout at `/dash/_mcp` so an agent can inspect the component tree while you write a web page plugin. It is disabled by default (`api:dash:mcp:enabled`) because it is served inside the Dash WSGI app where token auth does not apply. When enabled, Meerschaum limits it to layout introspection and opts every callback out, requiring `mcp_enabled=True` per callback. Requires `dash>=4.3.0`; older versions are detected and warned about instead of crashing the app.
+
+## 3.4.0 Releases
 
 ### v3.4.7
 
