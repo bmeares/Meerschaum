@@ -194,6 +194,33 @@ default_api_config = {
     'endpoints': {
         'docs_in_production': True,
     },
+    ### Meerschaum's own MCP server, served at `/mcp`.
+    'mcp': {
+        'enabled': True,
+        ### If `True`, only expose tools which never modify data, regardless of
+        ### the caller's token scopes.
+        'read_only': False,
+        'actions': {
+            ### Actions which `execute_action` refuses to run, because each one
+            ### executes arbitrary code or SQL on the API host: `sh`, `os`, and
+            ### `python` directly, `stack` through Docker Compose, `sql` through
+            ### a connector, and `install` by fetching a plugin and importing it.
+            ### Also refused as another action's subaction (e.g. `start job`).
+            'denylist': ['sh', 'os', 'python', 'stack', 'sql', 'install'],
+            ### If non-empty, the only actions `execute_action` may run.
+            'allowlist': [],
+        },
+    },
+    ### Plotly Dash's own MCP server, which exposes the web console's layout and
+    ### callbacks so an agent can understand the app it is looking at.
+    ### Separate from `api:mcp` above, and off by default: it has no
+    ### authentication of its own, because it is served from inside the Dash WSGI
+    ### app where the API's token auth does not apply.
+    'dash': {
+        'mcp': {
+            'enabled': False,
+        },
+    },
     'tokens': {
         'valid_refresh_minutes': 60,
         'default_expiration_days': 366,

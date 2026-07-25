@@ -24,7 +24,7 @@ from meerschaum.api.dash.sessions import (
     delete_session,
     set_session,
 )
-from meerschaum.api.dash.sessions import is_session_authenticated
+from meerschaum.api.dash.sessions import is_session_authenticated, is_state_authenticated
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.connectors.parse import parse_instance_keys
 from meerschaum.api.dash.pipes import (
@@ -830,13 +830,16 @@ dash_app.clientside_callback(
 @dash_app.callback(
     Output("download-dataframe-csv", "data"),
     Input({'type': 'pipe-download-csv-button', 'index': ALL}, 'n_clicks'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def download_pipe_csv(n_clicks):
+def download_pipe_csv(n_clicks, session_store_data):
     """
     Download the most recent chunk as a CSV file.
     """
     if not n_clicks:
+        raise PreventUpdate
+    if not is_state_authenticated(session_store_data):
         raise PreventUpdate
     ctx = dash.callback_context.triggered
     if ctx[0]['value'] is None:
@@ -886,11 +889,14 @@ def update_pipe_accordion(item, session_store_data):
     Output({'type': 'update-parameters-success-div', 'index': MATCH}, 'children'),
     Input({'type': 'update-parameters-button', 'index': MATCH}, 'n_clicks'),
     State({'type': 'parameters-editor', 'index': MATCH}, 'value'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def update_pipe_parameters_click(n_clicks, parameters_editor_text):
+def update_pipe_parameters_click(n_clicks, parameters_editor_text, session_store_data):
     if not n_clicks:
         raise PreventUpdate
+    if not is_state_authenticated(session_store_data):
+        return alert_from_success_tuple((False, "You are not authenticated."))
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -920,11 +926,14 @@ def update_pipe_parameters_click(n_clicks, parameters_editor_text):
     Output({'type': 'update-sql-success-div', 'index': MATCH}, 'children'),
     Input({'type': 'update-sql-button', 'index': MATCH}, 'n_clicks'),
     State({'type': 'sql-editor', 'index': MATCH}, 'value'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def update_pipe_sql_click(n_clicks, sql_editor_text):
+def update_pipe_sql_click(n_clicks, sql_editor_text, session_store_data):
     if not n_clicks:
         raise PreventUpdate
+    if not is_state_authenticated(session_store_data):
+        return alert_from_success_tuple((False, "You are not authenticated."))
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -946,11 +955,16 @@ def update_pipe_sql_click(n_clicks, sql_editor_text):
 @dash_app.callback(
     Output({'type': 'sql-editor', 'index': MATCH}, 'value'),
     Input({'type': 'resolve-symlinks-switch', 'index': MATCH}, 'value'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def toggle_sql_symlinks(value):
+def toggle_sql_symlinks(value, session_store_data):
     triggered = dash.callback_context.triggered
     if not triggered or triggered[0]['value'] is None:
+        raise PreventUpdate
+
+    ### The pipe's SQL definition is not public.
+    if not is_state_authenticated(session_store_data):
         raise PreventUpdate
 
     pipe = pipe_from_ctx(triggered, 'value')
@@ -965,11 +979,14 @@ def toggle_sql_symlinks(value):
     Output({'type': 'sync-success-div', 'index': MATCH}, 'children'),
     Input({'type': 'update-sync-button', 'index': MATCH}, 'n_clicks'),
     State({'type': 'sync-editor', 'index': MATCH}, 'value'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def sync_documents_click(n_clicks, sync_editor_text):
+def sync_documents_click(n_clicks, sync_editor_text, session_store_data):
     if not n_clicks:
         raise PreventUpdate
+    if not is_state_authenticated(session_store_data):
+        return alert_from_success_tuple((False, "You are not authenticated."))
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
@@ -1011,12 +1028,22 @@ def sync_documents_click(n_clicks, sync_editor_text):
     State({'type': 'limit-input', 'index': MATCH}, 'value'),
     State({'type': 'query-data-begin-input', 'index': MATCH}, 'value'),
     State({'type': 'query-data-end-input', 'index': MATCH}, 'value'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def query_data_click(n_clicks, query_editor_text, limit_value, begin, end):
+def query_data_click(
+    n_clicks,
+    query_editor_text,
+    limit_value,
+    begin,
+    end,
+    session_store_data,
+):
     triggered = dash.callback_context.triggered
     if triggered[0]['value'] is None:
         raise PreventUpdate
+    if not is_state_authenticated(session_store_data):
+        return alert_from_success_tuple((False, "You are not authenticated."))
     pipe = pipe_from_ctx(triggered, 'n_clicks')
     if pipe is None:
         raise PreventUpdate
@@ -1263,13 +1290,17 @@ def close_pages_offcanvas_on_nav(pathname: Optional[str]):
 @dash_app.callback(
     Output({'type': 'calculate-rowcount-div', 'index': MATCH}, 'children'),
     Input({'type': 'calculate-rowcount-button', 'index': MATCH}, 'n_clicks'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def calculate_rowcount_button_click(n_clicks: int):
+def calculate_rowcount_button_click(n_clicks: int, session_store_data):
     """
     Calculate the rowcount for the pipe.
     """
     if not n_clicks:
+        raise PreventUpdate
+
+    if not is_state_authenticated(session_store_data):
         raise PreventUpdate
 
     triggered = dash.callback_context.triggered

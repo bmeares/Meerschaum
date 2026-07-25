@@ -144,8 +144,37 @@ pipe.edit()           # persist the change
 !!! warning "Changing a dtype is not a backfill"
     Editing a dtype updates the metadata and affects how *future* rows are written; it does not retroactively rewrite existing rows. To rebuild a column's stored values under the new type, re-sync the historical range (e.g. `Pipe.verify()` or `sync pipes --begin ...`).
 
+## `json` columns cannot be index columns
+
+A `json` column holds `dict` or `list` values. Syncing sorts and deduplicates on the [index columns](/reference/pipes/parameters/#columns) in Pandas, and containers are unhashable there — so a `json` column in `columns` is refused when the pipe is registered, edited, or synced:
+
+```python
+mrsm.Pipe(
+    'sql:main', 'satellites',
+    columns={'datetime': 'ts', 'id': 'display_config'},   # <- rejected
+    dtypes={'display_config': 'json'},
+).register()
+# (False, "Cannot use a 'json' column as an index column: ...")
+```
+
+This is a client-side limit, not a database one. If you only need a database index on the column for query performance, declare it under [`indices`](/reference/pipes/parameters/#indices) instead, which is allowed:
+
+```python
+mrsm.Pipe(
+    'sql:main', 'satellites',
+    columns={'datetime': 'ts', 'id': 'sat_id'},
+    indices={'cfg': 'display_config'},                    # <- fine
+    dtypes={'display_config': 'json'},
+)
+```
+
+On PostgreSQL-like flavors the column is stored as `JSONB`, which supports B-tree, hash, and GIN indices, so a real index is created. On MySQL/MariaDB the dtype maps to `TEXT`, which cannot be indexed without a prefix length, so no index is built.
+
+If you need to identify rows by the contents of a JSON column, give it a scalar dtype (`str`) so it can be compared as text, or extract the identifying field into its own column.
+
 ## Common dtype issues
 
+- **`Cannot use a 'json' column as an index column`.** Give the column a scalar dtype (e.g. `str`), or move it out of `columns` and into `indices` — see [above](#json-columns-cannot-be-index-columns).
 - **A column became `numeric` (or `string`) unexpectedly.** A later sync sent a float into an `int` column (promoted to `numeric`), or text into a numeric column (promoted to `string`). Set the dtype explicitly up front, or use [`mixed_numerics=False`](/reference/pipes/parameters/#mixed_numerics) / [`static=True`](/reference/pipes/parameters/#static) to lock the schema.
 - **`Unknown Pandas data type '...'. Falling back to 'TEXT'.`** The dtype string isn't recognized. Use a base Meerschaum dtype or a valid Pandas dtype string.
 - **Timezone offsets disappeared / shifted.** The `datetime` dtype is tz-aware and coerces everything to UTC. For tz-naive storage, use `datetime64[us]` (no timezone).

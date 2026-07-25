@@ -51,3 +51,25 @@ Visit the `/dash/plugins` page to see and download the plugins registered to the
 Create manage long-lived [tokens](/reference/api-instance/tokens/) on the page `/dash/tokens`.
 
 <img src="/assets/screenshots/web-console-tokens-register.png" alt="Register token popup">
+
+## Dash MCP server
+
+Plotly Dash can expose the web console's layout over its own [MCP](../mcp/index.md) server at `/dash/_mcp`, which lets an AI agent inspect the component tree while you build a [web page plugin](../plugins/types-of-plugins.md). It is a development aid, **not** part of Meerschaum's MCP server, and it is disabled by default:
+
+```yaml
+api:
+  dash:
+    mcp:
+      enabled: true   # requires dash>=4.3.0
+```
+
+!!! danger "Do not enable this on a public instance"
+    Dash's MCP server is served from inside the Dash WSGI app, which sits outside FastAPI's authentication — nothing it exposes is token- or scope-checked. Meerschaum limits it to layout introspection (`dash://layout`, `dash://components`, and the `get_dash_component` tool) and opts every callback out, so a callback must opt in explicitly:
+
+    ```python
+    @dash_app.callback(..., mcp_enabled=True)
+    def my_callback(...):
+        ...
+    ```
+
+    Only opt in callbacks that are safe to run unauthenticated. Use Meerschaum's own [`/mcp` endpoint](../mcp/index.md) for anything that touches data.

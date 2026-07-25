@@ -25,6 +25,7 @@ from meerschaum.api import (
     pipes as api_pipes,
     get_api_connector,
     endpoints,
+    dash_mcp_enabled,
 )
 
 from meerschaum.connectors.parse import parse_instance_keys
@@ -46,6 +47,32 @@ stylesheets = [
     dbc.icons.FONT_AWESOME,
 ]
 scripts = ['/static/js/node_modules/xterm/lib/xterm.js']
+
+### Dash's own MCP server (`enable_mcp`) exposes the app's layout, components,
+### and callbacks so an agent can understand the page it is looking at. It is
+### distinct from Meerschaum's MCP server at `/mcp`, and opt-in via
+### `api:dash:mcp:enabled`, for two reasons:
+###
+###   1. It lives inside this WSGI app, so FastAPI's token auth never runs for
+###      it. Every callback it advertises — core and plugin — becomes an
+###      unauthenticated, self-describing tool.
+###   2. It only reached Dash in 4.3.0, while Meerschaum still supports
+###      `dash>=4.1.0`. Passing the kwarg to an older Dash raises a `TypeError`
+###      and takes the whole app down with it.
+_dash_mcp_kwargs = {}
+if dash_mcp_enabled:
+    _dash_version = getattr(dash, '__version__', '0')
+    packaging_version = attempt_import('packaging.version', lazy=False)
+    if packaging_version.parse(_dash_version) >= packaging_version.parse('4.3.0'):
+        _dash_mcp_kwargs['enable_mcp'] = True
+    else:
+        from meerschaum.utils.warnings import warn
+        warn(
+            f"The Dash MCP server requires `dash>=4.3.0` (found {_dash_version}). "
+            "Upgrade Dash or unset `api:dash:mcp:enabled`.",
+            stack=False,
+        )
+
 dash_app = enrich.DashProxy(
     __name__,
     title='Meerschaum Web',
@@ -57,7 +84,20 @@ dash_app = enrich.DashProxy(
         enrich.TriggerTransform(),
         enrich.MultiplexerTransform(),
     ],
+    **_dash_mcp_kwargs
 )
+
+### Dash exposes every callback as an invocable MCP tool by default. Meerschaum's
+### callbacks read and write pipes, users, and tokens, so limit the Dash MCP
+### server to what it is actually for — reading the layout — and require a
+### callback to opt in explicitly (`@callback(..., mcp_enabled=True)`).
+if _dash_mcp_kwargs:
+    from dash.mcp import configure_mcp_server
+    configure_mcp_server(
+        include_callbacks=False,
+        include_clientside_callbacks=False,
+        include_pages=False,
+    )
 
 ### The console is dark by default: the Darkly theme is enabled, the light (Flatly)
 ### theme is disabled, and <body> carries `dbc_dark` (dbc_dark.css scopes its overrides

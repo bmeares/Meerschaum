@@ -26,6 +26,65 @@ dcc, html = import_dcc(check_update=CHECK_UPDATE), import_html(check_update=CHEC
 dbc = attempt_import('dash_bootstrap_components', lazy=False, check_update=CHECK_UPDATE)
 
 
+def check_token_access(
+    token_id: str,
+    session_store_data: Optional[dict] = None,
+) -> SuccessTuple:
+    """
+    Return whether a session may modify the token `token_id`.
+
+    Mirrors the ownership rule enforced by the REST routes
+    (`meerschaum.api.routes._tokens`): a token belongs to the user who created
+    it, and only that user or an admin may edit, invalidate, or delete it.
+
+    The token-management callbacks are reachable directly via
+    `/dash/_dash-update-component` with an arbitrary token ID, so this must be
+    checked in the callback rather than relied upon from the rendered page.
+
+    Parameters
+    ----------
+    token_id: str
+        The token ID taken from the triggering component's `index`.
+
+    session_store_data: Optional[dict], default None
+        The `session-store` component's `data` dict.
+
+    Returns
+    -------
+    A `SuccessTuple` indicating whether the operation may proceed.
+    """
+    import uuid
+    from meerschaum.utils.misc import is_uuid
+    from meerschaum.api import no_auth
+    from meerschaum.api.dash.sessions import is_state_authenticated
+
+    if not is_state_authenticated(session_store_data):
+        return False, "You are not authenticated."
+
+    if not is_uuid(token_id):
+        return False, "Invalid token ID."
+
+    conn = get_api_connector()
+    token_model = conn.get_token_model(uuid.UUID(str(token_id)))
+    if token_model is None:
+        return False, "Token does not exist."
+
+    ### Under `--no-auth`, the session has no real user (`get_user_from_session`
+    ### returns `None`), so ownership cannot (and need not) be enforced.
+    if no_auth:
+        return True, "Success"
+
+    session_id = (session_store_data or {}).get('session-id', None)
+    user = get_user_from_session(session_id)
+    user_id = conn.get_user_id(user, debug=debug) if user is not None else None
+
+    if token_model.user_id and token_model.user_id != user_id:
+        if user is None or conn.get_user_type(user, debug=debug) != 'admin':
+            return False, "Cannot modify another user's token."
+
+    return True, "Success"
+
+
 def get_tokens_table(session_id: Optional[str] = None) -> Tuple[dbc.Table, List[dbc.Alert]]:
     """
     Return the main tokens table.

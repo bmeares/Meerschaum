@@ -1,8 +1,48 @@
 # 🪵 Changelog
 
-## 3.4.0 Releases
+## 3.5.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v3.5.0
+
+- **Add a first-class [MCP server](/reference/mcp/).**  
+  AI assistants can now discover your pipes, read their data, and run actions — 15 [tools](/reference/mcp/tools/), 5 resources, and 3 prompts. Run it locally over stdio with `mrsm start mcp`, or remotely at an API instance's `/mcp` endpoint (where each tool requires the same [scope](/reference/api-instance/tokens/) as its REST equivalent, and tools your token can't call are hidden).
+
+  ```json
+  {
+    "mcpServers": {
+      "meerschaum": {"command": "mrsm", "args": ["start", "mcp"]}
+    }
+  }
+  ```
+
+  This replaces the community `mcp` plugin — uninstall it with `mrsm uninstall plugin mcp`. Read [MCP security](/reference/mcp/security/) before exposing `/mcp`: `api:mcp:read_only` hides every modifying tool, `execute_action` denies the code-executing actions by default, and `read_sql` accepts only a single read-only statement under its own `sql:read` scope.
+
+  The MCP tools enforce the same guardrails as the REST routes: pipes targeting the protected instance tables (`mrsm_users`, `mrsm_tokens`, `mrsm_pipes`, `mrsm_plugins`) can't be registered, read, or written; `clear_pipe` and `deduplicate_pipe` require `pipes:delete`; `instance_keys` is checked against the API's allowed instances; and `execute_action` applies the server's action permissions, pins the instance, and refuses a denied action passed as another action's subaction. Tool calls run off the event loop, so a long sync no longer stalls other requests.
+
+- **Reject `json` columns used as index columns.**  
+  JSON values can't be sorted or deduplicated, so such a pipe synced once and then failed with `TypeError: unhashable type: 'dict'`. Registering, editing, or syncing now fails immediately instead. Use [`indices`](/reference/pipes/parameters/#indices) if you only want a database index on the column. See [Data Types](/reference/pipes/dtypes/#json-columns-cannot-be-index-columns).
+
+- **Require authentication for web console actions which read or write data.**  
+  Twelve Dash callbacks (pipe data, parameter and SQL edits, syncing documents, the users listing, job logs, and tokens) could be triggered without a session by posting to the callback endpoint directly.
+
+- **Fix `--no-auth` rejecting every authenticated route.**  
+  `mrsm start api --no-auth` returned `401 Not authenticated` for all endpoints instead of skipping authentication.
+
+- **Require authentication to list API tokens in the web console.**  
+  The tokens page's refresh callback could be triggered without a session, returning every token's client ID, label, and expiration.
+
+- **Fix the web console minting tokens with all scopes.**  
+  Deselecting "Grant all scopes" and choosing individual scopes had no effect — the registered token always carried every scope.
+
+- **Enforce the registration permission in the web console.**  
+  With `api:permissions:registration:users` disabled, the web console's register form still created accounts; only the REST route checked it.
+
+- **Add Plotly Dash's MCP server for plugin authors.**  
+  Set `api:dash:mcp:enabled` (requires `dash>=4.3.0`) to expose the web console's layout at `/dash/_mcp`, so an assistant can inspect the component tree while you write a [web page plugin](/reference/plugins/types-of-plugins/). Off by default because it's served without authentication. See [Web Console](/reference/api-instance/web-console/#dash-mcp-server).
+
+## 3.4.0 Releases
 
 ### v3.4.7
 

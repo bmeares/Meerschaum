@@ -43,6 +43,11 @@ nav = [
       {"NGINX" = "reference/api-instance/nginx.md"},
       {"Web Console" = "reference/api-instance/web-console.md"},
     ]},
+    {"🤖 MCP Server" = [
+      "reference/mcp/index.md",
+      {"Tool Reference" = "reference/mcp/tools.md"},
+      {"Security" = "reference/mcp/security.md"},
+    ]},
     {"🎼 Compose" = "reference/compose.md"},
     {"⏯️ Actions" = "reference/actions/index.md"},
     {"👷 Background Jobs" = "reference/background-jobs.md"},

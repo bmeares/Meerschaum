@@ -194,6 +194,14 @@ def sync(
                     p._invalidate_cache(debug=debug)
                     return register_success, register_msg
 
+        ### Checked here as well as in `register()` so that a pipe registered before
+        ### this validation existed reports the reason rather than failing deep in
+        ### Pandas with `unhashable type: 'dict'`.
+        indices_success, indices_msg = p.validate_indices(debug=debug)
+        if not indices_success:
+            p._invalidate_cache(debug=debug)
+            return indices_success, indices_msg
+
         if isinstance(df, str):
             from meerschaum.utils.dataframe import parse_simple_lines
             df = parse_simple_lines(df)

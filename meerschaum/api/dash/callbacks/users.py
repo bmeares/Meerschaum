@@ -10,10 +10,12 @@ from __future__ import annotations
 from meerschaum.utils.typing import Optional
 from meerschaum.api.dash import dash_app
 from meerschaum.api import CHECK_UPDATE
-from meerschaum.utils.packages import attempt_import
+from meerschaum.utils.packages import attempt_import, import_html
 dash = attempt_import('dash', lazy=False, check_update=CHECK_UPDATE)
-from dash.dependencies import Input, Output
+html = import_html(check_update=CHECK_UPDATE)
+from dash.dependencies import Input, Output, State
 from meerschaum.api.dash.users import build_users_listing, build_user_detail
+from meerschaum.api.dash.sessions import is_state_authenticated
 
 
 def _parse_username_from_pathname(pathname: Optional[str]) -> Optional[str]:
@@ -35,15 +37,28 @@ def _parse_username_from_pathname(pathname: Optional[str]) -> Optional[str]:
     Input('users-location', 'pathname'),
     Input('search-users-input', 'value'),
     Input('users-pagination', 'active_page'),
+    State('session-store', 'data'),
 )
 def render_users_page(
     pathname: Optional[str] = None,
     search_term: Optional[str] = None,
     active_page: Optional[int] = None,
+    session_store_data: Optional[dict] = None,
 ):
     """
     Render either the paginated users listing or a single user's detail page.
     """
+    ### The user directory is not public: this callback is reachable directly via
+    ### `/dash/_dash-update-component`, not only by navigating the page.
+    if not is_state_authenticated(session_store_data):
+        return (
+            html.P("You are not authenticated."),
+            {'display': 'none'},
+            1,
+            1,
+            {'display': 'none'},
+        )
+
     username = _parse_username_from_pathname(pathname)
     if username:
         return (

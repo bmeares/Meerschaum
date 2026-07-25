@@ -19,13 +19,14 @@ import dash.dcc as dcc
 import meerschaum as mrsm
 from meerschaum.api import get_api_connector, debug
 from meerschaum.api.dash import dash_app
-from meerschaum.api.dash.sessions import get_user_from_session
+from meerschaum.api.dash.sessions import get_user_from_session, is_state_authenticated
 from meerschaum.api.dash.components import alert_from_success_tuple, build_cards_grid
 from meerschaum.api.dash.tokens import (
     get_tokens_cards,
     get_tokens_table,
     build_tokens_register_input_modal,
     build_tokens_register_output_modal,
+    check_token_access,
 )
 from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.daemon import get_new_daemon_name
@@ -46,6 +47,16 @@ def refresh_tokens_button_click(
     """
     Build the tokens cards on load or refresh.
     """
+    ### Like the other token callbacks, this is reachable directly via
+    ### `/dash/_dash-update-component`, so it must not list tokens for
+    ### unauthenticated sessions.
+    if not is_state_authenticated(session_data):
+        return (
+            html.P("You are not authenticated."),
+            dash.no_update,
+            [],
+        )
+
     session_id = (session_data or {}).get('session-id', None)
     tokens_table, alerts = get_tokens_table(session_id)
     if not tokens_table:
@@ -143,6 +154,7 @@ def edit_token_deselect_scopes_click(n_clicks: Optional[int], name: str):
     Input('tokens-register-button', 'n_clicks'),
     State('tokens-name-input', 'value'),
     State('tokens-scopes-checklist', 'value'),
+    State('tokens-toggle-scopes-switch', 'value'),
     State('tokens-expiration-datepickersingle', 'date'),
     State('session-store', 'data'),
     prevent_initial_call=True,
@@ -151,6 +163,7 @@ def register_token_click(
     n_clicks: Optional[int],
     name: str,
     scopes: List[str],
+    grant_all_scopes: bool = True,
     expiration: Optional[datetime] = None,
     session_data: Optional[Dict[str, Any]] = None,
 ):
@@ -160,10 +173,34 @@ def register_token_click(
     if not n_clicks:
         raise PreventUpdate
 
+    scopes = (
+        list(STATIC_CONFIG['tokens']['scopes'])
+        if grant_all_scopes
+        else (scopes or [])
+    )
+    if not scopes:
+        return (
+            dash.no_update,
+            True,
+            [
+                dbc.ModalHeader(html.H4(["Failed to register token ", html.B(name)])),
+                dbc.ModalBody(
+                    alert_from_success_tuple((False, "Select at least one scope."))
+                ),
+                dbc.ModalFooter([
+                    dbc.Button(
+                        "Close",
+                        id='tokens-close-register-output-modal-button',
+                    ),
+                ]),
+            ],
+        )
+
     session_id = (session_data or {}).get('session-id', None)
     token = Token(
         label=(name or None),
         user=get_user_from_session(session_id),
+        scopes=scopes,
         expiration=(datetime.fromisoformat(f"{expiration}") if expiration is not None else None),
     )
     return False, True, build_tokens_register_output_modal(token)
@@ -273,6 +310,7 @@ def edit_token_button_click(n_clicks: int):
     State({'type': 'tokens-expiration-datepickersingle', 'index': MATCH}, 'date'),
     State({'type': 'tokens-scopes-checklist', 'index': MATCH}, 'value'),
     State({'type': 'tokens-name-input', 'index': MATCH}, 'value'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
 def edit_token_submit_button_click(
@@ -280,6 +318,7 @@ def edit_token_submit_button_click(
     expiration: Optional[datetime],
     scopes: List[str],
     label: str,
+    session_store_data: Optional[Dict[str, Any]] = None,
 ):
     if not n_clicks:
         raise PreventUpdate
@@ -290,6 +329,10 @@ def edit_token_submit_button_click(
 
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     token_id = component_dict['index']
+
+    allowed, reason = check_token_access(token_id, session_store_data)
+    if not allowed:
+        return dash.no_update, alert_from_success_tuple((False, reason))
 
     expiration_date = datetime.fromisoformat(expiration) if expiration is not None else None
 
@@ -336,9 +379,13 @@ def delete_token_click(n_clicks: int):
     Output({'type': 'tokens-invalidate-modal', 'index': MATCH}, 'is_open'),
     Output({'type': 'tokens-invalidate-alerts-div', 'index': MATCH}, 'children'),
     Input({'type': 'tokens-invalidate-confirm-button', 'index': MATCH}, 'n_clicks'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def invalidate_token_confirm_click(n_clicks: int):
+def invalidate_token_confirm_click(
+    n_clicks: int,
+    session_store_data: Optional[Dict[str, Any]] = None,
+):
     if not n_clicks:
         raise PreventUpdate
 
@@ -348,6 +395,10 @@ def invalidate_token_confirm_click(n_clicks: int):
 
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     token_id = component_dict['index']
+
+    allowed, reason = check_token_access(token_id, session_store_data)
+    if not allowed:
+        return dash.no_update, dash.no_update, alert_from_success_tuple((False, reason))
 
     token = Token(
         id=token_id,
@@ -366,9 +417,13 @@ def invalidate_token_confirm_click(n_clicks: int):
     Output({'type': 'tokens-delete-modal', 'index': MATCH}, 'is_open'),
     Output({'type': 'tokens-delete-alerts-div', 'index': MATCH}, 'children'),
     Input({'type': 'tokens-delete-confirm-button', 'index': MATCH}, 'n_clicks'),
+    State('session-store', 'data'),
     prevent_initial_call=True,
 )
-def delete_token_confirm_click(n_clicks: int):
+def delete_token_confirm_click(
+    n_clicks: int,
+    session_store_data: Optional[Dict[str, Any]] = None,
+):
     if not n_clicks:
         raise PreventUpdate
 
@@ -378,6 +433,10 @@ def delete_token_confirm_click(n_clicks: int):
 
     component_dict = json.loads(ctx[0]['prop_id'].split('.' + 'n_clicks')[0])
     token_id = component_dict['index']
+
+    allowed, reason = check_token_access(token_id, session_store_data)
+    if not allowed:
+        return dash.no_update, dash.no_update, alert_from_success_tuple((False, reason))
 
     token = Token(
         id=token_id,
