@@ -8886,6 +8886,25 @@ Source: https://meerschaum.io/news/changelog/
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.5.1
+
+- **Fix upserting rows which null out `json`, `numeric`, or `uuid` columns.**  
+  Patching a row so that a special-dtype column becomes `NULL` failed on PostgreSQL-like flavors with an error such as `column "j" is of type jsonb but expression is of type text`. An all-null column carries no values to inspect, so the temporary staging table created it as `TEXT` instead of the column's real type. Staged columns now fall back to the pipe's registered dtype when every incoming value is null.
+
+  ```python
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe(
+      'test', 'upsert', 'nulls',
+      instance='sql:main',
+      columns={'primary': 'id'},
+      upsert=True,
+      dtypes={'id': 'int', 'j': 'json'},
+  )
+  pipe.sync([{'id': 1, 'j': [1, 2]}])
+  pipe.sync([{'id': 1, 'j': None}])
+  ```
+
 ### v3.5.0
 
 - **Add a first-class [MCP server](/reference/mcp/).**  

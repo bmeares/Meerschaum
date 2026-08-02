@@ -11,7 +11,7 @@ from tests import debug
 from tests.connectors import conns, get_flavors
 import meerschaum as mrsm
 from meerschaum import Pipe
-from meerschaum.utils.dtypes import are_dtypes_equal
+from meerschaum.utils.dtypes import are_dtypes_equal, value_is_null
 from meerschaum.utils.sql import sql_item_name
 from meerschaum.utils.dtypes.sql import PD_TO_DB_DTYPES_FLAVORS
 
@@ -870,6 +870,46 @@ def test_sync_uuids_simple_upsert(flavor: str):
     assert len(df) == 1
     assert isinstance(df['val'][0], UUID)
     assert df['val'][0] == UUID('d1cc1516-16e5-4471-8ab9-e969a1def655')
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_upsert_null_special_dtypes(flavor: str):
+    """
+    Test that an upsert patch of all-null special columns keeps the pipe's dtypes.
+    """
+    conn = conns[flavor]
+    parameters = {
+        'columns': {'primary': 'id'},
+        'upsert': True,
+        'dtypes': {'id': 'int', 'j': 'json', 'n': 'numeric', 'u': 'uuid', 't': 'string'},
+    }
+    pipe = mrsm.Pipe('test', 'upsert', 'null_special', instance=conn)
+    pipe.delete()
+    pipe = mrsm.Pipe('test', 'upsert', 'null_special', instance=conn, parameters=parameters)
+    success, msg = pipe.sync(
+        [
+            {
+                'id': 1,
+                'j': [1, 2],
+                'n': Decimal('1.5'),
+                'u': UUID('7d78f4a7-8c0d-4cc3-9636-9516aa0c32ce'),
+                't': 'first',
+            },
+        ],
+        debug=debug,
+    )
+    assert success, msg
+
+    success, msg = pipe.sync(
+        [{'id': 1, 'j': None, 'n': None, 'u': None, 't': 'second'}],
+        debug=debug,
+    )
+    assert success, msg
+    df = pipe.get_data(debug=debug)
+    assert len(df) == 1
+    assert df['t'][0] == 'second'
+    for col in ('j', 'n', 'u'):
+        assert value_is_null(df[col][0]), f"'{col}' is not null: {df[col][0]}"
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
