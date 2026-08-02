@@ -2078,12 +2078,18 @@ def sync_pipe(
             label=('update' if not upsert else 'upsert'),
         )
         self._log_temporary_tables_creation(temp_target, create=(not pipe.temporary), debug=debug)
+        pipe_dtypes = pipe.dtypes
         update_dtypes = {
             **{
                 col: str(typ)
                 for col, typ in update_df.dtypes.items()
             },
-            **get_special_cols(update_df)
+            **get_special_cols(update_df),
+            **{
+                col: pipe_dtypes[col]
+                for col in update_df.columns
+                if col in pipe_dtypes and update_df[col].isnull().all()
+            },
         }
 
         temp_pipe = Pipe(
