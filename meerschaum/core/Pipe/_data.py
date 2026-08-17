@@ -90,10 +90,9 @@ def get_data(
         This may be set under `pipe.parameters['chunk_minutes']`.
         By default, use a timedelta of 43200 minutes (30 days).
         If `chunk_interval` is an integer and the `datetime` axis a timestamp,
-        the use a timedelta with the number of minutes configured to this value.
-        If the `datetime` axis is an integer, default to the configured chunksize.
-        If `chunk_interval` is a `timedelta` and the `datetime` axis an integer,
-        use the number of minutes in the `timedelta`.
+        then use a timedelta with the number of minutes configured to this value.
+        If the `datetime` axis is an integer, an `int` is used verbatim as the number of
+        epoch units, and a `timedelta` is scaled into epoch units by the pipe's `precision`.
 
     order: Optional[str], default 'asc'
         If `order` is not `None`, sort the resulting dataframe by indices.
@@ -662,30 +661,35 @@ def get_chunk_interval(
     Parameters
     ----------
     chunk_interval: Union[timedelta, int, None], default None
-        If provided, coerce this value into the correct type (overriding the `verify` keys).
-        For example, if the datetime axis is an integer, then return the number of minutes.
+        If provided, use this value instead of the `verify` keys.
+        An `int` is already in the axis's own units — epoch units for an integer axis,
+        minutes otherwise — and is used verbatim. A `timedelta` is a duration, so on an
+        integer axis it is scaled into epoch units by the pipe's `precision`.
 
     Returns
     -------
     The chunk interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
     """
-    from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES
-
     dt_col = self.columns.get('datetime', None)
     dt_dtype = self.dtypes.get(dt_col, 'datetime') if dt_col is not None else 'datetime'
     is_int_axis = 'int' in str(dt_dtype).lower()
     verify_params = self.parameters.get('verify', {})
 
-    ### An explicit `chunk_interval` argument overrides everything (legacy behavior).
+    ### An explicit `chunk_interval` argument overrides the `verify` keys.
     if chunk_interval is not None:
+        if dt_col is not None and is_int_axis:
+            ### An `int` is already in epoch units; a duration must be scaled like the
+            ### no-argument path below.
+            if isinstance(chunk_interval, int):
+                return chunk_interval
+            return self._scale_delta_to_int_axis(chunk_interval)
+
         chunk_minutes = (
             chunk_interval
             if isinstance(chunk_interval, int)
             else int(chunk_interval.total_seconds() / 60)
         )
-        if dt_col is None:
-            return timedelta(minutes=chunk_minutes)
-        return chunk_minutes if is_int_axis else timedelta(minutes=chunk_minutes)
+        return timedelta(minutes=chunk_minutes)
 
     ### Integer axis: an explicit `verify.chunk_range` is the chunk size in epoch units, verbatim.
     if dt_col is not None and is_int_axis:
@@ -711,18 +715,30 @@ def get_chunk_interval(
         return chunk_delta
 
     if is_int_axis:
-        ### Legacy: without `precision` (and without `chunk_range`), use the chunk's minutes
-        ### verbatim as the integer interval.
-        if not self.parameters.get('precision', None):
-            return int(chunk_delta.total_seconds() / 60)
-        precision_unit = self.precision.get('unit', None)
-        true_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
-        scalar = MRSM_PRECISION_UNITS_SCALARS.get(true_unit, None)
-        if scalar is not None:
-            return int(chunk_delta.total_seconds() * scalar)
-        return int(chunk_delta.total_seconds() / 60)
+        return self._scale_delta_to_int_axis(chunk_delta)
 
     return chunk_delta
+
+
+def _scale_delta_to_int_axis(self, chunk_delta: timedelta) -> int:
+    """
+    Convert a duration into the epoch units of an integer datetime axis via the pipe's
+    `precision`. Legacy: without a `precision`, the duration's minutes are used verbatim.
+    """
+    from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_SCALARS, MRSM_PRECISION_UNITS_ALIASES
+
+    if not self.parameters.get('precision', None):
+        return max(int(chunk_delta.total_seconds() / 60), 1)
+
+    precision_unit = self.precision.get('unit', None)
+    true_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
+    scalar = MRSM_PRECISION_UNITS_SCALARS.get(true_unit, None)
+    if scalar is None:
+        return max(int(chunk_delta.total_seconds() / 60), 1)
+
+    ### A coarse precision (e.g. minutes) can scale a short duration below one epoch unit,
+    ### which would make for a zero-width chunk.
+    return max(int(chunk_delta.total_seconds() * scalar), 1)
 
 
 def get_chunk_bounds(

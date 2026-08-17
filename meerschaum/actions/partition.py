@@ -125,7 +125,10 @@ def _partition_pipes(
     def _width_display(pipe) -> str:
         """Human-readable applied width, from the pipe's resolved chunk interval."""
         try:
-            iv = pipe.get_chunk_interval(chunk_minutes, debug=debug)
+            iv = pipe.get_chunk_interval(
+                timedelta(minutes=chunk_minutes) if chunk_minutes is not None else None,
+                debug=debug,
+            )
         except Exception:
             return "-"
         return interval_str(iv) if isinstance(iv, timedelta) else f"{iv:,}"

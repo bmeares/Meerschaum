@@ -51,6 +51,8 @@ class SQLConnector(InstanceConnector):
         _get_columnstore_policy_query,
         _get_columnstore_remove_policy_query,
         _get_columnstore_disable_query,
+        _get_integer_now_func_queries,
+        set_integer_now_func,
     )
     from ._maintenance import (
         vacuum_pipe,

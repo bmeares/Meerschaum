@@ -30,6 +30,17 @@ def _get_in_memory_key(cache_key: str) -> str:
     )
 
 
+#: Schema cache keys dropped by a hard invalidation.
+_MEMORY_ONLY_SCHEMA_CACHE_KEYS: tuple[str, ...] = (
+    '_columns_types',
+    '_columns_types_timestamp',
+    '_columns_indices',
+    '_columns_indices_timestamp',
+    '_exists_timestamp',
+    '_skip_check_indices',
+)
+
+
 _instance_hash_cache: dict[str, str] = {}
 
 def _get_instance_hash(pipe: mrsm.Pipe) -> str:
@@ -168,6 +179,11 @@ def _invalidate_cache(
 
     if not hard:
         return True, "Success"
+
+    ### `_get_cache_keys()` below only lists what's on disk / in Valkey, so it cannot
+    ### enumerate these in-memory keys; clear them explicitly.
+    for memory_only_key in _MEMORY_ONLY_SCHEMA_CACHE_KEYS:
+        self._clear_cache_key(memory_only_key, debug=debug)
 
     cache_conn = self._get_cache_connector()
     cache_dir_path = self._get_cache_dir_path()

@@ -1787,6 +1787,15 @@ def create_pipe_table_from_df(
         success = all(
             self.exec_queries(create_table_queries, break_on_error=True, rollback=True, debug=debug)
         )
+    ### Declarative Hypercore creation auto-installs a columnstore policy, which needs an
+    ### `integer_now` function on an integer axis.
+    if success and hypercore and not self.set_integer_now_func(pipe, debug=debug):
+        warn(
+            f"Could not register an `integer_now` function for {pipe}; "
+            "its columnstore policy will fail on every run.",
+            stack=False,
+        )
+
     target_name = sql_item_name(pipe.target, schema=self.get_pipe_schema(pipe), flavor=self.flavor)
     msg = (
         "Success"

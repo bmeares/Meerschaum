@@ -306,3 +306,79 @@ def test_maintenance_actions(flavor: str):
         _assert_success_tuple((success, msg))
         if supported:
             assert success, f"`{action_name} pipes` failed: {msg}"
+
+
+def _int_axis_pipe(conn, location: str, **parameters):
+    """Build (without syncing) a millisecond-precision integer-axis pipe."""
+    return mrsm.Pipe(
+        'test', 'compress', location,
+        instance=conn,
+        columns={'datetime': 'ts'},
+        dtypes={'ts': 'int'},
+        parameters={'precision': {'unit': 'millisecond'}, **parameters},
+    )
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_columnstore_policy_after_scales_on_int_axis(flavor: str):
+    """
+    A duration `compress:after` must mean the same thing on both axis types: on an integer axis
+    it is scaled into epoch units instead of being discarded for a hard-coded 7-day equivalent.
+    """
+    conn = conns[flavor]
+    if conn.type != 'sql' or conn.flavor not in ('timescaledb', 'timescaledb-ha'):
+        return
+
+    ### 30 days of milliseconds.
+    pipe = _int_axis_pipe(conn, 'after_string', compress={'after': '30 days'})
+    assert 'after => 2592000000' in conn._get_columnstore_policy_query(pipe)
+
+    ### An explicit integer is already in epoch units and is honored verbatim.
+    int_pipe = _int_axis_pipe(conn, 'after_int', compress={'after': 12345})
+    assert 'after => 12345' in conn._get_columnstore_policy_query(int_pipe)
+
+    ### A bare number is epoch units, not nanoseconds (which would compress everything at once).
+    for value in (30.0, '30'):
+        numeric_pipe = _int_axis_pipe(conn, 'after_numeric', compress={'after': value})
+        assert 'after => 30' in conn._get_columnstore_policy_query(numeric_pipe)
+
+    ### No `after` still defaults to 7 days of milliseconds.
+    default_pipe = _int_axis_pipe(conn, 'after_default', compress=True)
+    assert 'after => 604800000' in conn._get_columnstore_policy_query(default_pipe)
+
+    ### A datetime axis keeps the `INTERVAL` spelling.
+    dt_pipe = mrsm.Pipe(
+        'test', 'compress', 'after_datetime',
+        instance=conn,
+        columns={'datetime': 'ts'},
+        parameters={'compress': {'after': '30 days'}},
+    )
+    assert "INTERVAL '30 days'" in conn._get_columnstore_policy_query(dt_pipe)
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_integer_now_func_registered_for_int_axis(flavor: str):
+    """
+    TimescaleDB cannot evaluate a time-based columnstore policy on an integer-axis hypertable
+    without an `integer_now` function: the policy is accepted and then fails on every run.
+    """
+    conn = conns[flavor]
+    if conn.type != 'sql' or conn.flavor not in ('timescaledb', 'timescaledb-ha'):
+        return
+
+    pipe = _int_axis_pipe(conn, 'integer_now', compress=True)
+    queries = conn._get_integer_now_func_queries(pipe)
+    assert len(queries) == 2
+    assert 'CREATE OR REPLACE FUNCTION mrsm_integer_now_millisecond()' in queries[0]
+    assert '* 1000' in queries[0]
+    assert 'set_integer_now_func' in queries[1]
+    assert "'mrsm_integer_now_millisecond'" in queries[1]
+
+    ### A datetime axis needs no such function.
+    dt_pipe = mrsm.Pipe(
+        'test', 'compress', 'integer_now_datetime',
+        instance=conn,
+        columns={'datetime': 'ts'},
+        parameters={'compress': True},
+    )
+    assert conn._get_integer_now_func_queries(dt_pipe) == []

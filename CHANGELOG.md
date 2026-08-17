@@ -6,6 +6,18 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### v3.5.2
 
+- **Fix a stale schema cache surviving `DELETE /pipes/{ck}/{mk}/{lk}/cache`.**  
+  A pipe's column types are cached in memory only, but `Pipe._invalidate_cache(hard=True)` discovered the keys to clear by listing what had been written to disk (or to the cache connector). For a pipe with `cache=False` — every pipe the API server holds — that list was empty, so a hard invalidation cleared nothing and the route which exists to refresh the schema after a schema-changing sync was a no-op. An API client which added a column and read the pipe back could receive the previous column list for up to a minute. The in-memory schema keys are now cleared explicitly.
+
+- **Scale an explicit chunk interval to an integer datetime axis.**  
+  `Pipe.get_chunk_interval()` applied the pipe's `precision` only when resolving the interval from the `verify` parameters, never when given one directly. `repartition` (and `partition pipes --chunk-minutes`) passes its width through that path, so asking for 30-day chunks on a millisecond axis set a chunk interval of 43,200 *milliseconds* — about 43 seconds — while reporting success and persisting `verify.chunk_minutes` as 43200. An `int` argument is still taken verbatim as the axis's own epoch units; a `timedelta` is now scaled by `precision`, and the callers which mean minutes pass a `timedelta`. `repartition` reports an integer axis's new width in epoch units.
+
+- **Register an `integer_now` function for integer-axis hypertables.**  
+  TimescaleDB cannot evaluate "older than N" for a columnstore policy on a hypertable partitioned by an integer column until such a function exists. Meerschaum never called `set_integer_now_func`, so the policy was accepted at creation and then failed on every background run with `integer_now function not set on hypertable` — compression silently never happened, on exactly the tables which grow largest. A `mrsm_integer_now_<unit>()` function derived from the pipe's `precision` is now registered before any columnstore policy is installed, including the one TimescaleDB auto-creates for a Hypercore table at `CREATE TABLE`.
+
+- **Honor a duration `compress:after` on an integer datetime axis.**  
+  `compress: {after: '30 days'}` — the documented spelling on a datetime axis — was discarded on an integer axis and replaced with a hard-coded 7-day equivalent, with no warning and with the configured value still visible in the pipe's parameters. Durations are now parsed and scaled by the axis `precision`, so the same spelling means the same thing on both axis types. A bare number is still used verbatim as epoch units, and a value which cannot be parsed warns and names the fallback rather than silently substituting a different retention.
+
 - **Fix `/login` dropping a user's custom scopes.**  
   The password grant read scopes from a freshly constructed `User` without refreshing its attributes from the instance, so any scopes stored in a user's attributes were ignored and the issued JWT silently carried the default scope set — routes gated on a custom scope returned 403 with valid credentials. Separately, an omitted `scope` form field was treated as an explicit request for every default scope, which filtered out anything beyond that set; per RFC 6749 § 3.3, an omitted `scope` now grants the principal's allowed scopes (and `['*']` for all-scope tokens).
 
