@@ -37,7 +37,6 @@ _MEMORY_ONLY_SCHEMA_CACHE_KEYS: tuple[str, ...] = (
     '_columns_indices',
     '_columns_indices_timestamp',
     '_exists_timestamp',
-    '_skip_check_indices',
 )
 
 
