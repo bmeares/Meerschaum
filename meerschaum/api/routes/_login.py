@@ -123,7 +123,7 @@ def login(
         if not correct_password:
             raise InvalidCredentialsException
 
-        allowed_scopes = user.get_scopes(debug=debug)
+        allowed_scopes = user.get_scopes(refresh=True, debug=debug)
         type_ = get_api_connector().get_user_type(user, debug=debug)
         sub_id = username
 

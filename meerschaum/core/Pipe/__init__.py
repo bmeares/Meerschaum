@@ -102,6 +102,7 @@ class Pipe:
         get_value,
         _get_data_as_iterator,
         get_chunk_interval,
+        _scale_delta_to_int_axis,
         get_chunk_bounds,
         get_chunk_bounds_batches,
         parse_date_bounds,

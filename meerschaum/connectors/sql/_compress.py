@@ -13,6 +13,7 @@ from __future__ import annotations
 import meerschaum as mrsm
 from meerschaum.utils.typing import Union, Any, Optional, List, Dict, SuccessTuple
 from meerschaum.utils.debug import dprint
+from meerschaum.utils.warnings import warn
 
 ### Flavors whose tables support some form of compression.
 COMPRESSIBLE_FLAVORS = {
@@ -65,6 +66,88 @@ def _normalize_columnstore_cols(
                 direction = ' ' + ' '.join(tok.upper() for tok in tokens[1:])
         normalized.append(f"{sql_item_name(col, flavor=flavor)}{direction}")
     return normalized
+
+
+### Default age at which chunks are converted to the columnstore.
+_DEFAULT_COMPRESS_AFTER = '7 days'
+
+
+def _dt_axis_is_integer(pipe: mrsm.Pipe) -> bool:
+    """
+    Return whether a pipe's datetime axis is an integer epoch.
+
+    Reads the configured dtype only: the inferring `pipe.dtypes` property queries the remote.
+    """
+    from meerschaum.utils.dtypes import are_dtypes_equal
+    dt_col = pipe.columns.get('datetime', None)
+    if not dt_col:
+        return False
+    dt_typ = str(pipe.parameters.get('dtypes', {}).get(dt_col, 'datetime'))
+    return are_dtypes_equal(dt_typ, 'int')
+
+
+def _get_precision_unit(pipe: mrsm.Pipe) -> str:
+    """
+    Return a pipe's datetime-axis precision unit, resolving any alias (e.g. `'ms'`).
+
+    Always one of `MRSM_PRECISION_UNITS_SCALARS`: the unit is interpolated into DDL, so an
+    unrecognized value falls back to `'second'` rather than reaching the database.
+    """
+    from meerschaum.utils.dtypes import (
+        MRSM_PRECISION_UNITS_SCALARS,
+        MRSM_PRECISION_UNITS_ALIASES,
+    )
+    unit = pipe.precision.get('unit', 'second')
+    true_unit = MRSM_PRECISION_UNITS_ALIASES.get(unit, unit)
+    return true_unit if true_unit in MRSM_PRECISION_UNITS_SCALARS else 'second'
+
+
+def _get_precision_scalar(pipe: mrsm.Pipe) -> Union[int, float]:
+    """
+    Return how many of an integer axis's epoch units make up one second.
+    """
+    from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_SCALARS
+    return MRSM_PRECISION_UNITS_SCALARS.get(_get_precision_unit(pipe), 1)
+
+
+def _get_integer_after(pipe: mrsm.Pipe, after: Any) -> int:
+    """
+    Convert a compression `after` duration into the epoch units of an integer datetime axis,
+    so that `'30 days'` means the same thing on both axis types.
+    """
+    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.misc import is_int
+    pd = attempt_import('pandas')
+
+    scalar = _get_precision_scalar(pipe)
+    default_seconds = pd.Timedelta(_DEFAULT_COMPRESS_AFTER).total_seconds()
+    if not after:
+        return int(default_seconds * scalar)
+
+    ### A bare number is already in epoch units, like an `int`. `pd.Timedelta` would read it
+    ### as nanoseconds and silently yield an `after` of 0, compressing every chunk at once.
+    if isinstance(after, float) or is_int(after):
+        return int(float(after))
+
+    try:
+        seconds = pd.Timedelta(after).total_seconds()
+    except Exception:
+        warn(
+            f"Could not parse `compress:after` value '{after}' for {pipe}; "
+            f"falling back to {_DEFAULT_COMPRESS_AFTER}.",
+            stack=False,
+        )
+        seconds = default_seconds
+
+    return int(seconds * scalar)
+
+
+def _get_integer_now_func_name(pipe: mrsm.Pipe) -> str:
+    """
+    Return the name of the `integer_now` function for a pipe's integer datetime axis.
+    One function per precision unit, shared by every pipe on that precision.
+    """
+    return f"mrsm_integer_now_{_get_precision_unit(pipe)}"
 
 
 def _not_a_hypertable_message(pipe: mrsm.Pipe) -> str:
@@ -311,30 +394,22 @@ def _get_columnstore_policy_query(
     separate transaction from `_get_columnstore_settings_query` (see timescale/timescaledb#8600).
     """
     from meerschaum.utils.sql import sql_item_name
-    from meerschaum.utils.dtypes import are_dtypes_equal, MRSM_PRECISION_UNITS_SCALARS
     pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
     settings = self._get_compress_settings(pipe)
 
     ### Hypertables with an integer time dimension (int epoch datetime axis) require an integer
-    ### `after`; an `INTERVAL` raises `InvalidParameterValue`. Read the configured dtype only —
-    ### the inferring `pipe.dtypes` property walks references and queries the remote for column
-    ### types, which can add minutes of cold-connection overhead during query building.
-    dt_col = pipe.columns.get('datetime', None)
-    configured_dtypes = pipe.parameters.get('dtypes', {})
-    dt_typ = str(configured_dtypes.get(dt_col, 'datetime')) if dt_col else 'datetime'
-    dt_is_integer = are_dtypes_equal(dt_typ, 'int')
+    ### `after`; an `INTERVAL` raises `InvalidParameterValue`.
+    dt_is_integer = _dt_axis_is_integer(pipe)
 
     after = settings['after']
     if dt_is_integer:
-        ### Honor an explicit integer, otherwise derive a 7-day-equivalent offset from the axis
-        ### precision (e.g. 604800 for second precision, 604800000 for millisecond).
+        ### Honor an explicit integer verbatim (it is already in epoch units); otherwise scale
+        ### the configured duration — or the 7-day default — into the axis's epoch units via
+        ### the pipe's `precision`, so `after: '30 days'` means the same thing on both axis types.
         if isinstance(after, int) and not isinstance(after, bool):
             after_clause = str(after)
         else:
-            unit = pipe.precision.get('unit', 'second')
-            scalar = MRSM_PRECISION_UNITS_SCALARS.get(unit, 1)
-            ### 7 days = 604800 seconds; scalar is units-per-second.
-            after_clause = str(int(604800 * scalar))
+            after_clause = str(_get_integer_after(pipe, after))
     else:
         if not after:
             ### Default to converting chunks older than 7 days.
@@ -362,6 +437,60 @@ def _get_columnstore_remove_policy_query(
     from meerschaum.utils.sql import sql_item_name
     pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
     return f"CALL remove_columnstore_policy('{pipe_name}', if_exists => true)"
+
+
+def _get_integer_now_func_queries(
+    self,
+    pipe: mrsm.Pipe,
+) -> List[str]:
+    """
+    Build the queries registering an `integer_now` function on an integer-axis hypertable.
+
+    Without one, a time-based columnstore policy is accepted at creation and then fails on
+    every background run with `integer_now function not set on hypertable`.
+    Returns an empty list for a table which does not need one.
+    """
+    from meerschaum.utils.sql import sql_item_name
+    if self.flavor not in ('timescaledb', 'timescaledb-ha') or not _dt_axis_is_integer(pipe):
+        return []
+
+    pipe_name = sql_item_name(pipe.target, self.flavor, self.get_pipe_schema(pipe))
+    regclass_literal = "'" + pipe_name.replace("'", "''") + "'"
+    scalar = _get_precision_scalar(pipe)
+    func_name = _get_integer_now_func_name(pipe)
+
+    return [
+        (
+            f"CREATE OR REPLACE FUNCTION {func_name}() RETURNS BIGINT\n"
+            "LANGUAGE SQL STABLE AS $$\n"
+            f"    SELECT FLOOR(EXTRACT(EPOCH FROM now()) * {scalar})::BIGINT\n"
+            "$$"
+        ),
+        f"SELECT set_integer_now_func({regclass_literal}, '{func_name}', replace_if_exists => true)",
+    ]
+
+
+def set_integer_now_func(
+    self,
+    pipe: mrsm.Pipe,
+    debug: bool = False,
+) -> bool:
+    """
+    Register an `integer_now` function if the pipe's datetime axis is an integer.
+    Returns `True` when nothing needed doing or the function was registered.
+    """
+    queries = self._get_integer_now_func_queries(pipe)
+    if not queries:
+        return True
+
+    try:
+        return all(self.exec_queries(
+            queries, break_on_error=True, rollback=True, silent=(not debug), debug=debug,
+        ))
+    except Exception as e:
+        if debug:
+            dprint(f"Failed to set an `integer_now` function for {pipe}:\n{e}")
+        return False
 
 
 def apply_compression_policy(
@@ -395,6 +524,13 @@ def apply_compression_policy(
     try:
         if not pipe.exists(debug=debug) or not self._is_hypertable(pipe, debug=debug):
             return True, f"{pipe} is not a hypertable; skipping compression policy."
+
+        if not self.set_integer_now_func(pipe, debug=debug):
+            warn(
+                f"Could not register an `integer_now` function for {pipe}; "
+                "its columnstore policy will fail on every run.",
+                stack=False,
+            )
 
         ### Enable the columnstore and add the policy in SEPARATE transactions
         ### (see timescale/timescaledb#8600).
@@ -467,6 +603,10 @@ def compress_pipe(
     if flavor in ('timescaledb', 'timescaledb-ha'):
         if not self._is_hypertable(pipe, debug=debug):
             return False, _not_a_hypertable_message(pipe)
+        ### 0. An integer axis needs an `integer_now` function before any time-based policy.
+        integer_now_queries = self._get_integer_now_func_queries(pipe)
+        if integer_now_queries:
+            query_groups.append(integer_now_queries)
         ### 1. Enable the columnstore (required before any chunk can be converted).
         query_groups.append([self._get_columnstore_settings_query(pipe)])
         ### 2. Install a policy for ongoing conversion — re-create it so the configured `after`

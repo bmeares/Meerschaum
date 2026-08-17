@@ -32,7 +32,9 @@ class CustomOAuth2PasswordRequestForm:
         grant_type: str = fastapi.Form(None, pattern="password|client_credentials"),
         username: Optional[str] = fastapi.Form(None),
         password: Optional[str] = fastapi.Form(None),
-        scope: str = fastapi.Form(" ".join(STATIC_CONFIG['tokens']['scopes'])),
+        ### An omitted `scope` means the server decides (RFC 6749 § 3.3):
+        ### the login route then grants the principal's allowed scopes.
+        scope: str = fastapi.Form(''),
         client_id: Optional[str] = fastapi.Form(None),
         client_secret: Optional[str] = fastapi.Form(None),
         authorization: Optional[str] = fastapi.Header(None),

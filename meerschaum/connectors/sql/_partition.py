@@ -869,7 +869,8 @@ def partition_pipe(
         ### schema-qualified, quoted name as a string literal so it resolves unambiguously.
         pipe_name = sql_item_name(pipe.target, flavor, self.get_pipe_schema(pipe))
         regclass_literal = "'" + pipe_name.replace("'", "''") + "'"
-        interval = pipe.get_chunk_interval(new_minutes, debug=debug)
+        ### Pass a duration, not a bare `int`: an `int` is taken as the axis's own units.
+        interval = pipe.get_chunk_interval(timedelta(minutes=new_minutes), debug=debug)
         chunk_time_interval = (
             f"{interval}"
             if isinstance(interval, int)
@@ -886,13 +887,18 @@ def partition_pipe(
             {'verify': {'chunk_minutes': new_minutes}}, persist=True, debug=debug
         )
         return True, (
-            f"Set chunk interval for {pipe} to {new_minutes} minutes "
-            "(applies to future chunks; existing chunks are unchanged)."
+            f"Set chunk interval for {pipe} to "
+            + (
+                f"{interval:,} epoch units"
+                if isinstance(interval, int)
+                else f"{new_minutes} minutes"
+            )
+            + " (applies to future chunks; existing chunks are unchanged)."
         )
 
     ### Non-TimescaleDB: rebuild via a drop + re-sync round-trip.
     current_interval = pipe.get_chunk_interval(debug=debug)
-    new_interval = pipe.get_chunk_interval(new_minutes, debug=debug)
+    new_interval = pipe.get_chunk_interval(timedelta(minutes=new_minutes), debug=debug)
     if current_interval == new_interval:
         return True, f"{pipe} is already partitioned at {new_minutes} minutes."
 

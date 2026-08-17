@@ -104,6 +104,33 @@ def test_invalidate_cache_hard_clears_volatile_keys():
     assert pipe._get_cached_value('attributes') is not None
 
 
+def test_invalidate_cache_hard_clears_schema_cache():
+    """
+    A hard invalidation must drop the in-memory schema cache so that a schema change
+    made elsewhere is picked up before the TTL expires.
+    The API's `DELETE /pipes/{ck}/{mk}/{lk}/cache` route depends on this to keep
+    long-lived server-side pipes from serving a stale column list after a sync.
+
+    `cache=False` (the API server's default) is the case that matters: nothing is
+    written to disk, so the on-disk key listing cannot find these keys.
+    """
+    pipe = mrsm.Pipe('test', 'cache', 'schema_invalidate', instance=_SQLITE_CONN, cache=False)
+    pipe.delete()
+    pipe = mrsm.Pipe('test', 'cache', 'schema_invalidate', instance=_SQLITE_CONN, cache=False)
+    assert pipe.sync([{'a': 1}])[0]
+
+    ### Warm the schema cache, as a read would.
+    assert 'b' not in pipe.get_columns_types()
+
+    ### Alter the schema from another `Pipe` object (i.e. another process).
+    other = mrsm.Pipe('test', 'cache', 'schema_invalidate', instance=_SQLITE_CONN, cache=False)
+    assert other.sync([{'a': 2, 'b': 3}])[0]
+
+    success, msg = pipe._invalidate_cache(hard=True)
+    assert success, msg
+    assert 'b' in pipe.get_columns_types()
+
+
 # ---------------------------------------------------------------------------
 # Disk-layer tests (SQLite connector — no Docker, just a local file.
 # sql:memory hard-disables cache in __init__ so we need a real connector.)

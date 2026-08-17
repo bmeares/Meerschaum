@@ -382,3 +382,33 @@ def test_aligned_chunk_bounds_coincide_with_partitions(flavor: str):
     for (_, prev_hi), (next_lo, _) in zip(bounds, bounds[1:]):
         assert prev_hi == next_lo
     assert bounds[-1][1] == END
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_explicit_chunk_interval_scales_to_int_axis(flavor: str):
+    """
+    An explicit duration must be scaled into an integer axis's epoch units, exactly like the
+    no-argument path. Passing 30 days used to yield `43200` — 43 seconds on a millisecond axis.
+    (`get_chunk_interval` is pure, so this runs on any flavor.)
+    """
+    conn = conns[flavor]
+    if conn.type != 'sql':
+        return
+
+    ms_pipe = mrsm.Pipe(
+        'test', 'partition', 'explicit_int_axis',
+        instance=conn, columns={'datetime': 'ts'}, dtypes={'ts': 'int'},
+        parameters={'precision': {'unit': 'millisecond'}},
+    )
+    ### A duration is scaled into the axis's epoch units (30 days of milliseconds) ...
+    assert ms_pipe.get_chunk_interval(timedelta(minutes=43200)) == 2_592_000_000
+    ### ... while an `int` is already in those units and is used verbatim.
+    assert ms_pipe.get_chunk_interval(1000) == 1000
+
+    ### A datetime axis is unaffected.
+    dt_pipe = mrsm.Pipe(
+        'test', 'partition', 'explicit_dt_axis',
+        instance=conn, columns={'datetime': 'ts'},
+    )
+    assert dt_pipe.get_chunk_interval(timedelta(minutes=43200)) == timedelta(days=30)
+    assert dt_pipe.get_chunk_interval(43200) == timedelta(days=30)
