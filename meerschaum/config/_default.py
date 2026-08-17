@@ -242,6 +242,13 @@ default_api_config = {
             'allow_multiple_instances': True,
             'allowed_instance_keys': ['*']
         },
+        ### Which groups of core routes the API registers (fnmatch patterns).
+        ### The default `['*']` serves everything; restrict the surface with e.g.
+        ### `['version']` to serve only `/version` alongside plugin-added routes.
+        ### `/login` is always served so that issued tokens keep working.
+        'routes': {
+            'allowlist': ['*'],
+        },
     },
     'protocol': default_meerschaum_config['connectors']['api']['default']['protocol'],
     'webterm': {

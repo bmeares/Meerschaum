@@ -8886,6 +8886,24 @@ Source: https://meerschaum.io/news/changelog/
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v3.5.2
+
+- **Fix `/login` dropping a user's custom scopes.**  
+  The password grant read scopes from a freshly constructed `User` without refreshing its attributes from the instance, so any scopes stored in a user's attributes were ignored and the issued JWT silently carried the default scope set — routes gated on a custom scope returned 403 with valid credentials. Separately, an omitted `scope` form field was treated as an explicit request for every default scope, which filtered out anything beyond that set; per RFC 6749 § 3.3, an omitted `scope` now grants the principal's allowed scopes (and `['*']` for all-scope tokens).
+
+- **Probe the cache connector before using it.**  
+  `get_cache_connector()` memoized the configured connector without ever contacting the server, so a misconfigured or unreachable cache looked exactly like "no cache" while every cache operation failed at the call site. The connector is now pinged when first resolved; on failure the API warns, continues without a cache (the documented `None` path), and probes again after 60 seconds so a cache which is merely slow to start isn't disabled for the life of the process.
+
+- **Restrict the served routes with `api:permissions:routes:allowlist`.**  
+  Serve a minimal API surface — e.g. only the routes added by your API plugins — by listing which groups of core routes to register (`fnmatch` patterns against `actions`, `connectors`, `index`, `jobs`, `misc`, `pipes`, `plugins`, `tokens`, `users`, `version`, `mcp`, and `webterm`; the default `['*']` serves everything). Disallowed groups are never registered, rather than removed from the app after the fact. `/login` is always served so that issued tokens keep authenticating plugin routes, and the web console registers its routes independently (start with `--no-dash` for a restricted surface).
+
+  ```yaml
+  # Under api:permissions, serve only `/version` alongside plugin routes.
+  routes:
+    allowlist:
+      - 'version'
+  ```
+
 ### v3.5.1
 
 - **Fix upserting rows which null out `json`, `numeric`, or `uuid` columns.**  

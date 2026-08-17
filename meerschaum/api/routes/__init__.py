@@ -6,25 +6,68 @@
 Import the routes submodules to register them to the FastAPI app.
 """
 
-import meerschaum.api.routes._login
-import meerschaum.api.routes._actions
-import meerschaum.api.routes._jobs
-import meerschaum.api.routes._connectors
-import meerschaum.api.routes._index
-import meerschaum.api.routes._misc
-import meerschaum.api.routes._pipes
-import meerschaum.api.routes._plugins
-import meerschaum.api.routes._users
-import meerschaum.api.routes._tokens
-import meerschaum.api.routes._version
+from fnmatch import fnmatch
+from importlib import import_module
 
-from meerschaum.api import _include_dash, mcp_enabled
+from meerschaum.api import _include_dash, mcp_enabled, permissions_config
+from meerschaum.utils.warnings import warn
+
+_allowed_route_group_patterns = (
+    permissions_config.get('routes', {}).get('allowlist', None) or ['*']
+)
+
+#: Core route groups which `api:permissions:routes:allowlist` may restrict.
+#: Each name matches a submodule of `meerschaum.api.routes`.
+_core_route_groups = (
+    'actions',
+    'connectors',
+    'index',
+    'jobs',
+    'misc',
+    'pipes',
+    'plugins',
+    'tokens',
+    'users',
+    'version',
+)
+
+
+def route_group_is_allowed(route_group: str) -> bool:
+    """
+    Return whether a group of core routes may be registered,
+    according to the patterns in `api:permissions:routes:allowlist`.
+    """
+    return any(
+        fnmatch(route_group, pattern)
+        for pattern in _allowed_route_group_patterns
+    )
+
+
+### The login routes are always registered:
+### tokens issued by `/login` authenticate the routes added by API plugins,
+### and the token manager's user loader is defined alongside them.
+import meerschaum.api.routes._login
+
+for _route_group in _core_route_groups:
+    if route_group_is_allowed(_route_group):
+        import_module(f'meerschaum.api.routes._{_route_group}')
 
 ### Registered before the API plugins run so that the built-in `/mcp` route
 ### takes precedence over the route registered by the third-party `mcp` plugin
 ### (which this endpoint supersedes).
-if mcp_enabled:
+if mcp_enabled and route_group_is_allowed('mcp'):
     import meerschaum.api.routes._mcp
 
-if _include_dash:
+if _include_dash and route_group_is_allowed('webterm'):
     import meerschaum.api.routes._webterm
+
+if _include_dash and not all(
+    route_group_is_allowed(_route_group)
+    for _route_group in _core_route_groups
+):
+    warn(
+        "The web console registers routes independently of "
+        "`api:permissions:routes:allowlist`.\n    "
+        "Start the API with `--no-dash` to serve a restricted route surface.",
+        stack=False,
+    )

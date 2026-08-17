@@ -8,6 +8,7 @@ Meerschaum API backend. Start an API instance with `start api`.
 from __future__ import annotations
 
 import os
+import time
 from collections import defaultdict
 from fnmatch import fnmatch
 
@@ -169,9 +170,11 @@ def get_api_connector(instance_keys: Optional[str] = None):
 
 
 cache_connector = None
+_cache_connector_probe_failed_at = None
+CACHE_CONNECTOR_PROBE_RETRY_SECONDS: float = 60.0
 def get_cache_connector(connector_keys: Optional[str] = None):
     """Return the `valkey` connector if running in production."""
-    global cache_connector
+    global cache_connector, _cache_connector_probe_failed_at
     if cache_connector is not None:
         return cache_connector
 
@@ -193,8 +196,41 @@ def get_cache_connector(connector_keys: Optional[str] = None):
         warn(f"Invalid cache connector '{connector_keys}'.")
         return None
 
-    if cache_connector is None:
-        cache_connector = parse_instance_keys(connector_keys)
+    with _locks['cache_connector']:
+        if cache_connector is not None:
+            return cache_connector
+
+        ### After a failed probe, wait before probing again
+        ### so that a dead cache server is not hammered on every request.
+        if (
+            _cache_connector_probe_failed_at is not None
+            and (time.monotonic() - _cache_connector_probe_failed_at)
+                < CACHE_CONNECTOR_PROBE_RETRY_SECONDS
+        ):
+            return None
+
+        _cache_connector = parse_instance_keys(connector_keys)
+
+        ### Probe the connector before memoizing it: a misconfigured or unreachable
+        ### cache must degrade to the documented no-cache path (`None`), not return
+        ### a connector whose every operation fails at the call site.
+        try:
+            probe_success = bool(_cache_connector.test_connection())
+        except Exception:
+            probe_success = False
+
+        if not probe_success:
+            _cache_connector_probe_failed_at = time.monotonic()
+            warn(
+                f"Cache connector '{connector_keys}' is unreachable. "
+                "Continuing without a cache; will probe again in "
+                f"{CACHE_CONNECTOR_PROBE_RETRY_SECONDS} seconds.",
+                stack=False,
+            )
+            return None
+
+        _cache_connector_probe_failed_at = None
+        cache_connector = _cache_connector
 
     if debug:
         dprint(f"Cache connector: {cache_connector}")
