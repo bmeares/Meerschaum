@@ -203,6 +203,19 @@ def test_to_datetime(input_dt_val, expected_output, kwargs):
         assert output_dt_val == expected_output
 
 
+def test_coerce_timezone_accepts_dask_series():
+    """Dask datetime series use Pandas scalar and exception types."""
+    dd = pytest.importorskip('dask.dataframe')
+    from meerschaum.utils.dtypes import coerce_timezone
+
+    series = dd.from_pandas(
+        pd.Series(pd.to_datetime(['2025-01-01'], utc=True)),
+        npartitions=1,
+    )
+    result = coerce_timezone(series, strip_utc=True).compute()
+    assert result.dt.tz is None
+
+
 @pytest.mark.parametrize(
     "precision_unit,decrease,expected",
     [

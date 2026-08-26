@@ -232,7 +232,8 @@ def get_data(
         }
         if debug:
             dprint(f"Dask meta:\n{dask_meta}")
-        return _sort_df(dd.from_delayed(dask_chunks, meta=dask_meta))
+        dask_df = dd.from_delayed(dask_chunks, meta=dask_meta, verify_meta=False)
+        return _sort_df(dask_df.astype(dask_meta))
 
     if not self.exists(debug=debug):
         return [] if as_docs else None

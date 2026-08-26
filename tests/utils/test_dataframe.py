@@ -114,6 +114,18 @@ def test_polars_enforce_mixed_special_dtypes():
     assert str(row['uuid']) == '12345678-1234-5678-1234-567812345678'
 
 
+def test_polars_enforcement_preserves_untyped_objects():
+    """Accelerating declared columns must not change untyped object columns."""
+    from meerschaum.utils.dataframe import enforce_dtypes
+
+    result = enforce_dtypes(
+        pd.DataFrame([{'id': '1', 'payload': {'foo': 'bar'}}]),
+        {'id': 'int'},
+    )
+    assert result.iloc[0].to_dict() == {'id': 1, 'payload': {'foo': 'bar'}}
+    assert str(result.dtypes['payload']) == 'object'
+
+
 @pytest.mark.parametrize(
     "dtype,expected_dtype",
     [

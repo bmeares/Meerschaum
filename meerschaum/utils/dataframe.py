@@ -1521,19 +1521,20 @@ def enforce_dtypes(
         for col, typ in dtypes.items()
         if col not in fallback_dtypes
     }
+    untyped_cols = [col for col in df.columns if col not in normalized_dtypes]
     polars_df = (
         _enforce_dtypes_with_polars(
             df,
             native_dtypes,
             strip_timezone=(strip_timezone if coerce_timezone else False),
         )
-        if native_dtypes and not fallback_dtypes
+        if native_dtypes and not fallback_dtypes and not untyped_cols
         else None
     )
     if polars_df is not None:
         return polars_df if as_polars else to_pandas(polars_df)
 
-    if native_dtypes and fallback_dtypes:
+    if native_dtypes and (fallback_dtypes or untyped_cols):
         df = to_pandas(df)
         native_cols = [col for col in native_dtypes if col in df.columns]
         native_df = _enforce_dtypes_with_polars(

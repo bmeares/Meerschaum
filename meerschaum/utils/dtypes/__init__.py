@@ -683,10 +683,7 @@ def to_datetime(
         If provided, enforce the provided precision unit.
     """
     pandas, dateutil_parser = mrsm.attempt_import('pandas', 'dateutil.parser', lazy=False)
-    is_dask = 'dask' in getattr(dt_val, '__module__', '')
-    dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
     dt_is_series = hasattr(dt_val, 'dtype') and hasattr(dt_val, '__module__')
-    pd = pandas if dd is None else dd
     enforce_precision = precision_unit is not None
     precision_unit = precision_unit or 'microsecond'
     true_precision_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
@@ -719,7 +716,7 @@ def to_datetime(
             )
         )
 
-    if isinstance(dt_val, pd.Timestamp):
+    if isinstance(dt_val, pandas.Timestamp):
         dt_val_to_return = dt_val if not as_pydatetime else dt_val.to_pydatetime()
         return (
             coerce_timezone(dt_val_to_return)
@@ -746,7 +743,7 @@ def to_datetime(
                 if check_dtype(dtype, with_utc=True)
                 else dt_val.astype(f"datetime64[{precision_abbreviation}, UTC]")
             )
-        except pd.errors.OutOfBoundsDatetime:
+        except pandas.errors.OutOfBoundsDatetime:
             try:
                 next_precision = get_next_precision_unit(true_precision_unit)
                 next_precision_abbrevation = MRSM_PRECISION_UNITS_ABBREVIATIONS[next_precision]
@@ -776,13 +773,13 @@ def to_datetime(
         return new_dt_series
 
     try:
-        new_dt_val = pd.to_datetime(dt_val, utc=True, format='ISO8601')
+        new_dt_val = pandas.to_datetime(dt_val, utc=True, format='ISO8601')
         if new_dt_val.unit != precision_abbreviation:
             new_dt_val = new_dt_val.as_unit(precision_abbreviation)
         if as_pydatetime:
             return new_dt_val.to_pydatetime()
         return new_dt_val
-    except (pd.errors.OutOfBoundsDatetime, ValueError):
+    except (pandas.errors.OutOfBoundsDatetime, ValueError):
         pass
 
     new_dt_val = parse(dt_val)
