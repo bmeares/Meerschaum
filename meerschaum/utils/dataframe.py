@@ -64,12 +64,27 @@ def to_pandas(df: Any) -> Any:
         return df
     if df.__class__.__name__ == 'LazyFrame':
         df = df.collect()
-    return df.to_pandas(use_pyarrow_extension_array=True)
+    json_cols = [
+        col
+        for col, typ in df.schema.items()
+        if getattr(typ, 'ext_name', lambda: None)() == 'arrow.json'
+    ]
+    if json_cols:
+        df = df.with_columns(df[col].ext.storage() for col in json_cols)
+    pandas_df = df.to_pandas(use_pyarrow_extension_array=True)
+    if json_cols:
+        import json
+        for col in json_cols:
+            pandas_df[col] = pandas_df[col].apply(
+                lambda value: json.loads(value) if isinstance(value, str) else None
+            )
+    return pandas_df
 
 
 def to_polars(
     df: Any,
     geometry_cols_types_srids: Optional[Dict[str, Tuple[str, Any]]] = None,
+    json_cols: Optional[List[str]] = None,
 ) -> Any:
     """Convert a Pandas DataFrame to Polars; otherwise return ``df``."""
     if df.__class__.__module__.split('.')[0] == 'polars':
@@ -85,18 +100,25 @@ def to_polars(
         for col, type_srid in geometry_cols_types_srids.items()
         if col in df.columns
     }
-    if geometry_cols_types_srids:
+    json_cols = [col for col in (json_cols or []) if col in df.columns]
+    if geometry_cols_types_srids or json_cols:
         try:
             import json
-            from meerschaum.utils.dtypes import attempt_cast_to_geometry
-            shapely = mrsm.attempt_import('shapely', lazy=False)
-            try:
-                from geoarrow.types.type_pyarrow import register_extension_types
-                register_extension_types()
-            except Exception:
-                pass
             geometry_cols = list(geometry_cols_types_srids)
-            polars_df = to_polars(df.drop(columns=geometry_cols))
+            special_cols = list(dict.fromkeys(geometry_cols + json_cols))
+            polars_df = to_polars(
+                df.drop(columns=special_cols),
+                geometry_cols_types_srids={},
+                json_cols=[],
+            )
+            if geometry_cols:
+                from meerschaum.utils.dtypes import attempt_cast_to_geometry
+                shapely = mrsm.attempt_import('shapely', lazy=False)
+                try:
+                    from geoarrow.types.type_pyarrow import register_extension_types
+                    register_extension_types()
+                except Exception:
+                    pass
             for col, (_, srid) in geometry_cols_types_srids.items():
                 crs = str(srid) if srid else None
                 if crs and ':' not in crs:
@@ -114,9 +136,33 @@ def to_polars(
                     ).tolist(),
                     dtype=polars.Extension('geoarrow.wkb', polars.Binary, metadata),
                 ))
+            if json_cols:
+                from meerschaum.utils.dtypes import json_serialize_value, value_is_null
+                for col in json_cols:
+                    values = []
+                    for value in df[col].tolist():
+                        if value_is_null(value):
+                            values.append(None)
+                            continue
+                        if isinstance(value, str):
+                            try:
+                                value = json.loads(value)
+                            except json.JSONDecodeError:
+                                pass
+                        values.append(json.dumps(
+                            value,
+                            default=json_serialize_value,
+                            separators=(',', ':'),
+                            allow_nan=False,
+                        ))
+                    polars_df = polars_df.with_columns(polars.Series(
+                        col,
+                        values,
+                        dtype=polars.Extension('arrow.json', polars.String, ''),
+                    ))
             return polars_df.select(list(df.columns))
         except Exception:
-            # ponytail: Fall back to object conversion if Polars changes its unstable API.
+            # ponytail: Preserve compatibility if Polars changes its unstable extension API.
             pass
     if get_uuid_cols(df):
         return polars.DataFrame(df.to_dict(orient='list'), strict=False)
@@ -1399,13 +1445,14 @@ def _enforce_dtypes_with_polars(
         for col, typ in dtypes.items()
     }
     for typ in normalized_dtypes.values():
-        if typ in ('json', 'uuid', 'object') or typ.startswith(('geometry', 'geography')):
+        if typ in ('uuid', 'object') or typ.startswith(('geometry', 'geography')):
             return None
         if typ.startswith('numeric') and None in get_numeric_precision_scale(None, typ):
             return None
 
     try:
-        polars_df = to_polars(df)
+        json_cols = [col for col, typ in normalized_dtypes.items() if typ == 'json']
+        polars_df = to_polars(df, json_cols=json_cols)
         if polars_df.__class__.__name__ == 'LazyFrame':
             polars_df = polars_df.collect()
         expressions = []
@@ -1470,6 +1517,10 @@ def _enforce_dtypes_with_polars(
             elif typ.startswith('numeric'):
                 precision, scale = get_numeric_precision_scale(None, typ)
                 expr = expr.cast(polars.Decimal(precision, scale), strict=True)
+            elif typ == 'json':
+                if getattr(source_dtype, 'ext_name', lambda: None)() != 'arrow.json':
+                    return None
+                continue
             else:
                 return None
             expressions.append(expr.alias(col))
@@ -1553,11 +1604,12 @@ def enforce_dtypes(
         col: MRSM_ALIAS_DTYPES.get(str(typ), str(typ)).lower()
         for col, typ in dtypes.items()
     }
+    declared_json_cols = [col for col, typ in normalized_dtypes.items() if typ == 'json']
     fallback_dtypes = {
         col: dtypes[col]
         for col, typ in normalized_dtypes.items()
         if (
-            typ in ('json', 'uuid', 'object')
+            typ in ('uuid', 'object')
             or typ.startswith(('geometry', 'geography'))
             or (typ.startswith('numeric') and None in get_numeric_precision_scale(None, typ))
         )
@@ -1776,7 +1828,11 @@ def enforce_dtypes(
         if debug:
             dprint("Data types match. Exiting enforcement...")
         return (
-            to_polars(df, geometry_cols_types_srids=geometry_cols_types_srids)
+            to_polars(
+                df,
+                geometry_cols_types_srids=geometry_cols_types_srids,
+                json_cols=declared_json_cols,
+            )
             if as_polars
             else df
         )
@@ -1813,7 +1869,11 @@ def enforce_dtypes(
             )
             pprint(detected_dt_cols)
         return (
-            to_polars(df, geometry_cols_types_srids=geometry_cols_types_srids)
+            to_polars(
+                df,
+                geometry_cols_types_srids=geometry_cols_types_srids,
+                json_cols=declared_json_cols,
+            )
             if as_polars
             else df
         )
@@ -1884,7 +1944,11 @@ def enforce_dtypes(
                     if debug:
                         dprint(f"Was unable to convert to float then {t}.")
     return (
-        to_polars(df, geometry_cols_types_srids=geometry_cols_types_srids)
+        to_polars(
+            df,
+            geometry_cols_types_srids=geometry_cols_types_srids,
+            json_cols=declared_json_cols,
+        )
         if as_polars
         else df
     )

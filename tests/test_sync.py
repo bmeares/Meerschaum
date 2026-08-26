@@ -734,18 +734,22 @@ def test_sync_polars_dataframe(flavor: str):
     pipe = mrsm.Pipe(
         'polars', 'demo',
         columns={'datetime': 'dt', 'id': 'id'},
-        dtypes={'dt': 'datetime', 'id': 'int'},
+        dtypes={'dt': 'datetime', 'id': 'int', 'payload': 'json'},
         instance=conn,
     )
     pipe.delete()
 
-    success, msg = pipe.sync(pl.DataFrame({'dt': ['2023-01-01'], 'id': [1]}))
+    success, msg = pipe.sync(pl.DataFrame({
+        'dt': ['2023-01-01'], 'id': [1], 'payload': ['{"kind":"dict"}'],
+    }))
     assert success, msg
-    success, msg = pipe.sync(pl.LazyFrame({'dt': ['2023-01-02'], 'id': [2]}))
+    success, msg = pipe.sync(pl.LazyFrame({
+        'dt': ['2023-01-02'], 'id': [2], 'payload': ['["list",null]'],
+    }))
     assert success, msg
     success, msg = pipe.sync(iter([
-        pl.DataFrame({'dt': ['2023-01-03'], 'id': [3]}),
-        pl.DataFrame({'dt': ['2023-01-04'], 'id': [4]}),
+        pl.DataFrame({'dt': ['2023-01-03'], 'id': [3], 'payload': [None]}),
+        pl.DataFrame({'dt': ['2023-01-04'], 'id': [4], 'payload': ['{"chunk":true}']}),
     ]))
     assert success, msg
 
@@ -754,11 +758,19 @@ def test_sync_polars_dataframe(flavor: str):
     assert isinstance(pd_df, pd.DataFrame)
     assert isinstance(pl_df, pl.DataFrame)
     assert pl_df['id'].to_list() == [1, 2, 3, 4]
-    assert all(isinstance(chunk, pl.DataFrame) for chunk in pipe.get_data(
-        as_polars=True,
-        as_iterator=True,
-        chunk_interval=1440,
-    ))
+    assert pd_df['payload'].tolist() == [
+        {'kind': 'dict'}, ['list', None], None, {'chunk': True},
+    ]
+    assert pl_df.schema['payload'].ext_name() == 'arrow.json'
+    assert all(
+        isinstance(chunk, pl.DataFrame)
+        and chunk.schema['payload'].ext_name() == 'arrow.json'
+        for chunk in pipe.get_data(
+            as_polars=True,
+            as_iterator=True,
+            chunk_interval=1440,
+        )
+    )
     with pytest.raises(ValueError):
         pipe.get_data(as_polars=True, as_docs=True)
     with pytest.raises(ValueError):

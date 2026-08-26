@@ -125,7 +125,7 @@ def get_data(
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.dtypes import to_pandas_dtype
-    from meerschaum.utils.dataframe import add_missing_cols_to_df, df_is_chunk_generator, to_polars
+    from meerschaum.utils.dataframe import add_missing_cols_to_df, df_is_chunk_generator
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import dprint
     dd = attempt_import('dask.dataframe') if as_dask else None
@@ -190,13 +190,14 @@ def get_data(
             limit=limit,
             order=order,
             as_docs=as_docs,
+            as_polars=as_polars,
             fresh=fresh,
             debug=debug,
         )
         if as_docs:
             return df
         df = _sort_df(df)
-        return (to_polars(chunk) for chunk in df) if as_polars else df
+        return df
 
     if as_dask:
         from multiprocessing.pool import ThreadPool
@@ -345,6 +346,7 @@ def _get_data_as_iterator(
     limit: Optional[int] = None,
     order: Optional[str] = 'asc',
     as_docs: bool = False,
+    as_polars: bool = False,
     fresh: bool = False,
     debug: bool = False,
     **kw: Any
@@ -397,6 +399,7 @@ def _get_data_as_iterator(
             limit=limit,
             order=order,
             as_docs=as_docs,
+            as_polars=as_polars,
             fresh=fresh,
             debug=debug,
         )
@@ -419,6 +422,7 @@ def _get_data_as_iterator(
             limit=limit,
             order=order,
             as_docs=as_docs,
+            as_polars=as_polars,
             fresh=fresh,
             debug=debug,
         )

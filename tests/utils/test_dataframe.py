@@ -122,24 +122,34 @@ def test_polars_enforce_all_string_dtypes():
 
 
 def test_polars_enforce_mixed_special_dtypes():
-    """Special dtypes retain Python values in a Polars result."""
+    """JSON uses canonical Arrow storage while Pandas retains Python values."""
     pl = pytest.importorskip('polars')
-    from meerschaum.utils.dataframe import enforce_dtypes
+    from meerschaum.utils.dataframe import enforce_dtypes, to_pandas
 
     result = enforce_dtypes(
-        pd.DataFrame([{
-            'id': '1',
-            'json': '{"foo": "bar"}',
-            'uuid': '12345678-1234-5678-1234-567812345678',
-        }]),
+        pd.DataFrame([
+            {
+                'id': '1',
+                'json': '{"foo": "bar"}',
+                'uuid': '12345678-1234-5678-1234-567812345678',
+            },
+            {'id': '2', 'json': [1, None], 'uuid': None},
+            {'id': '3', 'json': None, 'uuid': None},
+        ]),
         {'id': 'int', 'json': 'json', 'uuid': 'uuid'},
         as_polars=True,
     )
-    row = result.row(0, named=True)
     assert isinstance(result, pl.DataFrame)
-    assert row['id'] == 1
-    assert row['json'] == {'foo': 'bar'}
-    assert str(row['uuid']) == '12345678-1234-5678-1234-567812345678'
+    assert result.schema['json'].ext_name() == 'arrow.json'
+    assert result.schema['json'].ext_storage() == pl.String
+    assert result['json'].to_list() == ['{"foo":"bar"}', '[1,null]', None]
+    assert 'extension<arrow.json' in str(result.to_arrow().schema.field('json').type)
+    for transformed in (result.filter(pl.col('id') == 1), pl.concat([result, result])):
+        assert transformed.schema['json'].ext_name() == 'arrow.json'
+
+    pandas_result = to_pandas(result)
+    assert pandas_result['json'].tolist() == [{'foo': 'bar'}, [1, None], None]
+    assert str(pandas_result['uuid'][0]) == '12345678-1234-5678-1234-567812345678'
 
 
 def test_polars_enforcement_preserves_untyped_objects():
