@@ -1,6 +1,6 @@
 # 🎼 Meerschaum Compose
 
-The [`compose` plugin](https://github.com/bmeares/compose) does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: with Meerschaum Compose, you can consolidate everything into a single YAML file ― that includes all of the pipes and configuration needed for your project!
+Meerschaum Compose does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: you can consolidate everything into a single YAML file ― including all of the pipes and configuration needed for your project. Compose is built into Meerschaum 4.0 and later.
 
 With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in the Compose project ― one job per instance. Because the configuration is contained in the YAML file (e.g. custom connectors), Compose projects are useful for prototyping, collaboration, and consistency.
 
@@ -65,11 +65,9 @@ With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in 
 
     Want to skip the setup and work in a pre-configured environment? Create a new repository from the [Meerschaum Compose Project Template](https://github.com/bmeares/mrsm-compose-template).
 
-Install the `compose` plugin from the public repository `api:mrsm`:
+!!! note "Upgrading from the compose plugin"
 
-```bash
-mrsm install plugin compose
-```
+    The former `compose` plugin is no longer required. The built-in action takes precedence and preserves the same commands, flags, and project files. If the plugin is still installed, Meerschaum warns once per process; remove it with `mrsm uninstall plugin compose`.
 
 From a new directory, create a file `mrsm-compose.yaml`. You can paste the example file above to get started.
 
@@ -128,7 +126,7 @@ mrsm compose up -f
 
 ## 🎌 Flags
 
-The `compose` plugin adds a few new custom flags. You can quickly view the available flags with `mrsm -h` or `mrsm show help`.
+The built-in `compose` action provides the following flags. You can quickly view the available flags with `mrsm -h` or `mrsm show help`.
 
 Flag | Description | Example
 --|--|--

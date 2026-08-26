@@ -99,6 +99,9 @@ packages: Dict[str, Dict[str, str]] = {
     'stack': {
         'compose'                    : 'docker-compose>=1.29.2',
     },
+    'compose': {
+        'envyaml'                    : 'envyaml>=1.10.211231',
+    },
     'build': {
         'cx_Freeze'                  : 'cx_Freeze>=7.0.0',
         'PyInstaller'                : 'pyinstaller>6.6.0',

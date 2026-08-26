@@ -131,13 +131,7 @@ And paste the following into `fred.py`:
 
 The plugin provides one function `fetch()` that takes a pipe, pulls an ID from `pipe.parameters`, and returns the appropriate DataFrame.
 
-Now that we've got our YAML file and plugin, install the <a href="/reference/compose">`compose` plugin</a>:
-
-```bash
-mrsm install plugin compose
-```
-
-Let's initialize our environment to install our dependencies (`pandas`) into the project's virtual environment for `plugin:fred`. From the parent project directory, run `compose init`:
+Now that we've got our YAML file and project plugin, initialize the built-in <a href="/reference/compose">Compose</a> environment. This installs our dependency (`pandas`) into the project's virtual environment for `plugin:fred`:
 
 ```bash
 cd ../

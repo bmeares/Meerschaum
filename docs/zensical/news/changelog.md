@@ -4,6 +4,13 @@
 
 ### v4.0.0
 
+- **Build Meerschaum Compose into core.**
+  Existing Compose YAML files, commands, flags, arbitrary nested actions, project plugin discovery,
+  and multiple root / plugin directories continue to work without installing the `compose` plugin.
+  The built-in action takes precedence when the legacy plugin is installed and emits a once-per-process
+  uninstall warning. New project initialization no longer injects a copy of the Compose plugin into each
+  project's internal plugins directory.
+
 - **Add opt-in Polars dataframe support without breaking Pandas users.**
   Pipes accept Polars `DataFrame` and `LazyFrame` inputs, including chunk generators, and
   `Pipe.get_data(as_polars=True)` returns Polars frames. Pandas remains the default output and
