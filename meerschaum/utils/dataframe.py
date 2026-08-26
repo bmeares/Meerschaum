@@ -21,6 +21,29 @@ if TYPE_CHECKING:
     pd, dask = mrsm.attempt_import('pandas', 'dask')
 
 
+def to_pandas(df: Any) -> Any:
+    """Convert a Polars DataFrame or LazyFrame to Pandas; otherwise return ``df``."""
+    if df.__class__.__module__.split('.')[0] != 'polars':
+        return df
+    if df.__class__.__name__ == 'LazyFrame':
+        df = df.collect()
+    return df.to_pandas(use_pyarrow_extension_array=True)
+
+
+def to_polars(df: Any) -> Any:
+    """Convert a Pandas DataFrame to Polars; otherwise return ``df``."""
+    if df.__class__.__module__.split('.')[0] == 'polars':
+        return df
+    polars = mrsm.attempt_import('polars')
+    if get_uuid_cols(df):
+        return polars.DataFrame(df.to_dict(orient='list'), strict=False)
+    try:
+        return polars.from_pandas(df, include_index=False)
+    except (TypeError, ValueError):
+        # ponytail: Preserve unsupported Python objects; remove when Polars supports UUIDs.
+        return polars.DataFrame(df.to_dict(orient='list'), strict=False)
+
+
 def add_missing_cols_to_df(
     df: 'pd.DataFrame',
     dtypes: Dict[str, Any],

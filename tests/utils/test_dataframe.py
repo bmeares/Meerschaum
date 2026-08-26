@@ -6,12 +6,48 @@
 Test functions from `meerschaum.utils.misc`.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from uuid import uuid4
 import pytest
 from meerschaum.utils.packages import attempt_import
 from meerschaum.utils.dtypes import MRSM_PD_DTYPES
 DEBUG: bool = True
 pd = attempt_import('pandas')
+
+
+def test_polars_conversion():
+    """Polars conversion is explicit and leaves Pandas inputs untouched."""
+    pl = pytest.importorskip('polars')
+    from meerschaum.utils.dataframe import to_pandas, to_polars
+
+    pd_df = pd.DataFrame({'a': [1, None], 'b': ['x', 'y']})
+    assert to_pandas(pd_df) is pd_df
+    pl_df = to_polars(pd_df)
+    assert isinstance(pl_df, pl.DataFrame)
+    assert to_polars(pl_df) is pl_df
+    for converted_df in (to_pandas(pl_df), to_pandas(pl_df.lazy())):
+        assert converted_df['b'].tolist() == ['x', 'y']
+        assert converted_df['a'].iloc[0] == 1
+        assert pd.isna(converted_df['a'].iloc[1])
+
+
+def test_polars_special_type_conversion():
+    """Polars output preserves Meerschaum's Python-backed special values."""
+    pl = pytest.importorskip('polars')
+    from meerschaum.utils.dataframe import to_pandas, to_polars
+
+    uuid_value = uuid4()
+    pd_df = pd.DataFrame([{
+        'dt': datetime(2025, 1, 1, tzinfo=timezone.utc),
+        'date': date(2025, 1, 1),
+        'decimal': Decimal('1.20'),
+        'uuid': uuid_value,
+        'bytes': b'x',
+        'json': {'a': [1, None]},
+    }])
+    row = to_pandas(to_polars(pd_df)).iloc[0].to_dict()
+    assert row == pd_df.iloc[0].to_dict()
 
 
 @pytest.mark.parametrize(

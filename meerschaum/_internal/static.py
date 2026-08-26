@@ -250,6 +250,7 @@ STATIC_CONFIG: Dict[str, Any] = {
         'gid': 'MRSM_GID',
         'noask': 'MRSM_NOASK',
         'noninteractive': 'MRSM_NONINTERACTIVE',
+        'no_auto_install': 'MRSM_NO_AUTO_INSTALL',
         'id': 'MRSM_SERVER_ID',
         'test_flavors': 'MRSM_TEST_FLAVORS',
         'daemon_id': 'MRSM_DAEMON_ID',

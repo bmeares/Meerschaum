@@ -62,19 +62,28 @@ def test_replace_env_invalidates_plugins_cache(project_scope):
     must drop the cached `plugins` package from `sys.modules`.
     """
     import meerschaum.config.paths as paths
+    from meerschaum.utils.venv import Venv, venv_target_path
     plugins_stem = paths.PLUGINS_RESOURCES_PATH.stem
+    with Venv('mrsm'):
+        original_venv_target = str(venv_target_path('mrsm', allow_nonexistent=True))
+        assert original_venv_target in sys.path
 
-    with replace_env(project_scope):
+        with replace_env(project_scope):
+            assert plugins_stem not in sys.modules
+            _load_scope_plugins()
+            plugins_mod = sys.modules.get(plugins_stem)
+            assert plugins_mod is not None
+            assert str(paths.PLUGINS_RESOURCES_PATH) in [
+                str(pathlib.Path(path_str)) for path_str in plugins_mod.__path__
+            ]
+
+        ### On exit, the package cached under the project scope must be gone.
         assert plugins_stem not in sys.modules
-        _load_scope_plugins()
-        plugins_mod = sys.modules.get(plugins_stem)
-        assert plugins_mod is not None
-        assert str(paths.PLUGINS_RESOURCES_PATH) in [
-            str(pathlib.Path(path_str)) for path_str in plugins_mod.__path__
-        ]
-
-    ### On exit, the package cached under the project scope must be gone.
-    assert plugins_stem not in sys.modules
+        assert original_venv_target in sys.path
+        assert not any(
+            str(project_scope[STATIC_CONFIG['environment']['root']]) in p
+            for p in sys.path
+        )
 
 
 def test_sibling_plugin_import_after_scope_switch(project_scope):

@@ -97,13 +97,7 @@ def make_action(
         if skip_if_loaded and func.__name__ in actions:
             return func
 
-        import meerschaum.config.paths as paths
-        plugin_name = (
-            func.__name__.split(
-                f"{paths.PLUGINS_RESOURCES_PATH.stem}.",
-                maxsplit=1,
-            )[-1].split('.')[0]
-        )
+        plugin_name = _plugin_name or _get_parent_plugin(function=func)
         plugin = Plugin(plugin_name) if plugin_name else None
 
         if debug:
@@ -152,7 +146,7 @@ def pre_sync_hook(
     >>>
     """
     with _locks['_pre_sync_hooks']:
-        plugin_name = _get_parent_plugin()
+        plugin_name = _get_parent_plugin(function=function)
         try:
             if plugin_name not in _pre_sync_hooks:
                 _pre_sync_hooks[plugin_name] = []
@@ -193,7 +187,7 @@ def post_sync_hook(
     """
     with _locks['_post_sync_hooks']:
         try:
-            plugin_name = _get_parent_plugin()
+            plugin_name = _get_parent_plugin(function=function)
             if plugin_name not in _post_sync_hooks:
                 _post_sync_hooks[plugin_name] = []
             _post_sync_hooks[plugin_name].append(function)
@@ -264,7 +258,7 @@ def web_page(
             )
         )
  
-        plugin_name = _get_parent_plugin()
+        plugin_name = _get_parent_plugin(function=_func)
         page_group = page_group or plugin_name
         if page_group not in _plugin_endpoints_to_pages:
             _plugin_endpoints_to_pages[page_group] = {}
@@ -296,7 +290,7 @@ def dash_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
     Execute the function when starting the Dash application.
     """
     with _locks['_dash_plugins']:
-        plugin_name = _get_parent_plugin()
+        plugin_name = _get_parent_plugin(function=function)
         try:
             if plugin_name not in _dash_plugins:
                 _dash_plugins[plugin_name] = []
@@ -328,9 +322,10 @@ def api_plugin(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
     """
     with _locks['_api_plugins']:
         try:
-            if function.__module__ not in _api_plugins:
-                _api_plugins[function.__module__] = []
-            _api_plugins[function.__module__].append(function)
+            plugin_name = _get_parent_plugin(function=function)
+            if plugin_name not in _api_plugins:
+                _api_plugins[plugin_name] = []
+            _api_plugins[plugin_name].append(function)
         except Exception as e:
             from meerschaum.utils.warnings import warn
             warn(e)
@@ -353,42 +348,12 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
 
     import os
     import pathlib
-    import time
     from collections import defaultdict
     from meerschaum.utils.misc import flatten_list, make_symlink, is_symlink
-    from meerschaum._internal.static import STATIC_CONFIG
     import meerschaum.config.paths as paths
+    fasteners = mrsm.attempt_import('fasteners', lazy=False)
 
-    ### If the lock file exists, sleep for up to a second or until it's removed before continuing.
-    with _locks['PLUGINS_INTERNAL_LOCK_PATH']:
-        if paths.PLUGINS_INTERNAL_LOCK_PATH.exists():
-            lock_sleep_total = STATIC_CONFIG['plugins']['lock_sleep_total']
-            lock_sleep_increment = STATIC_CONFIG['plugins']['lock_sleep_increment']
-            lock_start = time.perf_counter()
-            while (
-                (time.perf_counter() - lock_start) < lock_sleep_total
-            ):
-                time.sleep(lock_sleep_increment)
-                if not paths.PLUGINS_INTERNAL_LOCK_PATH.exists():
-                    break
-                try:
-                    paths.PLUGINS_INTERNAL_LOCK_PATH.unlink()
-                except Exception as e:
-                    if warn:
-                        _warn(
-                            f"Error while removing lockfile {paths.PLUGINS_INTERNAL_LOCK_PATH}:\n"
-                            f"{e}"
-                        )
-                    break
-
-        ### Begin locking from other processes.
-        try:
-            paths.PLUGINS_INTERNAL_LOCK_PATH.touch()
-        except Exception as e:
-            if warn:
-                _warn(f"Unable to create lockfile {paths.PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
-
-    with _locks['internal_plugins']:
+    with fasteners.InterProcessLock(str(paths.PLUGINS_INTERNAL_LOCK_PATH)), _locks['internal_plugins']:
 
         try:
             from importlib.metadata import entry_points
@@ -511,18 +476,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                         + f"to {plugin_path}:\n    {msg}"
                     )
 
-    ### Release symlink lock file in case other processes need it.
     with _locks['PLUGINS_INTERNAL_LOCK_PATH']:
-        try:
-            if paths.PLUGINS_INTERNAL_LOCK_PATH.exists():
-                paths.PLUGINS_INTERNAL_LOCK_PATH.unlink()
-        ### Sometimes competing threads will delete the lock file at the same time.
-        except FileNotFoundError:
-            pass
-        except Exception as e:
-            if warn:
-                _warn(f"Error cleaning up lockfile {paths.PLUGINS_INTERNAL_LOCK_PATH}:\n{e}")
-
         try:
             if not paths.PLUGINS_INIT_PATH.exists():
                 paths.PLUGINS_INIT_PATH.touch()
@@ -575,7 +529,11 @@ def import_plugins(
         ### It's not a guarantee of correct activation order,
         ### e.g. if a library plugin pins a specific package and another 
         plugins_names = get_plugins_names()
-        already_active_venvs = [is_venv_active(plugin_name) for plugin_name in plugins_names]
+        already_active_venvs = {
+            plugin_name
+            for plugin_name in plugins_names
+            if is_venv_active(plugin_name)
+        }
 
         if not sys.path or sys.path[0] != str(paths.PLUGINS_RESOURCES_PATH.parent):
             prepended_sys_path = True
@@ -769,7 +727,7 @@ def load_plugins(
                 make_action(
                     func,
                     **{'shell': shell, 'debug': debug},
-                    _plugin_name=name,
+                    _plugin_name=_get_parent_plugin(function=func),
                     skip_if_loaded=True,
                 )
 
@@ -842,7 +800,7 @@ def unload_plugins(
     root_plugins_mod = (
         sys.modules.get(paths.PLUGINS_RESOURCES_PATH.stem, None)
         if sorted(plugins) != sorted(all_plugins)
-        else sys.modules.pop(paths.PLUGINS_RESOURCES_PATH, None)
+        else sys.modules.pop(paths.PLUGINS_RESOURCES_PATH.stem, None)
     )
 
     for plugin_name in plugins:
@@ -865,6 +823,7 @@ def unload_plugins(
 
         ### Unload API endpoints and pages.
         _ = _dash_plugins.pop(plugin_name, None)
+        _ = _api_plugins.pop(plugin_name, None)
         web_page_funcs = _plugins_web_pages.pop(plugin_name, None) or []
         page_groups_to_pop = []
         for page_group, page_functions in _plugin_endpoints_to_pages.items():
@@ -1112,9 +1071,15 @@ def inject_plugin_path(
     make_symlink(plugin_path, injected_path)
 
 
-def _get_parent_plugin(stacklevel: Union[int, Tuple[int, ...]] = (1, 2, 3, 4)) -> Union[str, None]:
+def _get_parent_plugin(
+    stacklevel: Union[int, Tuple[int, ...]] = (1, 2, 3, 4),
+    function: Optional[Callable[[Any], Any]] = None,
+) -> Union[str, None]:
     """If this function is called from outside a Meerschaum plugin, it will return None."""
     import inspect
+    module_name = getattr(function, '__module__', '')
+    if module_name.startswith('plugins.'):
+        return module_name.split('.')[1]
     if not isinstance(stacklevel, tuple):
         stacklevel = (stacklevel,)
 

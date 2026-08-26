@@ -8,7 +8,6 @@ ARG dep_group=full \
 
 ENV MRSM_USER=$mrsm_user \
     MRSM_DEP_GROUP=$dep_group \
-    MRSM_USER=meerschaum \
     MRSM_UID=$mrsm_uid \
     MRSM_GID=$mrsm_gid \
     MRSM_ROOT_DIR=$mrsm_root_dir \

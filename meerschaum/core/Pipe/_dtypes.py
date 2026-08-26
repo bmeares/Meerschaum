@@ -36,6 +36,7 @@ def enforce_dtypes(
         parse_df_datetimes,
         enforce_dtypes as _enforce_dtypes,
         parse_simple_lines,
+        to_pandas,
     )
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.packages import import_pandas
@@ -47,6 +48,8 @@ def enforce_dtypes(
                 + "    Skipping dtype enforcement..."
             )
         return df
+
+    df = to_pandas(df)
 
     if not self.enforce:
         enforce = False

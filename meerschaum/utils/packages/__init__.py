@@ -39,7 +39,7 @@ _locks = {
     'emitted_pandas_warning': RLock(),
 }
 _checked_for_updates = set()
-_is_installed_first_check: Dict[str, bool] = {}
+_is_installed_first_check: Dict[Tuple[str, Optional[str], bool, bool], bool] = {}
 
 
 def get_module_path(
@@ -1050,6 +1050,10 @@ def pip_install(
             print(f"{rc=}")
         success = rc == 0
 
+    if success:
+        with _locks['_is_installed_first_check']:
+            _is_installed_first_check.clear()
+
     msg = (
         "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 
         else "Failed to " + ('un' if _uninstall else '') + "install packages."
@@ -1326,6 +1330,10 @@ def attempt_import(
 
     import importlib.util
 
+    no_auto_install_env_var = 'MRSM_NO_AUTO_INSTALL'
+    if os.environ.get(no_auto_install_env_var, '').lower() in ('1', 'true', 'yes'):
+        install = False
+
     ### to prevent recursion, check if parent Meerschaum package is being imported
     if names == ('meerschaum',):
         return _import_module('meerschaum')
@@ -1386,9 +1394,10 @@ def attempt_import(
                 ) is not None
             )
         else:
+            installed_cache_key = (name, venv, split, allow_outside_venv)
             if check_is_installed:
                 with _locks['_is_installed_first_check']:
-                    if not _is_installed_first_check.get(name, False):
+                    if not _is_installed_first_check.get(installed_cache_key, False):
                         package_is_installed = is_installed(
                             name,
                             venv = venv,
@@ -1396,13 +1405,16 @@ def attempt_import(
                             allow_outside_venv = allow_outside_venv,
                             debug = debug,
                         )
-                        _is_installed_first_check[name] = package_is_installed
+                        if package_is_installed:
+                            _is_installed_first_check[installed_cache_key] = True
                     else:
-                        package_is_installed = _is_installed_first_check[name]
+                        package_is_installed = True
             else:
-                package_is_installed = _is_installed_first_check.get(
+                package_is_installed = venv_contains_package(
                     name,
-                    venv_contains_package(name, venv=venv, split=split, debug=debug)
+                    venv=venv,
+                    split=split,
+                    debug=debug,
                 )
             found_module = package_is_installed
 
@@ -1427,7 +1439,11 @@ def attempt_import(
                 warn_function(
                     (f"\n\nMissing package '{name}' from virtual environment '{venv}'; "
                      + "some features will not work correctly."
-                     + "\n\nSet install=True when calling attempt_import.\n"),
+                     + (
+                         f"\n\nUnset {no_auto_install_env_var} to allow package installation.\n"
+                         if no_auto_install_env_var in os.environ
+                         else "\n\nSet install=True when calling attempt_import.\n"
+                     )),
                     ImportWarning,
                     stacklevel = 3,
                     color = False,

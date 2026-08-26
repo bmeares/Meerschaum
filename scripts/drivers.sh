@@ -1,9 +1,5 @@
 #! /bin/bash
 
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-. "$DIR"/config.sh
-cd "$PARENT"
-
 if [ "$EUID" -ne 0 ]; then
   echo "This script must be run as root.";
   exit 1;

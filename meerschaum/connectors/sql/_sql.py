@@ -144,11 +144,9 @@ def read(
     from decimal import Decimal
 
     pd = import_pandas()
-    dd = None
-
     is_dask = 'dask' in pd.__name__
+    dd = pd if is_dask else None
     pandas = attempt_import('pandas')
-    is_dask = dd is not None
     npartitions = chunksize_to_npartitions(chunksize)
     if is_dask:
         chunksize = None
@@ -888,7 +886,7 @@ def to_sql(
         for col, typ in kw.get('dtype', {}).items()
         if (
             col in df.columns
-            and 'geometry' in str(typ).lower() or 'geography' in str(typ).lower()
+            and ('geometry' in str(typ).lower() or 'geography' in str(typ).lower())
         )
     }
     geometry_cols.extend([col for col in geometry_cols_dtypes if col not in geometry_cols])

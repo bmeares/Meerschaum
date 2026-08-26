@@ -30,6 +30,7 @@ def get_data(
     as_iterator: bool = False,
     as_chunks: bool = False,
     as_dask: bool = False,
+    as_polars: bool = False,
     add_missing_columns: bool = False,
     chunk_interval: Union[timedelta, int, None] = None,
     order: Optional[str] = 'asc',
@@ -82,6 +83,10 @@ def get_data(
         If `True`, return a `dask.DataFrame`
         (which may be loaded into a Pandas DataFrame with `df.compute()`).
 
+    as_polars: bool, default False
+        If `True`, return a `polars.DataFrame`. When combined with `as_iterator=True`,
+        yield Polars DataFrames. This may not be combined with `as_docs` or `as_dask`.
+
     add_missing_columns: bool, default False
         If `True`, add any missing columns from `Pipe.dtypes` to the dataframe.
 
@@ -113,18 +118,22 @@ def get_data(
     A `List[Dict]` if `as_docs=True`.
     An `Iterator[pd.DataFrame]` if `as_chunks=True` (or `as_iterator=True`).
     An `Iterator[List[Dict]]` if both `as_docs=True` and `as_chunks=True`.
+    A `polars.DataFrame` if `as_polars=True`.
 
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.venv import Venv
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.dtypes import to_pandas_dtype
-    from meerschaum.utils.dataframe import add_missing_cols_to_df, df_is_chunk_generator
+    from meerschaum.utils.dataframe import add_missing_cols_to_df, df_is_chunk_generator, to_polars
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.warnings import dprint
     dd = attempt_import('dask.dataframe') if as_dask else None
     dask = attempt_import('dask') if as_dask else None
     _ = attempt_import('partd', lazy=False) if as_dask else None
+
+    if as_polars and (as_docs or as_dask):
+        raise ValueError("`as_polars` may not be combined with `as_docs` or `as_dask`.")
 
     if select_columns == '*':
         select_columns = None
@@ -181,7 +190,8 @@ def get_data(
         )
         if as_docs:
             return df
-        return _sort_df(df)
+        df = _sort_df(df)
+        return (to_polars(chunk) for chunk in df) if as_polars else df
 
     if as_dask:
         from multiprocessing.pool import ThreadPool
@@ -313,8 +323,8 @@ def get_data(
         )
 
         if order:
-            return _sort_df(enforced_df)
-        return enforced_df
+            enforced_df = _sort_df(enforced_df)
+        return to_polars(enforced_df) if as_polars else enforced_df
 
 
 def _get_data_as_iterator(

@@ -59,10 +59,6 @@ packages: Dict[str, Dict[str, str]] = {
         'importlib_metadata'         : 'importlib-metadata>=4.12.0',
     },
     '_internal'                      : {
-        'apscheduler'                : (
-                                       f"{_MRSM_PACKAGE_ARCHIVES_PREFIX}"
-                                       "apscheduler-4.0.0a6.post8+mrsm-py3-none-any.whl>=4.0.0a6"
-        ),
         'dataclass_wizard'           : 'dataclass-wizard>=0.35.0',
     },
     'jobs': {
@@ -148,6 +144,11 @@ packages['sql'] = {
 packages['sql'].update(packages['drivers'])
 packages['sql'].update(packages['core'])
 packages['sql'].update(packages['gis'])
+packages['polars'] = {
+    'polars'                         : 'polars>=1.32.0',
+    'pandas'                         : packages['sql']['pandas'],
+    'pyarrow'                        : packages['sql']['pyarrow'],
+}
 packages['dash'] = {
     'flask_compress'                 : 'Flask-Compress>=1.17.0',
     'dash'                           : 'dash>=4.1.0',

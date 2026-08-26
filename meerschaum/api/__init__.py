@@ -399,7 +399,11 @@ if mcp_enabled:
 
 ### Execute the API plugins functions.
 for module_name, functions_list in _api_plugins.items():
-    plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
+    plugin_name = (
+        module_name.split('.')[1]
+        if module_name and module_name.startswith('plugins.')
+        else module_name
+    )
     plugin = mrsm.Plugin(plugin_name) if plugin_name else None
 
     if plugin is not None:

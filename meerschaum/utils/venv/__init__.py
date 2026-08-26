@@ -69,10 +69,6 @@ def activate_venv(
 
     """
     thread_id = get_ident()
-    if active_venvs_order and active_venvs_order[0] == venv:
-        if not force:
-            return True
-
     import sys
     import os
     if venv is not None and init_if_not_exists:
@@ -97,6 +93,13 @@ def activate_venv(
             raise EnvironmentError(f"Could not activate virtual environment '{venv}'.")
 
         target = target_path.as_posix()
+        if (
+            active_venvs_order
+            and active_venvs_order[0] == venv
+            and target in sys.path
+            and not force
+        ):
+            return True
 
         if venv in active_venvs_order:
             try:

@@ -736,7 +736,7 @@ def filter_existing(
     pandas = attempt_import('pandas')
     if enforce_dtypes or 'dataframe' not in str(type(df)).lower():
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
-    is_dask = hasattr('df', '__module__') and 'dask' in df.__module__
+    is_dask = hasattr(df, '__module__') and 'dask' in df.__module__
     if is_dask:
         dd = attempt_import('dask.dataframe')
         merge = dd.merge
