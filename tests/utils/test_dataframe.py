@@ -226,6 +226,31 @@ def test_filter_unseen_df_polars_preserves_source_order(monkeypatch):
     assert result['id'].tolist() == [3, 2]
 
 
+def test_filter_unseen_df_polars_preserves_boolean_dtype(monkeypatch):
+    """Null-token normalization does not coerce unrelated boolean columns."""
+    pytest.importorskip('polars')
+    import meerschaum.utils.dataframe as dataframe
+
+    old_df = pd.DataFrame({
+        'id': pd.Series([1], dtype='int64[pyarrow]'),
+        'value': pd.Series(['NA'], dtype='string[pyarrow]'),
+        'flag': pd.Series([False], dtype='bool[pyarrow]'),
+    })
+    new_df = pd.DataFrame({
+        'id': pd.Series([1, 2], dtype='int64[pyarrow]'),
+        'value': pd.Series(['NA', 'new'], dtype='string[pyarrow]'),
+        'flag': pd.Series([False, True], dtype='bool[pyarrow]'),
+    })
+
+    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 10 ** 9)
+    expected = dataframe.filter_unseen_df(old_df, new_df)
+    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 0)
+    actual = dataframe.filter_unseen_df(old_df, new_df)
+
+    pd.testing.assert_frame_equal(actual, expected)
+    assert actual['flag'].dtype == new_df['flag'].dtype
+
+
 def test_filter_unseen_df_polars_falls_back(monkeypatch):
     """A Polars conversion error cleanly selects the established Pandas path."""
     pl = pytest.importorskip('polars')

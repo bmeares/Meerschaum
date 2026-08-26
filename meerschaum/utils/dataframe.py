@@ -423,8 +423,19 @@ def filter_unseen_df(
     geometry_cols = set(new_geometry_cols + old_geometry_cols)
 
     na_pattern = r'(?i)^(none|nan|na|nat|natz|<na>)$'
-    normalized_new_df = new_df.infer_objects().replace(na_pattern, pd.NA, regex=True).fillna(NA)
-    normalized_old_df = old_df.infer_objects().replace(na_pattern, pd.NA, regex=True).fillna(NA)
+    def normalize_nulls(df_to_normalize):
+        normalized_df = df_to_normalize.infer_objects()
+        string_cols = normalized_df.select_dtypes(
+            include=['object', 'string', 'category']
+        ).columns
+        return normalized_df.replace(
+            {col: na_pattern for col in string_cols},
+            pd.NA,
+            regex=True,
+        ).fillna(NA)
+
+    normalized_new_df = normalize_nulls(new_df)
+    normalized_old_df = normalize_nulls(old_df)
     delta_df = (
         None
         if is_dask
