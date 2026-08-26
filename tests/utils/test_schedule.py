@@ -180,6 +180,22 @@ def test_cron_skips_nonexistent_dst_time():
     assert trigger.next() == datetime(2024, 3, 11, 2, 30, tzinfo=eastern)
 
 
+def test_cron_repeats_ambiguous_dst_time():
+    """A wall-clock time repeated by fall-back must fire for both occurrences."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    eastern = gettz('America/New_York')
+    trigger = parse_schedule(
+        '30 1 * * *',
+        now=datetime(2024, 11, 3, 1, 30, tzinfo=eastern),
+    )
+    first = trigger.next()
+    second = trigger.next()
+    assert first == datetime(2024, 11, 3, 1, 30, tzinfo=eastern, fold=0)
+    assert second == datetime(2024, 11, 3, 1, 30, tzinfo=eastern, fold=1)
+    assert second.timestamp() - first.timestamp() == 3600
+
+
 def test_cron_numeric_weekdays_retain_crontab_semantics():
     """Numeric cron weekdays use 0 and 7 for Sunday, while 1 is Monday."""
     from meerschaum.utils.schedule import parse_schedule
@@ -211,6 +227,35 @@ def test_cron_day_fields_and_steps_retain_crontab_semantics():
     assert stepped_weekdays.next() == datetime(2024, 5, 2, tzinfo=timezone.utc)
     assert stepped_days.next() == datetime(2024, 5, 1, tzinfo=timezone.utc)
     assert stepped_days.next() == datetime(2024, 5, 3, tzinfo=timezone.utc)
+
+
+def test_crontab_reference_examples():
+    """Examples from crontab(5) retain their standard field behavior."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    every_other_hour = parse_schedule(
+        '23 0-23/2 * * *',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+    sunday = parse_schedule(
+        '5 4 * * sun',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+    first_fifteenth_or_friday = parse_schedule(
+        '30 4 1,15 * 5',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+
+    assert [every_other_hour.next() for _ in range(2)] == [
+        datetime(2024, 5, 1, 0, 23, tzinfo=timezone.utc),
+        datetime(2024, 5, 1, 2, 23, tzinfo=timezone.utc),
+    ]
+    assert sunday.next() == datetime(2024, 5, 5, 4, 5, tzinfo=timezone.utc)
+    assert [first_fifteenth_or_friday.next() for _ in range(3)] == [
+        datetime(2024, 5, 1, 4, 30, tzinfo=timezone.utc),
+        datetime(2024, 5, 3, 4, 30, tzinfo=timezone.utc),
+        datetime(2024, 5, 10, 4, 30, tzinfo=timezone.utc),
+    ]
 
 
 def test_sparse_cron_schedules():
