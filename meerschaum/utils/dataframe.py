@@ -36,6 +36,8 @@ def _filter_unseen_df_with_polars(
     polars = attempt_import('polars', install=False, lazy=False, warn=False)
     if polars is None:
         return None
+    if get_uuid_cols(new_df) or get_uuid_cols(old_df):
+        return None
 
     row_col = '__mrsm_row_id'
     while row_col in new_df.columns:
