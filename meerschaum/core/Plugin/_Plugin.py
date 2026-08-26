@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import pathlib
 import shutil
+import threading
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
@@ -24,6 +25,7 @@ from meerschaum.utils.typing import (
 from meerschaum.utils.warnings import error, warn
 _tmpversion = None
 _ongoing_installations = set()
+_ongoing_installations_lock = threading.Lock()
 
 
 class Plugin:
@@ -281,9 +283,25 @@ class Plugin:
         A `SuccessTuple` of success (bool) and a message (str).
 
         """
-        if self.full_name in _ongoing_installations:
-            return True, f"Already installing plugin '{self}'."
-        _ongoing_installations.add(self.full_name)
+        installation_key = self.full_name
+        with _ongoing_installations_lock:
+            if installation_key in _ongoing_installations:
+                return True, f"Already installing plugin '{self}'."
+            _ongoing_installations.add(installation_key)
+
+        try:
+            return self._install(skip_deps=skip_deps, force=force, debug=debug)
+        finally:
+            with _ongoing_installations_lock:
+                _ongoing_installations.discard(installation_key)
+
+
+    def _install(
+        self,
+        skip_deps: bool = False,
+        force: bool = False,
+        debug: bool = False,
+    ) -> SuccessTuple:
 
         import meerschaum.config.paths as paths
         from meerschaum.utils.warnings import warn, error
@@ -459,13 +477,11 @@ class Plugin:
 
         ### if we've already failed, return here
         if not success or abort:
-            _ongoing_installations.remove(self.full_name)
             return success, msg
 
         ### attempt to install dependencies
         dependencies_installed = skip_deps or self.install_dependencies(force=force, debug=debug)
         if not dependencies_installed:
-            _ongoing_installations.remove(self.full_name)
             return False, f"Failed to install dependencies for plugin '{self}'."
 
         ### handling success tuple, bool, or other (typically None)
@@ -496,7 +512,6 @@ class Plugin:
                 f"of type '{type(setup_tuple)}': {setup_tuple}"
             )
 
-        _ongoing_installations.remove(self.full_name)
         _ = self.module
         return success, msg
 

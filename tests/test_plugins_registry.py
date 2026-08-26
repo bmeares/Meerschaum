@@ -1,6 +1,18 @@
 #! /usr/bin/env python3
 
 
+def test_failed_plugin_install_does_not_poison_next_attempt(tmp_path, monkeypatch):
+    """A failed install must not remain marked as active."""
+    import meerschaum.config.paths as paths
+    from meerschaum.core.Plugin import Plugin
+
+    monkeypatch.setattr(paths, 'PLUGINS_TEMP_RESOURCES_PATH', tmp_path)
+    plugin = Plugin('missing_install', archive_path=tmp_path / 'missing.tar.gz')
+
+    assert plugin.install(skip_deps=True)[0] is False
+    assert plugin.install(skip_deps=True)[0] is False
+
+
 def test_plugin_registries_use_root_module_and_unload(monkeypatch):
     """Decorators in plugin submodules share one owner and unload together."""
     import sys
