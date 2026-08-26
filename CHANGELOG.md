@@ -1,5 +1,35 @@
 # 🪵 Changelog
 
+## 4.0.0 Releases
+
+### v4.0.0
+
+- **Add opt-in Polars dataframe support without breaking Pandas users.**
+  Pipes accept Polars `DataFrame` and `LazyFrame` inputs, including chunk generators, and
+  `Pipe.get_data(as_polars=True)` returns Polars frames. Pandas remains the default output and
+  plugin boundary. Install the conversion dependencies with `pip install 'meerschaum[polars]'`.
+
+- **Replace the unreleased APScheduler fork with Meerschaum's small schedule engine.**
+  Existing interval, calendar, five-field cron, start-time, and `and` / `or` schedule strings keep
+  their public `trigger.next()` interface. Calendar schedules retain month-end behavior, cron
+  schedules handle DST transitions, and scheduled callbacks do not overlap themselves.
+
+- **Make plugin registration and synchronization deterministic.**
+  Decorated functions are owned by their root plugin module even when defined in submodules,
+  unloading clears every associated registry, and plugin symlink updates now use the existing
+  inter-process lock dependency instead of racing on a hand-managed lockfile.
+
+- **Add a locked mode for optional dependencies.**
+  Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.
+  Installed-package checks are now cached by virtual environment and import policy, so one plugin's
+  result cannot leak into another plugin environment. Runtime installation still defaults to on for
+  the beginner-friendly experience, using `uv` with the existing `pip` fallback.
+
+- **Repair Dask, SQL geometry, and Docker build paths.**
+  Dask frames are detected correctly in sync and SQL reads, SQL geometry dtype filtering applies
+  only to columns present in the frame, and the Docker workflow uses the maintained buildx script
+  and current GitHub Actions.
+
 ## 3.5.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!
