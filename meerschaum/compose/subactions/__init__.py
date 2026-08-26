@@ -56,28 +56,31 @@ def _do_subaction(subaction: str, debug: bool = False, **kwargs):
     if debug:
         dprint("Compose: Replacing config.", icon=False)
 
-    with replace_config(config):
-        with replace_env(env):
-            new_plugin_names = get_plugins_names()
+    new_plugin_names = []
+    try:
+        with replace_config(config):
+            with replace_env(env):
+                try:
+                    new_plugin_names = get_plugins_names()
+                    if debug:
+                        dprint(f"Compose: Loading plugins: {new_plugin_names}", icon=False)
+                    load_plugins(debug=debug)
+
+                    if debug:
+                        name = subaction_function.__name__.lstrip('_').replace('_', ' ')
+                        dprint(f"Compose: Calling `{name}`...", icon=False)
+
+                    success, msg = subaction_function(compose_config, debug=debug, **kwargs)
+                finally:
+                    if need_unload and new_plugin_names:
+                        if debug:
+                            dprint("Compose: Unloading project plugins.", icon=False)
+                        unload_plugins(new_plugin_names, debug=debug)
+    finally:
+        if need_unload:
             if debug:
-                dprint(f"Compose: Loading plugins: {new_plugin_names}", icon=False)
-            load_plugins(debug=debug)
-
-            if debug:
-                name = subaction_function.__name__.lstrip('_').replace('_', ' ')
-                dprint(f"Compose: Calling `{name}`...", icon=False)
-
-            success, msg = subaction_function(compose_config, debug=debug, **kwargs)
-
-            if need_unload:
-                if debug:
-                    dprint("Compose: Unloading project plugins.", icon=False)
-                unload_plugins(new_plugin_names, debug=debug)
-
-    if need_unload:
-        if debug:
-            dprint("Compose: Loading back existing plugins.")
-        _ = sys.modules.pop('plugins', None)
-        if old_plugins_names:
-            load_plugins(debug=debug)
+                dprint("Compose: Loading back existing plugins.")
+            _ = sys.modules.pop('plugins', None)
+            if old_plugins_names:
+                load_plugins(debug=debug)
     return success, msg

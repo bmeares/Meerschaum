@@ -225,3 +225,38 @@ def test_compose_temporary_pipe_retry_returns_success():
     success, msg = run_initial_syncs([pipe], {'project_name': 'test'})
     assert success, msg
     assert pipe.calls == 2
+
+
+def test_compose_restores_host_plugins_after_subaction_error(monkeypatch):
+    """Project plugins are unloaded and host plugins reloaded when a subaction raises."""
+    from contextlib import nullcontext
+    import pytest
+    import meerschaum.compose.subactions as subactions
+    import meerschaum.compose.utils as compose_utils
+    import meerschaum.compose.utils.config as config_module
+    import meerschaum.plugins as plugins
+    import meerschaum.config as config
+    import meerschaum.config.environment as environment
+
+    unloads = []
+    loads = []
+    plugin_scopes = iter((['host'], ['project']))
+
+    def fail(*args, **kwargs):
+        raise RuntimeError('subaction failed')
+
+    monkeypatch.setattr(subactions, 'get_subactions', lambda: ['fail'])
+    monkeypatch.setattr(subactions, '_get_subaction_function', lambda name: fail)
+    monkeypatch.setattr(compose_utils, 'init', lambda **kwargs: {'config': {}})
+    monkeypatch.setattr(config_module, 'get_env_dict', lambda compose_config: {})
+    monkeypatch.setattr(plugins, 'get_plugins_names', lambda: next(plugin_scopes))
+    monkeypatch.setattr(plugins, 'unload_plugins', lambda names, **kwargs: unloads.append(names))
+    monkeypatch.setattr(plugins, 'load_plugins', lambda **kwargs: loads.append(True))
+    monkeypatch.setattr(config, 'replace_config', lambda value: nullcontext())
+    monkeypatch.setattr(environment, 'replace_env', lambda value: nullcontext())
+
+    with pytest.raises(RuntimeError, match='subaction failed'):
+        subactions._do_subaction('fail')
+
+    assert unloads == [['host'], ['project']]
+    assert len(loads) == 2
