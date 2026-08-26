@@ -67,9 +67,13 @@ With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in 
 
 !!! note "Upgrading from the compose plugin"
 
-    The former `compose` plugin is no longer required. The built-in action takes precedence and preserves the same commands, flags, and project files. If the plugin is still installed, Meerschaum warns once per process; remove it with `mrsm uninstall plugin compose`.
+    Existing Compose files and commands do not need to change for Meerschaum 4. To migrate:
 
-    Locked or offline environments should install the parser dependency up front with `pip install 'meerschaum[compose]'`.
+    1. Upgrade Meerschaum. Locked or offline environments should install the parser dependency up front with `pip install 'meerschaum[compose]'`.
+    2. Remove `mrsm install plugin compose` from project bootstrap scripts, then run `mrsm uninstall plugin compose`. Until it is removed, the built-in action takes precedence and warns once per process.
+    3. Continue using the same YAML files, commands, and flags. Legacy Compose imports and registered `plugin:compose` pipes remain compatible.
+
+    `compose down -v` deletes only resources whose project ownership is clear. Shared pipes are untagged, and ambiguous resources are preserved.
 
 From a new directory, create a file `mrsm-compose.yaml`. You can paste the example file above to get started.
 

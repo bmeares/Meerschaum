@@ -22,19 +22,21 @@
 - **Replace the unreleased APScheduler fork with Meerschaum's small schedule engine.**  
   Existing interval, calendar, five-field cron, start-time, and `and` / `or` schedule strings keep
   their public `trigger.next()` interface. Calendar schedules retain month-end behavior, cron
-  schedules follow crontab's day-of-month / day-of-week rules and handle DST transitions, and
-  scheduled callbacks do not overlap themselves.
+  schedules follow crontab's day-of-month / day-of-week and stepped-field rules, handle DST
+  transitions, and scheduled callbacks do not overlap themselves.
 
 - **Make plugin registration and synchronization deterministic.**  
   Decorated functions are owned by their root plugin module even when defined in submodules,
   unloading clears every associated registry, and plugin symlink updates now use the existing
-  inter-process lock dependency instead of racing on a hand-managed lockfile.
+  inter-process lock dependency instead of racing on a hand-managed lockfile. Failed setup hooks
+  restore the caller's virtual environment state.
 
 - **Make runtime dependency installation safer and inspectable.**  
   Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.
   `install packages --dry-run` reports the selected installer, environment, arguments, and requested
   packages without changing the environment. Package mutations are serialized per environment across
-  threads and processes, and installed-package checks are cached by environment and import policy.
+  threads and processes, implicit downloads emit a once-per-process warning, and installed-package
+  checks are cached by environment and import policy.
   Runtime installation remains on by default for the beginner-friendly experience, using `uv` with
   the existing `pip` fallback.
 

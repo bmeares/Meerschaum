@@ -643,10 +643,10 @@ class Plugin:
 
         if debug:
             dprint(f"Running setup for plugin '{self}'...")
+        from meerschaum.utils.venv import Venv
         try:
-            self.activate_venv(debug=debug)
-            return_tuple = _setup(*args, **_kw)
-            self.deactivate_venv(debug=debug)
+            with Venv(self, debug=debug):
+                return_tuple = _setup(*args, **_kw)
         except Exception as e:
             return False, str(e)
 

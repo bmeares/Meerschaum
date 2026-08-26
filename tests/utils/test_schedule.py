@@ -233,6 +233,14 @@ def test_crontab_reference_examples():
     """Examples from crontab(5) retain their standard field behavior."""
     from meerschaum.utils.schedule import parse_schedule
 
+    minute_step = parse_schedule(
+        '0/35 * * * *',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+    weekday_step = parse_schedule(
+        '0 0 * * 1/2',
+        now=datetime(2024, 5, 6, tzinfo=timezone.utc),
+    )
     every_other_hour = parse_schedule(
         '23 0-23/2 * * *',
         now=datetime(2024, 5, 1, tzinfo=timezone.utc),
@@ -246,6 +254,17 @@ def test_crontab_reference_examples():
         now=datetime(2024, 5, 1, tzinfo=timezone.utc),
     )
 
+    assert [minute_step.next() for _ in range(3)] == [
+        datetime(2024, 5, 1, 0, 0, tzinfo=timezone.utc),
+        datetime(2024, 5, 1, 0, 35, tzinfo=timezone.utc),
+        datetime(2024, 5, 1, 1, 0, tzinfo=timezone.utc),
+    ]
+    assert [weekday_step.next() for _ in range(4)] == [
+        datetime(2024, 5, 6, tzinfo=timezone.utc),
+        datetime(2024, 5, 8, tzinfo=timezone.utc),
+        datetime(2024, 5, 10, tzinfo=timezone.utc),
+        datetime(2024, 5, 12, tzinfo=timezone.utc),
+    ]
     assert [every_other_hour.next() for _ in range(2)] == [
         datetime(2024, 5, 1, 0, 23, tzinfo=timezone.utc),
         datetime(2024, 5, 1, 2, 23, tzinfo=timezone.utc),

@@ -116,7 +116,7 @@ def _expand_cron_field(
         return names_map.get(value.lower(), int(value) if value.lstrip('-').isdigit() else -1)
 
     for part in expression.lower().split(','):
-        range_part, _, step_str = part.partition('/')
+        range_part, separator, step_str = part.partition('/')
         step = int(step_str) if step_str else 1
         if step <= 0:
             raise ValueError(f"Invalid cron step '{step}'.")
@@ -126,7 +126,8 @@ def _expand_cron_field(
             start_str, stop_str = range_part.split('-', 1)
             start, stop = as_int(start_str), as_int(stop_str)
         else:
-            start = stop = as_int(range_part)
+            start = as_int(range_part)
+            stop = maximum if separator else start
         if start < minimum or stop > maximum or start > stop:
             raise ValueError(f"Invalid cron field '{expression}'.")
         values.update(range(start, stop + 1, step))
@@ -163,7 +164,7 @@ def _expand_cron_weekdays(expression: str) -> set[int]:
             cron_values = (
                 range(endpoints[0], endpoints[1] + 1, step)
                 if len(endpoints) == 2
-                else endpoints
+                else (range(endpoints[0], 8, step) if separator else endpoints)
             )
         if step <= 0:
             raise ValueError(f"Invalid cron field '{expression}'.")

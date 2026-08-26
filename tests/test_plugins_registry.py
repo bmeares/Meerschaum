@@ -1,6 +1,24 @@
 #! /usr/bin/env python3
 
 
+def test_plugin_setup_deactivates_venv_after_exception(monkeypatch):
+    """A failed setup hook must not leak its virtual environment."""
+    import types
+    from meerschaum.core.Plugin import Plugin
+
+    def fail_setup():
+        raise RuntimeError("boom")
+
+    plugin = Plugin('failed_setup')
+    plugin._module = types.SimpleNamespace(setup=fail_setup)
+    events = []
+    monkeypatch.setattr(plugin, 'activate_venv', lambda **kw: events.append('activate'))
+    monkeypatch.setattr(plugin, 'deactivate_venv', lambda **kw: events.append('deactivate'))
+
+    assert plugin.setup() == (False, "boom")
+    assert events == ['activate', 'deactivate']
+
+
 def test_failed_plugin_install_does_not_poison_next_attempt(tmp_path, monkeypatch):
     """A failed install must not remain marked as active."""
     import meerschaum.config.paths as paths
