@@ -56,6 +56,21 @@ __pdoc__ = {
     'plugins': False,
 }
 
+_FIRST_PARTY_PLUGIN_MODULES = {
+    'compose': 'meerschaum.compose',
+}
+
+
+def _import_first_party_plugin(plugin_import_name: str):
+    """Import a compatibility alias for a plugin which moved into Meerschaum core."""
+    import importlib
+
+    plugin_import_parts = plugin_import_name.split('.')
+    module_root = _FIRST_PARTY_PLUGIN_MODULES.get(plugin_import_parts[0], None)
+    if module_root is None:
+        return None
+    return importlib.import_module('.'.join([module_root] + plugin_import_parts[1:]))
+
 
 def make_action(
     function: Optional[Callable[[Any], Any]] = None,
@@ -630,7 +645,6 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
         plugin_import_name = plugin_import_name[len('plugins.'):]
     plugin_import_parts = plugin_import_name.split('.')
     plugin_root_name = plugin_import_parts[0]
-    plugin = mrsm.Plugin(plugin_root_name)
 
     submodule_import_name = '.'.join(
         [paths.PLUGINS_RESOURCES_PATH.stem]
@@ -639,6 +653,12 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
     if len(attrs) == 0:
         raise ValueError(f"Provide which attributes to return from '{submodule_import_name}'.")
 
+    first_party_submodule = _import_first_party_plugin(plugin_import_name)
+    if first_party_submodule is not None:
+        attrs_to_return = [getattr(first_party_submodule, attr) for attr in attrs]
+        return attrs_to_return[0] if len(attrs_to_return) == 1 else tuple(attrs_to_return)
+
+    plugin = mrsm.Plugin(plugin_root_name)
     attrs_to_return = []
     with mrsm.Venv(plugin):
         if plugin.module is None:

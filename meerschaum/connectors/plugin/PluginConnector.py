@@ -31,32 +31,34 @@ class PluginConnector(Connector):
 
         import os, pathlib, sys
         from meerschaum.core import Plugin
+        from meerschaum.plugins import _import_first_party_plugin
         from meerschaum.utils.warnings import error, warn
         from meerschaum.utils.venv import Venv
 
         self._plugin = Plugin(self.label)
         with Venv(self._plugin):
-            if self._plugin.module is None:
+            plugin_module = self._plugin.module or _import_first_party_plugin(self.label)
+            if plugin_module is None:
                 error(f"Plugin '{self.label}' cannot be found. Is it installed?")
 
             ### Attempt to import a `fetch()` method.
             self.fetch = None
             try:
-                self.fetch = self._plugin.module.fetch
+                self.fetch = plugin_module.fetch
             except Exception as e:
                 pass
 
             ### Attempt to import a `sync()` method.
             self.sync = None
             try:
-                self.sync = self._plugin.module.sync
+                self.sync = plugin_module.sync
             except Exception as e:
                 pass
 
             ### Attempt to import a `register()` method.
             self.register = None
             try:
-                self.register = self._plugin.module.register
+                self.register = plugin_module.register
             except Exception as e:
                 pass
 

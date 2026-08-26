@@ -140,3 +140,22 @@ def test_compose_explicit_jobs_keep_established_flags():
         'start', 'api', '--port', '9000',
         '-t', 'test-project', '--name', 'api', '-d', '-f',
     ]
+
+
+def test_compose_programmatic_plugin_import_resolves_to_core():
+    """Legacy programmatic imports survive uninstalling the Compose plugin."""
+    from meerschaum.plugins import from_plugin_import
+
+    get_defined_pipes = from_plugin_import('compose.utils.pipes', 'get_defined_pipes')
+    assert get_defined_pipes.__module__ == 'meerschaum.compose.utils.pipes'
+
+
+def test_legacy_compose_plugin_connector_resolves_to_core(monkeypatch):
+    """Stored ``plugin:compose`` pipes retain their connector after plugin removal."""
+    from meerschaum.core import Plugin
+    from meerschaum.connectors.plugin import PluginConnector
+    import meerschaum.compose as compose_module
+
+    monkeypatch.setattr(Plugin, 'module', property(lambda self: None))
+    connector = PluginConnector('compose')
+    assert connector.sync is compose_module.sync
