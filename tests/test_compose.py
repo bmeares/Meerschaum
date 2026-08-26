@@ -147,7 +147,9 @@ def test_compose_programmatic_plugin_import_resolves_to_core():
     from meerschaum.plugins import from_plugin_import
 
     get_defined_pipes = from_plugin_import('compose.utils.pipes', 'get_defined_pipes')
+    legacy_sync = from_plugin_import('compose.sync', 'sync')
     assert get_defined_pipes.__module__ == 'meerschaum.compose.utils.pipes'
+    assert legacy_sync.__module__ == 'meerschaum.compose.sync'
 
 
 def test_legacy_compose_plugin_connector_resolves_to_core(monkeypatch):
