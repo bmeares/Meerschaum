@@ -137,6 +137,7 @@ packages['sql'] = {
     'numpy'                          : 'numpy>=2.3.1',
     'pandas'                         : 'pandas[parquet]>=3.0.0',
     'pyarrow'                        : 'pyarrow>=20.0.0',
+    'polars'                         : 'polars>=1.32.0',
     'dask'                           : 'dask[complete]>=2024.12.1',
     'partd'                          : 'partd>=1.4.2',
     'pytz'                           : 'pytz',
@@ -151,7 +152,7 @@ packages['sql'].update(packages['drivers'])
 packages['sql'].update(packages['core'])
 packages['sql'].update(packages['gis'])
 packages['polars'] = {
-    'polars'                         : 'polars>=1.32.0',
+    'polars'                         : packages['sql']['polars'],
     'pandas'                         : packages['sql']['pandas'],
     'pyarrow'                        : packages['sql']['pyarrow'],
 }

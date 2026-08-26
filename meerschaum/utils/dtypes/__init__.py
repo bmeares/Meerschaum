@@ -187,14 +187,18 @@ def are_dtypes_equal(
         return True
 
     numeric_dtypes = ('numeric', 'decimal', 'object')
-    if ldtype in numeric_dtypes and rdtype in numeric_dtypes:
+    if (
+        ldtype in numeric_dtypes or ldtype.startswith('decimal')
+    ) and (
+        rdtype in numeric_dtypes or rdtype.startswith('decimal')
+    ):
         return True
 
     uuid_dtypes = ('uuid', 'object')
     if ldtype in uuid_dtypes and rdtype in uuid_dtypes:
         return True
 
-    bytes_dtypes = ('bytes', 'object', 'binary')
+    bytes_dtypes = ('bytes', 'object', 'binary', 'large_binary')
     if ldtype in bytes_dtypes and rdtype in bytes_dtypes:
         return True
 
@@ -214,7 +218,7 @@ def are_dtypes_equal(
     if ldtype_found_dt_prefix and rdtype_found_dt_prefix:
         return True
 
-    string_dtypes = ('str', 'string', 'object')
+    string_dtypes = ('str', 'string', 'large_string', 'string_view', 'object')
     if ldtype in string_dtypes and rdtype in string_dtypes:
         return True
 

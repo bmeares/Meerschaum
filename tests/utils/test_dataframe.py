@@ -50,6 +50,70 @@ def test_polars_special_type_conversion():
     assert row == pd_df.iloc[0].to_dict()
 
 
+def test_polars_enforce_all_string_dtypes():
+    """Arrow-native dtype enforcement accepts string input and preserves Pandas compatibility."""
+    pl = pytest.importorskip('polars')
+    from meerschaum.utils.dataframe import enforce_dtypes
+
+    raw_df = pd.DataFrame([{
+        'int': '1',
+        'float': '1.5',
+        'bool': 'False',
+        'str': 2,
+        'numeric': '123.456',
+        'bytes': 'Zm9vIGJhcg==',
+        'date': '2025-01-01',
+        'datetime': '2025-01-01T12:30:00Z',
+    }])
+    dtypes = {
+        'int': 'int',
+        'float': 'float',
+        'bool': 'bool',
+        'str': 'str',
+        'numeric': 'numeric[5,2]',
+        'bytes': 'bytes',
+        'date': 'date',
+        'datetime': 'datetime64[us, UTC]',
+    }
+
+    polars_df = enforce_dtypes(raw_df, dtypes, as_polars=True)
+    pandas_df = enforce_dtypes(raw_df, dtypes)
+
+    assert isinstance(polars_df, pl.DataFrame)
+    assert polars_df.row(0, named=True) == {
+        'int': 1,
+        'float': 1.5,
+        'bool': False,
+        'str': '2',
+        'numeric': Decimal('123.46'),
+        'bytes': b'foo bar',
+        'date': date(2025, 1, 1),
+        'datetime': datetime(2025, 1, 1, 12, 30, tzinfo=timezone.utc),
+    }
+    assert pandas_df.iloc[0].to_dict() == polars_df.row(0, named=True)
+
+
+def test_polars_enforce_mixed_special_dtypes():
+    """Special dtypes retain Python values in a Polars result."""
+    pl = pytest.importorskip('polars')
+    from meerschaum.utils.dataframe import enforce_dtypes
+
+    result = enforce_dtypes(
+        pd.DataFrame([{
+            'id': '1',
+            'json': '{"foo": "bar"}',
+            'uuid': '12345678-1234-5678-1234-567812345678',
+        }]),
+        {'id': 'int', 'json': 'json', 'uuid': 'uuid'},
+        as_polars=True,
+    )
+    row = result.row(0, named=True)
+    assert isinstance(result, pl.DataFrame)
+    assert row['id'] == 1
+    assert row['json'] == {'foo': 'bar'}
+    assert str(row['uuid']) == '12345678-1234-5678-1234-567812345678'
+
+
 @pytest.mark.parametrize(
     "dtype,expected_dtype",
     [
@@ -226,6 +290,19 @@ def test_filter_unseen_df_polars_preserves_source_order(monkeypatch):
     assert result['id'].tolist() == [3, 2]
 
 
+def test_filter_unseen_df_mixed_datetime_backends():
+    """Native and Arrow-backed Pandas datetimes represent the same rows."""
+    from meerschaum.utils.dataframe import filter_unseen_df
+
+    native_dt = pd.Series(pd.to_datetime(['2025-01-01'], utc=True))
+    arrow_dt = native_dt.astype('timestamp[us, tz=UTC][pyarrow]')
+    assert filter_unseen_df(
+        pd.DataFrame({'dt': arrow_dt}),
+        pd.DataFrame({'dt': native_dt}),
+        dtypes={'dt': 'datetime64[us, UTC]'},
+    ).empty
+
+
 def test_filter_unseen_df_polars_matches_boolean_dtype(monkeypatch):
     """The accelerated path preserves Pandas' mixed-backend dtype resolution."""
     pytest.importorskip('polars')
@@ -290,6 +367,16 @@ def test_filter_unseen_df_numeric_precision_scale():
                 'distant_dt': (None, 'microsecond'),
                 'dt_second': (None, 'second'),
             },
+        ),
+        (
+            pd.DataFrame({
+                'dt': pd.Series(
+                    [datetime(2025, 1, 1, tzinfo=timezone.utc)],
+                    dtype='timestamp[us, tz=UTC][pyarrow]',
+                ),
+            }),
+            {'dt': 'datetime64[us, UTC]'},
+            {'dt': ('UTC', 'microsecond')},
         ),
     ]
 )

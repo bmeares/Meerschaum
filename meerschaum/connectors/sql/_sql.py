@@ -849,6 +849,7 @@ def to_sql(
     )
     from meerschaum.utils.dtypes.sql import (
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
+        TIMEZONE_NAIVE_FLAVORS,
         get_db_type_from_pd_type,
         get_pd_type_from_db_type,
         get_numeric_precision_scale,
@@ -896,6 +897,11 @@ def to_sql(
         else get_geometry_type_srid()
         for col, typ in geometry_cols_dtypes.items()
     }
+
+    if self.flavor in TIMEZONE_NAIVE_FLAVORS:
+        for col, typ in df.dtypes.items():
+            if are_dtypes_equal(str(typ), 'datetime'):
+                df[col] = coerce_timezone(df[col], strip_utc=True)
 
     cols_pd_types = {
         col: get_pd_type_from_db_type(str(typ))

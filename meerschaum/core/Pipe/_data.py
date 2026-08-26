@@ -157,7 +157,12 @@ def get_data(
             if col_ix != 'datetime' and col in _df.columns
         ]
         indices.extend(non_dt_cols)
-        if 'dask' not in _df.__module__:
+        if _df.__module__.split('.')[0] == 'polars':
+            _df = _df.sort(
+                indices,
+                descending=(str(order).lower() != 'asc'),
+            )
+        elif 'dask' not in _df.__module__:
             _df.sort_values(
                 by=indices,
                 inplace=True,
@@ -319,12 +324,13 @@ def get_data(
         enforced_df = self.enforce_dtypes(
             df,
             dtypes=pipe_dtypes,
+            as_polars=as_polars,
             debug=debug,
         )
 
         if order:
             enforced_df = _sort_df(enforced_df)
-        return to_polars(enforced_df) if as_polars else enforced_df
+        return enforced_df
 
 
 def _get_data_as_iterator(

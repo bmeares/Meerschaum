@@ -314,9 +314,13 @@ def filter_unseen_df(
                 and 'utc' not in _dtypes_col_dtype.lower()
             )
             if col in old_df.columns:
-                old_df[col] = coerce_timezone(old_df[col], strip_utc=strip_utc)
+                old_df[col] = coerce_timezone(
+                    old_df[col], strip_utc=strip_utc
+                ).astype(typ)
             if col in new_df.columns:
-                new_df[col] = coerce_timezone(new_df[col], strip_utc=strip_utc)
+                new_df[col] = coerce_timezone(
+                    new_df[col], strip_utc=strip_utc
+                ).astype(typ)
         cast_dt_cols = False
     except Exception as e:
         warn(f"Could not cast datetime columns:\n{e}")
@@ -951,11 +955,12 @@ def get_datetime_cols(
         """
         Extract the tz + precision tuple from a dtype string.
         """
+        dtype = str(dtype).removesuffix('[pyarrow]')
         meta_str = dtype.split('[', maxsplit=1)[-1].rstrip(']').replace(' ', '')
         tz = (
             None
             if ',' not in meta_str
-            else meta_str.split(',', maxsplit=1)[-1]
+            else meta_str.split(',', maxsplit=1)[-1].removeprefix('tz=')
         )
         precision_abbreviation = (
             meta_str
@@ -1179,7 +1184,7 @@ def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
     known_bytes_cols = [
         col
         for col, typ in df.dtypes.items()
-        if str(typ) == 'binary[pyarrow]'
+        if str(typ) in ('binary[pyarrow]', 'large_binary[pyarrow]')
     ]
 
     if len(df) == 0:
@@ -1327,6 +1332,106 @@ def get_special_cols(df: 'pd.DataFrame') -> Dict[str, str]:
     }
 
 
+def _enforce_dtypes_with_polars(
+    df: Any,
+    dtypes: Dict[str, str],
+    strip_timezone: bool = False,
+) -> Any:
+    """Return a Polars frame with enforced Arrow-native dtypes, or ``None`` to fall back."""
+    if 'dask' in getattr(df, '__module__', ''):
+        return None
+
+    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.dtypes import MRSM_ALIAS_DTYPES
+    from meerschaum.utils.dtypes.sql import get_numeric_precision_scale
+    polars = attempt_import('polars', install=False, lazy=False, warn=False)
+    if polars is None:
+        return None
+
+    normalized_dtypes = {
+        col: MRSM_ALIAS_DTYPES.get(str(typ), str(typ)).lower()
+        for col, typ in dtypes.items()
+    }
+    for typ in normalized_dtypes.values():
+        if typ in ('json', 'uuid', 'object') or typ.startswith(('geometry', 'geography')):
+            return None
+        if typ.startswith('numeric') and None in get_numeric_precision_scale(None, typ):
+            return None
+
+    try:
+        polars_df = to_polars(df)
+        if polars_df.__class__.__name__ == 'LazyFrame':
+            polars_df = polars_df.collect()
+        expressions = []
+        integer_dtypes = {
+            'int': polars.Int64,
+            'int8': polars.Int8,
+            'int16': polars.Int16,
+            'int32': polars.Int32,
+            'int64': polars.Int64,
+            'uint8': polars.UInt8,
+            'uint16': polars.UInt16,
+            'uint32': polars.UInt32,
+            'uint64': polars.UInt64,
+        }
+        float_dtypes = {
+            'float': polars.Float64,
+            'float32': polars.Float32,
+            'float64': polars.Float64,
+            'double': polars.Float64,
+        }
+        for col, typ in normalized_dtypes.items():
+            if col not in polars_df.columns or typ == 'object':
+                continue
+            expr = polars.col(col)
+            source_dtype = polars_df.schema[col]
+            if typ in integer_dtypes:
+                expr = expr.cast(integer_dtypes[typ], strict=True)
+            elif typ in float_dtypes:
+                expr = expr.cast(float_dtypes[typ], strict=True)
+            elif typ in ('str', 'string'):
+                expr = expr.cast(polars.String, strict=True)
+            elif typ == 'bool':
+                expr = (
+                    expr.cast(polars.String).str.to_lowercase().replace_strict(
+                        {'true': True, 'false': False, '1': True, '0': False},
+                        return_dtype=polars.Boolean,
+                    )
+                    if source_dtype == polars.String
+                    else expr.cast(polars.Boolean, strict=True)
+                )
+            elif typ == 'bytes':
+                expr = (
+                    expr.str.decode('base64', strict=True)
+                    if source_dtype == polars.String
+                    else expr.cast(polars.Binary, strict=True)
+                )
+            elif typ == 'date':
+                expr = expr.cast(polars.Date, strict=True)
+            elif typ.startswith('datetime'):
+                precision = typ.split('[', maxsplit=1)[-1].split(',', maxsplit=1)[0]
+                precision = precision if precision in ('ns', 'us', 'ms') else 'us'
+                timezone = None if strip_timezone else 'UTC'
+                expr = (
+                    expr.str.to_datetime(
+                        time_unit=precision,
+                        time_zone=timezone,
+                        strict=True,
+                    )
+                    if source_dtype == polars.String
+                    else expr.cast(polars.Datetime(precision, timezone), strict=True)
+                )
+            elif typ.startswith('numeric'):
+                precision, scale = get_numeric_precision_scale(None, typ)
+                expr = expr.cast(polars.Decimal(precision, scale), strict=True)
+            else:
+                return None
+            expressions.append(expr.alias(col))
+        return polars_df.with_columns(expressions)
+    except Exception:
+        return None
+
+
 def enforce_dtypes(
     df: 'pd.DataFrame',
     dtypes: Dict[str, str],
@@ -1335,6 +1440,7 @@ def enforce_dtypes(
     coerce_numeric: bool = False,
     coerce_timezone: bool = True,
     strip_timezone: bool = False,
+    as_polars: bool = False,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -1367,6 +1473,10 @@ def enforce_dtypes(
         If `coerce_timezone` and `strip_timezone` are `True`,
         remove timezone information from datetimes.
 
+    as_polars: bool, default False
+        If `True`, return a Polars DataFrame. Supported Arrow-native dtypes are enforced
+        with Polars; unsupported schemas use the established Pandas path before conversion.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -1379,6 +1489,7 @@ def enforce_dtypes(
     from meerschaum.utils.debug import dprint
     from meerschaum.utils.formatting import pprint
     from meerschaum.utils.dtypes import (
+        MRSM_ALIAS_DTYPES,
         are_dtypes_equal,
         to_pandas_dtype,
         is_dtype_numeric,
@@ -1392,12 +1503,60 @@ def enforce_dtypes(
     from meerschaum.utils.dtypes.sql import get_numeric_precision_scale
     pandas = mrsm.attempt_import('pandas')
     is_dask = 'dask' in df.__module__
+    normalized_dtypes = {
+        col: MRSM_ALIAS_DTYPES.get(str(typ), str(typ)).lower()
+        for col, typ in dtypes.items()
+    }
+    fallback_dtypes = {
+        col: dtypes[col]
+        for col, typ in normalized_dtypes.items()
+        if (
+            typ in ('json', 'uuid', 'object')
+            or typ.startswith(('geometry', 'geography'))
+            or (typ.startswith('numeric') and None in get_numeric_precision_scale(None, typ))
+        )
+    }
+    native_dtypes = {
+        col: typ
+        for col, typ in dtypes.items()
+        if col not in fallback_dtypes
+    }
+    polars_df = (
+        _enforce_dtypes_with_polars(
+            df,
+            native_dtypes,
+            strip_timezone=(strip_timezone if coerce_timezone else False),
+        )
+        if native_dtypes and not fallback_dtypes
+        else None
+    )
+    if polars_df is not None:
+        return polars_df if as_polars else to_pandas(polars_df)
+
+    if native_dtypes and fallback_dtypes:
+        df = to_pandas(df)
+        native_cols = [col for col in native_dtypes if col in df.columns]
+        native_df = _enforce_dtypes_with_polars(
+            df[native_cols],
+            native_dtypes,
+            strip_timezone=(strip_timezone if coerce_timezone else False),
+        ) if native_cols else None
+        if native_df is not None:
+            if safe_copy:
+                df = df.copy()
+            native_pd_df = to_pandas(native_df)
+            for col in native_cols:
+                df[col] = native_pd_df[col].array
+            dtypes = fallback_dtypes
+            safe_copy = False
+
+    df = to_pandas(df)
     if safe_copy:
         df = df.copy()
     if len(df.columns) == 0:
         if debug:
             dprint("Incoming DataFrame has no columns. Skipping enforcement...")
-        return df
+        return to_polars(df) if as_polars else df
 
     explicit_dtypes = explicit_dtypes or {}
     pipe_pandas_dtypes = {
@@ -1569,7 +1728,7 @@ def enforce_dtypes(
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):
         if debug:
             dprint("Data types match. Exiting enforcement...")
-        return df
+        return to_polars(df) if as_polars else df
 
     common_dtypes = {}
     common_diff_dtypes = {}
@@ -1602,7 +1761,7 @@ def enforce_dtypes(
                 + "The only detected difference was in the following datetime columns."
             )
             pprint(detected_dt_cols)
-        return df
+        return to_polars(df) if as_polars else df
 
     for col, typ in {k: v for k, v in common_diff_dtypes.items()}.items():
         previous_typ = common_dtypes[col]
@@ -1669,7 +1828,7 @@ def enforce_dtypes(
                 except Exception:
                     if debug:
                         dprint(f"Was unable to convert to float then {t}.")
-    return df
+    return to_polars(df) if as_polars else df
 
 
 def get_datetime_bound_from_df(
