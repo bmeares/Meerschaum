@@ -214,10 +214,7 @@ def replace_env(env: Union[Dict[str, Any], None]):
         The new environment dictionary to be patched on `os.environ`.
     """
     if env is None:
-        try:
-            yield
-        except Exception:
-            pass
+        yield
         return
 
     from meerschaum.config import _config, set_config

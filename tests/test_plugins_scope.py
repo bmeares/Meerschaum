@@ -86,6 +86,15 @@ def test_replace_env_invalidates_plugins_cache(project_scope):
         )
 
 
+def test_replace_env_none_propagates_exceptions():
+    """A no-op environment scope must not hide failures from plugin code."""
+    from meerschaum.config.environment import replace_env
+
+    with pytest.raises(RuntimeError, match='plugin failed'):
+        with replace_env(None):
+            raise RuntimeError('plugin failed')
+
+
 def test_sibling_plugin_import_after_scope_switch(project_scope):
     """
     A plugin doing a module-level `from_plugin_import` of a sibling must be
