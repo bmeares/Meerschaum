@@ -765,6 +765,28 @@ def test_sync_polars_dataframe(flavor: str):
         pipe.get_data(as_polars=True, as_dask=True)
 
 
+def test_sync_polars_upsert():
+    """Polars input preserves the existing SQL upsert contract."""
+    pl = pytest.importorskip('polars')
+    pipe = mrsm.Pipe(
+        'polars', 'upsert',
+        columns={'primary': 'id'},
+        dtypes={'id': 'int', 'value': 'int'},
+        parameters={'upsert': True},
+        instance=conns['sqlite'],
+    )
+    pipe.delete()
+    success, msg = pipe.sync(pl.DataFrame({'id': [1, 2], 'value': [10, 20]}))
+    assert success, msg
+    success, msg = pipe.sync(pl.DataFrame({'id': [1, 3], 'value': [99, 30]}))
+    assert success, msg
+    assert pipe.get_data().sort_values('id').to_dict(orient='records') == [
+        {'id': 1, 'value': 99},
+        {'id': 2, 'value': 20},
+        {'id': 3, 'value': 30},
+    ]
+
+
 @pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_null_indices(flavor: str):
     """

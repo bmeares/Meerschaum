@@ -151,6 +151,110 @@ def test_filter_unseen_df(old_docs, new_docs, expected_docs):
 
 
 @pytest.mark.parametrize(
+    'old_df,new_df',
+    [
+        (
+            pd.DataFrame({
+                'id': pd.Series([1, None, 3], dtype='int64[pyarrow]'),
+                'value': ['same', 'old', 'same'],
+            }),
+            pd.DataFrame({
+                'id': pd.Series([1, None, 4], dtype='int64[pyarrow]'),
+                'value': ['same', 'new', 'new'],
+            }),
+        ),
+        (
+            pd.DataFrame([{
+                'dt': datetime(2025, 1, 1, tzinfo=timezone.utc),
+                'uuid': uuid4(),
+                'numeric': Decimal('1.20'),
+                'bytes': b'old',
+                'json': {'a': [1, None]},
+            }]),
+            pd.DataFrame([{
+                'dt': datetime(2025, 1, 1, tzinfo=timezone.utc),
+                'uuid': uuid4(),
+                'numeric': Decimal('2.30'),
+                'bytes': b'new',
+                'json': {'a': [2, None]},
+            }]),
+        ),
+        (
+            pd.DataFrame({'id': [1, 1, 9], 'value': [None, None, 'same']}),
+            pd.DataFrame({
+                'id': [3, 1, 1, 2, 9],
+                'value': ['new-3', None, None, 'new-2', 'same'],
+            }),
+        ),
+    ],
+)
+def test_filter_unseen_df_polars_parity(monkeypatch, old_df, new_df):
+    """The Polars anti-join matches the Pandas path, including its safe fallback."""
+    pl = pytest.importorskip('polars')
+    import meerschaum.utils.dataframe as dataframe
+
+    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 10 ** 9)
+    expected = dataframe.filter_unseen_df(old_df, new_df)
+    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 0)
+    actual = dataframe.filter_unseen_df(old_df, new_df)
+
+    pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_filter_unseen_df_polars_preserves_source_order(monkeypatch):
+    """The anti-join retains source order, including around duplicate null rows."""
+    pytest.importorskip('polars')
+    import meerschaum.utils.dataframe as dataframe
+
+    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 0)
+    old_df = pd.DataFrame({'id': [1, 1, 9], 'value': [None, None, 'same']})
+    new_df = pd.DataFrame({
+        'id': [3, 1, 1, 2, 9],
+        'value': ['new-3', None, None, 'new-2', 'same'],
+    })
+    original_filter = dataframe._filter_unseen_df_with_polars
+    native_results = []
+
+    def capture_native_result(*args, **kwargs):
+        native_result = original_filter(*args, **kwargs)
+        native_results.append(native_result)
+        return native_result
+
+    monkeypatch.setattr(dataframe, '_filter_unseen_df_with_polars', capture_native_result)
+    result = dataframe.filter_unseen_df(old_df, new_df)
+    assert native_results[0] is not None
+    assert result['id'].tolist() == [3, 2]
+
+
+def test_filter_unseen_df_polars_falls_back(monkeypatch):
+    """A Polars conversion error cleanly selects the established Pandas path."""
+    pl = pytest.importorskip('polars')
+    import meerschaum.utils.dataframe as dataframe
+
+    def fail_conversion(*args, **kwargs):
+        raise TypeError("unsupported value")
+
+    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 0)
+    monkeypatch.setattr(pl, 'from_pandas', fail_conversion)
+    old_df = pd.DataFrame({'id': [1]})
+    new_df = pd.DataFrame({'id': [1, 2]})
+    assert dataframe._filter_unseen_df_with_polars(new_df, old_df) is None
+    assert dataframe.filter_unseen_df(old_df, new_df)['id'].tolist() == [2]
+
+
+def test_filter_unseen_df_numeric_precision_scale():
+    """Configured numeric precision and scale are applied independently."""
+    from meerschaum.utils.dataframe import filter_unseen_df
+
+    result = filter_unseen_df(
+        pd.DataFrame({'value': [Decimal('1.00')]}),
+        pd.DataFrame({'value': ['2.345']}),
+        dtypes={'value': 'numeric[5,2]'},
+    )
+    assert result.iloc[0]['value'] == Decimal('2.35')
+
+
+@pytest.mark.parametrize(
     'df,expected_types,expected_tuples',
     [
         (

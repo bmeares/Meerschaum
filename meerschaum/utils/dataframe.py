@@ -21,6 +21,41 @@ if TYPE_CHECKING:
     pd, dask = mrsm.attempt_import('pandas', 'dask')
 
 
+_POLARS_FILTER_MIN_ROWS: int = 100_000
+
+
+def _filter_unseen_df_with_polars(
+    new_df: 'pd.DataFrame',
+    old_df: 'pd.DataFrame',
+) -> Union['pd.DataFrame', None]:
+    """Return an anti-join of ``new_df`` against ``old_df``, or ``None`` to fall back."""
+    if len(new_df) + len(old_df) < _POLARS_FILTER_MIN_ROWS:
+        return None
+
+    from meerschaum.utils.packages import attempt_import
+    polars = attempt_import('polars', install=False, lazy=False, warn=False)
+    if polars is None:
+        return None
+
+    row_col = '__mrsm_row_id'
+    while row_col in new_df.columns:
+        row_col = '_' + row_col
+
+    try:
+        new_pl = polars.from_pandas(new_df, include_index=False).with_row_index(row_col)
+        old_pl = polars.from_pandas(old_df, include_index=False)
+        row_indices = new_pl.join(
+            old_pl,
+            on=list(new_df.columns),
+            how='anti',
+            nulls_equal=True,
+        ).get_column(row_col).to_list()
+    except Exception:
+        return None
+
+    return new_df.iloc[sorted(row_indices)].reset_index(drop=True)
+
+
 def to_pandas(df: Any) -> Any:
     """Convert a Polars DataFrame or LazyFrame to Pandas; otherwise return ``df``."""
     if df.__class__.__module__.split('.')[0] != 'polars':
@@ -193,6 +228,7 @@ def filter_unseen_df(
         NA = pd.NA
 
     new_df_dtypes = dict(new_df.dtypes)
+    new_cols = list(new_df_dtypes)
     old_df_dtypes = dict(old_df.dtypes)
 
     same_cols = set(new_df.columns) == set(old_df.columns)
@@ -207,8 +243,8 @@ def filter_unseen_df(
         }
         old_types_missing_from_new = {
             col: typ
-            for col, typ in new_df_dtypes.items()
-            if col not in old_df_dtypes
+            for col, typ in old_df_dtypes.items()
+            if col not in new_df_dtypes
         }
         old_df_dtypes.update(new_types_missing_from_old)
         new_df_dtypes.update(old_types_missing_from_new)
@@ -233,6 +269,11 @@ def filter_unseen_df(
     if dtypes is None:
         dtypes = {col: str(typ) for col, typ in old_df.dtypes.items()}
 
+    numeric_cols_precisions_scales = {
+        col: get_numeric_precision_scale(None, typ)
+        for col, typ in dtypes.items()
+        if col and str(typ).lower().startswith('numeric')
+    }
     dtypes = {
         col: to_pandas_dtype(typ)
         for col, typ in dtypes.items()
@@ -241,12 +282,6 @@ def filter_unseen_df(
     for col, typ in new_df_dtypes.items():
         if col not in dtypes:
             dtypes[col] = typ
-
-    numeric_cols_precisions_scales = {
-        col: get_numeric_precision_scale(None, typ)
-        for col, typ in dtypes.items()
-        if col and str(typ).lower().startswith('numeric')
-    }
 
     dt_dtypes = {
         col: typ
@@ -319,12 +354,14 @@ def filter_unseen_df(
 
     if cast_cols:
         for col, dtype in dtypes.items():
-            if col in new_df.columns:
+            for df_to_cast in (new_df, old_df):
+                if col not in df_to_cast.columns:
+                    continue
                 try:
-                    new_df[col] = (
-                        new_df[col].astype(dtype)
+                    df_to_cast[col] = (
+                        df_to_cast[col].astype(dtype)
                         if not callable(dtype)
-                        else new_df[col].apply(dtype)
+                        else df_to_cast[col].apply(dtype)
                     )
                 except Exception as e:
                     warn(f"Was not able to cast column '{col}' to dtype '{dtype}'.\n{e}")
@@ -384,16 +421,28 @@ def filter_unseen_df(
     geometry_cols = set(new_geometry_cols + old_geometry_cols)
 
     na_pattern = r'(?i)^(none|nan|na|nat|natz|<na>)$'
-    joined_df = merge(
-        new_df.infer_objects().replace(na_pattern, pd.NA, regex=True).fillna(NA),
-        old_df.infer_objects().replace(na_pattern, pd.NA, regex=True).fillna(NA),
-        how='left',
-        on=None,
-        indicator=True,
+    normalized_new_df = new_df.infer_objects().replace(na_pattern, pd.NA, regex=True).fillna(NA)
+    normalized_old_df = old_df.infer_objects().replace(na_pattern, pd.NA, regex=True).fillna(NA)
+    delta_df = (
+        None
+        if is_dask
+        else _filter_unseen_df_with_polars(normalized_new_df, normalized_old_df)
     )
-    changed_rows_mask = (joined_df['_merge'] == 'left_only')
-    new_cols = list(new_df_dtypes)
-    delta_df = joined_df[new_cols][changed_rows_mask].reset_index(drop=True)
+    if delta_df is None:
+        joined_df = merge(
+            normalized_new_df,
+            normalized_old_df,
+            how='left',
+            on=None,
+            indicator=True,
+        )
+        changed_rows_mask = (joined_df['_merge'] == 'left_only')
+        delta_df = joined_df[new_cols][changed_rows_mask].reset_index(drop=True)
+    else:
+        delta_df = delta_df[new_cols]
+        for col, typ in new_df_dtypes.items():
+            if col in delta_df.columns and str(typ) in ('object', 'str'):
+                delta_df[col] = delta_df[col].astype('object')
 
     delta_json_cols = get_json_cols(delta_df)
     for json_col in json_cols:
@@ -421,8 +470,8 @@ def filter_unseen_df(
                 functools.partial(
                     attempt_cast_to_numeric,
                     quantize=True,
-                    precision=numeric_cols_precisions_scales.get(numeric_col, (None, None)[0]),
-                    scale=numeric_cols_precisions_scales.get(numeric_col, (None, None)[1]),
+                    precision=numeric_cols_precisions_scales.get(numeric_col, (None, None))[0],
+                    scale=numeric_cols_precisions_scales.get(numeric_col, (None, None))[1],
                 )
             )
         except Exception:

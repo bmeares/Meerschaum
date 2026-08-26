@@ -193,3 +193,34 @@ def test_filter_existing_no_pipe_data(flavor: str):
     assert len(unseen) == 2
     assert len(update) == 0
     assert len(delta) == 2
+
+
+def test_filter_existing_polars_parity(monkeypatch):
+    """The accelerated anti-join preserves unseen, update, and unchanged-row semantics."""
+    pd = mrsm.attempt_import('pandas')
+    import meerschaum.utils.dataframe as dataframe
+
+    pipe = mrsm.Pipe(
+        'test', 'filter_existing', 'polars_parity',
+        instance=conns['sqlite'],
+        columns={'datetime': 'dt', 'id': 'id'},
+    )
+    pipe.delete()
+    success, msg = pipe.sync([
+        {'dt': datetime(2021, 1, 1, tzinfo=timezone.utc), 'id': 1, 'val': 10},
+        {'dt': datetime(2021, 1, 2, tzinfo=timezone.utc), 'id': 2, 'val': 20},
+    ])
+    assert success, msg
+    incoming_df = pd.DataFrame([
+        {'dt': datetime(2021, 1, 1, tzinfo=timezone.utc), 'id': 1, 'val': 99},
+        {'dt': datetime(2021, 1, 2, tzinfo=timezone.utc), 'id': 2, 'val': 20},
+        {'dt': datetime(2021, 1, 3, tzinfo=timezone.utc), 'id': 3, 'val': 30},
+    ])
+
+    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 10 ** 9)
+    expected = pipe.filter_existing(incoming_df)
+    monkeypatch.setattr(dataframe, '_POLARS_FILTER_MIN_ROWS', 0)
+    actual = pipe.filter_existing(incoming_df)
+
+    for actual_df, expected_df in zip(actual, expected):
+        pd.testing.assert_frame_equal(actual_df, expected_df)
