@@ -34,7 +34,8 @@
   Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.
   `install packages --dry-run` reports the selected installer, environment, arguments, and requested
   packages without changing the environment. Package mutations are serialized per environment across
-  threads and processes, and installed-package checks are cached by environment and import policy.
+  threads and processes, implicit downloads emit a once-per-process warning, and installed-package
+  checks are cached by environment and import policy.
   Runtime installation remains on by default for the beginner-friendly experience, using `uv` with
   the existing `pip` fallback.
 

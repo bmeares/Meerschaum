@@ -72,6 +72,29 @@ def test_attempt_import_no_auto_install(monkeypatch):
     ) is None
 
 
+def test_attempt_import_warns_once_before_auto_install(monkeypatch):
+    """Implicit dependency downloads must announce themselves once per process."""
+    import warnings
+    import meerschaum.utils.packages as packages
+
+    monkeypatch.setattr(packages, 'Venv', lambda *args, **kw: nullcontext())
+    monkeypatch.setattr(packages, 'is_installed', lambda *args, **kw: False)
+    monkeypatch.setattr(packages, 'pip_install', lambda *args, **kw: True)
+    monkeypatch.setattr(packages, 'emitted_auto_install_warning', False)
+    packages._is_installed_first_check.clear()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        for _ in range(2):
+            packages.attempt_import('pandas', lazy=False)
+
+    assert len([
+        warning
+        for warning in caught
+        if 'installing a missing runtime dependency' in str(warning.message)
+    ]) == 1
+
+
 def test_attempt_import_rechecks_missing_packages(monkeypatch):
     """A dependency installed by another process must not stay cached as missing."""
     import meerschaum.utils.packages as packages

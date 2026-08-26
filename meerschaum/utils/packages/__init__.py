@@ -37,12 +37,14 @@ _locks = {
     '_checked_for_updates': RLock(),
     '_is_installed_first_check': RLock(),
     'emitted_pandas_warning': RLock(),
+    'emitted_auto_install_warning': RLock(),
     '_install_thread_locks': RLock(),
 }
 _checked_for_updates = set()
 _is_installed_first_check: Dict[Tuple[str, Optional[str], bool, bool], bool] = {}
 _install_thread_locks = {}
 _install_lock_depths = {}
+emitted_auto_install_warning = False
 
 
 def _get_pip_install_target_path(venv: Optional[str] = 'mrsm') -> pathlib.Path:
@@ -1543,6 +1545,7 @@ def attempt_import(
 
     import importlib.util
 
+    global emitted_auto_install_warning
     no_auto_install_env_var = 'MRSM_NO_AUTO_INSTALL'
     if os.environ.get(no_auto_install_env_var, '').lower() in ('1', 'true', 'yes'):
         install = False
@@ -1633,6 +1636,16 @@ def attempt_import(
 
         if not found_module:
             if install:
+                with _locks['emitted_auto_install_warning']:
+                    if warn and not emitted_auto_install_warning:
+                        emitted_auto_install_warning = True
+                        warn_function(
+                            "Meerschaum is installing a missing runtime dependency. "
+                            + f"Set {no_auto_install_env_var}=1 to disable automatic downloads.",
+                            ImportWarning,
+                            stacklevel=3,
+                            color=False,
+                        )
                 if not pip_install(
                     install_name,
                     venv = venv,

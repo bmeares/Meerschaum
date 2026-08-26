@@ -151,7 +151,8 @@ MRSM_NOASK=1 mrsm bootstrap pipes
 
 Meerschaum normally installs a missing optional dependency when a feature first imports it. Set
 `MRSM_NO_AUTO_INSTALL=1` for locked-down, offline, or reproducible environments. Missing packages
-will be reported instead of downloaded; install the dependency group before starting Meerschaum.
+will be reported instead of downloaded; otherwise Meerschaum warns before the first automatic download
+in each process. Install the dependency group before starting Meerschaum.
 
 ```bash
 MRSM_NO_AUTO_INSTALL=1 mrsm show pipes
