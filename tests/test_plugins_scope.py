@@ -130,3 +130,20 @@ def test_sibling_plugin_import_after_scope_switch(project_scope):
         plugin = mrsm.Plugin('scope_user')
         assert plugin.module is not None, "Unable to import plugin 'scope_user'."
         assert plugin.module.get_dep_value() == 'scoped-dep-value'
+
+
+def test_reload_plugins_refreshes_sibling_imports(project_scope):
+    """Reloading all plugins must refresh functions imported from siblings."""
+    plugins_dir = pathlib.Path(project_scope[STATIC_CONFIG['environment']['plugins']])
+
+    with replace_env(project_scope):
+        _load_scope_plugins()
+        assert mrsm.Plugin('scope_user').module.get_dep_value() == 'scoped-dep-value'
+
+        (plugins_dir / 'scope_dep.py').write_text(
+            DEP_PLUGIN_SOURCE.replace('scoped-dep-value', 'reloaded-dependency-value')
+        )
+        from meerschaum.plugins import reload_plugins
+        reload_plugins()
+
+        assert mrsm.Plugin('scope_user').module.get_dep_value() == 'reloaded-dependency-value'
