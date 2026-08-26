@@ -15,8 +15,10 @@
 - **Add opt-in Polars dataframe support without breaking Pandas users.**  
   Pipes accept Polars `DataFrame` and `LazyFrame` inputs, including chunk generators, and
   `Pipe.get_data(as_polars=True)` returns Polars frames. Large unseen-row comparisons use Polars when
-  it is already installed and safely fall back for unsupported dtypes. Pandas remains the default
-  output and plugin boundary. Install the conversion dependencies with
+  it is already installed and safely fall back for unsupported dtypes. Polars geometry columns use
+  GeoArrow WKB, and declared JSON columns use canonical Arrow JSON over UTF-8 storage. Pandas restores
+  JSON objects and retains the GeoPandas / Shapely path as the default output and plugin boundary.
+  Install the conversion dependencies with
   `pip install 'meerschaum[polars]'`.
 
 - **Replace the unreleased APScheduler fork with Meerschaum's small schedule engine.**  
@@ -28,8 +30,9 @@
 - **Make plugin registration and synchronization deterministic.**  
   Decorated functions are owned by their root plugin module even when defined in submodules,
   unloading clears every associated registry, and plugin symlink updates now use the existing
-  inter-process lock dependency instead of racing on a hand-managed lockfile. Failed setup hooks
-  restore the caller's virtual environment state.
+  inter-process lock dependency instead of racing on a hand-managed lockfile. Plugin source and
+  dependency installs share an environment-scoped inter-process lock, and failed setup hooks restore
+  the caller's virtual environment state.
 
 - **Make runtime dependency installation safer and inspectable.**  
   Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.

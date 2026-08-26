@@ -290,7 +290,9 @@ class Plugin:
             _ongoing_installations.add(installation_key)
 
         try:
-            return self._install(skip_deps=skip_deps, force=force, debug=debug)
+            from meerschaum.utils.packages import _pip_install_lock
+            with _pip_install_lock(self.name):
+                return self._install(skip_deps=skip_deps, force=force, debug=debug)
         finally:
             with _ongoing_installations_lock:
                 _ongoing_installations.discard(installation_key)

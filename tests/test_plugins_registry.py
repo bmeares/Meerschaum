@@ -31,6 +31,28 @@ def test_failed_plugin_install_does_not_poison_next_attempt(tmp_path, monkeypatc
     assert plugin.install(skip_deps=True)[0] is False
 
 
+def test_plugin_install_uses_environment_lock(monkeypatch):
+    """Plugin source and dependency mutations must share one process lock."""
+    from contextlib import contextmanager
+    import meerschaum.utils.packages as packages
+    from meerschaum.core.Plugin import Plugin
+
+    events = []
+
+    @contextmanager
+    def lock(name):
+        events.append(('enter', name))
+        yield
+        events.append(('exit', name))
+
+    plugin = Plugin('locked_install')
+    monkeypatch.setattr(packages, '_pip_install_lock', lock)
+    monkeypatch.setattr(plugin, '_install', lambda **kw: (True, "Success"))
+
+    assert plugin.install() == (True, "Success")
+    assert events == [('enter', 'locked_install'), ('exit', 'locked_install')]
+
+
 def test_plugin_registries_use_root_module_and_unload(monkeypatch):
     """Decorators in plugin submodules share one owner and unload together."""
     import sys

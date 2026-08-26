@@ -865,6 +865,8 @@ Plugins are just Python modules, so you can write custom code and share it among
 
 At run time, plugins are imported under the global `plugins` namespace, but you'll probably be testing plugins directly when the `plugins` namespace isn't created. That's where [`Plugin` objects](https://docs.meerschaum.io/#meerschaum.Plugin) come in handy: they contain a number of convenience functions so you can cross-pollinate between plugins.
 
+Actions, hooks, API endpoints, and web pages defined in submodules belong to the root plugin. For example, decorated functions in `plugins.foo.routes` are unloaded and reloaded with `plugins.foo`, so a submodule does not need separate lifecycle management.
+
 ### Package Management
 
 Meerschaum plugins only need to be modules ― no package metadata required. But if you plan on managing your plugins as proper packages (e.g. to publish to repositories like [PyPI](https://pypi.org/)), simply add the [entry point](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-package-metadata) `meerschaum.plugins` to your package metadata:
