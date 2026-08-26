@@ -452,10 +452,19 @@ def filter_unseen_df(
         changed_rows_mask = (joined_df['_merge'] == 'left_only')
         delta_df = joined_df[new_cols][changed_rows_mask].reset_index(drop=True)
     else:
+        merge_dtypes = merge(
+            normalized_new_df.head(0),
+            normalized_old_df.head(0),
+            how='left',
+            on=None,
+            indicator=True,
+        ).dtypes
+        delta_df = delta_df.astype({
+            col: typ
+            for col, typ in merge_dtypes.items()
+            if col in delta_df.columns and str(delta_df.dtypes[col]) != str(typ)
+        })
         delta_df = delta_df[new_cols]
-        for col, typ in new_df_dtypes.items():
-            if col in delta_df.columns and str(typ) in ('object', 'str'):
-                delta_df[col] = delta_df[col].astype('object')
 
     delta_json_cols = get_json_cols(delta_df)
     for json_col in json_cols:
