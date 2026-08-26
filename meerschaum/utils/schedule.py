@@ -135,33 +135,39 @@ def _expand_cron_field(
 
 def _expand_cron_weekdays(expression: str) -> set[int]:
     """Return Python weekdays while retaining cron's 0/7 = Sunday convention."""
-    if expression.startswith('*'):
-        return _expand_cron_field(expression, 0, 6)
-
     values = set()
-    names = set(CRON_DAYS_OF_WEEK)
+    names_map = {
+        'sun': 0,
+        **{name: i + 1 for i, name in enumerate(CRON_DAYS_OF_WEEK[:-1])},
+    }
+
+    def as_cron_int(value: str) -> int:
+        return names_map.get(
+            value.lower(),
+            int(value) if value.isdigit() else -1,
+        )
+
     for part in expression.lower().split(','):
         range_part, separator, step_str = part.partition('/')
         step = int(step_str) if separator else 1
-        if any(name in range_part for name in names):
-            values.update(_expand_cron_field(part, 0, 6, CRON_DAYS_OF_WEEK))
-            continue
-
-        endpoints = range_part.split('-', 1)
-        numeric_values = [int(value) for value in endpoints]
-        if any(value < 0 or value > 7 for value in numeric_values) or step <= 0:
+        if range_part == '*':
+            cron_values = range(0, 7, step)
+        else:
+            endpoints = [as_cron_int(value) for value in range_part.split('-', 1)]
+            if (
+                any(value < 0 or value > 7 for value in endpoints)
+                or step <= 0
+                or (len(endpoints) == 2 and endpoints[0] > endpoints[1])
+            ):
+                raise ValueError(f"Invalid cron field '{expression}'.")
+            cron_values = (
+                range(endpoints[0], endpoints[1] + 1, step)
+                if len(endpoints) == 2
+                else endpoints
+            )
+        if step <= 0:
             raise ValueError(f"Invalid cron field '{expression}'.")
-        converted = [6 if value in (0, 7) else value - 1 for value in numeric_values]
-        if len(converted) == 1:
-            values.add(converted[0])
-            continue
-        start, stop = converted
-        ordered = (
-            list(range(start, stop + 1))
-            if start <= stop
-            else list(range(start, 7)) + list(range(0, stop + 1))
-        )
-        values.update(ordered[::step])
+        values.update(6 if value in (0, 7) else value - 1 for value in cron_values)
     return values
 
 
@@ -184,8 +190,10 @@ class _CronTrigger:
         self._minutes = _expand_cron_field(str(minute), 0, 59)
         self._hours = _expand_cron_field(str(hour), 0, 23)
         self._days = _expand_cron_field(str(day), 1, 31)
+        self._days_have_wildcard = '*' in str(day)
         self._months = _expand_cron_field(str(month), 1, 12, CRON_MONTHS)
         self._weekdays = _expand_cron_weekdays(str(day_of_week))
+        self._weekdays_have_wildcard = '*' in str(day_of_week)
         self._years = None if str(year) == '*' else _expand_cron_field(str(year), 1, 9999)
         self._seconds = _expand_cron_field(str(second), 0, 59)
         self._step_seconds = 1 if len(self._seconds) > 1 else 60
@@ -200,11 +208,16 @@ class _CronTrigger:
         )
 
     def _date_matches(self, candidate: datetime) -> bool:
+        day_matches = candidate.day in self._days
+        weekday_matches = candidate.weekday() in self._weekdays
+        if self._days_have_wildcard or self._weekdays_have_wildcard:
+            day_matches = day_matches and weekday_matches
+        else:
+            day_matches = day_matches or weekday_matches
         return (
             (self._years is None or candidate.year in self._years)
             and candidate.month in self._months
-            and candidate.day in self._days
-            and candidate.weekday() in self._weekdays
+            and day_matches
         )
 
     def next(self) -> Optional[datetime]:

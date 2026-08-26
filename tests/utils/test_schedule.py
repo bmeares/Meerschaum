@@ -190,6 +190,29 @@ def test_cron_numeric_weekdays_retain_crontab_semantics():
     assert monday.next() == datetime(2024, 1, 1, tzinfo=timezone.utc)
 
 
+def test_cron_day_fields_and_steps_retain_crontab_semantics():
+    """Restricted day fields are ORed, and numeric steps begin with Sunday."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    day_or_friday = parse_schedule(
+        '0 0 13 * 5',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+    stepped_weekdays = parse_schedule(
+        '0 0 * * */2',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+    stepped_days = parse_schedule(
+        '0 0 */2 * *',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+
+    assert day_or_friday.next() == datetime(2024, 5, 3, tzinfo=timezone.utc)
+    assert stepped_weekdays.next() == datetime(2024, 5, 2, tzinfo=timezone.utc)
+    assert stepped_days.next() == datetime(2024, 5, 1, tzinfo=timezone.utc)
+    assert stepped_days.next() == datetime(2024, 5, 3, tzinfo=timezone.utc)
+
+
 def test_sparse_cron_schedules():
     """Sparse schedules jump across rejected dates without changing results."""
     from meerschaum.utils.schedule import parse_schedule
