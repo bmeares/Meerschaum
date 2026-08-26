@@ -764,6 +764,8 @@ Because the same function may be registered as both a pre- and a post-hook, bran
 
 It is **not** called on every sync or action — use it strictly for work that should happen once at install time. It must return a `SuccessTuple` (a `#!python (bool, str)` tuple); a `#!python False` result is reported to the user and signals that setup failed.
 
+If dependency installation or `#!python setup()` fails during a plugin upgrade, Meerschaum restores the previous plugin source and virtual environment.
+
 Typical uses:
 
 - **Verify dependencies / external tooling** that `required` can't express (a system binary, a driver, a service being reachable).

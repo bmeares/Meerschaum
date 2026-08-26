@@ -32,7 +32,8 @@
   unloading clears every associated registry, and plugin symlink updates now use the existing
   inter-process lock dependency instead of racing on a hand-managed lockfile. Plugin source and
   dependency installs share an environment-scoped inter-process lock, and failed setup hooks restore
-  the caller's virtual environment state.
+  the caller's virtual environment state. Failed plugin upgrades restore the previous source and
+  dependency environment instead of leaving a partial installation.
 
 - **Make runtime dependency installation safer and inspectable.**  
   Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.

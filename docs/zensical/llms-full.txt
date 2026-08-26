@@ -7516,6 +7516,8 @@ Because the same function may be registered as both a pre- and a post-hook, bran
 
 It is **not** called on every sync or action — use it strictly for work that should happen once at install time. It must return a `SuccessTuple` (a `#!python (bool, str)` tuple); a `#!python False` result is reported to the user and signals that setup failed.
 
+If dependency installation or `#!python setup()` fails during a plugin upgrade, Meerschaum restores the previous plugin source and virtual environment.
+
 Typical uses:
 
 - **Verify dependencies / external tooling** that `required` can't express (a system binary, a driver, a service being reachable).
@@ -8960,7 +8962,8 @@ Source: https://meerschaum.io/news/changelog/
   unloading clears every associated registry, and plugin symlink updates now use the existing
   inter-process lock dependency instead of racing on a hand-managed lockfile. Plugin source and
   dependency installs share an environment-scoped inter-process lock, and failed setup hooks restore
-  the caller's virtual environment state.
+  the caller's virtual environment state. Failed plugin upgrades restore the previous source and
+  dependency environment instead of leaving a partial installation.
 
 - **Make runtime dependency installation safer and inspectable.**  
   Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.
