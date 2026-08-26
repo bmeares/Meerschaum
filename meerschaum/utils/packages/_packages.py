@@ -18,7 +18,11 @@ from typing import Dict
 _MRSM_PACKAGE_ARCHIVES_PREFIX: str = "https://meerschaum.io/files/archives/wheels/"
 
 packages: Dict[str, Dict[str, str]] = {
-    'required': {},
+    ### Runtime package installation is serialized with `InterProcessLock`, so
+    ### fasteners must be available before optional dependencies are bootstrapped.
+    'required': {
+        'fasteners'                  : 'fasteners>=0.19.0',
+    },
     'minimal': {},
     'formatting': {
         'pprintpp'                   : 'pprintpp>=0.4.0',
@@ -50,7 +54,6 @@ packages: Dict[str, Dict[str, str]] = {
         'packaging'                  : 'packaging>=21.3.0',
         'prompt_toolkit'             : 'prompt-toolkit>=3.0.39',
         'more_itertools'             : 'more-itertools>=8.7.0',
-        'fasteners'                  : 'fasteners>=0.19.0',
         'virtualenv'                 : 'virtualenv>=20.1.0',
         'attrs'                      : 'attrs>=24.2.0',
         'uv'                         : 'uv>=0.2.11',

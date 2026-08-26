@@ -145,6 +145,7 @@ def _install_packages(
     action: Optional[List[str]] = None,
     sub_args: Optional[List[str]] = None,
     venv: Union[str, NoVenv] = NoVenv,
+    dry_run: bool = False,
     debug: bool = False,
     **kw: Any
 ) -> SuccessTuple:
@@ -165,10 +166,14 @@ def _install_packages(
 
     if pip_install(
         *action,
-        args = ['--upgrade'] + sub_args,
+        args = ['--upgrade'] + (sub_args or []),
         venv = venv,
+        dry_run=dry_run,
         debug = debug,
     ):
+        if dry_run:
+            return True, "Dependency preflight completed without changing the environment."
+
         reload_success, reload_msg = actions['reload'](debug=debug)
         if not reload_success:
             return reload_success, reload_msg
