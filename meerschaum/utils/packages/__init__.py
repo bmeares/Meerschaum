@@ -47,23 +47,68 @@ _install_lock_depths = {}
 
 def _get_pip_install_target_path(venv: Optional[str] = 'mrsm') -> pathlib.Path:
     """Resolve an installation target without creating it."""
-    if venv is not None or inside_venv():
+    if venv is not None:
         return venv_target_path(venv, allow_nonexistent=True)
 
-    import site
-    user_site_packages = site.getusersitepackages()
-    if user_site_packages is None:
-        raise EnvironmentError("Could not determine user site packages.")
-    return pathlib.Path(user_site_packages)
+    import sys
+    return pathlib.Path(sys.prefix)
 
 
 def get_pip_install_lock_path(venv: Optional[str] = 'mrsm') -> pathlib.Path:
     """Return the cross-process package installation lock path for an environment."""
     import hashlib
-    import meerschaum.config.paths as paths
+    import tempfile
     target_path = _get_pip_install_target_path(venv).resolve()
-    target_hash = hashlib.sha256(str(target_path).encode('utf-8')).hexdigest()[:16]
-    return paths.VENVS_CACHE_RESOURCES_PATH / 'package-installs' / (target_hash + '.lock')
+    target_key = os.path.normcase(str(target_path))
+    target_hash = hashlib.sha256(target_key.encode('utf-8')).hexdigest()[:16]
+    return (
+        pathlib.Path(tempfile.gettempdir())
+        / 'meerschaum-package-installs'
+        / (target_hash + '.lock')
+    )
+
+
+def _stdlib_interprocess_lock(lock_path: pathlib.Path):
+    """Lock a file when `fasteners` is not yet available in a source checkout."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _locked():
+        import platform
+        is_windows = platform.system() == 'Windows'
+        acquired = False
+        lock_file = open(lock_path, 'a+b')
+        try:
+            if is_windows:
+                import msvcrt
+                import time
+                lock_file.seek(0)
+                if lock_file.read(1) == b'':
+                    lock_file.write(b'\0')
+                    lock_file.flush()
+                while True:
+                    try:
+                        lock_file.seek(0)
+                        msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                        acquired = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+            else:
+                import fcntl
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                acquired = True
+            yield
+        finally:
+            if acquired:
+                if is_windows:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
+
+    return _locked()
 
 
 def _pip_install_lock(venv: Optional[str] = 'mrsm'):
@@ -73,9 +118,10 @@ def _pip_install_lock(venv: Optional[str] = 'mrsm'):
     @contextmanager
     def _locked():
         from threading import get_ident
-        fasteners = attempt_import('fasteners', install=False, warn=False, lazy=False)
-        if fasteners is None:
-            raise ImportError("Package installation requires 'fasteners'.")
+        try:
+            import fasteners
+        except ImportError:
+            fasteners = None
 
         lock_path = get_pip_install_lock_path(venv)
         lock_key = str(lock_path)
@@ -91,7 +137,12 @@ def _pip_install_lock(venv: Optional[str] = 'mrsm'):
                     yield
                     return
                 lock_path.parent.mkdir(parents=True, exist_ok=True)
-                with fasteners.InterProcessLock(str(lock_path)):
+                process_lock = (
+                    fasteners.InterProcessLock(str(lock_path))
+                    if fasteners is not None
+                    else _stdlib_interprocess_lock(lock_path)
+                )
+                with process_lock:
                     yield
             finally:
                 if depth:

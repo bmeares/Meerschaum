@@ -10,7 +10,7 @@ def _hold_package_install_lock(root, active, max_active, start):
     import meerschaum.config.paths as paths
     import meerschaum.utils.packages as packages
 
-    paths.VENVS_CACHE_RESOURCES_PATH = Path(root) / 'cache'
+    paths.VIRTENV_RESOURCES_PATH = Path(root) / 'venvs'
     start.wait()
     with packages._pip_install_lock('shared'):
         with active.get_lock(), max_active.get_lock():
@@ -158,3 +158,52 @@ def test_pip_install_lock_serializes_processes(tmp_path):
         assert process.exitcode == 0
 
     assert max_active.value == 1
+
+
+def test_pip_install_lock_is_reentrant(tmp_path, monkeypatch):
+    """Nested package installs in one thread must not deadlock."""
+    import meerschaum.config.paths as paths
+    import meerschaum.utils.packages as packages
+
+    monkeypatch.setattr(paths, 'VIRTENV_RESOURCES_PATH', tmp_path / 'venvs')
+    with packages._pip_install_lock('nested'):
+        with packages._pip_install_lock('nested'):
+            pass
+
+
+def test_pip_install_lock_path_tracks_target_not_root(tmp_path, monkeypatch):
+    """Different Meerschaum roots must share a lock for the current interpreter."""
+    import sys
+    from pathlib import Path
+    import meerschaum.config.paths as paths
+    import meerschaum.utils.packages as packages
+
+    monkeypatch.setattr(paths, 'VENVS_CACHE_RESOURCES_PATH', tmp_path / 'root-one')
+    first_lock_path = packages.get_pip_install_lock_path(None)
+    monkeypatch.setattr(paths, 'VENVS_CACHE_RESOURCES_PATH', tmp_path / 'root-two')
+    second_lock_path = packages.get_pip_install_lock_path(None)
+
+    assert first_lock_path == second_lock_path
+    assert packages._get_pip_install_target_path(None) == Path(sys.prefix)
+
+
+def test_stdlib_interprocess_lock_windows(monkeypatch, tmp_path):
+    """The source-checkout fallback must acquire and release a Windows byte lock."""
+    import sys
+    import types
+    import platform
+    import meerschaum.utils.packages as packages
+
+    calls = []
+    fake_msvcrt = types.SimpleNamespace(
+        LK_NBLCK=1,
+        LK_UNLCK=2,
+        locking=lambda fileno, operation, length: calls.append((operation, length)),
+    )
+    monkeypatch.setattr(platform, 'system', lambda: 'Windows')
+    monkeypatch.setitem(sys.modules, 'msvcrt', fake_msvcrt)
+
+    with packages._stdlib_interprocess_lock(tmp_path / 'install.lock'):
+        pass
+
+    assert calls == [(fake_msvcrt.LK_NBLCK, 1), (fake_msvcrt.LK_UNLCK, 1)]
