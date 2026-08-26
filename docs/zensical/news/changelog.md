@@ -4,35 +4,41 @@
 
 ### v4.0.0
 
-- **Build Meerschaum Compose into core.**
+- **Build Meerschaum Compose into core.**  
   Existing Compose YAML files, commands, flags, arbitrary nested actions, project plugin discovery,
   and multiple root / plugin directories continue to work without installing the `compose` plugin.
+  Project environment and plugin state are restored after every command, destructive operations
+  preserve resources whose ownership is ambiguous, and legacy Compose imports remain available.
   The built-in action takes precedence when the legacy plugin is installed and emits a once-per-process
-  uninstall warning. New project initialization no longer injects a copy of the Compose plugin into each
-  project's internal plugins directory.
+  uninstall warning. New projects no longer receive a copied Compose plugin.
 
-- **Add opt-in Polars dataframe support without breaking Pandas users.**
+- **Add opt-in Polars dataframe support without breaking Pandas users.**  
   Pipes accept Polars `DataFrame` and `LazyFrame` inputs, including chunk generators, and
-  `Pipe.get_data(as_polars=True)` returns Polars frames. Pandas remains the default output and
-  plugin boundary. Install the conversion dependencies with `pip install 'meerschaum[polars]'`.
+  `Pipe.get_data(as_polars=True)` returns Polars frames. Large unseen-row comparisons use Polars when
+  it is already installed and safely fall back for unsupported dtypes. Pandas remains the default
+  output and plugin boundary. Install the conversion dependencies with
+  `pip install 'meerschaum[polars]'`.
 
-- **Replace the unreleased APScheduler fork with Meerschaum's small schedule engine.**
+- **Replace the unreleased APScheduler fork with Meerschaum's small schedule engine.**  
   Existing interval, calendar, five-field cron, start-time, and `and` / `or` schedule strings keep
   their public `trigger.next()` interface. Calendar schedules retain month-end behavior, cron
-  schedules handle DST transitions, and scheduled callbacks do not overlap themselves.
+  schedules follow crontab's day-of-month / day-of-week rules and handle DST transitions, and
+  scheduled callbacks do not overlap themselves.
 
-- **Make plugin registration and synchronization deterministic.**
+- **Make plugin registration and synchronization deterministic.**  
   Decorated functions are owned by their root plugin module even when defined in submodules,
   unloading clears every associated registry, and plugin symlink updates now use the existing
   inter-process lock dependency instead of racing on a hand-managed lockfile.
 
-- **Add a locked mode for optional dependencies.**
+- **Make runtime dependency installation safer and inspectable.**  
   Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.
-  Installed-package checks are now cached by virtual environment and import policy, so one plugin's
-  result cannot leak into another plugin environment. Runtime installation still defaults to on for
-  the beginner-friendly experience, using `uv` with the existing `pip` fallback.
+  `install packages --dry-run` reports the selected installer, environment, arguments, and requested
+  packages without changing the environment. Package mutations are serialized per environment across
+  threads and processes, and installed-package checks are cached by environment and import policy.
+  Runtime installation remains on by default for the beginner-friendly experience, using `uv` with
+  the existing `pip` fallback.
 
-- **Repair Dask, SQL geometry, and Docker build paths.**
+- **Repair Dask, SQL geometry, and Docker build paths.**  
   Dask frames are detected correctly in sync and SQL reads, SQL geometry dtype filtering applies
   only to columns present in the frame, and the Docker workflow uses the maintained buildx script
   and current GitHub Actions.

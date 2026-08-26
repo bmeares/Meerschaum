@@ -1,2 +1,3 @@
 prune tests
 prune docs
+global-exclude *.py[cod]

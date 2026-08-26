@@ -589,13 +589,7 @@ And paste the following into `fred.py`:
 
 The plugin provides one function `fetch()` that takes a pipe, pulls an ID from `pipe.parameters`, and returns the appropriate DataFrame.
 
-Now that we've got our YAML file and plugin, install the <a href="/reference/compose">`compose` plugin</a>:
-
-```bash
-mrsm install plugin compose
-```
-
-Let's initialize our environment to install our dependencies (`pandas`) into the project's virtual environment for `plugin:fred`. From the parent project directory, run `compose init`:
+Now that we've got our YAML file and project plugin, initialize the built-in <a href="/reference/compose">Compose</a> environment. This installs our dependency (`pandas`) into the project's virtual environment for `plugin:fred`:
 
 ```bash
 cd ../
@@ -4679,7 +4673,6 @@ If you're building your own Docker images, consider basing off the [`bmeares/mee
 ```docker
 FROM bmeares/meerschaum
 
-RUN mrsm install plugin compose
 COPY --chown=meerschaum:meerschaum ./ /app
 WORKDIR /app
 RUN mrsm compose init
@@ -4710,6 +4703,7 @@ Run the [`bmeares/meerschaum` Docker image](https://hub.docker.com/r/bmeares/mee
 ### Helm Chart (k8s)
 
 If you are running Kubernetes, consider the [Meerschaum Helm chart on Artifact Hub](https://artifacthub.io/packages/helm/meerschaum/meerschaum). It's configured to run the [`bmeares/meerschaum` Docker Image](https://hub.docker.com/r/bmeares/meerschaum) for k8s environments.
+
 
 ---
 
@@ -5192,7 +5186,7 @@ The tools are broadly the same, with a few changes:
 
 ## Dash's MCP server
 
-Plotly Dash has [its own MCP server](../plugins/types-of-plugins.md#web-pages), separate from this one, which exposes the web console's layout so an agent can understand the page it is building. It is **off by default** and is a development aid, not an API — see the [web console docs](../api-instance/web-console.md#dash-mcp-server).
+Plotly Dash has [its own MCP server](../plugins/types-of-plugins.md), separate from this one, which exposes the web console's layout so an agent can understand the page it is building. It is **off by default** and is a development aid, not an API — see the [web console docs](../api-instance/web-console.md#dash-mcp-server).
 
 
 ---
@@ -5664,7 +5658,7 @@ Source: https://meerschaum.io/reference/compose/
 
 # 🎼 Meerschaum Compose
 
-The [`compose` plugin](https://github.com/bmeares/compose) does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: with Meerschaum Compose, you can consolidate everything into a single YAML file ― that includes all of the pipes and configuration needed for your project!
+Meerschaum Compose does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: you can consolidate everything into a single YAML file ― including all of the pipes and configuration needed for your project. Compose is built into Meerschaum 4.0 and later.
 
 With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in the Compose project ― one job per instance. Because the configuration is contained in the YAML file (e.g. custom connectors), Compose projects are useful for prototyping, collaboration, and consistency.
 
@@ -5729,11 +5723,9 @@ With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in 
 
     Want to skip the setup and work in a pre-configured environment? Create a new repository from the [Meerschaum Compose Project Template](https://github.com/bmeares/mrsm-compose-template).
 
-Install the `compose` plugin from the public repository `api:mrsm`:
+!!! note "Upgrading from the compose plugin"
 
-```bash
-mrsm install plugin compose
-```
+    The former `compose` plugin is no longer required. The built-in action takes precedence and preserves the same commands, flags, and project files. If the plugin is still installed, Meerschaum warns once per process; remove it with `mrsm uninstall plugin compose`.
 
 From a new directory, create a file `mrsm-compose.yaml`. You can paste the example file above to get started.
 
@@ -5792,7 +5784,7 @@ mrsm compose up -f
 
 ## 🎌 Flags
 
-The `compose` plugin adds a few new custom flags. You can quickly view the available flags with `mrsm -h` or `mrsm show help`.
+The built-in `compose` action provides the following flags. You can quickly view the available flags with `mrsm -h` or `mrsm show help`.
 
 Flag | Description | Example
 --|--|--
@@ -5918,6 +5910,7 @@ Keys under `jobs` are the names of jobs to be run with `compose up`. If defined,
       date: "date -s 'every 10 seconds'"
       echo: "echo 'Hello, World!'"
     ```
+
 
 ---
 
@@ -8929,28 +8922,41 @@ Source: https://meerschaum.io/news/changelog/
 
 ### v4.0.0
 
-- **Add opt-in Polars dataframe support without breaking Pandas users.**
-  Pipes accept Polars `DataFrame` and `LazyFrame` inputs, including chunk generators, and
-  `Pipe.get_data(as_polars=True)` returns Polars frames. Pandas remains the default output and
-  plugin boundary. Install the conversion dependencies with `pip install 'meerschaum[polars]'`.
+- **Build Meerschaum Compose into core.**  
+  Existing Compose YAML files, commands, flags, arbitrary nested actions, project plugin discovery,
+  and multiple root / plugin directories continue to work without installing the `compose` plugin.
+  Project environment and plugin state are restored after every command, destructive operations
+  preserve resources whose ownership is ambiguous, and legacy Compose imports remain available.
+  The built-in action takes precedence when the legacy plugin is installed and emits a once-per-process
+  uninstall warning. New projects no longer receive a copied Compose plugin.
 
-- **Replace the unreleased APScheduler fork with Meerschaum's small schedule engine.**
+- **Add opt-in Polars dataframe support without breaking Pandas users.**  
+  Pipes accept Polars `DataFrame` and `LazyFrame` inputs, including chunk generators, and
+  `Pipe.get_data(as_polars=True)` returns Polars frames. Large unseen-row comparisons use Polars when
+  it is already installed and safely fall back for unsupported dtypes. Pandas remains the default
+  output and plugin boundary. Install the conversion dependencies with
+  `pip install 'meerschaum[polars]'`.
+
+- **Replace the unreleased APScheduler fork with Meerschaum's small schedule engine.**  
   Existing interval, calendar, five-field cron, start-time, and `and` / `or` schedule strings keep
   their public `trigger.next()` interface. Calendar schedules retain month-end behavior, cron
-  schedules handle DST transitions, and scheduled callbacks do not overlap themselves.
+  schedules follow crontab's day-of-month / day-of-week rules and handle DST transitions, and
+  scheduled callbacks do not overlap themselves.
 
-- **Make plugin registration and synchronization deterministic.**
+- **Make plugin registration and synchronization deterministic.**  
   Decorated functions are owned by their root plugin module even when defined in submodules,
   unloading clears every associated registry, and plugin symlink updates now use the existing
   inter-process lock dependency instead of racing on a hand-managed lockfile.
 
-- **Add a locked mode for optional dependencies.**
+- **Make runtime dependency installation safer and inspectable.**  
   Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.
-  Installed-package checks are now cached by virtual environment and import policy, so one plugin's
-  result cannot leak into another plugin environment. Runtime installation still defaults to on for
-  the beginner-friendly experience, using `uv` with the existing `pip` fallback.
+  `install packages --dry-run` reports the selected installer, environment, arguments, and requested
+  packages without changing the environment. Package mutations are serialized per environment across
+  threads and processes, and installed-package checks are cached by environment and import policy.
+  Runtime installation remains on by default for the beginner-friendly experience, using `uv` with
+  the existing `pip` fallback.
 
-- **Repair Dask, SQL geometry, and Docker build paths.**
+- **Repair Dask, SQL geometry, and Docker build paths.**  
   Dask frames are detected correctly in sync and SQL reads, SQL geometry dtype filtering applies
   only to columns present in the frame, and the Docker workflow uses the maintained buildx script
   and current GitHub Actions.
