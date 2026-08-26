@@ -69,6 +69,8 @@ With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in 
 
     The former `compose` plugin is no longer required. The built-in action takes precedence and preserves the same commands, flags, and project files. If the plugin is still installed, Meerschaum warns once per process; remove it with `mrsm uninstall plugin compose`.
 
+    Locked or offline environments should install the parser dependency up front with `pip install 'meerschaum[compose]'`.
+
 From a new directory, create a file `mrsm-compose.yaml`. You can paste the example file above to get started.
 
 ```bash
