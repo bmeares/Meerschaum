@@ -50,6 +50,34 @@ def test_polars_special_type_conversion():
     assert row == pd_df.iloc[0].to_dict()
 
 
+def test_polars_geometry_uses_geoarrow_wkb():
+    """Polars uses GeoArrow WKB while Pandas retains GeoPandas geometry."""
+    import json
+    pl = pytest.importorskip('polars')
+    shapely = attempt_import('shapely')
+    geopandas = attempt_import('geopandas')
+    from meerschaum.utils.dataframe import enforce_dtypes
+
+    raw_df = pd.DataFrame({'id': ['1', '2'], 'geom': ['POINT (1 2)', None]})
+    dtypes = {'id': 'int', 'geom': 'geometry[Point, 4326]'}
+    polars_df = enforce_dtypes(raw_df, dtypes, as_polars=True)
+    geometry_dtype = polars_df.schema['geom']
+
+    assert geometry_dtype.ext_name() == 'geoarrow.wkb'
+    assert geometry_dtype.ext_storage() == pl.Binary
+    assert json.loads(geometry_dtype.ext_metadata()) == {
+        'crs': 'EPSG:4326',
+        'crs_type': 'authority_code',
+    }
+    assert shapely.from_wkb(polars_df['geom'][0]).equals(shapely.Point(1, 2))
+    assert polars_df['geom'][1] is None
+    assert 'extension<geoarrow.wkb' in str(polars_df.to_arrow().schema.field('geom').type)
+
+    pandas_df = enforce_dtypes(raw_df, dtypes)
+    assert isinstance(pandas_df, geopandas.GeoDataFrame)
+    assert pandas_df['geom'].iloc[0].equals(shapely.Point(1, 2))
+
+
 def test_polars_enforce_all_string_dtypes():
     """Arrow-native dtype enforcement accepts string input and preserves Pandas compatibility."""
     pl = pytest.importorskip('polars')

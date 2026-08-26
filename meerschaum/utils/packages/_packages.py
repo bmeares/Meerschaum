@@ -95,6 +95,7 @@ packages: Dict[str, Dict[str, str]] = {
         'pyproj'                     : 'pyproj>=3.7.1',
         'geopandas'                  : 'geopandas>=1.0.1', 
         'shapely'                    : 'shapely>=2.0.7',
+        'geoarrow'                   : 'geoarrow-types>=0.3.0',
     },
     'stack': {
         'compose'                    : 'docker-compose>=1.29.2',
@@ -137,7 +138,7 @@ packages['sql'] = {
     'numpy'                          : 'numpy>=2.3.1',
     'pandas'                         : 'pandas[parquet]>=3.0.0',
     'pyarrow'                        : 'pyarrow>=20.0.0',
-    'polars'                         : 'polars>=1.32.0',
+    'polars'                         : 'polars>=1.43.2',
     'dask'                           : 'dask[complete]>=2024.12.1',
     'partd'                          : 'partd>=1.4.2',
     'pytz'                           : 'pytz',
@@ -155,6 +156,7 @@ packages['polars'] = {
     'polars'                         : packages['sql']['polars'],
     'pandas'                         : packages['sql']['pandas'],
     'pyarrow'                        : packages['sql']['pyarrow'],
+    'geoarrow'                       : packages['gis']['geoarrow'],
 }
 packages['dash'] = {
     'flask_compress'                 : 'Flask-Compress>=1.17.0',

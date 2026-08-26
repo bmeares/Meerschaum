@@ -15,7 +15,8 @@
 - **Add opt-in Polars dataframe support without breaking Pandas users.**  
   Pipes accept Polars `DataFrame` and `LazyFrame` inputs, including chunk generators, and
   `Pipe.get_data(as_polars=True)` returns Polars frames. Large unseen-row comparisons use Polars when
-  it is already installed and safely fall back for unsupported dtypes. Pandas remains the default
+  it is already installed and safely fall back for unsupported dtypes. Polars geometry columns use
+  GeoArrow WKB over binary storage, while Pandas retains the GeoPandas / Shapely path as the default
   output and plugin boundary. Install the conversion dependencies with
   `pip install 'meerschaum[polars]'`.
 

@@ -67,11 +67,57 @@ def to_pandas(df: Any) -> Any:
     return df.to_pandas(use_pyarrow_extension_array=True)
 
 
-def to_polars(df: Any) -> Any:
+def to_polars(
+    df: Any,
+    geometry_cols_types_srids: Optional[Dict[str, Tuple[str, Any]]] = None,
+) -> Any:
     """Convert a Pandas DataFrame to Polars; otherwise return ``df``."""
     if df.__class__.__module__.split('.')[0] == 'polars':
         return df
     polars = mrsm.attempt_import('polars')
+    geometry_cols_types_srids = (
+        get_geometry_cols(df, with_types_srids=True)
+        if geometry_cols_types_srids is None and get_geometry_cols(df)
+        else (geometry_cols_types_srids or {})
+    )
+    geometry_cols_types_srids = {
+        col: type_srid
+        for col, type_srid in geometry_cols_types_srids.items()
+        if col in df.columns
+    }
+    if geometry_cols_types_srids:
+        try:
+            import json
+            from meerschaum.utils.dtypes import attempt_cast_to_geometry
+            shapely = mrsm.attempt_import('shapely', lazy=False)
+            try:
+                from geoarrow.types.type_pyarrow import register_extension_types
+                register_extension_types()
+            except Exception:
+                pass
+            geometry_cols = list(geometry_cols_types_srids)
+            polars_df = to_polars(df.drop(columns=geometry_cols))
+            for col, (_, srid) in geometry_cols_types_srids.items():
+                crs = str(srid) if srid else None
+                if crs and ':' not in crs:
+                    crs = 'EPSG:' + crs
+                metadata = json.dumps(
+                    ({'crs': crs, 'crs_type': 'authority_code'} if crs else {}),
+                    separators=(',', ':'),
+                )
+                polars_df = polars_df.with_columns(polars.Series(
+                    col,
+                    shapely.to_wkb(
+                        attempt_cast_to_geometry(df[col]),
+                        hex=False,
+                        include_srid=True,
+                    ).tolist(),
+                    dtype=polars.Extension('geoarrow.wkb', polars.Binary, metadata),
+                ))
+            return polars_df.select(list(df.columns))
+        except Exception:
+            # ponytail: Fall back to object conversion if Polars changes its unstable API.
+            pass
     if get_uuid_cols(df):
         return polars.DataFrame(df.to_dict(orient='list'), strict=False)
     try:
@@ -1729,7 +1775,11 @@ def enforce_dtypes(
     if are_dtypes_equal(df_dtypes, pipe_pandas_dtypes):
         if debug:
             dprint("Data types match. Exiting enforcement...")
-        return to_polars(df) if as_polars else df
+        return (
+            to_polars(df, geometry_cols_types_srids=geometry_cols_types_srids)
+            if as_polars
+            else df
+        )
 
     common_dtypes = {}
     common_diff_dtypes = {}
@@ -1762,7 +1812,11 @@ def enforce_dtypes(
                 + "The only detected difference was in the following datetime columns."
             )
             pprint(detected_dt_cols)
-        return to_polars(df) if as_polars else df
+        return (
+            to_polars(df, geometry_cols_types_srids=geometry_cols_types_srids)
+            if as_polars
+            else df
+        )
 
     for col, typ in {k: v for k, v in common_diff_dtypes.items()}.items():
         previous_typ = common_dtypes[col]
@@ -1829,7 +1883,11 @@ def enforce_dtypes(
                 except Exception:
                     if debug:
                         dprint(f"Was unable to convert to float then {t}.")
-    return to_polars(df) if as_polars else df
+    return (
+        to_polars(df, geometry_cols_types_srids=geometry_cols_types_srids)
+        if as_polars
+        else df
+    )
 
 
 def get_datetime_bound_from_df(
