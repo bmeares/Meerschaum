@@ -398,7 +398,7 @@ def run_initial_syncs(
                 _replace=False,
             )
             if not pipe.temporary
-            else pipe.sync(debug=debug, **kw)[0]
+            else pipe.sync(debug=debug, **kw)
         )
 
         if not success:

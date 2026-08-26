@@ -9,7 +9,6 @@ Read the configuration files.
 import os
 import pathlib
 import json
-import pickle
 import platform
 
 import meerschaum as mrsm
@@ -93,11 +92,14 @@ def read_compose_config(
 
     from meerschaum.compose.utils.stack import ensure_project_name
 
+    env_file_path = pathlib.Path(env_file) if env_file is not None else None
+    if env_file_path is not None and not env_file_path.is_absolute():
+        env_file_path = compose_file_path.parent / env_file_path
     envyaml = mrsm.attempt_import('envyaml', venv='compose')
     try:
         env = envyaml.EnvYAML(
             yaml_file = compose_file_path,
-            env_file = env_file,
+            env_file = env_file_path,
             include_environment = True,
             flatten = False,
             strict = True,
@@ -129,7 +131,7 @@ def read_compose_config(
 
         env = envyaml.EnvYAML(
             yaml_file = compose_file_path,
-            env_file = env_file,
+            env_file = env_file_path,
             include_environment = True,
             flatten = False,
             strict = True,
@@ -274,9 +276,7 @@ def get_dir_paths(compose_config: Dict[str, Any], dir_name: str) -> List[pathlib
     """
     from meerschaum.config._paths import PLUGINS_RESOURCES_PATH, ROOT_DIR_PATH
     compose_file_path = compose_config.get('__file__', None)
-    old_cwd = os.getcwd()
-    if compose_file_path is not None:
-        os.chdir(compose_file_path.parent)
+    base_dir = compose_file_path.parent if compose_file_path is not None else pathlib.Path.cwd()
 
     configured_dir = compose_config.get(f'{dir_name}_dir', -1)
     env_dir = compose_config.get('environment', {}).get(f'MRSM_{dir_name.upper()}_DIR', None)
@@ -287,11 +287,20 @@ def get_dir_paths(compose_config: Dict[str, Any], dir_name: str) -> List[pathlib
     if isinstance(env_dir, str):
         if env_dir.lstrip().startswith('['):
             env_dir_paths = [
-                pathlib.Path(env_path_str).resolve()
+                (
+                    pathlib.Path(env_path_str).resolve()
+                    if pathlib.Path(env_path_str).is_absolute()
+                    else (base_dir / env_path_str).resolve()
+                )
                 for env_path_str in json.loads(env_dir)
             ]
         else:
-            env_dir_paths = [pathlib.Path(env_dir).resolve()]
+            env_dir_path = pathlib.Path(env_dir)
+            env_dir_paths = [
+                env_dir_path.resolve()
+                if env_dir_path.is_absolute()
+                else (base_dir / env_dir_path).resolve()
+            ]
     else:
         env_dir_paths = []
 
@@ -315,7 +324,12 @@ def get_dir_paths(compose_config: Dict[str, Any], dir_name: str) -> List[pathlib
                 info("A null value for `root_dir` will use the host Meerschaum root directory.")
                 path = ROOT_DIR_PATH
         else:
-            path = pathlib.Path(configured_dir_val).resolve()
+            configured_path = pathlib.Path(configured_dir_val)
+            path = (
+                configured_path.resolve()
+                if configured_path.is_absolute()
+                else (base_dir / configured_path).resolve()
+            )
         if path not in configured_dir_paths:
             configured_dir_paths.append(path)
 
@@ -331,9 +345,6 @@ def get_dir_paths(compose_config: Dict[str, Any], dir_name: str) -> List[pathlib
         if real_path not in unique_paths:
             unique_paths.append(real_path)
     existing_unique_paths = [path for path in unique_paths if path.exists()]
-
-    if compose_file_path is not None:
-        os.chdir(old_cwd)
 
     if (
         len(existing_unique_paths) > 1
@@ -525,17 +536,16 @@ def init_env(
         Infer `.env` if `env_file` is `None`.
     """
     dotenv = mrsm.attempt_import('dotenv', venv='compose')
-    old_cwd = os.getcwd()
-    os.chdir(compose_file_path.parent)
     if env_file is None:
-        env_file = '.env'
-    env_path = compose_file_path.parent / env_file
+        env_file = pathlib.Path('.env')
+    env_path = pathlib.Path(env_file)
+    if not env_path.is_absolute():
+        env_path = compose_file_path.parent / env_path
     try:
         if env_path.exists():
-            dotenv.load_dotenv(env_file)
+            dotenv.load_dotenv(env_path)
     except Exception as e:
         warn(f"Failed to load '{env_path}':\n{e}")
-    os.chdir(old_cwd)
 
 
 def get_config_cache_path(compose_config: Dict[str, Any]) -> pathlib.Path:
@@ -552,8 +562,7 @@ def write_config_cache(compose_config: Dict[str, Any]) -> None:
     """
     config_cache_path = get_config_cache_path(compose_config)
 
-    with open(config_cache_path, 'wb') as f:
-        pickle.dump(hash_config(compose_config), f)
+    config_cache_path.write_text(hash_config(compose_config), encoding='utf-8')
 
 
 def read_config_cache(compose_config: Dict[str, Any]) -> Union[int, None]:
@@ -564,21 +573,28 @@ def read_config_cache(compose_config: Dict[str, Any]) -> Union[int, None]:
     config_cache_path = get_config_cache_path(compose_config)
     if not config_cache_path.exists():
         return None
-    with open(config_cache_path, 'rb') as f:
-        config_cache = pickle.load(f)
-    return config_cache
+    try:
+        config_cache = config_cache_path.read_text(encoding='utf-8').strip()
+    except (OSError, UnicodeError):
+        return None
+    return (
+        config_cache
+        if len(config_cache) == 64 and all(c in '0123456789abcdef' for c in config_cache)
+        else None
+    )
 
 
 def config_has_changed(compose_config: Dict[str, Any]) -> bool:
     """
     Check if the in-memory configuration is the same as the last cached version.
     """
-    if 'config_has_changed' in CONFIG_METADATA:
-        return CONFIG_METADATA['config_has_changed']
+    metadata_key = str(get_config_cache_path(compose_config).resolve())
+    if metadata_key in CONFIG_METADATA:
+        return CONFIG_METADATA[metadata_key]
     config_cache = read_config_cache(compose_config)
     hashed_config = hash_config(compose_config)
     has_changed = (config_cache != hashed_config)
-    CONFIG_METADATA['config_has_changed'] = has_changed
+    CONFIG_METADATA[metadata_key] = has_changed
     return has_changed
 
 

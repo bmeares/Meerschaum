@@ -159,3 +159,69 @@ def test_legacy_compose_plugin_connector_resolves_to_core(monkeypatch):
     monkeypatch.setattr(Plugin, 'module', property(lambda self: None))
     connector = PluginConnector('compose')
     assert connector.sync is compose_module.sync
+
+
+def test_compose_path_resolution_does_not_change_cwd(tmp_path):
+    """Project-relative paths and env files resolve without mutating process cwd."""
+    import os
+    import meerschaum.compose.utils.config as config_module
+
+    project_dir = tmp_path / 'project'
+    project_dir.mkdir()
+    compose_path = project_dir / 'mrsm-compose.yaml'
+    compose_path.write_text('root_dir: ./state\n', encoding='utf-8')
+    env_path = project_dir / 'custom.env'
+    env_path.write_text('COMPOSE_CWD_TEST=ok\n', encoding='utf-8')
+    original_cwd = os.getcwd()
+
+    config = config_module.read_compose_config(compose_path, env_file=pathlib.Path('custom.env'))
+    config_module.init_env(compose_path, pathlib.Path('custom.env'))
+
+    assert os.getcwd() == original_cwd
+    assert config['root_dir'] == (project_dir / 'state').resolve()
+    assert os.environ['COMPOSE_CWD_TEST'] == 'ok'
+
+
+def test_compose_cache_is_safe_text_and_scoped_per_project(tmp_path):
+    """Compose caches are inert hashes, and one project cannot cache another's result."""
+    import meerschaum.compose.utils.config as config_module
+
+    configs = []
+    for name in ('one', 'two'):
+        root = tmp_path / name
+        root.mkdir()
+        configs.append({'root_dir': root, 'project_name': name})
+
+    config_module.CONFIG_METADATA.clear()
+    config_module.write_config_cache(configs[0])
+    cache_path = config_module.get_config_cache_path(configs[0])
+    assert len(cache_path.read_text(encoding='utf-8')) == 64
+    assert config_module.config_has_changed(configs[0]) is False
+    assert config_module.config_has_changed(configs[1]) is True
+
+    cache_path.write_bytes(b'\x80unsafe legacy pickle')
+    config_module.CONFIG_METADATA.clear()
+    assert config_module.read_config_cache(configs[0]) is None
+
+
+def test_compose_temporary_pipe_retry_returns_success():
+    """A failed temporary pipe may succeed on its second verification pass."""
+    from meerschaum.compose.subactions.up import run_initial_syncs
+
+    class TemporaryPipe:
+        temporary = True
+
+        def __init__(self):
+            self.calls = 0
+
+        def sync(self, **kwargs):
+            self.calls += 1
+            return (self.calls == 2, 'ok' if self.calls == 2 else 'retry')
+
+        def __str__(self):
+            return 'temporary pipe'
+
+    pipe = TemporaryPipe()
+    success, msg = run_initial_syncs([pipe], {'project_name': 'test'})
+    assert success, msg
+    assert pipe.calls == 2
