@@ -112,6 +112,23 @@ def test_pip_install_preflight_is_read_only(monkeypatch, tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_run_python_package_forwards_explicit_environment(monkeypatch):
+    """Package subprocesses must receive the caller's isolated environment."""
+    import meerschaum.utils.packages as packages
+    import meerschaum.utils.process as process
+
+    captured = {}
+    monkeypatch.setattr(packages, 'venv_executable', lambda **kwargs: 'python')
+    monkeypatch.setattr(
+        process,
+        'run_process',
+        lambda *args, **kwargs: captured.update(kwargs) or 0,
+    )
+
+    assert packages.run_python_package('example', env={'ONLY_THIS': 'value'}, venv=None) == 0
+    assert captured['env'] == {'ONLY_THIS': 'value'}
+
+
 def test_pip_install_dry_run_skips_lock_and_mutation(monkeypatch):
     """A dry run must not create a lock or execute an installer."""
     import meerschaum.utils.packages as packages

@@ -342,23 +342,28 @@ def replace_config(config_: Union[Dict[str, Any], None]):
         The new config dictionary to temporarily replace the canonical `config`.
     """
     if config_ is None:
-        try:
-            yield
-        except Exception:
-            pass
+        yield
         return
 
     global _backup_config, _allow_write_missing
 
-    _backup_config = _config()
+    previous_config = _config()
+    previous_backup_config = _backup_config
+    previous_allow_write_missing = _allow_write_missing
+    _backup_config = (
+        previous_backup_config
+        if previous_backup_config is not None
+        else previous_config
+    )
     _allow_write_missing = False
     set_config(config_)
 
     try:
         yield
     finally:
-        set_config(_backup_config)
-        _allow_write_missing = True
+        set_config(previous_config)
+        _backup_config = previous_backup_config
+        _allow_write_missing = previous_allow_write_missing
 
 ### This need to be below get_config to avoid a circular import.
 from meerschaum.config._read_config import read_config

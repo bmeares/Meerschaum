@@ -95,6 +95,26 @@ def test_replace_env_none_propagates_exceptions():
             raise RuntimeError('plugin failed')
 
 
+def test_replace_config_is_reentrant_and_propagates_exceptions():
+    """Nested and empty config scopes restore their caller's configuration."""
+    import meerschaum.config as config
+
+    original = config._config()
+    try:
+        with config.replace_config({'scope': 'outer'}):
+            assert config._config() == {'scope': 'outer'}
+            with config.replace_config({'scope': 'inner'}):
+                assert config._config() == {'scope': 'inner'}
+            assert config._config() == {'scope': 'outer'}
+        assert config._config() is original
+
+        with pytest.raises(RuntimeError, match='plugin failed'):
+            with config.replace_config(None):
+                raise RuntimeError('plugin failed')
+    finally:
+        config.set_config(original)
+
+
 def test_sibling_plugin_import_after_scope_switch(project_scope):
     """
     A plugin doing a module-level `from_plugin_import` of a sibling must be

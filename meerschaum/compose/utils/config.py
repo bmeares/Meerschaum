@@ -377,7 +377,7 @@ def get_env_dict(compose_config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Return a dictionary of environment variables.
     """
-    env_dict = {}
+    env_dict = dict(os.environ)
 
     if platform.system() == 'Windows':
         app_data = os.environ.get('AppData', '')
@@ -388,7 +388,6 @@ def get_env_dict(compose_config: Dict[str, Any]) -> Dict[str, Any]:
             'HOME': home,
             'HOMEPATH': homepath,
         })
-        env_dict.update(os.environ)
 
     term = os.environ.get('TERM', None)
     if term:
@@ -589,12 +588,13 @@ def config_has_changed(compose_config: Dict[str, Any]) -> bool:
     Check if the in-memory configuration is the same as the last cached version.
     """
     metadata_key = str(get_config_cache_path(compose_config).resolve())
-    if metadata_key in CONFIG_METADATA:
-        return CONFIG_METADATA[metadata_key]
-    config_cache = read_config_cache(compose_config)
     hashed_config = hash_config(compose_config)
+    metadata = CONFIG_METADATA.get(metadata_key, None)
+    if metadata is not None and metadata[0] == hashed_config:
+        return metadata[1]
+    config_cache = read_config_cache(compose_config)
     has_changed = (config_cache != hashed_config)
-    CONFIG_METADATA[metadata_key] = has_changed
+    CONFIG_METADATA[metadata_key] = (hashed_config, has_changed)
     return has_changed
 
 

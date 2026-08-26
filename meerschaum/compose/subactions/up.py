@@ -36,8 +36,9 @@ def _compose_up(
         get_defined_pipes,
         instance_pipes_from_pipes_list,
     )
-    from meerschaum.compose.utils.jobs import get_jobs_commands
+    from meerschaum.compose.utils.jobs import get_jobs_commands, get_project_job_names
     from meerschaum.compose.utils.config import config_has_changed
+    from meerschaum.jobs import get_jobs
     no_daemon_flags = (
         ['--no-daemon']
         if compose_config.get('isolation', None) == 'subprocess'
@@ -270,22 +271,43 @@ def _compose_up(
         return True, msg
 
     jobs_commands = get_jobs_commands(compose_config)
-    for job_name, job_command in jobs_commands.items():
-        info(f"Starting job '{job_name}'...")
-        run_mrsm_command(
+    existing_jobs = get_jobs(debug=debug)
+    job_names_to_delete = get_project_job_names(compose_config, existing_jobs)
+    unsafe_collisions = [
+        job_name
+        for job_name in jobs_commands
+        if job_name in existing_jobs and job_name not in job_names_to_delete
+    ]
+    if unsafe_collisions:
+        return False, (
+            "Refusing to replace job"
+            + ('s' if len(unsafe_collisions) != 1 else '')
+            + " not owned by this Compose project: "
+            + ', '.join(unsafe_collisions)
+        )
+
+    for job_name in job_names_to_delete:
+        delete_success, delete_msg = run_mrsm_command(
             ['delete', 'job', job_name, '-f'],
             compose_config,
             capture_output=(not debug),
             debug=debug,
             _replace=False,
         )
-        run_mrsm_command(
+        if not delete_success:
+            return False, f"Failed to delete job '{job_name}':\n{delete_msg}"
+
+    for job_name, job_command in jobs_commands.items():
+        info(f"Starting job '{job_name}'...")
+        start_success, start_msg = run_mrsm_command(
             job_command,
             compose_config,
             capture_output=False,
             debug=debug,
             _replace=False,
         )
+        if not start_success:
+            return False, f"Failed to start job '{job_name}':\n{start_msg}"
 
     if force:
         run_mrsm_command(

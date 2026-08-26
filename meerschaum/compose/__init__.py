@@ -4,6 +4,7 @@
 
 import meerschaum as mrsm
 from meerschaum.compose.sync import sync
+from meerschaum.actions.compose import compose, complete_compose
 
 _warned_about_plugin = False
 

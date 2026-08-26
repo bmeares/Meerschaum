@@ -1438,6 +1438,7 @@ def run_python_package(
             foreground=foreground,
             as_proc=as_proc,
             capture_output=capture_output,
+            env=env_dict,
             **kw
         )
     except Exception:
