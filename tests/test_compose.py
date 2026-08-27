@@ -667,3 +667,52 @@ def test_compose_up_starts_jobs_instead_of_syncing_pipes(monkeypatch):
     monkeypatch.setattr(up_module, 'run_initial_syncs', lambda *args, **kwargs: (True, "Success"))
     success, msg = up_module._compose_up(compose_config, presync=True, no_jobs=True)
     assert success, msg
+
+
+def test_compose_owns_a_compound_pipeline_job():
+    """A compound job command is adopted despite being stored as `start pipeline`."""
+    from meerschaum.compose.utils.jobs import get_jobs_commands, get_project_job_names
+
+    config = {
+        'project_name': 'maps',
+        'jobs': {
+            'maps': (
+                'sync pipes -c plugin:osm -t maps '
+                '+ sync pipes -c sql:sra -m segments -t maps '
+                ': --loop --min-seconds 604800 -w 1'
+            ),
+        },
+    }
+    command = get_jobs_commands(config)['maps']
+    assert '-d' in command and command[-1] == '-f'
+
+    ### What the daemon actually records: Meerschaum rewrites the compound command
+    ### into a `start pipeline` invocation carrying the sub-command as a parameter.
+    running_sysargs = [
+        'start', 'pipeline', '--loop', '--min-seconds', '604800', '-w', '1',
+        '--name', 'maps', '-f',
+        '-P',
+        json.dumps(
+            {
+                'sub_args_line': (
+                    'sync pipes -c plugin:osm -t maps '
+                    '+ sync pipes -c sql:sra -m segments -t maps'
+                ),
+                'patch_args': None,
+            },
+            separators=(',', ':'),
+        ),
+    ]
+    assert get_project_job_names(config, {
+        'maps': _ComposeTestJob(running_sysargs),
+    }) == ['maps']
+
+    ### A pipeline running a different sub-command is still foreign.
+    foreign_sysargs = list(running_sysargs)
+    foreign_sysargs[-1] = json.dumps(
+        {'sub_args_line': 'sync pipes -c sql:other -t maps', 'patch_args': None},
+        separators=(',', ':'),
+    )
+    assert get_project_job_names(config, {
+        'maps': _ComposeTestJob(foreign_sysargs),
+    }) == []

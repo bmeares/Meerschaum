@@ -8942,6 +8942,19 @@ Source: https://meerschaum.io/news/changelog/
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v4.0.3
+
+- **Adopt Compose jobs which run compound commands.**  
+  Meerschaum rewrites a compound job command (`... + ... : --loop`) into the `start pipeline` invocation it records on the daemon, so it never matched the command configured in the compose file. A pipeline job started before v4.0.2 stamped its project onto it therefore read as foreign, and `compose up` refused to replace it until the job was deleted by hand. Both commands are now compared in their condensed form.
+
+  ```yaml
+  jobs:
+    maps: >
+      sync pipes -c plugin:osm -t maps
+      + sync pipes -c sql:main -m segments -t maps
+      : --loop --min-seconds 604800
+  ```
+
 ### v4.0.2
 
 - **Recognize Compose jobs which declare their own tags.**  
