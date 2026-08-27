@@ -626,13 +626,16 @@ def coerce_timezone(
     dt_is_series = hasattr(dt, 'dtype') and hasattr(dt, '__module__')
     if dt_is_series:
         pandas = mrsm.attempt_import('pandas', lazy=False)
+        dt_timezone = getattr(getattr(dt, 'dt', None), 'tz', None)
+
+        if dt_timezone is not None:
+            utc_dt = dt if str(dt_timezone).lower() == 'utc' else dt.dt.tz_convert(timezone.utc)
+            return utc_dt.dt.tz_localize(None) if strip_utc else utc_dt
 
         if (
-            pandas.api.types.is_datetime64_any_dtype(dt) and (
-                (dt.dt.tz is not None and not strip_utc)
-                or
-                (dt.dt.tz is None and strip_utc)
-            )
+            pandas.api.types.is_datetime64_any_dtype(dt)
+            and dt_timezone is None
+            and strip_utc
         ):
             return dt
 

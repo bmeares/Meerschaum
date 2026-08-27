@@ -83,6 +83,8 @@ packages: Dict[str, Dict[str, str]] = {
     'drivers-extras': {
         'pyodbc'                     : 'pyodbc>=4.0.30',
         'oracledb'                   : 'oracledb>=2.5.0',
+        'adbc_driver_postgresql'     : 'adbc-driver-postgresql>=1.7.0',
+        'adbc_driver_sqlite'         : 'adbc-driver-sqlite>=1.7.0',
     },
     'cli': {
         'pgcli'                      : 'pgcli>=3.1.0',

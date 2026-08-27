@@ -266,6 +266,11 @@ def get_data(
             limit=limit,
             order=order,
             debug=debug,
+            **(
+                {'as_polars': True}
+                if as_polars and self.instance_connector.type == 'sql'
+                else {}
+            ),
             **kw
         )
         if df is None:

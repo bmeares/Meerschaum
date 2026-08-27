@@ -7,7 +7,9 @@ Test SQL utility functions.
 """
 
 import datetime
+from types import SimpleNamespace
 import pytest
+import meerschaum as mrsm
 from tests.connectors import conns, get_flavors
 from meerschaum.connectors.sql import SQLConnector
 from meerschaum.connectors.sql.tools import dateadd_str, table_exists, sql_item_name
@@ -112,3 +114,78 @@ def test_parse_uri(uri: str, expected_attributes):
     Text that parsing a URI string returns the expected dictionary.
     """
     assert SQLConnector.parse_uri(uri) == expected_attributes
+
+
+def test_get_pipe_data_uses_adbc_for_polars(monkeypatch):
+    """Arrow-safe Polars reads use ADBC and strip SQLAlchemy's dialect from the URI."""
+    import polars as pl
+    import meerschaum.utils.packages as packages
+    from meerschaum.connectors.sql._pipes import get_pipe_data
+
+    expected = pl.DataFrame({'id': [1]})
+    real_attempt_import = packages.attempt_import
+
+    def attempt_import(*names, **kw):
+        if names == ('adbc_driver_postgresql',):
+            assert kw.get('install') is False
+            return SimpleNamespace()
+        return real_attempt_import(*names, **kw)
+
+    monkeypatch.setattr(
+        packages,
+        'attempt_import',
+        attempt_import,
+    )
+    monkeypatch.setattr(
+        pl,
+        'read_database_uri',
+        lambda query, uri, engine: (
+            expected
+            if (
+                query == 'SELECT id FROM test'
+                and uri == 'postgresql://user:pass@localhost/db'
+                and engine == 'adbc'
+            )
+            else None
+        ),
+    )
+    connector = SimpleNamespace(
+        flavor='postgresql',
+        URI='postgresql+psycopg://user:pass@localhost/db',
+        get_pipe_data_query=lambda *args, **kw: 'SELECT id FROM test',
+    )
+    pipe = SimpleNamespace(
+        enforce=True,
+        get_columns_types=lambda **kw: {'id': 'BIGINT'},
+        get_dtypes=lambda **kw: {'id': 'int64'},
+    )
+
+    assert get_pipe_data(connector, pipe, as_polars=True) is expected
+
+
+def test_duckdb_unchunked_read_iterator(tmp_path):
+    """DuckDB's unchunked Pandas result is exposed as one iterator chunk."""
+    if mrsm.attempt_import('duckdb', install=False, warn=False) is None:
+        pytest.skip("DuckDB is not installed.")
+
+    connector = SQLConnector(
+        'test_duckdb_iterator',
+        flavor='duckdb',
+        database=str(tmp_path / 'iterator.duckdb'),
+    )
+    try:
+        assert connector.exec('CREATE TABLE test (id BIGINT)', commit=True) is not None
+        assert connector.exec('INSERT INTO test VALUES (1)', commit=True) is not None
+        assert connector.read('SELECT * FROM test', chunksize=None)['id'].tolist() == [1]
+        assert connector.read(
+            'SELECT * FROM test',
+            chunksize=None,
+            chunk_hook=len,
+            as_hook_results=True,
+        ) == [1]
+        chunks = list(connector.read('SELECT * FROM test', chunksize=None, as_iterator=True))
+        assert len(chunks) == 1
+        assert chunks[0]['id'].tolist() == [1]
+    finally:
+        if connector.engine is not None:
+            connector.engine.dispose()

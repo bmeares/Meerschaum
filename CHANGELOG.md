@@ -18,6 +18,8 @@
   it is already installed and safely fall back for unsupported dtypes. Polars geometry columns use
   GeoArrow WKB, and declared JSON columns use canonical Arrow JSON over UTF-8 storage. Pandas restores
   JSON objects and retains the GeoPandas / Shapely path as the default output and plugin boundary.
+  PostgreSQL and SQLite reads use optional ADBC drivers, and DuckDB reads use its native Polars path;
+  unavailable drivers and unsafe dtypes fall back to Pandas.
   Install the conversion dependencies with
   `pip install 'meerschaum[polars]'`.
 

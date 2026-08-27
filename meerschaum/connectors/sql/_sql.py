@@ -305,19 +305,16 @@ def read(
                     )
 
                     to_return = (
-                        (
-                            chunk_generator
-                            if not (as_hook_results or chunksize is None)
-                            else (
-                                _process_chunk(_chunk)
-                                for _chunk in chunk_generator
-                            )
-                        )
-                        if as_iterator or chunksize is None
+                        iter((chunk_generator,))
+                        if chunksize is None and as_iterator
                         else (
-                            list(pool.imap(_process_chunk, chunk_generator))
-                            if as_hook_results
-                            else None
+                            chunk_generator
+                            if as_iterator
+                            else (
+                                list(pool.imap(_process_chunk, chunk_generator))
+                                if as_hook_results and chunksize is not None
+                                else None
+                            )
                         )
                     )
                     return chunk_generator, to_return
@@ -371,24 +368,6 @@ def read(
             from meerschaum.utils.formatting import get_console
             if not silent:
                 get_console().print_exception()
-
-    read_chunks = 0
-    try:
-        for chunk in chunk_generator:
-            if chunk_hook is not None:
-                chunk_args, chunk_kwargs = _get_chunk_args_kwargs(chunk)
-                chunk_hook_results.append(chunk_hook(*chunk_args, **chunk_kwargs))
-            chunk_list.append(chunk)
-            read_chunks += 1
-            if chunks is not None and read_chunks >= chunks:
-                break
-    except Exception as e:
-        warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
-        from meerschaum.utils.formatting import get_console
-        if not silent:
-            get_console().print_exception()
-
-        return None
 
     ### If no chunks returned, read without chunks
     ### to get columns
