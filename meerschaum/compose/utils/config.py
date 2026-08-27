@@ -413,6 +413,16 @@ def get_env_dict(compose_config: Dict[str, Any]) -> Dict[str, Any]:
         default=json_serialize_value,
     )
 
+    ### Unlike `MRSM__COMPOSE_CONFIG` (which carries the project's `config:` block,
+    ### i.e. connector credentials), the project's name is safe to persist onto a job,
+    ### which is how Compose proves it owns the jobs it starts.
+    from meerschaum.compose.utils.stack import get_project_name
+    from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
+    try:
+        env_dict[_STATIC_CONFIG['environment']['compose_project']] = get_project_name(compose_config)
+    except ValueError:
+        pass
+
     config = compose_config.get('config', None)
     if config:
         env_dict['MRSM_CONFIG'] = json.dumps(config, separators=(',', ':'))

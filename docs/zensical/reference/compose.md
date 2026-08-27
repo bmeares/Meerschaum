@@ -264,3 +264,5 @@ Keys under `jobs` are the names of jobs to be run with `compose up`. If defined,
       date: "date -s 'every 10 seconds'"
       echo: "echo 'Hello, World!'"
     ```
+
+`compose up` only replaces jobs which belong to the project. A job started by Compose records its project's name, so it stays replaceable after you edit its command. Jobs started before that stamp existed are recognized two other ways: by the `-t <project_name>` tag Compose appends to job commands which set no tags of their own, and by running the exact command the project would start. A job under a configured name which proves none of these is refused rather than clobbered — with the caveat that two projects sharing a root directory and configuring the same job name with the same command cannot be told apart until each has started its own job.
