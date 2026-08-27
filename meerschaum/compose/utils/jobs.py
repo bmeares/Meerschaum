@@ -30,7 +30,16 @@ NON_IDENTIFYING_FLAGS: List[str] = ['-d', '--daemon', '--no-daemon', '--debug']
 
 def _command_signature(sysargs: List[str]) -> List[str]:
     """Return a job command without the flags that don't identify the workload."""
-    return [arg for arg in sysargs if arg not in NON_IDENTIFYING_FLAGS]
+    from meerschaum._internal.arguments._parse_arguments import compress_pipeline_sysargs
+
+    ### A compound command (`... + ... : --loop`) is stored as the `start pipeline`
+    ### form it was rewritten into, so compare both sides in the condensed form.
+    ### This is a no-op for a command which isn't a pipeline.
+    return [
+        arg
+        for arg in compress_pipeline_sysargs(list(sysargs))
+        if arg not in NON_IDENTIFYING_FLAGS
+    ]
 
 
 def job_belongs_to_project(
