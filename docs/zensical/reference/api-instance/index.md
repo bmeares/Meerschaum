@@ -94,7 +94,6 @@ If you're building your own Docker images, consider basing off the [`bmeares/mee
 ```docker
 FROM bmeares/meerschaum
 
-RUN mrsm install plugin compose
 COPY --chown=meerschaum:meerschaum ./ /app
 WORKDIR /app
 RUN mrsm compose init

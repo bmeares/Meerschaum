@@ -30,6 +30,7 @@ def get_data(
     as_iterator: bool = False,
     as_chunks: bool = False,
     as_dask: bool = False,
+    as_polars: bool = False,
     add_missing_columns: bool = False,
     chunk_interval: Union[timedelta, int, None] = None,
     order: Optional[str] = 'asc',
@@ -82,6 +83,10 @@ def get_data(
         If `True`, return a `dask.DataFrame`
         (which may be loaded into a Pandas DataFrame with `df.compute()`).
 
+    as_polars: bool, default False
+        If `True`, return a `polars.DataFrame`. When combined with `as_iterator=True`,
+        yield Polars DataFrames. This may not be combined with `as_docs` or `as_dask`.
+
     add_missing_columns: bool, default False
         If `True`, add any missing columns from `Pipe.dtypes` to the dataframe.
 
@@ -113,6 +118,7 @@ def get_data(
     A `List[Dict]` if `as_docs=True`.
     An `Iterator[pd.DataFrame]` if `as_chunks=True` (or `as_iterator=True`).
     An `Iterator[List[Dict]]` if both `as_docs=True` and `as_chunks=True`.
+    A `polars.DataFrame` if `as_polars=True`.
 
     """
     from meerschaum.utils.warnings import warn
@@ -125,6 +131,9 @@ def get_data(
     dd = attempt_import('dask.dataframe') if as_dask else None
     dask = attempt_import('dask') if as_dask else None
     _ = attempt_import('partd', lazy=False) if as_dask else None
+
+    if as_polars and (as_docs or as_dask):
+        raise ValueError("`as_polars` may not be combined with `as_docs` or `as_dask`.")
 
     if select_columns == '*':
         select_columns = None
@@ -148,7 +157,12 @@ def get_data(
             if col_ix != 'datetime' and col in _df.columns
         ]
         indices.extend(non_dt_cols)
-        if 'dask' not in _df.__module__:
+        if _df.__module__.split('.')[0] == 'polars':
+            _df = _df.sort(
+                indices,
+                descending=(str(order).lower() != 'asc'),
+            )
+        elif 'dask' not in _df.__module__:
             _df.sort_values(
                 by=indices,
                 inplace=True,
@@ -176,12 +190,14 @@ def get_data(
             limit=limit,
             order=order,
             as_docs=as_docs,
+            as_polars=as_polars,
             fresh=fresh,
             debug=debug,
         )
         if as_docs:
             return df
-        return _sort_df(df)
+        df = _sort_df(df)
+        return df
 
     if as_dask:
         from multiprocessing.pool import ThreadPool
@@ -217,7 +233,8 @@ def get_data(
         }
         if debug:
             dprint(f"Dask meta:\n{dask_meta}")
-        return _sort_df(dd.from_delayed(dask_chunks, meta=dask_meta))
+        dask_df = dd.from_delayed(dask_chunks, meta=dask_meta, verify_meta=False)
+        return _sort_df(dask_df.astype(dask_meta))
 
     if not self.exists(debug=debug):
         return [] if as_docs else None
@@ -249,6 +266,11 @@ def get_data(
             limit=limit,
             order=order,
             debug=debug,
+            **(
+                {'as_polars': True}
+                if as_polars and self.instance_connector.type == 'sql'
+                else {}
+            ),
             **kw
         )
         if df is None:
@@ -309,11 +331,12 @@ def get_data(
         enforced_df = self.enforce_dtypes(
             df,
             dtypes=pipe_dtypes,
+            as_polars=as_polars,
             debug=debug,
         )
 
         if order:
-            return _sort_df(enforced_df)
+            enforced_df = _sort_df(enforced_df)
         return enforced_df
 
 
@@ -328,6 +351,7 @@ def _get_data_as_iterator(
     limit: Optional[int] = None,
     order: Optional[str] = 'asc',
     as_docs: bool = False,
+    as_polars: bool = False,
     fresh: bool = False,
     debug: bool = False,
     **kw: Any
@@ -380,6 +404,7 @@ def _get_data_as_iterator(
             limit=limit,
             order=order,
             as_docs=as_docs,
+            as_polars=as_polars,
             fresh=fresh,
             debug=debug,
         )
@@ -402,6 +427,7 @@ def _get_data_as_iterator(
             limit=limit,
             order=order,
             as_docs=as_docs,
+            as_polars=as_polars,
             fresh=fresh,
             debug=debug,
         )

@@ -122,4 +122,4 @@ The tools are broadly the same, with a few changes:
 
 ## Dash's MCP server
 
-Plotly Dash has [its own MCP server](../plugins/types-of-plugins.md#web-pages), separate from this one, which exposes the web console's layout so an agent can understand the page it is building. It is **off by default** and is a development aid, not an API — see the [web console docs](../api-instance/web-console.md#dash-mcp-server).
+Plotly Dash has [its own MCP server](../plugins/types-of-plugins.md), separate from this one, which exposes the web console's layout so an agent can understand the page it is building. It is **off by default** and is a development aid, not an API — see the [web console docs](../api-instance/web-console.md#dash-mcp-server).

@@ -1,5 +1,54 @@
 # 🪵 Changelog
 
+## 4.0.0 Releases
+
+### v4.0.0
+
+- **Build Meerschaum Compose into core.**  
+  Existing Compose YAML files, commands, flags, arbitrary nested actions, project plugin discovery,
+  and multiple root / plugin directories continue to work without installing the `compose` plugin.
+  Project environment and plugin state are restored after every command, destructive operations
+  preserve resources whose ownership is ambiguous, and legacy Compose imports remain available.
+  The built-in action takes precedence when the legacy plugin is installed and emits a once-per-process
+  uninstall warning. New projects no longer receive a copied Compose plugin.
+
+- **Add opt-in Polars dataframe support without breaking Pandas users.**  
+  Pipes accept Polars `DataFrame` and `LazyFrame` inputs, including chunk generators, and
+  `Pipe.get_data(as_polars=True)` returns Polars frames. Large unseen-row comparisons use Polars when
+  it is already installed and safely fall back for unsupported dtypes. Polars geometry columns use
+  GeoArrow WKB, and declared JSON columns use canonical Arrow JSON over UTF-8 storage. Pandas restores
+  JSON objects and retains the GeoPandas / Shapely path as the default output and plugin boundary.
+  Install the conversion dependencies with
+  `pip install 'meerschaum[polars]'`.
+
+- **Replace the unreleased APScheduler fork with Meerschaum's small schedule engine.**  
+  Existing interval, calendar, five-field cron, start-time, and `and` / `or` schedule strings keep
+  their public `trigger.next()` interface. Calendar schedules retain month-end behavior, cron
+  schedules follow crontab's day-of-month / day-of-week and stepped-field rules, handle DST
+  transitions, and scheduled callbacks do not overlap themselves.
+
+- **Make plugin registration and synchronization deterministic.**  
+  Decorated functions are owned by their root plugin module even when defined in submodules,
+  unloading clears every associated registry, and plugin symlink updates now use the existing
+  inter-process lock dependency instead of racing on a hand-managed lockfile. Plugin source and
+  dependency installs share an environment-scoped inter-process lock, and failed setup hooks restore
+  the caller's virtual environment state. Failed plugin upgrades restore the previous source and
+  dependency environment instead of leaving a partial installation.
+
+- **Make runtime dependency installation safer and inspectable.**  
+  Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.
+  `install packages --dry-run` reports the selected installer, environment, arguments, and requested
+  packages without changing the environment. Package mutations are serialized per environment across
+  threads and processes, implicit downloads emit a once-per-process warning, and installed-package
+  checks are cached by environment and import policy.
+  Runtime installation remains on by default for the beginner-friendly experience, using `uv` with
+  the existing `pip` fallback.
+
+- **Repair Dask, SQL geometry, and Docker build paths.**  
+  Dask frames are detected correctly in sync and SQL reads, SQL geometry dtype filtering applies
+  only to columns present in the frame, and the Docker workflow uses the maintained buildx script
+  and current GitHub Actions.
+
 ## 3.5.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!

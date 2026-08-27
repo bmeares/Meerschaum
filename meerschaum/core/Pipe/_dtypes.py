@@ -23,6 +23,7 @@ def enforce_dtypes(
     enforce: bool = True,
     safe_copy: bool = True,
     dtypes: Optional[Dict[str, str]] = None,
+    as_polars: bool = False,
     debug: bool = False,
 ) -> 'pd.DataFrame':
     """
@@ -36,6 +37,8 @@ def enforce_dtypes(
         parse_df_datetimes,
         enforce_dtypes as _enforce_dtypes,
         parse_simple_lines,
+        to_pandas,
+        to_polars,
     )
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.packages import import_pandas
@@ -100,7 +103,7 @@ def enforce_dtypes(
                 f"Could not find dtypes for {self}.\n"
                 + "Skipping dtype enforcement..."
             )
-        return df
+        return to_polars(df) if as_polars else to_pandas(df)
 
     return _enforce_dtypes(
         df,
@@ -110,6 +113,7 @@ def enforce_dtypes(
         strip_timezone=(self.tzinfo is None),
         coerce_numeric=self.mixed_numerics,
         coerce_timezone=enforce,
+        as_polars=as_polars,
         debug=debug,
     )
 

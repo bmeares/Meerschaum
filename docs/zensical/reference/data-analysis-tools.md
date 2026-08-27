@@ -68,6 +68,23 @@ Read a table or query into a Pandas DataFrame with `conn.read()`:
 0   1 2021-06-06 12:00:00
 ```
 
+## 🐻‍❄️ Polars Integration
+
+Pandas remains Meerschaum's default DataFrame API, so existing plugins keep working unchanged.
+Polars DataFrames and LazyFrames may be synced directly, and reads may opt into Polars:
+
+```python
+import meerschaum as mrsm
+import polars as pl
+
+pipe = mrsm.Pipe('demo', 'polars', columns=['dt', 'id'])
+pipe.sync(pl.DataFrame({'dt': ['2026-01-01'], 'id': [1]}))
+df = pipe.get_data(as_polars=True)
+```
+
+LazyFrames are collected at the sync boundary. Install support with
+`pip install 'meerschaum[polars]'`.
+
 
 ## 🧙‍♂️ SQLAlchemy Integration
 

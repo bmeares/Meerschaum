@@ -37,9 +37,136 @@ _locks = {
     '_checked_for_updates': RLock(),
     '_is_installed_first_check': RLock(),
     'emitted_pandas_warning': RLock(),
+    'emitted_auto_install_warning': RLock(),
+    '_install_thread_locks': RLock(),
 }
 _checked_for_updates = set()
-_is_installed_first_check: Dict[str, bool] = {}
+_is_installed_first_check: Dict[Tuple[str, Optional[str], bool, bool], bool] = {}
+_install_thread_locks = {}
+_install_lock_depths = {}
+emitted_auto_install_warning = False
+
+
+def _get_pip_install_target_path(venv: Optional[str] = 'mrsm') -> pathlib.Path:
+    """Resolve an installation target without creating it."""
+    if venv is not None:
+        return venv_target_path(venv, allow_nonexistent=True)
+
+    import sys
+    return pathlib.Path(sys.prefix)
+
+
+def get_pip_install_lock_path(venv: Optional[str] = 'mrsm') -> pathlib.Path:
+    """Return the cross-process package installation lock path for an environment."""
+    import hashlib
+    import tempfile
+    target_path = _get_pip_install_target_path(venv).resolve()
+    target_key = os.path.normcase(str(target_path))
+    target_hash = hashlib.sha256(target_key.encode('utf-8')).hexdigest()[:16]
+    return (
+        pathlib.Path(tempfile.gettempdir())
+        / 'meerschaum-package-installs'
+        / (target_hash + '.lock')
+    )
+
+
+def _stdlib_interprocess_lock(lock_path: pathlib.Path):
+    """Lock a file when `fasteners` is not yet available in a source checkout."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _locked():
+        import platform
+        is_windows = platform.system() == 'Windows'
+        acquired = False
+        lock_file = open(lock_path, 'a+b')
+        try:
+            if is_windows:
+                import msvcrt
+                import time
+                lock_file.seek(0)
+                if lock_file.read(1) == b'':
+                    lock_file.write(b'\0')
+                    lock_file.flush()
+                while True:
+                    try:
+                        lock_file.seek(0)
+                        msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                        acquired = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+            else:
+                import fcntl
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                acquired = True
+            yield
+        finally:
+            if acquired:
+                if is_windows:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
+
+    return _locked()
+
+
+def _pip_install_lock(venv: Optional[str] = 'mrsm'):
+    """Serialize package mutations across threads and processes for an environment."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _locked():
+        from threading import get_ident
+        try:
+            import fasteners
+        except ImportError:
+            fasteners = None
+
+        lock_path = get_pip_install_lock_path(venv)
+        lock_key = str(lock_path)
+        with _locks['_install_thread_locks']:
+            thread_lock = _install_thread_locks.setdefault(lock_key, RLock())
+
+        with thread_lock:
+            depth_key = (get_ident(), lock_key)
+            depth = _install_lock_depths.get(depth_key, 0)
+            _install_lock_depths[depth_key] = depth + 1
+            try:
+                if depth:
+                    yield
+                    return
+                lock_path.parent.mkdir(parents=True, exist_ok=True)
+                process_lock = (
+                    fasteners.InterProcessLock(str(lock_path))
+                    if fasteners is not None
+                    else _stdlib_interprocess_lock(lock_path)
+                )
+                with process_lock:
+                    yield
+            finally:
+                if depth:
+                    _install_lock_depths[depth_key] -= 1
+                else:
+                    _install_lock_depths.pop(depth_key, None)
+
+    return _locked()
+
+
+def _locked_pip_install(func):
+    """Lock package mutations while preserving `pip_install()`'s public signature."""
+    import functools
+
+    @functools.wraps(func)
+    def _wrapped(*args, **kw):
+        if kw.get('dry_run', False):
+            return func(*args, **kw)
+        with _pip_install_lock(kw.get('venv', 'mrsm')):
+            return func(*args, **kw)
+
+    return _wrapped
 
 
 def get_module_path(
@@ -774,6 +901,73 @@ def get_pip(
     return subprocess.call(cmd_list, env=_get_pip_os_env(color=color)) == 0
 
 
+def get_pip_install_plan(
+    *install_names: str,
+    args: Optional[List[str]] = None,
+    requirements_file_path: Union[pathlib.Path, str, None] = None,
+    venv: Optional[str] = 'mrsm',
+    _uninstall: bool = False,
+    _install_uv_pip: bool = True,
+    _use_uv_pip: bool = True,
+    debug: bool = False,
+) -> Dict[str, Any]:
+    """Return a read-only summary of a package installation request."""
+    try:
+        import pip  # noqa: F401
+        have_pip = True
+    except ImportError:
+        have_pip = venv_contains_package('pip', venv=None, debug=debug)
+
+    try:
+        import uv
+        uv_bin = str(uv.find_uv_bin())
+    except (ImportError, FileNotFoundError):
+        uv_bin = None
+
+    use_uv_pip = bool(
+        _use_uv_pip
+        and uv_bin
+        and venv is not None
+        and is_uv_enabled()
+    )
+    requested_packages = [
+        (
+            get_install_no_version(install_name)
+            if _uninstall or install_name.startswith(_MRSM_PACKAGE_ARCHIVES_PREFIX)
+            else install_name
+        )
+        for install_name in install_names
+    ]
+    auto_install_enabled = os.environ.get('MRSM_NO_AUTO_INSTALL', '').lower() not in (
+        '1', 'true', 'yes'
+    )
+    return {
+        'operation': 'uninstall' if _uninstall else 'install',
+        'environment': venv,
+        'target': str(_get_pip_install_target_path(venv)),
+        'packages': requested_packages,
+        'requirements_file': (
+            str(pathlib.Path(requirements_file_path).resolve())
+            if requirements_file_path is not None
+            else None
+        ),
+        'args': list(args if args is not None else ([] if _uninstall else ['--upgrade'])),
+        'installer': 'uv' if use_uv_pip else 'pip',
+        'installer_available': bool(use_uv_pip or have_pip),
+        'pip_fallback': bool(use_uv_pip and have_pip),
+        'auto_install_enabled': auto_install_enabled,
+        'would_bootstrap_uv': bool(
+            not use_uv_pip
+            and not uv_bin
+            and have_pip
+            and _install_uv_pip
+            and is_uv_enabled()
+        ),
+        'lock_path': str(get_pip_install_lock_path(venv)),
+    }
+
+
+@_locked_pip_install
 def pip_install(
     *install_names: str,
     args: Optional[List[str]] = None,
@@ -789,6 +983,7 @@ def pip_install(
     _use_uv_pip: bool = True,
     color: bool = True,
     silent: bool = False,
+    dry_run: bool = False,
     debug: bool = False,
 ) -> bool:
     """
@@ -833,6 +1028,9 @@ def pip_install(
     silent: bool, default False
         If `True`, skip printing messages.
 
+    dry_run: bool, default False
+        If `True`, print the read-only installation plan without changing the environment.
+
     debug: bool, default False
         Verbosity toggle.
 
@@ -844,6 +1042,22 @@ def pip_install(
     import meerschaum.config.paths as paths
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
+    if dry_run:
+        import json
+        plan = get_pip_install_plan(
+            *install_names,
+            args=args,
+            requirements_file_path=requirements_file_path,
+            venv=venv,
+            _uninstall=_uninstall,
+            _install_uv_pip=_install_uv_pip,
+            _use_uv_pip=_use_uv_pip,
+            debug=debug,
+        )
+        if not silent:
+            print(json.dumps(plan, indent=2))
+        return True
+
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
     ANSI = True if color else False
@@ -1050,6 +1264,10 @@ def pip_install(
             print(f"{rc=}")
         success = rc == 0
 
+    if success:
+        with _locks['_is_installed_first_check']:
+            _is_installed_first_check.clear()
+
     msg = (
         "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 
         else "Failed to " + ('un' if _uninstall else '') + "install packages."
@@ -1222,6 +1440,7 @@ def run_python_package(
             foreground=foreground,
             as_proc=as_proc,
             capture_output=capture_output,
+            env=env_dict,
             **kw
         )
     except Exception:
@@ -1326,6 +1545,11 @@ def attempt_import(
 
     import importlib.util
 
+    global emitted_auto_install_warning
+    no_auto_install_env_var = 'MRSM_NO_AUTO_INSTALL'
+    if os.environ.get(no_auto_install_env_var, '').lower() in ('1', 'true', 'yes'):
+        install = False
+
     ### to prevent recursion, check if parent Meerschaum package is being imported
     if names == ('meerschaum',):
         return _import_module('meerschaum')
@@ -1386,9 +1610,10 @@ def attempt_import(
                 ) is not None
             )
         else:
+            installed_cache_key = (name, venv, split, allow_outside_venv)
             if check_is_installed:
                 with _locks['_is_installed_first_check']:
-                    if not _is_installed_first_check.get(name, False):
+                    if not _is_installed_first_check.get(installed_cache_key, False):
                         package_is_installed = is_installed(
                             name,
                             venv = venv,
@@ -1396,18 +1621,31 @@ def attempt_import(
                             allow_outside_venv = allow_outside_venv,
                             debug = debug,
                         )
-                        _is_installed_first_check[name] = package_is_installed
+                        if package_is_installed:
+                            _is_installed_first_check[installed_cache_key] = True
                     else:
-                        package_is_installed = _is_installed_first_check[name]
+                        package_is_installed = True
             else:
-                package_is_installed = _is_installed_first_check.get(
+                package_is_installed = venv_contains_package(
                     name,
-                    venv_contains_package(name, venv=venv, split=split, debug=debug)
+                    venv=venv,
+                    split=split,
+                    debug=debug,
                 )
             found_module = package_is_installed
 
         if not found_module:
             if install:
+                with _locks['emitted_auto_install_warning']:
+                    if warn and not emitted_auto_install_warning:
+                        emitted_auto_install_warning = True
+                        warn_function(
+                            "Meerschaum is installing a missing runtime dependency. "
+                            + f"Set {no_auto_install_env_var}=1 to disable automatic downloads.",
+                            ImportWarning,
+                            stacklevel=3,
+                            color=False,
+                        )
                 if not pip_install(
                     install_name,
                     venv = venv,
@@ -1427,7 +1665,11 @@ def attempt_import(
                 warn_function(
                     (f"\n\nMissing package '{name}' from virtual environment '{venv}'; "
                      + "some features will not work correctly."
-                     + "\n\nSet install=True when calling attempt_import.\n"),
+                     + (
+                         f"\n\nUnset {no_auto_install_env_var} to allow package installation.\n"
+                         if no_auto_install_env_var in os.environ
+                         else "\n\nSet install=True when calling attempt_import.\n"
+                     )),
                     ImportWarning,
                     stacklevel = 3,
                     color = False,

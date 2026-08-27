@@ -18,7 +18,11 @@ from typing import Dict
 _MRSM_PACKAGE_ARCHIVES_PREFIX: str = "https://meerschaum.io/files/archives/wheels/"
 
 packages: Dict[str, Dict[str, str]] = {
-    'required': {},
+    ### Runtime package installation is serialized with `InterProcessLock`, so
+    ### fasteners must be available before optional dependencies are bootstrapped.
+    'required': {
+        'fasteners'                  : 'fasteners>=0.19.0',
+    },
     'minimal': {},
     'formatting': {
         'pprintpp'                   : 'pprintpp>=0.4.0',
@@ -50,7 +54,6 @@ packages: Dict[str, Dict[str, str]] = {
         'packaging'                  : 'packaging>=21.3.0',
         'prompt_toolkit'             : 'prompt-toolkit>=3.0.39',
         'more_itertools'             : 'more-itertools>=8.7.0',
-        'fasteners'                  : 'fasteners>=0.19.0',
         'virtualenv'                 : 'virtualenv>=20.1.0',
         'attrs'                      : 'attrs>=24.2.0',
         'uv'                         : 'uv>=0.2.11',
@@ -59,10 +62,6 @@ packages: Dict[str, Dict[str, str]] = {
         'importlib_metadata'         : 'importlib-metadata>=4.12.0',
     },
     '_internal'                      : {
-        'apscheduler'                : (
-                                       f"{_MRSM_PACKAGE_ARCHIVES_PREFIX}"
-                                       "apscheduler-4.0.0a6.post8+mrsm-py3-none-any.whl>=4.0.0a6"
-        ),
         'dataclass_wizard'           : 'dataclass-wizard>=0.35.0',
     },
     'jobs': {
@@ -84,6 +83,8 @@ packages: Dict[str, Dict[str, str]] = {
     'drivers-extras': {
         'pyodbc'                     : 'pyodbc>=4.0.30',
         'oracledb'                   : 'oracledb>=2.5.0',
+        'adbc_driver_postgresql'     : 'adbc-driver-postgresql>=1.7.0',
+        'adbc_driver_sqlite'         : 'adbc-driver-sqlite>=1.7.0',
     },
     'cli': {
         'pgcli'                      : 'pgcli>=3.1.0',
@@ -96,9 +97,13 @@ packages: Dict[str, Dict[str, str]] = {
         'pyproj'                     : 'pyproj>=3.7.1',
         'geopandas'                  : 'geopandas>=1.0.1', 
         'shapely'                    : 'shapely>=2.0.7',
+        'geoarrow'                   : 'geoarrow-types>=0.3.0',
     },
     'stack': {
         'compose'                    : 'docker-compose>=1.29.2',
+    },
+    'compose': {
+        'envyaml'                    : 'envyaml>=1.10.211231',
     },
     'build': {
         'cx_Freeze'                  : 'cx_Freeze>=7.0.0',
@@ -135,6 +140,7 @@ packages['sql'] = {
     'numpy'                          : 'numpy>=2.3.1',
     'pandas'                         : 'pandas[parquet]>=3.0.0',
     'pyarrow'                        : 'pyarrow>=20.0.0',
+    'polars'                         : 'polars>=1.43.2',
     'dask'                           : 'dask[complete]>=2024.12.1',
     'partd'                          : 'partd>=1.4.2',
     'pytz'                           : 'pytz',
@@ -148,6 +154,12 @@ packages['sql'] = {
 packages['sql'].update(packages['drivers'])
 packages['sql'].update(packages['core'])
 packages['sql'].update(packages['gis'])
+packages['polars'] = {
+    'polars'                         : packages['sql']['polars'],
+    'pandas'                         : packages['sql']['pandas'],
+    'pyarrow'                        : packages['sql']['pyarrow'],
+    'geoarrow'                       : packages['gis']['geoarrow'],
+}
 packages['dash'] = {
     'flask_compress'                 : 'Flask-Compress>=1.17.0',
     'dash'                           : 'dash>=4.1.0',

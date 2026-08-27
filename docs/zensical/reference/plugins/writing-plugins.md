@@ -764,6 +764,8 @@ Because the same function may be registered as both a pre- and a post-hook, bran
 
 It is **not** called on every sync or action — use it strictly for work that should happen once at install time. It must return a `SuccessTuple` (a `#!python (bool, str)` tuple); a `#!python False` result is reported to the user and signals that setup failed.
 
+If dependency installation or `#!python setup()` fails during a plugin upgrade, Meerschaum restores the previous plugin source and virtual environment.
+
 Typical uses:
 
 - **Verify dependencies / external tooling** that `required` can't express (a system binary, a driver, a service being reachable).
@@ -864,6 +866,8 @@ Generally, using built-in or custom arguments mentioned above should cover almos
 Plugins are just Python modules, so you can write custom code and share it amongst other plugins (i.e. a [library plugin](/reference/plugins/types-of-plugins/#-library-plugins)).
 
 At run time, plugins are imported under the global `plugins` namespace, but you'll probably be testing plugins directly when the `plugins` namespace isn't created. That's where [`Plugin` objects](https://docs.meerschaum.io/#meerschaum.Plugin) come in handy: they contain a number of convenience functions so you can cross-pollinate between plugins.
+
+Actions, hooks, API endpoints, and web pages defined in submodules belong to the root plugin. For example, decorated functions in `plugins.foo.routes` are unloaded and reloaded with `plugins.foo`, so a submodule does not need separate lifecycle management.
 
 ### Package Management
 

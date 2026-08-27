@@ -6,7 +6,11 @@
 Test the scheduling functions.
 """
 
+import asyncio
+import threading
+import time
 from datetime import datetime, timezone
+from dateutil.tz import gettz
 import pytest
 
 @pytest.mark.parametrize(
@@ -23,6 +27,11 @@ import pytest
             datetime(2024, 5, 1, 0, 2, 0, tzinfo=timezone.utc),
         ]),
         ("daily starting May 1, 2024", [
+            datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 2, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 3, 0, 0, 0, tzinfo=timezone.utc),
+        ]),
+        ("daily beginning 2024-05-01", [
             datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 2, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 3, 0, 0, 0, tzinfo=timezone.utc),
@@ -92,6 +101,16 @@ import pytest
             datetime(2024, 5, 6, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 7, 0, 0, 0, tzinfo=timezone.utc),
         ]),
+        ("Monday and daily starting 2024-05-03", [
+            datetime(2024, 5, 6, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 13, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 20, 0, 0, 0, tzinfo=timezone.utc),
+        ]),
+        ("January and monthly starting 2024-01-01", [
+            datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        ]),
         ("mon-fri and every 5 minutes starting 2024-05-03", [
             datetime(2024, 5, 3, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 3, 0, 5, 0, tzinfo=timezone.utc),
@@ -140,3 +159,218 @@ def test_parse_schedule(schedule, expected_datetimes):
     for expected_dt in expected_datetimes:
         next_dt = trigger.next()
         assert next_dt == expected_dt
+
+
+def test_calendar_schedules_skip_invalid_dates():
+    """Month- and year-based schedules retain their original calendar day."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    monthly = parse_schedule('monthly starting 2024-01-31')
+    assert [monthly.next() for _ in range(3)] == [
+        datetime(2024, 1, 31, tzinfo=timezone.utc),
+        datetime(2024, 3, 31, tzinfo=timezone.utc),
+        datetime(2024, 5, 31, tzinfo=timezone.utc),
+    ]
+
+    yearly = parse_schedule('yearly starting 2024-02-29')
+    assert [yearly.next() for _ in range(2)] == [
+        datetime(2024, 2, 29, tzinfo=timezone.utc),
+        datetime(2028, 2, 29, tzinfo=timezone.utc),
+    ]
+
+    monthly_at_time = parse_schedule('monthly starting 2024-01-01 12:34:56')
+    assert monthly_at_time.next() == datetime(
+        2024, 1, 1, 12, 34, 56, tzinfo=timezone.utc,
+    )
+
+    yearly_at_time = parse_schedule('yearly starting 2025-07-01 12:00')
+    assert [yearly_at_time.next() for _ in range(2)] == [
+        datetime(2025, 7, 1, 12, tzinfo=timezone.utc),
+        datetime(2026, 7, 1, 12, tzinfo=timezone.utc),
+    ]
+
+
+def test_second_intervals_with_cron_fragments_cross_minutes():
+    """Second intervals combined with cron fragments must not pin the minute."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    trigger = parse_schedule(
+        'every 5 seconds and mon-fri',
+        now=datetime(2024, 5, 3, 0, 0, 0, 123456, tzinfo=timezone.utc),
+    )
+    fire_times = [trigger.next() for _ in range(13)]
+    assert fire_times[-2:] == [
+        datetime(2024, 5, 3, 0, 0, 55, 123456, tzinfo=timezone.utc),
+        datetime(2024, 5, 3, 0, 1, 0, 123456, tzinfo=timezone.utc),
+    ]
+
+
+@pytest.mark.parametrize(
+    'schedule',
+    [
+        'every 0.01 seconds starting 2024-01-01',
+        '* * * * * starting 2024-01-01',
+        'monthly starting 2024-01-31 12:34:56',
+        'every 5 seconds or mon-fri starting 2024-01-01',
+        'every 5 seconds and mon-fri starting 2024-01-01',
+    ],
+)
+def test_triggers_jump_past_missed_occurrences(schedule):
+    """Past schedules find the next future occurrence without replaying each miss."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    trigger = parse_schedule(schedule)
+    after = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+    assert trigger.next() <= after
+    assert trigger.next_after(after) > after
+
+
+def test_cron_skips_nonexistent_dst_time():
+    """A wall-clock time skipped by spring-forward must not be fabricated."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    eastern = gettz('America/New_York')
+    trigger = parse_schedule(
+        '30 2 * * *',
+        now=datetime(2024, 3, 9, 2, 30, tzinfo=eastern),
+    )
+    assert trigger.next() == datetime(2024, 3, 9, 2, 30, tzinfo=eastern)
+    assert trigger.next() == datetime(2024, 3, 11, 2, 30, tzinfo=eastern)
+
+
+def test_cron_repeats_ambiguous_dst_time():
+    """A wall-clock time repeated by fall-back must fire for both occurrences."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    eastern = gettz('America/New_York')
+    trigger = parse_schedule(
+        '30 1 * * *',
+        now=datetime(2024, 11, 3, 1, 30, tzinfo=eastern),
+    )
+    first = trigger.next()
+    second = trigger.next()
+    assert first == datetime(2024, 11, 3, 1, 30, tzinfo=eastern, fold=0)
+    assert second == datetime(2024, 11, 3, 1, 30, tzinfo=eastern, fold=1)
+    assert second.timestamp() - first.timestamp() == 3600
+
+
+def test_cron_numeric_weekdays_retain_crontab_semantics():
+    """Numeric cron weekdays use 0 and 7 for Sunday, while 1 is Monday."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    sunday = parse_schedule('0 0 * * 0', now=datetime(2024, 1, 1, tzinfo=timezone.utc))
+    monday = parse_schedule('0 0 * * 1', now=datetime(2024, 1, 1, tzinfo=timezone.utc))
+    assert sunday.next() == datetime(2024, 1, 7, tzinfo=timezone.utc)
+    assert monday.next() == datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+
+def test_cron_day_fields_and_steps_retain_crontab_semantics():
+    """Restricted day fields are ORed, and numeric steps begin with Sunday."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    day_or_friday = parse_schedule(
+        '0 0 13 * 5',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+    stepped_weekdays = parse_schedule(
+        '0 0 * * */2',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+    stepped_days = parse_schedule(
+        '0 0 */2 * *',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+
+    assert day_or_friday.next() == datetime(2024, 5, 3, tzinfo=timezone.utc)
+    assert stepped_weekdays.next() == datetime(2024, 5, 2, tzinfo=timezone.utc)
+    assert stepped_days.next() == datetime(2024, 5, 1, tzinfo=timezone.utc)
+    assert stepped_days.next() == datetime(2024, 5, 3, tzinfo=timezone.utc)
+
+
+def test_crontab_reference_examples():
+    """Examples from crontab(5) retain their standard field behavior."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    minute_step = parse_schedule(
+        '0/35 * * * *',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+    weekday_step = parse_schedule(
+        '0 0 * * 1/2',
+        now=datetime(2024, 5, 6, tzinfo=timezone.utc),
+    )
+    every_other_hour = parse_schedule(
+        '23 0-23/2 * * *',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+    sunday = parse_schedule(
+        '5 4 * * sun',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+    first_fifteenth_or_friday = parse_schedule(
+        '30 4 1,15 * 5',
+        now=datetime(2024, 5, 1, tzinfo=timezone.utc),
+    )
+
+    assert [minute_step.next() for _ in range(3)] == [
+        datetime(2024, 5, 1, 0, 0, tzinfo=timezone.utc),
+        datetime(2024, 5, 1, 0, 35, tzinfo=timezone.utc),
+        datetime(2024, 5, 1, 1, 0, tzinfo=timezone.utc),
+    ]
+    assert [weekday_step.next() for _ in range(4)] == [
+        datetime(2024, 5, 6, tzinfo=timezone.utc),
+        datetime(2024, 5, 8, tzinfo=timezone.utc),
+        datetime(2024, 5, 10, tzinfo=timezone.utc),
+        datetime(2024, 5, 12, tzinfo=timezone.utc),
+    ]
+    assert [every_other_hour.next() for _ in range(2)] == [
+        datetime(2024, 5, 1, 0, 23, tzinfo=timezone.utc),
+        datetime(2024, 5, 1, 2, 23, tzinfo=timezone.utc),
+    ]
+    assert sunday.next() == datetime(2024, 5, 5, 4, 5, tzinfo=timezone.utc)
+    assert [first_fifteenth_or_friday.next() for _ in range(3)] == [
+        datetime(2024, 5, 1, 4, 30, tzinfo=timezone.utc),
+        datetime(2024, 5, 3, 4, 30, tzinfo=timezone.utc),
+        datetime(2024, 5, 10, 4, 30, tzinfo=timezone.utc),
+    ]
+
+
+def test_sparse_cron_schedules():
+    """Sparse schedules jump across rejected dates without changing results."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    annual = parse_schedule('0 0 1 1 *', now=datetime(2024, 1, 2, tzinfo=timezone.utc))
+    leap_day = parse_schedule('0 0 29 2 *', now=datetime(2024, 3, 1, tzinfo=timezone.utc))
+    assert annual.next() == datetime(2025, 1, 1, tzinfo=timezone.utc)
+    assert leap_day.next() == datetime(2028, 2, 29, tzinfo=timezone.utc)
+
+
+def test_schedule_function_stops_without_overlapping_runs():
+    """Stopping wakes the scheduler, and slow functions never overlap themselves."""
+    from meerschaum.utils.schedule import schedule_function, _stop_scheduler
+
+    state = {'active': 0, 'max_active': 0, 'calls': 0}
+    started = threading.Event()
+
+    def slow_function():
+        state['active'] += 1
+        state['max_active'] = max(state['max_active'], state['active'])
+        state['calls'] += 1
+        started.set()
+        time.sleep(0.03)
+        state['active'] -= 1
+
+    thread = threading.Thread(
+        target=schedule_function,
+        args=(slow_function, 'every 0.01 seconds'),
+        daemon=True,
+    )
+    thread.start()
+    assert started.wait(1.0)
+    time.sleep(0.08)
+    asyncio.run(_stop_scheduler())
+    thread.join(1.0)
+
+    assert not thread.is_alive()
+    assert state['calls'] >= 2
+    assert state['max_active'] == 1

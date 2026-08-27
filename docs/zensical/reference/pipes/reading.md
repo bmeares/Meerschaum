@@ -27,6 +27,20 @@ df = pipe.get_data(params={'station': ['KGMU', 'KATL']})
 df = pipe.get_data(limit=100)
 ```
 
+Pandas remains the default for backwards compatibility. To work in Polars, install the optional
+extra and request a Polars DataFrame explicitly:
+
+```bash
+pip install 'meerschaum[polars]'
+```
+
+```python
+polars_df = pipe.get_data(as_polars=True)
+```
+
+Pass `as_polars=True` with `as_chunks=True` to yield Polars DataFrames. It cannot be combined
+with `as_docs=True` or `as_dask=True`.
+
 **Chunked iteration** — pass `as_chunks=True` (alias `as_iterator=True`) to get a generator of DataFrames, each covering a time-bound slice. Useful for large datasets that don't fit in memory:
 
 ```python

@@ -726,6 +726,80 @@ def test_sync_dask_dataframe(flavor: str):
 
 
 @pytest.mark.parametrize("flavor", get_flavors())
+def test_sync_polars_dataframe(flavor: str):
+    """Sync eager, lazy, and chunked Polars frames and request Polars output."""
+    pl = pytest.importorskip('polars')
+    pd = mrsm.attempt_import('pandas')
+    conn = conns[flavor]
+    pipe = mrsm.Pipe(
+        'polars', 'demo',
+        columns={'datetime': 'dt', 'id': 'id'},
+        dtypes={'dt': 'datetime', 'id': 'int', 'payload': 'json'},
+        instance=conn,
+    )
+    pipe.delete()
+
+    success, msg = pipe.sync(pl.DataFrame({
+        'dt': ['2023-01-01'], 'id': [1], 'payload': ['{"kind":"dict"}'],
+    }))
+    assert success, msg
+    success, msg = pipe.sync(pl.LazyFrame({
+        'dt': ['2023-01-02'], 'id': [2], 'payload': ['["list",null]'],
+    }))
+    assert success, msg
+    success, msg = pipe.sync(iter([
+        pl.DataFrame({'dt': ['2023-01-03'], 'id': [3], 'payload': [None]}),
+        pl.DataFrame({'dt': ['2023-01-04'], 'id': [4], 'payload': ['{"chunk":true}']}),
+    ]))
+    assert success, msg
+
+    pd_df = pipe.get_data()
+    pl_df = pipe.get_data(as_polars=True)
+    assert isinstance(pd_df, pd.DataFrame)
+    assert isinstance(pl_df, pl.DataFrame)
+    assert pl_df['id'].to_list() == [1, 2, 3, 4]
+    assert pd_df['payload'].tolist() == [
+        {'kind': 'dict'}, ['list', None], None, {'chunk': True},
+    ]
+    assert pl_df.schema['payload'].ext_name() == 'arrow.json'
+    assert all(
+        isinstance(chunk, pl.DataFrame)
+        and chunk.schema['payload'].ext_name() == 'arrow.json'
+        for chunk in pipe.get_data(
+            as_polars=True,
+            as_iterator=True,
+            chunk_interval=1440,
+        )
+    )
+    with pytest.raises(ValueError):
+        pipe.get_data(as_polars=True, as_docs=True)
+    with pytest.raises(ValueError):
+        pipe.get_data(as_polars=True, as_dask=True)
+
+
+def test_sync_polars_upsert():
+    """Polars input preserves the existing SQL upsert contract."""
+    pl = pytest.importorskip('polars')
+    pipe = mrsm.Pipe(
+        'polars', 'upsert',
+        columns={'primary': 'id'},
+        dtypes={'id': 'int', 'value': 'int'},
+        parameters={'upsert': True},
+        instance=conns['sqlite'],
+    )
+    pipe.delete()
+    success, msg = pipe.sync(pl.DataFrame({'id': [1, 2], 'value': [10, 20]}))
+    assert success, msg
+    success, msg = pipe.sync(pl.DataFrame({'id': [1, 3], 'value': [99, 30]}))
+    assert success, msg
+    assert pipe.get_data().sort_values('id').to_dict(orient='records') == [
+        {'id': 1, 'value': 99},
+        {'id': 2, 'value': 20},
+        {'id': 3, 'value': 30},
+    ]
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
 def test_sync_null_indices(flavor: str):
     """
     Test that null indices are accounted for.

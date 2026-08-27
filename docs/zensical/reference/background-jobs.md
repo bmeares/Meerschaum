@@ -87,8 +87,8 @@ success, msg = job.start()
 
 ## ⏲️ Schedules
 
-!!! warning ""
-    As of Meerschaum v2.2.0, scheduling is handled by the library [APScheduler](https://apscheduler.readthedocs.io) rather than [Rocketry](https://rocketry.readthedocs.io/en/stable/condition_syntax/index.html).
+Meerschaum includes its own small schedule engine, so scheduled jobs do not require a separate
+scheduler package or service.
 
 You can run any command regularly with the flag `-s` or `--schedule` ― for example, `-s hourly` will execute the command once per hour. Below are the supported intervals:
 
@@ -124,7 +124,7 @@ Append the phrase `starting [time]` to a schedule to set the reference point. If
 
  Schedule | Description 
 ----------|-------------
- `every 10 minutes starting in 30 seconds` | Beginning 30 seconds from now, fire every 10 seconds.
+ `every 10 minutes starting in 30 seconds` | Beginning 30 seconds from now, fire every 10 minutes.
  `hourly starting 00:30` | Fire every hour on the 30th minute.
  `daily starting tomorrow 00:30` | Beginning at 30 minutes past midnight UTC, fire daily.
  `weekly starting Monday at 12:15 PM` | Fire every week on Monday at 12:15 PM.
@@ -142,7 +142,7 @@ For more fine-grained control, you may specify your schedule in a [`cron`](https
 [minute] [hour] [day] [month] [week]
 ```
 
-For example, the schedule `30 * * may-aug mon-fri` runs once per hour on the 30th minute, but only on weekdays in the months May through August. See [APScheduler](https://apscheduler.readthedocs.io/en/master/api.html#apscheduler.triggers.cron.CronTrigger) for additional documentation.
+For example, the schedule `30 * * may-aug mon-fri` runs once per hour on the 30th minute, but only on weekdays in the months May through August. Fields accept `*`, comma-separated values, ranges, steps, month names, and weekday names. Numeric weekdays follow crontab conventions: `0` and `7` are Sunday, and `1` is Monday.
 
 You may find it more readable to achieve similar results by combining fragments of `cron` schedules with interval schedules (e.g. `daily and mon-fri`). Read below to see what's possible:
 
@@ -221,7 +221,7 @@ Next 5 timestamps for schedule 'daily and mon-fri starting May 2, 2024':
 
 ??? info "Schedules Python API"
 
-    You may also parse your schedules with the function [`parse_schedule()`](https://docs.meerschaum.io/meerschaum/utils/schedule.html#parse_schedule), which returns an [APScheduler `Trigger`](https://apscheduler.readthedocs.io/en/master/api.html#triggers).
+    You may also parse schedules with [`parse_schedule()`](https://docs.meerschaum.io/meerschaum/utils/schedule.html#parse_schedule). It returns a stateful trigger whose `next()` method returns the next timezone-aware timestamp.
 
     ```python
     from meerschaum.utils.schedule import parse_schedule

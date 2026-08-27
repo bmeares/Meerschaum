@@ -203,6 +203,35 @@ def test_to_datetime(input_dt_val, expected_output, kwargs):
         assert output_dt_val == expected_output
 
 
+def test_coerce_timezone_accepts_dask_series():
+    """Dask datetime series use Pandas scalar and exception types."""
+    dd = pytest.importorskip('dask.dataframe')
+    from meerschaum.utils.dtypes import coerce_timezone
+
+    series = dd.from_pandas(
+        pd.Series(pd.to_datetime(['2025-01-01'], utc=True)),
+        npartitions=1,
+    )
+    result = coerce_timezone(series, strip_utc=True).compute()
+    assert result.dt.tz is None
+
+
+def test_coerce_timezone_converts_arrow_backed_series_to_utc():
+    """Arrow-backed aware timestamps retain their instants while becoming UTC."""
+    from meerschaum.utils.dtypes import coerce_timezone
+
+    series = pd.Series(
+        pd.to_datetime(['2025-01-01 00:00:00'], utc=True).tz_convert('America/New_York'),
+        dtype='timestamp[us, tz=America/New_York][pyarrow]',
+    )
+    result = coerce_timezone(series)
+    assert str(result.dtype) == 'timestamp[us, tz=UTC][pyarrow]'
+    assert result.iloc[0] == pd.Timestamp('2025-01-01 00:00:00+00:00')
+    stripped_result = coerce_timezone(series, strip_utc=True)
+    assert str(stripped_result.dtype) == 'timestamp[us][pyarrow]'
+    assert stripped_result.iloc[0] == pd.Timestamp('2025-01-01 00:00:00')
+
+
 @pytest.mark.parametrize(
     "precision_unit,decrease,expected",
     [

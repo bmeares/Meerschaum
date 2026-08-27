@@ -11,6 +11,7 @@ import sys
 import argparse
 import json
 import re
+import pathlib
 from datetime import datetime, timedelta, timezone
 from meerschaum.utils.typing import Union, Dict, List, Any, Tuple, Callable
 from meerschaum.utils.misc import string_to_dict
@@ -202,6 +203,7 @@ groups['api'] = parser.add_argument_group(title='API options')
 groups['plugins'] = parser.add_argument_group(title='Plugins options')
 groups['tokens'] = parser.add_argument_group(title='Tokens options')
 groups['packages'] = parser.add_argument_group(title='Packages options')
+groups['compose'] = parser.add_argument_group(title='Compose options')
 groups['debug'] = parser.add_argument_group(title='Debugging options')
 groups['misc'] = parser.add_argument_group(title='Miscellaneous options')
 
@@ -498,6 +500,53 @@ groups['packages'].add_argument(
     '--venv', type=str,
     help="Choose which virtual environment to target when installing or removing packages.",
 )
+
+### Compose options
+groups['compose'].add_argument(
+    '--file', '--compose-file', type=pathlib.Path,
+    help="Specify an alternate compose file (default: mrsm-compose.yaml).",
+)
+groups['compose'].add_argument(
+    '--env-file', type=pathlib.Path,
+    help="Specify an alternate environment file (default: .env).",
+)
+groups['compose'].add_argument(
+    '--dry', action='store_true',
+    help="Update project pipes without syncing.",
+)
+groups['compose'].add_argument(
+    '--drop', '-v', '--volumes', action='store_true',
+    help="Drop named pipes when running `mrsm compose down`.",
+)
+groups['compose'].add_argument(
+    '--presync', action='store_true',
+    help="Run syncs before bringing up jobs.",
+)
+groups['compose'].add_argument(
+    '--no-jobs', action='store_true',
+    help="Exit before starting background jobs.",
+)
+groups['compose'].add_argument(
+    '--isolated', action='store_true',
+    help="Execute Compose commands in subprocesses.",
+)
+
+### The legacy compose plugin registers the same flags during import. Point its
+### argument group at the built-in group and mark these exact options as loaded
+### so installed copies remain quiet throughout the deprecation window.
+groups['plugin_compose'] = groups['compose']
+_seen_plugin_args['plugin_compose'] = {
+    str(options)
+    for options in (
+        ('--file', '--compose-file'),
+        ('--env-file',),
+        ('--dry',),
+        ('--drop', '-v', '--volumes'),
+        ('--presync',),
+        ('--no-jobs',),
+        ('--isolated',),
+    )
+}
 ### Debugging Arguments
 groups['debug'].add_argument(
     '--debug', action="store_true", help="Print debug statements (max verbosity)"
@@ -524,6 +573,9 @@ groups['misc'].add_argument(
 )
 groups['misc'].add_argument(
     '--skip-deps', action="store_true", help="Skip dependencies when installing plugins.",
+)
+groups['misc'].add_argument(
+    '--dry-run', action="store_true", help="Preview package installation without making changes.",
 )
 groups['misc'].add_argument(
     '-P', '--params', type=string_to_dict, help=(

@@ -214,14 +214,13 @@ def replace_env(env: Union[Dict[str, Any], None]):
         The new environment dictionary to be patched on `os.environ`.
     """
     if env is None:
-        try:
-            yield
-        except Exception:
-            pass
+        yield
         return
 
     from meerschaum.config import _config, set_config
     import meerschaum.config.paths as paths
+    import meerschaum.utils.venv as venv_utils
+    import sys
 
     old_environ = dict(os.environ)
     old_config = copy.deepcopy(_config())
@@ -229,6 +228,15 @@ def replace_env(env: Union[Dict[str, Any], None]):
     old_plugins_dir_paths = paths.PLUGINS_DIR_PATHS
     old_venvs_dir_path = paths.VIRTENV_RESOURCES_PATH
     old_config_dir_path = paths.CONFIG_DIR_PATH
+    with venv_utils.LOCKS['active_venvs'], venv_utils.LOCKS['sys.path']:
+        old_sys_path = list(sys.path)
+        old_active_venvs = set(venv_utils.active_venvs)
+        old_active_venvs_counts = dict(venv_utils.active_venvs_counts)
+        old_active_venvs_order = list(venv_utils.active_venvs_order)
+        old_threads_active_venvs = {
+            thread_id: dict(active_counts)
+            for thread_id, active_counts in venv_utils.threads_active_venvs.items()
+        }
 
     root_dir_env_var = STATIC_CONFIG['environment']['root']
     plugins_dir_env_var = STATIC_CONFIG['environment']['plugins']
@@ -312,6 +320,18 @@ def replace_env(env: Union[Dict[str, Any], None]):
 
             if replaced_config_dir:
                 paths.set_config_dir_path(old_config_dir_path)
+
+            ### Venv names are resolved relative to the current root. Restore both
+            ### the import path and activation bookkeeping after a scoped root swap.
+            with venv_utils.LOCKS['active_venvs'], venv_utils.LOCKS['sys.path']:
+                sys.path[:] = old_sys_path
+                venv_utils.active_venvs.clear()
+                venv_utils.active_venvs.update(old_active_venvs)
+                venv_utils.active_venvs_counts.clear()
+                venv_utils.active_venvs_counts.update(old_active_venvs_counts)
+                venv_utils.active_venvs_order[:] = old_active_venvs_order
+                venv_utils.threads_active_venvs.clear()
+                venv_utils.threads_active_venvs.update(old_threads_active_venvs)
 
             _config().clear()
             set_config(old_config)

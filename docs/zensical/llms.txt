@@ -35,7 +35,7 @@
 - [🤖 MCP Server](https://meerschaum.io/reference/mcp/): Meerschaum ships a Model Context Protocol server, so an AI agent can discover your pipes, read their data, and run actions without you writing any glue code.
 - [Tool Reference](https://meerschaum.io/reference/mcp/tools/): Every tool, resource, and prompt the MCP server exposes, generated
 - [Security](https://meerschaum.io/reference/mcp/security/): The MCP server hands an AI agent the same capabilities a person has at the CLI or web console. Treat a token for it exactly as you would a Meerschaum login.
-- [🎼 Compose](https://meerschaum.io/reference/compose/): The compose plugin does the same for Meerschaum as Docker Compose does for Docker: with Meerschaum Compose, you can consolidate everything into a single YAML file ― that includes all of the pipes and 
+- [🎼 Compose](https://meerschaum.io/reference/compose/): Meerschaum Compose does the same for Meerschaum as Docker Compose does for Docker: you can consolidate everything into a single YAML file ― including all of the pipes and configuration needed for your
 - [⏯️ Actions](https://meerschaum.io/reference/actions/): To see available actions, run help or show actions.
 - [👷 Background Jobs](https://meerschaum.io/reference/background-jobs/): Meerschaum's job management system lets you run any process in the background ― just add -d to any command. Thanks to the built-in scheduler, you no longer have to worry about manually configuring cro
 - [🔧 Data Analysis Tools](https://meerschaum.io/reference/data-analysis-tools/): Meerschaum comes with a pre-configured data visualization stack so that you can spend your time on analysis rather than configuring servers.
@@ -52,7 +52,7 @@
 - [📚 Tutorials](https://meerschaum.io/tutorials/): Want to learn Meerschaum hands-on? Follow the written, end-to-end walkthrough below, or scroll down to the video tutorials if you're more of a visual learner.
 
 ## News
-- [🪵 Changelog](https://meerschaum.io/news/changelog/): This is the current release cycle, so stay tuned for future releases!
+- [🪵 Changelog](https://meerschaum.io/news/changelog/): - Build Meerschaum Compose into core.
 - [📢 Announcements](https://meerschaum.io/news/announcements/): > 27 June 2022
 - [🌠 To-Do / Wish List](https://meerschaum.io/news/to-do/): Below are some ongoing tasks I have planned for Meerschaum. This is not an exhaustive list, and if you would like to contribute a feature idea or point out a bug, please start a discussion or open an 
 - [🤗 Acknowledgements](https://meerschaum.io/news/acknowledgements/): Meerschaum is built with the help of many incredible open source libraries. In the spirit of open source, I've chosen to release the project under the permissive Apache 2.0 license.

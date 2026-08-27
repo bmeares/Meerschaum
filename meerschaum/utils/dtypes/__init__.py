@@ -187,14 +187,18 @@ def are_dtypes_equal(
         return True
 
     numeric_dtypes = ('numeric', 'decimal', 'object')
-    if ldtype in numeric_dtypes and rdtype in numeric_dtypes:
+    if (
+        ldtype in numeric_dtypes or ldtype.startswith('decimal')
+    ) and (
+        rdtype in numeric_dtypes or rdtype.startswith('decimal')
+    ):
         return True
 
     uuid_dtypes = ('uuid', 'object')
     if ldtype in uuid_dtypes and rdtype in uuid_dtypes:
         return True
 
-    bytes_dtypes = ('bytes', 'object', 'binary')
+    bytes_dtypes = ('bytes', 'object', 'binary', 'large_binary')
     if ldtype in bytes_dtypes and rdtype in bytes_dtypes:
         return True
 
@@ -214,7 +218,7 @@ def are_dtypes_equal(
     if ldtype_found_dt_prefix and rdtype_found_dt_prefix:
         return True
 
-    string_dtypes = ('str', 'string', 'object')
+    string_dtypes = ('str', 'string', 'large_string', 'string_view', 'object')
     if ldtype in string_dtypes and rdtype in string_dtypes:
         return True
 
@@ -622,13 +626,16 @@ def coerce_timezone(
     dt_is_series = hasattr(dt, 'dtype') and hasattr(dt, '__module__')
     if dt_is_series:
         pandas = mrsm.attempt_import('pandas', lazy=False)
+        dt_timezone = getattr(getattr(dt, 'dt', None), 'tz', None)
+
+        if dt_timezone is not None:
+            utc_dt = dt if str(dt_timezone).lower() == 'utc' else dt.dt.tz_convert(timezone.utc)
+            return utc_dt.dt.tz_localize(None) if strip_utc else utc_dt
 
         if (
-            pandas.api.types.is_datetime64_any_dtype(dt) and (
-                (dt.dt.tz is not None and not strip_utc)
-                or
-                (dt.dt.tz is None and strip_utc)
-            )
+            pandas.api.types.is_datetime64_any_dtype(dt)
+            and dt_timezone is None
+            and strip_utc
         ):
             return dt
 
@@ -679,10 +686,7 @@ def to_datetime(
         If provided, enforce the provided precision unit.
     """
     pandas, dateutil_parser = mrsm.attempt_import('pandas', 'dateutil.parser', lazy=False)
-    is_dask = 'dask' in getattr(dt_val, '__module__', '')
-    dd = mrsm.attempt_import('dask.dataframe') if is_dask else None
     dt_is_series = hasattr(dt_val, 'dtype') and hasattr(dt_val, '__module__')
-    pd = pandas if dd is None else dd
     enforce_precision = precision_unit is not None
     precision_unit = precision_unit or 'microsecond'
     true_precision_unit = MRSM_PRECISION_UNITS_ALIASES.get(precision_unit, precision_unit)
@@ -715,7 +719,7 @@ def to_datetime(
             )
         )
 
-    if isinstance(dt_val, pd.Timestamp):
+    if isinstance(dt_val, pandas.Timestamp):
         dt_val_to_return = dt_val if not as_pydatetime else dt_val.to_pydatetime()
         return (
             coerce_timezone(dt_val_to_return)
@@ -742,7 +746,7 @@ def to_datetime(
                 if check_dtype(dtype, with_utc=True)
                 else dt_val.astype(f"datetime64[{precision_abbreviation}, UTC]")
             )
-        except pd.errors.OutOfBoundsDatetime:
+        except pandas.errors.OutOfBoundsDatetime:
             try:
                 next_precision = get_next_precision_unit(true_precision_unit)
                 next_precision_abbrevation = MRSM_PRECISION_UNITS_ABBREVIATIONS[next_precision]
@@ -772,13 +776,13 @@ def to_datetime(
         return new_dt_series
 
     try:
-        new_dt_val = pd.to_datetime(dt_val, utc=True, format='ISO8601')
+        new_dt_val = pandas.to_datetime(dt_val, utc=True, format='ISO8601')
         if new_dt_val.unit != precision_abbreviation:
             new_dt_val = new_dt_val.as_unit(precision_abbreviation)
         if as_pydatetime:
             return new_dt_val.to_pydatetime()
         return new_dt_val
-    except (pd.errors.OutOfBoundsDatetime, ValueError):
+    except (pandas.errors.OutOfBoundsDatetime, ValueError):
         pass
 
     new_dt_val = parse(dt_val)
