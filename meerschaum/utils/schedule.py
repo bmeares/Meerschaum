@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import traceback
-from datetime import date, datetime, time, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Callable, Any, Optional, List, Dict
@@ -22,7 +23,6 @@ FREQUENCY_ALIASES: Dict[str, str] = {
 }
 LOGIC_ALIASES: Dict[str, str] = {
     'and': '&', 'or': '|', ' through ': '-', ' thru ': '-', ' - ': '-',
-    'beginning': STARTING_KEYWORD,
 }
 CRON_DAYS_OF_WEEK: List[str] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 CRON_DAYS_OF_WEEK_ALIASES: Dict[str, str] = {
@@ -61,6 +61,11 @@ class _IntervalTrigger:
         )
         return self._last_fire_time
 
+    def next_after(self, after: datetime) -> datetime:
+        intervals = max(0, ((after - self.start_time) // self._interval) + 1)
+        self._last_fire_time = self.start_time + (self._interval * intervals)
+        return self._last_fire_time
+
 
 class _CalendarIntervalTrigger:
     """Month/year intervals which retain the original day and skip invalid dates."""
@@ -73,8 +78,7 @@ class _CalendarIntervalTrigger:
         self.timezone = start_time.tzinfo
         self.years = years
         self.months = months
-        # APScheduler's calendar trigger defaulted to midnight; retain that behavior.
-        self._time = time(tzinfo=self.timezone)
+        self._time = start_time.timetz()
         self._last_fire_date = None
 
     def next(self) -> datetime:
@@ -101,6 +105,13 @@ class _CalendarIntervalTrigger:
                 continue
             self._last_fire_date = next_date
             return candidate
+
+    def next_after(self, after: datetime) -> datetime:
+        self._last_fire_date = None
+        candidate = self.next()
+        while candidate <= after:
+            candidate = self.next()
+        return candidate
 
 
 def _expand_cron_field(
@@ -185,6 +196,7 @@ class _CronTrigger:
         day_of_week: str = '*',
         year: str = '*',
         second: str = '0',
+        microsecond: int = 0,
     ):
         self.start_time = start_time
         self.timezone = start_time.tzinfo
@@ -197,6 +209,7 @@ class _CronTrigger:
         self._weekdays_have_wildcard = '*' in str(day_of_week)
         self._years = None if str(year) == '*' else _expand_cron_field(str(year), 1, 9999)
         self._seconds = _expand_cron_field(str(second), 0, 59)
+        self._microsecond = microsecond
         self._step_seconds = 1 if len(self._seconds) > 1 else 60
         self._last_fire_time = None
 
@@ -223,11 +236,14 @@ class _CronTrigger:
 
     def next(self) -> Optional[datetime]:
         if self._last_fire_time is None:
-            candidate = self.start_time.replace(microsecond=0)
+            candidate = self.start_time.replace(microsecond=self._microsecond)
             if self._step_seconds == 60:
                 candidate = candidate.replace(second=min(self._seconds))
-                if candidate < self.start_time:
-                    candidate = datetime.fromtimestamp(candidate.timestamp() + 60, self.timezone)
+            if candidate < self.start_time:
+                candidate = datetime.fromtimestamp(
+                    candidate.timestamp() + self._step_seconds,
+                    self.timezone,
+                )
         else:
             candidate = datetime.fromtimestamp(
                 self._last_fire_time.timestamp() + self._step_seconds, self.timezone,
@@ -253,6 +269,25 @@ class _CronTrigger:
             )
         return None
 
+    def next_after(self, after: datetime) -> Optional[datetime]:
+        if after < self.start_time:
+            self._last_fire_time = None
+            return self.next()
+        after = after.astimezone(self.timezone)
+        candidate = after.replace(microsecond=self._microsecond)
+        if self._step_seconds == 60:
+            candidate = candidate.replace(second=min(self._seconds))
+        if candidate <= after:
+            candidate = datetime.fromtimestamp(
+                candidate.timestamp() + self._step_seconds,
+                self.timezone,
+            )
+        self._last_fire_time = datetime.fromtimestamp(
+            candidate.timestamp() - self._step_seconds,
+            self.timezone,
+        )
+        return self.next()
+
 
 class _OrTrigger:
     def __init__(self, triggers):
@@ -268,6 +303,10 @@ class _OrTrigger:
                 if fire_time == earliest:
                     self._next_fire_times[i] = self.triggers[i].next()
         return earliest
+
+    def next_after(self, after: datetime) -> Optional[datetime]:
+        self._next_fire_times = [trigger.next_after(after) for trigger in self.triggers]
+        return self.next()
 
 
 class _AndTrigger:
@@ -289,6 +328,10 @@ class _AndTrigger:
             if latest == earliest:
                 return earliest
         raise RuntimeError("Maximum iterations reached while combining schedules.")
+
+    def next_after(self, after: datetime) -> Optional[datetime]:
+        self._next_fire_times = [trigger.next_after(after) for trigger in self.triggers]
+        return self.next()
 
 
 class _Scheduler:
@@ -328,13 +371,8 @@ def schedule_function(
                 break
             now = datetime.now(next_time.tzinfo or timezone.utc)
             if next_time <= now:
-                while True:
-                    candidate = trigger.next()
-                    if candidate is None or candidate > now:
-                        pending_next_time = candidate
-                        schedule_finished = candidate is None
-                        break
-                    next_time = candidate
+                pending_next_time = trigger.next_after(now)
+                schedule_finished = pending_next_time is None
             if scheduler.stop_event.wait(max(0.0, (next_time - now).total_seconds())):
                 break
             try:
@@ -352,8 +390,9 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
     """Parse a schedule string into a stateful object with a ``next()`` method."""
     from meerschaum.utils.misc import items_str, is_int
 
+    schedule = _canonicalize_starting_keyword(schedule)
     starting_ts = parse_start_time(schedule, now=now)
-    schedule = schedule.split(STARTING_KEYWORD, maxsplit=1)[0].strip()
+    schedule = schedule.split(STARTING_KEYWORD, maxsplit=1)[0].strip().lower()
     for alias_keyword, true_keyword in SCHEDULE_ALIASES.items():
         schedule = schedule.replace(alias_keyword, true_keyword)
     if '&' in schedule and '|' in schedule:
@@ -397,8 +436,9 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
                     starting_ts,
                     **cron_kw,
                     hour='*',
-                    minute='*' if has_minutes else str(starting_ts.minute),
+                    minute='*' if (has_minutes or has_seconds) else str(starting_ts.minute),
                     second='*' if has_seconds else str(starting_ts.second),
+                    microsecond=starting_ts.microsecond,
                 )
             else:
                 cron_parts = schedule_part.split()
@@ -420,6 +460,7 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
     """Return the explicit starting datetime in ``schedule``, or ``now``."""
     from meerschaum.utils.dtypes import round_time
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
+    schedule = _canonicalize_starting_keyword(schedule)
     starting_parts = schedule.split(STARTING_KEYWORD)
     starting_str = ('now' if len(starting_parts) == 1 else starting_parts[-1]).strip()
     now = now or datetime.now(timezone.utc)
@@ -453,6 +494,15 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
     if not starting_ts.tzinfo:
         starting_ts = starting_ts.replace(tzinfo=timezone.utc)
     return starting_ts
+
+
+def _canonicalize_starting_keyword(schedule: str) -> str:
+    return re.sub(
+        rf'\b(?:{STARTING_KEYWORD}|beginning)\b',
+        STARTING_KEYWORD,
+        schedule,
+        flags=re.IGNORECASE,
+    )
 
 
 async def _stop_scheduler():

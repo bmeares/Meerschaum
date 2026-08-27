@@ -31,6 +31,11 @@ import pytest
             datetime(2024, 5, 2, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 3, 0, 0, 0, tzinfo=timezone.utc),
         ]),
+        ("daily beginning 2024-05-01", [
+            datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 2, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 3, 0, 0, 0, tzinfo=timezone.utc),
+        ]),
         ("weekly starting 2024-05-01", [
             datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 8, 0, 0, 0, tzinfo=timezone.utc),
@@ -95,6 +100,16 @@ import pytest
             datetime(2024, 5, 3, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 6, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2024, 5, 7, 0, 0, 0, tzinfo=timezone.utc),
+        ]),
+        ("Monday and daily starting 2024-05-03", [
+            datetime(2024, 5, 6, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 13, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 5, 20, 0, 0, 0, tzinfo=timezone.utc),
+        ]),
+        ("January and monthly starting 2024-01-01", [
+            datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
         ]),
         ("mon-fri and every 5 minutes starting 2024-05-03", [
             datetime(2024, 5, 3, 0, 0, 0, tzinfo=timezone.utc),
@@ -164,7 +179,50 @@ def test_calendar_schedules_skip_invalid_dates():
     ]
 
     monthly_at_time = parse_schedule('monthly starting 2024-01-01 12:34:56')
-    assert monthly_at_time.next() == datetime(2024, 1, 1, tzinfo=timezone.utc)
+    assert monthly_at_time.next() == datetime(
+        2024, 1, 1, 12, 34, 56, tzinfo=timezone.utc,
+    )
+
+    yearly_at_time = parse_schedule('yearly starting 2025-07-01 12:00')
+    assert [yearly_at_time.next() for _ in range(2)] == [
+        datetime(2025, 7, 1, 12, tzinfo=timezone.utc),
+        datetime(2026, 7, 1, 12, tzinfo=timezone.utc),
+    ]
+
+
+def test_second_intervals_with_cron_fragments_cross_minutes():
+    """Second intervals combined with cron fragments must not pin the minute."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    trigger = parse_schedule(
+        'every 5 seconds and mon-fri',
+        now=datetime(2024, 5, 3, 0, 0, 0, 123456, tzinfo=timezone.utc),
+    )
+    fire_times = [trigger.next() for _ in range(13)]
+    assert fire_times[-2:] == [
+        datetime(2024, 5, 3, 0, 0, 55, 123456, tzinfo=timezone.utc),
+        datetime(2024, 5, 3, 0, 1, 0, 123456, tzinfo=timezone.utc),
+    ]
+
+
+@pytest.mark.parametrize(
+    'schedule',
+    [
+        'every 0.01 seconds starting 2024-01-01',
+        '* * * * * starting 2024-01-01',
+        'monthly starting 2024-01-31 12:34:56',
+        'every 5 seconds or mon-fri starting 2024-01-01',
+        'every 5 seconds and mon-fri starting 2024-01-01',
+    ],
+)
+def test_triggers_jump_past_missed_occurrences(schedule):
+    """Past schedules find the next future occurrence without replaying each miss."""
+    from meerschaum.utils.schedule import parse_schedule
+
+    trigger = parse_schedule(schedule)
+    after = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+    assert trigger.next() <= after
+    assert trigger.next_after(after) > after
 
 
 def test_cron_skips_nonexistent_dst_time():
