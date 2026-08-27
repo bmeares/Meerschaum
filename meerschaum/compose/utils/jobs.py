@@ -9,7 +9,7 @@ Utility functions for job management.
 import copy
 import json
 import shlex
-from meerschaum.utils.typing import Dict, List, Any
+from meerschaum.utils.typing import Dict, List, Any, Optional
 
 
 def _get_explicit_job_name(command: List[str]):
@@ -21,10 +21,37 @@ def _get_explicit_job_name(command: List[str]):
     return None
 
 
-def job_belongs_to_project(job: Any, project_name: str) -> bool:
+### Flags which Compose adds when starting a job but which a running job's
+### recorded sysargs may or may not carry (`-d` is stripped by `Job`, `--debug`
+### is only present when the job was started from `compose up --debug`, and
+### `--no-daemon` is appended only under `isolation: subprocess`).
+NON_IDENTIFYING_FLAGS: List[str] = ['-d', '--daemon', '--no-daemon', '--debug']
+
+
+def _command_signature(sysargs: List[str]) -> List[str]:
+    """Return a job command without the flags that don't identify the workload."""
+    return [arg for arg in sysargs if arg not in NON_IDENTIFYING_FLAGS]
+
+
+def job_belongs_to_project(
+    job: Any,
+    project_name: str,
+    project_command: Optional[List[str]] = None,
+) -> bool:
     """Return whether a job's environment or command proves project ownership."""
+    from meerschaum._internal.static import STATIC_CONFIG
+    job_env = getattr(job, 'env', {}) or {}
+
+    ### A job started inside a Compose project records the project's name, so this
+    ### proof survives edits to the job's command. Only the name is persisted:
+    ### `MRSM__COMPOSE_CONFIG` carries the project's `config:` block (i.e. connector
+    ### credentials) and must never be written to a job's properties.
+    if job_env.get(STATIC_CONFIG['environment']['compose_project'], None) == project_name:
+        return True
+
+    ### Jobs built explicitly with `Job(..., env=...)` may carry the whole config.
     try:
-        compose_config = json.loads((getattr(job, 'env', {}) or {}).get('MRSM__COMPOSE_CONFIG', '{}'))
+        compose_config = json.loads(job_env.get('MRSM__COMPOSE_CONFIG', '{}'))
         if compose_config.get('project_name', None) == project_name:
             return True
     except Exception:
@@ -39,6 +66,17 @@ def job_belongs_to_project(job: Any, project_name: str) -> bool:
                 break
             if tag == project_name:
                 return True
+
+    ### A job whose command is byte-for-byte the command this project would run is
+    ### taken to be this project's job. This adopts jobs started before Compose
+    ### stamped the project name onto them, and jobs which set their own `-t` (e.g.
+    ### to select pipes by tag), for which Compose appends no `-t <project_name>`.
+    ### Two projects sharing a root directory and configuring the same job name with
+    ### the same command are indistinguishable here; the stamp above is what
+    ### separates them once each job has been started by its own project.
+    if project_command is not None and _command_signature(sysargs) == _command_signature(project_command):
+        return True
+
     return False
 
 def get_jobs_commands(compose_config: Dict[str, Any]) -> Dict[str, List[str]]:
@@ -138,12 +176,11 @@ def get_project_job_names(
     if not explicit_jobs:
         return project_job_names
 
-    for legacy_job_name, command_str in explicit_jobs.items():
-        command = shlex.split(command_str)
-        explicit_job_name = _get_explicit_job_name(command)
-        configured_job_name = explicit_job_name or legacy_job_name
+    for configured_job_name, command in get_jobs_commands(compose_config).items():
         explicit_job = jobs.get(configured_job_name, None)
-        if explicit_job is not None and job_belongs_to_project(explicit_job, project_name):
+        if explicit_job is None:
+            continue
+        if job_belongs_to_project(explicit_job, project_name, project_command=command):
             project_job_names.append(configured_job_name)
 
     return list(dict.fromkeys(project_job_names))

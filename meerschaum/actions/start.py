@@ -127,8 +127,10 @@ def _start_jobs(
           - `start job --name happy_seal`
                 Start the job 'happy_seal' but via the `--name` flag.
     """
+    import os
     import shlex
     from meerschaum.utils.warnings import warn, info
+    from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.daemon._names import get_new_daemon_name
     from meerschaum.jobs import (
         Job,
@@ -226,7 +228,21 @@ def _start_jobs(
             if not line
             else line
         )
-        job = Job(name, job_sysargs, executor_keys=executor_keys, delete_after_completion=rm)
+        ### Jobs started inside a Compose project record which project owns them.
+        compose_project_var = STATIC_CONFIG['environment']['compose_project']
+        compose_project_name = os.environ.get(compose_project_var, None)
+        job_env = (
+            {compose_project_var: compose_project_name}
+            if compose_project_name
+            else None
+        )
+        job = Job(
+            name,
+            job_sysargs,
+            env=job_env,
+            executor_keys=executor_keys,
+            delete_after_completion=rm,
+        )
 
         if not job.exists():
             try:

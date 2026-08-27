@@ -4,6 +4,19 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v4.0.2
+
+- **Recognize Compose jobs which declare their own tags.**  
+  `compose up` proved a job belonged to the project by the `-t <project_name>` tag it injects, and it injects that tag only when the job's command carries no tags of its own. A job which sets `-t` to select the pipes it syncs therefore read as foreign, and `up` aborted with *"Refusing to replace jobs not owned by this Compose project"* — after the pipe changes had already been applied. Adding the project name as a second tag isn't a fix: tags are an OR when selecting pipes, so the job would sync every pipe in the project.
+
+  A job started inside a project now records that project's name (`MRSM__COMPOSE_PROJECT`) in its properties, which proves ownership no matter how the job's command later changes. Only the name is persisted; `MRSM__COMPOSE_CONFIG` carries the project's `config:` block and never reaches a job. Jobs started before this release are adopted by their command: a job running exactly what the project would start is the project's job. Editing such a job's command in the YAML replaces it, as it did under the Compose plugin, because `Job` keeps an existing daemon's command and only a delete-and-recreate applies new arguments. A job running a different command under a configured name, with no stamp, is still refused, and `compose down` reaps the project's jobs instead of orphaning them.
+
+  ```yaml
+  jobs:
+    recompute: >
+      sync pipes -c sql:main -t recompute --loop --min-seconds 300
+  ```
+
 ### v4.0.1
 
 - **Start the configured jobs instead of syncing pipes in `compose up`.**  

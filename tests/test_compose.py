@@ -219,6 +219,88 @@ def test_compose_job_collisions_and_deletes_require_ownership():
     }) == []
 
 
+def test_compose_owns_jobs_which_declare_their_own_tags():
+    """A job command matching the project's own command is owned, tags notwithstanding."""
+    from meerschaum.compose.utils.jobs import get_jobs_commands, get_project_job_names
+
+    ### `-t recompute` selects the pipes to sync, so Compose never appends `-t alpha`
+    ### and the tag can't prove ownership.
+    config = {
+        'project_name': 'alpha',
+        'jobs': {'recompute': 'sync pipes -c sql:alpha -t recompute --loop'},
+    }
+    command = get_jobs_commands(config)['recompute']
+    assert '-t' in command and 'alpha' not in command
+
+    running_sysargs = [arg for arg in command if arg != '-d']
+    assert get_project_job_names(config, {
+        'recompute': _ComposeTestJob(running_sysargs),
+    }) == ['recompute']
+
+    ### A different workload under the same name is still foreign.
+    assert get_project_job_names(config, {
+        'recompute': _ComposeTestJob(
+            ['sync', 'pipes', '-c', 'sql:beta', '-t', 'recompute', '--loop', '--name', 'recompute', '-f']
+        ),
+    }) == []
+
+    ### `--no-daemon` (added under `isolation: subprocess`) doesn't identify the workload.
+    assert get_project_job_names(config, {
+        'recompute': _ComposeTestJob(running_sysargs + ['--no-daemon']),
+    }) == ['recompute']
+
+
+def test_compose_owns_jobs_it_stamped_after_a_command_edit():
+    """A job stamped with the project name stays owned once its command changes."""
+    from meerschaum._internal.static import STATIC_CONFIG
+    from meerschaum.compose.utils.jobs import get_project_job_names
+
+    compose_project_var = STATIC_CONFIG['environment']['compose_project']
+    config = {
+        'project_name': 'alpha',
+        'jobs': {'recompute': 'sync pipes -c sql:alpha -t recompute --loop --min-seconds 600'},
+    }
+
+    ### The running job predates the edit: neither its tags nor its command match.
+    stale_job = _ComposeTestJob(
+        ['sync', 'pipes', '-c', 'sql:alpha', '-t', 'recompute', '--loop',
+         '--min-seconds', '300', '--name', 'recompute', '-f']
+    )
+    assert get_project_job_names(config, {'recompute': stale_job}) == []
+
+    stale_job.env = {compose_project_var: 'alpha'}
+    assert get_project_job_names(config, {'recompute': stale_job}) == ['recompute']
+
+    ### Another project's stamp is not ownership.
+    stale_job.env = {compose_project_var: 'beta'}
+    assert get_project_job_names(config, {'recompute': stale_job}) == []
+
+
+def test_compose_stamps_the_project_name_onto_started_jobs(tmp_path, monkeypatch):
+    """A job started inside a Compose environment records its project's name."""
+    import meerschaum as mrsm
+    from meerschaum._internal.static import STATIC_CONFIG
+    from meerschaum.compose.utils.config import get_env_dict
+
+    compose_project_var = STATIC_CONFIG['environment']['compose_project']
+    env = get_env_dict({'project_name': 'alpha', '__file__': tmp_path / 'mrsm-compose.yaml'})
+    assert env[compose_project_var] == 'alpha'
+
+    ### The project's config carries credentials and must not reach the job.
+    monkeypatch.setenv(compose_project_var, 'alpha')
+    monkeypatch.setenv('MRSM__COMPOSE_CONFIG', json.dumps({'project_name': 'alpha'}))
+
+    job_name = 'test-compose-stamp'
+    success, _ = mrsm.entry(['show', 'version', '-d', '--name', job_name, '-f', '-y'])
+    try:
+        assert success
+        job = mrsm.Job(job_name)
+        assert job.env.get(compose_project_var, None) == 'alpha'
+        assert 'MRSM__COMPOSE_CONFIG' not in job.env
+    finally:
+        mrsm.entry(['delete', 'job', job_name, '-f', '-y'])
+
+
 def test_compose_down_deletes_only_exact_owned_job_names(monkeypatch):
     """Compose down never expands into the unfiltered `delete jobs` command."""
     import meerschaum.compose.subactions.down as down_module
