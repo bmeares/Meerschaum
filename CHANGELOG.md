@@ -7,14 +7,14 @@ This is the current release cycle, so stay tuned for future releases!
 ### v4.0.0
 
 - **Build Meerschaum Compose into the core package.**  
-  Existing projects keep working — the `compose` plugin is no longer needed.
+  `compose` is now a built-in action, so existing `mrsm-compose.yaml` projects run without installing the `compose` plugin. The subactions (`up`, `down`, `run`, `ps`, `logs`, `explain`, `init`), their flags, and arbitrary nested actions behave as before, as do project plugin discovery and per-project root and plugins directories. Each command loads the project's config, environment, and plugins for the duration of the subaction and restores the host process state afterward, so chaining commands does not leak project state. The code lives at `meerschaum.compose`, so plugin-era imports still resolve. If the old plugin is still installed, the built-in action takes precedence and warns once to uninstall it. New projects no longer copy the plugin into the project directory.
 
   ```bash
   mrsm compose up
   ```
 
 - **Add opt-in Polars support.**  
-  Pipes accept `polars.DataFrame` and `LazyFrame` (including chunk generators), and `Pipe.get_data()` may return Polars frames. Pandas remains the default.
+  Pipes accept `polars.DataFrame` and `LazyFrame` inputs, including chunk generators, and `Pipe.get_data()` may return Polars frames. Geometry columns use GeoArrow WKB and JSON columns use Arrow JSON. Pandas remains the default output and the plugin boundary.
 
   ```bash
   pip install 'meerschaum[polars]'
@@ -26,24 +26,24 @@ This is the current release cycle, so stay tuned for future releases!
   ```
 
 - **Replace the APScheduler fork with a built-in schedule engine.**  
-  Interval, calendar, cron, `starting`, and `and` / `or` schedule strings keep their behavior, now with correct DST handling and no overlapping runs.
+  Interval, calendar, cron, `starting`, and `and` / `or` schedule strings keep their behavior and the `trigger.next()` interface, now with correct DST handling and no overlapping runs of the same callback.
 
   ```bash
   mrsm sync pipes --schedule 'every 30 minutes starting 00:15'
   ```
 
 - **Make plugin registration and locking deterministic.**  
-  Decorators bind to the root plugin module even when defined in submodules, unloading clears every registry, and installs are guarded by an inter-process lock. Failed setup hooks and upgrades roll back.
+  Decorators bind to the root plugin module even when defined in submodules, unloading a plugin clears every registry it wrote to, and source and dependency installs are guarded by an inter-process lock. Failed setup hooks and failed upgrades restore the previous state instead of leaving a partial install.
 
 - **Control runtime package installation.**  
-  Block implicit downloads with `MRSM_NO_AUTO_INSTALL=1`, or preview them with `--dry-run`. Installation stays on by default and now prefers `uv`, falling back to `pip`.
+  Set `MRSM_NO_AUTO_INSTALL=1` to stop `attempt_import()` from downloading missing packages, or preview an install with `--dry-run`. Automatic installation stays on by default and now prefers `uv`, falling back to `pip`.
 
   ```bash
   mrsm install packages polars --dry-run
   ```
 
 - **Fix Dask, geometry, and Docker regressions.**  
-  Dask frames are detected during syncs and SQL reads, SQL geometry filtering skips columns absent from the frame, and Docker images build with the maintained buildx script.
+  Dask frames are detected during syncs and SQL reads, SQL geometry dtype filtering skips columns absent from the frame, and Docker images build with the maintained buildx script.
 
 ## 3.5.0 Releases
 
