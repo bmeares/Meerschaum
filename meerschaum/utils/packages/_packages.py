@@ -18,11 +18,9 @@ from typing import Dict
 _MRSM_PACKAGE_ARCHIVES_PREFIX: str = "https://meerschaum.io/files/archives/wheels/"
 
 packages: Dict[str, Dict[str, str]] = {
-    ### Runtime package installation is serialized with `InterProcessLock`, so
-    ### fasteners must be available before optional dependencies are bootstrapped.
-    'required': {
-        'fasteners'                  : 'fasteners>=0.19.0',
-    },
+    ### Meerschaum installs its own dependencies into the `mrsm` venv at runtime,
+    ### so the base package requires nothing.
+    'required': {},
     'minimal': {},
     'formatting': {
         'pprintpp'                   : 'pprintpp>=0.4.0',

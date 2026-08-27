@@ -227,12 +227,11 @@ def test_pip_install_lock_path_tracks_target_not_root(tmp_path, monkeypatch):
     assert packages._get_pip_install_target_path(None) == Path(sys.prefix)
 
 
-def test_stdlib_interprocess_lock_windows(monkeypatch, tmp_path):
-    """The source-checkout fallback must acquire and release a Windows byte lock."""
+def test_interprocess_lock_windows(monkeypatch, tmp_path):
+    """The Windows path must acquire and release a byte lock."""
     import sys
     import types
-    import platform
-    import meerschaum.utils.packages as packages
+    import meerschaum.utils.locks as locks
 
     calls = []
     fake_msvcrt = types.SimpleNamespace(
@@ -240,10 +239,10 @@ def test_stdlib_interprocess_lock_windows(monkeypatch, tmp_path):
         LK_UNLCK=2,
         locking=lambda fileno, operation, length: calls.append((operation, length)),
     )
-    monkeypatch.setattr(platform, 'system', lambda: 'Windows')
+    monkeypatch.setattr(locks, '_IS_WINDOWS', True)
     monkeypatch.setitem(sys.modules, 'msvcrt', fake_msvcrt)
 
-    with packages._stdlib_interprocess_lock(tmp_path / 'install.lock'):
-        pass
+    with locks.InterProcessLock(tmp_path / 'install.lock'):
+        assert calls == [(1, 1)]
 
-    assert calls == [(fake_msvcrt.LK_NBLCK, 1), (fake_msvcrt.LK_UNLCK, 1)]
+    assert calls == [(1, 1), (2, 1)]

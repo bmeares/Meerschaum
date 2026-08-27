@@ -1088,15 +1088,15 @@ class Daemon:
         return paths.LOGS_RESOURCES_PATH / ('.' + self.daemon_id + '.log.offset')
 
     @property
-    def log_offset_lock(self) -> 'fasteners.InterProcessLock':
+    def log_offset_lock(self) -> 'InterProcessLock':
         """
         Return the process lock context manager.
         """
         if '_log_offset_lock' in self.__dict__:
             return self._log_offset_lock
 
-        fasteners = attempt_import('fasteners')
-        self._log_offset_lock = fasteners.InterProcessLock(self.log_offset_path)
+        from meerschaum.utils.locks import InterProcessLock
+        self._log_offset_lock = InterProcessLock(self.log_offset_path)
         return self._log_offset_lock
 
     @property
@@ -1257,15 +1257,15 @@ class Daemon:
         return self.path / 'process.pid'
 
     @property
-    def pid_lock(self) -> 'fasteners.InterProcessLock':
+    def pid_lock(self) -> 'InterProcessLock':
         """
         Return the process lock context manager.
         """
         if '_pid_lock' in self.__dict__:
             return self._pid_lock
 
-        fasteners = attempt_import('fasteners')
-        self._pid_lock = fasteners.InterProcessLock(self.pid_path)
+        from meerschaum.utils.locks import InterProcessLock
+        self._pid_lock = InterProcessLock(self.pid_path)
         return self._pid_lock
 
     @property

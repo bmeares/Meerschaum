@@ -70,49 +70,6 @@ def get_pip_install_lock_path(venv: Optional[str] = 'mrsm') -> pathlib.Path:
     )
 
 
-def _stdlib_interprocess_lock(lock_path: pathlib.Path):
-    """Lock a file when `fasteners` is not yet available in a source checkout."""
-    from contextlib import contextmanager
-
-    @contextmanager
-    def _locked():
-        import platform
-        is_windows = platform.system() == 'Windows'
-        acquired = False
-        lock_file = open(lock_path, 'a+b')
-        try:
-            if is_windows:
-                import msvcrt
-                import time
-                lock_file.seek(0)
-                if lock_file.read(1) == b'':
-                    lock_file.write(b'\0')
-                    lock_file.flush()
-                while True:
-                    try:
-                        lock_file.seek(0)
-                        msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-                        acquired = True
-                        break
-                    except OSError:
-                        time.sleep(0.05)
-            else:
-                import fcntl
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-                acquired = True
-            yield
-        finally:
-            if acquired:
-                if is_windows:
-                    lock_file.seek(0)
-                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-            lock_file.close()
-
-    return _locked()
-
-
 def _pip_install_lock(venv: Optional[str] = 'mrsm'):
     """Serialize package mutations across threads and processes for an environment."""
     from contextlib import contextmanager
@@ -120,10 +77,7 @@ def _pip_install_lock(venv: Optional[str] = 'mrsm'):
     @contextmanager
     def _locked():
         from threading import get_ident
-        try:
-            import fasteners
-        except ImportError:
-            fasteners = None
+        from meerschaum.utils.locks import InterProcessLock
 
         lock_path = get_pip_install_lock_path(venv)
         lock_key = str(lock_path)
@@ -139,12 +93,7 @@ def _pip_install_lock(venv: Optional[str] = 'mrsm'):
                     yield
                     return
                 lock_path.parent.mkdir(parents=True, exist_ok=True)
-                process_lock = (
-                    fasteners.InterProcessLock(str(lock_path))
-                    if fasteners is not None
-                    else _stdlib_interprocess_lock(lock_path)
-                )
-                with process_lock:
+                with InterProcessLock(lock_path):
                     yield
             finally:
                 if depth:

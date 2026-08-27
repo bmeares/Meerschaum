@@ -254,7 +254,7 @@ Keys under the parent key `sync` are the following:
 
 ### The `jobs` Key
 
-Keys under `jobs` are the names of jobs to be run with `compose up`. If defined, these jobs override the default syncing jobs.
+Keys under `jobs` are the names of jobs to be run with `compose up`. If defined, these jobs override the default syncing jobs: `compose up` registers the project's pipes and starts these jobs without syncing the pipes first (run `mrsm compose up --presync` to force a sync pass).
 
 !!! example "Example jobs"
     ```yaml

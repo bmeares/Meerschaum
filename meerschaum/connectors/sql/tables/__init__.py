@@ -94,10 +94,10 @@ def get_tables(
     if conn_key in connector_tables:
         return connector_tables[conn_key]
 
-    fasteners = attempt_import('fasteners')
+    from meerschaum.utils.locks import InterProcessLock
     pickle_path = conn.get_metadata_cache_path(kind='pkl')
     lock_path = pickle_path.with_suffix('.lock')
-    lock = fasteners.InterProcessLock(lock_path)
+    lock = InterProcessLock(lock_path)
 
     with lock:
         if not cache_expired and pickle_path.exists():
