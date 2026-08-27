@@ -144,11 +144,9 @@ def read(
     from decimal import Decimal
 
     pd = import_pandas()
-    dd = None
-
     is_dask = 'dask' in pd.__name__
+    dd = pd if is_dask else None
     pandas = attempt_import('pandas')
-    is_dask = dd is not None
     npartitions = chunksize_to_npartitions(chunksize)
     if is_dask:
         chunksize = None
@@ -307,19 +305,16 @@ def read(
                     )
 
                     to_return = (
-                        (
-                            chunk_generator
-                            if not (as_hook_results or chunksize is None)
-                            else (
-                                _process_chunk(_chunk)
-                                for _chunk in chunk_generator
-                            )
-                        )
-                        if as_iterator or chunksize is None
+                        iter((chunk_generator,))
+                        if chunksize is None and as_iterator
                         else (
-                            list(pool.imap(_process_chunk, chunk_generator))
-                            if as_hook_results
-                            else None
+                            chunk_generator
+                            if as_iterator
+                            else (
+                                list(pool.imap(_process_chunk, chunk_generator))
+                                if as_hook_results and chunksize is not None
+                                else None
+                            )
                         )
                     )
                     return chunk_generator, to_return
@@ -373,24 +368,6 @@ def read(
             from meerschaum.utils.formatting import get_console
             if not silent:
                 get_console().print_exception()
-
-    read_chunks = 0
-    try:
-        for chunk in chunk_generator:
-            if chunk_hook is not None:
-                chunk_args, chunk_kwargs = _get_chunk_args_kwargs(chunk)
-                chunk_hook_results.append(chunk_hook(*chunk_args, **chunk_kwargs))
-            chunk_list.append(chunk)
-            read_chunks += 1
-            if chunks is not None and read_chunks >= chunks:
-                break
-    except Exception as e:
-        warn(f"[{self}] Failed to retrieve query results:\n" + str(e), stacklevel=3)
-        from meerschaum.utils.formatting import get_console
-        if not silent:
-            get_console().print_exception()
-
-        return None
 
     ### If no chunks returned, read without chunks
     ### to get columns
@@ -851,6 +828,7 @@ def to_sql(
     )
     from meerschaum.utils.dtypes.sql import (
         PD_TO_SQLALCHEMY_DTYPES_FLAVORS,
+        TIMEZONE_NAIVE_FLAVORS,
         get_db_type_from_pd_type,
         get_pd_type_from_db_type,
         get_numeric_precision_scale,
@@ -888,7 +866,7 @@ def to_sql(
         for col, typ in kw.get('dtype', {}).items()
         if (
             col in df.columns
-            and 'geometry' in str(typ).lower() or 'geography' in str(typ).lower()
+            and ('geometry' in str(typ).lower() or 'geography' in str(typ).lower())
         )
     }
     geometry_cols.extend([col for col in geometry_cols_dtypes if col not in geometry_cols])
@@ -898,6 +876,11 @@ def to_sql(
         else get_geometry_type_srid()
         for col, typ in geometry_cols_dtypes.items()
     }
+
+    if self.flavor in TIMEZONE_NAIVE_FLAVORS:
+        for col, typ in df.dtypes.items():
+            if are_dtypes_equal(str(typ), 'datetime'):
+                df[col] = coerce_timezone(df[col], strip_utc=True)
 
     cols_pd_types = {
         col: get_pd_type_from_db_type(str(typ))

@@ -493,7 +493,11 @@ def _wrap_pipe(
         _sync_hooks = (_pre_sync_hooks if is_pre_sync else _post_sync_hooks)
         _hook_results = (pre_hook_results if is_pre_sync else post_hook_results)
         for module_name, sync_hooks in _sync_hooks.items():
-            plugin_name = module_name.split('.')[-1] if module_name.startswith('plugins.') else None
+            plugin_name = (
+                module_name.split('.')[1]
+                if module_name and module_name.startswith('plugins.')
+                else module_name
+            )
             for sync_hook in sync_hooks:
                 hook_result = pool.apply_async(call_sync_hook, (plugin_name, sync_hook))
                 _hook_results.append(hook_result)

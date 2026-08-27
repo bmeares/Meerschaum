@@ -62,19 +62,57 @@ def test_replace_env_invalidates_plugins_cache(project_scope):
     must drop the cached `plugins` package from `sys.modules`.
     """
     import meerschaum.config.paths as paths
+    from meerschaum.utils.venv import Venv, venv_target_path
     plugins_stem = paths.PLUGINS_RESOURCES_PATH.stem
+    with Venv('mrsm'):
+        original_venv_target = str(venv_target_path('mrsm', allow_nonexistent=True))
+        assert original_venv_target in sys.path
 
-    with replace_env(project_scope):
+        with replace_env(project_scope):
+            assert plugins_stem not in sys.modules
+            _load_scope_plugins()
+            plugins_mod = sys.modules.get(plugins_stem)
+            assert plugins_mod is not None
+            assert str(paths.PLUGINS_RESOURCES_PATH) in [
+                str(pathlib.Path(path_str)) for path_str in plugins_mod.__path__
+            ]
+
+        ### On exit, the package cached under the project scope must be gone.
         assert plugins_stem not in sys.modules
-        _load_scope_plugins()
-        plugins_mod = sys.modules.get(plugins_stem)
-        assert plugins_mod is not None
-        assert str(paths.PLUGINS_RESOURCES_PATH) in [
-            str(pathlib.Path(path_str)) for path_str in plugins_mod.__path__
-        ]
+        assert original_venv_target in sys.path
+        assert not any(
+            str(project_scope[STATIC_CONFIG['environment']['root']]) in p
+            for p in sys.path
+        )
 
-    ### On exit, the package cached under the project scope must be gone.
-    assert plugins_stem not in sys.modules
+
+def test_replace_env_none_propagates_exceptions():
+    """A no-op environment scope must not hide failures from plugin code."""
+    from meerschaum.config.environment import replace_env
+
+    with pytest.raises(RuntimeError, match='plugin failed'):
+        with replace_env(None):
+            raise RuntimeError('plugin failed')
+
+
+def test_replace_config_is_reentrant_and_propagates_exceptions():
+    """Nested and empty config scopes restore their caller's configuration."""
+    import meerschaum.config as config
+
+    original = config._config()
+    try:
+        with config.replace_config({'scope': 'outer'}):
+            assert config._config() == {'scope': 'outer'}
+            with config.replace_config({'scope': 'inner'}):
+                assert config._config() == {'scope': 'inner'}
+            assert config._config() == {'scope': 'outer'}
+        assert config._config() is original
+
+        with pytest.raises(RuntimeError, match='plugin failed'):
+            with config.replace_config(None):
+                raise RuntimeError('plugin failed')
+    finally:
+        config.set_config(original)
 
 
 def test_sibling_plugin_import_after_scope_switch(project_scope):
@@ -92,3 +130,20 @@ def test_sibling_plugin_import_after_scope_switch(project_scope):
         plugin = mrsm.Plugin('scope_user')
         assert plugin.module is not None, "Unable to import plugin 'scope_user'."
         assert plugin.module.get_dep_value() == 'scoped-dep-value'
+
+
+def test_reload_plugins_refreshes_sibling_imports(project_scope):
+    """Reloading all plugins must refresh functions imported from siblings."""
+    plugins_dir = pathlib.Path(project_scope[STATIC_CONFIG['environment']['plugins']])
+
+    with replace_env(project_scope):
+        _load_scope_plugins()
+        assert mrsm.Plugin('scope_user').module.get_dep_value() == 'scoped-dep-value'
+
+        (plugins_dir / 'scope_dep.py').write_text(
+            DEP_PLUGIN_SOURCE.replace('scoped-dep-value', 'reloaded-dependency-value')
+        )
+        from meerschaum.plugins import reload_plugins
+        reload_plugins()
+
+        assert mrsm.Plugin('scope_user').module.get_dep_value() == 'reloaded-dependency-value'

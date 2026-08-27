@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import pathlib
 import shutil
+import threading
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
@@ -24,6 +25,25 @@ from meerschaum.utils.typing import (
 from meerschaum.utils.warnings import error, warn
 _tmpversion = None
 _ongoing_installations = set()
+_ongoing_installations_lock = threading.Lock()
+
+
+def _copy_path(source: pathlib.Path, destination: pathlib.Path) -> None:
+    """Copy a file, directory, or symlink without following symlinks."""
+    if source.is_symlink():
+        destination.symlink_to(os.readlink(source), target_is_directory=source.is_dir())
+    elif source.is_dir():
+        shutil.copytree(source, destination, symlinks=True)
+    else:
+        shutil.copy2(source, destination, follow_symlinks=False)
+
+
+def _remove_path(path: pathlib.Path) -> None:
+    """Remove a file, directory, or symlink if it exists."""
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
 
 
 class Plugin:
@@ -281,9 +301,104 @@ class Plugin:
         A `SuccessTuple` of success (bool) and a message (str).
 
         """
-        if self.full_name in _ongoing_installations:
-            return True, f"Already installing plugin '{self}'."
-        _ongoing_installations.add(self.full_name)
+        installation_key = self.full_name
+        with _ongoing_installations_lock:
+            if installation_key in _ongoing_installations:
+                return True, f"Already installing plugin '{self}'."
+            _ongoing_installations.add(installation_key)
+
+        try:
+            from meerschaum.utils.packages import _pip_install_lock
+            with _pip_install_lock(self.name):
+                return self._install_with_rollback(
+                    skip_deps=skip_deps,
+                    force=force,
+                    debug=debug,
+                )
+        finally:
+            with _ongoing_installations_lock:
+                _ongoing_installations.discard(installation_key)
+
+
+    def _install_with_rollback(
+        self,
+        skip_deps: bool = False,
+        force: bool = False,
+        debug: bool = False,
+    ) -> SuccessTuple:
+        """Restore the previous plugin source and environment after a failed install."""
+        import tempfile
+        import meerschaum.config.paths as paths
+        from meerschaum.plugins import sync_plugins_symlinks
+        from meerschaum.utils.packages import reload_meerschaum
+
+        if not self.archive_path.exists():
+            return False, f"Missing archive file for plugin '{self}'."
+
+        paths.PLUGINS_TEMP_RESOURCES_PATH.mkdir(parents=True, exist_ok=True)
+        source_paths = [
+            plugins_dir_path / filename
+            for plugins_dir_path in paths.PLUGINS_DIR_PATHS
+            for filename in (self.name, self.name + '.py')
+        ]
+        tracked_paths = source_paths + [paths.VIRTENV_RESOURCES_PATH / self.name]
+
+        with tempfile.TemporaryDirectory(
+            prefix=f'.{self.name}-rollback-',
+            dir=paths.PLUGINS_TEMP_RESOURCES_PATH,
+        ) as rollback_dir_str:
+            rollback_dir = pathlib.Path(rollback_dir_str)
+            backups = {}
+            rollback_prepared = False
+
+            def prepare_rollback() -> None:
+                nonlocal rollback_prepared
+                for index, path in enumerate(tracked_paths):
+                    if not path.exists() and not path.is_symlink():
+                        continue
+                    backup_path = rollback_dir / str(index)
+                    _copy_path(path, backup_path)
+                    backups[path] = backup_path
+                rollback_prepared = True
+
+            def rollback() -> None:
+                if not rollback_prepared:
+                    return
+                for path in tracked_paths:
+                    _remove_path(path)
+                for path, backup_path in backups.items():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(backup_path), str(path))
+                self.__dict__.pop('_module', None)
+                self.__dict__.pop('_required', None)
+                sync_plugins_symlinks(debug=debug)
+                reload_meerschaum(debug=debug)
+
+            try:
+                result = self._install(
+                    skip_deps=skip_deps,
+                    force=force,
+                    debug=debug,
+                    _prepare_rollback=prepare_rollback,
+                )
+            except BaseException:
+                rollback()
+                raise
+            if not result[0]:
+                try:
+                    rollback()
+                except Exception as e:
+                    return False, result[1] + f"\nFailed to roll back plugin '{self}': {e}"
+            return result
+
+
+    def _install(
+        self,
+        skip_deps: bool = False,
+        force: bool = False,
+        debug: bool = False,
+        _prepare_rollback: Optional[Any] = None,
+    ) -> SuccessTuple:
 
         import meerschaum.config.paths as paths
         from meerschaum.utils.warnings import warn, error
@@ -333,7 +448,6 @@ class Plugin:
         if is_dir:
             fpath = fpath / '__init__.py'
 
-        init_venv(self.name, debug=debug)
         with open(fpath, 'r', encoding='utf-8') as f:
             init_lines = f.readlines()
         new_version = None
@@ -393,30 +507,23 @@ class Plugin:
             )
             abort = True
         elif is_new_version or force:
-            for src_dir, dirs, files in os.walk(temp_dir):
-                if success is not None:
-                    break
-                dst_dir = str(src_dir).replace(str(temp_dir), str(plugin_installation_dir_path))
-                if not os.path.exists(dst_dir):
-                    os.mkdir(dst_dir)
-                for f in files:
-                    src_file = os.path.join(src_dir, f)
-                    dst_file = os.path.join(dst_dir, f)
-                    if os.path.exists(dst_file):
-                        os.remove(dst_file)
-
-                    if debug:
-                        dprint(f"Moving '{src_file}' to '{dst_dir}'...")
-                    try:
-                        shutil.move(src_file, dst_dir)
-                    except Exception:
-                        success, msg = False, (
-                            f"Failed to install plugin '{self}': " +
-                            f"Could not move file '{src_file}' to '{dst_dir}'"
-                        )
-                        print(msg)
-                        break
-            if success is None:
+            if _prepare_rollback is not None:
+                _prepare_rollback()
+            source_path = temp_dir / files[0]
+            destination_path = plugin_installation_dir_path / files[0]
+            try:
+                plugin_installation_dir_path.mkdir(parents=True, exist_ok=True)
+                for existing_path in (
+                    plugin_installation_dir_path / self.name,
+                    plugin_installation_dir_path / (self.name + '.py'),
+                ):
+                    _remove_path(existing_path)
+                if debug:
+                    dprint(f"Moving '{source_path}' to '{destination_path}'...")
+                shutil.move(str(source_path), str(destination_path))
+            except Exception as e:
+                success, msg = False, f"Failed to install plugin '{self}': {e}"
+            else:
                 success, msg = True, success_msg
         else:
             success, msg = False, (
@@ -434,38 +541,38 @@ class Plugin:
         init_venv(venv=self.name, force=True, debug=debug)
         reload_meerschaum(debug=debug)
 
-        ### Record the origin repository (only if explicitly known) so the update
-        ### checker knows where to look for newer versions. Locally-installed plugins
-        ### have no explicit repo and are intentionally skipped.
-        if success or abort:
-            _origin_repo_keys = None
-            if self._repo_connector is not None:
-                _origin_repo_keys = str(self._repo_connector)
-            elif self._repo_keys:
-                _origin_repo_keys = self._repo_keys
-            elif self._repo_in_name:
-                _origin_repo_keys = self._repo_in_name
-            if _origin_repo_keys:
-                try:
-                    from meerschaum.plugins._origins import write_plugin_origin
-                    write_plugin_origin(
-                        self.name,
-                        _origin_repo_keys,
-                        plugin_installation_dir_path,
-                        debug=debug,
-                    )
-                except Exception:
-                    pass
+        ### Record the origin only after a successful transaction. Locally-installed
+        ### plugins have no explicit repo and are intentionally skipped.
+        _origin_repo_keys = (
+            str(self._repo_connector)
+            if self._repo_connector is not None
+            else self._repo_keys or self._repo_in_name
+        )
+
+        def write_origin() -> None:
+            if not _origin_repo_keys:
+                return
+            try:
+                from meerschaum.plugins._origins import write_plugin_origin
+                write_plugin_origin(
+                    self.name,
+                    _origin_repo_keys,
+                    plugin_installation_dir_path,
+                    debug=debug,
+                )
+            except Exception:
+                pass
+
+        if abort:
+            write_origin()
 
         ### if we've already failed, return here
         if not success or abort:
-            _ongoing_installations.remove(self.full_name)
             return success, msg
 
         ### attempt to install dependencies
         dependencies_installed = skip_deps or self.install_dependencies(force=force, debug=debug)
         if not dependencies_installed:
-            _ongoing_installations.remove(self.full_name)
             return False, f"Failed to install dependencies for plugin '{self}'."
 
         ### handling success tuple, bool, or other (typically None)
@@ -496,8 +603,9 @@ class Plugin:
                 f"of type '{type(setup_tuple)}': {setup_tuple}"
             )
 
-        _ongoing_installations.remove(self.full_name)
         _ = self.module
+        if success:
+            write_origin()
         return success, msg
 
 
@@ -628,10 +736,10 @@ class Plugin:
 
         if debug:
             dprint(f"Running setup for plugin '{self}'...")
+        from meerschaum.utils.venv import Venv
         try:
-            self.activate_venv(debug=debug)
-            return_tuple = _setup(*args, **_kw)
-            self.deactivate_venv(debug=debug)
+            with Venv(self, debug=debug):
+                return_tuple = _setup(*args, **_kw)
         except Exception as e:
             return False, str(e)
 

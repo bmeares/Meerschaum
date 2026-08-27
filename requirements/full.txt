@@ -1,3 +1,4 @@
+fasteners>=0.19.0
 pprintpp>=0.4.0
 asciitree>=0.3.3
 typing-extensions>=4.7.1
@@ -25,7 +26,6 @@ aiofiles>=0.6.0
 packaging>=21.3.0
 prompt-toolkit>=3.0.39
 more-itertools>=8.7.0
-fasteners>=0.19.0
 virtualenv>=20.1.0
 attrs>=24.2.0
 uv>=0.2.11
@@ -47,11 +47,14 @@ duckdb-engine>=0.13.0
 pyproj>=3.7.1
 geopandas>=1.0.1
 shapely>=2.0.7
+geoarrow-types>=0.3.0
+envyaml>=1.10.211231
 pywebview>=3.6.3
 pycparser>=2.21.0
 numpy>=2.3.1
 pandas[parquet]>=3.0.0
 pyarrow>=20.0.0
+polars>=1.43.2
 dask[complete]>=2024.12.1
 partd>=1.4.2
 pytz

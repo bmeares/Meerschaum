@@ -173,6 +173,35 @@ def parse_arguments(sysargs: List[str]) -> Dict[str, Any]:
             args_dict['text'] = ' '.join(sysargs)
         args_dict[STATIC_CONFIG['system']['arguments']['failure_key']] = e
 
+    ### Compose options live on the legacy flat parser, but native Compose makes them
+    ### permanently registered. Give options back to unrelated actions as subprocess
+    ### arguments instead of silently stealing common flags such as `-v` and `--file`.
+    if (args_dict.get('action', []) or [None])[0] != 'compose':
+        compose_options = {
+            'file': ('--file', '--compose-file'),
+            'env_file': ('--env-file',),
+            'dry': ('--dry',),
+            'drop': ('--drop', '-v', '--volumes'),
+            'presync': ('--presync',),
+            'no_jobs': ('--no-jobs',),
+            'isolated': ('--isolated',),
+        }
+        restored_sub_args = []
+        for dest, option_strings in compose_options.items():
+            if not args_dict.get(dest, None):
+                continue
+            takes_value = dest in ('file', 'env_file')
+            for i, arg in enumerate(filtered_sysargs):
+                if arg in option_strings:
+                    restored_sub_args.append(arg)
+                    if takes_value and i + 1 < len(filtered_sysargs):
+                        restored_sub_args.append(filtered_sysargs[i + 1])
+                elif takes_value and any(arg.startswith(option + '=') for option in option_strings):
+                    restored_sub_args.append(arg)
+            args_dict.pop(dest, None)
+        if restored_sub_args:
+            args_dict['sub_args'] = (args_dict.get('sub_args', None) or []) + restored_sub_args
+
     false_flags = [arg for arg, val in args_dict.items() if val is False]
     for arg in false_flags:
         _ = args_dict.pop(arg, None)

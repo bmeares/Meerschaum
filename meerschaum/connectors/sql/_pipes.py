@@ -1090,6 +1090,7 @@ def get_pipe_data(
     end_add_minutes: int = 0,
     chunksize: Optional[int] = -1,
     as_iterator: bool = False,
+    as_polars: bool = False,
     debug: bool = False,
     **kw: Any
 ) -> Union[pd.DataFrame, None]:
@@ -1137,12 +1138,15 @@ def get_pipe_data(
     as_iterator: bool, default False
         If `True`, return the chunks iterator directly.
 
+    as_polars: bool, default False
+        If `True`, use an Arrow-native driver when available and return a Polars DataFrame.
+
     debug: bool, default False
         Verbosity toggle.
 
     Returns
     -------
-    A `pd.DataFrame` of the pipe's data.
+    A Pandas DataFrame, or a Polars DataFrame when an Arrow-native read is available.
 
     """
     from meerschaum.utils.packages import import_pandas
@@ -1240,6 +1244,66 @@ def get_pipe_data(
         debug=debug,
         **kw
     )
+
+    arrow_dtypes = {
+        col: pipe_dtypes.get(col, get_pd_type_from_db_type(cols_types.get(col, '')))
+        for col in dtypes
+    }
+    fallback_dtypes = {
+        col: typ
+        for col, typ in arrow_dtypes.items()
+        if (
+            str(typ).lower() in ('uuid', 'object', 'numeric')
+            or str(typ).lower().startswith(('geometry', 'geography'))
+        )
+    }
+    adbc_driver = {
+        'sqlite': 'adbc_driver_sqlite',
+        'postgresql': 'adbc_driver_postgresql',
+        'postgis': 'adbc_driver_postgresql',
+        'timescaledb': 'adbc_driver_postgresql',
+        'timescaledb-ha': 'adbc_driver_postgresql',
+        'citus': 'adbc_driver_postgresql',
+        'cockroachdb': 'adbc_driver_postgresql',
+    }.get(self.flavor, None)
+    can_read_native = bool(
+        as_polars
+        and pipe.enforce
+        and dtypes
+        and not fallback_dtypes
+        and not as_iterator
+        and not is_dask
+        and (
+            self.flavor == 'duckdb'
+            or (adbc_driver and not (self.flavor == 'sqlite' and self.database == ':memory:'))
+        )
+    )
+    if can_read_native:
+        from meerschaum.utils.packages import attempt_import
+        polars = attempt_import('polars', lazy=False)
+        try:
+            if self.flavor == 'duckdb':
+                with self.engine.connect() as connection:
+                    return connection.connection.driver_connection.execute(query).pl()
+            if attempt_import(
+                adbc_driver,
+                lazy=False,
+                warn=False,
+                install=False,
+            ) is not None:
+                import warnings
+                adbc_uri = self.URI
+                if adbc_driver == 'adbc_driver_postgresql':
+                    adbc_uri = 'postgresql://' + adbc_uri.split('://', maxsplit=1)[-1]
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        'ignore',
+                        message=r"Extension type 'arrow\.(json|opaque)' is not registered",
+                    )
+                    return polars.read_database_uri(query, adbc_uri, engine='adbc')
+        except Exception as e:
+            if debug:
+                dprint(f"[{self}] Arrow-native read failed; falling back to Pandas:\n{e}")
 
     read_kwargs = {}
     if is_dask:

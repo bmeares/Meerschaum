@@ -1,6 +1,6 @@
 # 🎼 Meerschaum Compose
 
-The [`compose` plugin](https://github.com/bmeares/compose) does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: with Meerschaum Compose, you can consolidate everything into a single YAML file ― that includes all of the pipes and configuration needed for your project!
+Meerschaum Compose does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: you can consolidate everything into a single YAML file ― including all of the pipes and configuration needed for your project. Compose is built into Meerschaum 4.0 and later.
 
 With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in the Compose project ― one job per instance. Because the configuration is contained in the YAML file (e.g. custom connectors), Compose projects are useful for prototyping, collaboration, and consistency.
 
@@ -65,11 +65,15 @@ With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in 
 
     Want to skip the setup and work in a pre-configured environment? Create a new repository from the [Meerschaum Compose Project Template](https://github.com/bmeares/mrsm-compose-template).
 
-Install the `compose` plugin from the public repository `api:mrsm`:
+!!! note "Upgrading from the compose plugin"
 
-```bash
-mrsm install plugin compose
-```
+    Existing Compose files and commands do not need to change for Meerschaum 4. To migrate:
+
+    1. Upgrade Meerschaum. Locked or offline environments should install the parser dependency up front with `pip install 'meerschaum[compose]'`.
+    2. Remove `mrsm install plugin compose` from project bootstrap scripts, then run `mrsm uninstall plugin compose`. Until it is removed, the built-in action takes precedence and warns once per process.
+    3. Continue using the same YAML files, commands, and flags. Legacy Compose imports and registered `plugin:compose` pipes remain compatible.
+
+    `compose down -v` deletes only resources whose project ownership is clear. Shared pipes are untagged, and ambiguous resources are preserved.
 
 From a new directory, create a file `mrsm-compose.yaml`. You can paste the example file above to get started.
 
@@ -108,6 +112,12 @@ For our example project `awesome-sauce`, let's bring up the syncing jobs:
 mrsm compose up -f
 ```
 
+Running `mrsm compose` without a subaction opens the Meerschaum shell inside the project's environment. The project name is appended to the prompt and shown in the bottom toolbar so you can tell which project a command will run against:
+
+```
+ [ mrsm@sql:awesome | awesome-sauce ] ➤
+```
+
 ??? tip "All other commands are executed as regular actions from within the project environment."
 
     ```bash
@@ -128,7 +138,7 @@ mrsm compose up -f
 
 ## 🎌 Flags
 
-The `compose` plugin adds a few new custom flags. You can quickly view the available flags with `mrsm -h` or `mrsm show help`.
+The built-in `compose` action provides the following flags. You can quickly view the available flags with `mrsm -h` or `mrsm show help`.
 
 Flag | Description | Example
 --|--|--

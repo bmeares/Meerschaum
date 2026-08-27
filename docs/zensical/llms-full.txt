@@ -589,13 +589,7 @@ And paste the following into `fred.py`:
 
 The plugin provides one function `fetch()` that takes a pipe, pulls an ID from `pipe.parameters`, and returns the appropriate DataFrame.
 
-Now that we've got our YAML file and plugin, install the <a href="/reference/compose">`compose` plugin</a>:
-
-```bash
-mrsm install plugin compose
-```
-
-Let's initialize our environment to install our dependencies (`pandas`) into the project's virtual environment for `plugin:fred`. From the parent project directory, run `compose init`:
+Now that we've got our YAML file and project plugin, initialize the built-in <a href="/reference/compose">Compose</a> environment. This installs our dependency (`pandas`) into the project's virtual environment for `plugin:fred`:
 
 ```bash
 cd ../
@@ -1291,6 +1285,20 @@ df = pipe.get_data(params={'station': ['KGMU', 'KATL']})
 # Cap rows returned:
 df = pipe.get_data(limit=100)
 ```
+
+Pandas remains the default for backwards compatibility. To work in Polars, install the optional
+extra and request a Polars DataFrame explicitly:
+
+```bash
+pip install 'meerschaum[polars]'
+```
+
+```python
+polars_df = pipe.get_data(as_polars=True)
+```
+
+Pass `as_polars=True` with `as_chunks=True` to yield Polars DataFrames. It cannot be combined
+with `as_docs=True` or `as_dask=True`.
 
 **Chunked iteration** — pass `as_chunks=True` (alias `as_iterator=True`) to get a generator of DataFrames, each covering a time-bound slice. Useful for large datasets that don't fit in memory:
 
@@ -4665,7 +4673,6 @@ If you're building your own Docker images, consider basing off the [`bmeares/mee
 ```docker
 FROM bmeares/meerschaum
 
-RUN mrsm install plugin compose
 COPY --chown=meerschaum:meerschaum ./ /app
 WORKDIR /app
 RUN mrsm compose init
@@ -4696,6 +4703,7 @@ Run the [`bmeares/meerschaum` Docker image](https://hub.docker.com/r/bmeares/mee
 ### Helm Chart (k8s)
 
 If you are running Kubernetes, consider the [Meerschaum Helm chart on Artifact Hub](https://artifacthub.io/packages/helm/meerschaum/meerschaum). It's configured to run the [`bmeares/meerschaum` Docker Image](https://hub.docker.com/r/bmeares/meerschaum) for k8s environments.
+
 
 ---
 
@@ -5178,7 +5186,7 @@ The tools are broadly the same, with a few changes:
 
 ## Dash's MCP server
 
-Plotly Dash has [its own MCP server](../plugins/types-of-plugins.md#web-pages), separate from this one, which exposes the web console's layout so an agent can understand the page it is building. It is **off by default** and is a development aid, not an API — see the [web console docs](../api-instance/web-console.md#dash-mcp-server).
+Plotly Dash has [its own MCP server](../plugins/types-of-plugins.md), separate from this one, which exposes the web console's layout so an agent can understand the page it is building. It is **off by default** and is a development aid, not an API — see the [web console docs](../api-instance/web-console.md#dash-mcp-server).
 
 
 ---
@@ -5650,7 +5658,7 @@ Source: https://meerschaum.io/reference/compose/
 
 # 🎼 Meerschaum Compose
 
-The [`compose` plugin](https://github.com/bmeares/compose) does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: with Meerschaum Compose, you can consolidate everything into a single YAML file ― that includes all of the pipes and configuration needed for your project!
+Meerschaum Compose does the same for Meerschaum as [Docker Compose](https://docs.docker.com/engine/reference/commandline/compose/) does for Docker: you can consolidate everything into a single YAML file ― including all of the pipes and configuration needed for your project. Compose is built into Meerschaum 4.0 and later.
 
 With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in the Compose project ― one job per instance. Because the configuration is contained in the YAML file (e.g. custom connectors), Compose projects are useful for prototyping, collaboration, and consistency.
 
@@ -5715,11 +5723,15 @@ With `mrsm compose up`, you can stand up syncing jobs for your pipes defined in 
 
     Want to skip the setup and work in a pre-configured environment? Create a new repository from the [Meerschaum Compose Project Template](https://github.com/bmeares/mrsm-compose-template).
 
-Install the `compose` plugin from the public repository `api:mrsm`:
+!!! note "Upgrading from the compose plugin"
 
-```bash
-mrsm install plugin compose
-```
+    Existing Compose files and commands do not need to change for Meerschaum 4. To migrate:
+
+    1. Upgrade Meerschaum. Locked or offline environments should install the parser dependency up front with `pip install 'meerschaum[compose]'`.
+    2. Remove `mrsm install plugin compose` from project bootstrap scripts, then run `mrsm uninstall plugin compose`. Until it is removed, the built-in action takes precedence and warns once per process.
+    3. Continue using the same YAML files, commands, and flags. Legacy Compose imports and registered `plugin:compose` pipes remain compatible.
+
+    `compose down -v` deletes only resources whose project ownership is clear. Shared pipes are untagged, and ambiguous resources are preserved.
 
 From a new directory, create a file `mrsm-compose.yaml`. You can paste the example file above to get started.
 
@@ -5778,7 +5790,7 @@ mrsm compose up -f
 
 ## 🎌 Flags
 
-The `compose` plugin adds a few new custom flags. You can quickly view the available flags with `mrsm -h` or `mrsm show help`.
+The built-in `compose` action provides the following flags. You can quickly view the available flags with `mrsm -h` or `mrsm show help`.
 
 Flag | Description | Example
 --|--|--
@@ -5904,6 +5916,7 @@ Keys under `jobs` are the names of jobs to be run with `compose up`. If defined,
       date: "date -s 'every 10 seconds'"
       echo: "echo 'Hello, World!'"
     ```
+
 
 ---
 
@@ -6275,8 +6288,8 @@ success, msg = job.start()
 
 ## ⏲️ Schedules
 
-!!! warning ""
-    As of Meerschaum v2.2.0, scheduling is handled by the library [APScheduler](https://apscheduler.readthedocs.io) rather than [Rocketry](https://rocketry.readthedocs.io/en/stable/condition_syntax/index.html).
+Meerschaum includes its own small schedule engine, so scheduled jobs do not require a separate
+scheduler package or service.
 
 You can run any command regularly with the flag `-s` or `--schedule` ― for example, `-s hourly` will execute the command once per hour. Below are the supported intervals:
 
@@ -6312,7 +6325,7 @@ Append the phrase `starting [time]` to a schedule to set the reference point. If
 
  Schedule | Description 
 ----------|-------------
- `every 10 minutes starting in 30 seconds` | Beginning 30 seconds from now, fire every 10 seconds.
+ `every 10 minutes starting in 30 seconds` | Beginning 30 seconds from now, fire every 10 minutes.
  `hourly starting 00:30` | Fire every hour on the 30th minute.
  `daily starting tomorrow 00:30` | Beginning at 30 minutes past midnight UTC, fire daily.
  `weekly starting Monday at 12:15 PM` | Fire every week on Monday at 12:15 PM.
@@ -6330,7 +6343,7 @@ For more fine-grained control, you may specify your schedule in a [`cron`](https
 [minute] [hour] [day] [month] [week]
 ```
 
-For example, the schedule `30 * * may-aug mon-fri` runs once per hour on the 30th minute, but only on weekdays in the months May through August. See [APScheduler](https://apscheduler.readthedocs.io/en/master/api.html#apscheduler.triggers.cron.CronTrigger) for additional documentation.
+For example, the schedule `30 * * may-aug mon-fri` runs once per hour on the 30th minute, but only on weekdays in the months May through August. Fields accept `*`, comma-separated values, ranges, steps, month names, and weekday names. Numeric weekdays follow crontab conventions: `0` and `7` are Sunday, and `1` is Monday.
 
 You may find it more readable to achieve similar results by combining fragments of `cron` schedules with interval schedules (e.g. `daily and mon-fri`). Read below to see what's possible:
 
@@ -6409,7 +6422,7 @@ Next 5 timestamps for schedule 'daily and mon-fri starting May 2, 2024':
 
 ??? info "Schedules Python API"
 
-    You may also parse your schedules with the function [`parse_schedule()`](https://docs.meerschaum.io/meerschaum/utils/schedule.html#parse_schedule), which returns an [APScheduler `Trigger`](https://apscheduler.readthedocs.io/en/master/api.html#triggers).
+    You may also parse schedules with [`parse_schedule()`](https://docs.meerschaum.io/meerschaum/utils/schedule.html#parse_schedule). It returns a stateful trigger whose `next()` method returns the next timezone-aware timestamp.
 
     ```python
     from meerschaum.utils.schedule import parse_schedule
@@ -6508,6 +6521,7 @@ sync pipes -i sql:local -e api:main
 !!! note "Custom executors"
     You can implement a custom executor with the [`#!python @make_executor` decorator](). See [`Executor`](https://docs.meerschaum.io/meerschaum/jobs.html#Executor) and [`SystemdExecutor`](https://docs.meerschaum.io/meerschaum/jobs/systemd.html) for an example implementation.
 
+
 ---
 
 # 🔧 Data Analysis Tools
@@ -6583,6 +6597,23 @@ Read a table or query into a Pandas DataFrame with `conn.read()`:
    id            datetime
 0   1 2021-06-06 12:00:00
 ```
+
+## 🐻‍❄️ Polars Integration
+
+Pandas remains Meerschaum's default DataFrame API, so existing plugins keep working unchanged.
+Polars DataFrames and LazyFrames may be synced directly, and reads may opt into Polars:
+
+```python
+import meerschaum as mrsm
+import polars as pl
+
+pipe = mrsm.Pipe('demo', 'polars', columns=['dt', 'id'])
+pipe.sync(pl.DataFrame({'dt': ['2026-01-01'], 'id': [1]}))
+df = pipe.get_data(as_polars=True)
+```
+
+LazyFrames are collected at the sync boundary. Install support with
+`pip install 'meerschaum[polars]'`.
 
 
 ## 🧙‍♂️ SQLAlchemy Integration
@@ -7485,6 +7516,8 @@ Because the same function may be registered as both a pre- and a post-hook, bran
 
 It is **not** called on every sync or action — use it strictly for work that should happen once at install time. It must return a `SuccessTuple` (a `#!python (bool, str)` tuple); a `#!python False` result is reported to the user and signals that setup failed.
 
+If dependency installation or `#!python setup()` fails during a plugin upgrade, Meerschaum restores the previous plugin source and virtual environment.
+
 Typical uses:
 
 - **Verify dependencies / external tooling** that `required` can't express (a system binary, a driver, a service being reachable).
@@ -7586,6 +7619,8 @@ Plugins are just Python modules, so you can write custom code and share it among
 
 At run time, plugins are imported under the global `plugins` namespace, but you'll probably be testing plugins directly when the `plugins` namespace isn't created. That's where [`Plugin` objects](https://docs.meerschaum.io/#meerschaum.Plugin) come in handy: they contain a number of convenience functions so you can cross-pollinate between plugins.
 
+Actions, hooks, API endpoints, and web pages defined in submodules belong to the root plugin. For example, decorated functions in `plugins.foo.routes` are unloaded and reloaded with `plugins.foo`, so a submodule does not need separate lifecycle management.
+
 ### Package Management
 
 Meerschaum plugins only need to be modules ― no package metadata required. But if you plan on managing your plugins as proper packages (e.g. to publish to repositories like [PyPI](https://pypi.org/)), simply add the [entry point](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-package-metadata) `meerschaum.plugins` to your package metadata:
@@ -7646,6 +7681,7 @@ plugin = Plugin('foo')
 with Venv(plugin):
     foo = plugin.module
 ```
+
 
 ---
 
@@ -7890,6 +7926,7 @@ All Meerschaum environment variables begin with the prefix `MRSM_`. The most com
 | `MRSM_PATCH` | A second patch applied *after* `MRSM_CONFIG` (may reference its keys). | _(unset)_ |
 | `MRSM_<TYPE>_<LABEL>` | Define a connector by URI (e.g. `MRSM_SQL_MAIN`, `MRSM_API_MAIN`). | _(unset)_ |
 | `MRSM_RUNTIME` | Marks a special runtime (e.g. `portable`, `docker`). | _(unset)_ |
+| `MRSM_NO_AUTO_INSTALL` | Disable package installation triggered by `attempt_import()`. | _(unset)_ |
 | `MRSM_NOASK` / `MRSM_NONINTERACTIVE` | Disable interactive prompts (assume defaults). | _(unset)_ |
 
 !!! tip "Inspecting your environment"
@@ -8013,6 +8050,17 @@ Set either of these to disable interactive prompts. When set, Meerschaum assumes
 
 ```bash
 MRSM_NOASK=1 mrsm bootstrap pipes
+```
+
+## **`MRSM_NO_AUTO_INSTALL`**
+
+Meerschaum normally installs a missing optional dependency when a feature first imports it. Set
+`MRSM_NO_AUTO_INSTALL=1` for locked-down, offline, or reproducible environments. Missing packages
+will be reported instead of downloaded; otherwise Meerschaum warns before the first automatic download
+in each process. Install the dependency group before starting Meerschaum.
+
+```bash
+MRSM_NO_AUTO_INSTALL=1 mrsm show pipes
 ```
 
 ## Internal Variables
@@ -8881,6 +8929,55 @@ Are you more of a visual learner? Check out these video tutorials below where I 
 Source: https://meerschaum.io/news/changelog/
 
 # 🪵 Changelog
+
+## 4.0.0 Releases
+
+### v4.0.0
+
+- **Build Meerschaum Compose into core.**  
+  Existing Compose YAML files, commands, flags, arbitrary nested actions, project plugin discovery,
+  and multiple root / plugin directories continue to work without installing the `compose` plugin.
+  Project environment and plugin state are restored after every command, destructive operations
+  preserve resources whose ownership is ambiguous, and legacy Compose imports remain available.
+  The built-in action takes precedence when the legacy plugin is installed and emits a once-per-process
+  uninstall warning. New projects no longer receive a copied Compose plugin.
+
+- **Add opt-in Polars dataframe support without breaking Pandas users.**  
+  Pipes accept Polars `DataFrame` and `LazyFrame` inputs, including chunk generators, and
+  `Pipe.get_data(as_polars=True)` returns Polars frames. Large unseen-row comparisons use Polars when
+  it is already installed and safely fall back for unsupported dtypes. Polars geometry columns use
+  GeoArrow WKB, and declared JSON columns use canonical Arrow JSON over UTF-8 storage. Pandas restores
+  JSON objects and retains the GeoPandas / Shapely path as the default output and plugin boundary.
+  Install the conversion dependencies with
+  `pip install 'meerschaum[polars]'`.
+
+- **Replace the unreleased APScheduler fork with Meerschaum's small schedule engine.**  
+  Existing interval, calendar, five-field cron, start-time, and `and` / `or` schedule strings keep
+  their public `trigger.next()` interface. Calendar schedules retain month-end behavior, cron
+  schedules follow crontab's day-of-month / day-of-week and stepped-field rules, handle DST
+  transitions, and scheduled callbacks do not overlap themselves.
+
+- **Make plugin registration and synchronization deterministic.**  
+  Decorated functions are owned by their root plugin module even when defined in submodules,
+  unloading clears every associated registry, and plugin symlink updates now use the existing
+  inter-process lock dependency instead of racing on a hand-managed lockfile. Plugin source and
+  dependency installs share an environment-scoped inter-process lock, and failed setup hooks restore
+  the caller's virtual environment state. Failed plugin upgrades restore the previous source and
+  dependency environment instead of leaving a partial installation.
+
+- **Make runtime dependency installation safer and inspectable.**  
+  Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.
+  `install packages --dry-run` reports the selected installer, environment, arguments, and requested
+  packages without changing the environment. Package mutations are serialized per environment across
+  threads and processes, implicit downloads emit a once-per-process warning, and installed-package
+  checks are cached by environment and import policy.
+  Runtime installation remains on by default for the beginner-friendly experience, using `uv` with
+  the existing `pip` fallback.
+
+- **Repair Dask, SQL geometry, and Docker build paths.**  
+  Dask frames are detected correctly in sync and SQL reads, SQL geometry dtype filtering applies
+  only to columns present in the frame, and the Docker workflow uses the maintained buildx script
+  and current GitHub Actions.
 
 ## 3.5.0 Releases
 

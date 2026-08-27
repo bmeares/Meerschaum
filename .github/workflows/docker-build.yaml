@@ -5,8 +5,8 @@ on:
     inputs:
       publish:
         description: 'Publish the images to DockerHub.'
-        required: false
-        default: ""
+        type: boolean
+        default: false
   # pull_request:
     # branches: main
   # push:
@@ -18,43 +18,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Install python3
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.7'
-
-      # - name: Setup buildx
-        # id: buildx
-        # uses: crazy-max/ghaction-docker-buildx@v2
-        # with:
-          # buildx-version: latest
-          # skip-cache: false
-          # qemu-version: latest
+          python-version: '3.14'
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
+        uses: docker/setup-qemu-action@v3
 
       - name: Set Up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v1
-
-      - name: Reset QEMU architectures
-        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
-      - name: Build Docker images
-        run: ./scripts/docker/build.sh
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to DockerHub
-        if: success() && github.event_name != 'pull_request'
-        uses: docker/login-action@v1
+        if: inputs.publish
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # - name: Publish Docker images
-        # if: success() && github.event_name != 'pull_request'
-        # run: ./scripts/docker/build.sh --push
-        # run: ./scripts/docker/build.sh ${{ github.event.inputs.publish }}
+      - name: Build Docker images
+        if: ${{ !inputs.publish }}
+        run: ./scripts/docker/buildx.sh
 
+      - name: Build and publish Docker images
+        if: inputs.publish
+        run: ./scripts/docker/buildx.sh --push
