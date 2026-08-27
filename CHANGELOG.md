@@ -9,6 +9,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Start the configured jobs instead of syncing pipes in `compose up`.**  
   A project with a `jobs` key registered its pipes and then ran an initial sync pass over them before starting anything, so a failing sync aborted `up` and the configured jobs never started. When `jobs` is defined it is the project's workload: `up` registers the pipes and starts the jobs. `mrsm compose up --presync` still forces a sync pass.
 
+- **Install Meerschaum without any dependencies.**  
+  `fasteners` was the last hard requirement, needed before the `mrsm` venv exists because runtime package installation is serialized with an inter-process lock. That lock is now `meerschaum.utils.locks.InterProcessLock`, built on `fcntl` (POSIX) and `msvcrt` (Windows), so `pip install meerschaum` pulls nothing and every dependency is installed into the `mrsm` venv on demand (or up front via an extra, e.g. `meerschaum[api]`). Locking behavior is unchanged for package installs, plugin symlinks, job restart checks, the SQL metadata cache, and daemon PID files.
+
 ### v4.0.0
 
 - **Build Meerschaum Compose into the core package.**  

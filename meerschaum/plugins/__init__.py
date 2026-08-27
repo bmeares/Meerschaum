@@ -366,9 +366,9 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     from collections import defaultdict
     from meerschaum.utils.misc import flatten_list, make_symlink, is_symlink
     import meerschaum.config.paths as paths
-    fasteners = mrsm.attempt_import('fasteners', lazy=False)
+    from meerschaum.utils.locks import InterProcessLock
 
-    with fasteners.InterProcessLock(str(paths.PLUGINS_INTERNAL_LOCK_PATH)), _locks['internal_plugins']:
+    with InterProcessLock(paths.PLUGINS_INTERNAL_LOCK_PATH), _locks['internal_plugins']:
 
         try:
             from importlib.metadata import entry_points
