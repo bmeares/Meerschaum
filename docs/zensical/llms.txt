@@ -52,7 +52,7 @@
 - [📚 Tutorials](https://meerschaum.io/tutorials/): Want to learn Meerschaum hands-on? Follow the written, end-to-end walkthrough below, or scroll down to the video tutorials if you're more of a visual learner.
 
 ## News
-- [🪵 Changelog](https://meerschaum.io/news/changelog/): - Build Meerschaum Compose into core.
+- [🪵 Changelog](https://meerschaum.io/news/changelog/): This is the current release cycle, so stay tuned for future releases!
 - [📢 Announcements](https://meerschaum.io/news/announcements/): > 27 June 2022
 - [🌠 To-Do / Wish List](https://meerschaum.io/news/to-do/): Below are some ongoing tasks I have planned for Meerschaum. This is not an exhaustive list, and if you would like to contribute a feature idea or point out a bug, please start a discussion or open an 
 - [🤗 Acknowledgements](https://meerschaum.io/news/acknowledgements/): Meerschaum is built with the help of many incredible open source libraries. In the spirit of open source, I've chosen to release the project under the permissive Apache 2.0 license.

@@ -5770,6 +5770,12 @@ For our example project `awesome-sauce`, let's bring up the syncing jobs:
 mrsm compose up -f
 ```
 
+Running `mrsm compose` without a subaction opens the Meerschaum shell inside the project's environment. The project name is appended to the prompt and shown in the bottom toolbar so you can tell which project a command will run against:
+
+```
+ [ mrsm@sql:awesome | awesome-sauce ] ➤
+```
+
 ??? tip "All other commands are executed as regular actions from within the project environment."
 
     ```bash
@@ -8932,56 +8938,54 @@ Source: https://meerschaum.io/news/changelog/
 
 ## 4.0.0 Releases
 
+This is the current release cycle, so stay tuned for future releases!
+
 ### v4.0.0
 
-- **Build Meerschaum Compose into core.**  
-  Existing Compose YAML files, commands, flags, arbitrary nested actions, project plugin discovery,
-  and multiple root / plugin directories continue to work without installing the `compose` plugin.
-  Project environment and plugin state are restored after every command, destructive operations
-  preserve resources whose ownership is ambiguous, and legacy Compose imports remain available.
-  The built-in action takes precedence when the legacy plugin is installed and emits a once-per-process
-  uninstall warning. New projects no longer receive a copied Compose plugin.
+- **Build Meerschaum Compose into the core package.**  
+  `compose` is now a built-in action, so existing `mrsm-compose.yaml` projects run without installing the `compose` plugin. The subactions (`up`, `down`, `run`, `ps`, `logs`, `explain`, `init`), their flags, and arbitrary nested actions behave as before, as do project plugin discovery and per-project root and plugins directories. Each command loads the project's config, environment, and plugins for the duration of the subaction and restores the host process state afterward, so chaining commands does not leak project state. The code lives at `meerschaum.compose`, so plugin-era imports still resolve. If the old plugin is still installed, the built-in action takes precedence and warns once to uninstall it. New projects no longer copy the plugin into the project directory. Running `mrsm compose` without a subaction opens a shell in the project environment, and the shell prompt and bottom toolbar name the active project. The executor keys moved out of the prompt into that slot; they are still shown in the bottom toolbar.
 
-- **Add opt-in Polars dataframe support without breaking Pandas users.**  
-  Pipes accept Polars `DataFrame` and `LazyFrame` inputs, including chunk generators, and
-  `Pipe.get_data(as_polars=True)` returns Polars frames. Large unseen-row comparisons use Polars when
-  it is already installed and safely fall back for unsupported dtypes. Polars geometry columns use
-  GeoArrow WKB, and declared JSON columns use canonical Arrow JSON over UTF-8 storage. Pandas restores
-  JSON objects and retains the GeoPandas / Shapely path as the default output and plugin boundary.
-  Install the conversion dependencies with
-  `pip install 'meerschaum[polars]'`.
+  ```bash
+  mrsm compose up
+  ```
 
-- **Replace the unreleased APScheduler fork with Meerschaum's small schedule engine.**  
-  Existing interval, calendar, five-field cron, start-time, and `and` / `or` schedule strings keep
-  their public `trigger.next()` interface. Calendar schedules retain month-end behavior, cron
-  schedules follow crontab's day-of-month / day-of-week and stepped-field rules, handle DST
-  transitions, and scheduled callbacks do not overlap themselves.
+  ```
+   [ mrsm@sql:awesome | awesome-sauce ] ➤
+  ```
 
-- **Make plugin registration and synchronization deterministic.**  
-  Decorated functions are owned by their root plugin module even when defined in submodules,
-  unloading clears every associated registry, and plugin symlink updates now use the existing
-  inter-process lock dependency instead of racing on a hand-managed lockfile. Plugin source and
-  dependency installs share an environment-scoped inter-process lock, and failed setup hooks restore
-  the caller's virtual environment state. Failed plugin upgrades restore the previous source and
-  dependency environment instead of leaving a partial installation.
+- **Add opt-in Polars support.**  
+  Pipes accept `polars.DataFrame` and `LazyFrame` inputs, including chunk generators, and `Pipe.get_data()` may return Polars frames. Geometry columns use GeoArrow WKB and JSON columns use Arrow JSON. Pandas remains the default output and the plugin boundary.
 
-- **Make runtime dependency installation safer and inspectable.**  
-  Set `MRSM_NO_AUTO_INSTALL=1` to prevent `attempt_import()` from downloading missing packages.
-  `install packages --dry-run` reports the selected installer, environment, arguments, and requested
-  packages without changing the environment. Package mutations are serialized per environment across
-  threads and processes, implicit downloads emit a once-per-process warning, and installed-package
-  checks are cached by environment and import policy.
-  Runtime installation remains on by default for the beginner-friendly experience, using `uv` with
-  the existing `pip` fallback.
+  ```bash
+  pip install 'meerschaum[polars]'
+  ```
 
-- **Repair Dask, SQL geometry, and Docker build paths.**  
-  Dask frames are detected correctly in sync and SQL reads, SQL geometry dtype filtering applies
-  only to columns present in the frame, and the Docker workflow uses the maintained buildx script
-  and current GitHub Actions.
+  ```python
+  df = pipe.get_data(as_polars=True)
+  pipe.sync(df)
+  ```
+
+- **Replace the APScheduler fork with a built-in schedule engine.**  
+  Interval, calendar, cron, `starting`, and `and` / `or` schedule strings keep their behavior and the `trigger.next()` interface, now with correct DST handling and no overlapping runs of the same callback.
+
+  ```bash
+  mrsm sync pipes --schedule 'every 30 minutes starting 00:15'
+  ```
+
+- **Make plugin registration and locking deterministic.**  
+  Decorators bind to the root plugin module even when defined in submodules, unloading a plugin clears every registry it wrote to, and source and dependency installs are guarded by an inter-process lock. Failed setup hooks and failed upgrades restore the previous state instead of leaving a partial install.
+
+- **Control runtime package installation.**  
+  Set `MRSM_NO_AUTO_INSTALL=1` to stop `attempt_import()` from downloading missing packages, or preview an install with `--dry-run`. Automatic installation stays on by default and now prefers `uv`, falling back to `pip`.
+
+  ```bash
+  mrsm install packages polars --dry-run
+  ```
+
+- **Fix Dask, geometry, and Docker regressions.**  
+  Dask frames are detected during syncs and SQL reads, SQL geometry dtype filtering skips columns absent from the frame, and Docker images build with the maintained buildx script.
 
 ## 3.5.0 Releases
-
-This is the current release cycle, so stay tuned for future releases!
 
 ### v3.5.2
 
