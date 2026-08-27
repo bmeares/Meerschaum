@@ -534,3 +534,54 @@ def test_compose_shell_prompt_shows_the_active_project(monkeypatch):
     monkeypatch.delenv('MRSM__COMPOSE_CONFIG')
     shell.update_prompt()
     assert 'awesome' not in remove_ansi(shell.prompt)
+
+
+def test_compose_up_starts_jobs_instead_of_syncing_pipes(monkeypatch):
+    """Explicitly configured jobs are the workload, so `up` does not sync the pipes."""
+    import meerschaum as mrsm
+    import meerschaum.compose.subactions.up as up_module
+    import meerschaum.compose.utils as compose_utils
+    import meerschaum.compose.utils.config as config_module
+    import meerschaum.compose.utils.jobs as compose_jobs
+    import meerschaum.compose.utils.pipes as pipes_module
+    import meerschaum.compose.utils.plugins as plugins_module
+    import meerschaum.jobs as jobs_module
+
+    pipe = mrsm.Pipe('plugin:foo', 'bar', instance='sql:local', temporary=True)
+    started_commands = []
+
+    monkeypatch.setattr(plugins_module, 'check_and_install_plugins', lambda *args, **kwargs: (True, "Success"))
+    monkeypatch.setattr(pipes_module, 'build_custom_connectors', lambda *args, **kwargs: {})
+    monkeypatch.setattr(pipes_module, 'get_defined_pipes', lambda *args, **kwargs: [pipe])
+    monkeypatch.setattr(config_module, 'config_has_changed', lambda *args, **kwargs: True)
+    monkeypatch.setattr(compose_jobs, 'get_jobs_commands', lambda *args, **kwargs: {
+        'hello': ['show', 'version', '--name', 'hello', '-d'],
+    })
+    monkeypatch.setattr(compose_jobs, 'get_project_job_names', lambda *args, **kwargs: [])
+    monkeypatch.setattr(jobs_module, 'get_jobs', lambda **kwargs: {})
+    monkeypatch.setattr(mrsm, 'get_pipes', lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        compose_utils,
+        'run_mrsm_command',
+        lambda command, *args, **kwargs: (started_commands.append(command), (True, "Success"))[1],
+    )
+
+    def _fail_on_sync(*args, **kwargs):
+        raise AssertionError("`up` must not sync the pipes when jobs are configured.")
+
+    monkeypatch.setattr(up_module, 'run_initial_syncs', _fail_on_sync)
+
+    compose_config = {
+        'project_name': 'alpha',
+        'jobs': {'hello': 'show version'},
+    }
+    success, msg = up_module._compose_up(compose_config)
+
+    assert success, msg
+    assert started_commands == [['show', 'version', '--name', 'hello', '-d']]
+    assert 'Running 1 background job' in msg
+
+    ### `--presync` still forces a sync pass.
+    monkeypatch.setattr(up_module, 'run_initial_syncs', lambda *args, **kwargs: (True, "Success"))
+    success, msg = up_module._compose_up(compose_config, presync=True, no_jobs=True)
+    assert success, msg

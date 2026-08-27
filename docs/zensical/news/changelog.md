@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v4.0.1
+
+- **Start the configured jobs instead of syncing pipes in `compose up`.**  
+  A project with a `jobs` key registered its pipes and then ran an initial sync pass over them before starting anything, so a failing sync aborted `up` and the configured jobs never started. When `jobs` is defined it is the project's workload: `up` registers the pipes and starts the jobs. `mrsm compose up --presync` still forces a sync pass.
+
 ### v4.0.0
 
 - **Build Meerschaum Compose into the core package.**  

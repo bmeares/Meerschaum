@@ -58,6 +58,7 @@ def _compose_up(
     pipes = get_defined_pipes(compose_config, debug=debug)
     instance_pipes = instance_pipes_from_pipes_list(pipes)
     project_name = get_project_name(compose_config)
+    explicit_jobs = compose_config.get('jobs', {})
 
     remote_instance_pipes = {
         instance_keys: mrsm.get_pipes(
@@ -226,8 +227,10 @@ def _compose_up(
 
     ### If any changes have been made to the config file's values,
     ### trigger another verification pass before starting jobs.
+    ### Explicitly configured jobs are the project's workload, so syncing the pipes
+    ### is not implied by bringing them up (`--presync` still forces a pass).
     ran_verification_sync = False
-    if presync or (updated_pipes and config_has_changed(compose_config)):
+    if presync or (not explicit_jobs and updated_pipes and config_has_changed(compose_config)):
         ran_verification_sync = True
         print_options(
             pipes,
@@ -318,7 +321,6 @@ def _compose_up(
             _replace=False,
         )
 
-    explicit_jobs = compose_config.get('jobs', {})
     if explicit_jobs:
         msg = (
             f"Running {len(jobs_commands)} background job"
