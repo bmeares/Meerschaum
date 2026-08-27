@@ -64,6 +64,8 @@ def _compose_default(
     )
     if action:
         info(f"Running '{' '.join(action)}' in compose project '{project_name}'...")
+    else:
+        info(f"Starting a shell in compose project '{project_name}'...")
 
     success, msg = run_mrsm_command(
         isolated_sysargs,

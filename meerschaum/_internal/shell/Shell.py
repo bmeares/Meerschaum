@@ -377,6 +377,16 @@ class Shell(cmd.Cmd):
 
         shell_attrs['intro'] = self.intro
         shell_attrs['_prompt'] = get_config('shell', CHARSET, 'prompt', patch=patch)
+        ### Configs written before v4.0.0 persist a prompt without `{compose}`.
+        ### Insert the token after the prompt's leading whitespace so a Compose
+        ### environment is still visible under an existing configuration.
+        if '{compose}' not in shell_attrs['_prompt']:
+            _lead_len = len(shell_attrs['_prompt']) - len(shell_attrs['_prompt'].lstrip('\n '))
+            shell_attrs['_prompt'] = (
+                shell_attrs['_prompt'][:_lead_len]
+                + '{compose}'
+                + shell_attrs['_prompt'][_lead_len:]
+            )
         self.prompt = shell_attrs['_prompt']
         shell_attrs['ruler'] = get_config('shell', CHARSET, 'ruler', patch=patch)
         self.ruler = shell_attrs['ruler']
@@ -402,6 +412,9 @@ class Shell(cmd.Cmd):
 
         ### this will be updated later in update_prompt ONLY IF {username} is in the prompt
         shell_attrs['username'] = ''
+
+        ### Set in `update_prompt()` when running inside a Compose project's environment.
+        shell_attrs['compose'] = ''
 
         if ANSI:
             def apply_colors(attr, key):
@@ -489,6 +502,22 @@ class Shell(cmd.Cmd):
             prompt = prompt.replace('{username}', shell_attrs['username'])
             mask = mask.replace('{username}', ''.join(['\0' for c in '{username}']))
 
+        if '{compose}' in shell_attrs['_prompt']:
+            from meerschaum.compose import get_env_project_name
+            compose_project_name = get_env_project_name()
+            compose_text = (
+                (compose_project_name + ' |')
+                if compose_project_name
+                else ''
+            )
+            shell_attrs['compose'] = (
+                compose_text
+                if not ANSI or not compose_text
+                else colored(compose_text, **get_config('shell', 'ansi', 'compose', 'rich'))
+            )
+            prompt = prompt.replace('{compose}', shell_attrs['compose'] + (' ' if compose_text else ''))
+            mask = mask.replace('{compose}', ''.join(['\0' for c in '{compose}']))
+
         if '{executor_keys}' in shell_attrs['_prompt']:
             if executor_keys is None:
                 executor_keys = shell_attrs.get('executor_keys', None) or 'local'
@@ -523,6 +552,12 @@ class Shell(cmd.Cmd):
         }
 
         self.prompt = ''.join(remainder_prompt).replace(
+            '{compose}', (
+                truncate_text_for_display(shell_attrs['compose'], **truncation_kwargs) + ' '
+                if shell_attrs['compose']
+                else ''
+            )
+        ).replace(
             '{username}', truncate_text_for_display(
                 shell_attrs['username'],
                 **truncation_kwargs

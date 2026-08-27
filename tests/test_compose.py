@@ -506,3 +506,29 @@ def test_compose_restores_environment_and_plugins_when_host_unload_fails(monkeyp
 
     assert 'COMPOSE_LEAK_TEST' not in os.environ
     assert loads == [True]
+
+
+def test_compose_shell_prompt_shows_the_active_project(monkeypatch):
+    """The shell prompt names the Compose project, even under a pre-v4 prompt config."""
+    from meerschaum.config._shell import default_shell_config
+    from meerschaum.utils.misc import remove_ansi
+    from meerschaum._internal.shell.Shell import Shell, shell_attrs
+
+    for charset in ('ascii', 'unicode'):
+        assert '{compose}' in default_shell_config[charset]['prompt']
+
+    shell = Shell()
+    ### The test root's config predates v4.0.0, so the token must be injected.
+    assert '{compose}' in shell_attrs['_prompt']
+    assert 'awesome' not in remove_ansi(shell.prompt)
+
+    monkeypatch.setenv(
+        'MRSM__COMPOSE_CONFIG',
+        json.dumps({'__file__': '/tmp/awesome/mrsm-compose.yaml'}),
+    )
+    shell.update_prompt()
+    assert 'awesome |' in remove_ansi(shell.prompt)
+
+    monkeypatch.delenv('MRSM__COMPOSE_CONFIG')
+    shell.update_prompt()
+    assert 'awesome' not in remove_ansi(shell.prompt)
