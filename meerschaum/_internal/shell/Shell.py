@@ -378,15 +378,15 @@ class Shell(cmd.Cmd):
         shell_attrs['intro'] = self.intro
         shell_attrs['_prompt'] = get_config('shell', CHARSET, 'prompt', patch=patch)
         ### Configs written before v4.0.0 persist a prompt without `{compose}`.
-        ### Insert the token after the prompt's leading whitespace so a Compose
-        ### environment is still visible under an existing configuration.
+        ### The executor keys moved to the bottom toolbar, so give the Compose project
+        ### that slot; a customized prompt keeps its executor and gets the token appended.
         if '{compose}' not in shell_attrs['_prompt']:
-            _lead_len = len(shell_attrs['_prompt']) - len(shell_attrs['_prompt'].lstrip('\n '))
-            shell_attrs['_prompt'] = (
-                shell_attrs['_prompt'][:_lead_len]
-                + '{compose}'
-                + shell_attrs['_prompt'][_lead_len:]
-            )
+            if ' | {executor_keys}' in shell_attrs['_prompt']:
+                shell_attrs['_prompt'] = shell_attrs['_prompt'].replace(
+                    ' | {executor_keys}', '{compose}'
+                )
+            else:
+                shell_attrs['_prompt'] += '{compose}'
         self.prompt = shell_attrs['_prompt']
         shell_attrs['ruler'] = get_config('shell', CHARSET, 'ruler', patch=patch)
         self.ruler = shell_attrs['ruler']
@@ -457,6 +457,17 @@ class Shell(cmd.Cmd):
         mask = prompt
         shell_attrs['_update_bottom_toolbar'] = True
 
+        truncation_suffix = (
+            '…'
+            if UNICODE
+            else '...'
+        )
+        console = get_console()
+        truncation_kwargs = {
+            'suffix': truncation_suffix,
+            'max_length': int(console.size.width / 4),
+        }
+
         if '{instance}' in shell_attrs['_prompt']:
             if instance is None:
                 instance = shell_attrs['instance_keys']
@@ -504,18 +515,27 @@ class Shell(cmd.Cmd):
 
         if '{compose}' in shell_attrs['_prompt']:
             from meerschaum.compose import get_env_project_name
-            compose_project_name = get_env_project_name()
+            compose_project_name = truncate_text_for_display(
+                get_env_project_name() or '',
+                **truncation_kwargs
+            )
             compose_text = (
-                (compose_project_name + ' |')
+                (' | ' + compose_project_name)
                 if compose_project_name
                 else ''
             )
             shell_attrs['compose'] = (
                 compose_text
-                if not ANSI or not compose_text
-                else colored(compose_text, **get_config('shell', 'ansi', 'compose', 'rich'))
+                if not ANSI or not compose_project_name
+                else (
+                    colored(' | ', **get_config('shell', 'ansi', 'prompt', 'rich'))
+                    + colored(
+                        compose_project_name,
+                        **get_config('shell', 'ansi', 'compose', 'rich')
+                    )
+                )
             )
-            prompt = prompt.replace('{compose}', shell_attrs['compose'] + (' ' if compose_text else ''))
+            prompt = prompt.replace('{compose}', shell_attrs['compose'])
             mask = mask.replace('{compose}', ''.join(['\0' for c in '{compose}']))
 
         if '{executor_keys}' in shell_attrs['_prompt']:
@@ -540,23 +560,8 @@ class Shell(cmd.Cmd):
                     _c = colored(_c, **get_config('shell', 'ansi', 'prompt', 'rich'))
                 remainder_prompt[i] = _c
 
-        truncation_suffix = (
-            '…'
-            if UNICODE
-            else '...'
-        )
-        console = get_console()
-        truncation_kwargs = {
-            'suffix': truncation_suffix,
-            'max_length': int(console.size.width / 4),
-        }
-
         self.prompt = ''.join(remainder_prompt).replace(
-            '{compose}', (
-                truncate_text_for_display(shell_attrs['compose'], **truncation_kwargs) + ' '
-                if shell_attrs['compose']
-                else ''
-            )
+            '{compose}', shell_attrs['compose']
         ).replace(
             '{username}', truncate_text_for_display(
                 shell_attrs['username'],
@@ -1171,6 +1176,7 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
     last_connected = False
     def bottom_toolbar():
         nonlocal last_connected
+        from meerschaum.compose import get_env_project_name
         if not get_config('shell', 'bottom_toolbar', 'enabled'):
             return None
         if not shell_attrs['_update_bottom_toolbar'] and platform.system() == 'Windows':
@@ -1263,8 +1269,23 @@ def input_with_sigint(_input, session, shell: Optional[Shell] = None):
             ) + ' ' + connected_icon
         )
 
+        compose_project_name = get_env_project_name()
+        compose_colored = (
+            (
+                colored(
+                    truncate_text_for_display(compose_project_name, **truncation_kwargs),
+                    'on ' + get_config('shell', 'ansi', 'compose', 'rich', 'style')
+                )
+                if ANSI
+                else colored(compose_project_name, 'on white')
+            ) + colored(' | ', 'on white')
+            if compose_project_name
+            else ''
+        )
+
         left = (
             ' '
+            + compose_colored
             + instance_colored
             + colored(' | ', 'on white')
             + executor_colored

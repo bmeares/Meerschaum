@@ -112,10 +112,10 @@ For our example project `awesome-sauce`, let's bring up the syncing jobs:
 mrsm compose up -f
 ```
 
-Running `mrsm compose` without a subaction opens the Meerschaum shell inside the project's environment. The prompt is prefixed with the project name so you can tell which project a command will run against:
+Running `mrsm compose` without a subaction opens the Meerschaum shell inside the project's environment. The project name is appended to the prompt and shown in the bottom toolbar so you can tell which project a command will run against:
 
 ```
- [ awesome-sauce | mrsm@sql:awesome | local ] ➤
+ [ mrsm@sql:awesome | awesome-sauce ] ➤
 ```
 
 ??? tip "All other commands are executed as regular actions from within the project environment."

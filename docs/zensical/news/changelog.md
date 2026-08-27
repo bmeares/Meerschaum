@@ -7,14 +7,14 @@ This is the current release cycle, so stay tuned for future releases!
 ### v4.0.0
 
 - **Build Meerschaum Compose into the core package.**  
-  `compose` is now a built-in action, so existing `mrsm-compose.yaml` projects run without installing the `compose` plugin. The subactions (`up`, `down`, `run`, `ps`, `logs`, `explain`, `init`), their flags, and arbitrary nested actions behave as before, as do project plugin discovery and per-project root and plugins directories. Each command loads the project's config, environment, and plugins for the duration of the subaction and restores the host process state afterward, so chaining commands does not leak project state. The code lives at `meerschaum.compose`, so plugin-era imports still resolve. If the old plugin is still installed, the built-in action takes precedence and warns once to uninstall it. New projects no longer copy the plugin into the project directory. Running `mrsm compose` without a subaction opens a shell in the project environment, and the shell prompt names the active project.
+  `compose` is now a built-in action, so existing `mrsm-compose.yaml` projects run without installing the `compose` plugin. The subactions (`up`, `down`, `run`, `ps`, `logs`, `explain`, `init`), their flags, and arbitrary nested actions behave as before, as do project plugin discovery and per-project root and plugins directories. Each command loads the project's config, environment, and plugins for the duration of the subaction and restores the host process state afterward, so chaining commands does not leak project state. The code lives at `meerschaum.compose`, so plugin-era imports still resolve. If the old plugin is still installed, the built-in action takes precedence and warns once to uninstall it. New projects no longer copy the plugin into the project directory. Running `mrsm compose` without a subaction opens a shell in the project environment, and the shell prompt and bottom toolbar name the active project. The executor keys moved out of the prompt into that slot; they are still shown in the bottom toolbar.
 
   ```bash
   mrsm compose up
   ```
 
   ```
-   [ awesome-sauce | mrsm@sql:awesome | local ] ➤
+   [ mrsm@sql:awesome | awesome-sauce ] ➤
   ```
 
 - **Add opt-in Polars support.**  

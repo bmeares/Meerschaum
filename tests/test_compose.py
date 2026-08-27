@@ -516,10 +516,12 @@ def test_compose_shell_prompt_shows_the_active_project(monkeypatch):
 
     for charset in ('ascii', 'unicode'):
         assert '{compose}' in default_shell_config[charset]['prompt']
+        assert '{executor_keys}' not in default_shell_config[charset]['prompt']
 
     shell = Shell()
-    ### The test root's config predates v4.0.0, so the token must be injected.
+    ### The test root's config predates v4.0.0, so the executor slot must be swapped.
     assert '{compose}' in shell_attrs['_prompt']
+    assert '{executor_keys}' not in shell_attrs['_prompt']
     assert 'awesome' not in remove_ansi(shell.prompt)
 
     monkeypatch.setenv(
@@ -527,7 +529,7 @@ def test_compose_shell_prompt_shows_the_active_project(monkeypatch):
         json.dumps({'__file__': '/tmp/awesome/mrsm-compose.yaml'}),
     )
     shell.update_prompt()
-    assert 'awesome |' in remove_ansi(shell.prompt)
+    assert '| awesome ' in remove_ansi(shell.prompt)
 
     monkeypatch.delenv('MRSM__COMPOSE_CONFIG')
     shell.update_prompt()
