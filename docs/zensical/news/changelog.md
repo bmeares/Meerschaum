@@ -19,6 +19,14 @@ This is the current release cycle, so stay tuned for future releases!
   unseen_df, update_df, delta_df = pipe.filter_existing(pl.DataFrame(docs))
   ```
 
+- **Speed up shell autocompletion.**  
+  Typing a flag in the shell was laggy: `-c` (and any other incomplete flag) re-parsed the
+  line through the pretty-printed error path on every keystroke, and completing a connector
+  re-imported every installed plugin. `argparse` failures now raise directly instead of
+  routing through `meerschaum.utils.warnings.error()` (whose Rich traceback was built and then discarded), and
+  `get_data_plugins()` caches its result against the installed plugins' names. With 21
+  plugins installed, a keystroke after `-c` fell from 275 ms to 8 ms.
+
 - **Preserve dtypes when splitting new rows from updated rows.**  
   `filter_existing()` separated the two with `joined_df.where(mask).dropna(how='all')`, which masks the non-matching rows to null before dropping them. That upcast integer and boolean columns to `float` or `object` on the way through, and silently discarded any row whose values were all null. Both frames are now selected with a boolean mask, which keeps the dtypes and the rows.
 

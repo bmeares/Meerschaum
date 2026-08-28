@@ -1006,12 +1006,25 @@ def get_plugins_modules(*to_load, **kw) -> List['ModuleType']:
     return [plugin.module for plugin in get_plugins(*to_load, **kw)]
 
 
+_data_plugins_cache: Dict[Tuple[str, ...], List[Plugin]] = {}
 def get_data_plugins() -> List[Plugin]:
     """
     Only return the modules of plugins with either `fetch()` or `sync()` functions.
     """
     import inspect
     plugins = get_plugins()
+
+    ### ponytail: cache on the installed plugins' names.
+    ### Accessing `plugin.module` re-enters `import_plugins()` (venv activation +
+    ### a nested `get_plugins()`) for every plugin, so an uncached call costs
+    ### hundreds of milliseconds. The shell completer calls this on every keystroke
+    ### (via `get_connector_labels()`), which is what made typing `-c` laggy.
+    ### Installing or removing a plugin changes the key, so the cache self-invalidates;
+    ### editing a plugin in place requires a restart to pick up a new `fetch()`/`sync()`.
+    cache_key = tuple(plugin.name for plugin in plugins)
+    if cache_key in _data_plugins_cache:
+        return _data_plugins_cache[cache_key]
+
     data_names = {'sync', 'fetch'}
     data_plugins = []
     for plugin in plugins:
@@ -1021,6 +1034,8 @@ def get_data_plugins() -> List[Plugin]:
             if name not in data_names:
                 continue
             data_plugins.append(plugin)
+
+    _data_plugins_cache[cache_key] = data_plugins
     return data_plugins
 
 

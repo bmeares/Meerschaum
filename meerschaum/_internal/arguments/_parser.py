@@ -25,7 +25,12 @@ class InvalidArgumentException(Exception):
 _original_argparse_error = argparse.ArgumentParser.error
 _original_argparse_parse_known_args = argparse.ArgumentParser.parse_known_args
 def _new_argparse_error(message: str):
-    error(message, InvalidArgumentException, stack=False)
+    ### ponytail: raise directly instead of `warnings.error()`.
+    ### The pretty-printing path (rich fill_ansi + traceback extraction) costs ~6 ms
+    ### and is pure waste here: the traceback is never displayed and the message is
+    ### only ever stringified into a `SuccessTuple`. The shell completer parses every
+    ### keystroke, so partial flags (e.g. `-c`) hit this on each character.
+    raise InvalidArgumentException(message)
 
 class ArgumentParser(argparse.ArgumentParser):
     """Override the built-in `argparse` error handling."""
