@@ -1,8 +1,28 @@
 # 🪵 Changelog
 
-## 4.0.0 Releases
+## 4.1.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v4.1.0
+
+- **Filter Polars DataFrames against a pipe without converting to Pandas.**  
+  `Pipe.filter_existing()` raised `AttributeError: 'DataFrame' object has no attribute 'empty'` when handed a `polars.DataFrame`, because the guard which detects non-DataFrame input matches on the string `'dataframe'` and a Polars frame's type name contains it. A Polars `DataFrame` or `LazyFrame` is now accepted, and the three returned frames (unseen, update, delta) are Polars frames rather than Pandas ones.
+
+  The comparison itself also runs natively: the existing rows are read with `Pipe.get_data(as_polars=True)`, and both the delta anti-join and the unseen / update split are performed by Polars, so no frame is round-tripped through Pandas. On a 150k-row sync against SQLite this cuts `filter_existing()` from 1.49s to 0.94s. Frames which Polars cannot compare — `uuid`, `object`, and geometry columns, or pipes using `autoincrement` / `autotime` — transparently fall back to the Pandas implementation and are converted back to Polars on the way out. Where the incoming and stored frames disagree on a dtype within the same family (Pandas never downcasts, so an incoming `int64` meets Oracle's stored `int32`), both are widened to their common dtype; anything else, such as an `int` against a `float`, falls back to Pandas, which coerces mixed numerics into `numeric` values. Pandas remains the default: a Pandas frame in is still filtered by Pandas and returned as Pandas.
+
+  ```python
+  import polars as pl
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe('demo', 'polars', instance='sql:main')
+  unseen_df, update_df, delta_df = pipe.filter_existing(pl.DataFrame(docs))
+  ```
+
+- **Preserve dtypes when splitting new rows from updated rows.**  
+  `filter_existing()` separated the two with `joined_df.where(mask).dropna(how='all')`, which masks the non-matching rows to null before dropping them. That upcast integer and boolean columns to `float` or `object` on the way through, and silently discarded any row whose values were all null. Both frames are now selected with a boolean mask, which keeps the dtypes and the rows.
+
+## 4.0.0 Releases
 
 ### v4.0.3
 

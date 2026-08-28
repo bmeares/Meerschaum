@@ -688,6 +688,8 @@ def filter_existing(
     ----------
     df: 'pd.DataFrame'
         The dataframe to inspect and filter.
+        A `polars.DataFrame` or `LazyFrame` is accepted,
+        in which case the returned dataframes are `polars.DataFrame`.
 
     safe_copy: bool, default True
         If `True`, create a copy before comparing and modifying the dataframes.
@@ -713,7 +715,8 @@ def filter_existing(
 
     Returns
     -------
-    A tuple of three pandas DataFrames: unseen, update, and delta.
+    A tuple of three DataFrames: unseen, update, and delta.
+    These are Polars DataFrames if `df` is a Polars DataFrame or LazyFrame, else Pandas.
     """
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.debug import dprint
@@ -722,18 +725,44 @@ def filter_existing(
         filter_unseen_df,
         add_missing_cols_to_df,
         get_unhashable_cols,
+        get_json_cols,
+        to_pandas,
+        to_polars,
     )
     from meerschaum.utils.dtypes import (
         to_pandas_dtype,
         none_if_null,
-        to_datetime,
-        are_dtypes_equal,
-        value_is_null,
-        round_time,
     )
     from meerschaum.config import get_config
     pd = import_pandas()
     pandas = attempt_import('pandas')
+    ### Polars frames are filtered natively when possible;
+    ### otherwise they are converted up-front and converted back on the way out.
+    input_is_polars = df is not None and df.__class__.__module__.split('.')[0] == 'polars'
+    if input_is_polars:
+        polars_dfs = self._filter_existing_polars(
+            df,
+            safe_copy=safe_copy,
+            date_bound_only=date_bound_only,
+            include_unchanged_columns=include_unchanged_columns,
+            enforce_dtypes=enforce_dtypes,
+            chunksize=chunksize,
+            debug=debug,
+            **kw
+        )
+        if polars_dfs is not None:
+            return polars_dfs
+
+    df = to_pandas(df)
+
+    def _return_dfs(unseen, update, delta):
+        if not input_is_polars:
+            return unseen, update, delta
+        return tuple(
+            to_polars(_df, json_cols=get_json_cols(_df))
+            for _df in (unseen, update, delta)
+        )
+
     if enforce_dtypes or 'dataframe' not in str(type(df)).lower():
         df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
     is_dask = hasattr(df, '__module__') and 'dask' in df.__module__
@@ -781,89 +810,32 @@ def filter_existing(
 
     if df is None:
         empty_df = get_empty_df()
-        return empty_df, empty_df, empty_df
+        return _return_dfs(empty_df, empty_df, empty_df)
 
     if (df.empty if not is_dask else len(df) == 0):
-        return df, df, df
-
-    ### begin is the oldest data in the new dataframe
-    begin, end = None, None
+        return _return_dfs(df, df, df)
 
     if autoincrement and primary_key == dt_col and dt_col not in df.columns:
         if enforce_dtypes:
             df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
-        return df, get_empty_df(), df
+        return _return_dfs(df, get_empty_df(), df)
 
     if autotime and dt_col and dt_col not in df.columns:
         if enforce_dtypes:
             df = self.enforce_dtypes(df, chunksize=chunksize, debug=debug)
-        return df, get_empty_df(), df
+        return _return_dfs(df, get_empty_df(), df)
 
     try:
         min_dt_val = df[dt_col].min(skipna=True) if dt_col and dt_col in df.columns else None
-        if is_dask and min_dt_val is not None:
-            min_dt_val = min_dt_val.compute()
-        min_dt = (
-            to_datetime(min_dt_val, as_pydatetime=True)
-            if min_dt_val is not None and are_dtypes_equal(dt_type, 'datetime')
-            else min_dt_val
-        )
-    except Exception:
-        min_dt = None
-
-    if not are_dtypes_equal('datetime', str(type(min_dt))) or value_is_null(min_dt):
-       if not are_dtypes_equal('int', str(type(min_dt))):
-            min_dt = None
-
-    if isinstance(min_dt, datetime):
-        rounded_min_dt = round_time(min_dt, to='down')
-        try:
-            begin = rounded_min_dt - timedelta(minutes=1)
-        except OverflowError:
-            begin = rounded_min_dt
-    elif dt_type and 'int' in dt_type.lower():
-        begin = min_dt
-    elif dt_col is None:
-        begin = None
-
-    ### end is the newest data in the new dataframe
-    try:
         max_dt_val = df[dt_col].max(skipna=True) if dt_col and dt_col in df.columns else None
-        if is_dask and max_dt_val is not None:
-            max_dt_val = max_dt_val.compute()
-        max_dt = (
-            to_datetime(max_dt_val, as_pydatetime=True)
-            if max_dt_val is not None and 'datetime' in str(dt_type)
-            else max_dt_val
-        )
+        if is_dask:
+            min_dt_val = min_dt_val.compute() if min_dt_val is not None else None
+            max_dt_val = max_dt_val.compute() if max_dt_val is not None else None
     except Exception:
-        import traceback
-        traceback.print_exc()
-        max_dt = None
+        min_dt_val, max_dt_val = None, None
 
-    if not are_dtypes_equal('datetime', str(type(max_dt))) or value_is_null(max_dt):
-        if not are_dtypes_equal('int', str(type(max_dt))):
-            max_dt = None
-
-    if isinstance(max_dt, datetime):
-        end = (
-            round_time(
-                max_dt,
-                to='down'
-            ) + timedelta(minutes=1)
-        )
-    elif dt_type and 'int' in dt_type.lower() and max_dt is not None:
-        end = max_dt + 1
-
-    if max_dt is not None and min_dt is not None and min_dt > max_dt:
-        warn("Detected minimum datetime greater than maximum datetime.")
-
-    if begin is not None and end is not None and begin > end:
-        if isinstance(begin, datetime):
-            begin = end - timedelta(minutes=1)
-        ### We might be using integers for the datetime axis.
-        else:
-            begin = end - 1
+    ### `begin` is the oldest data in the new dataframe, `end` is the newest.
+    begin, end = _get_delta_bounds(min_dt_val, max_dt_val, dt_type, dt_col)
 
     unique_index_vals = {
         col: df[col].unique()
@@ -905,7 +877,7 @@ def filter_existing(
     if backtrack_df is None:
         if debug:
             dprint(f"No backtrack data was found for {self}.")
-        return df, get_empty_df(), df
+        return _return_dfs(df, get_empty_df(), df)
 
     if enforce_dtypes:
         backtrack_df = self.enforce_dtypes(backtrack_df, chunksize=chunksize, debug=debug)
@@ -988,18 +960,12 @@ def filter_existing(
     cols = list(delta_df.columns)
 
     unseen_df = (
-        joined_df
-        .where(new_rows_mask)
-        .dropna(how='all')[cols]
-        .reset_index(drop=True)
+        joined_df[new_rows_mask][cols].reset_index(drop=True)
     ) if on_cols else delta_df
 
     ### Rows that have already been inserted but values have changed.
     update_df = (
-        joined_df
-        .where(~new_rows_mask)
-        .dropna(how='all')[cols]
-        .reset_index(drop=True)
+        joined_df[~new_rows_mask][cols].reset_index(drop=True)
     ) if on_cols else get_empty_df()
 
     if include_unchanged_columns and on_cols:
@@ -1017,8 +983,377 @@ def filter_existing(
             on=on_cols,
         )
 
-    return unseen_df, update_df, delta_df
+    return _return_dfs(unseen_df, update_df, delta_df)
 
+
+def _get_delta_bounds(
+    min_dt_val: Any,
+    max_dt_val: Any,
+    dt_type: Optional[str],
+    dt_col: Optional[str],
+) -> Tuple[Any, Any]:
+    """
+    Return the `begin` and `end` bounds used to fetch the existing rows to compare against.
+
+    Parameters
+    ----------
+    min_dt_val: Any
+        The minimum value of the incoming datetime axis (`None` if there is no datetime axis).
+
+    max_dt_val: Any
+        The maximum value of the incoming datetime axis (`None` if there is no datetime axis).
+
+    dt_type: Optional[str]
+        The registered dtype of the datetime axis (e.g. `'datetime'` or `'int'`).
+
+    dt_col: Optional[str]
+        The name of the datetime axis column.
+
+    Returns
+    -------
+    A tuple of the `begin` and `end` bounds (either may be `None`).
+    """
+    from meerschaum.utils.dtypes import (
+        to_datetime,
+        are_dtypes_equal,
+        value_is_null,
+        round_time,
+    )
+
+    def _coerce(val: Any) -> Any:
+        try:
+            return (
+                to_datetime(val, as_pydatetime=True)
+                if val is not None and are_dtypes_equal(dt_type, 'datetime')
+                else val
+            )
+        except Exception:
+            return None
+
+    min_dt, max_dt = _coerce(min_dt_val), _coerce(max_dt_val)
+
+    if not are_dtypes_equal('datetime', str(type(min_dt))) or value_is_null(min_dt):
+        if not are_dtypes_equal('int', str(type(min_dt))):
+            min_dt = None
+
+    if not are_dtypes_equal('datetime', str(type(max_dt))) or value_is_null(max_dt):
+        if not are_dtypes_equal('int', str(type(max_dt))):
+            max_dt = None
+
+    begin, end = None, None
+
+    if isinstance(min_dt, datetime):
+        rounded_min_dt = round_time(min_dt, to='down')
+        try:
+            begin = rounded_min_dt - timedelta(minutes=1)
+        except OverflowError:
+            begin = rounded_min_dt
+    elif dt_type and 'int' in dt_type.lower():
+        begin = min_dt
+    elif dt_col is None:
+        begin = None
+
+    if isinstance(max_dt, datetime):
+        end = round_time(max_dt, to='down') + timedelta(minutes=1)
+    elif dt_type and 'int' in dt_type.lower() and max_dt is not None:
+        end = max_dt + 1
+
+    if max_dt is not None and min_dt is not None and min_dt > max_dt:
+        warn("Detected minimum datetime greater than maximum datetime.")
+
+    if begin is not None and end is not None and begin > end:
+        if isinstance(begin, datetime):
+            begin = end - timedelta(minutes=1)
+        ### We might be using integers for the datetime axis.
+        else:
+            begin = end - 1
+
+    return begin, end
+
+
+def _is_polars_fallback_dtype(typ: Any) -> bool:
+    """Return `True` if a registered dtype cannot be compared natively by Polars."""
+    typ_str = str(typ).lower()
+    return (
+        typ_str in ('uuid', 'object')
+        or typ_str.startswith(('geometry', 'geography'))
+    )
+
+
+def _polars_dtypes_reconcilable(left: Any, right: Any) -> bool:
+    """
+    Return `True` if two Polars dtypes may be safely widened to a common dtype.
+
+    Pandas treats integers of different widths as equal and does not downcast,
+    so the incoming and stored frames may disagree on width (e.g. Oracle's `int32`).
+    Only same-family differences are reconcilable; anything else
+    (an `int` against a `float`, for example) is left to the Pandas path,
+    which coerces mixed numerics into `numeric` values.
+    """
+    if left == right:
+        return True
+
+    for check in ('is_integer', 'is_float', 'is_temporal'):
+        if not getattr(left, check, lambda: False)():
+            continue
+        if not getattr(right, check, lambda: False)():
+            return False
+        if check == 'is_temporal':
+            ### Naive and timezone-aware columns are not comparable,
+            ### and Polars widens to the coarser time unit,
+            ### which would round away a real difference.
+            return (
+                (getattr(left, 'time_zone', None) is None)
+                == (getattr(right, 'time_zone', None) is None)
+                and getattr(left, 'time_unit', None) == getattr(right, 'time_unit', None)
+            )
+        return True
+
+    return False
+
+
+def _has_polars_object_cols(df: Any, polars: Any) -> bool:
+    """Return `True` if a Polars frame contains columns which cannot be joined."""
+    return any(
+        typ == polars.Object or str(typ).lower() in ('object', 'unknown')
+        for typ in df.schema.values()
+    )
+
+
+def _filter_existing_polars(
+    self,
+    df: Any,
+    safe_copy: bool = True,
+    date_bound_only: bool = False,
+    include_unchanged_columns: bool = False,
+    enforce_dtypes: bool = False,
+    chunksize: Optional[int] = -1,
+    debug: bool = False,
+    **kw
+) -> Union[Tuple[Any, Any, Any], None]:
+    """
+    Filter a Polars DataFrame against the pipe's existing rows without converting to Pandas.
+
+    The existing rows are fetched as Polars (`Pipe.get_data(as_polars=True)`),
+    and both the delta anti-join and the unseen / update split are performed by Polars.
+
+    Parameters
+    ----------
+    df: Any
+        A `polars.DataFrame` or `polars.LazyFrame` to inspect and filter.
+
+    See `meerschaum.Pipe.filter_existing` for the remaining parameters.
+
+    Returns
+    -------
+    A tuple of three `polars.DataFrame` (unseen, update, delta),
+    or `None` if the frames cannot be compared natively,
+    in which case the caller falls back to the Pandas implementation.
+    """
+    from meerschaum.utils.debug import dprint
+    from meerschaum.utils.packages import attempt_import
+    from meerschaum.utils.dtypes import none_if_null
+    from meerschaum.config import get_config
+
+    polars = attempt_import('polars', install=False, lazy=False, warn=False)
+    if polars is None:
+        return None
+
+    ### NOTE: Polars frames are immutable, so `safe_copy` is a no-op on this path.
+    ### Dtypes are always enforced here (regardless of `enforce_dtypes`)
+    ### because Polars can only join frames which share a schema.
+    _ = safe_copy, enforce_dtypes
+
+    parameters = self.parameters
+    pipe_columns = self.columns
+    primary_key = pipe_columns.get('primary', None)
+    dt_col = pipe_columns.get('datetime', None)
+    dt_type = parameters.get('dtypes', {}).get(dt_col, 'datetime') if dt_col else None
+
+    ### These paths drop columns and mutate `self.columns`; leave them to Pandas.
+    if parameters.get('autoincrement', False) or parameters.get('autotime', False):
+        return None
+
+    pipe_dtypes = self.get_dtypes(debug=debug) if self.enforce else {}
+    if any(_is_polars_fallback_dtype(typ) for typ in pipe_dtypes.values()):
+        return None
+
+    try:
+        if df.__class__.__name__ == 'LazyFrame':
+            df = df.collect()
+
+        if df.is_empty():
+            return None
+
+        df = self.enforce_dtypes(df, chunksize=chunksize, as_polars=True, debug=debug)
+        if df is None or df.__class__.__module__.split('.')[0] != 'polars':
+            return None
+        if _has_polars_object_cols(df, polars):
+            return None
+
+        min_dt_val = df[dt_col].min() if dt_col and dt_col in df.columns else None
+        max_dt_val = df[dt_col].max() if dt_col and dt_col in df.columns else None
+        begin, end = _get_delta_bounds(min_dt_val, max_dt_val, dt_type, dt_col)
+
+        unique_index_vals = {
+            col: df[col].unique().to_list()
+            for col in (pipe_columns.values() if not primary_key else [primary_key])
+            if col in df.columns and col != dt_col
+        } if not date_bound_only else {}
+        filter_params_index_limit = get_config('pipes', 'sync', 'filter_params_index_limit')
+        _ = kw.pop('params', None)
+        params = {
+            col: [
+                none_if_null(val)
+                for val in unique_vals
+            ]
+            for col, unique_vals in unique_index_vals.items()
+            if len(unique_vals) <= filter_params_index_limit
+        } if not date_bound_only else {}
+
+        if debug:
+            dprint(
+                f"Looking at Polars data between '{begin}' and '{end}' "
+                f"with index value lengths:\n"
+                + json.dumps(
+                    {col: len(vals) for col, vals in unique_index_vals.items()},
+                    indent=4,
+                )
+            )
+
+        backtrack_df = self.get_data(
+            begin=begin,
+            end=end,
+            chunksize=chunksize,
+            params=params,
+            as_polars=True,
+            debug=debug,
+            **kw
+        )
+    except Exception as e:
+        if debug:
+            dprint(f"Failed to filter {self} natively with Polars:\n{e}")
+        return None
+
+    if backtrack_df is None:
+        if debug:
+            dprint(f"No backtrack data was found for {self}.")
+        return df, df.clear(), df
+
+    try:
+        if backtrack_df.__class__.__name__ == 'LazyFrame':
+            backtrack_df = backtrack_df.collect()
+        if backtrack_df.__class__.__module__.split('.')[0] != 'polars':
+            return None
+        if _has_polars_object_cols(backtrack_df, polars):
+            return None
+
+        if primary_key and primary_key not in backtrack_df.columns:
+            return None
+
+        ### Align both frames on the union of their columns.
+        new_cols = list(df.columns)
+        for col, typ in backtrack_df.schema.items():
+            if col not in df.columns:
+                df = df.with_columns(polars.lit(None, dtype=typ).alias(col))
+        for col, typ in df.schema.items():
+            if col not in backtrack_df.columns:
+                backtrack_df = backtrack_df.with_columns(polars.lit(None, dtype=typ).alias(col))
+        backtrack_df = backtrack_df.select(list(df.columns))
+
+        ### Widen same-family dtype differences to their common dtype.
+        ### Anything else is left to the Pandas path, which reconciles them.
+        mismatched_cols = [
+            col
+            for col in df.columns
+            if df.schema[col] != backtrack_df.schema[col]
+        ]
+        if mismatched_cols:
+            if any(
+                not _polars_dtypes_reconcilable(df.schema[col], backtrack_df.schema[col])
+                for col in mismatched_cols
+            ):
+                if debug:
+                    dprint(
+                        "Irreconcilable Polars dtypes for "
+                        + f"{mismatched_cols}; falling back to Pandas."
+                    )
+                return None
+            common_schema = dict(
+                polars.concat(
+                    [df.clear(), backtrack_df.clear()],
+                    how='vertical_relaxed',
+                ).schema
+            )
+            df = df.cast(common_schema)
+            backtrack_df = backtrack_df.cast(common_schema)
+
+        on_cols = [
+            col
+            for col_key, col in pipe_columns.items()
+            if (
+                col
+                and col_key != 'value'
+                and col in backtrack_df.columns
+            )
+        ] if not primary_key else [primary_key]
+        out_cols = new_cols + [col for col in on_cols if col not in new_cols]
+
+        ### Preserve the incoming row order across the joins.
+        row_col = '__mrsm_row_id'
+        while row_col in df.columns:
+            row_col = '_' + row_col
+
+        join_cols = list(df.columns)
+        delta_df = df.with_row_index(row_col).join(
+            backtrack_df,
+            on=join_cols,
+            how='anti',
+            nulls_equal=True,
+        )
+
+        if not on_cols:
+            unseen_df, update_df = delta_df, delta_df.clear()
+        else:
+            backtrack_index_df = backtrack_df.select(on_cols).unique()
+            unseen_df = delta_df.join(
+                backtrack_index_df,
+                on=on_cols,
+                how='anti',
+                nulls_equal=True,
+            )
+            update_df = delta_df.join(
+                backtrack_index_df,
+                on=on_cols,
+                how='semi',
+                nulls_equal=True,
+            )
+
+        def _finalize(_df):
+            return _df.sort(row_col).drop(row_col).select(out_cols)
+
+        unseen_df = _finalize(unseen_df)
+        update_df = _finalize(update_df)
+        delta_df = _finalize(delta_df)
+
+        if include_unchanged_columns and on_cols:
+            unchanged_backtrack_cols = [
+                col
+                for col in backtrack_df.columns
+                if col in on_cols or col not in update_df.columns
+            ]
+            update_df = backtrack_df.select(unchanged_backtrack_cols).join(
+                update_df,
+                on=on_cols,
+                how='inner',
+                nulls_equal=True,
+            )
+    except Exception as e:
+        if debug:
+            dprint(f"Failed to filter {self} natively with Polars:\n{e}")
+        return None
+
+    return unseen_df, update_df, delta_df
 
 @staticmethod
 def _get_chunk_label(

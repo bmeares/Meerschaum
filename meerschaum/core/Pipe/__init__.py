@@ -176,6 +176,7 @@ class Pipe:
         get_sync_time,
         exists,
         filter_existing,
+        _filter_existing_polars,
         _get_chunk_label,
         get_num_workers,
         _persist_new_special_columns,
