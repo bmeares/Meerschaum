@@ -18,6 +18,7 @@ from meerschaum.utils.threading import RLock
 from meerschaum.core.Plugin import Plugin
 
 _api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
+_plugins_import_errors: Dict[str, Exception] = {}
 _pre_sync_hooks: Dict[Union[str, None], List[Callable[[Any], Any]]] = {}
 _post_sync_hooks: Dict[Union[str, None], List[Callable[[Any], Any]]] = {}
 _actions_daemon_enabled: Dict[str, bool] = {}
@@ -580,7 +581,9 @@ def import_plugins(
                                 f'{paths.PLUGINS_RESOURCES_PATH.stem}.{plugin_name}'
                             )
                         )
+                    _ = _plugins_import_errors.pop(plugin_name, None)
                 except Exception as e:
+                    _plugins_import_errors[plugin_name] = e
                     _warn(
                         f"Failed to import plugin '{plugin_name}':\n    "
                         + f"{e}\n\nHere's a stacktrace:",
@@ -840,6 +843,7 @@ def unload_plugins(
         ### Unload sync hooks.
         _ = _pre_sync_hooks.pop(plugin_name, None)
         _ = _post_sync_hooks.pop(plugin_name, None)
+        _ = _plugins_import_errors.pop(plugin_name, None)
 
         ### Unload API endpoints and pages.
         _ = _dash_plugins.pop(plugin_name, None)

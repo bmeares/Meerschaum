@@ -127,7 +127,9 @@ class Plugin:
     @property
     def module(self):
         """
-        Return the Python module of the underlying plugin.
+        Return the Python module of the underlying plugin,
+        or `None` if the plugin is not installed or its import failed
+        (check `Plugin.import_error` for the swallowed exception).
         """
         if '_module' not in self.__dict__ or self.__dict__.get('_module', None) is None:
             if self.__file__ is None:
@@ -137,6 +139,16 @@ class Plugin:
             self._module = import_plugins(str(self), warn=False)
 
         return self._module
+
+    @property
+    def import_error(self) -> Union[Exception, None]:
+        """
+        Return the exception raised by this plugin's most recent failed import
+        (i.e. when `Plugin.module` is `None` even though the plugin is installed),
+        otherwise `None`.
+        """
+        from meerschaum.plugins import _plugins_import_errors
+        return _plugins_import_errors.get(self.name, None)
 
 
     @property
