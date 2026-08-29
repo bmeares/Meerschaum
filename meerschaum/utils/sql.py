@@ -2546,10 +2546,16 @@ def _get_create_table_query_from_cte(
         else None
     )
     query = query.lstrip()
-    is_with_query = query.lower().startswith('with ')
+    is_with_query = get_leading_with_index(query) != -1
     if flavor in ('mssql',):
         if is_with_query:
-            final_select_ix = query.lower().rfind('select')
+            final_select_ix = find_top_level_select_index(query, last=True)
+            if final_select_ix == -1:
+                from meerschaum.utils.warnings import error
+                error(
+                    "Could not locate the top-level SELECT of the following query:\n"
+                    + query
+                )
             create_table_queries = [
                 (
                     query[:final_select_ix].rstrip() + ',\n'
@@ -2678,6 +2684,115 @@ def _get_create_table_query_from_cte(
     return create_table_queries + alter_type_queries
 
 
+def find_top_level_select_index(query: str, last: bool = False) -> int:
+    """
+    Return the index of the first (or last) top-level `SELECT` keyword in a query.
+
+    The scan skips `--` line comments, `/* */` block comments, string literals,
+    quoted identifiers, and parenthesized subqueries, so a definition may safely
+    contain comments (including comments mentioning "select").
+
+    Parameters
+    ----------
+    query: str
+        The SQL query to scan.
+
+    last: bool, default False
+        If `True`, return the index of the last top-level `SELECT`
+        (e.g. the final statement of a CTE query) instead of the first.
+
+    Returns
+    -------
+    The character index of the `SELECT` keyword, or `-1` if none exists
+    at the top level.
+    """
+    q_lower = query.lower()
+    n = len(q_lower)
+    depth = 0
+    found_ix = -1
+    i = 0
+    while i < n:
+        ch = q_lower[i]
+        nxt = q_lower[i + 1] if (i + 1) < n else ''
+        if ch == '-' and nxt == '-':
+            eol = q_lower.find('\n', i)
+            i = n if eol == -1 else (eol + 1)
+            continue
+        if ch == '/' and nxt == '*':
+            end = q_lower.find('*/', i + 2)
+            i = n if end == -1 else (end + 2)
+            continue
+        if ch == "'":
+            i += 1
+            while i < n:
+                if q_lower[i] == "'":
+                    if (i + 1) < n and q_lower[i + 1] == "'":
+                        i += 2
+                        continue
+                    break
+                i += 1
+            i += 1
+            continue
+        if ch in ('"', '`'):
+            end = q_lower.find(ch, i + 1)
+            i = n if end == -1 else (end + 1)
+            continue
+        if ch == '[':
+            end = q_lower.find(']', i + 1)
+            i = n if end == -1 else (end + 1)
+            continue
+        if ch == '(':
+            depth += 1
+            i += 1
+            continue
+        if ch == ')':
+            depth -= 1
+            i += 1
+            continue
+        if depth == 0 and ch == 's' and q_lower[i:i + 6] == 'select':
+            before_ok = i == 0 or not (q_lower[i - 1].isalnum() or q_lower[i - 1] == '_')
+            after_ok = (i + 6) == n or not (q_lower[i + 6].isalnum() or q_lower[i + 6] == '_')
+            if before_ok and after_ok:
+                if not last:
+                    return i
+                found_ix = i
+                i += 6
+                continue
+        i += 1
+    return found_ix
+
+
+def get_leading_with_index(query: str) -> int:
+    """
+    Return the index of a query's leading `WITH` keyword,
+    skipping whitespace and comments, or `-1` if the query
+    does not begin with `WITH`.
+    """
+    q_lower = query.lower()
+    n = len(q_lower)
+    i = 0
+    while i < n:
+        ch = q_lower[i]
+        nxt = q_lower[i + 1] if (i + 1) < n else ''
+        if ch in (' ', '\t', '\r', '\n'):
+            i += 1
+            continue
+        if ch == '-' and nxt == '-':
+            eol = q_lower.find('\n', i)
+            i = n if eol == -1 else (eol + 1)
+            continue
+        if ch == '/' and nxt == '*':
+            end = q_lower.find('*/', i + 2)
+            i = n if end == -1 else (end + 2)
+            continue
+        break
+    if q_lower[i:i + 4] == 'with' and (
+        (i + 4) == n or not (q_lower[i + 4].isalnum() or q_lower[i + 4] == '_')
+    ):
+        return i
+    return -1
+
+
 def wrap_query_with_cte(
     sub_query: str,
     parent_query: str,
@@ -2690,12 +2805,13 @@ def wrap_query_with_cte(
     Parameters
     ----------
     sub_query: str
-        The query to be referenced. This may itself contain CTEs.
+        The query to be referenced. This may itself contain CTEs and comments.
         Unless `cte_name` is provided, this will be aliased as `src`.
 
     parent_query: str
         The larger query to append which references the subquery.
-        This must not contain CTEs.
+        If it contains CTEs of its own, they are hoisted into the
+        enclosing `WITH` list.
 
     flavor: str
         The database flavor, e.g. `'mssql'`.
@@ -2706,6 +2822,8 @@ def wrap_query_with_cte(
     Returns
     -------
     An encapsulating query which allows you to treat `sub_query` as a temporary table.
+    Raises an exception when a query's top-level `SELECT` cannot be located
+    (e.g. an incomplete definition), rather than emitting invalid SQL.
 
     Examples
     --------
@@ -2715,15 +2833,17 @@ def wrap_query_with_cte(
     >>> parent_query = "SELECT newval * 3 FROM src"
     >>> query = wrap_query_with_cte(sub_query, parent_query, 'mssql')
     >>> print(query)
-    >>> # WITH foo AS (SELECT 1 AS val),
-    >>> # [src] AS (
+    >>> # WITH foo AS (SELECT 1 AS val)
+    >>> # , [src] AS (
     >>> #     SELECT (val * 2) AS newval FROM foo
     >>> # )
     >>> # SELECT newval * 3 FROM src
 
     """
     import textwrap
+    from meerschaum.utils.warnings import error
     sub_query = sub_query.lstrip()
+    parent_query = parent_query.lstrip()
     cte_name_quoted = sql_item_name(cte_name, flavor, None)
 
     if flavor in NO_CTE_FLAVORS:
@@ -2734,53 +2854,47 @@ def wrap_query_with_cte(
             .replace('--MRSM_SUBQUERY--', f"(\n{sub_query}\n) AS {cte_name_quoted}")
         )
 
-    if sub_query.lstrip().lower().startswith('with '):
-        depth = 0
-        select_index = -1
-        sq_lower = sub_query.lower()
-
-        # Iterate through the query to find the first 'SELECT' at the top level (depth 0)
-        # Start searching after the 'WITH' keyword
-        start_search = sq_lower.find('with') + 4
-
-        for i in range(start_search, len(sq_lower)):
-            char = sq_lower[i]
-            if char == '(':
-                depth += 1
-            elif char == ')':
-                depth -= 1
-            elif depth == 0:
-                # Check for 'SELECT' at a word boundary
-                if sq_lower[i:i+6] == 'select':
-                    # Ensure it's not part of another word (e.g., 'selection')
-                    # by checking the character immediately following 'select'
-                    is_bound = (i + 6 == len(sq_lower)) or (not sq_lower[i+6].isalnum())
-                    if is_bound:
-                        select_index = i
-                        break
-
-        # If we found the main SELECT, we slice and flatten.
-        # Part 1 (definitions) contains the 'WITH cte AS (...),'
-        # Part 2 (body) contains the 'SELECT ... UNION ALL ...'
-        if select_index != -1:
-            definitions = sub_query[:select_index].rstrip()
-            # If the definitions end in a comma (rare but possible), remove it
-            if definitions.endswith(','):
-                definitions = definitions[:-1].rstrip()
-
-            body = sub_query[select_index:].strip()
-
-            return (
-                f"{definitions},\n"
-                f"{cte_name_quoted} AS (\n"
-                f"{textwrap.indent(body, '    ')}\n"
-                f")\n{parent_query}"
+    if get_leading_with_index(sub_query) != -1:
+        select_index = find_top_level_select_index(sub_query)
+        if select_index == -1:
+            error(
+                "Could not locate the top-level SELECT of the following query:\n"
+                + sub_query
             )
 
+        ### Flatten: the definitions part keeps the sub-query's own CTEs
+        ### (`WITH a AS (...) -- trailing comments included`), and the body
+        ### (`SELECT ...`) becomes the new CTE. The joining comma goes on its
+        ### own line so a trailing `--` comment cannot swallow it.
+        definitions = sub_query[:select_index].rstrip()
+        if definitions.endswith(','):
+            definitions = definitions[:-1].rstrip()
+        body = sub_query[select_index:].strip()
+
+        lead = (
+            f"{definitions}\n"
+            f", {cte_name_quoted} AS (\n"
+            f"{textwrap.indent(body, '    ')}\n"
+            f")"
+        )
+    else:
+        lead = (
+            f"WITH {cte_name_quoted} AS (\n"
+            f"{textwrap.indent(sub_query, '    ')}\n"
+            f")"
+        )
+
+    parent_with_index = get_leading_with_index(parent_query)
+    if parent_with_index == -1:
+        return f"{lead}\n{parent_query}"
+
+    ### The parent query declares CTEs of its own: hoist them after the new
+    ### definition instead of emitting an invalid second `WITH`.
+    parent_prefix = parent_query[:parent_with_index].rstrip()
+    parent_rest = parent_query[parent_with_index + len('with'):].lstrip()
     return (
-        f"WITH {cte_name_quoted} AS (\n"
-        f"{textwrap.indent(sub_query, '    ')}\n"
-        f")\n{parent_query}"
+        (f"{parent_prefix}\n" if parent_prefix else "")
+        + f"{lead}\n, {parent_rest}"
     )
 
 

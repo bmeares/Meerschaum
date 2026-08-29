@@ -189,3 +189,103 @@ def test_duckdb_unchunked_read_iterator(tmp_path):
     finally:
         if connector.engine is not None:
             connector.engine.dispose()
+
+
+def test_wrap_query_with_cte_flattens_sub_query_ctes():
+    """
+    A sub-query with its own CTEs must be flattened into one `WITH` list.
+    """
+    from meerschaum.utils.sql import wrap_query_with_cte
+    sub_query = "WITH foo AS (SELECT 1 AS val) SELECT (val * 2) AS newval FROM foo"
+    parent_query = 'SELECT newval * 3 FROM "src"'
+    query = wrap_query_with_cte(sub_query, parent_query, 'postgresql')
+    assert query.lower().count('with') == 1
+    assert '"src" AS (' in query
+    assert query.rstrip().endswith(parent_query)
+
+
+def test_wrap_query_with_cte_tolerates_comments():
+    """
+    `--` comments — including ones containing the word "select" — must not
+    corrupt the flattened query.
+    """
+    from meerschaum.utils.sql import wrap_query_with_cte
+    sub_query = (
+        "WITH a AS (\n"
+        "    SELECT 1 AS val\n"
+        ")\n"
+        "-- now select the final rows\n"
+        "SELECT * FROM a"
+    )
+    parent_query = 'SELECT * FROM "src"'
+    query = wrap_query_with_cte(sub_query, parent_query, 'postgresql')
+    lines = query.splitlines()
+    assert '-- now select the final rows' in lines
+    ### The joining comma must be on its own line (not swallowed by the comment).
+    comment_ix = lines.index('-- now select the final rows')
+    assert lines[comment_ix + 1].lstrip().startswith(',')
+    assert 'SELECT * FROM a' in query
+
+
+def test_wrap_query_with_cte_tolerates_leading_comment_before_with():
+    """
+    A comment before the leading `WITH` must still trigger flattening
+    (instead of illegally nesting a CTE inside a CTE body).
+    """
+    from meerschaum.utils.sql import wrap_query_with_cte
+    sub_query = (
+        "-- get the rows\n"
+        "WITH a AS (SELECT 1 AS val)\n"
+        "SELECT * FROM a"
+    )
+    parent_query = 'SELECT * FROM "src"'
+    query = wrap_query_with_cte(sub_query, parent_query, 'mssql')
+    assert query.lower().count('with') == 1
+
+
+def test_wrap_query_with_cte_hoists_parent_ctes():
+    """
+    A parent query declaring its own CTEs (the pushdown path) must be
+    hoisted into the enclosing `WITH` list, not emitted as a second `WITH`.
+    """
+    from meerschaum.utils.sql import wrap_query_with_cte
+    sub_query = 'SELECT * FROM "parent_tbl" WHERE "ts" >= 1'
+    parent_query = (
+        'WITH a AS (SELECT * FROM "src")\n'
+        "SELECT * FROM a"
+    )
+    query = wrap_query_with_cte(sub_query, parent_query, 'postgresql', cte_name='src')
+    assert query.lower().count('with ') == 1
+    assert query.lower().lstrip().startswith('with')
+    assert ', a AS (' in query
+
+
+def test_wrap_query_with_cte_raises_on_missing_top_level_select():
+    """
+    An unwrappable definition must fail loudly instead of emitting
+    invalid SQL.
+    """
+    from meerschaum.utils.sql import wrap_query_with_cte
+    sub_query = "WITH a AS (SELECT 1 AS val)"
+    parent_query = 'SELECT * FROM "src"'
+    with pytest.raises(Exception):
+        wrap_query_with_cte(sub_query, parent_query, 'postgresql')
+
+
+def test_find_top_level_select_index_skips_comments_and_strings():
+    """
+    The top-level `SELECT` scan must skip comments, string literals,
+    and quoted identifiers.
+    """
+    from meerschaum.utils.sql import find_top_level_select_index
+    query = (
+        "-- select nothing here\n"
+        "/* select nothing here either */\n"
+        "WITH a AS (SELECT 'select' AS \"select\")\n"
+        "SELECT * FROM a"
+    )
+    ix = find_top_level_select_index(query)
+    assert query[ix:].startswith('SELECT * FROM a')
+    last_ix = find_top_level_select_index(query, last=True)
+    assert last_ix == ix
+    assert find_top_level_select_index("WITH a AS (SELECT 1)") == -1
