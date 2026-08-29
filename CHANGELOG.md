@@ -1,8 +1,76 @@
 # 🪵 Changelog
 
-## 4.0.0 Releases
+## 4.1.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v4.1.0
+
+- **Filter Polars DataFrames against a pipe without converting to Pandas.**  
+  `Pipe.filter_existing()` raised `AttributeError: 'DataFrame' object has no attribute 'empty'` when handed a `polars.DataFrame`, because the guard which detects non-DataFrame input matches on the string `'dataframe'` and a Polars frame's type name contains it. A Polars `DataFrame` or `LazyFrame` is now accepted, and the three returned frames (unseen, update, delta) are Polars frames rather than Pandas ones.
+
+  The comparison itself also runs natively: the existing rows are read with `Pipe.get_data(as_polars=True)`, and both the delta anti-join and the unseen / update split are performed by Polars, so no frame is round-tripped through Pandas. On a 150k-row sync against SQLite this cuts `filter_existing()` from 1.49s to 0.94s. Frames which Polars cannot compare — `uuid`, `object`, and geometry columns, or pipes using `autoincrement` / `autotime` — transparently fall back to the Pandas implementation and are converted back to Polars on the way out. Where the incoming and stored frames disagree on a dtype within the same family (Pandas never downcasts, so an incoming `int64` meets Oracle's stored `int32`), both are widened to their common dtype; anything else, such as an `int` against a `float`, falls back to Pandas, which coerces mixed numerics into `numeric` values. Pandas remains the default: a Pandas frame in is still filtered by Pandas and returned as Pandas.
+
+  ```python
+  import polars as pl
+  import meerschaum as mrsm
+
+  pipe = mrsm.Pipe('demo', 'polars', instance='sql:main')
+  unseen_df, update_df, delta_df = pipe.filter_existing(pl.DataFrame(docs))
+  ```
+
+- **Speed up shell autocompletion.**  
+  Typing a flag in the shell was laggy: `-c` (and any other incomplete flag) re-parsed the
+  line through the pretty-printed error path on every keystroke, and completing a connector
+  re-imported every installed plugin. `argparse` failures now raise directly instead of
+  routing through `meerschaum.utils.warnings.error()` (whose Rich traceback was built and then discarded), and
+  `get_data_plugins()` caches its result against the installed plugins' names. With 21
+  plugins installed, a keystroke after `-c` fell from 275 ms to 8 ms.
+
+- **Preserve dtypes when splitting new rows from updated rows.**  
+  `filter_existing()` separated the two with `joined_df.where(mask).dropna(how='all')`, which masks the non-matching rows to null before dropping them. That upcast integer and boolean columns to `float` or `object` on the way through, and silently discarded any row whose values were all null. Both frames are now selected with a boolean mask, which keeps the dtypes and the rows.
+
+
+- **Grant admins every scope at `/login`.**  
+  The password grant decided which requested scopes to grant from `'*' in allowed_scopes` alone, so an admin whose stored scope list was narrow (or merely lacked `'*'`) received a token missing scopes their admin type already implies — admins short-circuit scope enforcement everywhere else (`is_user_allowed_to_execute()`). An `admin`-typed user is now treated as holding `'*'` at grant time: requesting specific scopes grants them, and requesting none grants `['*']`. API keys are unchanged — a deliberately narrowed key stays narrow.
+
+- **Gate the web console's pages behind the routes allowlist.**  
+  `api:permissions:routes:allowlist` restricted the core FastAPI route groups, but the web console registered its pages regardless, and the only recourse was `--no-dash` — unusable when plugin pages are served *through* the Dash app. The console's own pages (`/dash`, `/dash/pipes`, `/dash/users`, `/dash/tokens`, `/dash/jobs`, `/dash/plugins`, `/dash/register`) now register only when the new `dash` route group matches the allowlist. The login page is always served (it is the auth entrypoint for plugin pages requiring a login), pages registered by plugins via `@web_page` are unaffected, and the default allowlist (`['*']`) serves everything as before. The index redirect points at the login page when the console is stripped.
+
+  ```yaml
+  # Serve only /version, /login, and plugin-registered routes and pages:
+  api:
+    permissions:
+      routes:
+        allowlist: ['version']
+  ```
+
+- **Set a session cookie at login.**  
+  The web console kept its session ID only in a `dcc.Store` (browser local storage), which Dash callbacks can read but plain HTTP routes cannot — so a route added by an API plugin could never see that the browser was already signed in. Logging in now also mirrors the session ID into an `HttpOnly`, `SameSite=Lax` cookie (`mrsm-session-id`, scoped to `/`, `Secure` over HTTPS), and signing out clears it. Read it server-side with `meerschaum.api.dash.sessions.get_session_id_from_request()` and validate with `is_session_authenticated()`. Dash callbacks still authenticate through the session store, as before.
+
+- **Tolerate comments and nested CTEs when wrapping SQL definitions.**  
+  `wrap_query_with_cte()` scanned for a definition's top-level `SELECT` character-by-character, without skipping comments or string literals. A `--` comment before the final `SELECT` swallowed the CTE-joining comma and spliced the comment's text into the generated SQL; a comment *before* a leading `WITH` skipped flattening entirely and nested the CTE illegally (on SQL Server); and a parent query with CTEs of its own — the `parents` pushdown path — always emitted an invalid second `WITH`. All three produced broken SQL **silently**, surfacing only as `"No data were fetched"`. The scan now skips `--` and `/* */` comments, string literals, and quoted identifiers; parent CTEs are hoisted into the enclosing `WITH` list; and a definition whose top-level `SELECT` cannot be located raises a clear error instead of emitting invalid SQL. The same comment-aware scan replaces the `rfind('select')` in `SELECT INTO` creation on SQL Server, which could match inside a comment or an identifier like `selected_at`.
+
+- **Keep subscription connectors alive with `sync pipes --listen`.**  
+  A connector whose `sync()` subscribes to a stream (e.g. MQTT) and syncs via callbacks had to keep its process alive with `--loop --min-seconds <huge>`, which misrepresents the job (it is not resyncing) and picks an arbitrary interval. `sync pipes --listen` runs the initial sync pass and then blocks until a stop is requested (`stop jobs`, SIGTERM, or CTRL-C), so the subscription keeps syncing for the life of the job.
+
+  ```bash
+  mrsm sync pipes -c mqtt:main --listen
+  ```
+
+- **Provision plugin venvs on the first `compose init`.**  
+  `compose init` decided whether to run `install required` / `setup plugins` from a snapshot of installed plugins taken *before* the project's plugins were installed. In a fresh checkout or git worktree that snapshot is empty, so the first `init` skipped dependency provisioning entirely and a second run was required. The check now re-discovers installed plugins after the install pass.
+
+- **Warn when a pipe declares both `upsert` and `compress`.**  
+  Compressing a chunk invalidates the composite unique index the upsert's `ON CONFLICT` clause needs, so an upsert which re-syncs history older than `compress:after` fails with `"there is no unique or exclusion constraint matching the ON CONFLICT specification"` — long after the configuration looked accepted. Applying a columnstore policy to an upsert pipe now warns (once per pipe per process) naming the failure and the condition under which the combination is safe.
+
+- **Surface plugin import failures on `Plugin.import_error`.**  
+  `mrsm.Plugin('name').module` returned `None` when the plugin's import raised, with the exception swallowed — indistinguishable from the plugin not being installed. The most recent import failure (including a missing venv) is now retained and exposed as `Plugin.import_error`, and cleared when the plugin imports successfully or is unloaded.
+
+- **Cast strings to dates and read lazy schemas without deprecated Polars calls.**  
+  Enforcing a `date` dtype on a string column cast straight to `polars.Date`, which Polars deprecates and removes in 2.0, and `enforce_dtypes()` read `LazyFrame.columns`, which silently resolves the frame's schema. String columns now parse with `str.to_date()` (matching how `datetime` columns are already handled), and a lazy frame's column names come from `collect_schema().names()`.
+
+## 4.0.0 Releases
 
 ### v4.0.3
 

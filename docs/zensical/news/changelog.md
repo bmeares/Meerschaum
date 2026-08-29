@@ -67,6 +67,9 @@ This is the current release cycle, so stay tuned for future releases!
 - **Surface plugin import failures on `Plugin.import_error`.**  
   `mrsm.Plugin('name').module` returned `None` when the plugin's import raised, with the exception swallowed — indistinguishable from the plugin not being installed. The most recent import failure (including a missing venv) is now retained and exposed as `Plugin.import_error`, and cleared when the plugin imports successfully or is unloaded.
 
+- **Cast strings to dates and read lazy schemas without deprecated Polars calls.**  
+  Enforcing a `date` dtype on a string column cast straight to `polars.Date`, which Polars deprecates and removes in 2.0, and `enforce_dtypes()` read `LazyFrame.columns`, which silently resolves the frame's schema. String columns now parse with `str.to_date()` (matching how `datetime` columns are already handled), and a lazy frame's column names come from `collect_schema().names()`.
+
 ## 4.0.0 Releases
 
 ### v4.0.3
