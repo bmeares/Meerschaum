@@ -716,3 +716,49 @@ def test_compose_owns_a_compound_pipeline_job():
     assert get_project_job_names(config, {
         'maps': _ComposeTestJob(foreign_sysargs),
     }) == []
+
+
+def test_compose_init_provisions_plugins_on_first_run(tmp_path, monkeypatch):
+    """
+    A fresh project (no plugins symlinked yet) must still run the
+    `install required` / `setup plugins` pass on the FIRST `compose init`.
+    """
+    from meerschaum.compose import utils
+    import meerschaum.compose.utils.config as config_module
+    import meerschaum.compose.utils.plugins as plugins_module
+    import meerschaum.compose.utils.stack as stack_module
+    from meerschaum.compose.subactions.init import _compose_init
+
+    compose_path = tmp_path / 'mrsm-compose.yaml'
+    compose_path.touch()
+    compose_config = {'root_dir': tmp_path / 'root', 'project_name': 'fresh-project'}
+
+    commands = []
+    discovery_calls = []
+
+    def fake_get_installed_plugins(*args, **kwargs):
+        ### Empty before `check_and_install_plugins()` symlinks the project
+        ### plugins, non-empty afterwards — the fresh-worktree sequence.
+        discovery_calls.append(True)
+        return [] if len(discovery_calls) == 1 else ['proj_plugin']
+
+    monkeypatch.setattr(config_module, 'infer_compose_file_path', lambda file=None: compose_path)
+    monkeypatch.setattr(config_module, 'get_env_dict', lambda *args, **kwargs: {})
+    monkeypatch.setattr(utils, 'init', lambda *args, **kwargs: compose_config)
+    monkeypatch.setattr(stack_module, 'get_project_name', lambda *args, **kwargs: 'fresh-project')
+    monkeypatch.setattr(plugins_module, 'get_installed_plugins', fake_get_installed_plugins)
+    monkeypatch.setattr(
+        plugins_module,
+        'check_and_install_plugins',
+        lambda *args, **kwargs: (True, "Success"),
+    )
+    monkeypatch.setattr(
+        utils,
+        'run_mrsm_command',
+        lambda args, *a, **kw: commands.append(list(args)) or (True, "Success"),
+    )
+
+    success, msg = _compose_init(None, file=compose_path, yes=True)
+    assert success, msg
+    assert ['install', 'required'] in commands
+    assert ['setup', 'plugins'] in commands
