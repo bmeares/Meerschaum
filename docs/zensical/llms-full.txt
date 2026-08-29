@@ -9018,6 +9018,13 @@ This is the current release cycle, so stay tuned for future releases!
 - **Cast strings to dates and read lazy schemas without deprecated Polars calls.**  
   Enforcing a `date` dtype on a string column cast straight to `polars.Date`, which Polars deprecates and removes in 2.0, and `enforce_dtypes()` read `LazyFrame.columns`, which silently resolves the frame's schema. String columns now parse with `str.to_date()` (matching how `datetime` columns are already handled), and a lazy frame's column names come from `collect_schema().names()`.
 
+- **Scan for stale temporary tables once a minute, not once a sync.**  
+  `_drop_old_temporary_tables()` throttles its stale-table scan to once every 60 seconds, but recorded the timestamp only on the branch that *skips* the scan. The attribute therefore never advanced past its initial `0`, `perf_counter() - 0` never fell under the threshold, and every single `sync_pipe()` ran the full scan.
+
+  The scan then read every stale row out of `mrsm_temp_tables` and inserted a *fresh duplicate row for each one*, issued as one `INSERT` per row, while `_drop_temporary_tables()` only deletes rows for the tables in its in-memory set — non-empty during a sync. The duplicates written for every other table survived, so the count doubled on each pass. A test instance left running for three days reached 12.7 million rows across 1,472 distinct table names, roughly 8,500 copies each, and every subsequent sync replayed millions of single-row inserts against it.
+
+  The timestamp is now recorded when the scan actually runs, the stale tables are flagged in place with one idempotent `UPDATE ... SET ready_to_drop WHERE date_created < end AND ready_to_drop IS NULL`, and both bookkeeping selects are `DISTINCT`. Oracle felt this worst — it has no `DROP TABLE IF EXISTS`, so each drop also pays an existence check and a dedicated connection — where the integration suite had slowed from 412s to 8,083s for that flavor alone.
+
 ## 4.0.0 Releases
 
 ### v4.0.3

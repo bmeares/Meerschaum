@@ -289,3 +289,66 @@ def test_find_top_level_select_index_skips_comments_and_strings():
     last_ix = find_top_level_select_index(query, last=True)
     assert last_ix == ix
     assert find_top_level_select_index("WITH a AS (SELECT 1)") == -1
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_stale_temporary_tables_scan_is_throttled(flavor: str):
+    """
+    The stale-table scan must run at most once a minute and must not duplicate bookkeeping rows.
+    """
+    conn = conns[flavor]
+    if not isinstance(conn, SQLConnector):
+        return
+
+    from meerschaum.connectors.sql import _instance
+
+    scans = []
+    original_read = conn.read
+
+    def counting_read(query, **kw):
+        ### Only the stale scan filters on `date_created`; the cheap drop path selects
+        ### on `ready_to_drop` and runs on every call by design.
+        if 'date_created' in str(query):
+            scans.append(query)
+        return original_read(query, **kw)
+
+    inserts = []
+    original_exec = conn.exec
+
+    def counting_exec(query, **kw):
+        if 'INSERT' in str(query).upper():
+            inserts.append(query)
+        return original_exec(query, **kw)
+
+    ### Seed a stale bookkeeping row so the scan has something to flag.
+    import datetime as _datetime
+    import sqlalchemy
+    from meerschaum.connectors.sql.tables import get_tables
+    temp_tables_table = get_tables(mrsm_instance=conn, create=True)['temp_tables']
+    stale_name = '_mrsm_test_stale_temp_table'
+    conn.exec(sqlalchemy.delete(temp_tables_table).where(
+        temp_tables_table.c.table == stale_name
+    ), silent=True)
+    conn.exec(sqlalchemy.insert(temp_tables_table).values(
+        date_created=(
+            _datetime.datetime.now(_datetime.timezone.utc).replace(tzinfo=None)
+            - _datetime.timedelta(days=30)
+        ),
+        table=stale_name,
+        ready_to_drop=None,
+    ), silent=True)
+
+    conn._stale_temporary_tables_check_timestamp = None
+    _instance._in_memory_temp_tables.clear()
+    conn.read, conn.exec = counting_read, counting_exec
+    try:
+        for _ in range(5):
+            success, _msg = conn._drop_old_temporary_tables(refresh=False)
+            assert success
+    finally:
+        conn.read, conn.exec = original_read, original_exec
+
+    ### Only the first call scans; the remaining four are throttled to the cheap drop path.
+    assert len(scans) == 1, f"Scanned {len(scans)} times, expected 1."
+    ### The stale tables are flagged with an UPDATE, never re-inserted.
+    assert not inserts, f"Wrote {len(inserts)} bookkeeping rows, expected 0."
