@@ -340,6 +340,12 @@ groups['sync'].add_argument(
     help="The maximum number of seconds before cancelling a pipe's syncing job. Defaults to 300."
 )
 groups['sync'].add_argument(
+    '--listen', action="store_true", help=(
+        "Keep the process alive after the initial sync pass so subscription-style "
+        "connectors (e.g. MQTT) continue syncing via callbacks. Stops on `stop jobs` or CTRL-C."
+    )
+)
+groups['sync'].add_argument(
     '--unblock', action="store_true", help="Run the action asynchronously, if possible.",
 )
 groups['sync'].add_argument(

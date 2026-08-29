@@ -32,6 +32,13 @@ from meerschaum._internal.arguments import (
             },
         ),
         (
+            ['sync', 'pipes', '--listen'],
+            {
+                'action': ['sync', 'pipes'],
+                'listen': True,
+            },
+        ),
+        (
             ['foo', ':', '-s', 'every 3 seconds'],
             {
                 'action': ['foo', ':'],

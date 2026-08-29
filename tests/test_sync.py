@@ -1548,3 +1548,32 @@ def test_parametrized_sync_time(flavor: str):
     assert sync_time_a is not None
     assert sync_time_b is not None
     assert sync_time_a < sync_time_b
+
+
+def test_sync_pipes_listen_stays_alive_until_stop(monkeypatch):
+    """
+    `sync pipes --listen` must keep the process alive after the initial pass
+    (for subscription-style connectors) and exit promptly on a requested stop.
+    """
+    import threading
+    import time
+
+    import meerschaum.actions.sync as sync_module
+    from meerschaum.utils import threading as mrsm_threading
+
+    monkeypatch.setattr(sync_module, '_pipes_lap', lambda **kw: {})
+    mrsm_threading.clear_stop()
+
+    thread = threading.Thread(
+        target=lambda: sync_module._sync_pipes(listen=True, nopretty=True),
+        daemon=True,
+    )
+    thread.start()
+    try:
+        time.sleep(0.5)
+        assert thread.is_alive(), "`--listen` did not keep the sync process alive."
+        mrsm_threading.request_stop()
+        thread.join(timeout=5)
+        assert not thread.is_alive(), "`--listen` did not stop on a requested stop."
+    finally:
+        mrsm_threading.clear_stop()
