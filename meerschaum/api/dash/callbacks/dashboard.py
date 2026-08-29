@@ -18,6 +18,7 @@ from dash.exceptions import PreventUpdate
 import meerschaum as mrsm
 from meerschaum.utils.typing import List, Optional, Any, Tuple
 from meerschaum.api import get_api_connector, endpoints, no_auth, CHECK_UPDATE
+from meerschaum.api.routes import route_group_is_allowed
 from meerschaum.api.dash import dash_app, debug
 from meerschaum.api.dash.sessions import (
     is_session_active,
@@ -90,15 +91,23 @@ omit_actions = {
 }
 
 ### Map endpoints to page layouts.
+### The console's own pages are gated by the `dash` route group of
+### `api:permissions:routes:allowlist`; unknown paths render the error page.
+### The login page is always served so plugin pages requiring a login keep an
+### auth entrypoint, and plugin pages (`add_plugin_pages`) register regardless
+### of the allowlist.
+_console_pages_allowed = route_group_is_allowed('dash')
 _paths = {
     '/dash/login'   : pages.login.layout,
-    '/dash'         : pages.dashboard.layout,
-    '/dash/plugins' : pages.plugins.layout,
-    '/dash/users'   : pages.users.layout,
-    '/dash/tokens'  : pages.tokens.layout,
-    '/dash/register': pages.register.layout,
-    '/dash/pipes'   : pages.pipes.layout,
-    '/dash/jobs'    : pages.jobs.layout,
+    **({
+        '/dash'         : pages.dashboard.layout,
+        '/dash/plugins' : pages.plugins.layout,
+        '/dash/users'   : pages.users.layout,
+        '/dash/tokens'  : pages.tokens.layout,
+        '/dash/register': pages.register.layout,
+        '/dash/pipes'   : pages.pipes.layout,
+        '/dash/jobs'    : pages.jobs.layout,
+    } if _console_pages_allowed else {}),
 }
 _required_login = {'', '/dash', '/dash/', '/dash/tokens', '/dash/jobs', '/dash/pipes'}
 ### Endpoints (plugin pages with `@web_page(dark_theme=False)`) that opt out of the
@@ -111,7 +120,7 @@ _pages = {
     'Users': '/dash/users',
     'Tokens': '/dash/tokens',
     'Jobs': '/dash/jobs',
-}
+} if _console_pages_allowed else {}
 
 
 @dash_app.callback(

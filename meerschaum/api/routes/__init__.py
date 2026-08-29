@@ -10,7 +10,6 @@ from fnmatch import fnmatch
 from importlib import import_module
 
 from meerschaum.api import _include_dash, mcp_enabled, permissions_config
-from meerschaum.utils.warnings import warn
 
 _allowed_route_group_patterns = (
     permissions_config.get('routes', {}).get('allowlist', None) or ['*']
@@ -61,13 +60,6 @@ if mcp_enabled and route_group_is_allowed('mcp'):
 if _include_dash and route_group_is_allowed('webterm'):
     import meerschaum.api.routes._webterm
 
-if _include_dash and not all(
-    route_group_is_allowed(_route_group)
-    for _route_group in _core_route_groups
-):
-    warn(
-        "The web console registers routes independently of "
-        "`api:permissions:routes:allowlist`.\n    "
-        "Start the API with `--no-dash` to serve a restricted route surface.",
-        stack=False,
-    )
+### The web console's own pages are gated by the `dash` route group
+### (see `meerschaum.api.dash.callbacks.dashboard`); pages registered by
+### plugins via `@web_page` are always served when the Dash app is mounted.
