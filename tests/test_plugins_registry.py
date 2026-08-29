@@ -142,3 +142,32 @@ def test_plugin_registries_use_root_module_and_unload(monkeypatch):
     assert 'example' not in plugins._post_sync_hooks
     assert 'example' not in plugins._api_plugins
     assert 'example' not in plugins._dash_plugins
+
+
+def test_plugin_import_error_is_surfaced(tmp_path):
+    """A failed plugin import must retain its exception on `Plugin.import_error`."""
+    from meerschaum._internal.static import STATIC_CONFIG
+    from meerschaum.config.environment import replace_env
+    import meerschaum.plugins as plugins
+    from meerschaum.core.Plugin import Plugin
+
+    root_dir = tmp_path / 'root'
+    plugins_dir = tmp_path / 'plugins'
+    plugins_dir.mkdir(parents=True)
+    (plugins_dir / 'broken_import.py').write_text("raise RuntimeError('kaboom')\n")
+
+    scope = {
+        STATIC_CONFIG['environment']['root']: str(root_dir),
+        STATIC_CONFIG['environment']['plugins']: str(plugins_dir),
+    }
+    try:
+        with replace_env(scope):
+            from meerschaum.utils.venv import init_venv
+            init_venv('broken_import')
+            plugins.sync_plugins_symlinks()
+            plugin = Plugin('broken_import')
+            assert plugin.module is None
+            assert isinstance(plugin.import_error, RuntimeError)
+            assert 'kaboom' in str(plugin.import_error)
+    finally:
+        plugins._plugins_import_errors.pop('broken_import', None)

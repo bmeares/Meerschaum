@@ -18,7 +18,7 @@ from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State
 
 from meerschaum.api.dash import dash_app, debug, pipes, _get_pipes
-from meerschaum.api.dash.sessions import set_session
+from meerschaum.api.dash.sessions import set_session, set_session_cookie
 from meerschaum.api.dash.connectors import get_web_connector
 from meerschaum.api.routes._login import login
 from meerschaum.api.dash.components import alert_from_success_tuple
@@ -89,6 +89,10 @@ def login_button_click(
             'mrsm-location.href': location_href,
         }
         set_session(session_id, {'username': username})
+        ### Mirror the session ID into an `HttpOnly` cookie (scoped to `/`)
+        ### so plain HTTP routes outside the `/dash` WSGI mount can read it.
+        from flask import request as flask_request
+        set_session_cookie(ctx.response, session_id, secure=flask_request.is_secure)
         alerts = []
     except HTTPException:
         form_class += ' is-invalid'

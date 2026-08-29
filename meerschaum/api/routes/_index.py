@@ -15,10 +15,15 @@ from meerschaum.api import (
     docs_enabled,
     _include_dash,
 )
+from meerschaum.api.routes import route_group_is_allowed
 RedirectResponse = starlette.responses.RedirectResponse
 
 INDEX_REDIRECT_URL: str = (
-    endpoints['dash']
+    (
+        endpoints['dash']
+        if route_group_is_allowed('dash')
+        else endpoints['dash'] + '/login'
+    )
     if _include_dash
     else (
         endpoints['docs']

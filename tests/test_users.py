@@ -68,3 +68,53 @@ def test_login_preserves_custom_user_scopes(flavor: str):
     finally:
         delete_success, delete_msg = user_conn.delete_user(user, debug=debug)
     assert delete_success, delete_msg
+
+
+@pytest.mark.parametrize("flavor", get_flavors())
+def test_login_treats_admin_as_wildcard_scope(flavor: str):
+    """
+    The password grant must treat an admin as holding the `'*'` scope,
+    so an admin's stored scope list does not filter the grant.
+    """
+    if flavor != 'api':
+        pytest.skip("The password grant is only served by the API.")
+
+    conn = conns[flavor]
+    ### Register directly on the API's backing instance: the API's
+    ### register route does not accept a user type.
+    instance_conn = get_connector('sql', 'test_postgresql')
+    username, password = 'test_admin_scopes', 'test1234'
+    user = User(
+        username,
+        password,
+        type='admin',
+        email='none@none.com',
+        attributes={'scopes': ['custom:read']},
+    )
+    user_conn = get_connector(
+        'api', 'test_admin_scopes_login',
+        username=username,
+        password=password,
+        host=conn.host,
+        port=conn.port,
+    )
+
+    ### Clean up a leftover account from a previous run before registering.
+    instance_conn.delete_user(user, debug=debug)
+
+    success, msg = instance_conn.register_user(user, debug=debug)
+    assert success, msg
+    try:
+        login_success, login_msg = user_conn.login(debug=debug)
+        assert login_success, login_msg
+
+        token = user_conn._token
+        payload_segment = token.split('.')[1]
+        payload = json.loads(
+            base64.urlsafe_b64decode(payload_segment + '=' * (-len(payload_segment) % 4))
+        )
+        assert payload.get('scopes') == ['*']
+        assert payload.get('type') == 'admin'
+    finally:
+        delete_success, delete_msg = instance_conn.delete_user(user, debug=debug)
+    assert delete_success, delete_msg

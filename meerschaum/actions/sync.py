@@ -25,6 +25,9 @@ def sync(
     Usage:
         - `--loop`
             - Sync indefinitely.
+        - `--listen`
+            - Keep the process alive after the initial sync pass
+              (for subscription-style connectors which sync via callbacks).
         - `--min-seconds 10`
             - Wait 10 seconds between laps.
         - `--async`, `--unblock``
@@ -262,6 +265,7 @@ def _pipes_lap(
 
 def _sync_pipes(
     loop: bool = False,
+    listen: bool = False,
     min_seconds: int = 1,
     unblock: bool = False,
     verify: bool = False,
@@ -281,6 +285,9 @@ def _sync_pipes(
     Usage:
         - `--loop`
             - Sync indefinitely.
+        - `--listen`
+            - Keep the process alive after the initial sync pass
+              (for subscription-style connectors which sync via callbacks).
         - `--min-seconds 10`
             - Wait 10 seconds between laps.
         - `--async`, `--unblock``
@@ -414,6 +421,21 @@ def _sync_pipes(
                 loop, run = False, False
                 warn(interrupt_warning_msg, stack=False)
         run = loop
+
+    ### With `--listen`, stay alive after the initial pass so connectors which
+    ### subscribed during their `sync()` keep syncing via callbacks
+    ### (replaces the `--loop --min-seconds <huge>` workaround).
+    if listen and success_pipes is not None and not stop_requested():
+        from meerschaum.utils.threading import STOP_EVENT
+        info(
+            "Listening for new data; subscribed connectors will keep syncing.\n"
+            "    Stop with `stop jobs` (or CTRL-C)."
+        )
+        try:
+            STOP_EVENT.wait()
+        except KeyboardInterrupt:
+            warn(interrupt_warning_msg, stack=False)
+
     return (len(success_pipes) > 0 if success_pipes is not None else False), msg
 
 

@@ -108,6 +108,7 @@ def _drop_temporary_tables(self, debug: bool = False) -> SuccessTuple:
     query = (
         sqlalchemy.select(temp_tables_table.c.table)
         .where(temp_tables_table.c.ready_to_drop.is_not(None))
+        .distinct()
     )
     tables_to_drop = {
         table
@@ -166,13 +167,14 @@ def _drop_old_temporary_tables(
     from meerschaum.connectors.sql.tables import get_tables
     sqlalchemy = mrsm.attempt_import('sqlalchemy', lazy=False)
     temp_tables_table = get_tables(mrsm_instance=self, create=False, debug=debug)['temp_tables']
-    last_check = getattr(self, '_stale_temporary_tables_check_timestamp', 0)
+    last_check = getattr(self, '_stale_temporary_tables_check_timestamp', None)
     now_ts = time.perf_counter()
-    if not last_check:
-        self._stale_temporary_tables_check_timestamp = 0
-    if refresh or (now_ts - last_check) < 60:
-        self._stale_temporary_tables_check_timestamp = now_ts
+    if refresh or (last_check is not None and (now_ts - last_check) < 60):
         return self._drop_temporary_tables(debug=debug)
+
+    ### Record the scan before running it; the timestamp used to be written only on the
+    ### branch above, which left the throttle permanently disarmed and scanned every sync.
+    self._stale_temporary_tables_check_timestamp = now_ts
 
     stale_temporary_tables_minutes = get_config(
         'system', 'connectors', 'sql', 'instance', 'stale_temporary_tables_minutes'
@@ -183,29 +185,28 @@ def _drop_old_temporary_tables(
     query = (
         sqlalchemy.select(temp_tables_table.c.table)
         .where(temp_tables_table.c.date_created < end)
+        .distinct()
     )
 
     df = self.read(query, silent=True, debug=debug)
     if df is None:
         return True, "Success"
 
-    ### Insert new records with the current time (skipping updates to avoid recursion).
-    docs = [
-        {
-            'date_created': now,
-            'table': table,
-            'ready_to_drop': now,
-        }
-        for table in df['table']
-    ]
-    if docs:
-        queries = [sqlalchemy.insert(temp_tables_table).values(**doc) for doc in docs]
-        _ = [self.exec(query, silent=True, debug=debug) for query in queries]
-        _in_memory_temp_tables.update(
-            {
-                table: True
-                for table in df['table']
-            }
+    ### Flag the stale tables in place. Inserting a row per stale table instead duplicated
+    ### the bookkeeping on every sync, so the table grew without bound.
+    stale_tables = set(df['table'])
+    if stale_tables:
+        update_query = (
+            sqlalchemy.update(temp_tables_table)
+            .where(
+                sqlalchemy.and_(
+                    temp_tables_table.c.date_created < end,
+                    temp_tables_table.c.ready_to_drop.is_(None),
+                )
+            )
+            .values(ready_to_drop=now)
         )
+        _ = self.exec(update_query, silent=True, debug=debug)
+        _in_memory_temp_tables.update({table: True for table in stale_tables})
 
     return self._drop_temporary_tables(debug=debug)

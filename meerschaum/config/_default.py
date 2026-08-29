@@ -246,6 +246,8 @@ default_api_config = {
         ### The default `['*']` serves everything; restrict the surface with e.g.
         ### `['version']` to serve only `/version` alongside plugin-added routes.
         ### `/login` is always served so that issued tokens keep working.
+        ### The `dash` group gates the web console's own pages; plugin pages
+        ### (`@web_page`) and the console login page are always served.
         'routes': {
             'allowlist': ['*'],
         },

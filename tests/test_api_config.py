@@ -122,3 +122,45 @@ def test_routes_allowlist_default_serves_core_routes():
             path == prefix or path.startswith(prefix + '/')
             for path in paths
         ), f"Core route group '{prefix}' is not registered by default."
+
+
+def _get_console_page_paths(config: dict) -> list:
+    code = (
+        "import json\n"
+        "import meerschaum.api\n"
+        "from meerschaum.api.dash.callbacks.dashboard import _paths\n"
+        "print('PATHS=' + json.dumps(sorted(_paths)))\n"
+    )
+    stdout = _api_boot_output(code, config)
+    for line in stdout.splitlines():
+        if line.startswith('PATHS='):
+            return json.loads(line[len('PATHS='):])
+    raise AssertionError(f"No console paths printed:\n{stdout}")
+
+
+def test_routes_allowlist_dash_group_gates_console_pages():
+    """
+    An allowlist without the `dash` group must strip the web console's own
+    pages while keeping the login page (the auth entrypoint for plugin pages).
+    """
+    config = {
+        'api': {
+            'permissions': {'routes': {'allowlist': ['version']}},
+        },
+    }
+    paths = _get_console_page_paths(config)
+    assert '/dash/login' in paths
+    for console_path in ('/dash', '/dash/pipes', '/dash/users', '/dash/jobs', '/dash/tokens'):
+        assert console_path not in paths, (
+            f"Console page '{console_path}' is still served under a restricted allowlist."
+        )
+
+
+def test_routes_allowlist_default_serves_console_pages():
+    """
+    The default allowlist (`['*']`) must serve the web console's own pages.
+    """
+    config = {'api': {}}
+    paths = _get_console_page_paths(config)
+    for console_path in ('/dash/login', '/dash', '/dash/pipes', '/dash/users', '/dash/jobs'):
+        assert console_path in paths, f"Console page '{console_path}' is not served by default."

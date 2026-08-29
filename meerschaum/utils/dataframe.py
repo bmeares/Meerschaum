@@ -1500,7 +1500,11 @@ def _enforce_dtypes_with_polars(
                     else expr.cast(polars.Binary, strict=True)
                 )
             elif typ == 'date':
-                expr = expr.cast(polars.Date, strict=True)
+                expr = (
+                    expr.str.to_date(strict=True)
+                    if source_dtype == polars.String
+                    else expr.cast(polars.Date, strict=True)
+                )
             elif typ.startswith('datetime'):
                 precision = typ.split('[', maxsplit=1)[-1].split(',', maxsplit=1)[0]
                 precision = precision if precision in ('ns', 'us', 'ms') else 'us'
@@ -1619,7 +1623,8 @@ def enforce_dtypes(
         for col, typ in dtypes.items()
         if col not in fallback_dtypes
     }
-    untyped_cols = [col for col in df.columns if col not in normalized_dtypes]
+    df_cols = df.collect_schema().names() if hasattr(df, 'collect_schema') else df.columns
+    untyped_cols = [col for col in df_cols if col not in normalized_dtypes]
     polars_df = (
         _enforce_dtypes_with_polars(
             df,

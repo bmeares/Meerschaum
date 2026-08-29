@@ -82,6 +82,16 @@ pipe.sync(pl.DataFrame({'dt': ['2026-01-01'], 'id': [1]}))
 df = pipe.get_data(as_polars=True)
 ```
 
+`Pipe.filter_existing()` also accepts Polars frames and returns Polars frames.
+Rows are compared natively — the existing rows are read as Polars,
+and the anti-join is performed by Polars without a Pandas round-trip.
+Columns which Polars cannot compare (`uuid`, `object`, and geometry)
+fall back to Pandas internally and are converted back on return.
+
+```python
+unseen_df, update_df, delta_df = pipe.filter_existing(pl.DataFrame(docs))
+```
+
 LazyFrames are collected at the sync boundary. Install support with
 `pip install 'meerschaum[polars]'`.
 

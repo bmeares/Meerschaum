@@ -521,6 +521,23 @@ def apply_compression_policy(
     if not pipe.parameters.get('compress', False):
         return True, "Compression is not enabled for this pipe."
 
+    ### Compressing a chunk invalidates the composite unique index the upsert's
+    ### `ON CONFLICT` needs, so an upsert which touches a compressed chunk fails.
+    ### Warn once per pipe per process; the combination is safe only while
+    ### `compress:after` exceeds the pipe's re-upsert window.
+    if pipe.upsert:
+        warned_pipes = self.__dict__.setdefault('_compress_upsert_warned_pipes', set())
+        if str(pipe) not in warned_pipes:
+            warned_pipes.add(str(pipe))
+            warn(
+                f"{pipe} declares both `upsert` and `compress`:\n    "
+                "upserts into compressed chunks will fail with "
+                "\"no unique or exclusion constraint matching the ON CONFLICT "
+                "specification\".\n    "
+                "Ensure `compress:after` exceeds how far back this pipe re-syncs history.",
+                stack=False,
+            )
+
     try:
         if not pipe.exists(debug=debug) or not self._is_hypertable(pipe, debug=debug):
             return True, f"{pipe} is not a hypertable; skipping compression policy."

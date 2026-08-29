@@ -116,7 +116,12 @@ def _compose_init(
     if not plugins_success:
         return plugins_success, plugins_msg
 
-    if existing_plugins:
+    ### Re-discover after installing: the pre-install snapshot is empty in a
+    ### fresh worktree (nothing symlinked into the project root yet), and the
+    ### venv provisioning below must run on the FIRST `init`, not the second.
+    installed_plugins = existing_plugins or get_installed_plugins(compose_config, debug=debug)
+
+    if installed_plugins:
         with replace_config(config):
             with replace_env(env):
                 ### Do NOT scope to `existing_plugins`: that list is discovered IN-PROCESS

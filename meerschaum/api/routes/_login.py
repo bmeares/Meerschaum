@@ -145,7 +145,9 @@ def login(
         raise InvalidCredentialsException
 
     requested_scopes = data.scope.split()
-    if '*' in allowed_scopes:
+    ### Admins implicitly hold every scope (see `is_user_allowed_to_execute()`),
+    ### so an admin's stored scope list must not filter the grant.
+    if '*' in allowed_scopes or type_ == 'admin':
         final_scopes = requested_scopes or ['*']
     else:
         final_scopes = [
