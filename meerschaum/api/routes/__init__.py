@@ -11,9 +11,11 @@ from importlib import import_module
 
 from meerschaum.api import _include_dash, mcp_enabled, permissions_config
 
-_allowed_route_group_patterns = (
-    permissions_config.get('routes', {}).get('allowlist', None) or ['*']
-)
+### An explicitly empty allowlist means "register no core route groups";
+### only a MISSING (or null) allowlist falls back to serving everything.
+_allowed_route_group_patterns = permissions_config.get('routes', {}).get('allowlist', None)
+if _allowed_route_group_patterns is None:
+    _allowed_route_group_patterns = ['*']
 
 #: Core route groups which `api:permissions:routes:allowlist` may restrict.
 #: Each name matches a submodule of `meerschaum.api.routes`.
