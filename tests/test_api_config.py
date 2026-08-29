@@ -164,3 +164,53 @@ def test_routes_allowlist_default_serves_console_pages():
     paths = _get_console_page_paths(config)
     for console_path in ('/dash/login', '/dash', '/dash/pipes', '/dash/users', '/dash/jobs'):
         assert console_path in paths, f"Console page '{console_path}' is not served by default."
+
+
+def test_routes_allowlist_empty_denies_core_routes():
+    """
+    An explicitly empty allowlist (`[]`) must register no core route groups
+    (only a missing allowlist falls back to `['*']`); `/login` stays served.
+    """
+    config = {
+        'api': {
+            'uvicorn': {'no_dash': True},
+            'permissions': {'routes': {'allowlist': []}},
+        },
+    }
+    paths = _get_registered_route_paths(config)
+    assert '/login' in paths
+    for prefix in (
+        '/actions', '/connectors', '/jobs', '/mcp',
+        '/pipes', '/plugins', '/tokens', '/users', '/version',
+    ):
+        assert not any(
+            path == prefix or path.startswith(prefix + '/')
+            for path in paths
+        ), f"Core route group '{prefix}' is registered under an empty allowlist."
+
+
+def test_startup_event_survives_empty_allowlist():
+    """
+    The startup event normalizes the OpenAPI schema; with a restricted
+    allowlist the generated schema may lack `components.securitySchemes`,
+    which must not crash the boot (the reported production crash loop).
+    """
+    config = {
+        'api': {
+            'uvicorn': {'no_dash': True},
+            'permissions': {'routes': {'allowlist': []}},
+        },
+    }
+    code = (
+        "import asyncio\n"
+        "import meerschaum.api._events as events\n"
+        "asyncio.run(events.startup())\n"
+        "from meerschaum.jobs import stop_check_jobs_thread\n"
+        "stop_check_jobs_thread()\n"
+        "from meerschaum.api import app\n"
+        "schemes = app.openapi_schema['components']['securitySchemes']\n"
+        "assert 'OAuth2PasswordBearer' in schemes and 'APIKey' in schemes\n"
+        "print('STARTUP_OK')\n"
+    )
+    stdout = _api_boot_output(code, config)
+    assert 'STARTUP_OK' in stdout
