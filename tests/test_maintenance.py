@@ -382,3 +382,31 @@ def test_integer_now_func_registered_for_int_axis(flavor: str):
         parameters={'compress': True},
     )
     assert conn._get_integer_now_func_queries(dt_pipe) == []
+
+
+def test_compress_with_upsert_warns_once(monkeypatch):
+    """Declaring both `upsert` and `compress` must warn (once per pipe per process)."""
+    from types import SimpleNamespace
+    import meerschaum.connectors.sql._compress as compress_module
+    from meerschaum.connectors.sql._compress import apply_compression_policy
+
+    messages = []
+    monkeypatch.setattr(compress_module, 'warn', lambda msg, **kw: messages.append(msg))
+
+    conn = conns['sqlite']
+    pipe = mrsm.Pipe(
+        'plugin:timeline', 'activities', 'compress_upsert_warn',
+        instance=conn,
+        parameters={
+            'columns': {'datetime': 'time', 'id': 'id'},
+            'upsert': True,
+            'compress': {'after': '30 days'},
+        },
+    )
+    fake_self = SimpleNamespace(flavor='timescaledb')
+
+    apply_compression_policy(fake_self, pipe, debug=debug)
+    apply_compression_policy(fake_self, pipe, debug=debug)
+
+    assert len(messages) == 1
+    assert 'ON CONFLICT' in messages[0]
