@@ -39,16 +39,24 @@ async def startup():
     """
     app.openapi_schema = app.openapi()
 
+    ### A restricted routes allowlist can leave no authenticated routes, so the
+    ### generated schema may lack `components` / `securitySchemes` entirely.
+    security_schemes = (
+        app.openapi_schema
+        .setdefault('components', {})
+        .setdefault('securitySchemes', {})
+    )
+
     ### Remove the implicitly added HTTPBearer scheme if it exists.
-    if 'BearerAuth' in app.openapi_schema['components']['securitySchemes']:
-        del app.openapi_schema['components']['securitySchemes']['BearerAuth']
-    elif 'HTTPBearer' in app.openapi_schema['components']['securitySchemes']:
-        del app.openapi_schema['components']['securitySchemes']['HTTPBearer']
-    if 'LoginManager' in app.openapi_schema['components']['securitySchemes']:
-        del app.openapi_schema['components']['securitySchemes']['LoginManager']
+    if 'BearerAuth' in security_schemes:
+        del security_schemes['BearerAuth']
+    elif 'HTTPBearer' in security_schemes:
+        del security_schemes['HTTPBearer']
+    if 'LoginManager' in security_schemes:
+        del security_schemes['LoginManager']
 
     scopes = STATIC_CONFIG['tokens']['scopes']
-    app.openapi_schema['components']['securitySchemes']['OAuth2PasswordBearer'] = {
+    security_schemes['OAuth2PasswordBearer'] = {
         'type': 'oauth2',
         'flows': {
             'password': {
@@ -57,7 +65,7 @@ async def startup():
             },
         },
     }
-    app.openapi_schema['components']['securitySchemes']['APIKey'] = {
+    security_schemes['APIKey'] = {
         'type': 'http',
         'scheme': 'bearer',
         'bearerFormat': 'mrsm-key:{client_id}:{client_secret}',

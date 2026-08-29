@@ -4,6 +4,14 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v4.1.1
+
+- **Honor an explicitly empty routes allowlist.**  
+  `api:permissions:routes:allowlist: []` — the documented way to serve nothing but `/login` and plugin routes — was treated as unset (`[] or ['*']`) and silently served every core route group. An empty list now registers no core route groups; only a missing (or null) allowlist falls back to `['*']`.
+
+- **Boot with a restricted allowlist.**  
+  With no authenticated core routes registered, the generated OpenAPI schema has no `components.securitySchemes`, and the startup event crashed with `KeyError: 'securitySchemes'` — a crash loop, on exactly the locked-down deployments the allowlist exists for. The schema sections are now created when absent.
+
 ### v4.1.0
 
 - **Filter Polars DataFrames against a pipe without converting to Pandas.**  
