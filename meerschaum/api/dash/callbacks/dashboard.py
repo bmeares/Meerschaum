@@ -23,6 +23,7 @@ from meerschaum.api.dash.sessions import (
     is_session_active,
     delete_session,
     set_session,
+    clear_session_cookie,
 )
 from meerschaum.api.dash.sessions import is_session_authenticated, is_state_authenticated
 from meerschaum.api.dash.connectors import get_web_connector
@@ -1176,6 +1177,7 @@ def sign_out_button_click(
     session_id = session_store_data.get('session-id', None)
     if session_id:
         delete_session(session_id)
+    clear_session_cookie(dash.callback_context.response)
     return endpoints['dash'], {}
 
 

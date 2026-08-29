@@ -15,8 +15,61 @@ from meerschaum.config import get_config
 from meerschaum.utils.warnings import dprint
 
 SESSION_KEY_TEMPLATE: str = 'mrsm_session_id:{session_id}'
+SESSION_COOKIE_NAME: str = 'mrsm-session-id'
 EXPIRES_SECONDS: int = get_config('api', 'cache', 'session_expires_minutes') * 60
 _active_sessions: Dict[str, Dict[str, Any]] = {}
+
+
+def set_session_cookie(response, session_id: str, secure: bool = False) -> None:
+    """
+    Attach the session ID to a response as an `HttpOnly` cookie.
+
+    Works with both Flask responses (Dash callbacks, via
+    `dash.callback_context.response`) and Starlette/FastAPI responses.
+    The cookie is scoped to `path='/'` so plain HTTP routes outside the
+    `/dash` WSGI mount (e.g. `/webterm`) can read the session.
+
+    Parameters
+    ----------
+    response: Any
+        A response object exposing `set_cookie()` (Flask or Starlette).
+
+    session_id: str
+        The session UUID to store in the cookie.
+
+    secure: bool, default False
+        If `True`, mark the cookie as `Secure` (HTTPS-only).
+    """
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        str(session_id),
+        max_age=EXPIRES_SECONDS,
+        path='/',
+        httponly=True,
+        samesite='Lax',
+        secure=secure,
+    )
+
+
+def clear_session_cookie(response) -> None:
+    """
+    Remove the session cookie from a response (e.g. on logout).
+    """
+    response.delete_cookie(SESSION_COOKIE_NAME, path='/')
+
+
+def get_session_id_from_request(request) -> Union[str, None]:
+    """
+    Return the session ID stored in a request's session cookie, if any.
+
+    Works with both Flask and Starlette/FastAPI requests (both expose
+    a `cookies` mapping). Validate the returned ID with
+    `is_session_authenticated()` before performing any actions.
+    """
+    cookies = getattr(request, 'cookies', None)
+    if cookies is None:
+        return None
+    return cookies.get(SESSION_COOKIE_NAME, None) or None
 
 
 def get_session_key(session_id: str) -> str:
@@ -170,10 +223,12 @@ def is_state_authenticated(session_store_data: Optional[Dict[str, Any]]) -> bool
 
     Dash callbacks are reachable by anyone who can POST to
     `/dash/_dash-update-component` — the WSGI-mounted Dash app sits outside
-    FastAPI's auth, and the session ID arrives as callback state rather than as a
-    header or cookie. So any callback which reads or writes pipes, users,
-    tokens, or job logs must take `State('session-store', 'data')` and check it
-    through this function before doing any work.
+    FastAPI's auth, and the session ID arrives as callback state (the login
+    callback also mirrors it into the `mrsm-session-id` cookie for plain HTTP
+    routes, but callbacks read the store). So any callback which reads or
+    writes pipes, users, tokens, or job logs must take
+    `State('session-store', 'data')` and check it through this function
+    before doing any work.
 
     Parameters
     ----------
