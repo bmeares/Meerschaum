@@ -907,6 +907,16 @@ def get_create_index_queries(
     unique_index_name = sql_item_name(unique_index_name_unquoted, self.flavor)
     constraint_name_unquoted = unique_index_name_unquoted.replace('IX_', 'UQ_')
     constraint_name = sql_item_name(constraint_name_unquoted, self.flavor)
+    postgres_unique_constraint_flavors = (
+        'citus', 'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha'
+    )
+    unique_target_exists = (
+        unique_index_name_unquoted.lower() in existing_ix_names
+        or (
+            self.flavor in postgres_unique_constraint_flavors
+            and constraint_name_unquoted.lower() in existing_ix_names
+        )
+    )
     add_constraint_query = (
         f"ALTER TABLE {_pipe_name} ADD CONSTRAINT {constraint_name} UNIQUE ({indices_cols_str})"
     )
@@ -918,10 +928,16 @@ def get_create_index_queries(
     create_unique_index_query = (
         f"CREATE UNIQUE INDEX {unique_index_name} ON {_pipe_name} ({unique_index_cols_str})"
     )
-    constraint_queries = [create_unique_index_query]
-    if self.flavor not in ('sqlite', 'geopackage'):
+    constraint_queries = (
+        [add_constraint_query]
+        if self.flavor in postgres_unique_constraint_flavors
+        else [create_unique_index_query]
+    )
+    if self.flavor not in (
+        'sqlite', 'geopackage', *postgres_unique_constraint_flavors
+    ):
         constraint_queries.append(add_constraint_query)
-    if upsert and indices_cols_str and unique_index_name_unquoted.lower() not in existing_ix_names:
+    if upsert and indices_cols_str and not unique_target_exists:
         index_queries[unique_index_name] = constraint_queries
         ### Remove regular indices that cover the same single column as the unique index.
         ### Some flavors (e.g. Oracle) reject two indices on the same column combination.
@@ -1011,16 +1027,19 @@ def get_drop_index_queries(
     for ix_key, ix_unquoted in indices.items():
         if ix_key in drop_queries:
             continue
-        if ix_unquoted.lower() not in existing_indices:
+        is_unique_upsert = ix_key == 'unique' and upsert
+        constraint_name_unquoted = ix_unquoted.replace('IX_', 'UQ_')
+        constraint_exists = constraint_name_unquoted.lower() in existing_indices
+        index_exists = ix_unquoted.lower() in existing_indices
+        if not index_exists and not (is_unique_upsert and constraint_exists):
             continue
 
         if (
-            ix_key == 'unique'
-            and upsert
+            is_unique_upsert
             and self.flavor not in ('sqlite', 'geopackage')
             and not is_hypertable
+            and constraint_exists
         ):
-            constraint_name_unquoted = ix_unquoted.replace('IX_', 'UQ_')
             constraint_name = sql_item_name(constraint_name_unquoted, self.flavor)
             constraint_or_index = (
                 "CONSTRAINT"
@@ -1031,6 +1050,9 @@ def get_drop_index_queries(
                 f"ALTER TABLE {pipe_name}\n"
                 f"DROP {constraint_or_index} {constraint_name}"
             )
+
+        if not index_exists:
+            continue
 
         query = (
             (
