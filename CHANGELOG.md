@@ -4,6 +4,15 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### Unreleased
+
+- **Create one PostgreSQL unique structure for upsert pipes.**
+  PostgreSQL-family connectors created a unique index and then added an
+  equivalent unique constraint, which created a second backing index over the
+  same columns. New upsert pipes now create the constraint only, recognize its
+  `UQ_` backing index on later index passes, and drop either the new single
+  structure or a legacy `IX_` + `UQ_` pair correctly.
+
 ### v4.1.1
 
 - **Honor an explicitly empty routes allowlist.**  
