@@ -28,29 +28,49 @@ def attributes(self) -> Dict[str, Any]:
     from meerschaum.connectors import get_connector_plugin
     from meerschaum.utils.dtypes import get_current_timestamp
 
-    timeout_seconds = get_config('pipes', 'attributes', 'local_cache_timeout_seconds')
+    if self.temporary:
+        return self._attributes
 
-    now = get_current_timestamp('ms', as_int=True) / 1000
-    _attributes_sync_time = self._get_cached_value('_attributes_sync_time', debug=self.debug)
-    timed_out = (
-        _attributes_sync_time is None
-        or
-        (timeout_seconds is not None and (now - _attributes_sync_time) >= timeout_seconds)
-    )
-    if not self.temporary and timed_out:
-        self._cache_value('_attributes_sync_time', now, memory_only=True, debug=self.debug)
-        local_attributes = self._get_cached_value('attributes', debug=self.debug) or {}
-        with Venv(get_connector_plugin(self.instance_connector)):
-            instance_attributes = self.instance_connector.get_pipe_attributes(self)
-
-        self._cache_value(
-            'attributes',
-            apply_patch_to_config(instance_attributes, local_attributes),
-            memory_only=True,
-            debug=self.debug,
+    with self._attributes_lock:
+        # Instance connectors may read local parameters while fetching metadata.
+        if self.__dict__.get('_attributes_loading', False):
+            return self._attributes
+        timeout_seconds = get_config('pipes', 'attributes', 'local_cache_timeout_seconds')
+        now = get_current_timestamp('ms', as_int=True) / 1000
+        sync_time = self._get_cached_value('_attributes_sync_time', debug=self.debug)
+        timed_out = (
+            sync_time is None
+            or (timeout_seconds is not None and (now - sync_time) >= timeout_seconds)
         )
+        if timed_out:
+            local_attributes = self._get_cached_value('attributes', debug=self.debug) or {}
+            self._attributes_loading = True
+            try:
+                with Venv(get_connector_plugin(self.instance_connector)):
+                    instance_attributes = self.instance_connector.get_pipe_attributes(self)
+                if not isinstance(instance_attributes, dict) or (
+                    not instance_attributes and self._get_cached_value('_id') is not None
+                ):
+                    raise RuntimeError(f"Missing metadata for registered pipe {self}.")
+                self._cache_value(
+                    'attributes',
+                    apply_patch_to_config(instance_attributes, local_attributes),
+                    memory_only=True,
+                    debug=self.debug,
+                )
+            except Exception as e:
+                self._attributes_load_failures = self.__dict__.get('_attributes_load_failures', 0) + 1
+                self._clear_cache_key('_attributes_sync_time', debug=self.debug)
+                warn(f"Failed to load attributes for {self}: {e}")
+                return self._attributes
+            finally:
+                self._attributes_loading = False
+            self._cache_value(
+                '_attributes_sync_time', get_current_timestamp('ms', as_int=True) / 1000,
+                memory_only=True, debug=self.debug,
+            )
 
-    return self._attributes
+        return self._attributes
 
 
 _cached_base_params = {}
@@ -87,6 +107,9 @@ def get_parameters(
 
     if refresh:
         _ = self._invalidate_cache(hard=True)
+        with self._attributes_lock:
+            self._clear_cache_key('_attributes_sync_time', debug=debug)
+            self.__dict__.pop('_target', None)
         ### Drop any memoized resolution so a later non-refresh call recomputes from fresh state.
         _ = self.__dict__.pop('_resolved_parameters_raw', None)
         _ = self.__dict__.pop('_resolved_parameters', None)
@@ -1040,6 +1063,7 @@ def reference(self, _reference) -> None:
 def target(self) -> str:
     """
     The target table name.
+    Registered pipes do not memoize guessed defaults while metadata failures are outstanding.
     You can set the target name under on of the following keys
     (checked in this order):
       - `target`
@@ -1051,6 +1075,7 @@ def target(self) -> str:
     if cached_target:
         return cached_target
 
+    load_failures = self.__dict__.get('_attributes_load_failures', 0)
     params = self.parameters
     target_val = params.get('target', None)
     if target_val:
@@ -1085,7 +1110,10 @@ def target(self) -> str:
     if _target not in default_targets:
         self.target = _target
 
-    self.__dict__['_target'] = _target
+    # Parameter resolution may retry a failed load; its first snapshot is still stale.
+    resolved_cleanly = load_failures == self.__dict__.get('_attributes_load_failures', 0)
+    if (params and resolved_cleanly) or self.temporary or self.id is None:
+        self.__dict__['_target'] = _target
     return _target
 
 

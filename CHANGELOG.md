@@ -6,6 +6,15 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### Unreleased
 
+- **Serialize first reads of shared pipe metadata.**
+  Concurrent readers could observe an unfinished attribute load and cache a
+  guessed table name, producing errors such as `relation "public.sra_clients_sites"
+  does not exist` despite a registered `clients_sites` target. Attribute loads
+  now serialize per pipe and mark metadata fresh only after success. Failed
+  SQL or API reads warn and remain retryable, registered pipes with empty
+  parameters do not cache guessed targets, and an explicit parameter refresh
+  invalidates the target and freshness caches.
+
 - **Record clean daemon stops as successful.**
   The daemon's own shutdown handler raises `SystemExit(0)`, but the result
   recorder classified it as a failure and stored a red `SystemExit: 0`
