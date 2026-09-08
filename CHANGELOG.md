@@ -6,6 +6,13 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### Unreleased
 
+- **Record clean daemon stops as successful.**
+  The daemon's own shutdown handler raises `SystemExit(0)`, but the result
+  recorder classified it as a failure and stored a red `SystemExit: 0`
+  traceback. Exit codes `None` and `0` now record a successful stop; nonzero
+  exits, `KeyboardInterrupt`, and `BrokenPipeError` remain failures. A
+  `Failed to gracefully quit` warning now includes the underlying quit reason.
+
 - **Create one PostgreSQL unique structure for upsert pipes.**
   PostgreSQL-family connectors created a unique index and then added an
   equivalent unique constraint, which created a second backing index over the
