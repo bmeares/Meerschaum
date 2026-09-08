@@ -306,7 +306,7 @@ class Job:
             return quit_success, f"Stopped {self}."
 
         warn(
-            f"Failed to gracefully quit {self}.",
+            f"Failed to gracefully quit {self}: {quit_msg}",
             stack=False,
         )
         kill_success, kill_msg = self.daemon.kill(timeout=timeout_seconds)
