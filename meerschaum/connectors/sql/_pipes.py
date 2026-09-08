@@ -1691,22 +1691,20 @@ def get_pipe_attributes(
 
     pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
-    try:
-        q = sqlalchemy.select(pipes_tbl).where(pipes_tbl.c.pipe_id == pipe.id)
-        if debug:
-            dprint(q)
-        rows = (
-            self.exec(q, silent=True, debug=debug).mappings().all()
-            if self.flavor != 'duckdb'
-            else self.read(q, debug=debug).to_dict(orient='records')
-        )
-        if not rows:
-            return {}
-        attributes = dict(rows[0])
-    except Exception:
-        if debug:
-            dprint(traceback.format_exc())
+    q = sqlalchemy.select(pipes_tbl).where(pipes_tbl.c.pipe_id == pipe.id)
+    if debug:
+        dprint(q)
+    result = self.exec(q, debug=debug) if self.flavor != 'duckdb' else self.read(q, debug=debug)
+    if result is None:
+        raise RuntimeError(f"Failed to read metadata for {pipe} from {self}.")
+    rows = (
+        result.mappings().all()
+        if self.flavor != 'duckdb'
+        else result.to_dict(orient='records')
+    )
+    if not rows:
         return {}
+    attributes = dict(rows[0])
 
     ### handle non-PostgreSQL databases (text vs JSON)
     if not isinstance(attributes.get('parameters', None), dict):

@@ -36,7 +36,7 @@ def get_pipe_instance_keys(self, pipe: mrsm.Pipe) -> Union[str, None]:
     Return the configured instance keys for a pipe if set,
     else fall back to the default `instance_keys` for this `APIConnector`.
     """
-    return pipe.parameters.get('instance_keys', self.instance_keys)
+    return pipe._attributes.get('parameters', {}).get('instance_keys', self.instance_keys)
 
 
 def register_pipe(
@@ -479,11 +479,13 @@ def get_pipe_attributes(
         },
         debug=debug
     )
-    try:
-        return json.loads(response.text)
-    except Exception as e:
-        warn(f"Failed to get the attributes for {pipe}:\n{e}")
-    return {}
+    response.raise_for_status()
+    attributes = json.loads(response.text)
+    if not isinstance(attributes, dict) or (
+        attributes and not isinstance(attributes.get('parameters'), dict)
+    ):
+        raise ValueError(f"Invalid attributes response for {pipe}.")
+    return attributes
 
 
 def get_sync_time(
