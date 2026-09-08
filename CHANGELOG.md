@@ -6,6 +6,12 @@ This is the current release cycle, so stay tuned for future releases!
 
 ### Unreleased
 
+- **Keep full tracebacks for failed daemon actions.**
+  Non-debug daemon actions previously discarded the stack trace and suggested
+  rerunning with `--debug`, losing the evidence needed to diagnose intermittent
+  background failures. Daemons now log the full traceback while retaining a
+  concise failure result; foreground non-debug errors remain concise.
+
 - **Serialize first reads of shared pipe metadata.**
   Concurrent readers could observe an unfinished attribute load and cache a
   guessed table name, producing errors such as `relation "public.sra_clients_sites"
