@@ -4,36 +4,19 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
-### Unreleased
+### v4.1.2
 
-- **Keep full tracebacks for failed daemon actions.**
-  Non-debug daemon actions previously discarded the stack trace and suggested
-  rerunning with `--debug`, losing the evidence needed to diagnose intermittent
-  background failures. Daemons now log the full traceback while retaining a
-  concise failure result; foreground non-debug errors remain concise.
+- **Create one PostgreSQL unique structure for upsert pipes.**  
+  PostgreSQL-family connectors created a unique index and then added an equivalent unique constraint, which built a second backing index over the same columns. New upsert pipes now create the constraint only, recognize its `UQ_` backing index on later index passes, and drop either the new single structure or a legacy `IX_` + `UQ_` pair correctly.
 
-- **Serialize first reads of shared pipe metadata.**
-  Concurrent readers could observe an unfinished attribute load and cache a
-  guessed table name, producing errors such as `relation "public.sra_clients_sites"
-  does not exist` despite a registered `clients_sites` target. Attribute loads
-  now serialize per pipe and mark metadata fresh only after success. Failed
-  SQL or API reads warn and remain retryable, registered pipes with empty
-  parameters do not cache guessed targets, and an explicit parameter refresh
-  invalidates the target and freshness caches.
+- **Serialize first reads of shared pipe metadata.**  
+  Concurrent readers could observe an unfinished attribute load and cache a guessed table name, producing errors such as `relation "public.sra_clients_sites" does not exist` despite a registered `clients_sites` target. Attribute loads now serialize per pipe and mark metadata fresh only after success. Failed SQL or API reads warn and remain retryable, registered pipes with empty parameters do not cache guessed targets, and an explicit parameter refresh invalidates the target and freshness caches.
 
-- **Record clean daemon stops as successful.**
-  The daemon's own shutdown handler raises `SystemExit(0)`, but the result
-  recorder classified it as a failure and stored a red `SystemExit: 0`
-  traceback. Exit codes `None` and `0` now record a successful stop; nonzero
-  exits, `KeyboardInterrupt`, and `BrokenPipeError` remain failures. A
-  `Failed to gracefully quit` warning now includes the underlying quit reason.
+- **Record clean daemon stops as successful.**  
+  The daemon's own shutdown handler raises `SystemExit(0)`, but the result recorder classified it as a failure and stored a red `SystemExit: 0` traceback. Exit codes `None` and `0` now record a successful stop; nonzero exits, `KeyboardInterrupt`, and `BrokenPipeError` remain failures. A `Failed to gracefully quit` warning now includes the underlying quit reason.
 
-- **Create one PostgreSQL unique structure for upsert pipes.**
-  PostgreSQL-family connectors created a unique index and then added an
-  equivalent unique constraint, which created a second backing index over the
-  same columns. New upsert pipes now create the constraint only, recognize its
-  `UQ_` backing index on later index passes, and drop either the new single
-  structure or a legacy `IX_` + `UQ_` pair correctly.
+- **Keep full tracebacks for failed daemon actions.**  
+  Non-debug daemon actions previously discarded the stack trace and suggested rerunning with `--debug`, losing the evidence needed to diagnose intermittent background failures. Daemons now log the full traceback while retaining a concise failure result; foreground non-debug errors remain concise.
 
 ### v4.1.1
 
