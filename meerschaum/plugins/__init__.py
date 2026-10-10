@@ -73,6 +73,31 @@ def _import_first_party_plugin(plugin_import_name: str):
     return importlib.import_module('.'.join([module_root] + plugin_import_parts[1:]))
 
 
+def _get_plugins_package_name() -> str:
+    """
+    Return the import name of the plugins package (`plugins`)
+    without resolving (and creating) the plugins resources directory.
+    """
+    from meerschaum.config._paths import paths
+    path_parts = paths['PLUGINS_RESOURCES_PATH']
+    last_part = path_parts[-1] if isinstance(path_parts, (list, tuple)) else path_parts
+    return pathlib.Path(last_part).stem
+
+
+def _get_loaded_module(module_name: str) -> Union['ModuleType', None]:
+    """
+    Return a fully-initialized module from `sys.modules`, else `None`.
+    A module still being imported (e.g. by another thread) is not returned.
+    """
+    import sys
+    module = sys.modules.get(module_name, None)
+    if module is None:
+        return None
+    if getattr(getattr(module, '__spec__', None), '_initializing', False):
+        return None
+    return module
+
+
 def make_action(
     function: Optional[Callable[[Any], Any]] = None,
     shell: bool = False,
@@ -642,27 +667,41 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
     >>> defined_pipes = get_defined_pipes(cf)
     """
     import importlib
-    import meerschaum.config.paths as paths
     from meerschaum.utils.warnings import warn as _warn
     if plugin_import_name.startswith('plugins.'):
         plugin_import_name = plugin_import_name[len('plugins.'):]
     plugin_import_parts = plugin_import_name.split('.')
     plugin_root_name = plugin_import_parts[0]
 
-    submodule_import_name = '.'.join(
-        [paths.PLUGINS_RESOURCES_PATH.stem]
-        + plugin_import_parts
-    )
+    plugins_package_name = _get_plugins_package_name()
+    submodule_import_name = '.'.join([plugins_package_name] + plugin_import_parts)
     if len(attrs) == 0:
         raise ValueError(f"Provide which attributes to return from '{submodule_import_name}'.")
+
+    def _get_attrs(module) -> Any:
+        attrs_to_return = []
+        for attr in attrs:
+            try:
+                attrs_to_return.append(getattr(module, attr))
+            except Exception:
+                _warn(f"Failed to access '{attr}' from '{submodule_import_name}'.")
+                attrs_to_return.append(None)
+        return attrs_to_return[0] if len(attrs_to_return) == 1 else tuple(attrs_to_return)
 
     first_party_submodule = _import_first_party_plugin(plugin_import_name)
     if first_party_submodule is not None:
         attrs_to_return = [getattr(first_party_submodule, attr) for attr in attrs]
         return attrs_to_return[0] if len(attrs_to_return) == 1 else tuple(attrs_to_return)
 
+    ### Skip building the plugin and activating its venv when the submodule is already imported.
+    loaded_submodule = _get_loaded_module(submodule_import_name)
+    if (
+        loaded_submodule is not None
+        and _get_loaded_module(f'{plugins_package_name}.{plugin_root_name}') is not None
+    ):
+        return _get_attrs(loaded_submodule)
+
     plugin = mrsm.Plugin(plugin_root_name)
-    attrs_to_return = []
     with mrsm.Venv(plugin):
         if plugin.module is None:
             raise ImportError(f"Unable to import plugin '{plugin}'.")
@@ -683,19 +722,10 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
                     importlib._bootstrap,
                 ]
             )
-            return None
+            ### Return one `None` per attribute so tuple unpacking still works.
+            return None if len(attrs) == 1 else (None,) * len(attrs)
 
-        for attr in attrs:
-            try:
-                attrs_to_return.append(getattr(submodule, attr))
-            except Exception:
-                _warn(f"Failed to access '{attr}' from '{submodule_import_name}'.")
-                attrs_to_return.append(None)
-        
-        if len(attrs) == 1:
-            return attrs_to_return[0]
-
-        return tuple(attrs_to_return)
+        return _get_attrs(submodule)
 
 
 _loaded_plugins: bool = False

@@ -132,6 +132,12 @@ class Plugin:
         (check `Plugin.import_error` for the swallowed exception).
         """
         if '_module' not in self.__dict__ or self.__dict__.get('_module', None) is None:
+            from meerschaum.plugins import _get_loaded_module, _get_plugins_package_name
+            loaded_module = _get_loaded_module(f'{_get_plugins_package_name()}.{self.name}')
+            if loaded_module is not None:
+                self._module = loaded_module
+                return self._module
+
             if self.__file__ is None:
                 return None
 
