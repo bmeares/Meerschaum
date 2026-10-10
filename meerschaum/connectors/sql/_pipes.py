@@ -16,6 +16,11 @@ from meerschaum.utils.typing import (
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.debug import dprint
 
+### PostgreSQL-family upsert pipes create only a `UQ_` unique constraint (no `IX_` index).
+_POSTGRES_UNIQUE_CONSTRAINT_FLAVORS = (
+    'citus', 'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha'
+)
+
 
 def register_pipe(
     self,
@@ -907,13 +912,10 @@ def get_create_index_queries(
     unique_index_name = sql_item_name(unique_index_name_unquoted, self.flavor)
     constraint_name_unquoted = unique_index_name_unquoted.replace('IX_', 'UQ_')
     constraint_name = sql_item_name(constraint_name_unquoted, self.flavor)
-    postgres_unique_constraint_flavors = (
-        'citus', 'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha'
-    )
     unique_target_exists = (
         unique_index_name_unquoted.lower() in existing_ix_names
         or (
-            self.flavor in postgres_unique_constraint_flavors
+            self.flavor in _POSTGRES_UNIQUE_CONSTRAINT_FLAVORS
             and constraint_name_unquoted.lower() in existing_ix_names
         )
     )
@@ -930,11 +932,11 @@ def get_create_index_queries(
     )
     constraint_queries = (
         [add_constraint_query]
-        if self.flavor in postgres_unique_constraint_flavors
+        if self.flavor in _POSTGRES_UNIQUE_CONSTRAINT_FLAVORS
         else [create_unique_index_query]
     )
     if self.flavor not in (
-        'sqlite', 'geopackage', *postgres_unique_constraint_flavors
+        'sqlite', 'geopackage', *_POSTGRES_UNIQUE_CONSTRAINT_FLAVORS
     ):
         constraint_queries.append(add_constraint_query)
     if upsert and indices_cols_str and not unique_target_exists:
@@ -1029,8 +1031,14 @@ def get_drop_index_queries(
             continue
         is_unique_upsert = ix_key == 'unique' and upsert
         constraint_name_unquoted = ix_unquoted.replace('IX_', 'UQ_')
-        constraint_exists = constraint_name_unquoted.lower() in existing_indices
         index_exists = ix_unquoted.lower() in existing_indices
+        ### Other flavors (e.g. Oracle) may back the constraint with the `IX_` index itself,
+        ### so the `UQ_` name is only listed as an index on PostgreSQL.
+        constraint_exists = (
+            constraint_name_unquoted.lower() in existing_indices
+            if self.flavor in _POSTGRES_UNIQUE_CONSTRAINT_FLAVORS
+            else index_exists
+        )
         if not index_exists and not (is_unique_upsert and constraint_exists):
             continue
 
