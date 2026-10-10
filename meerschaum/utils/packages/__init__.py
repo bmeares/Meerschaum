@@ -1512,6 +1512,16 @@ def attempt_import(
     warn_function = _warnings.warn
 
     def do_import(_name: str, **kw) -> Union['ModuleType', None]:
+        ### A fully-imported module resolves from `sys.modules` regardless of the active venv,
+        ### so skip activating the venv (which resolves and creates its directories).
+        import sys
+        loaded_module = sys.modules.get(_name, None)
+        if (
+            loaded_module is not None
+            and not getattr(getattr(loaded_module, '__spec__', None), '_initializing', False)
+        ):
+            return loaded_module
+
         with Venv(venv=venv, debug=debug):
             ### determine the import method (lazy vs normal)
             from meerschaum.utils.misc import filter_keywords

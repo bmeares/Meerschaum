@@ -163,11 +163,25 @@ def get_data(
                 descending=(str(order).lower() != 'asc'),
             )
         elif 'dask' not in _df.__module__:
-            _df.sort_values(
-                by=indices,
-                inplace=True,
-                ascending=(str(order).lower() == 'asc'),
+            ascending = str(order).lower() == 'asc'
+            dt_series = _df[dt_col] if indices and indices[0] == dt_col else None
+            ### Unique, non-null, ordered datetimes (e.g. from the SQL `ORDER BY`) are already sorted.
+            already_sorted = (
+                dt_series is not None
+                and not dt_series.hasnans
+                and (
+                    dt_series.is_monotonic_increasing
+                    if ascending
+                    else dt_series.is_monotonic_decreasing
+                )
+                and dt_series.is_unique
             )
+            if not already_sorted:
+                _df.sort_values(
+                    by=indices,
+                    inplace=True,
+                    ascending=ascending,
+                )
             _df.reset_index(drop=True, inplace=True)
         else:
             _df = _df.sort_values(
