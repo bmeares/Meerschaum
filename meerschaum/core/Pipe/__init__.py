@@ -486,6 +486,7 @@ class Pipe:
             self.cache = False
 
         self._cache_locks = collections.defaultdict(lambda: threading.RLock())
+        self._attributes_lock = threading.RLock()
 
         if references is not None or reference is not None:
             reference_vals = references if references is not None else reference

@@ -4,6 +4,29 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v4.1.2
+
+- **Serve already-imported plugins instantly from `from_plugin_import()`.**  
+  Every call built a new `Plugin`, activated its virtual environment (re-parsing its dependencies), and re-ran `import_plugins()`, which builds a `Plugin` for every installed plugin and creates resource directories along the way: about 4 ms per call, or 16 ms with thirty plugins installed. A fully-imported submodule is now returned straight from `sys.modules` (about 0.01 ms per call), and `Plugin.module` reuses an already-imported module. Reloading or unloading plugins still picks up new code.
+
+- **Return one `None` per name when `from_plugin_import()` fails.**  
+  A failed submodule import returned a single `None` even when several attributes were requested, so `a, b = from_plugin_import(...)` raised a confusing unpacking error far from the cause. It now returns one `None` per requested attribute, after the existing warning and stacktrace.
+
+- **Cut the fixed overhead of `Pipe.get_data()`.**  
+  `attempt_import()` activated the `mrsm` virtual environment on every call, even for modules already imported, and `get_data()` makes dozens of these calls. Loaded modules are now returned directly. `get_data()` also skips re-sorting in Pandas when the datetime column is already unique and in order (as returned by the SQL `ORDER BY`); ties and nulls are still fully sorted. A warm `get_data()` on a small SQLite pipe dropped from 24 ms to 13 ms.
+
+- **Create one PostgreSQL unique structure for upsert pipes.**  
+  PostgreSQL-family connectors created a unique index and then added an equivalent unique constraint, which built a second backing index over the same columns. New upsert pipes now create the constraint only, recognize its `UQ_` backing index on later index passes, and drop either the new single structure or a legacy `IX_` + `UQ_` pair correctly.
+
+- **Serialize first reads of shared pipe metadata.**  
+  Concurrent readers could observe an unfinished attribute load and cache a guessed table name, producing errors such as `relation "public.sra_clients_sites" does not exist` despite a registered `clients_sites` target. Attribute loads now serialize per pipe and mark metadata fresh only after success. Failed SQL or API reads warn and remain retryable, registered pipes with empty parameters do not cache guessed targets, and an explicit parameter refresh invalidates the target and freshness caches.
+
+- **Record clean daemon stops as successful.**  
+  The daemon's own shutdown handler raises `SystemExit(0)`, but the result recorder classified it as a failure and stored a red `SystemExit: 0` traceback. Exit codes `None` and `0` now record a successful stop; nonzero exits, `KeyboardInterrupt`, and `BrokenPipeError` remain failures. A `Failed to gracefully quit` warning now includes the underlying quit reason.
+
+- **Keep full tracebacks for failed daemon actions.**  
+  Non-debug daemon actions previously discarded the stack trace and suggested rerunning with `--debug`, losing the evidence needed to diagnose intermittent background failures. Daemons now log the full traceback while retaining a concise failure result; foreground non-debug errors remain concise.
+
 ### v4.1.1
 
 - **Honor an explicitly empty routes allowlist.**  

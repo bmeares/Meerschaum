@@ -419,7 +419,9 @@ def _do_action_wrapper(
         try:
             result = action_function(**filter_keywords(action_function, **kw))
         except Exception as e:
-            if kw.get('debug', True):
+            from meerschaum.utils.daemon import running_in_daemon
+            log_traceback = kw.get('debug', True) or running_in_daemon()
+            if log_traceback:
                 import traceback
                 traceback.print_exception(type(e), e, e.__traceback__)
             result = False, (
@@ -428,7 +430,7 @@ def _do_action_wrapper(
                 + (f':\n\n{e}' if str(e) else '.')
                 + (
                     "\n\nRun again with '--debug' to see a full stacktrace."
-                    if not kw.get('debug', False) else ''
+                    if not log_traceback else ''
                 )
             )
         except KeyboardInterrupt:

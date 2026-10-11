@@ -16,6 +16,11 @@ from meerschaum.utils.typing import (
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.debug import dprint
 
+### PostgreSQL-family upsert pipes create only a `UQ_` unique constraint (no `IX_` index).
+_POSTGRES_UNIQUE_CONSTRAINT_FLAVORS = (
+    'citus', 'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha'
+)
+
 
 def register_pipe(
     self,
@@ -907,6 +912,13 @@ def get_create_index_queries(
     unique_index_name = sql_item_name(unique_index_name_unquoted, self.flavor)
     constraint_name_unquoted = unique_index_name_unquoted.replace('IX_', 'UQ_')
     constraint_name = sql_item_name(constraint_name_unquoted, self.flavor)
+    unique_target_exists = (
+        unique_index_name_unquoted.lower() in existing_ix_names
+        or (
+            self.flavor in _POSTGRES_UNIQUE_CONSTRAINT_FLAVORS
+            and constraint_name_unquoted.lower() in existing_ix_names
+        )
+    )
     add_constraint_query = (
         f"ALTER TABLE {_pipe_name} ADD CONSTRAINT {constraint_name} UNIQUE ({indices_cols_str})"
     )
@@ -918,10 +930,16 @@ def get_create_index_queries(
     create_unique_index_query = (
         f"CREATE UNIQUE INDEX {unique_index_name} ON {_pipe_name} ({unique_index_cols_str})"
     )
-    constraint_queries = [create_unique_index_query]
-    if self.flavor not in ('sqlite', 'geopackage'):
+    constraint_queries = (
+        [add_constraint_query]
+        if self.flavor in _POSTGRES_UNIQUE_CONSTRAINT_FLAVORS
+        else [create_unique_index_query]
+    )
+    if self.flavor not in (
+        'sqlite', 'geopackage', *_POSTGRES_UNIQUE_CONSTRAINT_FLAVORS
+    ):
         constraint_queries.append(add_constraint_query)
-    if upsert and indices_cols_str and unique_index_name_unquoted.lower() not in existing_ix_names:
+    if upsert and indices_cols_str and not unique_target_exists:
         index_queries[unique_index_name] = constraint_queries
         ### Remove regular indices that cover the same single column as the unique index.
         ### Some flavors (e.g. Oracle) reject two indices on the same column combination.
@@ -1011,16 +1029,25 @@ def get_drop_index_queries(
     for ix_key, ix_unquoted in indices.items():
         if ix_key in drop_queries:
             continue
-        if ix_unquoted.lower() not in existing_indices:
+        is_unique_upsert = ix_key == 'unique' and upsert
+        constraint_name_unquoted = ix_unquoted.replace('IX_', 'UQ_')
+        index_exists = ix_unquoted.lower() in existing_indices
+        ### Other flavors (e.g. Oracle) may back the constraint with the `IX_` index itself,
+        ### so the `UQ_` name is only listed as an index on PostgreSQL.
+        constraint_exists = (
+            constraint_name_unquoted.lower() in existing_indices
+            if self.flavor in _POSTGRES_UNIQUE_CONSTRAINT_FLAVORS
+            else index_exists
+        )
+        if not index_exists and not (is_unique_upsert and constraint_exists):
             continue
 
         if (
-            ix_key == 'unique'
-            and upsert
+            is_unique_upsert
             and self.flavor not in ('sqlite', 'geopackage')
             and not is_hypertable
+            and constraint_exists
         ):
-            constraint_name_unquoted = ix_unquoted.replace('IX_', 'UQ_')
             constraint_name = sql_item_name(constraint_name_unquoted, self.flavor)
             constraint_or_index = (
                 "CONSTRAINT"
@@ -1031,6 +1058,9 @@ def get_drop_index_queries(
                 f"ALTER TABLE {pipe_name}\n"
                 f"DROP {constraint_or_index} {constraint_name}"
             )
+
+        if not index_exists:
+            continue
 
         query = (
             (
@@ -1669,22 +1699,20 @@ def get_pipe_attributes(
 
     pipes_tbl = get_tables(mrsm_instance=self, create=(not pipe.temporary), debug=debug)['pipes']
 
-    try:
-        q = sqlalchemy.select(pipes_tbl).where(pipes_tbl.c.pipe_id == pipe.id)
-        if debug:
-            dprint(q)
-        rows = (
-            self.exec(q, silent=True, debug=debug).mappings().all()
-            if self.flavor != 'duckdb'
-            else self.read(q, debug=debug).to_dict(orient='records')
-        )
-        if not rows:
-            return {}
-        attributes = dict(rows[0])
-    except Exception:
-        if debug:
-            dprint(traceback.format_exc())
+    q = sqlalchemy.select(pipes_tbl).where(pipes_tbl.c.pipe_id == pipe.id)
+    if debug:
+        dprint(q)
+    result = self.exec(q, debug=debug) if self.flavor != 'duckdb' else self.read(q, debug=debug)
+    if result is None:
+        raise RuntimeError(f"Failed to read metadata for {pipe} from {self}.")
+    rows = (
+        result.mappings().all()
+        if self.flavor != 'duckdb'
+        else result.to_dict(orient='records')
+    )
+    if not rows:
         return {}
+    attributes = dict(rows[0])
 
     ### handle non-PostgreSQL databases (text vs JSON)
     if not isinstance(attributes.get('parameters', None), dict):

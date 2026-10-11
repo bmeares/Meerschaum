@@ -351,7 +351,13 @@ class Daemon:
                     self._capture_process_timestamp('began')
                     result = self.target(*self.target_args, **self.target_kw)
                     self.properties['result'] = result
-                except (BrokenPipeError, KeyboardInterrupt, SystemExit):
+                except SystemExit as e:
+                    result = (
+                        (True, f"Stopped daemon '{self.daemon_id}'.")
+                        if e.code is None or e.code == 0
+                        else (False, traceback.format_exc())
+                    )
+                except (BrokenPipeError, KeyboardInterrupt):
                     result = False, traceback.format_exc()
                 except Exception as e:
                     warn(
