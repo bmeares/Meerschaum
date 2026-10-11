@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v4.1.4
+
+- **Don't restart running jobs with a bare `compose start jobs`.**  
+  v4.1.3 scoped Compose job actions by expanding a bare `compose start jobs` into the project's job names, but naming a running job asks to restart it, so `compose start jobs -y` restarted every running job in the project. Bare job actions now expand only to the jobs the bare command would act on: `start` to stopped and paused jobs, `restart` to jobs created with `--restart` or `--loop`, and `stop` / `pause` to running jobs. `compose stop jobs` and `compose pause jobs` also keep their confirmation prompt.
+
 ### v4.1.3
 
 - **Scope `compose start jobs` (and other job actions) to the project.**  

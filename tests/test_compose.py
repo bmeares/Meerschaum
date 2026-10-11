@@ -158,8 +158,10 @@ def test_compose_explicit_jobs_keep_established_flags():
 
 
 class _ComposeTestJob:
-    def __init__(self, sysargs):
+    def __init__(self, sysargs, status='stopped', restart=False):
         self.sysargs = sysargs
+        self.status = status
+        self.restart = restart
 
 
 class _ComposeTestConnector:
@@ -764,14 +766,16 @@ def test_compose_init_provisions_plugins_on_first_run(tmp_path, monkeypatch):
     assert ['setup', 'plugins'] in commands
 
 
-def _run_compose_default(monkeypatch, action, jobs, sysargs=None):
+def _run_compose_default(monkeypatch, action, jobs, sysargs=None, **kw):
     """Run the default Compose subaction with fake jobs, returning the commands it ran."""
     import meerschaum.compose.subactions.default as default_module
     import meerschaum.compose.utils as compose_utils
     import meerschaum.jobs as jobs_module
+    import meerschaum.utils.formatting._jobs as jobs_formatting
 
     commands = []
     monkeypatch.setattr(jobs_module, 'get_jobs', lambda **kwargs: jobs)
+    monkeypatch.setattr(jobs_formatting, 'pprint_jobs', lambda *args, **kwargs: None)
     monkeypatch.setattr(
         compose_utils,
         'run_mrsm_command',
@@ -781,13 +785,14 @@ def _run_compose_default(monkeypatch, action, jobs, sysargs=None):
         {'project_name': 'alpha', 'jobs': {'api': 'start api', 'worker': 'sync pipes --loop'}},
         action=action,
         sysargs=(sysargs or (['compose'] + action + ['--file', 'alpha.yaml', '-y'])),
+        **{'yes': True, **kw}
     )
     return result, commands
 
 
-def _stamped_job(sysargs, project_name):
+def _stamped_job(sysargs, project_name, **kw):
     from meerschaum._internal.static import STATIC_CONFIG
-    job = _ComposeTestJob(sysargs)
+    job = _ComposeTestJob(sysargs, **kw)
     job.env = {STATIC_CONFIG['environment']['compose_project']: project_name}
     return job
 
@@ -795,15 +800,59 @@ def _stamped_job(sysargs, project_name):
 def test_compose_job_actions_without_names_are_scoped_to_the_project(monkeypatch):
     """`compose start jobs` must not start other projects' jobs sharing the root."""
     jobs = {
-        'api': _stamped_job(['start', 'api'], 'alpha'),
+        'api': _stamped_job(['start', 'api'], 'alpha', status='running', restart=True),
         'worker': _ComposeTestJob(['sync', 'pipes', '--loop', '-t', 'alpha', '--name', 'worker', '-f']),
         'sixfab': _stamped_job(['sync', 'pipes', '-c', 'sixfab:sra'], 'beta'),
         'manual': _ComposeTestJob(['show', 'version']),
     }
-    for verb in ('start', 'stop', 'pause', 'restart', 'delete'):
+    ### Each bare command expands to the project jobs it would have acted on:
+    ### `start` never restarts the running `api`, and `restart` only checks `--restart` jobs.
+    expected = {
+        'start': ['worker'],
+        'stop': ['api'],
+        'pause': ['api'],
+        'restart': ['api'],
+        'delete': ['api', 'worker'],
+    }
+    for verb, job_names in expected.items():
         (success, _), commands = _run_compose_default(monkeypatch, [verb, 'jobs'], jobs)
         assert success
-        assert commands == [[verb, 'jobs', 'api', 'worker', '-y']]
+        assert commands == [[verb, 'jobs'] + job_names + ['-y']]
+
+
+def test_compose_start_jobs_leaves_running_jobs_alone(monkeypatch):
+    """A bare `compose start jobs -y` must not restart the project's running jobs."""
+    jobs = {
+        'api': _stamped_job(['start', 'api'], 'alpha', status='running'),
+        'worker': _ComposeTestJob(
+            ['sync', 'pipes', '--loop', '-t', 'alpha', '--name', 'worker', '-f'],
+            status='running',
+        ),
+    }
+    (success, msg), commands = _run_compose_default(monkeypatch, ['start', 'jobs'], jobs)
+    assert success
+    assert msg == "All jobs are running."
+    assert commands == []
+
+
+def test_compose_bare_stop_jobs_still_asks_for_confirmation(monkeypatch):
+    """Expanding `stop jobs` into names must keep the bare command's confirmation."""
+    import meerschaum.utils.prompt as prompt_module
+
+    questions = []
+    monkeypatch.setattr(
+        prompt_module,
+        'yes_no',
+        lambda question, *args, **kwargs: (questions.append(question) or False),
+    )
+    jobs = {'api': _stamped_job(['start', 'api'], 'alpha', status='running')}
+    (success, _), commands = _run_compose_default(
+        monkeypatch, ['stop', 'jobs'], jobs,
+        sysargs=['compose', 'stop', 'jobs'], yes=False,
+    )
+    assert not success
+    assert questions == ['Stop the above jobs?']
+    assert commands == []
 
 
 def test_compose_job_actions_refuse_other_projects_jobs(monkeypatch):
