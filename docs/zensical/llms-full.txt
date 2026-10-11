@@ -5925,6 +5925,8 @@ Keys under `jobs` are the names of jobs to be run with `compose up`. If defined,
 
 `compose up` only replaces jobs which belong to the project. A job started by Compose records its project's name, so it stays replaceable after you edit its command. Jobs started before that stamp existed are recognized two other ways: by the `-t <project_name>` tag Compose appends to job commands which set no tags of their own, and by running the exact command the project would start. A job under a configured name which proves none of these is refused rather than clobbered — with the caveat that two projects sharing a root directory and configuring the same job name with the same command cannot be told apart until each has started its own job.
 
+Job actions run through Compose are scoped the same way, so several projects can share one root directory. `compose start jobs`, `stop jobs`, `pause jobs`, `restart jobs`, and `delete jobs` with no job names act only on this project's jobs (and do nothing if it has none). Naming a job stamped by another project is refused, since running it here would apply this project's config to it: start or stop it from its own project's compose file instead.
+
 
 ---
 
@@ -8951,6 +8953,11 @@ Source: https://meerschaum.io/news/changelog/
 ## 4.1.0 Releases
 
 This is the current release cycle, so stay tuned for future releases!
+
+### v4.1.3
+
+- **Scope `compose start jobs` (and other job actions) to the project.**  
+  Job actions without job names were passed straight through to `mrsm`, so `mrsm compose start jobs` started every stopped job in the root directory, not just the project's. Projects sharing a root directory then had their jobs started with the calling project's environment and config, losing their own connectors. `compose start`, `stop`, `pause`, `restart`, and `delete jobs` with no names now act only on the project's jobs, and naming a job owned by another Compose project is refused.
 
 ### v4.1.2
 
