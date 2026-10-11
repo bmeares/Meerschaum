@@ -42,6 +42,21 @@ def _command_signature(sysargs: List[str]) -> List[str]:
     ]
 
 
+def get_job_project_name(job: Any) -> Optional[str]:
+    """Return the Compose project name stamped onto a job, if any."""
+    from meerschaum._internal.static import STATIC_CONFIG
+    job_env = getattr(job, 'env', {}) or {}
+    project_name = job_env.get(STATIC_CONFIG['environment']['compose_project'], None)
+    if project_name:
+        return project_name
+
+    try:
+        compose_config = json.loads(job_env.get('MRSM__COMPOSE_CONFIG', '{}'))
+        return compose_config.get('project_name', None) or None
+    except Exception:
+        return None
+
+
 def job_belongs_to_project(
     job: Any,
     project_name: str,

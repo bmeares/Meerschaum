@@ -4,6 +4,11 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v4.1.3
+
+- **Scope `compose start jobs` (and other job actions) to the project.**  
+  Job actions without job names were passed straight through to `mrsm`, so `mrsm compose start jobs` started every stopped job in the root directory, not just the project's. Projects sharing a root directory then had their jobs started with the calling project's environment and config, losing their own connectors. `compose start`, `stop`, `pause`, `restart`, and `delete jobs` with no names now act only on the project's jobs, and naming a job owned by another Compose project is refused.
+
 ### v4.1.2
 
 - **Serve already-imported plugins instantly from `from_plugin_import()`.**  
