@@ -762,3 +762,81 @@ def test_compose_init_provisions_plugins_on_first_run(tmp_path, monkeypatch):
     assert success, msg
     assert ['install', 'required'] in commands
     assert ['setup', 'plugins'] in commands
+
+
+def _run_compose_default(monkeypatch, action, jobs, sysargs=None):
+    """Run the default Compose subaction with fake jobs, returning the commands it ran."""
+    import meerschaum.compose.subactions.default as default_module
+    import meerschaum.compose.utils as compose_utils
+    import meerschaum.jobs as jobs_module
+
+    commands = []
+    monkeypatch.setattr(jobs_module, 'get_jobs', lambda **kwargs: jobs)
+    monkeypatch.setattr(
+        compose_utils,
+        'run_mrsm_command',
+        lambda command, *args, **kwargs: (commands.append(command) or (True, "Success")),
+    )
+    result = default_module._compose_default(
+        {'project_name': 'alpha', 'jobs': {'api': 'start api', 'worker': 'sync pipes --loop'}},
+        action=action,
+        sysargs=(sysargs or (['compose'] + action + ['--file', 'alpha.yaml', '-y'])),
+    )
+    return result, commands
+
+
+def _stamped_job(sysargs, project_name):
+    from meerschaum._internal.static import STATIC_CONFIG
+    job = _ComposeTestJob(sysargs)
+    job.env = {STATIC_CONFIG['environment']['compose_project']: project_name}
+    return job
+
+
+def test_compose_job_actions_without_names_are_scoped_to_the_project(monkeypatch):
+    """`compose start jobs` must not start other projects' jobs sharing the root."""
+    jobs = {
+        'api': _stamped_job(['start', 'api'], 'alpha'),
+        'worker': _ComposeTestJob(['sync', 'pipes', '--loop', '-t', 'alpha', '--name', 'worker', '-f']),
+        'sixfab': _stamped_job(['sync', 'pipes', '-c', 'sixfab:sra'], 'beta'),
+        'manual': _ComposeTestJob(['show', 'version']),
+    }
+    for verb in ('start', 'stop', 'pause', 'restart', 'delete'):
+        (success, _), commands = _run_compose_default(monkeypatch, [verb, 'jobs'], jobs)
+        assert success
+        assert commands == [[verb, 'jobs', 'api', 'worker', '-y']]
+
+
+def test_compose_job_actions_refuse_other_projects_jobs(monkeypatch):
+    """Naming another project's job must not run it with this project's config."""
+    jobs = {
+        'api': _stamped_job(['start', 'api'], 'alpha'),
+        'sixfab': _stamped_job(['sync', 'pipes', '-c', 'sixfab:sra'], 'beta'),
+        'manual': _ComposeTestJob(['show', 'version']),
+    }
+    (success, msg), commands = _run_compose_default(monkeypatch, ['start', 'jobs', 'api', 'sixfab'], jobs)
+    assert not success
+    assert 'sixfab' in msg and 'api' not in msg.split(':')[-1]
+    assert commands == []
+
+    ### This project's jobs and unstamped jobs may still be named explicitly.
+    (success, _), commands = _run_compose_default(monkeypatch, ['start', 'job', 'api', 'manual'], jobs)
+    assert success
+    assert commands == [['start', 'job', 'api', 'manual', '-y']]
+
+
+def test_compose_job_actions_with_no_project_jobs_do_nothing(monkeypatch):
+    """With no jobs of its own, a project must not fall through to every job in the root."""
+    jobs = {'sixfab': _stamped_job(['sync', 'pipes', '-c', 'sixfab:sra'], 'beta')}
+    (success, msg), commands = _run_compose_default(monkeypatch, ['stop', 'jobs'], jobs)
+    assert success
+    assert 'No jobs' in msg
+    assert commands == []
+
+
+def test_compose_other_actions_pass_through_unscoped(monkeypatch):
+    """Read-only job actions and unrelated actions are forwarded unchanged."""
+    jobs = {'sixfab': _stamped_job(['sync', 'pipes'], 'beta')}
+    for action in (['show', 'jobs'], ['show', 'pipes'], ['sync', 'pipes']):
+        (success, _), commands = _run_compose_default(monkeypatch, action, jobs)
+        assert success
+        assert commands == [action + ['-y']]
