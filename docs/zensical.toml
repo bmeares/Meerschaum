@@ -60,6 +60,7 @@ nav = [
     ]},
     {"🌳 Environment Variables" = "reference/environment.md"},
     {"🩺 Troubleshooting" = "reference/troubleshooting.md"},
+    {"⬆️ Migrating to v5" = "reference/migrating-to-v5.md"},
     {"📖 Glossary" = "reference/glossary.md"},
     {"💼 Portable" = "reference/meerschaum-portable.md"},
   ]},
