@@ -27,7 +27,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -137,7 +136,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose.yaml"
    },
-   "config_hash": "0ff5b645e1e69f547e48f0b319d6c318532cc9f5981a11155fd819a6f5d8f1f6",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -147,7 +145,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/does-not-exist\"],\"project_name\":\"lint\",\"pipes\":[{\"connector\":\"sql:local\",\"metric\":\"source\",\"instance\":\"sql:local\",\"parameters\":{\"columns\":{\"datetime\":\"ts\"},\"dtype\":{\"value\":\"float64\"},\"tag\":\"legacy\",\"index\":{\"station\":\"station\"}}},{\"connector\":\"sql:local\",\"metric\":\"derived\",\"instance\":\"sql:local\",\"parameters\":{\"sql\":\"SELECT *\\nFROM {{ Pipe('sql:local', 'source', instance='sql:local') }}\\nJOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}\",\"columns\":\"{{ Pipe('sql:local', 'source', instance='sql:local').columns }}\",\"indexes\":{\"id\":\"id\"},\"tags\":\"string-tags-in-parameters\"}}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"lint\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
     "MRSM__COMPOSE_PROJECT": "lint",
@@ -346,7 +343,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose.yaml"
    },
-   "config_hash": "b77dd8fe29eb1e296a22d1dcb8be25cf213a601482d04eb1e53bde70b95b2e79",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -356,7 +352,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/does-not-exist\"],\"project_name\":\"lint\",\"pipes\":[{\"connector\":\"sql:local\",\"metric\":\"source\",\"instance\":\"sql:local\",\"parameters\":{\"columns\":{\"datetime\":\"ts\"},\"dtype\":{\"value\":\"float64\"},\"tag\":\"legacy\",\"index\":{\"station\":\"station\"}}},{\"connector\":\"sql:local\",\"metric\":\"derived\",\"instance\":\"sql:local\",\"parameters\":{\"sql\":\"SELECT *\\nFROM {{ Pipe('sql:local', 'source', instance='sql:local') }}\\nJOIN {{ Pipe('sql:local', 'stale', instance='sql:local') }}\",\"columns\":\"{{ Pipe('sql:local', 'source', instance='sql:local').columns }}\",\"indexes\":{\"id\":\"id\"},\"tags\":\"string-tags-in-parameters\"}}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"lint\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
     "MRSM__COMPOSE_PROJECT": "lint",

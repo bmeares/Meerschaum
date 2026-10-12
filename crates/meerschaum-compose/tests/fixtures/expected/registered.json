@@ -132,7 +132,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -232,7 +231,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "32b06b714a649e847ef9cc24304e6b2049ee8aa973c610cbed02c1180587de0d",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -242,7 +240,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -569,7 +566,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "a0b45a97e4dbcaf6fd22873c1fc82170b5540f592f408819307a9be1f7f31560",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -579,7 +575,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -1055,7 +1050,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "95dd1270b115a30e8e05384463b1223b206bb95a765671a5d564175ec61471f8",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1065,7 +1059,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -1560,7 +1553,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "24646d3b152d4d1412b419109a69388eebab536727793458cff3a702c7ead00b",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1570,7 +1562,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -2039,7 +2030,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "227f203d44cc795b391e92c027b81e848196a7819a30744b358bf1c235a1133f",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2049,7 +2039,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -2503,7 +2492,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "cd52ab4720822099c53bff3bae2fb2714c1eb18df687eca69d97e49ee29cf4e2",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2513,7 +2501,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -2775,7 +2762,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "eae0c04eb1f6fa83180e2550992eef5f960ee5e664c25590e8d458eec053e29c",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2785,7 +2771,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -2953,7 +2938,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "3a645fbded4067e873ee3babfd3dba0feac394b8c78cb4cc9b2d2310ae692394",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2963,7 +2947,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -3210,7 +3193,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "52ca1a0633c29c46bace34e2b3ddf9bfe9dbccaf6e430e23a44fbbce6708e8d2",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -3220,7 +3202,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -3339,7 +3320,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "6941ac9144c34128bfb5b34b6b5f5a0bc602c86be8227da37c8448c361053002",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -3349,7 +3329,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -3474,7 +3453,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "ba6fa5b150fc49399874e2821e21a152deb6684accbb9c876751e5e0bf7f7d9c",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -3484,7 +3462,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -3614,7 +3591,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "0cd8038eddc72fb04357b463423efd4609dd044dcf250f69f75694032ef97cb1",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -3624,7 +3600,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -3755,7 +3730,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "62f17ebb835e4b269988f2736e22e968ab159268cbf35c5f9288674692ef8744",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -3765,7 +3739,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -3896,7 +3869,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "fc00217504246eca6d104ec18e5d4cc9cee0142dca58eefb6ddf7a028d42f527",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -3906,7 +3878,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -4031,7 +4002,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "df05adf71a894e0d2f721b4a37499c5a1c8cf3c8b1a296dca4a5f65b29eead3c",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -4041,7 +4011,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -4159,7 +4128,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "c9c30599f1feab3a4778d542fe960c781936b50740a1f8cf7d736779d585912d",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -4169,7 +4137,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",
@@ -4277,7 +4244,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "8ada7b3d928f5ed8008e3a95110e4739ad8f36723632b5622518f1116acfa795",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -4287,7 +4253,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "reg",

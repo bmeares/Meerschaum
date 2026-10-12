@@ -29,7 +29,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -51,11 +50,6 @@
     "type": "TypeError",
     "message": "Pipe.__init__() got an unexpected keyword argument 'dtype'. Did you mean 'dtypes'?"
    },
-   "traceback": [
-    "    pipes = [mrsm.Pipe(**pipe_meta) for pipe_meta in pipes_meta]",
-    "             ~~~~~~~~~^^^^^^^^^^^^^",
-    "TypeError: Pipe.__init__() got an unexpected keyword argument 'dtype'. Did you mean 'dtypes'?"
-   ],
    "commands": [
     {
      "sysargs": [
@@ -106,7 +100,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "cde9638675a36d4844ccc605593df7f616c2baa95dcf6694a277988bcd910577",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -116,7 +109,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"kwarg-typo\",\"pipes\":[{\"connector\":\"plugin:typo\",\"metric\":\"crash\",\"instance\":\"sql:local\",\"dtype\":{\"value\":\"float64\"}}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"kwarg-typo\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "kwarg-typo",
@@ -162,11 +154,6 @@
     "type": "TypeError",
     "message": "Pipe.__init__() got an unexpected keyword argument 'dtype'. Did you mean 'dtypes'?"
    },
-   "traceback": [
-    "    pipes = [mrsm.Pipe(**pipe_meta) for pipe_meta in pipes_meta]",
-    "             ~~~~~~~~~^^^^^^^^^^^^^",
-    "TypeError: Pipe.__init__() got an unexpected keyword argument 'dtype'. Did you mean 'dtypes'?"
-   ],
    "commands": [
     {
      "sysargs": [
@@ -217,7 +204,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "43702612e3a7f1bbd87e75b90d9f85d5dad2cb5595040b4705ffad3ad535ac83",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -227,7 +213,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"kwarg-typo\",\"pipes\":[{\"connector\":\"plugin:typo\",\"metric\":\"crash\",\"instance\":\"sql:local\",\"dtype\":{\"value\":\"float64\"}}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"kwarg-typo\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "kwarg-typo",

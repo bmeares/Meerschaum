@@ -4,11 +4,21 @@
 """
 Generate the `meerschaum-compose` parity fixtures from the Python compose implementation.
 
-Run from the repository root with the `mrsm` venv interpreter (it has `rich`, `python-dotenv`,
-`PyYAML` and `envyaml`):
+Run from the repository root, either against the working tree with an interpreter that has
+`rich`, `python-dotenv` and `PyYAML` (`envyaml` is taken from `test_root/venvs/compose` if the
+interpreter lacks it):
 
-    PYTHONPATH=$(pwd) ~/.config/meerschaum/venvs/mrsm/bin/python \
+    PYTHONPATH=$(pwd) python crates/meerschaum-compose/tests/fixtures/gen_compose.py [project ...]
+
+or against the released reference (what CI does; the output must be byte-identical):
+
+    MRSM_PLUGINS_DIR=$(mktemp -d) scripts/parity/run.sh \
         crates/meerschaum-compose/tests/fixtures/gen_compose.py [project ...]
+
+Each project runs in a child process of the *same* interpreter. The child gets an identical,
+minimal environment in both modes (no `PYTHONPATH`, a fixed `PYTHONHASHSEED`); which `meerschaum`
+it imports is passed on the command line (`--repo` puts the working tree first on `sys.path`;
+otherwise the interpreter's own package is used and must be the reference version).
 
 For every synthetic project under `projects/<name>/` (a compose file, optional `.env` files,
 plugins, and a `case.json` describing the runs), this script:
@@ -52,7 +62,6 @@ PROJECTS = HERE / 'projects'
 EXPECTED = HERE / 'expected'
 REPO = HERE.parent.parent.parent.parent
 COMPOSE_VENV = REPO / 'test_root' / 'venvs' / 'compose'
-MRSM_VENV = pathlib.Path.home() / '.config' / 'meerschaum' / 'venvs' / 'mrsm'
 
 ALL_RUNS = [
     {'name': 'explain', 'action': ['explain']},
@@ -118,13 +127,26 @@ def normalize(value, replacements):
 # Child process
 # ---------------------------------------------------------------------------------------------
 
-def child(project_name, tmp, out_path):
+def child(project_name, tmp, out_path, source):
     import faulthandler
     import warnings
     ### Abort with a traceback instead of hanging (e.g. on an unexpected prompt or connection).
     faulthandler.dump_traceback_later(300, exit=True)
+    if source.startswith('--repo'):
+        ### The parent's import path (e.g. its user site-packages, which depends on `HOME`)
+        ### travels on the command line rather than in the environment the fixtures record.
+        parent_path = [p for p in source.partition('=')[2].split(os.pathsep) if p]
+        sys.path[:0] = [str(REPO)] + [p for p in parent_path if p not in sys.path]
     import meerschaum as mrsm
-    assert os.path.realpath(mrsm.__file__).startswith(str(REPO)), mrsm.__file__
+    mrsm_file = os.path.realpath(mrsm.__file__)
+    if source.startswith('--repo'):
+        assert mrsm_file.startswith(str(REPO) + os.sep), mrsm_file
+    else:
+        assert not mrsm_file.startswith(str(REPO / 'meerschaum') + os.sep), mrsm_file
+        assert mrsm.__version__ == source.split('=', 1)[1], (mrsm.__version__, source)
+    ### Paths into the installed package (tracebacks in messages) differ between the working
+    ### tree and the reference venv.
+    package_dir = os.path.dirname(mrsm_file)
 
     from meerschaum.config._patch import apply_patch_to_config
     import meerschaum.compose.utils as compose_utils
@@ -304,7 +326,14 @@ def child(project_name, tmp, out_path):
     import meerschaum.utils.warnings as warnings_module
 
     def recording_warn(*args, **kw):
-        state['messages'].append(['warn', str(args[0]) if args else ''])
+        text = str(args[0]) if args else ''
+        ### Template-evaluation warnings embed a traceback (installation paths, line numbers).
+        if text.startswith('Failed to resolve pipe syntax') and ': Traceback' in text:
+            text = text.split(': Traceback', 1)[0] + ': <traceback>'
+        ### Runtime-dependency notices depend on the interpreter's installed packages.
+        if text.lstrip().startswith('Missing package '):
+            return
+        state['messages'].append(['warn', text])
 
     def recording_info(*args, **kw):
         state['messages'].append(['info', str(args[0]) if args else ''])
@@ -333,7 +362,6 @@ def child(project_name, tmp, out_path):
     def recording_read(*args, **kw):
         result = original_read(*args, **kw)
         state['config'] = copy.deepcopy(result)
-        state['config_hash'] = config_module.hash_config(result)
         return result
 
     config_module.read_compose_config = recording_read
@@ -430,7 +458,7 @@ def child(project_name, tmp, out_path):
                 record['result'] = [bool(result[0]), str(result[1])]
             except BaseException as e:
                 record['error'] = {'type': type(e).__name__, 'message': str(e)}
-                record['traceback'] = traceback.format_exc().splitlines()[-3:]
+                sys.__stderr__.write(traceback.format_exc())
             finally:
                 sys.stdout, sys.stderr = saved_stdout, saved_stderr
                 os.chdir(old_cwd)
@@ -451,7 +479,6 @@ def child(project_name, tmp, out_path):
             'warnings': warning_texts,
             'messages': state['messages'],
             'config': state['config'],
-            'config_hash': state.get('config_hash'),
             'env': state['env'],
             'pipes_meta': state['pipes_meta'],
             'pipes': state['pipes'],
@@ -468,6 +495,7 @@ def child(project_name, tmp, out_path):
             (copy_dir.as_posix(), '{PROJECT}'),
             (run_dir.as_posix(), '{RUN}'),
             (str(tmp), '{TMP}'),
+            (package_dir, '{SITE}/meerschaum'),
             (str(REPO), '{REPO}'),
         ]
         ### The hash covers absolute paths, so also record the hash of the normalized config.
@@ -488,6 +516,14 @@ def child(project_name, tmp, out_path):
 # ---------------------------------------------------------------------------------------------
 
 def generate(project_name):
+    reference = os.environ.get('MRSM_PARITY_REFERENCE')
+    ### Under scripts/parity/run.sh, keep the child as isolated as the parent (no user site).
+    interpreter_flags = ['-s'] if reference else []
+    source = (
+        f'--reference={reference}'
+        if reference
+        else '--repo=' + os.pathsep.join(p for p in sys.path if p and os.path.isdir(p))
+    )
     project_dir = PROJECTS / project_name
     case = json.loads((project_dir / 'case.json').read_text(encoding='utf-8'))
     tmp = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-compose-')).resolve()
@@ -496,8 +532,11 @@ def generate(project_name):
             (tmp / sub).mkdir()
         for name, text in (case.get('host_plugins') or {}).items():
             (tmp / 'host-plugins' / name).write_text(text, encoding='utf-8')
-        shutil.copytree(COMPOSE_VENV, tmp / 'venvs' / 'compose', symlinks=True)
-        (tmp / 'venvs' / 'mrsm').symlink_to(MRSM_VENV)
+        ### `envyaml` is imported with `attempt_import(..., venv='compose')`; the reference venv
+        ### ships it, a working-tree interpreter may not (then use the test root's venv).
+        import importlib.util
+        if importlib.util.find_spec('envyaml') is None and COMPOSE_VENV.exists():
+            shutil.copytree(COMPOSE_VENV, tmp / 'venvs' / 'compose', symlinks=True)
         env = {
             'PATH': '/usr/bin:/bin',
             'HOME': (tmp / 'home').as_posix(),
@@ -507,13 +546,13 @@ def generate(project_name):
             'MRSM_VENVS_DIR': (tmp / 'venvs').as_posix(),
             'MRSM_NO_AUTO_INSTALL': '1',
             'MRSM_CORE': 'python',
-            'PYTHONPATH': str(REPO),
+            ### Python's set order shows in messages (e.g. undefined variables).
             'PYTHONHASHSEED': '0',
         }
         env.update(case.get('process_env') or {})
         out_path = tmp / 'out.json'
         proc = subprocess.run(
-            [str(MRSM_VENV / 'bin' / 'python'), __file__, '--child', project_name, str(tmp), str(out_path)],
+            [sys.executable, *interpreter_flags, __file__, '--child', project_name, str(tmp), str(out_path), source],
             env=env,
             cwd=str(tmp),
             stdin=subprocess.DEVNULL,
@@ -536,7 +575,7 @@ def generate(project_name):
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == '--child':
-        child(sys.argv[2], sys.argv[3], sys.argv[4])
+        child(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
         return
     names = sys.argv[1:] or sorted(p.name for p in PROJECTS.iterdir() if (p / 'case.json').exists())
     for name in names:

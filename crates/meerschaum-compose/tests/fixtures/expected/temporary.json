@@ -51,7 +51,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -139,7 +138,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "c39e20083aa8440845f9716688e918441e381bcc52636be2ea86733d0cbf95b5",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -149,7 +147,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}},\"project_name\":\"temp\",\"pipes\":[{\"connector\":\"plugin:temp\",\"metric\":\"scratch\",\"temporary\":true,\"columns\":[\"ts\",\"id\"]},{\"connector\":\"plugin:temp\",\"metric\":\"kept\",\"location\":null,\"mrsm_instance\":\"sql:memory\"},{\"connector\":\"plugin:temp\",\"metric\":\"unicode\",\"instance\":\"sql:local\",\"parameters\":{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\"}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "temp",
@@ -329,7 +326,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "a11110b7ddd093d494ef4bd5614a7799842b6101ea5d581af4a4b1a6895bc008",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -339,7 +335,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}},\"project_name\":\"temp\",\"pipes\":[{\"connector\":\"plugin:temp\",\"metric\":\"scratch\",\"temporary\":true,\"columns\":[\"ts\",\"id\"]},{\"connector\":\"plugin:temp\",\"metric\":\"kept\",\"location\":null,\"mrsm_instance\":\"sql:memory\"},{\"connector\":\"plugin:temp\",\"metric\":\"unicode\",\"instance\":\"sql:local\",\"parameters\":{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\"}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "temp",
@@ -578,7 +573,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "fff53c834dca678012046547d44555df0df330e1bc04e7dc108504f23ad284d7",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -588,7 +582,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}},\"project_name\":\"temp\",\"pipes\":[{\"connector\":\"plugin:temp\",\"metric\":\"scratch\",\"temporary\":true,\"columns\":[\"ts\",\"id\"]},{\"connector\":\"plugin:temp\",\"metric\":\"kept\",\"location\":null,\"mrsm_instance\":\"sql:memory\"},{\"connector\":\"plugin:temp\",\"metric\":\"unicode\",\"instance\":\"sql:local\",\"parameters\":{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\"}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "temp",
@@ -900,7 +893,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "9c77249416cf9bdd7dc6fe346bd05492c7e5b6d357aaf06c4d3511f3a32a64ca",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -910,7 +902,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}},\"project_name\":\"temp\",\"pipes\":[{\"connector\":\"plugin:temp\",\"metric\":\"scratch\",\"temporary\":true,\"columns\":[\"ts\",\"id\"]},{\"connector\":\"plugin:temp\",\"metric\":\"kept\",\"location\":null,\"mrsm_instance\":\"sql:memory\"},{\"connector\":\"plugin:temp\",\"metric\":\"unicode\",\"instance\":\"sql:local\",\"parameters\":{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\"}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "temp",
@@ -1227,7 +1218,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "6fbf7892617f85cbe0e88f2682038a3615307eb369b00fd72fdc660f434dc6b0",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1237,7 +1227,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}},\"project_name\":\"temp\",\"pipes\":[{\"connector\":\"plugin:temp\",\"metric\":\"scratch\",\"temporary\":true,\"columns\":[\"ts\",\"id\"]},{\"connector\":\"plugin:temp\",\"metric\":\"kept\",\"location\":null,\"mrsm_instance\":\"sql:memory\"},{\"connector\":\"plugin:temp\",\"metric\":\"unicode\",\"instance\":\"sql:local\",\"parameters\":{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\"}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "temp",

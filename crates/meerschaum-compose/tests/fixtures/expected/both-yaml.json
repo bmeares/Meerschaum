@@ -26,7 +26,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -99,7 +98,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "54c19cddca499849da495a63868f47bbbe1e39eb83065d332021ea239ce01b3a",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -109,7 +107,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"from-yaml\",\"pipes\":[{\"connector\":\"plugin:both\",\"metric\":\"yaml\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"from-yaml\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "from-yaml",
@@ -225,7 +222,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "b0fc7d2959869a69f45d3670d038a2fc06d0e583f5784c2fac412cdae0da9634",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -235,7 +231,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"from-yaml\",\"pipes\":[{\"connector\":\"plugin:both\",\"metric\":\"yaml\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"from-yaml\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "from-yaml",

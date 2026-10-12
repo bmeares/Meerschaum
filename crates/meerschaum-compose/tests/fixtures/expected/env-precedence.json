@@ -54,7 +54,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0",
   "FROM_PROCESS": "process-value",
   "FROM_BOTH": "process-both",
@@ -168,7 +167,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose.yaml"
    },
-   "config_hash": "c880a65f2eb8dab67092bd0f723e1d6027bcec6e98e8dcb870b63609d4cf4c1b",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -178,7 +176,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "FROM_PROCESS": "process-value",
     "FROM_BOTH": "process-both",
@@ -345,7 +342,6 @@
     "__file__": "{PROJECT}/mrsm-compose.yaml",
     "project_name": "env-precedence"
    },
-   "config_hash": "eb6ac3be6162d90e80c112de01c42d3b3623e0416bb44c90e303544b8b749300",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -355,7 +351,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "FROM_PROCESS": "process-value",
     "FROM_BOTH": "process-both",
@@ -520,7 +515,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose.yaml"
    },
-   "config_hash": "28abff5e67f66754b026ff34d89d2824ece68fc3a0f1bd0279b97ef57b2b9264",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -530,7 +524,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "FROM_PROCESS": "process-value",
     "FROM_BOTH": "process-both",
@@ -697,7 +690,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose.yaml"
    },
-   "config_hash": "0884c7dc6fac9534f7c8115221abd2c5e7511e5cbbead7981a7e5ebcedf245d0",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -707,7 +699,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "FROM_PROCESS": "process-value",
     "FROM_BOTH": "process-both",
@@ -885,7 +876,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose.yaml"
    },
-   "config_hash": "bb2439b54fcf9e09c047f4d92ac13052c09b5a818b4352dba2f37f9bf4d5366b",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -895,7 +885,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "FROM_PROCESS": "process-value",
     "FROM_BOTH": "process-both",

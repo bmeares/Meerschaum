@@ -20,7 +20,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -42,11 +41,6 @@
     "type": "TypeError",
     "message": "str expected, not int"
    },
-   "traceback": [
-    "  File \"<frozen os>\", line 714, in __setitem__",
-    "  File \"<frozen os>\", line 788, in encode",
-    "TypeError: str expected, not int"
-   ],
    "commands": [
     {
      "sysargs": [
@@ -90,7 +84,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "4848d4eae0ecb17547fc7e3854455495a760c98dcb9f7b5fba849b8a21422d32",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -100,7 +93,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"PORT\":8000},\"project_name\":\"env-int\",\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"env-int\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "env-int",

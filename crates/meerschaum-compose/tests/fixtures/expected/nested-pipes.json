@@ -13,7 +13,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -102,7 +101,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "bd63f85b93f80d806ee29984766d43dc3ab1c8a20556459aec1ae4626b31c833",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -112,7 +110,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -359,7 +356,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "092eaad50c81075e7449de87f35efdbc82b82d4839405afe190aeb6bd91e434d",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -369,7 +365,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -741,7 +736,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "3d6698ecccce81e874aedee2b39ba1c95a7e16a8a0b59cfde8adab84f1b5c95b",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -751,7 +745,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -1142,7 +1135,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "15d63a37471c7644752f102508a8bbdf8c892c68f4dd9d51c432b48d3e50829b",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1152,7 +1144,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -1485,7 +1476,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "6bca4aaaf53b452760fb5db15c2ea0db97dd06ade57323aca7acc680061b740a",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1495,7 +1485,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -1817,7 +1806,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "9d566c5fac2ae23414dd65dc3054df76c197eb24f9a9696874c2a33bfe511932",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1827,7 +1815,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -1993,7 +1980,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "a0d8ebf188e295f4ea1b51ec087d21ebd2e2fef0ce441a2a2f0ef8b5db91bd69",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2003,7 +1989,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -2105,7 +2090,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "d439f5c6dfe21744abacb42c6f63b7f6d12fec0a024e23239c3bd2093e79ff54",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2115,7 +2099,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -2292,7 +2275,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "b39707aee92ba89947a25fafb7fce0623cf3baa1956564f833c1a3ac0def7f88",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2302,7 +2284,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -2410,7 +2391,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "03bb2ea4f28c15534d5691a4288850b5be8951e26baae645b892a75101f7bc5b",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2420,7 +2400,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -2534,7 +2513,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "329535dde06a1c087b9c45f7db4f3a55c4c53d69fac520d69ab010463159119d",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2544,7 +2522,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -2646,7 +2623,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "9abab805e8df2b8edf935c3212c85bf075a528211f0399a066b35f870b8f6634",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2656,7 +2632,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -2758,7 +2733,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "b0716a15f9d6af0fde65089c5cef2c3262a25b037dadd73dfd180bfd02560a83",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2768,7 +2742,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -2870,7 +2843,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "8aa0e1f23373304a066edb2d1a46e9cc5400297a551e559f83e2717b6c77ff9a",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2880,7 +2852,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -2994,7 +2965,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "93ed5e2166191e7255989f9960a480e8922f4e97aaa9e6ef87318410fec6da11",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -3004,7 +2974,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -3111,7 +3080,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "34563f752453c47bb257314810d2f676fde087f17bbbcb7d3f093929653e022f",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -3121,7 +3089,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",
@@ -3218,7 +3185,6 @@
     ],
     "project_name": "nested-pipes"
    },
-   "config_hash": "6f79915f7f3b53bccac1422c8e632ad89bb6e3f8304ef974698c0aa7277223fb",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -3228,7 +3194,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"sync\":{\"schedule\":\"daily starting 00:00\",\"args\":[\"--begin\",\"2024-01-01\"],\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"one\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:nested\",\"metric\":\"two\",\"location\":\"east\",\"instance\":\"sql:memory\"}]},\"pipes\":[{\"connector\":\"plugin:nested\",\"metric\":\"three\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"nested-pipes\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"project_name\":\"nested-pipes\"}",
     "MRSM__COMPOSE_PROJECT": "nested-pipes",

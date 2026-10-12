@@ -20,7 +20,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -42,11 +41,6 @@
     "type": "AttributeError",
     "message": "'str' object has no attribute 'append'"
    },
-   "traceback": [
-    "    pipe_meta['tags'].append(project_name)",
-    "    ^^^^^^^^^^^^^^^^^^^^^^^^",
-    "AttributeError: 'str' object has no attribute 'append'"
-   ],
    "commands": [
     {
      "sysargs": [
@@ -95,7 +89,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "2f4267948c319bdb56d89395f23f4361351acbc084dda436d8636f144e2d9326",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -105,7 +98,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"string-tags\",\"pipes\":[{\"connector\":\"plugin:tags\",\"metric\":\"crash\",\"instance\":\"sql:local\",\"tags\":\"single-string-tag\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"string-tags\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "string-tags",

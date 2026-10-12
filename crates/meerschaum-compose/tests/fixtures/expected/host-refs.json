@@ -21,7 +21,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -159,7 +158,6 @@
      "{PROJECT}/plugins"
     ]
    },
-   "config_hash": "e5cf0968ee812c517cb1e137be263a1f67bc2e9e31e9be2a38016fde35359dca",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -169,7 +167,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"nested\":{\"flavor\":\"sqlite\",\"database\":\":memory:\"},\"alias\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"missing\":null,\"invalid\":{},\"too_many\":{},\"empty\":{}},\"api\":{\"mrsm_copy\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"instance\":\"sql:alias\",\"stack\":{\"project_name\":\"host-refs\"}},\"connectors\":{\"sql\":{\"nested\":{\"flavor\":\"sqlite\",\"database\":\":memory:\"},\"alias\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"missing\":null,\"invalid\":{},\"too_many\":{},\"empty\":{}},\"api\":{\"mrsm_copy\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"instance\":\"sql:alias\",\"project_name\":\"host-refs\",\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "host-refs",

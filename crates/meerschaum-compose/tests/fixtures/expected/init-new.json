@@ -32,7 +32,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -140,7 +139,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose.yaml"
    },
-   "config_hash": "db8ad53dee9aa8297d857343eee25d7a7b1bc4db325c06ae3ddd025546a8459e",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -150,7 +148,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"plugins\":[],\"config\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":{\"username\":\"mrsm\",\"password\":\"mrsm\",\"flavor\":\"timescaledb-ha\",\"host\":\"localhost\",\"database\":\"meerschaum\",\"port\":5432}}}},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:main}\"}}}},\"stack\":{\"project_name\":\"init-new\"}},\"environment\":{},\"project_name\":\"init-new\",\"pipes\":[],\"connectors\":{\"sql\":{\"main\":{\"username\":\"mrsm\",\"password\":\"mrsm\",\"flavor\":\"timescaledb-ha\",\"host\":\"localhost\",\"database\":\"meerschaum\",\"port\":5432}}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
     "MRSM__COMPOSE_PROJECT": "init-new",
@@ -195,7 +192,6 @@
     ]
    ],
    "config": null,
-   "config_hash": null,
    "env": null,
    "pipes_meta": null,
    "pipes": null,

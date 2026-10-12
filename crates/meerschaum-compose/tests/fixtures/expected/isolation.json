@@ -13,7 +13,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -98,7 +97,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "021a0d71054d2652a3fb3cc5a7d1e61809af05f6a40cd694af31dfdc9500babb",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -108,7 +106,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -259,7 +256,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "04ceff915ee5c384a3b748b83a8fe61da1076b19e4d630fbe5497b10ca9d7f33",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -269,7 +265,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -538,7 +533,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "7ff26634f792655aa91fae11aee452262d7b3aa535807a6935f37986c6a64119",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -548,7 +542,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -837,7 +830,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "2dd61e62db7d981f782bf8c3a52be78112884ea7b0c2de2f5ff2dd718c4e03b6",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -847,7 +839,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -1029,7 +1020,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "69b0dedf333faeecd0e6d96eec1524dce05949b0fa59809a52d4a3cee2a7764a",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1039,7 +1029,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -1214,7 +1203,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "f64eacc59a29f62fbc036d287a9ed41362a2f1e7314e8d369d9468f11665af3d",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1224,7 +1212,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -1344,7 +1331,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "d888d089acccf94c46fd803ce66164d2f996a86e01f2b0c25eee1bb15a59ae66",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1354,7 +1340,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -1455,7 +1440,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "d89919b28d19d80986f3152b82101f586190bda0b8882157be14b3909e0d8a11",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1465,7 +1449,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -1597,7 +1580,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "2819c17c88c743fb6249e03931431e2f0afe6fbe426d385fcdace80bee858a50",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1607,7 +1589,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -1715,7 +1696,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "7985e98c14e2c39de9c2646731ea9505a1e2dfa74ceb257301080a72fd2d8f11",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1725,7 +1705,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -1839,7 +1818,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "8870a02e3dee2519000a5f6cdefc613205e1ff4781e846edac0bcc4b97af11e0",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1849,7 +1827,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -1950,7 +1927,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "ac325cb4324626254692120f6652766c0c740da2387329e1976e4b38d9f62364",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -1960,7 +1936,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -2061,7 +2036,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "ee3795b3034611d18a5f536cad888f12175a2540b25b4646a422b2d15fbbbd8d",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2071,7 +2045,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -2172,7 +2145,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "83571a8e5db9a65287d371bc2e646a88793ab05fec60bbb9c12997036301e483",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2182,7 +2154,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -2296,7 +2267,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "882727e3e1e29514fe7d9e93f9c6bd41603e1aa14484c2b57e8c538506d62962",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2306,7 +2276,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -2413,7 +2382,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "40ed05b611149f5a350f7b302fe182974a2b2723d7543777cb5449254c26cc0c",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2423,7 +2391,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",
@@ -2519,7 +2486,6 @@
      "{PROJECT}/more-plugins"
     ]
    },
-   "config_hash": "60a68a727cda47c7fa4a57a0ba8ef33ce9224023392a6858fbd266d35d458600",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -2529,7 +2495,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"environment\":{\"MRSM_PLUGINS_DIR\":\"[\\\"./plugins\\\", \\\"./more-plugins\\\"]\",\"MRSM_ROOT_DIR\":\"./env-root\",\"MRSM_WORK_DIR\":\"./work\",\"OTHER\":\"1\",\"EMPTY\":null},\"project_name\":\"isolated-project\",\"pipes\":[{\"connector\":\"plugin:iso\",\"metric\":\"data\",\"instance\":\"sql:local\"}],\"jobs\":{\"api\":\"start api --port 9000\",\"tagged\":\"sync pipes -c sql:local -t recompute --loop\",\"named\":\"sync pipes --name custom-name --loop\",\"compound\":\"sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1\",\"quoted\":\"sql local exec 'SELECT 1' -d\"},\"isolation\":\"subprocess\",\"daemon\":false,\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"isolated-project\"}},\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/more-plugins\"]}",
     "MRSM__COMPOSE_PROJECT": "isolated-project",

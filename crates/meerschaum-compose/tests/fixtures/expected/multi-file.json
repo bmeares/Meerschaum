@@ -65,7 +65,6 @@
   "MRSM_VENVS_DIR": "{TMP}/venvs",
   "MRSM_NO_AUTO_INSTALL": "1",
   "MRSM_CORE": "python",
-  "PYTHONPATH": "{REPO}",
   "PYTHONHASHSEED": "0"
  },
  "runs": [
@@ -155,7 +154,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose-00-extract.yaml"
    },
-   "config_hash": "c811eb73d962c89c665ee179b8ebff1e0b30fabf5ae033bbe149109e1ca839ce",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -165,7 +163,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/shared-root\",\"plugins_dir\":[\"{PROJECT}/shared-plugins\",\"{PROJECT}/plugins\"],\"plugins\":[\"shared\"],\"project_name\":\"extract\",\"pipes\":[{\"connector\":\"plugin:shared\",\"metric\":\"raw\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"extract\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose-00-extract.yaml\"}",
     "MRSM__COMPOSE_PROJECT": "extract",
@@ -295,7 +292,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose-01-load.yaml"
    },
-   "config_hash": "02dbd71e17b75afa9da77e7ae048ae4c57e5dcb9fa55627bab0e6ca93441ed61",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -305,7 +301,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/shared-root\",\"plugins_dir\":[\"{PROJECT}/shared-plugins\",\"{TMP}/host-root/.internal/plugins\",\"{PROJECT}/plugins\"],\"project_name\":\"load\",\"pipes\":[{\"connector\":\"sql:local\",\"metric\":\"clean\",\"instance\":\"sql:local\",\"parameters\":{\"query\":\"SELECT * FROM {{ Pipe('plugin:shared', 'raw', instance='sql:local') }}\"}}],\"jobs\":{\"load\":\"sync pipes -c sql:local --loop --min-seconds 60\"},\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"load\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose-01-load.yaml\"}",
     "MRSM__COMPOSE_PROJECT": "load",
@@ -460,7 +455,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose-00-extract.yaml"
    },
-   "config_hash": "68dfa45e9e27a91d4f3c2ccbcbd6bf7385119aac29a924f1fd390c5c74668651",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -470,7 +464,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/shared-root\",\"plugins_dir\":[\"{PROJECT}/shared-plugins\",\"{PROJECT}/plugins\"],\"plugins\":[\"shared\"],\"project_name\":\"extract\",\"pipes\":[{\"connector\":\"plugin:shared\",\"metric\":\"raw\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"extract\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose-00-extract.yaml\"}",
     "MRSM__COMPOSE_PROJECT": "extract",
@@ -614,7 +607,7 @@
     ],
     [
      "warn",
-     "Failed to resolve pipe syntax '{{ Pipe('plugin:shared', 'raw', instance='sql:local') }}': Traceback (most recent call last):\n  File \"{REPO}/meerschaum/utils/pipes.py\", line 248, in replace_pipes_syntax\n    resolved_values[placeholder] = _evaluate_pipe_access_chain_from_match(\n                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^\n        match,\n        ^^^^^^\n        _pipe=_pipe,\n        ^^^^^^^^^^^^\n    )\n    ^\n  File \"{REPO}/meerschaum/utils/pipes.py\", line 203, in _evaluate_pipe_access_chain_from_match\n    target = pipe.target\n             ^^^^^^^^^^^\n  File \"{REPO}/meerschaum/core/Pipe/_attributes.py\", line 1096, in target\n    if self.instance_connector.type == 'sql':\n       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'FakeInstanceConnector' object has no attribute 'type'\n"
+     "Failed to resolve pipe syntax '{{ Pipe('plugin:shared', 'raw', instance='sql:local') }}': <traceback>"
     ],
     [
      "info",
@@ -654,7 +647,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose-01-load.yaml"
    },
-   "config_hash": "b430345dd500cf7034f4bd3629230dfc0ea7da4c2bb1e49b375216f81ac1419c",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -664,7 +656,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/shared-root\",\"plugins_dir\":[\"{PROJECT}/shared-plugins\",\"{TMP}/host-root/.internal/plugins\",\"{PROJECT}/plugins\"],\"project_name\":\"load\",\"pipes\":[{\"connector\":\"sql:local\",\"metric\":\"clean\",\"instance\":\"sql:local\",\"parameters\":{\"query\":\"SELECT * FROM {{ Pipe('plugin:shared', 'raw', instance='sql:local') }}\"}}],\"jobs\":{\"load\":\"sync pipes -c sql:local --loop --min-seconds 60\"},\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"load\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose-01-load.yaml\"}",
     "MRSM__COMPOSE_PROJECT": "load",
@@ -844,7 +835,6 @@
     "daemon": true,
     "__file__": "{PROJECT}/mrsm-compose-00-extract.yaml"
    },
-   "config_hash": "8bb88975dec0c1bb3a0852cd1cd6f8ea5dd7b1b4f3ca3d207540958a5494c35d",
    "env": {
     "PATH": "/usr/bin:/bin",
     "HOME": "{TMP}/home",
@@ -854,7 +844,6 @@
     "MRSM_VENVS_DIR": "{TMP}/venvs",
     "MRSM_NO_AUTO_INSTALL": "1",
     "MRSM_CORE": "python",
-    "PYTHONPATH": "{REPO}",
     "PYTHONHASHSEED": "0",
     "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/shared-root\",\"plugins_dir\":[\"{PROJECT}/shared-plugins\",\"{PROJECT}/plugins\"],\"plugins\":[\"shared\"],\"project_name\":\"extract\",\"pipes\":[{\"connector\":\"plugin:shared\",\"metric\":\"raw\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"extract\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose-00-extract.yaml\"}",
     "MRSM__COMPOSE_PROJECT": "extract",
@@ -908,17 +897,11 @@
     "type": "FileNotFoundError",
     "message": "No compose file could be found.\n    Create a file mrsm-compose.yaml or specify a path with `--file`."
    },
-   "traceback": [
-    "    )",
-    "FileNotFoundError: No compose file could be found.",
-    "    Create a file mrsm-compose.yaml or specify a path with `--file`."
-   ],
    "commands": [],
    "events": [],
    "warnings": [],
    "messages": [],
    "config": null,
-   "config_hash": null,
    "env": null,
    "pipes_meta": null,
    "pipes": null,
@@ -946,17 +929,11 @@
     "type": "FileNotFoundError",
     "message": "No compose file could be found.\n    Create a file mrsm-compose.yaml or specify a path with `--file`."
    },
-   "traceback": [
-    "    )",
-    "FileNotFoundError: No compose file could be found.",
-    "    Create a file mrsm-compose.yaml or specify a path with `--file`."
-   ],
    "commands": [],
    "events": [],
    "warnings": [],
    "messages": [],
    "config": null,
-   "config_hash": null,
    "env": null,
    "pipes_meta": null,
    "pipes": null,
