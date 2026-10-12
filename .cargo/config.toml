@@ -1,0 +1,7 @@
+# Shared build directory for every crate so Polars/Arrow are compiled once.
+# Agents and CI must not override CARGO_TARGET_DIR: disk on the self-hosted runner is limited.
+[build]
+target-dir = "target"
+
+[profile.dev.package."*"]
+opt-level = 1

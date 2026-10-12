@@ -1,0 +1,11 @@
+[package]
+name = "meerschaum-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum v5: api crate (see docs/design/v5.0.0.md)"
+
+[dependencies]

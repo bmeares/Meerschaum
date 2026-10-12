@@ -1,0 +1,15 @@
+[package]
+name = "meerschaum-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum v5: the `mrsm` binary (clap CLI, shell, worker pool, Gantt TUI)"
+
+[[bin]]
+name = "mrsm"
+path = "src/main.rs"
+
+[dependencies]

@@ -1,0 +1,15 @@
+[package]
+name = "meerschaum-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum v5: PyO3 bindings exposed to Python as `meerschaum._core`"
+
+[lib]
+name = "_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
