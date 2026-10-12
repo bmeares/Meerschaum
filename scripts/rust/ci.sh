@@ -94,6 +94,8 @@ step_parity() {
   mapfile -t dirs < <(printf '%s\n' "${dirs[@]}" | sort -u)
   local rc=0
   git diff --stat --exit-code -- "${dirs[@]}" || rc=1
+  # Recorded fixtures must never carry machine-specific or sensitive content.
+  "$REPO/scripts/parity/check_fixture_hygiene.sh" "${dirs[@]}" || rc=1
   local untracked
   untracked="$(git ls-files --others --exclude-standard -- "${dirs[@]}")"
   if [ -n "$untracked" ]; then
