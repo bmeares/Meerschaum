@@ -18,3 +18,9 @@ dataclass-wizard>=0.35.0
 
 # v4 `compose` group, needed by crates/meerschaum-compose/tests/fixtures/gen_compose.py.
 envyaml>=1.10.211231
+
+# v4 `formatting` group, needed by crates/meerschaum-cli/tests/fixtures/gen_format.py (the Rust
+# formatting toolkit reproduces rich's layout and pprintpp/tabulate output byte for byte).
+rich==15.0.0
+pprintpp==0.4.0
+tabulate==0.10.0

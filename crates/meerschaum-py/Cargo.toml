@@ -23,7 +23,7 @@ extension-module = ["pyo3/extension-module"]
 # which changes the fingerprint of every Polars crate, so with it this crate cannot share the
 # kernel's Polars build. Without it, this crate reuses the kernel's Polars build (it depends on
 # `meerschaum-kernel`, see crates/README.md "Crate layering").
-polars = ["dep:pyo3-polars", "dep:polars"]
+polars = ["dep:pyo3-polars"]
 
 [dependencies]
 meerschaum-core = { workspace = true }
@@ -39,9 +39,15 @@ meerschaum-cli = { path = "../meerschaum-cli" }
 pyo3 = { version = "0.25", features = ["abi3-py311"] }
 pyo3-arrow = { version = "0.11", default-features = false }
 pyo3-polars = { version = "0.24", features = ["dtype-full"], optional = true }
-polars = { workspace = true, optional = true }
+# The kernel's Polars (same workspace features, so the build is shared): column types at the
+# pandas boundary.
+polars = { workspace = true }
 arrow = { workspace = true, features = ["ffi"] }
 toml = { workspace = true }
+indexmap = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
 
 [build-dependencies]
 pyo3-build-config = "0.25"

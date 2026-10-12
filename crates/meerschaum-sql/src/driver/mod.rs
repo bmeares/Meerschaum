@@ -16,6 +16,7 @@
 mod backend;
 pub mod batch;
 mod mysql;
+pub mod params;
 mod postgres;
 mod sqlite;
 mod unsupported;
@@ -37,6 +38,7 @@ use crate::flavor::{DriverFamily, Flavor};
 use crate::uri::ConnectionSpec;
 
 pub use batch::{ColumnKind, ColumnPlan, GeometryEncoding};
+pub use params::SqlParam;
 
 /// Python's default `chunksize` (`system.connectors.sql.chunksize`).
 pub const DEFAULT_CHUNKSIZE: usize = 100_000;
@@ -150,6 +152,104 @@ impl fmt::Debug for RecordBatchStream {
     }
 }
 
+/// Run a backend operation on its own task with owned arguments.
+///
+/// The backend functions are generic over the driver family with higher-ranked `Executor`
+/// bounds; rustc cannot prove their futures `Send` for every lifetime when they are awaited
+/// inside `async_trait` methods. Spawning them with `'static` arguments sidesteps that.
+macro_rules! on_pool {
+    ($pool:expr, $p:ident, $B:ident => $body:expr) => {
+        on_pool!($pool, $p, $B, _tx_mod => $body)
+    };
+    ($pool:expr, $p:ident, $B:ident, $M:ident => $body:expr) => {{
+        let handle = match $pool.clone() {
+            Pool::Postgres($p) => {
+                #[allow(unused)]
+                type $B = postgres::PgBackend;
+                #[allow(unused_imports)]
+                use backend::pg_tx as $M;
+                tokio::spawn(async move { $body })
+            }
+            Pool::Mysql($p) => {
+                #[allow(unused)]
+                type $B = mysql::MySqlBackend;
+                #[allow(unused_imports)]
+                use backend::mysql_tx as $M;
+                tokio::spawn(async move { $body })
+            }
+            Pool::Sqlite($p) => {
+                #[allow(unused)]
+                type $B = sqlite::SqliteBackend;
+                #[allow(unused_imports)]
+                use backend::sqlite_tx as $M;
+                tokio::spawn(async move { $body })
+            }
+        };
+        handle.await.map_err(|e| {
+            crate::error::SqlError::InvalidArgument(format!("The database task failed: {e}"))
+        })?
+    }};
+}
+
+/// An open transaction (SQLAlchemy `Session`): statements see each other's uncommitted
+/// effects until [`SqlTransaction::commit`]. Dropping it without committing rolls back.
+pub struct SqlTransaction {
+    inner: TxInner,
+}
+
+enum TxInner {
+    Postgres(sqlx::Transaction<'static, sqlx::Postgres>),
+    Mysql(sqlx::Transaction<'static, sqlx::MySql>),
+    Sqlite(sqlx::Transaction<'static, sqlx::Sqlite>),
+}
+
+impl fmt::Debug for SqlTransaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SqlTransaction").finish_non_exhaustive()
+    }
+}
+
+impl SqlTransaction {
+    /// Execute one or more statements, returning the rows affected.
+    pub async fn exec(&mut self, sql: &str) -> Result<u64> {
+        match &mut self.inner {
+            TxInner::Postgres(tx) => backend::pg_tx::tx_exec(tx, sql).await,
+            TxInner::Mysql(tx) => backend::mysql_tx::tx_exec(tx, sql).await,
+            TxInner::Sqlite(tx) => backend::sqlite_tx::tx_exec(tx, sql).await,
+        }
+    }
+
+    /// Run a query and collect the result as a kernel [`Frame`].
+    pub async fn read_frame(&mut self, sql: &str) -> Result<Frame> {
+        let batches = match &mut self.inner {
+            TxInner::Postgres(tx) => backend::pg_tx::tx_read(tx, sql).await?,
+            TxInner::Mysql(tx) => backend::mysql_tx::tx_read(tx, sql).await?,
+            TxInner::Sqlite(tx) => backend::sqlite_tx::tx_read(tx, sql).await?,
+        };
+        batches_to_frame(&batches)
+    }
+
+    /// Commit the transaction.
+    pub async fn commit(self) -> Result<()> {
+        match self.inner {
+            TxInner::Postgres(tx) => tx.commit().await?,
+            TxInner::Mysql(tx) => tx.commit().await?,
+            TxInner::Sqlite(tx) => tx.commit().await?,
+        }
+        Ok(())
+    }
+
+    /// Roll the transaction back.
+    pub async fn rollback(self) -> Result<()> {
+        match self.inner {
+            TxInner::Postgres(tx) => tx.rollback().await?,
+            TxInner::Mysql(tx) => tx.rollback().await?,
+            TxInner::Sqlite(tx) => tx.rollback().await?,
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 enum Pool {
     Postgres(sqlx::PgPool),
@@ -190,6 +290,36 @@ impl SqlDriver {
         })
     }
 
+    /// Build the pool without connecting (SQLAlchemy's lazy `create_engine`): the first query
+    /// opens the first connection. Must be called within a Tokio runtime.
+    pub fn connect_lazy(spec: &ConnectionSpec) -> Result<Self> {
+        let max = spec.max_connections();
+        let pool = match spec.flavor.driver_family() {
+            DriverFamily::Postgres => Pool::Postgres(
+                sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(max)
+                    .connect_lazy_with(postgres::connect_options(spec)?),
+            ),
+            DriverFamily::Mysql => Pool::Mysql(
+                sqlx::mysql::MySqlPoolOptions::new()
+                    .max_connections(max)
+                    .connect_lazy_with(mysql::connect_options(spec)?),
+            ),
+            DriverFamily::Sqlite => Pool::Sqlite(
+                sqlx::sqlite::SqlitePoolOptions::new()
+                    .max_connections(max)
+                    .connect_lazy_with(sqlite::connect_options(spec)?),
+            ),
+            DriverFamily::Mssql | DriverFamily::Oracle | DriverFamily::Duckdb => {
+                return Err(unsupported::unavailable(spec.flavor));
+            }
+        };
+        Ok(Self {
+            flavor: spec.flavor,
+            pool,
+        })
+    }
+
     /// The flavor this driver serves.
     pub fn flavor(&self) -> Flavor {
         self.flavor
@@ -202,20 +332,8 @@ impl SqlDriver {
     /// (or by describing the statement when it returns no rows).
     pub async fn read_stream(&self, sql: &str, chunksize: usize) -> Result<RecordBatchStream> {
         let chunksize = chunksize.max(1);
-        match &self.pool {
-            Pool::Postgres(p) => {
-                backend::read_stream::<postgres::PgBackend>(p.clone(), sql.to_string(), chunksize)
-                    .await
-            }
-            Pool::Mysql(p) => {
-                backend::read_stream::<mysql::MySqlBackend>(p.clone(), sql.to_string(), chunksize)
-                    .await
-            }
-            Pool::Sqlite(p) => {
-                backend::read_stream::<sqlite::SqliteBackend>(p.clone(), sql.to_string(), chunksize)
-                    .await
-            }
-        }
+        let sql = sql.to_string();
+        on_pool!(self.pool, p, B => backend::read_stream::<B>(p, sql, chunksize).await)
     }
 
     /// Execute a query and collect all rows (in batches of [`DEFAULT_CHUNKSIZE`]).
@@ -229,11 +347,8 @@ impl SqlDriver {
     /// Execute one or more statements (simple-query protocol, like SQLAlchemy `text()`),
     /// returning the number of rows affected.
     pub async fn exec(&self, sql: &str) -> Result<u64> {
-        match &self.pool {
-            Pool::Postgres(p) => backend::exec::<postgres::PgBackend>(p, sql).await,
-            Pool::Mysql(p) => backend::exec::<mysql::MySqlBackend>(p, sql).await,
-            Pool::Sqlite(p) => backend::exec::<sqlite::SqliteBackend>(p, sql).await,
-        }
+        let sql = sql.to_string();
+        on_pool!(self.pool, p, B => backend::exec::<B>(&p, &sql).await)
     }
 
     /// Execute a query and collect the result as a kernel [`Frame`] (the in-memory table type
@@ -264,42 +379,86 @@ impl SqlDriver {
         break_on_error: bool,
         rollback: bool,
     ) -> Result<Vec<Option<u64>>> {
-        match &self.pool {
-            Pool::Postgres(p) => {
-                backend::exec_queries::<postgres::PgBackend>(p, queries, break_on_error, rollback)
-                    .await
-            }
-            Pool::Mysql(p) => {
-                backend::exec_queries::<mysql::MySqlBackend>(p, queries, break_on_error, rollback)
-                    .await
-            }
-            Pool::Sqlite(p) => {
-                backend::exec_queries::<sqlite::SqliteBackend>(p, queries, break_on_error, rollback)
-                    .await
-            }
-        }
+        let queries = queries.to_vec();
+        on_pool!(self.pool, p, B, M => M::exec_queries(&p, &queries, break_on_error, rollback).await)
     }
 
     /// Execute statements outside any transaction block, stopping at the first failure
     /// (`SQLConnector._run_in_autocommit`, `_maintenance.py:54`; required for `VACUUM`).
     /// Returns whether every statement succeeded.
     pub async fn exec_autocommit(&self, queries: &[String]) -> Result<bool> {
-        match &self.pool {
-            Pool::Postgres(p) => backend::exec_autocommit::<postgres::PgBackend>(p, queries).await,
-            Pool::Mysql(p) => backend::exec_autocommit::<mysql::MySqlBackend>(p, queries).await,
-            Pool::Sqlite(p) => backend::exec_autocommit::<sqlite::SqliteBackend>(p, queries).await,
-        }
+        let queries = queries.to_vec();
+        on_pool!(self.pool, p, B, M => M::exec_autocommit(&p, &queries).await)
     }
 
     /// Return the first column of the first row (`SQLConnector.value`).
     ///
     /// `Ok(None)` when the query returns no rows; `Ok(Some(SqlValue::Null))` for a `NULL`.
     pub async fn value(&self, sql: &str) -> Result<Option<SqlValue>> {
+        let sql = sql.to_string();
+        on_pool!(self.pool, p, B => backend::value::<B>(&p, &sql).await)
+    }
+
+    /// Execute one statement with bound parameters, returning the rows affected.
+    pub async fn exec_with(&self, sql: &str, params: &[SqlParam]) -> Result<u64> {
+        let (sql, params) = (sql.to_string(), params.to_vec());
+        on_pool!(self.pool, p, B => backend::exec_with::<B>(&p, &sql, &params).await)
+    }
+
+    /// Execute bound statements in one transaction, stopping and rolling back at the first
+    /// failure (`None` marks the failed statement).
+    pub async fn exec_many_with(
+        &self,
+        statements: &[(String, Vec<SqlParam>)],
+    ) -> Result<Vec<Option<u64>>> {
+        let statements = statements.to_vec();
+        on_pool!(self.pool, p, B, M => M::exec_many_with(&p, &statements).await)
+    }
+
+    /// Run a query with bound parameters and collect the result as a kernel [`Frame`].
+    pub async fn read_frame_with(&self, sql: &str, params: &[SqlParam]) -> Result<Frame> {
+        let (sql, params) = (sql.to_string(), params.to_vec());
+        let batches =
+            on_pool!(self.pool, p, B => backend::read_with::<B>(&p, &sql, &params).await)?;
+        batches_to_frame(&batches)
+    }
+
+    /// The first column of the first row of a query with bound parameters.
+    pub async fn value_with(&self, sql: &str, params: &[SqlParam]) -> Result<Option<SqlValue>> {
+        let (sql, params) = (sql.to_string(), params.to_vec());
+        on_pool!(self.pool, p, B => backend::value_with::<B>(&p, &sql, &params).await)
+    }
+
+    /// PostgreSQL `COPY ... FROM STDIN` with a pre-encoded payload, in its own transaction
+    /// (`psql_insert_copy`, `_sql.py:1109`). Returns the number of rows copied.
+    pub async fn copy_in(&self, copy_sql: &str, data: Vec<u8>) -> Result<u64> {
         match &self.pool {
-            Pool::Postgres(p) => backend::value::<postgres::PgBackend>(p, sql).await,
-            Pool::Mysql(p) => backend::value::<mysql::MySqlBackend>(p, sql).await,
-            Pool::Sqlite(p) => backend::value::<sqlite::SqliteBackend>(p, sql).await,
+            Pool::Postgres(p) => {
+                let mut tx = p.begin().await?;
+                let mut copy = tx.copy_in_raw(copy_sql).await?;
+                if let Err(e) = copy.send(data).await {
+                    let _ = copy.abort(e.to_string()).await;
+                    return Err(e.into());
+                }
+                let n = copy.finish().await?;
+                tx.commit().await?;
+                Ok(n)
+            }
+            _ => Err(crate::error::SqlError::InvalidArgument(format!(
+                "COPY is only available on PostgreSQL (flavor '{}').",
+                self.flavor.as_str()
+            ))),
         }
+    }
+
+    /// Begin a transaction on a pooled connection.
+    pub async fn begin(&self) -> Result<SqlTransaction> {
+        let inner = match &self.pool {
+            Pool::Postgres(p) => TxInner::Postgres(p.begin().await?),
+            Pool::Mysql(p) => TxInner::Mysql(p.begin().await?),
+            Pool::Sqlite(p) => TxInner::Sqlite(p.begin().await?),
+        };
+        Ok(SqlTransaction { inner })
     }
 
     /// Close every pooled connection.

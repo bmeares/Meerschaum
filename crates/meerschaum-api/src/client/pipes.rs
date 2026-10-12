@@ -294,8 +294,8 @@ impl APIConnector {
                 .await?
                 .into_iter()
                 .map(|(c, t)| {
-                    let pd = if meerschaum_kernel::dtypes::py_isupper(&t) {
-                        meerschaum_kernel::dtypes::get_pd_type_from_db_type(&t, true)
+                    let pd = if meerschaum_core::pyfmt::py_isupper(&t) {
+                        meerschaum_core::dtypes::get_pd_type_from_db_type(&t, true)
                     } else {
                         meerschaum_kernel::dtypes::to_pandas_dtype(&t)
                     };
@@ -618,7 +618,7 @@ impl APIConnector {
         let dtypes = self.pipe_dtypes(pipe).await?;
         let ignore_cols: Vec<String> = dtypes
             .iter()
-            .filter(|(_, t)| !meerschaum_kernel::dtypes::are_dtypes_equal(t, "datetime"))
+            .filter(|(_, t)| !meerschaum_core::dtypes::are_dtypes_equal(t, "datetime"))
             .map(|(c, _)| c.clone())
             .collect();
         let parameters = self.pipe_parameters(pipe).await;

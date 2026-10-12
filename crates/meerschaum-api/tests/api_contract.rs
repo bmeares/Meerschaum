@@ -53,14 +53,19 @@ fn body_bytes(j: &J) -> Vec<u8> {
 /// The canned response for a recorded request; `/login` expirations are moved far into the
 /// future so the replay never re-authenticates.
 fn canned(r: &J) -> Canned {
-    let mut body = body_bytes(&r["response"]);
+    let mut body = if r["response"].get("reset").is_some() {
+        Vec::new()
+    } else {
+        body_bytes(&r["response"])
+    };
     if r["url"].as_str().unwrap().ends_with("/login") && r["status"] == 200 {
         let mut j: J = serde_json::from_slice(&body).unwrap();
         j["expires"] = J::String("2999-01-01T00:00:00.000000".into());
         body = serde_json::to_vec(&j).unwrap();
     }
     Canned {
-        status: r["status"].as_u64().unwrap() as u16,
+        // `null`: the server reset the connection (status 0 makes the mock drop it).
+        status: r["status"].as_u64().unwrap_or(0) as u16,
         content_type: r["content_type"].as_str().unwrap().to_string(),
         body,
     }
@@ -388,10 +393,15 @@ async fn run_step(ctx: &mut Ctx, name: &str) -> Result<J, ()> {
             let fx = step_fx(ctx, name);
             let df = sync_frame(&fx["sync_df"]);
             let extra: Map = fx["sync_kwargs"]
-                .as_object()
+                .as_array()
                 .unwrap()
                 .iter()
-                .map(|(k, v)| (k.clone(), meerschaum_api::pipe_ops::json_to_core(v)))
+                .map(|kv| {
+                    (
+                        kv[0].as_str().unwrap().to_string(),
+                        meerschaum_api::pipe_ops::json_to_core(&kv[1]),
+                    )
+                })
                 .collect();
             let chunksize = fx["chunksize"].as_i64();
             let check_existing = extra
@@ -752,14 +762,14 @@ async fn run_step(ctx: &mut Ctx, name: &str) -> Result<J, ()> {
             tuple(
                 conn.create_job(
                     "fixture-job",
-                    &["show".into(), "version".into()],
+                    &["show", "version", "--loop", "--min-seconds", "3600"].map(String::from),
                     Some(props),
                 )
                 .await,
             )
         }
         "get_job_exists" => json!(conn.get_job_exists("fixture-job").await.map_err(|_| ())?),
-        "start_job" => tuple(conn.start_job("fixture-job").await),
+        "start_job_missing" => tuple(conn.start_job("missing-job").await),
         "monitor_logs" => {
             let lines = Arc::new(Mutex::new(0usize));
             let result: Arc<Mutex<Option<SuccessTuple>>> = Arc::new(Mutex::new(None));
@@ -852,6 +862,31 @@ const DIRECT_TOKEN_STEPS: &[&str] = &[
     "delete_token",
 ];
 
+async fn wait_for_job(conn: &APIConnector, step: &str) {
+    for _ in 0..240 {
+        let done = match step {
+            "create_job" => conn
+                .get_logs("fixture-job")
+                .await
+                .is_ok_and(|l| l.contains("Meerschaum v")),
+            "stop_job" => {
+                conn.clear_job_metadata_cache();
+                conn.get_job_status("fixture-job")
+                    .await
+                    .is_ok_and(|s| s == "stopped")
+            }
+            _ => return,
+        };
+        if done {
+            if step == "create_job" {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+}
+
 async fn replay(server: &MockServer, live: bool) -> (Vec<String>, usize) {
     let fx = fixture();
     let steps = fx["steps"].as_array().unwrap().clone();
@@ -919,6 +954,12 @@ async fn replay(server: &MockServer, live: bool) -> (Vec<String>, usize) {
         }
         let result = run_step(&mut ctx, name).await;
         let (recorded, pending, ws_received) = server.take();
+        if live {
+            // The generator's unrecorded waits: the job's first output after `create_job`, and
+            // the stopped state after `stop_job`.
+            wait_for_job(&ctx.conn, name).await;
+            let _ = server.take();
+        }
         let expected = step["requests"].as_array().unwrap();
         if !live && pending > 0 {
             errors.push(format!(
@@ -989,6 +1030,16 @@ async fn replay(server: &MockServer, live: bool) -> (Vec<String>, usize) {
                 "{name}: rust failed, python returned {}",
                 step["result"]
             )),
+            Ok(actual)
+                if python_error
+                    && step["error"]
+                        .as_str()
+                        .unwrap_or("")
+                        .starts_with("ConnectionError")
+                    && actual.get(0) == Some(&J::Bool(false)) =>
+            {
+                // A transport failure raises in v4 and is a failed `SuccessTuple` here.
+            }
             Ok(_) if python_error => errors.push(format!(
                 "{name}: python raised {}, rust succeeded",
                 step["error"]

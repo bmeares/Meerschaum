@@ -56,6 +56,15 @@ pub fn get_numeric_cols(df: &Frame) -> Vec<String> {
     special_cols(df, "numeric", |v| matches!(v, Value::Decimal(_)))
 }
 
+/// Whether `get_uuid_cols()` reports `col` (of a frame with `height` rows).
+pub fn is_uuid_column(col: &crate::frame::Column, height: usize) -> bool {
+    height > 0
+        && match col.tags.declares("uuid") {
+            Some(declared) => declared,
+            None => matches!(first_valid(&col.data), Some(Value::Uuid(_))),
+        }
+}
+
 /// `get_uuid_cols()`: the first valid value is a `UUID`.
 pub fn get_uuid_cols(df: &Frame) -> Vec<String> {
     special_cols(df, "uuid", |v| matches!(v, Value::Uuid(_)))

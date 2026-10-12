@@ -96,6 +96,28 @@ pub fn enforce_dtypes_with_path(
     dtypes: &IndexMap<String, String>,
     opts: &EnforceOptions,
 ) -> Result<(Frame, bool), EnforceError> {
+    enforce_dtypes_with_report(df, dtypes, opts)
+        .map(|(frame, path)| (frame, path == EnforcePath::Native))
+}
+
+/// The path [`enforce_dtypes_with_report`] took, which decides the pandas dtypes v4 returns.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EnforcePath {
+    /// The whole frame went through Polars (`to_pandas(use_pyarrow_extension_array=True)`).
+    Native,
+    /// These typed columns (the native subset of a mixed frame) went through Polars first and
+    /// were assigned back Arrow-backed; the rest took the object path.
+    Subset(Vec<String>),
+    /// The pandas (object) path only.
+    Object,
+}
+
+/// [`enforce_dtypes`], also reporting the [`EnforcePath`].
+pub fn enforce_dtypes_with_report(
+    df: &Frame,
+    dtypes: &IndexMap<String, String>,
+    opts: &EnforceOptions,
+) -> Result<(Frame, EnforcePath), EnforceError> {
     let norm: IndexMap<&str, String> = dtypes
         .iter()
         .map(|(c, t)| (c.as_str(), normalized(t)))
@@ -122,25 +144,29 @@ pub fn enforce_dtypes_with_path(
 
     if !native.is_empty() && fallback.is_empty() && !untyped {
         if let Some(out) = enforce_native(df, &native, native_strip) {
-            return Ok((out, true));
+            return Ok((out, EnforcePath::Native));
         }
     }
 
     let mut df = df.clone();
     let mut dtypes = dtypes.clone();
+    let mut path = EnforcePath::Object;
     if !native.is_empty() && (!fallback.is_empty() || untyped) {
         let native_cols: Vec<String> = native.keys().filter(|c| df.contains(c)).cloned().collect();
         if !native_cols.is_empty() {
-            let subset = df.select(&native_cols)?;
-            if let Some(native_df) = enforce_native(&subset, &native, native_strip) {
-                for col in native_df.columns() {
-                    df.set_column(col.clone())?;
+            let subset: Vec<&Column> = native_cols.iter().filter_map(|c| df.column(c)).collect();
+            if let Some(native_df) =
+                enforce_native_columns(&subset, df.height(), &native, native_strip)
+            {
+                for col in native_df.into_columns() {
+                    df.set_column(col)?;
                 }
                 dtypes = fallback.clone();
+                path = EnforcePath::Subset(native_cols);
             }
         }
     }
-    enforce_object_path(df, &dtypes, opts).map(|f| (f, false))
+    enforce_object_path(df, &dtypes, opts).map(|f| (f, path))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -148,29 +174,8 @@ pub fn enforce_dtypes_with_path(
 
 /// `to_polars()` for one column: the Polars series v4 would get, or `None` if Polars could not
 /// build a castable column (UUIDs, geometries, mixed objects).
-fn to_polars_column(col: &Column, json: bool) -> Option<Series> {
+fn to_polars_column(col: &Column) -> Option<Series> {
     let name = col.name.as_str();
-    if json {
-        // PARITY: `to_polars(json_cols=...)` serializes each value: null-likes → null, strings are
-        // `json.loads`ed when possible (else kept as JSON strings), then `json.dumps`ed.
-        let values = col.data.values();
-        let out: Vec<Option<String>> = values
-            .iter()
-            .map(|v| {
-                if value_is_null(v) {
-                    return None;
-                }
-                Some(match v {
-                    Value::Str(s) => match serde_json::from_str::<serde_json::Value>(s) {
-                        Ok(j) => compact_json(&j),
-                        Err(_) => compact_json(&serde_json::Value::String(s.clone())),
-                    },
-                    other => json_dumps_value(other),
-                })
-            })
-            .collect();
-        return Some(StringChunked::from_iter_options(name.into(), out.into_iter()).into_series());
-    }
     match &col.data {
         ColumnData::Native(s) => Some(s.clone()),
         ColumnData::Object(values) => {
@@ -257,6 +262,18 @@ fn enforce_native(
     dtypes: &IndexMap<String, String>,
     strip_timezone: bool,
 ) -> Option<Frame> {
+    let columns: Vec<&Column> = df.columns().iter().collect();
+    enforce_native_columns(&columns, df.height(), dtypes, strip_timezone)
+}
+
+/// [`enforce_native`] on `columns` (a frame of `height` rows, or a selection of its columns),
+/// reading them without copying: only the columns passed through unchanged are cloned.
+fn enforce_native_columns(
+    columns: &[&Column],
+    height: usize,
+    dtypes: &IndexMap<String, String>,
+    strip_timezone: bool,
+) -> Option<Frame> {
     for typ in dtypes.values() {
         if is_fallback_dtype(&normalized(typ)) {
             return None;
@@ -264,49 +281,79 @@ fn enforce_native(
     }
     // PARITY: when any column holds UUIDs, v4 builds the Polars frame with `strict=False`,
     // which leaves Python objects that no cast accepts.
-    if !crate::detect::get_uuid_cols(df).is_empty() {
-        let uuid_typed = dtypes
-            .keys()
-            .any(|c| crate::detect::get_uuid_cols(df).contains(c));
-        if uuid_typed {
-            return None;
-        }
+    let uuid_typed = columns
+        .iter()
+        .any(|c| dtypes.contains_key(&c.name) && crate::detect::is_uuid_column(c, height));
+    if uuid_typed {
+        return None;
     }
-    let mut out = df.clone();
-    let mut json_cols = Vec::new();
-    for col in df.columns() {
+    let mut out = Frame::with_height(height);
+    // `out.set(name, data)` on a copy of the frame: the data is replaced and the tags reset
+    // (the CRS is kept); untouched columns stay as they are.
+    let replace = |out: &mut Frame, col: &Column, data: ColumnData| -> Option<()> {
+        out.set_column(Column {
+            name: col.name.clone(),
+            data,
+            crs: col.crs.clone(),
+            tags: Default::default(),
+        })
+        .ok()
+    };
+    for col in columns.iter().copied() {
         let norm = dtypes.get(&col.name).map(|t| normalized(t));
-        let is_json = norm.as_deref() == Some("json");
-        let series = to_polars_column(col, is_json)?;
+        if norm.as_deref() == Some("json") {
+            // PARITY: `to_polars(json_cols=...)` dumps each value and `to_pandas()` `json.loads`
+            // it back; pandas infers the dtype.
+            let values = json_roundtrip_values(&col.data);
+            replace(&mut out, col, apply_result(&col.name, values))?;
+            continue;
+        }
+        let series = to_polars_column(col)?;
         let Some(norm) = norm else {
-            out.set(&col.name, ColumnData::Native(series)).ok()?;
+            replace(&mut out, col, ColumnData::Native(series))?;
             continue;
         };
         if norm == "object" {
-            continue;
-        }
-        if is_json {
-            json_cols.push(col.name.clone());
-            // PARITY: `to_pandas()` `json.loads` each value back; pandas infers the dtype.
-            let values: Vec<Value> = series
-                .str()
-                .ok()?
-                .into_iter()
-                .map(|v| match v {
-                    Some(s) => serde_json::from_str(s)
-                        .map(json_to_value)
-                        .unwrap_or(Value::Null),
-                    None => Value::Null,
-                })
-                .collect();
-            out.set(&col.name, apply_result(&col.name, values)).ok()?;
+            out.set_column(col.clone()).ok()?;
             continue;
         }
         let target = native_target(&norm, strip_timezone)?;
         let casted = native_cast(&series, &target)?;
-        out.set(&col.name, ColumnData::Native(casted)).ok()?;
+        replace(&mut out, col, ColumnData::Native(casted))?;
     }
     Some(out)
+}
+
+/// The values of a declared `json` column after v4's `to_polars(json_cols=...)` /
+/// `to_pandas()` round trip: each value is dumped to JSON text (strings are `json.loads`ed first
+/// when they parse) and loaded back, null-likes become `None`.
+///
+/// A [`Value::Json`] container round-trips to itself (the dump is valid JSON and Rust's float
+/// formatting round-trips exactly), so it is kept without serializing it.
+fn json_roundtrip_values(data: &ColumnData) -> Vec<Value> {
+    let roundtrip = |v: &Value| -> Value {
+        if value_is_null(v) {
+            return Value::Null;
+        }
+        let text = match v {
+            Value::Json(j) => return Value::Json(j.clone()),
+            Value::Str(s) => match serde_json::from_str::<serde_json::Value>(s) {
+                Ok(j) => compact_json(&j),
+                Err(_) => compact_json(&serde_json::Value::String(s.clone())),
+            },
+            other => json_dumps_value(other),
+        };
+        serde_json::from_str(&text)
+            .map(json_to_value)
+            .unwrap_or(Value::Null)
+    };
+    match data {
+        ColumnData::Object(values) => values.iter().map(roundtrip).collect(),
+        ColumnData::Native(s) => crate::frame::series_to_values(s)
+            .iter()
+            .map(roundtrip)
+            .collect(),
+    }
 }
 
 /// A strict Polars cast following `_enforce_dtypes_with_polars` (string sources are parsed).
@@ -388,6 +435,15 @@ fn native_cast(s: &Series, target: &DataType) -> Option<Series> {
         (DataType::Datetime(stu, _), DataType::Datetime(ttu, ttz)) => {
             let phys = s.to_physical_repr().into_owned();
             let phys = phys.i64().ok()?;
+            if stu == ttu {
+                // Same unit: the timestamps are unchanged, only the timezone metadata differs.
+                return Some(
+                    phys.clone()
+                        .with_name(name)
+                        .into_datetime(*ttu, ttz.clone())
+                        .into_series(),
+                );
+            }
             let out: Vec<Option<i64>> = phys
                 .into_iter()
                 .map(|v| v.map(|v| convert_time_unit(v, *stu, *ttu)))
@@ -497,8 +553,24 @@ struct DtShape {
 }
 
 fn dt_shape(s: &str) -> Option<DtShape> {
+    dt_shape_parsed(s).map(|(shape, _)| shape)
+}
+
+/// [`dt_shape`] with the parsed value (`parse_iso_datetime` trims its input, so parsing the
+/// trimmed text gives the same result).
+fn dt_shape_parsed(
+    s: &str,
+) -> Option<(
+    DtShape,
+    (chrono::NaiveDateTime, Option<chrono::FixedOffset>),
+)> {
     let s = s.trim();
-    parse_iso_datetime(s)?;
+    let parsed = parse_iso_datetime(s)?;
+    Some((dt_shape_of(s)?, parsed))
+}
+
+/// The shape of trimmed text that parses as a datetime.
+fn dt_shape_of(s: &str) -> Option<DtShape> {
     if s.len() <= 10 {
         return Some(DtShape {
             has_time: false,
@@ -518,6 +590,39 @@ fn dt_shape(s: &str) -> Option<DtShape> {
     })
 }
 
+/// `f` over `items` in contiguous chunks on scoped threads (large inputs only), concatenated in
+/// order: the same result as `f(items)` when `f` maps each item independently. `None` from any
+/// chunk is `None` overall.
+fn par_map_chunks<T: Sync, R: Send>(
+    items: &[T],
+    f: impl Fn(&[T]) -> Option<Vec<R>> + Sync,
+) -> Option<Vec<R>> {
+    const MIN_CHUNK: usize = 65_536;
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(8)
+        .min(items.len() / MIN_CHUNK);
+    if threads < 2 {
+        return f(items);
+    }
+    let size = items.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = items
+            .chunks(size)
+            .map(|chunk| scope.spawn(|| f(chunk)))
+            .collect();
+        let mut out = Vec::with_capacity(items.len());
+        for handle in handles {
+            let part = handle
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+            out.extend(part?);
+        }
+        Some(out)
+    })
+}
+
 /// `Expr.str.to_datetime(time_unit, time_zone, strict=True)`.
 fn str_to_datetime(ca: &StringChunked, tu: TimeUnit, tz: Option<TimeZone>) -> Option<Series> {
     let first = ca.into_iter().flatten().next();
@@ -531,23 +636,28 @@ fn str_to_datetime(ca: &StringChunked, tu: TimeUnit, tz: Option<TimeZone>) -> Op
             );
         }
     };
-    let out: Option<Vec<Option<i64>>> = ca
-        .into_iter()
-        .map(|v| match v {
-            None => Some(None),
-            Some(t) => {
-                if dt_shape(t)? != shape {
-                    return None;
+    let texts: Vec<Option<&str>> = ca.into_iter().collect();
+    let out = par_map_chunks(&texts, |chunk| {
+        chunk
+            .iter()
+            .map(|v| match v {
+                None => Some(None),
+                Some(t) => {
+                    let (t_shape, (naive, offset)) = dt_shape_parsed(t)?;
+                    if t_shape != shape {
+                        return None;
+                    }
+                    let utc = match offset {
+                        Some(off) => {
+                            naive - chrono::Duration::seconds(off.local_minus_utc() as i64)
+                        }
+                        None => naive,
+                    };
+                    DateTimeValue::naive(utc).to_timestamp(tu).map(Some)
                 }
-                let (naive, offset) = parse_iso_datetime(t)?;
-                let utc = match offset {
-                    Some(off) => naive - chrono::Duration::seconds(off.local_minus_utc() as i64),
-                    None => naive,
-                };
-                DateTimeValue::naive(utc).to_timestamp(tu).map(Some)
-            }
-        })
-        .collect();
+            })
+            .collect()
+    });
     Some(
         Int64Chunked::from_iter_options(ca.name().clone(), out?.into_iter())
             .into_datetime(tu, tz)
@@ -945,6 +1055,43 @@ fn from_wkb_all(values: &[Value]) -> Option<Vec<Value>> {
         .collect()
 }
 
+/// Whether the value-by-value [`pandas_astype`] of a native column to `dtype` would return the
+/// column unchanged, so the conversion can be skipped. Only the cases where every value maps to
+/// itself qualify: the same dtype, no `NaN` in float columns (the slow path turns `NaN` into
+/// null), no `UInt64` (values above `i64::MAX` fail there), and datetimes that are naive or UTC
+/// and inside the range a [`DateTimeValue`] represents.
+fn astype_is_identity(s: &Series, dtype: &DataType) -> bool {
+    if s.dtype() != dtype {
+        return false;
+    }
+    match dtype {
+        DataType::Int8
+        | DataType::Int16
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::UInt8
+        | DataType::UInt16
+        | DataType::UInt32
+        | DataType::Boolean
+        | DataType::String
+        | DataType::Binary => true,
+        DataType::Float32 | DataType::Float64 => s.is_nan().map(|nan| !nan.any()).unwrap_or(false),
+        DataType::Datetime(tu, tz) => {
+            if tz.as_ref().is_some_and(|tz| *tz != TimeZone::UTC) {
+                return false;
+            }
+            let Ok(phys) = s.to_physical_repr().into_owned().i64().cloned() else {
+                return false;
+            };
+            [phys.min(), phys.max()]
+                .into_iter()
+                .flatten()
+                .all(|v| DateTimeValue::from_timestamp(v, *tu, None).is_some())
+        }
+        _ => false,
+    }
+}
+
 /// `Series.astype(target)` for the pandas dtype strings `enforce_dtypes` produces, with Arrow's
 /// safe-cast semantics (lossy float → int casts fail).
 pub fn pandas_astype(name: &str, data: &ColumnData, target: &str) -> Result<ColumnData, String> {
@@ -954,6 +1101,11 @@ pub fn pandas_astype(name: &str, data: &ColumnData, target: &str) -> Result<Colu
     let Some(dtype) = polars_dtype_for_pandas(target) else {
         return Err(format!("Cannot cast to '{target}'"));
     };
+    if let ColumnData::Native(s) = data {
+        if astype_is_identity(s, &dtype) {
+            return Ok(ColumnData::Native(s.clone().with_name(name.into())));
+        }
+    }
     let values = data.values();
     let err = |v: &Value| format!("Cannot cast {} '{}' to {target}", v.type_name(), v.py_str());
     let mut out = Vec::with_capacity(values.len());
@@ -965,15 +1117,17 @@ pub fn pandas_astype(name: &str, data: &ColumnData, target: &str) -> Result<Colu
         let converted = match (&dtype, v) {
             (d, Value::Int(i)) if d.is_integer() => Value::Int(*i),
             (d, Value::Bool(b)) if d.is_integer() => Value::Int(*b as i64),
+            // Arrow's safe cast: a fractional or out-of-range float is "truncated" and raises
+            // (`as i64` would saturate `1e20` to `i64::MAX`).
             (d, Value::Float(f)) if d.is_integer() => {
-                if f.fract() != 0.0 || !f.is_finite() {
+                if !crate::cast::float_fits_i64(*f) {
                     return Err(err(v));
                 }
                 Value::Int(*f as i64)
             }
             (d, Value::Decimal(dec)) if d.is_integer() => {
                 let f = dec.to_f64();
-                if f.fract() != 0.0 {
+                if !crate::cast::float_fits_i64(f) {
                     return Err(err(v));
                 }
                 Value::Int(f as i64)
@@ -1163,4 +1317,44 @@ pub fn pipe_enforce_dtypes(
             strip_timezone: !ctx.tz_aware,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn par_map_chunks_matches_sequential() {
+        let items: Vec<u64> = (0..300_000).collect();
+        let double = |chunk: &[u64]| Some(chunk.iter().map(|x| x * 2).collect::<Vec<_>>());
+        assert_eq!(par_map_chunks(&items, double), double(&items));
+        // A failure in any chunk fails the whole map.
+        let fail_late = |chunk: &[u64]| {
+            chunk
+                .iter()
+                .map(|x| (*x != 299_999).then_some(*x))
+                .collect::<Option<Vec<_>>>()
+        };
+        assert_eq!(par_map_chunks(&items, fail_late), None);
+    }
+
+    #[test]
+    fn str_to_datetime_parallel_matches_values() {
+        let texts: Vec<String> = (0..200_000)
+            .map(|i| format!("2024-01-01 00:{:02}:{:02}", (i / 60) % 60, i % 60))
+            .collect();
+        let ca = StringChunked::from_iter_values("dt".into(), texts.iter().map(String::as_str));
+        let s = str_to_datetime(&ca, TimeUnit::Microseconds, Some(TimeZone::UTC)).unwrap();
+        let phys = s.to_physical_repr().into_owned();
+        let phys = phys.i64().unwrap();
+        for (i, t) in texts.iter().enumerate().step_by(9_973) {
+            let (naive, _) = parse_iso_datetime(t).unwrap();
+            assert_eq!(phys.get(i), Some(naive.and_utc().timestamp_micros()), "{t}");
+        }
+        // One differently shaped value (no seconds) fails the whole column, as Polars does.
+        let mut mixed = texts.clone();
+        mixed[150_000] = "2024-01-01 00:00".to_string();
+        let ca = StringChunked::from_iter_values("dt".into(), mixed.iter().map(String::as_str));
+        assert!(str_to_datetime(&ca, TimeUnit::Microseconds, None).is_none());
+    }
 }

@@ -141,7 +141,16 @@ impl Backend for MySqlBackend {
             }
             ColumnKind::Float32 => SqlValue::Float(row.try_get::<f32, _>(idx).map_err(err)? as f64),
             ColumnKind::Float64 => SqlValue::Float(row.try_get::<f64, _>(idx).map_err(err)?),
-            ColumnKind::Decimal => SqlValue::Decimal(row.try_get::<Decimal, _>(idx).map_err(err)?),
+            // DECIMAL arrives as text; `rust_decimal` keeps 28 digits, so wider values stay
+            // text and are parsed into the 38-digit `Decimal128` by the batch builder.
+            ColumnKind::Decimal => {
+                let bytes = row.try_get_unchecked::<Vec<u8>, _>(idx).map_err(err)?;
+                let text = String::from_utf8_lossy(&bytes).into_owned();
+                match Decimal::from_str_exact(text.trim()) {
+                    Ok(d) => SqlValue::Decimal(d),
+                    Err(_) => SqlValue::Text(text),
+                }
+            }
             ColumnKind::Utf8 => {
                 let bytes = row.try_get_unchecked::<Vec<u8>, _>(idx).map_err(err)?;
                 SqlValue::Text(String::from_utf8_lossy(&bytes).into_owned())
@@ -172,6 +181,13 @@ impl Backend for MySqlBackend {
 
     fn rows_affected(result: &sqlx::mysql::MySqlQueryResult) -> u64 {
         result.rows_affected()
+    }
+
+    fn bind<'q>(
+        q: sqlx::query::Query<'q, MySql, sqlx::mysql::MySqlArguments>,
+        p: &super::params::SqlParam,
+    ) -> sqlx::query::Query<'q, MySql, sqlx::mysql::MySqlArguments> {
+        super::params::bind_mysql(q, p)
     }
 }
 

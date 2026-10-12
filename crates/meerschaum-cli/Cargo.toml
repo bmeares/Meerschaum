@@ -18,11 +18,17 @@ path = "src/main.rs"
 
 [dependencies]
 meerschaum-core = { workspace = true }
-meerschaum-kernel = { workspace = true }
-meerschaum-sql = { workspace = true }
+meerschaum-compose = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
 indexmap = { workspace = true }
 regex = { workspace = true }
 rust_decimal = { workspace = true }
 serde_json = { workspace = true }
+fancy-regex = "0.14"
+terminal_size = "0.4"
+unicode-width = "0.2"
+reedline = "0.52"
+
+[dev-dependencies]
+tempfile = "3"

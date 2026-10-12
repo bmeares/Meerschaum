@@ -1,0 +1,336 @@
+//! `Connector` and `InstanceConnector` for [`SqlConnector`], delegating to the inherent methods.
+//!
+//! Signature mismatches with the SQL semantics (the trait is owned by `meerschaum-connector`):
+//! - `get_plugin_id` returns the integer `plugin_id` as a string (SQL ids are integers).
+//! - `delete_plugin` keeps the SQL success tuple for unregistered plugins (`(True, ...)`).
+//! - `fetch(pipe, DataQuery)` maps an absent `begin` to an unbounded query (Python's `''`
+//!   default needs the instance sync time, which the source connector does not know).
+
+use indexmap::IndexMap;
+use meerschaum_connector::{
+    ColumnIndexInfo, Connector, ConnectorError, ConnectorResult, DataQuery, DateBound,
+    InstanceConnector, PipeId, PipesKeys, PipesKeysQuery, PluginRecord, SyncOptions, async_trait,
+    pipe_ops,
+};
+use meerschaum_core::users::User;
+use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
+use meerschaum_kernel::Frame;
+
+use super::SqlConnector;
+use super::fetch::{FetchArgs, metadef_bound};
+
+/// `SQLConnector.get_users_pipe()` (`_users.py:15`).
+pub fn sql_users_pipe(instance_keys: &str) -> Pipe {
+    let s = |pairs: &[(&str, &str)]| -> Value {
+        Value::Map(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), Value::Str(v.to_string())))
+                .collect(),
+        )
+    };
+    Pipe::builder("mrsm", "users")
+        .instance(instance_keys)
+        .kwarg("temporary", true)
+        .kwarg("cache", true)
+        .kwarg("static", true)
+        .kwarg("null_indices", false)
+        .kwarg("enforce", false)
+        .kwarg("autoincrement", true)
+        .kwarg("columns", s(&[("primary", "user_id")]))
+        .kwarg(
+            "dtypes",
+            s(&[
+                ("user_id", "int"),
+                ("username", "string"),
+                ("attributes", "json"),
+                ("user_type", "string"),
+            ]),
+        )
+        .kwarg("indices", s(&[("unique", "username")]))
+        .build()
+        .expect("static internal pipe keys are valid")
+}
+
+#[async_trait]
+impl Connector for SqlConnector {
+    fn connector_type(&self) -> &str {
+        "sql"
+    }
+
+    fn label(&self) -> &str {
+        &self.label
+    }
+
+    fn is_thread_safe(&self) -> bool {
+        SqlConnector::is_thread_safe(self)
+    }
+
+    async fn test_connection(&self) -> ConnectorResult<bool> {
+        Ok(self.value(self.flavor.test_query()).await.is_some())
+    }
+
+    async fn fetch(&self, pipe: &Pipe, query: &DataQuery) -> ConnectorResult<Option<Frame>> {
+        let args = FetchArgs {
+            begin: metadef_bound(query.begin.as_ref()),
+            end: metadef_bound(query.end.as_ref()),
+            params: query
+                .params
+                .as_ref()
+                .map(|p| p.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+            ..Default::default()
+        };
+        SqlConnector::fetch(self, pipe, &args).await
+    }
+}
+
+#[async_trait]
+impl InstanceConnector for SqlConnector {
+    async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        SqlConnector::register_pipe(self, pipe).await
+    }
+
+    async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
+        SqlConnector::get_pipe_attributes(self, pipe).await
+    }
+
+    async fn get_pipe_id(&self, pipe: &Pipe) -> ConnectorResult<Option<PipeId>> {
+        Ok(SqlConnector::get_pipe_id(self, pipe)
+            .await?
+            .map(PipeId::Int))
+    }
+
+    async fn edit_pipe(&self, pipe: &Pipe, patch: bool) -> SuccessTuple {
+        SqlConnector::edit_pipe(self, pipe, patch).await
+    }
+
+    async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        SqlConnector::delete_pipe(self, pipe).await
+    }
+
+    async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
+        SqlConnector::fetch_pipes_keys(self, query).await
+    }
+
+    async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool> {
+        SqlConnector::pipe_exists(self, pipe).await
+    }
+
+    async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        SqlConnector::drop_pipe(self, pipe).await
+    }
+
+    async fn drop_pipe_indices(&self, pipe: &Pipe) -> SuccessTuple {
+        SqlConnector::drop_pipe_indices(self, pipe, None).await
+    }
+
+    async fn create_pipe_indices(&self, pipe: &Pipe) -> SuccessTuple {
+        SqlConnector::create_pipe_indices(self, pipe, None).await
+    }
+
+    async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
+        SqlConnector::sync_pipe(self, pipe, df, opts).await
+    }
+
+    async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        SqlConnector::clear_pipe(self, pipe, query).await
+    }
+
+    async fn get_pipe_data(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<Frame>> {
+        SqlConnector::get_pipe_data(self, pipe, query).await
+    }
+
+    async fn get_backtrack_data(
+        &self,
+        pipe: &Pipe,
+        backtrack_minutes: i64,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<Frame>> {
+        SqlConnector::get_backtrack_data(self, pipe, Some(backtrack_minutes), query).await
+    }
+
+    async fn get_sync_time(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+        newest: bool,
+    ) -> ConnectorResult<Option<DateBound>> {
+        SqlConnector::get_sync_time(self, pipe, params, newest, false).await
+    }
+
+    async fn get_pipe_rowcount(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Option<i64>> {
+        SqlConnector::get_pipe_rowcount(self, pipe, query).await
+    }
+
+    async fn get_pipe_columns_types(
+        &self,
+        pipe: &Pipe,
+    ) -> ConnectorResult<IndexMap<String, String>> {
+        SqlConnector::get_pipe_columns_types(self, pipe).await
+    }
+
+    async fn get_pipe_columns_indices(
+        &self,
+        pipe: &Pipe,
+    ) -> ConnectorResult<IndexMap<String, Vec<ColumnIndexInfo>>> {
+        Ok(SqlConnector::get_pipe_columns_indices(self, pipe)
+            .await?
+            .into_iter()
+            .map(|(col, docs)| {
+                (
+                    col,
+                    docs.into_iter()
+                        .map(|d| ColumnIndexInfo {
+                            name: d.name.unwrap_or_default(),
+                            index_type: d.type_.unwrap_or_default(),
+                        })
+                        .collect(),
+                )
+            })
+            .collect())
+    }
+
+    async fn get_pipe_index_names(&self, pipe: &Pipe) -> ConnectorResult<Map> {
+        Ok(SqlConnector::get_pipe_index_names(self, pipe)?
+            .into_iter()
+            .map(|(k, v)| (k, Value::Str(v)))
+            .collect())
+    }
+
+    async fn deduplicate_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        SqlConnector::deduplicate_pipe(self, pipe, query).await
+    }
+
+    async fn get_pipe_size(&self, pipe: &Pipe) -> ConnectorResult<Option<i64>> {
+        Ok(SqlConnector::get_pipe_size(self, pipe).await)
+    }
+
+    async fn compress_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        SqlConnector::compress_pipe(self, pipe, false).await
+    }
+
+    async fn decompress_pipe(&self, pipe: &Pipe, no_policy: bool) -> SuccessTuple {
+        SqlConnector::decompress_pipe(self, pipe, no_policy).await
+    }
+
+    async fn vacuum_pipe(&self, pipe: &Pipe, full: bool) -> SuccessTuple {
+        SqlConnector::vacuum_pipe(self, pipe, full).await
+    }
+
+    async fn analyze_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        SqlConnector::analyze_pipe(self, pipe).await
+    }
+
+    async fn partition_pipe(&self, pipe: &Pipe, chunk_minutes: Option<i64>) -> SuccessTuple {
+        SqlConnector::partition_pipe(self, pipe, chunk_minutes).await
+    }
+
+    // Users (`_users.py`): the `mrsm_users` table.
+
+    fn get_users_pipe(&self) -> Pipe {
+        sql_users_pipe(&self.keys())
+    }
+
+    async fn register_user(&self, user: &mut User) -> SuccessTuple {
+        SqlConnector::register_user(self, user).await
+    }
+
+    async fn get_user_id(&self, user: &User) -> ConnectorResult<Option<Value>> {
+        SqlConnector::get_user_id(self, user).await
+    }
+
+    async fn get_username(&self, user_id: &Value) -> ConnectorResult<Option<Value>> {
+        SqlConnector::get_username(self, user_id).await
+    }
+
+    async fn get_users(&self) -> ConnectorResult<Vec<String>> {
+        SqlConnector::get_users(self).await
+    }
+
+    async fn edit_user(&self, user: &User) -> SuccessTuple {
+        SqlConnector::edit_user(self, user).await
+    }
+
+    async fn delete_user(&self, user: &User) -> SuccessTuple {
+        SqlConnector::delete_user(self, user).await
+    }
+
+    async fn get_user_password_hash(&self, user: &User) -> ConnectorResult<Option<String>> {
+        SqlConnector::get_user_password_hash(self, user).await
+    }
+
+    async fn get_user_type(&self, user: &User) -> ConnectorResult<Option<String>> {
+        SqlConnector::get_user_type(self, user).await
+    }
+
+    async fn get_user_attributes(&self, user: &User) -> ConnectorResult<Option<Map>> {
+        SqlConnector::get_user_attributes(self, user).await
+    }
+
+    // Plugins (`_plugins.py`): the `mrsm_plugins` table.
+
+    fn get_plugins_pipe(&self) -> Pipe {
+        pipe_ops::plugins_pipe(&self.keys(), "int")
+    }
+
+    async fn register_plugin(&self, plugin: &PluginRecord, force: bool) -> SuccessTuple {
+        SqlConnector::register_plugin(self, plugin, force).await
+    }
+
+    async fn get_plugin_id(&self, plugin: &PluginRecord) -> ConnectorResult<Option<String>> {
+        Ok(SqlConnector::get_plugin_id(self, plugin)
+            .await?
+            .map(|i| i.to_string()))
+    }
+
+    async fn get_plugin_version(&self, plugin: &PluginRecord) -> ConnectorResult<Option<String>> {
+        SqlConnector::get_plugin_version(self, plugin).await
+    }
+
+    async fn get_plugin_user_id(&self, plugin: &PluginRecord) -> ConnectorResult<Option<Value>> {
+        Ok(SqlConnector::get_plugin_user_id(self, plugin)
+            .await?
+            .map(Value::Int))
+    }
+
+    async fn get_plugin_username(&self, plugin: &PluginRecord) -> ConnectorResult<Option<String>> {
+        SqlConnector::get_plugin_username(self, plugin).await
+    }
+
+    async fn get_plugin_attributes(&self, plugin: &PluginRecord) -> ConnectorResult<Map> {
+        SqlConnector::get_plugin_attributes(self, plugin).await
+    }
+
+    async fn get_plugins(
+        &self,
+        user_id: Option<&Value>,
+        search_term: Option<&str>,
+    ) -> ConnectorResult<Vec<String>> {
+        SqlConnector::get_plugins(self, user_id, search_term).await
+    }
+
+    async fn delete_plugin(&self, plugin: &PluginRecord) -> SuccessTuple {
+        SqlConnector::delete_plugin(self, plugin).await
+    }
+
+    // Tokens: the generic pipe-based implementation (`instance/_tokens.py`) with the SQL users
+    // pipe's `user_id` dtype.
+
+    fn get_tokens_pipe(&self) -> Pipe {
+        pipe_ops::tokens_pipe(&self.keys(), "int")
+    }
+}
+
+impl From<ConnectorError> for crate::SqlError {
+    fn from(e: ConnectorError) -> Self {
+        crate::SqlError::InvalidArgument(e.to_string())
+    }
+}

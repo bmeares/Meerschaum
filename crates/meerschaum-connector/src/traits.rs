@@ -1,14 +1,10 @@
 //! The `Connector` and `InstanceConnector` traits (port of `meerschaum/connectors/_Connector.py`
 //! and `meerschaum/connectors/instance/_InstanceConnector.py`).
 //!
-//! **Placement.** These traits are shared by every instance connector (`meerschaum-sql`,
-//! `meerschaum-valkey`, the `APIConnector` here) and by `meerschaum-engine`. They need
-//! `meerschaum-core` (keys, parameters, users, tokens, `SuccessTuple`) *and*
-//! `meerschaum-kernel` (`Frame`), and `meerschaum-core` cannot depend on the kernel. Until a crate
-//! that sees both exists, they live here behind no feature flag, so depending on
-//! `meerschaum-api` with `default-features = false` pulls in neither `reqwest` nor `tokio`.
-//! MERGE NOTE: move this module (and [`crate::pipe_ops`]) next to `Frame` when the core
-//! consolidation lands, and re-export it from here.
+//! These traits are shared by every instance connector (`meerschaum-sql`, `meerschaum-valkey`,
+//! the `APIConnector` in `meerschaum-api`), the engine and the server. They need
+//! `meerschaum-core` (keys, parameters, users, tokens, `SuccessTuple`) and `meerschaum-kernel`
+//! (`Frame`).
 //!
 //! Every method mirrors one Python method; its doc comment carries the Python docstring's
 //! contract. Methods that return a `SuccessTuple` in Python return [`SuccessTuple`] here (failures

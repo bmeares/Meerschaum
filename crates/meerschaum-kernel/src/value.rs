@@ -461,6 +461,20 @@ fn parse_offset(s: &str) -> Option<FixedOffset> {
 ///
 /// Returns the wall time and an optional offset. Accepts `YYYY-MM-DD`, a `T` or space separator,
 /// `HH:MM[:SS[.fffffffff]]`, and `Z` / `±HH[:MM]` / `±HHMM` / ` UTC` suffixes.
+/// `YYYY-MM-DD` with ASCII digits at fixed positions, without chrono's format parser.
+fn fixed_width_ymd(s: &str) -> Option<NaiveDate> {
+    let b = s.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return None;
+    }
+    let num = |range: std::ops::Range<usize>| -> Option<u32> {
+        b[range].iter().try_fold(0u32, |acc, c| {
+            c.is_ascii_digit().then(|| acc * 10 + u32::from(c - b'0'))
+        })
+    };
+    NaiveDate::from_ymd_opt(num(0..4)? as i32, num(5..7)?, num(8..10)?)
+}
+
 pub fn parse_iso_datetime(s: &str) -> Option<(NaiveDateTime, Option<FixedOffset>)> {
     let s = s.trim();
     if s.len() < 8 {
@@ -474,7 +488,10 @@ pub fn parse_iso_datetime(s: &str) -> Option<(NaiveDateTime, Option<FixedOffset>
         return None;
     };
     let date = if date_part.len() == 10 {
-        NaiveDate::parse_from_str(date_part, "%Y-%m-%d").ok()?
+        // `DDDD-DD-DD` is what `%Y-%m-%d` reads as these numbers; anything else (signs, single
+        // digits, invalid dates) goes through chrono.
+        fixed_width_ymd(date_part)
+            .or_else(|| NaiveDate::parse_from_str(date_part, "%Y-%m-%d").ok())?
     } else {
         NaiveDate::parse_from_str(date_part, "%Y%m%d").ok()?
     };

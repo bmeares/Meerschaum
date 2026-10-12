@@ -2,14 +2,19 @@
 //! `meerschaum/_internal/entry.py` (`entry_without_daemon`, `entry_with_args`) and
 //! `meerschaum/_internal/arguments/_parser.py` (`parse_help`, `parse_version`).
 //!
-//! Only `show version`, `show arguments`, `show help` and `--help` run natively in this wave;
-//! every other action resolves by the v4 naming convention and returns a failure tuple.
+//! The actions that need no instance run natively (see [`crate::builtin`]); every other action
+//! resolves by the v4 naming convention and returns the not-implemented tuple.
 
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::Instant;
 
+use meerschaum_core::config::{Config, ConfigOptions};
+
 use crate::actions::{self, CORE_ACTIONS, Resolved};
+use crate::builtin::{self, ActionError, ActionResult};
 use crate::env;
+use crate::format::{FormatSettings, Formatter, OptionsArgs, TupleArgs};
 use crate::help;
 use crate::parse::parse_arguments;
 use crate::schema;
@@ -30,7 +35,96 @@ pub const PRINT_ARG_SCHEMA_FLAG: &str = "--print-arg-schema";
 /// v4 recurses through `entry` when a `+` survives into `entry_with_args`; cap the depth.
 const MAX_ENTRY_DEPTH: usize = 32;
 
-/// The dispatcher's environment: clock, terminal width and output stream.
+/// A process the CLI starts (an editor, `bash`, `python`, `mrsm` for compose).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommandSpec {
+    /// The program.
+    pub program: String,
+    /// Its arguments.
+    pub args: Vec<String>,
+    /// Environment variables to set.
+    pub env: Vec<(String, String)>,
+    /// Start from an empty environment (`env` is the whole environment).
+    pub env_clear: bool,
+    /// Discard the output (`capture_output=True`).
+    pub quiet: bool,
+    /// The working directory.
+    pub cwd: Option<PathBuf>,
+}
+
+/// The side effects actions need from the host: running processes in the foreground and
+/// reading a line of input.
+pub trait Host {
+    /// Run a process with the terminal attached and return its exit code.
+    fn run(&mut self, spec: &CommandSpec) -> std::io::Result<i32>;
+
+    /// Print a prompt and read a line from stdin (`None` at end of input).
+    fn read_line(&mut self, prompt: &str) -> Option<String>;
+}
+
+/// The real host.
+#[derive(Debug, Default)]
+pub struct SystemHost;
+
+impl Host for SystemHost {
+    fn run(&mut self, spec: &CommandSpec) -> std::io::Result<i32> {
+        let mut cmd = std::process::Command::new(&spec.program);
+        cmd.args(&spec.args);
+        if spec.env_clear {
+            cmd.env_clear();
+        }
+        cmd.envs(spec.env.iter().map(|(k, v)| (k, v)));
+        if let Some(cwd) = &spec.cwd {
+            cmd.current_dir(cwd);
+        }
+        if spec.quiet {
+            cmd.stdout(std::process::Stdio::null());
+            cmd.stderr(std::process::Stdio::null());
+        }
+        let status = cmd.status()?;
+        Ok(status.code().unwrap_or(1))
+    }
+
+    fn read_line(&mut self, prompt: &str) -> Option<String> {
+        print!("{prompt}");
+        let _ = std::io::stdout().flush();
+        let mut line = String::new();
+        match std::io::stdin().read_line(&mut line) {
+            Ok(0) | Err(_) => None,
+            Ok(_) => Some(line.trim_end_matches(['\n', '\r']).to_string()),
+        }
+    }
+}
+
+/// A host that runs nothing: every process "exits" with a fixed code and input is closed.
+/// The commands are recorded (for tests).
+#[derive(Debug, Default)]
+pub struct RecordingHost {
+    /// The processes that would have run.
+    pub commands: Vec<CommandSpec>,
+    /// The exit code every process returns.
+    pub exit_code: i32,
+    /// Lines to answer prompts with.
+    pub input: Vec<String>,
+}
+
+impl Host for RecordingHost {
+    fn run(&mut self, spec: &CommandSpec) -> std::io::Result<i32> {
+        self.commands.push(spec.clone());
+        Ok(self.exit_code)
+    }
+
+    fn read_line(&mut self, _prompt: &str) -> Option<String> {
+        if self.input.is_empty() {
+            None
+        } else {
+            Some(self.input.remove(0))
+        }
+    }
+}
+
+/// The dispatcher's environment: clock, terminal width, output streams, process environment,
+/// config registry and host.
 pub struct Runtime<'a> {
     /// Clock inputs for datetime parsing.
     pub dates: DateContext,
@@ -38,19 +132,111 @@ pub struct Runtime<'a> {
     pub columns: usize,
     /// Where actions print.
     pub out: &'a mut dyn Write,
+    /// Where warnings go.
+    pub err: Box<dyn Write + 'a>,
     /// Environment lookup (for `MRSM_*` variables).
     pub env: fn(&str) -> Option<String>,
+    /// The whole environment, in process order (`os.environ`).
+    pub vars: fn() -> Vec<(String, String)>,
+    /// The config registry (built from the process environment on first use).
+    pub config: Option<Config>,
+    /// Formatting settings (detected from the config and terminal when `None`).
+    pub format: Option<FormatSettings>,
+    /// Processes and input.
+    pub host: Box<dyn Host + 'a>,
+    /// The working directory (the process's when `None`).
+    pub cwd: Option<PathBuf>,
+    /// Running inside the interactive shell.
+    pub in_shell: bool,
+}
+
+fn no_vars() -> Vec<(String, String)> {
+    Vec::new()
+}
+
+fn process_vars() -> Vec<(String, String)> {
+    std::env::vars().collect()
 }
 
 impl<'a> Runtime<'a> {
-    /// The process runtime writing to `out`.
+    /// The process runtime writing to `out` (warnings to stderr).
     pub fn system(out: &'a mut dyn Write) -> Self {
         Self {
             dates: DateContext::system(),
             columns: help::terminal_columns(),
             out,
+            err: Box::new(std::io::stderr()),
             env: env::process_env,
+            vars: process_vars,
+            config: None,
+            format: None,
+            host: Box::new(SystemHost),
+            cwd: None,
+            in_shell: false,
         }
+    }
+
+    /// A runtime with an explicit environment lookup and no process environment, host or
+    /// stderr (for tests); set `config` before running actions that read it.
+    pub fn new(
+        dates: DateContext,
+        columns: usize,
+        out: &'a mut dyn Write,
+        env: fn(&str) -> Option<String>,
+    ) -> Self {
+        Self {
+            dates,
+            columns,
+            out,
+            err: Box::new(std::io::sink()),
+            env,
+            vars: no_vars,
+            config: None,
+            format: None,
+            host: Box::new(RecordingHost::default()),
+            cwd: None,
+            in_shell: false,
+        }
+    }
+
+    /// The config registry.
+    pub fn config(&mut self) -> &Config {
+        self.config.get_or_insert_with(|| {
+            Config::new(ConfigOptions::from_process()).unwrap_or_else(|_| {
+                let mut opts = ConfigOptions::from_process();
+                opts.allow_writes = false;
+                Config::new(opts).expect("config registry")
+            })
+        })
+    }
+
+    /// The formatting settings.
+    pub fn settings(&mut self) -> FormatSettings {
+        if let Some(s) = &self.format {
+            return s.clone();
+        }
+        let env = self.env;
+        FormatSettings::detect(self.config(), env)
+    }
+
+    /// Run a closure with a [`Formatter`].
+    pub fn with_formatter<R>(&mut self, f: impl FnOnce(&Formatter<'_>) -> R) -> R {
+        let settings = self.settings();
+        let config = self.config();
+        let formatter = Formatter::new(settings, config);
+        f(&formatter)
+    }
+
+    /// Write to stdout.
+    pub fn print(&mut self, text: &str) {
+        let _ = self.out.write_all(text.as_bytes());
+        let _ = self.out.flush();
+    }
+
+    /// Write to stderr.
+    pub fn eprint(&mut self, text: &str) {
+        let _ = self.err.write_all(text.as_bytes());
+        let _ = self.err.flush();
     }
 }
 
@@ -74,39 +260,33 @@ pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         return 0;
     }
     let nopretty = contains(sysargs, "--nopretty");
-    let result = if sysargs.is_empty() || contains(sysargs, "--shell") {
-        SuccessTuple::fail("The Meerschaum shell is not implemented in Rust yet.")
-    } else {
-        entry(sysargs, rt)
-    };
+    if sysargs.is_empty() || contains(sysargs, "--shell") {
+        let sysargs: Vec<String> = sysargs
+            .iter()
+            .filter(|a| *a != "--shell")
+            .cloned()
+            .collect();
+        // PARITY: `get_shell(sysargs)` without `mrsm_instance` (`meerschaum/__main__.py`).
+        crate::shell::run(&sysargs, None, rt);
+        return 0;
+    }
+    let result = entry(sysargs, rt);
     // PARITY: v4 only sets a failing exit code when the tuple is printed, so `--nopretty`
     // always exits 0 (`meerschaum/__main__.py` `main`).
     if nopretty {
         return 0;
     }
-    print_tuple(&result, rt.out);
+    let text = rt.with_formatter(|f| {
+        f.print_tuple(
+            &result,
+            TupleArgs {
+                upper_padding: 1,
+                ..TupleArgs::default()
+            },
+        )
+    });
+    rt.print(&text);
     if result.success { 0 } else { 1 }
-}
-
-/// `print_tuple(tup, upper_padding=1)`.
-pub fn print_tuple(tup: &SuccessTuple, out: &mut dyn Write) {
-    // PARITY: STATIC_CONFIG['system']['success']['ignore'] is missing a comma, so 'success' and
-    // 'Succeeded' are concatenated into 'successSucceeded' (`meerschaum/_internal/static.py`);
-    // `static.toml` keeps the quirk.
-    if tup.is_ignored_message() {
-        return;
-    }
-    let icon = if tup.success { "🎉" } else { "💢" };
-    let msg = format!(" {icon} {}", tup.message);
-    let mut lines: Vec<String> = Vec::new();
-    for (i, line) in msg.split('\n').enumerate() {
-        if i > 0 && !line.starts_with(' ') {
-            lines.push(format!("    {line}"));
-        } else {
-            lines.push(line.to_string());
-        }
-    }
-    let _ = writeln!(out, "\n{}\n", lines.join("\n"));
 }
 
 /// `entry(sysargs)`: run a (possibly chained) command line.
@@ -123,6 +303,18 @@ fn entry_at_depth(sysargs: &[String], rt: &mut Runtime<'_>, depth: usize) -> Suc
     let dates = rt.dates.clone();
     let result = run_chain(sysargs, &dates, None, |args| {
         entry_with_args(args, rt, depth)
+    });
+    match result {
+        Ok(tup) => tup,
+        Err(e) => SuccessTuple::fail(format!("{}: {}", e.class, e.message)),
+    }
+}
+
+/// `entry(sysargs, _patch_args=patch)`: the shell's entry point (`shell=True`, `line=...`).
+pub fn entry_with_patch(sysargs: &[String], patch: &ArgsMap, rt: &mut Runtime<'_>) -> SuccessTuple {
+    let dates = rt.dates.clone();
+    let result = run_chain(sysargs, &dates, Some(patch), |args| {
+        entry_with_args(args, rt, 0)
     });
     match result {
         Ok(tup) => tup,
@@ -336,7 +528,15 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
 
     let mut action = action_words(&args);
     if action.is_empty() || (action[0] == "mrsm" && action.len() == 1) {
-        return SuccessTuple::fail("The Meerschaum shell is not implemented in Rust yet.");
+        if rt.in_shell {
+            return SuccessTuple::success();
+        }
+        let instance = match args.get("mrsm_instance") {
+            Some(PyValue::Str(s)) => Some(s.clone()),
+            _ => None,
+        };
+        crate::shell::run(&sysargs, instance.as_deref(), rt);
+        return SuccessTuple::success();
     }
 
     let mut skip_schedule = false;
@@ -388,30 +588,62 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
 }
 
 fn run_action(resolved: &Resolved, args: &ArgsMap, rt: &mut Runtime<'_>) -> SuccessTuple {
-    match resolved.function_name() {
-        "_show_version" => {
-            let version = env!("CARGO_PKG_VERSION");
-            let nopretty = args.get("nopretty").is_some_and(PyValue::is_truthy);
-            let _ = if nopretty {
-                writeln!(rt.out, "{version}")
-            } else {
-                writeln!(rt.out, "Meerschaum v{version}")
-            };
-            SuccessTuple::success()
-        }
-        "_show_arguments" => {
-            let _ = writeln!(rt.out, "{}", format_args_map(args));
-            SuccessTuple::success()
-        }
-        "_show_help" => {
-            let _ = write!(rt.out, "{}", help::format_help(rt.columns));
-            SuccessTuple::success()
-        }
-        _ => SuccessTuple::fail(format!(
-            "action `{}` is not implemented in Rust yet",
-            resolved.display_name()
-        )),
+    let result: ActionResult = match resolved.function_name() {
+        "_show_version" => builtin::show_version(args, rt),
+        "_show_arguments" => builtin::show_arguments(args, rt),
+        "_show_help" => builtin::show_help(args, rt),
+        "_show_actions" => builtin::show_actions(args, rt),
+        "_show_config" => builtin::show_config(args, rt),
+        "_show_environment" => builtin::show_environment(args, rt),
+        "_show_plugins" => builtin::show_plugins(args, rt),
+        "_edit_config" => builtin::edit_config(args, rt),
+        "reload" => builtin::reload(args, rt),
+        "compose" => crate::compose_action::compose_action(args, rt),
+        "python" => builtin::python(args, rt),
+        "sh" => builtin::sh(args, rt),
+        "clear" => builtin::clear(args, rt),
+        _ => Ok(builtin::not_implemented(&resolved.display_name())),
+    };
+    match result {
+        Ok(tup) => tup,
+        Err(e) => action_failure(resolved, args, &e, rt),
     }
+}
+
+/// `_do_action_wrapper`'s message when the action raises.
+fn action_failure(
+    resolved: &Resolved,
+    args: &ArgsMap,
+    e: &ActionError,
+    rt: &mut Runtime<'_>,
+) -> SuccessTuple {
+    let mut name_parts: Vec<String> = resolved
+        .function_name()
+        .split('_')
+        .map(str::to_string)
+        .collect();
+    name_parts.extend(action_words(args));
+    let action_name = name_parts.join(" ");
+    // PARITY: `kw.get('debug', True)`: the traceback is logged unless `--debug` was parsed
+    // as False; the Rust CLI prints the exception line instead of a Python traceback.
+    let log_traceback = args.get("debug").is_none_or(PyValue::is_truthy);
+    if log_traceback {
+        rt.eprint(&format!("{}: {}\n", e.class, e.message));
+    }
+    let mut msg = format!(
+        "Failed to execute `{}` with `{}`",
+        action_name.trim(),
+        e.class
+    );
+    if e.message.is_empty() {
+        msg.push('.');
+    } else {
+        msg.push_str(&format!(":\n\n{}", e.message));
+    }
+    if !log_traceback {
+        msg.push_str("\n\nRun again with '--debug' to see a full stacktrace.");
+    }
+    SuccessTuple::fail(msg)
 }
 
 /// Render the arguments map as a Python `dict` literal, one key per line.
@@ -431,38 +663,31 @@ pub fn parse_help(sysargs: &[String], rt: &mut Runtime<'_>) {
     let args = parse_arguments(sysargs, &rt.dates).unwrap_or_default();
     let action = action_words(&args);
     if action.is_empty() {
-        let _ = write!(rt.out, "{}", help::format_help(rt.columns));
+        let _ = builtin::show_help(&args, rt);
         return;
     }
-    let Some(main) = CORE_ACTIONS.iter().find(|a| a.name == action[0]) else {
-        // `show actions`
-        let names: Vec<&str> = CORE_ACTIONS.iter().map(|a| a.name).collect();
-        let _ = writeln!(rt.out, "Available actions:\n\n  {}", names.join("\n  "));
-        return;
-    };
-    if action.len() > 1 {
-        let word = &action[1];
-        let sub = main.subactions.iter().find(|s| s.name == word).or_else(|| {
-            main.subactions
-                .iter()
-                .find(|s| s.name == format!("{word}s"))
-        });
-        if let Some(sub) = sub {
-            let words = vec![main.name.to_string(), sub.name.to_string()];
-            let _ = write!(rt.out, "{}", help::format_action_help(&words, rt.columns));
-            return;
+    match help::format_action_help(&action) {
+        Some(text) => rt.print(&text),
+        None => {
+            // `actions['show'](['actions'], **_args)`.
+            let mut kw = args.clone();
+            kw.shift_remove("action");
+            let opts = OptionsArgs {
+                name: "actions".into(),
+                sort_options: true,
+                nopretty: kw.get("nopretty").is_some_and(PyValue::is_truthy),
+                ..OptionsArgs::default()
+            };
+            let names = builtin::listed_actions();
+            let text = rt.with_formatter(|f| f.print_options(&names, &opts));
+            rt.print(&text);
         }
     }
-    let _ = write!(
-        rt.out,
-        "{}",
-        help::format_action_help(&[main.name.to_string()], rt.columns)
-    );
 }
 
 /// `parse_version(sysargs)`.
 pub fn parse_version(sysargs: &[String], rt: &mut Runtime<'_>) {
-    let version = env!("CARGO_PKG_VERSION");
+    let version = crate::VERSION;
     let _ = if contains(sysargs, "--nopretty") {
         writeln!(rt.out, "{version}")
     } else {

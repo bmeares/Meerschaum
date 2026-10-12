@@ -167,6 +167,13 @@ pub fn coerce_timezone(value: &Value, strip_utc: bool) -> Result<Value, CastErro
     Ok(Value::Datetime(coerce_datetime(&dt, strip_utc)))
 }
 
+/// Whether `f` is an integral float that converts to `i64` exactly: finite, without a fraction,
+/// and in `[-2**63, 2**63)` (`2**63` itself rounds up from `i64::MAX` and does not fit).
+pub fn float_fits_i64(f: f64) -> bool {
+    const TWO_63: f64 = 9_223_372_036_854_775_808.0;
+    f.is_finite() && f.fract() == 0.0 && (-TWO_63..TWO_63).contains(&f)
+}
+
 /// `coerce_timezone()` on a datetime value.
 pub fn coerce_datetime(dt: &DateTimeValue, strip_utc: bool) -> DateTimeValue {
     match dt.tz {

@@ -143,3 +143,14 @@ so `-` and `_` count as the same name. Results on 2026-10-12:
 `meerschaum-py` is also free. crates.io has no reservation mechanism. Claiming a name means
 publishing a version from the owner's account. The workspace is still at `5.0.0-a1`, so publish
 placeholders soon (§15).
+
+## Fixture hygiene
+
+Recorded fixtures are scanned by `scripts/parity/check_fixture_hygiene.sh` (run by the parity job after
+the reference regeneration, and by hand before any commit that touches `crates/*/tests/fixtures`). It
+fails on captured process environments, Claude Code or desktop session variables, home directories,
+the maintainer's handle in a path or e-mail, private project names and credential shapes. Python
+helpers under `fixtures/` are excluded because they name the things they scrub. Generators that start
+a Python reference server or daemon must do so with `env -i` plus only `PATH`, a temporary `HOME`,
+`MRSM_ROOT_DIR`, `MRSM_PLUGINS_DIR` and `PYTHONHASHSEED=0`, and must replace minted credentials, pids,
+timestamps and absolute paths with placeholders before writing.

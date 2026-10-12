@@ -4,6 +4,8 @@
 
 use clap::Command;
 
+use meerschaum_core::pyfmt::dedent;
+
 use crate::spec::{self, Group};
 
 /// The terminal width `argparse` would use: `$COLUMNS`, else 80 (`shutil.get_terminal_size`'s
@@ -282,20 +284,31 @@ pub fn format_help(columns: usize) -> String {
     format!("{}\n", collapsed.trim_matches('\n'))
 }
 
-/// Help for `mrsm <action...> --help`. v4 prints the action's docstring; the Rust port prints
-/// the action's usage line and the shared options until the action itself is ported.
-pub fn format_action_help(words: &[String], columns: usize) -> String {
-    let global = format_help(columns);
-    let body = global
-        .split_once("\n\n")
-        .map(|(_, rest)| rest)
-        .unwrap_or(&global);
-    format!(
-        "usage: mrsm {} {{options}}\n\nThe `{}` action is not implemented in Rust yet; its options are shared:\n\n{}",
-        words.join(" "),
-        words.join(" "),
-        body
-    )
+/// The help text `parse_help` prints for `mrsm <action> [<subaction>] --help`: the dedented
+/// docstring of the subaction function if the second word names one (a trailing `s` is tried),
+/// else of the main action, followed by `print`'s newline. `None` when the first word is not a
+/// core action (v4 then prints `show actions`).
+pub fn format_action_help(words: &[String]) -> Option<String> {
+    let main = crate::actions::CORE_ACTIONS
+        .iter()
+        .find(|a| Some(a.name) == words.first().map(String::as_str))?;
+    if let Some(word) = words.get(1) {
+        let sub = main.subactions.iter().find(|s| s.name == word).or_else(|| {
+            main.subactions
+                .iter()
+                .find(|s| s.name == format!("{word}s"))
+        });
+        if let Some(sub) = sub {
+            // PARITY: `print(textwrap.dedent(subaction.__doc__))` raises TypeError on a
+            // subaction without a docstring; every core subaction has one.
+            return Some(format!("{}\n", dedent(sub.doc().unwrap_or_default())));
+        }
+    }
+    let doc = match main.doc() {
+        Some(doc) => doc.to_string(),
+        None => format!("No help available for '{}'.", main.name),
+    };
+    Some(format!("{}\n", dedent(&doc)))
 }
 
 #[cfg(test)]

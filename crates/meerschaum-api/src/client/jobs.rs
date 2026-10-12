@@ -104,6 +104,13 @@ impl APIConnector {
         Ok(meta)
     }
 
+    /// Forget the cached job metadata (v4 keeps it for 5 seconds).
+    pub fn clear_job_metadata_cache(&self) {
+        if let Ok(mut cache) = self.job_metadata_cache.lock() {
+            cache.clear();
+        }
+    }
+
     /// `get_job(name)`: the metadata, or an error if the job does not exist.
     pub async fn get_job(&self, name: &str) -> ConnectorResult<JobMetadata> {
         let meta = self.get_job_metadata(name).await?;

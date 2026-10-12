@@ -30,6 +30,9 @@ ci_patterns=(            # case-insensitive
   'greenville'
   'BEGIN (RSA|OPENSSH|EC|PGP) PRIVATE KEY'
 )
+# JWT shapes are deliberately not scanned: auth fixtures carry deterministic test vectors signed
+# with a fixture-owned secret, and a shape match cannot tell those from a real token. Generators
+# must replace credentials minted during a run with placeholders (see gen_contract.py).
 cs_patterns=(            # case-sensitive (paths, handles, token shapes)
   '/home/bmeares'
   'bmeares@'
@@ -37,7 +40,6 @@ cs_patterns=(            # case-sensitive (paths, handles, token shapes)
   'AKIA[0-9A-Z]{16}'
   'ghp_[A-Za-z0-9]{20,}'
   'sk-[A-Za-z0-9_-]{20,}'
-  'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.'
 )
 
 status=0

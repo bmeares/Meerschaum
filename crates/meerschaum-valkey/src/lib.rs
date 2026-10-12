@@ -13,6 +13,7 @@
 
 pub mod backend;
 pub mod connector;
+pub mod dbtypes;
 pub mod fred_backend;
 pub mod instance;
 pub mod keys;

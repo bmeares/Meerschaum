@@ -101,6 +101,61 @@ pub(crate) fn kind_for(type_name: &str) -> ColumnKind {
     }
 }
 
+/// Decode PostgreSQL's binary `NUMERIC` (`ndigits`, `weight`, `sign`, `dscale`, base-10000
+/// digits) into decimal text. `None` for `NaN` / infinities (Python reads `Decimal('NaN')`, a
+/// null to pandas).
+pub(crate) fn pg_numeric_text(bytes: &[u8]) -> Option<String> {
+    let rd = |i: usize| -> Option<i16> {
+        Some(i16::from_be_bytes([*bytes.get(i)?, *bytes.get(i + 1)?]))
+    };
+    let ndigits = rd(0)? as usize;
+    let weight = rd(2)? as i32;
+    let sign = rd(4)? as u16;
+    let dscale = rd(6)?.max(0) as usize;
+    if sign != 0x0000 && sign != 0x4000 {
+        return None;
+    }
+    let digits: Vec<u16> = (0..ndigits)
+        .map(|k| rd(8 + 2 * k).map(|d| d as u16))
+        .collect::<Option<_>>()?;
+    let mut int_part = String::new();
+    for k in 0..=weight.max(-1) {
+        let d = digits.get(k as usize).copied().unwrap_or(0);
+        if int_part.is_empty() {
+            if d != 0 {
+                int_part.push_str(&d.to_string());
+            }
+        } else {
+            int_part.push_str(&format!("{d:04}"));
+        }
+    }
+    if int_part.is_empty() {
+        int_part.push('0');
+    }
+    let mut frac = String::new();
+    let mut k = weight + 1;
+    while frac.len() < dscale {
+        let d = if k < 0 {
+            0
+        } else {
+            digits.get(k as usize).copied().unwrap_or(0)
+        };
+        frac.push_str(&format!("{d:04}"));
+        k += 1;
+    }
+    frac.truncate(dscale);
+    let mut out = String::new();
+    if sign == 0x4000 {
+        out.push('-');
+    }
+    out.push_str(&int_part);
+    if dscale > 0 {
+        out.push('.');
+        out.push_str(&frac);
+    }
+    Some(out)
+}
+
 fn decode_err(plan: &ColumnPlan, e: sqlx::Error) -> SqlError {
     SqlError::Conversion {
         column: plan.name.clone(),
@@ -139,7 +194,22 @@ impl Backend for PgBackend {
             ),
             ColumnKind::Float32 => SqlValue::Float(row.try_get::<f32, _>(idx).map_err(err)? as f64),
             ColumnKind::Float64 => SqlValue::Float(row.try_get::<f64, _>(idx).map_err(err)?),
-            ColumnKind::Decimal => SqlValue::Decimal(row.try_get::<Decimal, _>(idx).map_err(err)?),
+            // `rust_decimal` keeps 28 digits; wider values are decoded from the binary format
+            // as text and parsed into the 38-digit `Decimal128` by the batch builder.
+            ColumnKind::Decimal => match row.try_get::<Decimal, _>(idx) {
+                Ok(d) if d.mantissa().unsigned_abs() < 10u128.pow(27) => SqlValue::Decimal(d),
+                _ => {
+                    let raw = row.try_get_raw(idx)?;
+                    let bytes = raw.as_bytes().map_err(|e| SqlError::Conversion {
+                        column: plan.name.clone(),
+                        reason: e.to_string(),
+                    })?;
+                    match pg_numeric_text(bytes) {
+                        Some(text) => SqlValue::Text(text),
+                        None => SqlValue::Null,
+                    }
+                }
+            },
             ColumnKind::Utf8 => {
                 SqlValue::Text(row.try_get_unchecked::<String, _>(idx).map_err(err)?)
             }
@@ -178,6 +248,13 @@ impl Backend for PgBackend {
     fn rows_affected(result: &sqlx::postgres::PgQueryResult) -> u64 {
         result.rows_affected()
     }
+
+    fn bind<'q>(
+        q: sqlx::query::Query<'q, Postgres, sqlx::postgres::PgArguments>,
+        p: &super::params::SqlParam,
+    ) -> sqlx::query::Query<'q, Postgres, sqlx::postgres::PgArguments> {
+        super::params::bind_pg(q, p)
+    }
 }
 
 #[cfg(test)]
@@ -194,6 +271,22 @@ mod tests {
                 ("work_mem".to_string(), "4MB".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn numeric_binary() {
+        // 12345.678 -> ndigits 3, weight 1, sign 0, dscale 3, digits [1, 2345, 6780]
+        let mut b = Vec::new();
+        for v in [3i16, 1, 0, 3, 1, 2345, 6780] {
+            b.extend_from_slice(&v.to_be_bytes());
+        }
+        assert_eq!(pg_numeric_text(&b).as_deref(), Some("12345.678"));
+        // -0.05 -> ndigits 1, weight -1, sign 0x4000, dscale 2, digits [500]
+        let mut b = Vec::new();
+        for v in [1i16, -1, 0x4000, 2, 500] {
+            b.extend_from_slice(&v.to_be_bytes());
+        }
+        assert_eq!(pg_numeric_text(&b).as_deref(), Some("-0.05"));
     }
 
     #[test]

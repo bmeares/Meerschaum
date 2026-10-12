@@ -1,8 +1,8 @@
 //! Pipe methods (`meerschaum/connectors/valkey/_pipes.py`).
 
 use indexmap::IndexMap;
-use meerschaum_api::pipe_ops::{self, Doc};
-use meerschaum_api::traits::{
+use meerschaum_connector::pipe_ops::{self, Doc};
+use meerschaum_connector::traits::{
     ConnectorError, ConnectorResult, DataQuery, DateBound, PipeKeysEntry, PipesKeysQuery,
     SyncOptions,
 };
@@ -57,7 +57,7 @@ pub fn dumps_parameters(parameters: &Map) -> String {
 /// extension types. This maps the kernel names onto the names v4 writes.
 pub fn python_dtype_name(kernel_dtype: &str, configured: Option<&str>) -> String {
     let configured_int =
-        configured.is_some_and(|c| meerschaum_kernel::dtypes::are_dtypes_equal(c, "int"));
+        configured.is_some_and(|c| meerschaum_core::dtypes::are_dtypes_equal(c, "int"));
     if let Some(rest) = kernel_dtype.strip_prefix("datetime64[") {
         let inner = rest.trim_end_matches(']');
         let mut parts = inner.splitn(2, ',');
@@ -413,7 +413,7 @@ impl ValkeyConnector {
         let ignore_dt_cols: Vec<String> = ctx
             .dtypes
             .iter()
-            .filter(|(_, t)| !meerschaum_kernel::dtypes::are_dtypes_equal(t, "datetime"))
+            .filter(|(_, t)| !meerschaum_core::dtypes::are_dtypes_equal(t, "datetime"))
             .map(|(c, _)| c.clone())
             .collect();
         let mut df = docs_frame(&docs, &ignore_dt_cols, !ctx.tz_aware)?;
@@ -711,15 +711,7 @@ impl ValkeyConnector {
         }
         Ok(valkey_dtypes(pipe.parameters())
             .into_iter()
-            .map(|(col, typ)| {
-                (
-                    col,
-                    meerschaum_sql::dtypes::get_db_type_from_pd_type(
-                        &typ,
-                        Some(meerschaum_sql::Flavor::Postgresql),
-                    ),
-                )
-            })
+            .map(|(col, typ)| (col, crate::dbtypes::get_postgresql_type_from_pd_type(&typ)))
             .collect())
     }
 
@@ -798,7 +790,7 @@ impl ValkeyConnector {
         let Some(val) = doc.get(&dt_col).filter(|v| !v.is_na()) else {
             return Ok(None);
         };
-        if meerschaum_kernel::dtypes::are_dtypes_equal(&dt_typ, "int") {
+        if meerschaum_core::dtypes::are_dtypes_equal(&dt_typ, "int") {
             return Ok(match val {
                 KValue::Int(i) => Some(DateBound::Int(*i)),
                 other => other.py_str().trim().parse().ok().map(DateBound::Int),

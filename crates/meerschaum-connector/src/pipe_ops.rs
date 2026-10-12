@@ -3,8 +3,8 @@
 //! `Pipe.sync()` for internal pipes, `Pipe.get_value()` / `get_doc()`, and the generic users,
 //! plugins and tokens implementations of `meerschaum/connectors/instance/`.
 //!
-//! MERGE NOTE: like [`crate::traits`], this belongs next to `Frame` once core and kernel are
-//! consolidated; the full `Pipe.sync()` flow belongs to `meerschaum-engine`.
+//! The full `Pipe.sync()` flow belongs to `meerschaum-engine`; these are the pieces connector
+//! implementations and the trait defaults need.
 
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
@@ -39,51 +39,21 @@ pub fn frame_to_docs(df: &Frame) -> Vec<Doc> {
         .collect()
 }
 
-/// A core (JSON-like) value as a kernel value. Containers become JSON values.
+/// A core (JSON-like) value as a kernel value (containers become JSON values).
 pub fn core_to_kernel(v: &Value) -> KValue {
-    match v {
-        Value::Null => KValue::Null,
-        Value::Bool(b) => KValue::Bool(*b),
-        Value::Int(i) => KValue::Int(*i),
-        Value::Float(f) => KValue::Float(*f),
-        Value::Str(s) => KValue::Str(s.clone()),
-        Value::List(_) | Value::Map(_) => {
-            KValue::Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
-        }
-    }
+    KValue::from(v)
 }
 
 /// A JSON value as a core value.
 pub fn json_to_core(j: &serde_json::Value) -> Value {
-    match j {
-        serde_json::Value::Null => Value::Null,
-        serde_json::Value::Bool(b) => Value::Bool(*b),
-        serde_json::Value::Number(n) => match n.as_i64() {
-            Some(i) => Value::Int(i),
-            None => Value::Float(n.as_f64().unwrap_or(f64::NAN)),
-        },
-        serde_json::Value::String(s) => Value::Str(s.clone()),
-        serde_json::Value::Array(a) => Value::List(a.iter().map(json_to_core).collect()),
-        serde_json::Value::Object(o) => Value::Map(
-            o.iter()
-                .map(|(k, v)| (k.clone(), json_to_core(v)))
-                .collect(),
-        ),
-    }
+    serde_json::from_value(j.clone()).unwrap_or(Value::Null)
 }
 
 /// A kernel value as a core value: nulls become `Null`, timestamps and other rich scalars their
 /// JSON serialization (`json_serialize_value`).
 pub fn kernel_to_core(v: &KValue) -> Value {
-    match v {
-        v if v.is_na() => Value::Null,
-        KValue::Bool(b) => Value::Bool(*b),
-        KValue::Int(i) => Value::Int(*i),
-        KValue::Float(f) => Value::Float(*f),
-        KValue::Str(s) => Value::Str(s.clone()),
-        KValue::Json(j) => json_to_core(j),
-        other => json_to_core(&meerschaum_kernel::serialize::json_serialize_value(other)),
-    }
+    v.to_core_value()
+        .unwrap_or_else(|| json_to_core(&meerschaum_kernel::serialize::json_serialize_value(v)))
 }
 
 /// A core `params` dict as `query_df` params.
@@ -173,8 +143,8 @@ pub async fn infer_dtypes<C: InstanceConnector + ?Sized>(
     Ok(columns_types
         .into_iter()
         .map(|(c, t)| {
-            let pd = if meerschaum_kernel::dtypes::py_isupper(&t) {
-                meerschaum_kernel::dtypes::get_pd_type_from_db_type(&t, true)
+            let pd = if meerschaum_core::pyfmt::py_isupper(&t) {
+                meerschaum_core::dtypes::get_pd_type_from_db_type(&t, true)
             } else {
                 meerschaum_kernel::dtypes::to_pandas_dtype(&t)
             };
@@ -914,7 +884,7 @@ pub fn token_model_from_doc(doc: &Doc) -> TokenModel {
                 }
                 _ => Vec::new(),
             },
-            _ => crate::models::scopes::all_scopes(),
+            _ => crate::models::all_scopes(),
         },
         is_valid: match get("is_valid") {
             Some(KValue::Bool(b)) => *b,

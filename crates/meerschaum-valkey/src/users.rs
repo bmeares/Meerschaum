@@ -2,8 +2,8 @@
 //! are synced into the `mrsm_users` / `mrsm_plugins` pipes and each field is a separate key.
 
 use indexmap::IndexMap;
-use meerschaum_api::pipe_ops::{self, Doc};
-use meerschaum_api::traits::{ConnectorResult, DataQuery, PluginRecord};
+use meerschaum_connector::pipe_ops::{self, Doc};
+use meerschaum_connector::traits::{ConnectorResult, DataQuery, PluginRecord};
 use meerschaum_core::pyfmt::{JsonStyle, json_dumps};
 use meerschaum_core::users::User;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};

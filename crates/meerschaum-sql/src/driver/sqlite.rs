@@ -29,8 +29,11 @@ pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<SqliteConnectOpti
             .filename(database)
             .create_if_missing(true)
     };
-    // Python's `sqlite3` leaves foreign keys off; sqlx turns them on by default.
-    Ok(opts.foreign_keys(false))
+    // Python's `sqlite3` leaves foreign keys off and keeps the rollback journal (`DELETE`);
+    // sqlx turns foreign keys on and switches files to WAL by default.
+    Ok(opts
+        .foreign_keys(false)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Delete))
 }
 
 pub(crate) async fn connect(spec: &ConnectionSpec) -> Result<SqlitePool> {
@@ -178,5 +181,12 @@ impl Backend for SqliteBackend {
 
     fn rows_affected(result: &sqlx::sqlite::SqliteQueryResult) -> u64 {
         result.rows_affected()
+    }
+
+    fn bind<'q>(
+        q: sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+        p: &super::params::SqlParam,
+    ) -> sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+        super::params::bind_sqlite(q, p)
     }
 }

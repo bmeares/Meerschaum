@@ -4,8 +4,8 @@
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use meerschaum_api::pipe_ops::Doc;
-use meerschaum_api::traits::{
+use meerschaum_connector::pipe_ops::Doc;
+use meerschaum_connector::traits::{
     ColumnIndexInfo, Connector, ConnectorError, ConnectorResult, DataQuery, DateBound,
     InstanceConnector, PipeId, PipesKeys, PipesKeysQuery, PluginRecord, SyncOptions, async_trait,
 };

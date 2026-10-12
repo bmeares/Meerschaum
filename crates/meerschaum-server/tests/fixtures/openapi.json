@@ -1,0 +1,2160 @@
+{
+  "docs_html": "\n    <!DOCTYPE html>\n    <html>\n    <head>\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <link type=\"text/css\" rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css\">\n    <link rel=\"shortcut icon\" href=\"https://fastapi.tiangolo.com/img/favicon.png\">\n    <title>Meerschaum API - Swagger UI</title>\n    </head>\n    <body>\n    <div id=\"swagger-ui\">\n    </div>\n    <script src=\"https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js\"></script>\n    <!-- `SwaggerUIBundle` is now available on the page -->\n    <script>\n    const ui = SwaggerUIBundle({\n        url: '/openapi.json',\n    \"dom_id\": \"#swagger-ui\",\n\"layout\": \"BaseLayout\",\n\"deepLinking\": true,\n\"showExtensions\": true,\n\"showCommonExtensions\": true,\noauth2RedirectUrl: window.location.origin + '/docs/oauth2-redirect',\n    presets: [\n        SwaggerUIBundle.presets.apis,\n        SwaggerUIBundle.SwaggerUIStandalonePreset\n        ],\n    })\n    </script>\n    </body>\n    </html>\n    ",
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "body_required": false,
+        "parameters": [],
+        "request_body": null,
+        "tags": []
+      }
+    },
+    "/actions": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Actions"
+        ]
+      }
+    },
+    "/actions/{action}": {
+      "post": {
+        "body_required": true,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": [
+          "application/json"
+        ],
+        "tags": [
+          "Actions"
+        ]
+      }
+    },
+    "/chaining": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Misc"
+        ]
+      }
+    },
+    "/connectors": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Connectors"
+        ]
+      }
+    },
+    "/connectors/{type}": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Connectors"
+        ]
+      }
+    },
+    "/favicon.ico": {
+      "get": {
+        "body_required": false,
+        "parameters": [],
+        "request_body": null,
+        "tags": [
+          "Misc"
+        ]
+      }
+    },
+    "/healthcheck": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Misc"
+        ]
+      }
+    },
+    "/info": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Misc"
+        ]
+      }
+    },
+    "/jobs": {
+      "get": {
+        "body_required": false,
+        "parameters": [],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/jobs/{name}": {
+      "delete": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      },
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      },
+      "post": {
+        "body_required": true,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": [
+          "application/json"
+        ],
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/jobs/{name}/exists": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/jobs/{name}/is_blocking_on_stdin": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/jobs/{name}/pause": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/jobs/{name}/start": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/jobs/{name}/stop": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/jobs/{name}/stop_time": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/jobs{name}/prompt_kwargs": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/login": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": [
+          "application/x-www-form-urlencoded"
+        ],
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/logs/{name}": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/mcp": {
+      "get": {
+        "body_required": false,
+        "parameters": [],
+        "request_body": null,
+        "tags": [
+          "MCP"
+        ]
+      },
+      "post": {
+        "body_required": false,
+        "parameters": [],
+        "request_body": null,
+        "tags": [
+          "MCP"
+        ]
+      }
+    },
+    "/metadata": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Misc"
+        ]
+      }
+    },
+    "/pipes": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "connector_keys",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "location_keys",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "metric_keys",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Attributes"
+        ]
+      }
+    },
+    "/pipes/keys": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "as_dict",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "in": "query",
+            "name": "connector_keys",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "location_keys",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "metric_keys",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "params",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "tags",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Attributes"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Attributes"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Attributes"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Attributes"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/analyze": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/attributes": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Attributes"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/cache": {
+      "delete": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/chunk_bounds": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "begin",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "bounded",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "in": "query",
+            "name": "chunk_interval_minutes",
+            "required": false,
+            "type": "integer|null"
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/clear": {
+      "delete": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "begin",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "params",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/columns/indices": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/columns/types": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/compress": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/csv": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "begin",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "params",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/data": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "begin",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "date_format",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "date_unit",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "double_precision",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "geometry_format",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "in": "query",
+            "name": "omit_columns",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "params",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "select_columns",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      },
+      "post": {
+        "body_required": true,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "blocking",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "in": "query",
+            "name": "check_existing",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "in": "query",
+            "name": "columns",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "workers",
+            "required": false,
+            "type": "integer|null"
+          }
+        ],
+        "request_body": [
+          "application/json",
+          "text/plain"
+        ],
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/decompress": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "no_policy",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/delete": {
+      "delete": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Attributes"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/docs": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "begin",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "in": "query",
+            "name": "omit_columns",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "params",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "select_columns",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/drop": {
+      "delete": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/edit": {
+      "patch": {
+        "body_required": true,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "patch",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "request_body": [
+          "application/json"
+        ],
+        "tags": [
+          "Pipes: Attributes"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/exists": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/id": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Attributes"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/indices/names": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/partition": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "chunk_minutes",
+            "required": false,
+            "type": "integer|null"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/register": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": [
+          "application/json"
+        ],
+        "tags": [
+          "Pipes: Attributes"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/rowcount": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "begin",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "type": "integer|null|string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "remote",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "request_body": [
+          "application/json"
+        ],
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/size": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/sync_time": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "newest",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "in": "query",
+            "name": "remote",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "in": "query",
+            "name": "round_down",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "request_body": [
+          "application/json"
+        ],
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/pipes/{connector_keys}/{metric_key}/{location_key}/vacuum": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connector_keys",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "location_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "path",
+            "name": "metric_key",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "full",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "in": "query",
+            "name": "instance_keys",
+            "required": false,
+            "type": "null|string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Pipes: Data"
+        ]
+      }
+    },
+    "/plugins": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          },
+          {
+            "in": "query",
+            "name": "search_term",
+            "required": false,
+            "type": "null|string"
+          },
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "type": "integer|null"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Plugins"
+        ]
+      }
+    },
+    "/plugins/{name}": {
+      "delete": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Plugins"
+        ]
+      },
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Plugins"
+        ]
+      },
+      "post": {
+        "body_required": true,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "attributes",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "request_body": [
+          "multipart/form-data"
+        ],
+        "tags": [
+          "Plugins"
+        ]
+      }
+    },
+    "/plugins/{name}/attributes": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Plugins"
+        ]
+      }
+    },
+    "/plugins/{name}/version": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "request_body": null,
+        "tags": []
+      }
+    },
+    "/tokens": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "labels",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Tokens"
+        ]
+      }
+    },
+    "/tokens/register": {
+      "post": {
+        "body_required": true,
+        "parameters": [],
+        "request_body": [
+          "application/json"
+        ],
+        "tags": [
+          "Tokens"
+        ]
+      }
+    },
+    "/tokens/validate": {
+      "post": {
+        "body_required": false,
+        "parameters": [],
+        "request_body": null,
+        "tags": [
+          "Tokens"
+        ]
+      }
+    },
+    "/tokens/{token_id}": {
+      "delete": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Tokens"
+        ]
+      },
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Tokens"
+        ]
+      }
+    },
+    "/tokens/{token_id}/edit": {
+      "post": {
+        "body_required": true,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": [
+          "application/json"
+        ],
+        "tags": [
+          "Tokens"
+        ]
+      }
+    },
+    "/tokens/{token_id}/invalidate": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Tokens"
+        ]
+      }
+    },
+    "/users": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/users/edit": {
+      "post": {
+        "body_required": false,
+        "parameters": [],
+        "request_body": [
+          "application/x-www-form-urlencoded"
+        ],
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/users/me": {
+      "get": {
+        "body_required": false,
+        "parameters": [],
+        "request_body": null,
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/users/register": {
+      "post": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "request_body": [
+          "application/x-www-form-urlencoded"
+        ],
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/users/{username}": {
+      "delete": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "username",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/users/{username}/attributes": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "username",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/users/{username}/id": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "username",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/users/{username}/password_hash": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "username",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/users/{username}/type": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "username",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/version": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Version"
+        ]
+      }
+    },
+    "/version/mrsm": {
+      "get": {
+        "body_required": false,
+        "parameters": [
+          {
+            "in": "query",
+            "name": "curr_user",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "request_body": null,
+        "tags": [
+          "Version"
+        ]
+      }
+    }
+  },
+  "security": [
+    {
+      "OAuth2PasswordBearer": []
+    },
+    {
+      "APIKey": []
+    }
+  ],
+  "security_schemes": [
+    "APIKey",
+    "OAuth2PasswordBearer"
+  ],
+  "title": "Meerschaum API"
+}

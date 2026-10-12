@@ -9,6 +9,7 @@ Utility functions for working with SQL data types.
 from __future__ import annotations
 from meerschaum.utils.typing import Dict, Union, Tuple, Optional
 from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
+from meerschaum._core._gate import rust_impl as _rust_impl
 from meerschaum.utils.dtypes import MRSM_PRECISION_UNITS_ABBREVIATIONS as _MRSM_PRECISION_UNITS_ABBREVIATIONS
 
 NUMERIC_PRECISION_FLAVORS: Dict[str, Tuple[int, int]] = {
@@ -1175,6 +1176,8 @@ def get_pd_type_from_db_type(db_type: str, allow_custom_dtypes: bool = True) -> 
     -------
     The equivalent datatype for a pandas DataFrame.
     """
+    if (_rust := _rust_impl('get_pd_type_from_db_type')) is not None:
+        return _rust(db_type, allow_custom_dtypes=allow_custom_dtypes)
     from meerschaum.utils.dtypes import are_dtypes_equal, get_geometry_type_srid
     def parse_custom(_pd_type: str, _db_type: str) -> str:
         if 'json' in _db_type.lower():

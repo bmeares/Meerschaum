@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/meerschaum-core",
     "crates/meerschaum-kernel",
+    "crates/meerschaum-connector",
     "crates/meerschaum-sql",
     "crates/meerschaum-valkey",
     "crates/meerschaum-api",
@@ -30,6 +31,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 meerschaum-core = { path = "crates/meerschaum-core" }
 meerschaum-kernel = { path = "crates/meerschaum-kernel" }
+meerschaum-connector = { path = "crates/meerschaum-connector" }
 meerschaum-sql = { path = "crates/meerschaum-sql" }
 meerschaum-valkey = { path = "crates/meerschaum-valkey" }
 meerschaum-api = { path = "crates/meerschaum-api" }

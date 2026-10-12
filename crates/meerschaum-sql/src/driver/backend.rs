@@ -11,6 +11,7 @@ use sqlx::{Database, Executor, IntoArguments, Pool, Row};
 use tokio::sync::{mpsc, oneshot};
 
 use super::batch::{self, ColumnPlan};
+use super::params::SqlParam;
 use super::{RecordBatchStream, SqlValue};
 use crate::error::{Result, SqlError};
 
@@ -29,6 +30,12 @@ pub(crate) trait Backend: 'static {
 
     /// The rows affected by a statement.
     fn rows_affected(result: &<Self::DB as Database>::QueryResult) -> u64;
+
+    /// Bind one parameter.
+    fn bind<'q>(
+        q: sqlx::query::Query<'q, Self::DB, <Self::DB as Database>::Arguments<'q>>,
+        p: &SqlParam,
+    ) -> sqlx::query::Query<'q, Self::DB, <Self::DB as Database>::Arguments<'q>>;
 }
 
 /// Decode a buffer of rows into column-major cells.
@@ -183,56 +190,6 @@ where
     Ok(B::rows_affected(&result))
 }
 
-/// `SQLConnector.exec_queries` (`_sql.py:622`).
-pub(crate) async fn exec_queries<B: Backend>(
-    pool: &Pool<B::DB>,
-    queries: &[String],
-    break_on_error: bool,
-    rollback: bool,
-) -> Result<Vec<Option<u64>>>
-where
-    for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
-{
-    let mut tx = pool.begin().await?;
-    let mut results = Vec::with_capacity(queries.len());
-    for query in queries {
-        match sqlx::raw_sql(query).execute(&mut *tx).await {
-            Ok(r) => results.push(Some(B::rows_affected(&r))),
-            Err(e) => {
-                tracing::warn!("Encountered error while executing:\n{e}");
-                results.push(None);
-                if break_on_error {
-                    if rollback {
-                        tx.rollback().await?;
-                        return Ok(results);
-                    }
-                    break;
-                }
-            }
-        }
-    }
-    tx.commit().await?;
-    Ok(results)
-}
-
-/// `SQLConnector._run_in_autocommit` (`_maintenance.py:54`).
-pub(crate) async fn exec_autocommit<B: Backend>(
-    pool: &Pool<B::DB>,
-    queries: &[String],
-) -> Result<bool>
-where
-    for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
-{
-    let mut conn = pool.acquire().await?;
-    for query in queries {
-        if let Err(e) = sqlx::raw_sql(query).execute(&mut *conn).await {
-            tracing::warn!("Encountered error while executing:\n{e}");
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 /// The first column of the first row.
 pub(crate) async fn value<B: Backend>(pool: &Pool<B::DB>, sql: &str) -> Result<Option<SqlValue>>
 where
@@ -253,3 +210,202 @@ where
     let plans = B::plan(row.columns());
     B::cell(&row, 0, &plans[0]).map(Some)
 }
+
+fn bound<'q, B: Backend>(
+    sql: &'q str,
+    params: &[SqlParam],
+) -> sqlx::query::Query<'q, B::DB, <B::DB as Database>::Arguments<'q>>
+where
+    B::DB: HasStatementCache,
+{
+    let mut q = sqlx::query::<B::DB>(sql).persistent(false);
+    for p in params {
+        q = B::bind(q, p);
+    }
+    q
+}
+
+/// Execute one statement with bound parameters.
+pub(crate) async fn exec_with<B: Backend>(
+    pool: &Pool<B::DB>,
+    sql: &str,
+    params: &[SqlParam],
+) -> Result<u64>
+where
+    for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
+    for<'q> <B::DB as Database>::Arguments<'q>: IntoArguments<'q, B::DB>,
+    B::DB: HasStatementCache,
+{
+    let result = bound::<B>(sql, params).execute(pool).await?;
+    Ok(B::rows_affected(&result))
+}
+
+/// Run a query with bound parameters and collect its rows as record batches.
+pub(crate) async fn read_with<B: Backend>(
+    pool: &Pool<B::DB>,
+    sql: &str,
+    params: &[SqlParam],
+) -> Result<Vec<RecordBatch>>
+where
+    for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
+    for<'q> <B::DB as Database>::Arguments<'q>: IntoArguments<'q, B::DB>,
+    B::DB: HasStatementCache,
+{
+    let rows = bound::<B>(sql, params).fetch_all(pool).await?;
+    if rows.is_empty() {
+        let schema = match pool.describe(sql).await {
+            Ok(desc) => {
+                let mut plans = B::plan(desc.columns());
+                let empty = vec![Vec::new(); plans.len()];
+                B::refine(&mut plans, &empty);
+                batch::resolve_decimal_scales(&mut plans, &[]);
+                batch::schema_for(&plans)
+            }
+            Err(_) => SchemaRef::new(Schema::empty()),
+        };
+        return Ok(vec![RecordBatch::new_empty(schema)]);
+    }
+    let mut state = None;
+    Ok(vec![make_batch::<B>(&rows, &mut state)?])
+}
+
+/// The first column of the first row of a query with bound parameters.
+pub(crate) async fn value_with<B: Backend>(
+    pool: &Pool<B::DB>,
+    sql: &str,
+    params: &[SqlParam],
+) -> Result<Option<SqlValue>>
+where
+    for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
+    for<'q> <B::DB as Database>::Arguments<'q>: IntoArguments<'q, B::DB>,
+    B::DB: HasStatementCache,
+{
+    let Some(row) = bound::<B>(sql, params).fetch_optional(pool).await? else {
+        return Ok(None);
+    };
+    if row.columns().is_empty() {
+        return Ok(None);
+    }
+    let plans = B::plan(row.columns());
+    B::cell(&row, 0, &plans[0]).map(Some)
+}
+
+/// The transaction-scoped operations, generated per driver family with concrete types: their
+/// futures must be provably `Send` (generic `&mut Connection` executors are not, see
+/// rust-lang/rust#102211).
+macro_rules! tx_ops {
+    ($m:ident, $B:ty) => {
+        pub(crate) mod $m {
+            use super::*;
+
+            type B = $B;
+            type Db = <$B as Backend>::DB;
+
+            /// `SQLConnector.exec_queries` (`_sql.py:622`).
+            pub(crate) async fn exec_queries(
+                pool: &Pool<Db>,
+                queries: &[String],
+                break_on_error: bool,
+                rollback: bool,
+            ) -> Result<Vec<Option<u64>>> {
+                let mut tx = pool.begin().await?;
+                let mut results = Vec::with_capacity(queries.len());
+                for query in queries {
+                    match sqlx::Executor::execute(&mut *tx, sqlx::raw_sql(query)).await {
+                        Ok(r) => results.push(Some(B::rows_affected(&r))),
+                        Err(e) => {
+                            tracing::warn!("Encountered error while executing:\n{e}");
+                            results.push(None);
+                            if break_on_error {
+                                if rollback {
+                                    tx.rollback().await?;
+                                    return Ok(results);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                tx.commit().await?;
+                Ok(results)
+            }
+
+            /// `SQLConnector._run_in_autocommit` (`_maintenance.py:54`).
+            pub(crate) async fn exec_autocommit(
+                pool: &Pool<Db>,
+                queries: &[String],
+            ) -> Result<bool> {
+                let mut conn = pool.acquire().await?;
+                for query in queries {
+                    if let Err(e) = sqlx::Executor::execute(&mut *conn, sqlx::raw_sql(query)).await
+                    {
+                        tracing::warn!("Encountered error while executing:\n{e}");
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+
+            /// Execute statements inside an open transaction (simple-query protocol).
+            pub(crate) async fn tx_exec(
+                tx: &mut sqlx::Transaction<'static, Db>,
+                sql: &str,
+            ) -> Result<u64> {
+                let r = sqlx::Executor::execute(&mut **tx, sqlx::raw_sql(sql)).await?;
+                Ok(B::rows_affected(&r))
+            }
+
+            /// Run a query inside an open transaction and collect its rows.
+            pub(crate) async fn tx_read(
+                tx: &mut sqlx::Transaction<'static, Db>,
+                sql: &str,
+            ) -> Result<Vec<RecordBatch>> {
+                let rows =
+                    sqlx::Executor::fetch_all(&mut **tx, sqlx::query::<Db>(sql).persistent(false))
+                        .await?;
+                if rows.is_empty() {
+                    let schema = match sqlx::Executor::describe(&mut **tx, sql).await {
+                        Ok(desc) => {
+                            let mut plans = B::plan(desc.columns());
+                            let empty = vec![Vec::new(); plans.len()];
+                            B::refine(&mut plans, &empty);
+                            batch::resolve_decimal_scales(&mut plans, &[]);
+                            batch::schema_for(&plans)
+                        }
+                        Err(_) => SchemaRef::new(Schema::empty()),
+                    };
+                    return Ok(vec![RecordBatch::new_empty(schema)]);
+                }
+                let mut state = None;
+                Ok(vec![make_batch::<B>(&rows, &mut state)?])
+            }
+
+            /// Bound statements in one transaction, stopping (and rolling back) at the first
+            /// failure.
+            pub(crate) async fn exec_many_with(
+                pool: &Pool<Db>,
+                statements: &[(String, Vec<SqlParam>)],
+            ) -> Result<Vec<Option<u64>>> {
+                let mut tx = pool.begin().await?;
+                let mut results = Vec::with_capacity(statements.len());
+                for (sql, params) in statements {
+                    match sqlx::Executor::execute(&mut *tx, bound::<B>(sql, params)).await {
+                        Ok(r) => results.push(Some(B::rows_affected(&r))),
+                        Err(e) => {
+                            tracing::warn!("Encountered error while executing:\n{e}");
+                            results.push(None);
+                            tx.rollback().await?;
+                            return Ok(results);
+                        }
+                    }
+                }
+                tx.commit().await?;
+                Ok(results)
+            }
+        }
+    };
+}
+
+tx_ops!(pg_tx, crate::driver::postgres::PgBackend);
+tx_ops!(mysql_tx, crate::driver::mysql::MySqlBackend);
+tx_ops!(sqlite_tx, crate::driver::sqlite::SqliteBackend);

@@ -41,8 +41,8 @@ pub const META_EXTENSION_NAME: &str = field_meta::EXTENSION_NAME;
 
 /// Decimal precision used for `NUMERIC` / `DECIMAL` columns.
 pub const DECIMAL_PRECISION: u8 = 38;
-/// `rust_decimal` holds at most 28 fractional digits.
-pub const MAX_DECIMAL_SCALE: u32 = 28;
+/// The largest decimal scale (`Decimal128` holds 38 digits).
+pub const MAX_DECIMAL_SCALE: u32 = 38;
 /// Scale used when the first batch of a decimal column holds no values.
 pub const DEFAULT_DECIMAL_SCALE: u32 = 10;
 
@@ -191,8 +191,8 @@ pub fn resolve_decimal_scales(plans: &mut [ColumnPlan], columns: &[Vec<SqlValue>
         }
         let mut scale: Option<u32> = None;
         for cell in cells {
-            if let Ok(Some(d)) = to_decimal(cell) {
-                scale = Some(scale.unwrap_or(0).max(d.scale()));
+            if let Ok(Some((_, s))) = to_decimal_parts(cell) {
+                scale = Some(scale.unwrap_or(0).max(s));
             }
         }
         plan.scale = scale
@@ -278,16 +278,12 @@ pub fn build_array(plan: &ColumnPlan, cells: &[SqlValue]) -> Result<ArrayRef> {
         ColumnKind::Decimal => {
             let scale = plan.scale;
             let values = collect(plan, cells, "decimal", |c| {
-                let Some(mut d) = to_decimal(c)? else {
+                let Some((m, s)) = to_decimal_parts(c)? else {
                     return Ok(None);
                 };
-                if d.scale() > scale {
-                    // Later batches may carry more fractional digits than the first batch that
-                    // fixed the schema; round half-even to the schema's scale.
-                    d = d.round_dp(scale);
-                }
-                d.rescale(scale);
-                Ok(Some(d.mantissa()))
+                // Later batches may carry more fractional digits than the first batch that
+                // fixed the schema; round half-even to the schema's scale.
+                rescale_mantissa(m, s, scale).map(Some).ok_or(())
             })?;
             Arc::new(
                 Decimal128Array::from(values)
@@ -395,6 +391,83 @@ fn to_bool(c: &SqlValue) -> Conv<bool> {
             _ => return Err(()),
         },
         _ => return Err(()),
+    }))
+}
+
+/// Parse decimal text (`-12.3400`, `1E+3`, `5e-2`) into `(mantissa, scale)` with up to 38
+/// significant digits (wider than `rust_decimal`'s 28, matching `Decimal128`).
+pub fn parse_decimal_text(s: &str) -> Option<(i128, u32)> {
+    let s = s.trim();
+    let (neg, rest) = match s.as_bytes().first()? {
+        b'-' => (true, &s[1..]),
+        b'+' => (false, &s[1..]),
+        _ => (false, s),
+    };
+    let (num, exp) = match rest.find(['e', 'E']) {
+        Some(i) => (&rest[..i], rest[i + 1..].parse::<i32>().ok()?),
+        None => (rest, 0),
+    };
+    let (int_part, frac_part) = match num.split_once('.') {
+        Some((a, b)) => (a, b),
+        None => (num, ""),
+    };
+    if int_part.is_empty() && frac_part.is_empty() {
+        return None;
+    }
+    if !int_part
+        .chars()
+        .chain(frac_part.chars())
+        .all(|c| c.is_ascii_digit())
+    {
+        return None;
+    }
+    let digits = format!("{int_part}{frac_part}");
+    let digits = digits.trim_start_matches('0');
+    let mut scale = frac_part.len() as i32 - exp;
+    let mut mantissa: i128 = if digits.is_empty() {
+        0
+    } else {
+        if digits.len() > 38 {
+            return None;
+        }
+        digits.parse().ok()?
+    };
+    if scale < 0 {
+        mantissa = mantissa.checked_mul(10i128.checked_pow((-scale) as u32)?)?;
+        scale = 0;
+    }
+    Some((if neg { -mantissa } else { mantissa }, scale as u32))
+}
+
+/// Rescale a decimal mantissa from `from` to `to` fractional digits (half-even rounding when
+/// dropping digits). `None` on overflow.
+pub fn rescale_mantissa(m: i128, from: u32, to: u32) -> Option<i128> {
+    if from == to {
+        return Some(m);
+    }
+    if from < to {
+        return m.checked_mul(10i128.checked_pow(to - from)?);
+    }
+    let div = 10i128.checked_pow(from - to)?;
+    let q = m / div;
+    let r = m % div;
+    let twice = r.abs().checked_mul(2)?;
+    let round_away = twice > div || (twice == div && q % 2 != 0);
+    Some(if round_away { q + m.signum() } else { q })
+}
+
+/// A cell as a `(mantissa, scale)` decimal (`NUMERIC` columns).
+pub(crate) fn to_decimal_parts(c: &SqlValue) -> Conv<(i128, u32)> {
+    Ok(Some(match c {
+        SqlValue::Null => return Ok(None),
+        SqlValue::Decimal(d) => (d.mantissa(), d.scale()),
+        SqlValue::Text(s) => parse_decimal_text(s).ok_or(())?,
+        other => {
+            let Some(d) = to_decimal(other)? else {
+                return Ok(None);
+            };
+            (d.mantissa(), d.scale())
+        }
     }))
 }
 
@@ -559,6 +632,27 @@ fn parse_naive(s: &str) -> Option<NaiveDateTime> {
 /// Whether a text cell carries an explicit UTC offset.
 pub fn text_has_offset(s: &str) -> bool {
     matches!(parse_datetime_text(s), Some((_, Some(_))))
+}
+
+#[cfg(test)]
+mod decimal_tests {
+    use super::*;
+
+    #[test]
+    fn wide_decimals() {
+        assert_eq!(parse_decimal_text("-12.3400"), Some((-123400, 4)));
+        assert_eq!(parse_decimal_text("1E+3"), Some((1000, 0)));
+        assert_eq!(parse_decimal_text("5e-2"), Some((5, 2)));
+        assert_eq!(
+            parse_decimal_text("123456789012345678.12345678901234567890"),
+            Some((12345678901234567812345678901234567890, 20))
+        );
+        assert_eq!(parse_decimal_text("abc"), None);
+        assert_eq!(rescale_mantissa(125, 2, 1), Some(12));
+        assert_eq!(rescale_mantissa(135, 2, 1), Some(14));
+        assert_eq!(rescale_mantissa(-135, 2, 1), Some(-14));
+        assert_eq!(rescale_mantissa(5, 0, 3), Some(5000));
+    }
 }
 
 #[cfg(test)]

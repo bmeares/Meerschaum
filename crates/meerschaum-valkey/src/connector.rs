@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use meerschaum_api::pipe_ops::{self, Doc};
-use meerschaum_api::traits::{ConnectorError, ConnectorResult};
 use meerschaum_api::wire::{ToJsonOptions, quote_plus, to_json};
+use meerschaum_connector::pipe_ops::{self, Doc};
+use meerschaum_connector::traits::{ConnectorError, ConnectorResult};
 use meerschaum_core::{Map, Value};
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::query::{ParamValue, QueryOptions, query_df};

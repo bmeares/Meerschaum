@@ -15,17 +15,22 @@
 //! - [`actions`], [`dispatch`], [`env`]: action resolution and the entry point.
 #![deny(unsafe_code)]
 
+pub mod action_docs;
 pub mod actions;
 pub mod argparse;
+pub mod builtin;
 pub mod command;
+pub mod compose_action;
 pub mod dateutil;
 pub mod dispatch;
 pub mod env;
+pub mod format;
 pub mod help;
 pub mod parse;
 pub mod pyjson;
 pub mod pyliteral;
 pub mod schema;
+pub mod shell;
 pub mod shlex;
 pub mod spec;
 pub mod sysargs;
@@ -33,4 +38,7 @@ pub mod types;
 pub mod value;
 
 pub use parse::{parse_arguments, parse_line};
+
+/// The version `show version` and `--version` print.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub use value::{ArgsMap, PyException, PyValue};

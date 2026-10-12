@@ -19,7 +19,7 @@
 
 use meerschaum_kernel::value::Value as KValue;
 
-use meerschaum_api::pipe_ops::Doc;
+use meerschaum_connector::pipe_ops::Doc;
 
 /// `STATIC_CONFIG['valkey']['colon']`: `:` inside index values is replaced with this.
 pub const COLON: &str = "-_";

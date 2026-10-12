@@ -107,7 +107,27 @@ impl ColumnData {
 
     /// `series.first_valid_index()` as a positional index.
     pub fn first_valid_index(&self) -> Option<usize> {
-        self.is_null_mask().iter().position(|n| !n)
+        // Same answer as `is_null_mask().position(|n| !n)`, without building the mask: the
+        // detectors call this on every column of every frame they inspect.
+        match self {
+            ColumnData::Native(s) => {
+                if s.is_empty() || s.null_count() == s.len() {
+                    return None;
+                }
+                if !s.dtype().is_float() {
+                    if s.null_count() == 0 {
+                        return Some(0);
+                    }
+                    return s.is_not_null().into_iter().position(|v| v == Some(true));
+                }
+                let floats = s.cast(&DataType::Float64).ok()?;
+                let floats = floats.f64().ok()?;
+                floats
+                    .into_iter()
+                    .position(|v| v.is_some_and(|f| !f.is_nan()))
+            }
+            ColumnData::Object(v) => v.iter().position(|v| !v.is_na()),
+        }
     }
 
     /// Gather rows by position.
@@ -423,6 +443,11 @@ impl Frame {
     }
 
     // ------------------------------------------------------------------ Polars interop
+
+    /// The columns, consuming the frame.
+    pub fn into_columns(self) -> Vec<Column> {
+        self.columns
+    }
 
     /// Wrap a Polars `DataFrame` (all columns native).
     pub fn from_polars(df: &DataFrame) -> Frame {
@@ -959,22 +984,22 @@ pub fn values_to_series(name: &str, values: &[Value], dtype: &DataType) -> Optio
                 .ok()?
         }
         DataType::String => {
-            let mut out = Vec::with_capacity(values.len());
+            let mut out: Vec<Option<&str>> = Vec::with_capacity(values.len());
             for v in values {
                 out.push(match v {
                     _ if !nn(v) => None,
-                    Value::Str(s) => Some(s.clone()),
+                    Value::Str(s) => Some(s.as_str()),
                     _ => return None,
                 });
             }
             StringChunked::from_iter_options(name, out.into_iter()).into_series()
         }
         DataType::Binary => {
-            let mut out: Vec<Option<Vec<u8>>> = Vec::with_capacity(values.len());
+            let mut out: Vec<Option<&[u8]>> = Vec::with_capacity(values.len());
             for v in values {
                 out.push(match v {
                     _ if !nn(v) => None,
-                    Value::Bytes(b) => Some(b.clone()),
+                    Value::Bytes(b) => Some(b.as_slice()),
                     _ => return None,
                 });
             }

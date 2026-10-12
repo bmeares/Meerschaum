@@ -270,6 +270,8 @@ def is_dtype_numeric(dtype: str) -> bool:
     -------
     A bool indicating the dtype is compatible with `numeric`.
     """
+    if (_rust := _rust_impl('is_dtype_numeric')) is not None:
+        return _rust(dtype)
     dtype_lower = dtype.lower()
 
     acceptable_substrings = ('numeric', 'float', 'double', 'int')
@@ -1063,6 +1065,8 @@ def get_geometry_type_srid(
     >>> get_geometry_type_srid('geometry[POINT, ESRI:102003]')
     ('Point', 'ESRI:102003')
     """
+    if (_rust := _rust_impl('get_geometry_type_srid')) is not None:
+        return _rust(dtype, default_type=default_type, default_srid=default_srid)
     from meerschaum.utils.misc import is_int
     ### NOTE: PostGIS syntax must also be parsed.
     dtype = dtype.replace('(', '[').replace(')', ']')

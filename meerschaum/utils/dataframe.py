@@ -878,6 +878,8 @@ def get_json_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to be encoded as JSON.
     """
+    if (_rust := _rust_impl('get_json_cols')) is not None:
+        return _rust(df)
     if df is None:
         return []
 
@@ -915,6 +917,8 @@ def get_numeric_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to treat as numerics.
     """
+    if (_rust := _rust_impl('get_numeric_cols')) is not None:
+        return _rust(df)
     if df is None:
         return []
     from decimal import Decimal
@@ -985,6 +989,8 @@ def get_uuid_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to treat as UUIDs.
     """
+    if (_rust := _rust_impl('get_uuid_cols')) is not None:
+        return _rust(df)
     if df is None:
         return []
     from uuid import UUID
@@ -1039,6 +1045,11 @@ def get_datetime_cols(
     A list of columns to treat as datetimes, or a dictionary of columns to tz+precision tuples
     (if `with_tz_precision` is `True`).
     """
+    if (_rust := _rust_impl('get_datetime_cols')) is not None:
+        return _rust(
+            df, timezone_aware=timezone_aware, timezone_naive=timezone_naive,
+            with_tz_precision=with_tz_precision,
+        )
     if not timezone_aware and not timezone_naive:
         raise ValueError("`timezone_aware` and `timezone_naive` cannot both be `False`.")
 
@@ -1273,6 +1284,8 @@ def get_bytes_cols(df: 'pd.DataFrame') -> List[str]:
     -------
     A list of columns to treat as bytes.
     """
+    if (_rust := _rust_impl('get_bytes_cols')) is not None:
+        return _rust(df)
     if df is None:
         return []
 
@@ -1332,6 +1345,8 @@ def get_geometry_cols(
     A list of columns to treat as `geometry`.
     If `with_types_srids`, return a dictionary mapping columns to tuples in the form (type, SRID).
     """
+    if (_rust := _rust_impl('get_geometry_cols')) is not None:
+        return _rust(df, with_types_srids=with_types_srids)
     if df is None:
         return [] if not with_types_srids else {}
 

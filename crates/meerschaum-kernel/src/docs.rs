@@ -64,8 +64,10 @@ pub fn convert_dtypes(name: &str, values: &[Value]) -> ColumnData {
     } else if all(|v| matches!(v, Value::Int(_))) {
         build(DataType::Int64)
     } else if all(|v| matches!(v, Value::Int(_) | Value::Float(_))) {
+        // PARITY: pandas converts when `(arr.astype(int) == arr).all()`; outside the int64
+        // range `astype(int)` does not round-trip (`1e20`, `2**63`), so the column stays float.
         let integral = non_null.iter().all(|v| match v {
-            Value::Float(f) => f.fract() == 0.0 && f.is_finite(),
+            Value::Float(f) => crate::cast::float_fits_i64(*f),
             _ => true,
         });
         if integral {

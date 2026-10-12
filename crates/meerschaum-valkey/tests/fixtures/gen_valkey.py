@@ -9,10 +9,13 @@ Runs the Python `ValkeyConnector` (v4.1.4, this repository) against the Valkey t
 sequence, the full key/value state of a dedicated database (index 11) plus each method's return
 value. The Rust integration tests replay the same sequence and compare.
 
-Usage (from the repository root):
+Usage (from the repository root), with the released 4.1.4 reference interpreter:
 
-    PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
-        python crates/meerschaum-valkey/tests/fixtures/gen_valkey.py
+    scripts/parity/run.sh crates/meerschaum-valkey/tests/fixtures/gen_valkey.py
+
+The generator runs with an empty temporary `MRSM_PLUGINS_DIR`, uses deterministic user IDs and
+writes JSON with sorted keys (order-sensitive pipe parameters are stored as JSON strings), so the
+fixture regenerates byte-identically.
 
 If the container is not running: `docker compose -f tests/docker-compose.yaml up -d valkey`.
 All data is synthetic.
@@ -20,11 +23,19 @@ All data is synthetic.
 
 import json
 import os
+import atexit
+import shutil
 import pathlib
+import tempfile
 from datetime import datetime, timezone
 
-import meerschaum as mrsm
-import meerschaum.utils.misc as misc
+### An empty plugins directory, set before `meerschaum` reads its environment.
+_PLUGINS_DIR = tempfile.mkdtemp(prefix='mrsm-valkey-fixture-plugins-')
+atexit.register(shutil.rmtree, _PLUGINS_DIR, True)
+os.environ['MRSM_PLUGINS_DIR'] = _PLUGINS_DIR
+
+import meerschaum as mrsm  # noqa: E402
+import meerschaum.utils.misc as misc  # noqa: E402
 
 HERE = pathlib.Path(__file__).parent
 OUT = HERE / 'valkey_sequence.json'
@@ -65,7 +76,8 @@ def tag(x):
             'metric_key': x.metric_key,
             'location_key': x.location_key,
             'instance_keys': str(x.instance_keys),
-            'parameters': tag(x.get_parameters(apply_symlinks=False)),
+            ### A JSON string: parameter order is significant and the fixture sorts keys.
+            'parameters': json.dumps(tag(x.get_parameters(apply_symlinks=False))),
             'temporary': bool(x.temporary),
         }}
     if isinstance(x, mrsm.core.User):
@@ -370,7 +382,7 @@ def main():
         'uri': conn.URI,
         'db': DB,
         'steps': steps,
-    }, indent=2, sort_keys=False) + '\n')
+    }, indent=2, sort_keys=True) + '\n')
     conn.client.flushdb()
     print(f"Wrote {len(steps)} steps to {OUT}.")
 

@@ -246,6 +246,10 @@ impl MockServer {
                         content_type: "text/plain".into(),
                         body: b"unexpected request".to_vec(),
                     });
+                    if canned.status == 0 {
+                        // A recorded connection reset.
+                        return;
+                    }
                     let mut out = format!(
                         "HTTP/1.1 {} {}\r\ncontent-type: {}\r\ncontent-length: {}\r\n\r\n",
                         canned.status,

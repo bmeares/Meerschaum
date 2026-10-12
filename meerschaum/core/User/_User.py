@@ -17,6 +17,7 @@ from binascii import b2a_base64, a2b_base64, Error as _BinAsciiError
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, Union, List
 from meerschaum.utils.warnings import warn
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 
 __all__ = ('hash_password', 'verify_password', 'User')
@@ -49,6 +50,8 @@ def hash_password(
     See the `passlib` documentation on the string format:
     https://passlib.readthedocs.io/en/stable/lib/passlib.hash.pbkdf2_digest.html#format-algorithm
     """
+    if (_rust := _rust_impl('hash_password')) is not None:
+        return _rust(password, salt=salt, rounds=rounds)
     from meerschaum._internal.static import STATIC_CONFIG
     hash_config = STATIC_CONFIG['users']['password_hash']
     if password is None:
@@ -91,6 +94,8 @@ def verify_password(
     -------
     A `bool` indicating whether `password` matches `password_hash`.
     """
+    if (_rust := _rust_impl('verify_password')) is not None:
+        return _rust(password, password_hash)
     from meerschaum._internal.static import STATIC_CONFIG
     if password is None or password_hash is None:
         return False

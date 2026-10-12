@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use meerschaum_api::traits::{DataQuery, DateBound, PipesKeysQuery, PluginRecord, SyncOptions};
+use meerschaum_connector::traits::{
+    DataQuery, DateBound, PipesKeysQuery, PluginRecord, SyncOptions,
+};
 use meerschaum_core::users::User;
 use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_kernel::frame::{Column, ColumnData, values_to_series};
@@ -27,7 +29,7 @@ pub fn fixture() -> J {
 
 /// A JSON value (untagged) as a core value.
 pub fn core(j: &J) -> Value {
-    meerschaum_api::pipe_ops::json_to_core(&untag(j))
+    meerschaum_connector::pipe_ops::json_to_core(&untag(j))
 }
 
 /// Replace tagged scalars by their plain JSON form (datetimes as ISO strings).
@@ -121,7 +123,11 @@ pub fn pipe(j: &J) -> Pipe {
     .location(p["location_key"].as_str())
     .instance(p["instance_keys"].as_str().unwrap())
     .kwarg("temporary", p["temporary"].as_bool().unwrap_or(false));
-    if let Value::Map(params) = core(&p["parameters"]) {
+    let params_json: J = match &p["parameters"] {
+        J::String(s) => serde_json::from_str(s).expect("parameters json"),
+        other => other.clone(),
+    };
+    if let Value::Map(params) = core(&params_json) {
         b = b.parameters(params);
     }
     b.build().expect("pipe")
@@ -263,7 +269,7 @@ fn core_json(v: &Value) -> J {
 /// Run one recorded call against the Rust connector and return its result in the fixture's
 /// encoding.
 pub async fn dispatch(conn: &ValkeyConnector, call: &J) -> J {
-    use meerschaum_api::traits::InstanceConnector;
+    use meerschaum_connector::traits::InstanceConnector;
     let method = call["method"].as_str().unwrap();
     let p = || pipe(arg(call, 0, "pipe"));
     match method {
@@ -527,7 +533,7 @@ pub async fn replay(conn: &ValkeyConnector) -> (Vec<String>, Vec<String>) {
                         if let Some(o) = ed.as_object() {
                             for (c, t) in o {
                                 let at = ad[c].as_str().unwrap_or("");
-                                if !meerschaum_kernel::dtypes::are_dtypes_equal(
+                                if !meerschaum_core::dtypes::are_dtypes_equal(
                                     t.as_str().unwrap_or(""),
                                     at,
                                 ) {

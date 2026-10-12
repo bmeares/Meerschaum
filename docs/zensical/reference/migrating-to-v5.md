@@ -86,7 +86,7 @@ Core actions behave the same and take the same flags. `mrsm --help` is diffed ag
 | `mrsm install plugin compose` | A no-op with a notice. Compose has been built in since 4.0. |
 | `MRSM_CORE=python` or any "use the Python core" switch | Does not exist. There is one core. |
 
-**`--loop --min-seconds N` behaves exactly as laps did** for a flat selection: every selected pipe syncs, then the process sleeps until `N` seconds after the lap began. Jobs like these need no change:
+**`--loop --min-seconds N` behaves exactly as laps did** for a flat selection: every selected pipe syncs, then the process sleeps `N` seconds after the lap ends, exactly as v4 does. Jobs like these need no change:
 
 ```bash
 mrsm sync pipes -c plugin:acme -m readings --loop --min-seconds 300 -w 1 -d --name acme-readings

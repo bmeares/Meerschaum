@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use fred::prelude::*;
 use fred::types::Value as FValue;
-use meerschaum_api::traits::async_trait;
+use meerschaum_connector::traits::async_trait;
 
 use crate::backend::{BackendError, BackendResult, ScoreBound, ValkeyBackend};
 

@@ -1,61 +1,49 @@
 {
-  "uri": "valkey://localhost:6399/11",
   "db": 11,
   "steps": [
     {
-      "step": "register_temperature",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "get_pipe_attributes",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_attributes",
           "result": {}
         },
         {
-          "method": "register_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "register_pipe",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "mrsm_pipe:demo:temperature:home": {
@@ -83,100 +71,70 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "register_temperature"
     },
     {
-      "step": "sync_temperature_1",
-      "result": [
-        true,
-        "Inserted 3, updated 0 rows."
-      ],
       "calls": [
         {
-          "method": "get_pipe_id",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_id",
           "result": 1
         },
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": false
         },
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": false
         },
         {
-          "method": "sync_pipe",
           "args": [],
           "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  }
-                },
-                "temporary": false
-              }
-            },
+            "begin": "",
+            "blocking": true,
+            "callback": null,
+            "check_existing": true,
+            "chunksize": -1,
             "df": {
               "__df__": {
                 "columns": [
@@ -184,12 +142,12 @@
                   "station",
                   "val"
                 ],
-                "dtypes": {
-                  "ts": "timestamp[us, tz=UTC][pyarrow]",
-                  "station": "string",
-                  "val": "Float64"
-                },
                 "data": {
+                  "station": [
+                    "a",
+                    "b",
+                    "a"
+                  ],
                   "ts": [
                     {
                       "t": "dt",
@@ -204,38 +162,65 @@
                       "v": "2024-01-02T12:30:00+00:00"
                     }
                   ],
-                  "station": [
-                    "a",
-                    "b",
-                    "a"
-                  ],
                   "val": [
                     1.5,
                     2.0,
                     3.25
                   ]
+                },
+                "dtypes": {
+                  "station": "string",
+                  "ts": "timestamp[us, tz=UTC][pyarrow]",
+                  "val": "Float64"
                 }
               }
             },
-            "begin": "",
             "end": null,
-            "force": false,
-            "retries": 10,
-            "min_seconds": 1,
-            "check_existing": true,
-            "blocking": true,
-            "workers": null,
-            "callback": null,
             "error_callback": null,
+            "force": false,
+            "min_seconds": 1,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}}",
+                "temporary": false
+              }
+            },
+            "retries": 10,
+            "safe_copy": true,
             "sync_chunks": true,
-            "chunksize": -1,
-            "safe_copy": true
+            "workers": null
           },
+          "method": "sync_pipe",
           "result": [
             true,
             "Inserted 3, updated 0 rows."
           ]
         }
+      ],
+      "docs": [
+        {
+          "station": "a",
+          "ts": "2024-01-01 00:00:00",
+          "val": 1.5
+        },
+        {
+          "station": "b",
+          "ts": "2024-01-01 00:00:00",
+          "val": 2.0
+        },
+        {
+          "station": "a",
+          "ts": "2024-01-02 12:30:00",
+          "val": 3.25
+        }
+      ],
+      "result": [
+        true,
+        "Inserted 3, updated 0 rows."
       ],
       "state": {
         "demo_temperature_home": {
@@ -297,127 +282,67 @@
           "value": "pipe_id"
         }
       },
-      "docs": [
-        {
-          "ts": "2024-01-01 00:00:00",
-          "station": "a",
-          "val": 1.5
-        },
-        {
-          "ts": "2024-01-01 00:00:00",
-          "station": "b",
-          "val": 2.0
-        },
-        {
-          "ts": "2024-01-02 12:30:00",
-          "station": "a",
-          "val": 3.25
-        }
-      ]
+      "step": "sync_temperature_1"
     },
     {
-      "step": "sync_temperature_2",
-      "result": [
-        true,
-        "Inserted 1, updated 1 rows."
-      ],
       "calls": [
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": true
         },
         {
-          "method": "get_pipe_columns_types",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_columns_types",
           "result": {
-            "ts": "TIMESTAMP(6)",
             "station": "TEXT",
+            "ts": "TIMESTAMP(6)",
             "val": "DOUBLE PRECISION"
           }
         },
         {
-          "method": "get_pipe_attributes",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_attributes",
           "result": {
             "connector_keys": "demo",
-            "metric_key": "temperature",
             "location_key": "home",
+            "metric_key": "temperature",
             "parameters": {
               "columns": {
                 "datetime": "ts",
@@ -425,8 +350,8 @@
               },
               "valkey": {
                 "dtypes": {
-                  "ts": "timestamp[us, tz=UTC][pyarrow]",
                   "station": "string",
+                  "ts": "timestamp[us, tz=UTC][pyarrow]",
                   "val": "Float64"
                 }
               }
@@ -435,30 +360,14 @@
           }
         },
         {
-          "method": "edit_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
                 "temporary": false
               }
             }
@@ -466,40 +375,20 @@
           "kwargs": {
             "patch": false
           },
+          "method": "edit_pipe",
           "result": [
             true,
             "Success"
           ]
         },
         {
-          "method": "sync_pipe",
           "args": [],
           "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            },
+            "begin": "",
+            "blocking": true,
+            "callback": null,
+            "check_existing": true,
+            "chunksize": -1,
             "df": {
               "__df__": {
                 "columns": [
@@ -507,12 +396,11 @@
                   "station",
                   "val"
                 ],
-                "dtypes": {
-                  "ts": "datetime64[us, UTC]",
-                  "station": "string",
-                  "val": "object"
-                },
                 "data": {
+                  "station": [
+                    "a",
+                    "c"
+                  ],
                   "ts": [
                     {
                       "t": "dt",
@@ -522,10 +410,6 @@
                       "t": "dt",
                       "v": "2024-01-03T00:00:00+00:00"
                     }
-                  ],
-                  "station": [
-                    "a",
-                    "c"
                   ],
                   "val": [
                     {
@@ -537,28 +421,55 @@
                       "v": "-4"
                     }
                   ]
+                },
+                "dtypes": {
+                  "station": "string",
+                  "ts": "datetime64[us, UTC]",
+                  "val": "object"
                 }
               }
             },
-            "begin": "",
             "end": null,
-            "force": false,
-            "retries": 10,
-            "min_seconds": 1,
-            "check_existing": true,
-            "blocking": true,
-            "workers": null,
-            "callback": null,
             "error_callback": null,
+            "force": false,
+            "min_seconds": 1,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            },
+            "retries": 10,
+            "safe_copy": true,
             "sync_chunks": true,
-            "chunksize": -1,
-            "safe_copy": true
+            "workers": null
           },
+          "method": "sync_pipe",
           "result": [
             true,
             "Inserted 1, updated 1 rows."
           ]
         }
+      ],
+      "docs": [
+        {
+          "station": "a",
+          "ts": "2024-01-02 12:30:00",
+          "val": 30.0
+        },
+        {
+          "station": "c",
+          "ts": "2024-01-03 00:00:00",
+          "val": -4.0
+        }
+      ],
+      "result": [
+        true,
+        "Inserted 1, updated 1 rows."
       ],
       "state": {
         "demo_temperature_home": {
@@ -628,31 +539,915 @@
           "value": "pipe_id"
         }
       },
-      "docs": [
-        {
-          "ts": "2024-01-02 12:30:00",
-          "station": "a",
-          "val": 30.0
-        },
-        {
-          "ts": "2024-01-03 00:00:00",
-          "station": "c",
-          "val": -4.0
-        }
-      ]
+      "step": "sync_temperature_2"
     },
     {
-      "step": "queries_temperature",
-      "result": {
-        "queries": [
-          {
-            "kwargs": {},
-            "get_data": {
+      "calls": [
+        {
+          "args": [],
+          "kwargs": {
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          },
+          "method": "pipe_exists",
+          "result": true
+        },
+        {
+          "args": [],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "limit": null,
+            "omit_columns": null,
+            "order": "asc",
+            "params": null,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            },
+            "select_columns": null
+          },
+          "method": "get_pipe_data",
+          "result": {
+            "__df__": {
+              "columns": [
+                "station",
+                "ts",
+                "val"
+              ],
+              "data": {
+                "station": [
+                  "a",
+                  "b",
+                  "a",
+                  "c"
+                ],
+                "ts": [
+                  {
+                    "t": "dt",
+                    "v": "2024-01-01T00:00:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-01T00:00:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-02T12:30:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-03T00:00:00+00:00"
+                  }
+                ],
+                "val": [
+                  {
+                    "t": "dec",
+                    "v": "1.5"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "2.0"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "30.0"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "-4.0"
+                  }
+                ]
+              },
               "dtypes": {
                 "station": "string",
                 "ts": "timestamp[us, tz=UTC][pyarrow]",
                 "val": "object"
+              }
+            }
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "params": null,
+            "remote": false
+          },
+          "method": "get_pipe_rowcount",
+          "result": 4
+        },
+        {
+          "args": [],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "limit": null,
+            "omit_columns": null,
+            "order": "asc",
+            "params": {
+              "station": "a"
+            },
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            },
+            "select_columns": null
+          },
+          "method": "get_pipe_data",
+          "result": {
+            "__df__": {
+              "columns": [
+                "station",
+                "ts",
+                "val"
+              ],
+              "data": {
+                "station": [
+                  "a",
+                  "a"
+                ],
+                "ts": [
+                  {
+                    "t": "dt",
+                    "v": "2024-01-01T00:00:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-02T12:30:00+00:00"
+                  }
+                ],
+                "val": [
+                  {
+                    "t": "dec",
+                    "v": "1.5"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "30.0"
+                  }
+                ]
               },
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "object"
+              }
+            }
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "params": {
+              "station": "a"
+            },
+            "remote": false
+          },
+          "method": "get_pipe_rowcount",
+          "result": 2
+        },
+        {
+          "args": [],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "limit": null,
+            "omit_columns": null,
+            "order": "asc",
+            "params": {
+              "station": [
+                "a",
+                "c"
+              ]
+            },
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            },
+            "select_columns": null
+          },
+          "method": "get_pipe_data",
+          "result": {
+            "__df__": {
+              "columns": [
+                "station",
+                "ts",
+                "val"
+              ],
+              "data": {
+                "station": [
+                  "a",
+                  "a",
+                  "c"
+                ],
+                "ts": [
+                  {
+                    "t": "dt",
+                    "v": "2024-01-01T00:00:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-02T12:30:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-03T00:00:00+00:00"
+                  }
+                ],
+                "val": [
+                  {
+                    "t": "dec",
+                    "v": "1.5"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "30.0"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "-4.0"
+                  }
+                ]
+              },
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "object"
+              }
+            }
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "params": {
+              "station": [
+                "a",
+                "c"
+              ]
+            },
+            "remote": false
+          },
+          "method": "get_pipe_rowcount",
+          "result": 3
+        },
+        {
+          "args": [],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "limit": null,
+            "omit_columns": null,
+            "order": "asc",
+            "params": {
+              "station": "_a"
+            },
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            },
+            "select_columns": null
+          },
+          "method": "get_pipe_data",
+          "result": {
+            "__df__": {
+              "columns": [
+                "station",
+                "ts",
+                "val"
+              ],
+              "data": {
+                "station": [
+                  "b",
+                  "c"
+                ],
+                "ts": [
+                  {
+                    "t": "dt",
+                    "v": "2024-01-01T00:00:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-03T00:00:00+00:00"
+                  }
+                ],
+                "val": [
+                  {
+                    "t": "dec",
+                    "v": "2.0"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "-4.0"
+                  }
+                ]
+              },
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "object"
+              }
+            }
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "params": {
+              "station": "_a"
+            },
+            "remote": false
+          },
+          "method": "get_pipe_rowcount",
+          "result": 2
+        },
+        {
+          "args": [],
+          "kwargs": {
+            "begin": {
+              "t": "dt",
+              "v": "2024-01-02T00:00:00+00:00"
+            },
+            "end": {
+              "t": "dt",
+              "v": "2024-01-03T00:00:00+00:00"
+            },
+            "limit": null,
+            "omit_columns": null,
+            "order": "asc",
+            "params": null,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            },
+            "select_columns": null
+          },
+          "method": "get_pipe_data",
+          "result": {
+            "__df__": {
+              "columns": [
+                "station",
+                "ts",
+                "val"
+              ],
+              "data": {
+                "station": [
+                  "a"
+                ],
+                "ts": [
+                  {
+                    "t": "dt",
+                    "v": "2024-01-02T12:30:00+00:00"
+                  }
+                ],
+                "val": [
+                  {
+                    "t": "dec",
+                    "v": "30.0"
+                  }
+                ]
+              },
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "object"
+              }
+            }
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {
+            "begin": {
+              "t": "dt",
+              "v": "2024-01-02T00:00:00+00:00"
+            },
+            "end": {
+              "t": "dt",
+              "v": "2024-01-03T00:00:00+00:00"
+            },
+            "params": null,
+            "remote": false
+          },
+          "method": "get_pipe_rowcount",
+          "result": 1
+        },
+        {
+          "args": [],
+          "kwargs": {
+            "begin": {
+              "t": "dt",
+              "v": "2024-01-02T00:00:00+00:00"
+            },
+            "end": null,
+            "limit": null,
+            "omit_columns": null,
+            "order": "asc",
+            "params": null,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            },
+            "select_columns": null
+          },
+          "method": "get_pipe_data",
+          "result": {
+            "__df__": {
+              "columns": [
+                "station",
+                "ts",
+                "val"
+              ],
+              "data": {
+                "station": [
+                  "a",
+                  "c"
+                ],
+                "ts": [
+                  {
+                    "t": "dt",
+                    "v": "2024-01-02T12:30:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-03T00:00:00+00:00"
+                  }
+                ],
+                "val": [
+                  {
+                    "t": "dec",
+                    "v": "30.0"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "-4.0"
+                  }
+                ]
+              },
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "object"
+              }
+            }
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {
+            "begin": {
+              "t": "dt",
+              "v": "2024-01-02T00:00:00+00:00"
+            },
+            "end": null,
+            "params": null,
+            "remote": false
+          },
+          "method": "get_pipe_rowcount",
+          "result": 2
+        },
+        {
+          "args": [],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "limit": null,
+            "omit_columns": null,
+            "order": "asc",
+            "params": null,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            },
+            "select_columns": [
+              "ts",
+              "val"
+            ]
+          },
+          "method": "get_pipe_data",
+          "result": {
+            "__df__": {
+              "columns": [
+                "ts",
+                "val"
+              ],
+              "data": {
+                "ts": [
+                  {
+                    "t": "dt",
+                    "v": "2024-01-01T00:00:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-01T00:00:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-02T12:30:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-03T00:00:00+00:00"
+                  }
+                ],
+                "val": [
+                  {
+                    "t": "dec",
+                    "v": "1.5"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "2.0"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "30.0"
+                  },
+                  {
+                    "t": "dec",
+                    "v": "-4.0"
+                  }
+                ]
+              },
+              "dtypes": {
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "object"
+              }
+            }
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "params": null,
+            "remote": false
+          },
+          "method": "get_pipe_rowcount",
+          "result": 4
+        },
+        {
+          "args": [],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "limit": null,
+            "omit_columns": [
+              "val"
+            ],
+            "order": "asc",
+            "params": null,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            },
+            "select_columns": null
+          },
+          "method": "get_pipe_data",
+          "result": {
+            "__df__": {
+              "columns": [
+                "station",
+                "ts"
+              ],
+              "data": {
+                "station": [
+                  "a",
+                  "b",
+                  "a",
+                  "c"
+                ],
+                "ts": [
+                  {
+                    "t": "dt",
+                    "v": "2024-01-01T00:00:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-01T00:00:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-02T12:30:00+00:00"
+                  },
+                  {
+                    "t": "dt",
+                    "v": "2024-01-03T00:00:00+00:00"
+                  }
+                ]
+              },
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]"
+              }
+            }
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "params": null,
+            "remote": false
+          },
+          "method": "get_pipe_rowcount",
+          "result": 4
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {
+            "newest": true,
+            "params": null,
+            "remote": false
+          },
+          "method": "get_sync_time",
+          "result": {
+            "t": "dt",
+            "v": "2024-01-03T00:00:00+00:00"
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {
+            "newest": false,
+            "params": null,
+            "remote": false
+          },
+          "method": "get_sync_time",
+          "result": {
+            "t": "dt",
+            "v": "2024-01-01T00:00:00+00:00"
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {},
+          "method": "get_pipe_columns_types",
+          "result": {
+            "station": "TEXT",
+            "ts": "TIMESTAMP(6)",
+            "val": "DOUBLE PRECISION"
+          }
+        },
+        {
+          "args": [
+            {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
+                "temporary": false
+              }
+            }
+          ],
+          "kwargs": {},
+          "method": "get_pipe_attributes",
+          "result": {
+            "connector_keys": "demo",
+            "location_key": "home",
+            "metric_key": "temperature",
+            "parameters": {
+              "columns": {
+                "datetime": "ts",
+                "id": "station"
+              },
+              "dtypes": {
+                "val": "numeric"
+              },
+              "valkey": {
+                "dtypes": {
+                  "station": "string",
+                  "ts": "timestamp[us, tz=UTC][pyarrow]",
+                  "val": "Float64"
+                }
+              }
+            },
+            "pipe_id": 1
+          }
+        }
+      ],
+      "result": {
+        "attributes": {
+          "connector_keys": "demo",
+          "location_key": "home",
+          "metric_key": "temperature",
+          "parameters": {
+            "columns": {
+              "datetime": "ts",
+              "id": "station"
+            },
+            "dtypes": {
+              "val": "numeric"
+            },
+            "valkey": {
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "Float64"
+              }
+            }
+          },
+          "pipe_id": 1
+        },
+        "columns_types": {
+          "station": "TEXT",
+          "ts": "TIMESTAMP(6)",
+          "val": "DOUBLE PRECISION"
+        },
+        "exists": true,
+        "id": 1,
+        "queries": [
+          {
+            "get_data": {
               "docs": [
                 {
                   "station": "a",
@@ -674,22 +1469,18 @@
                   "ts": "2024-01-03T00:00:00+00:00",
                   "val": "-4.0"
                 }
-              ]
-            },
-            "rowcount": 4
-          },
-          {
-            "kwargs": {
-              "params": {
-                "station": "a"
-              }
-            },
-            "get_data": {
+              ],
               "dtypes": {
                 "station": "string",
                 "ts": "timestamp[us, tz=UTC][pyarrow]",
                 "val": "object"
-              },
+              }
+            },
+            "kwargs": {},
+            "rowcount": 4
+          },
+          {
+            "get_data": {
               "docs": [
                 {
                   "station": "a",
@@ -701,11 +1492,45 @@
                   "ts": "2024-01-02T12:30:00+00:00",
                   "val": "30.0"
                 }
-              ]
+              ],
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "object"
+              }
+            },
+            "kwargs": {
+              "params": {
+                "station": "a"
+              }
             },
             "rowcount": 2
           },
           {
+            "get_data": {
+              "docs": [
+                {
+                  "station": "a",
+                  "ts": "2024-01-01T00:00:00+00:00",
+                  "val": "1.5"
+                },
+                {
+                  "station": "a",
+                  "ts": "2024-01-02T12:30:00+00:00",
+                  "val": "30.0"
+                },
+                {
+                  "station": "c",
+                  "ts": "2024-01-03T00:00:00+00:00",
+                  "val": "-4.0"
+                }
+              ],
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "object"
+              }
+            },
             "kwargs": {
               "params": {
                 "station": [
@@ -714,44 +1539,10 @@
                 ]
               }
             },
-            "get_data": {
-              "dtypes": {
-                "station": "string",
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "val": "object"
-              },
-              "docs": [
-                {
-                  "station": "a",
-                  "ts": "2024-01-01T00:00:00+00:00",
-                  "val": "1.5"
-                },
-                {
-                  "station": "a",
-                  "ts": "2024-01-02T12:30:00+00:00",
-                  "val": "30.0"
-                },
-                {
-                  "station": "c",
-                  "ts": "2024-01-03T00:00:00+00:00",
-                  "val": "-4.0"
-                }
-              ]
-            },
             "rowcount": 3
           },
           {
-            "kwargs": {
-              "params": {
-                "station": "_a"
-              }
-            },
             "get_data": {
-              "dtypes": {
-                "station": "string",
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "val": "object"
-              },
               "docs": [
                 {
                   "station": "b",
@@ -763,41 +1554,43 @@
                   "ts": "2024-01-03T00:00:00+00:00",
                   "val": "-4.0"
                 }
-              ]
-            },
-            "rowcount": 2
-          },
-          {
-            "kwargs": {
-              "begin": "2024-01-02",
-              "end": "2024-01-03"
-            },
-            "get_data": {
+              ],
               "dtypes": {
                 "station": "string",
                 "ts": "timestamp[us, tz=UTC][pyarrow]",
                 "val": "object"
-              },
+              }
+            },
+            "kwargs": {
+              "params": {
+                "station": "_a"
+              }
+            },
+            "rowcount": 2
+          },
+          {
+            "get_data": {
               "docs": [
                 {
                   "station": "a",
                   "ts": "2024-01-02T12:30:00+00:00",
                   "val": "30.0"
                 }
-              ]
-            },
-            "rowcount": 1
-          },
-          {
-            "kwargs": {
-              "begin": "2024-01-02"
-            },
-            "get_data": {
+              ],
               "dtypes": {
                 "station": "string",
                 "ts": "timestamp[us, tz=UTC][pyarrow]",
                 "val": "object"
-              },
+              }
+            },
+            "kwargs": {
+              "begin": "2024-01-02",
+              "end": "2024-01-03"
+            },
+            "rowcount": 1
+          },
+          {
+            "get_data": {
               "docs": [
                 {
                   "station": "a",
@@ -809,22 +1602,20 @@
                   "ts": "2024-01-03T00:00:00+00:00",
                   "val": "-4.0"
                 }
-              ]
+              ],
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "object"
+              }
+            },
+            "kwargs": {
+              "begin": "2024-01-02"
             },
             "rowcount": 2
           },
           {
-            "kwargs": {
-              "select_columns": [
-                "ts",
-                "val"
-              ]
-            },
             "get_data": {
-              "dtypes": {
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "val": "object"
-              },
               "docs": [
                 {
                   "ts": "2024-01-01T00:00:00+00:00",
@@ -842,21 +1633,22 @@
                   "ts": "2024-01-03T00:00:00+00:00",
                   "val": "-4.0"
                 }
+              ],
+              "dtypes": {
+                "ts": "timestamp[us, tz=UTC][pyarrow]",
+                "val": "object"
+              }
+            },
+            "kwargs": {
+              "select_columns": [
+                "ts",
+                "val"
               ]
             },
             "rowcount": 4
           },
           {
-            "kwargs": {
-              "omit_columns": [
-                "val"
-              ]
-            },
             "get_data": {
-              "dtypes": {
-                "station": "string",
-                "ts": "timestamp[us, tz=UTC][pyarrow]"
-              },
               "docs": [
                 {
                   "station": "a",
@@ -874,1231 +1666,23 @@
                   "station": "c",
                   "ts": "2024-01-03T00:00:00+00:00"
                 }
+              ],
+              "dtypes": {
+                "station": "string",
+                "ts": "timestamp[us, tz=UTC][pyarrow]"
+              }
+            },
+            "kwargs": {
+              "omit_columns": [
+                "val"
               ]
             },
             "rowcount": 4
           }
         ],
         "sync_time_newest": "2024-01-03T00:00:00+00:00",
-        "sync_time_oldest": "2024-01-01T00:00:00+00:00",
-        "columns_types": {
-          "ts": "TIMESTAMP(6)",
-          "station": "TEXT",
-          "val": "DOUBLE PRECISION"
-        },
-        "exists": true,
-        "id": 1,
-        "attributes": {
-          "connector_keys": "demo",
-          "metric_key": "temperature",
-          "location_key": "home",
-          "parameters": {
-            "columns": {
-              "datetime": "ts",
-              "id": "station"
-            },
-            "valkey": {
-              "dtypes": {
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "station": "string",
-                "val": "Float64"
-              }
-            },
-            "dtypes": {
-              "val": "numeric"
-            }
-          },
-          "pipe_id": 1
-        }
+        "sync_time_oldest": "2024-01-01T00:00:00+00:00"
       },
-      "calls": [
-        {
-          "method": "pipe_exists",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          },
-          "result": true
-        },
-        {
-          "method": "get_pipe_data",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            },
-            "select_columns": null,
-            "omit_columns": null,
-            "begin": null,
-            "end": null,
-            "params": null,
-            "limit": null,
-            "order": "asc"
-          },
-          "result": {
-            "__df__": {
-              "columns": [
-                "station",
-                "ts",
-                "val"
-              ],
-              "dtypes": {
-                "station": "string",
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "val": "object"
-              },
-              "data": {
-                "station": [
-                  "a",
-                  "b",
-                  "a",
-                  "c"
-                ],
-                "ts": [
-                  {
-                    "t": "dt",
-                    "v": "2024-01-01T00:00:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-01T00:00:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-02T12:30:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-03T00:00:00+00:00"
-                  }
-                ],
-                "val": [
-                  {
-                    "t": "dec",
-                    "v": "1.5"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "2.0"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "30.0"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "-4.0"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "method": "get_pipe_rowcount",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {
-            "begin": null,
-            "end": null,
-            "params": null,
-            "remote": false
-          },
-          "result": 4
-        },
-        {
-          "method": "get_pipe_data",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            },
-            "select_columns": null,
-            "omit_columns": null,
-            "begin": null,
-            "end": null,
-            "params": {
-              "station": "a"
-            },
-            "limit": null,
-            "order": "asc"
-          },
-          "result": {
-            "__df__": {
-              "columns": [
-                "station",
-                "ts",
-                "val"
-              ],
-              "dtypes": {
-                "station": "string",
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "val": "object"
-              },
-              "data": {
-                "station": [
-                  "a",
-                  "a"
-                ],
-                "ts": [
-                  {
-                    "t": "dt",
-                    "v": "2024-01-01T00:00:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-02T12:30:00+00:00"
-                  }
-                ],
-                "val": [
-                  {
-                    "t": "dec",
-                    "v": "1.5"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "30.0"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "method": "get_pipe_rowcount",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {
-            "begin": null,
-            "end": null,
-            "params": {
-              "station": "a"
-            },
-            "remote": false
-          },
-          "result": 2
-        },
-        {
-          "method": "get_pipe_data",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            },
-            "select_columns": null,
-            "omit_columns": null,
-            "begin": null,
-            "end": null,
-            "params": {
-              "station": [
-                "a",
-                "c"
-              ]
-            },
-            "limit": null,
-            "order": "asc"
-          },
-          "result": {
-            "__df__": {
-              "columns": [
-                "station",
-                "ts",
-                "val"
-              ],
-              "dtypes": {
-                "station": "string",
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "val": "object"
-              },
-              "data": {
-                "station": [
-                  "a",
-                  "a",
-                  "c"
-                ],
-                "ts": [
-                  {
-                    "t": "dt",
-                    "v": "2024-01-01T00:00:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-02T12:30:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-03T00:00:00+00:00"
-                  }
-                ],
-                "val": [
-                  {
-                    "t": "dec",
-                    "v": "1.5"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "30.0"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "-4.0"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "method": "get_pipe_rowcount",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {
-            "begin": null,
-            "end": null,
-            "params": {
-              "station": [
-                "a",
-                "c"
-              ]
-            },
-            "remote": false
-          },
-          "result": 3
-        },
-        {
-          "method": "get_pipe_data",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            },
-            "select_columns": null,
-            "omit_columns": null,
-            "begin": null,
-            "end": null,
-            "params": {
-              "station": "_a"
-            },
-            "limit": null,
-            "order": "asc"
-          },
-          "result": {
-            "__df__": {
-              "columns": [
-                "station",
-                "ts",
-                "val"
-              ],
-              "dtypes": {
-                "station": "string",
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "val": "object"
-              },
-              "data": {
-                "station": [
-                  "b",
-                  "c"
-                ],
-                "ts": [
-                  {
-                    "t": "dt",
-                    "v": "2024-01-01T00:00:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-03T00:00:00+00:00"
-                  }
-                ],
-                "val": [
-                  {
-                    "t": "dec",
-                    "v": "2.0"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "-4.0"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "method": "get_pipe_rowcount",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {
-            "begin": null,
-            "end": null,
-            "params": {
-              "station": "_a"
-            },
-            "remote": false
-          },
-          "result": 2
-        },
-        {
-          "method": "get_pipe_data",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            },
-            "select_columns": null,
-            "omit_columns": null,
-            "begin": {
-              "t": "dt",
-              "v": "2024-01-02T00:00:00+00:00"
-            },
-            "end": {
-              "t": "dt",
-              "v": "2024-01-03T00:00:00+00:00"
-            },
-            "params": null,
-            "limit": null,
-            "order": "asc"
-          },
-          "result": {
-            "__df__": {
-              "columns": [
-                "station",
-                "ts",
-                "val"
-              ],
-              "dtypes": {
-                "station": "string",
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "val": "object"
-              },
-              "data": {
-                "station": [
-                  "a"
-                ],
-                "ts": [
-                  {
-                    "t": "dt",
-                    "v": "2024-01-02T12:30:00+00:00"
-                  }
-                ],
-                "val": [
-                  {
-                    "t": "dec",
-                    "v": "30.0"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "method": "get_pipe_rowcount",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {
-            "begin": {
-              "t": "dt",
-              "v": "2024-01-02T00:00:00+00:00"
-            },
-            "end": {
-              "t": "dt",
-              "v": "2024-01-03T00:00:00+00:00"
-            },
-            "params": null,
-            "remote": false
-          },
-          "result": 1
-        },
-        {
-          "method": "get_pipe_data",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            },
-            "select_columns": null,
-            "omit_columns": null,
-            "begin": {
-              "t": "dt",
-              "v": "2024-01-02T00:00:00+00:00"
-            },
-            "end": null,
-            "params": null,
-            "limit": null,
-            "order": "asc"
-          },
-          "result": {
-            "__df__": {
-              "columns": [
-                "station",
-                "ts",
-                "val"
-              ],
-              "dtypes": {
-                "station": "string",
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "val": "object"
-              },
-              "data": {
-                "station": [
-                  "a",
-                  "c"
-                ],
-                "ts": [
-                  {
-                    "t": "dt",
-                    "v": "2024-01-02T12:30:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-03T00:00:00+00:00"
-                  }
-                ],
-                "val": [
-                  {
-                    "t": "dec",
-                    "v": "30.0"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "-4.0"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "method": "get_pipe_rowcount",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {
-            "begin": {
-              "t": "dt",
-              "v": "2024-01-02T00:00:00+00:00"
-            },
-            "end": null,
-            "params": null,
-            "remote": false
-          },
-          "result": 2
-        },
-        {
-          "method": "get_pipe_data",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            },
-            "select_columns": [
-              "ts",
-              "val"
-            ],
-            "omit_columns": null,
-            "begin": null,
-            "end": null,
-            "params": null,
-            "limit": null,
-            "order": "asc"
-          },
-          "result": {
-            "__df__": {
-              "columns": [
-                "ts",
-                "val"
-              ],
-              "dtypes": {
-                "ts": "timestamp[us, tz=UTC][pyarrow]",
-                "val": "object"
-              },
-              "data": {
-                "ts": [
-                  {
-                    "t": "dt",
-                    "v": "2024-01-01T00:00:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-01T00:00:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-02T12:30:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-03T00:00:00+00:00"
-                  }
-                ],
-                "val": [
-                  {
-                    "t": "dec",
-                    "v": "1.5"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "2.0"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "30.0"
-                  },
-                  {
-                    "t": "dec",
-                    "v": "-4.0"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "method": "get_pipe_rowcount",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {
-            "begin": null,
-            "end": null,
-            "params": null,
-            "remote": false
-          },
-          "result": 4
-        },
-        {
-          "method": "get_pipe_data",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            },
-            "select_columns": null,
-            "omit_columns": [
-              "val"
-            ],
-            "begin": null,
-            "end": null,
-            "params": null,
-            "limit": null,
-            "order": "asc"
-          },
-          "result": {
-            "__df__": {
-              "columns": [
-                "station",
-                "ts"
-              ],
-              "dtypes": {
-                "station": "string",
-                "ts": "timestamp[us, tz=UTC][pyarrow]"
-              },
-              "data": {
-                "station": [
-                  "a",
-                  "b",
-                  "a",
-                  "c"
-                ],
-                "ts": [
-                  {
-                    "t": "dt",
-                    "v": "2024-01-01T00:00:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-01T00:00:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-02T12:30:00+00:00"
-                  },
-                  {
-                    "t": "dt",
-                    "v": "2024-01-03T00:00:00+00:00"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "method": "get_pipe_rowcount",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {
-            "begin": null,
-            "end": null,
-            "params": null,
-            "remote": false
-          },
-          "result": 4
-        },
-        {
-          "method": "get_sync_time",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {
-            "params": null,
-            "newest": true,
-            "remote": false
-          },
-          "result": {
-            "t": "dt",
-            "v": "2024-01-03T00:00:00+00:00"
-          }
-        },
-        {
-          "method": "get_sync_time",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {
-            "params": null,
-            "newest": false,
-            "remote": false
-          },
-          "result": {
-            "t": "dt",
-            "v": "2024-01-01T00:00:00+00:00"
-          }
-        },
-        {
-          "method": "get_pipe_columns_types",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {},
-          "result": {
-            "ts": "TIMESTAMP(6)",
-            "station": "TEXT",
-            "val": "DOUBLE PRECISION"
-          }
-        },
-        {
-          "method": "get_pipe_attributes",
-          "args": [
-            {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
-                "temporary": false
-              }
-            }
-          ],
-          "kwargs": {},
-          "result": {
-            "connector_keys": "demo",
-            "metric_key": "temperature",
-            "location_key": "home",
-            "parameters": {
-              "columns": {
-                "datetime": "ts",
-                "id": "station"
-              },
-              "valkey": {
-                "dtypes": {
-                  "ts": "timestamp[us, tz=UTC][pyarrow]",
-                  "station": "string",
-                  "val": "Float64"
-                }
-              },
-              "dtypes": {
-                "val": "numeric"
-              }
-            },
-            "pipe_id": 1
-          }
-        }
-      ],
       "state": {
         "demo_temperature_home": {
           "type": "zset",
@@ -2166,60 +1750,52 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "queries_temperature"
     },
     {
-      "step": "register_humidity",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "get_pipe_attributes",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_attributes",
           "result": {}
         },
         {
-          "method": "register_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "register_pipe",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "demo_temperature_home": {
@@ -2300,158 +1876,148 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "register_humidity"
     },
     {
-      "step": "sync_humidity_1",
-      "result": [
-        true,
-        "Inserted 2, updated 0 rows."
-      ],
       "calls": [
         {
-          "method": "get_pipe_id",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_id",
           "result": 2
         },
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": false
         },
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": false
         },
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": false
         },
         {
-          "method": "sync_pipe",
           "args": [],
           "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  }
-                },
-                "temporary": false
-              }
-            },
+            "begin": "",
+            "blocking": true,
+            "callback": null,
+            "check_existing": true,
+            "chunksize": -1,
             "df": {
               "__df__": {
                 "columns": [
                   "room",
                   "pct"
                 ],
-                "dtypes": {
-                  "room": "string",
-                  "pct": "Int64"
-                },
                 "data": {
-                  "room": [
-                    "kitchen",
-                    "garage"
-                  ],
                   "pct": [
                     40,
                     55
+                  ],
+                  "room": [
+                    "kitchen",
+                    "garage"
                   ]
+                },
+                "dtypes": {
+                  "pct": "Int64",
+                  "room": "string"
                 }
               }
             },
-            "begin": "",
             "end": null,
-            "force": false,
-            "retries": 10,
-            "min_seconds": 1,
-            "check_existing": true,
-            "blocking": true,
-            "workers": null,
-            "callback": null,
             "error_callback": null,
+            "force": false,
+            "min_seconds": 1,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}}",
+                "temporary": false
+              }
+            },
+            "retries": 10,
+            "safe_copy": true,
             "sync_chunks": true,
-            "chunksize": -1,
-            "safe_copy": true
+            "workers": null
           },
+          "method": "sync_pipe",
           "result": [
             true,
             "Inserted 2, updated 0 rows."
           ]
         }
+      ],
+      "docs": [
+        {
+          "pct": 40,
+          "room": "kitchen"
+        },
+        {
+          "pct": 55,
+          "room": "garage"
+        }
+      ],
+      "result": [
+        true,
+        "Inserted 2, updated 0 rows."
       ],
       "state": {
         "demo_humidity": {
@@ -2548,146 +2114,116 @@
           "value": "pipe_id"
         }
       },
-      "docs": [
-        {
-          "room": "kitchen",
-          "pct": 40
-        },
-        {
-          "room": "garage",
-          "pct": 55
-        }
-      ]
+      "step": "sync_humidity_1"
     },
     {
-      "step": "sync_humidity_2",
-      "result": [
-        true,
-        "Inserted 1, updated 1 rows."
-      ],
       "calls": [
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "room": "string",
-                      "pct": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}, \"valkey\": {\"dtypes\": {\"room\": \"string\", \"pct\": \"Int64\"}}}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": true
         },
         {
-          "method": "get_pipe_columns_types",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "room": "string",
-                      "pct": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}, \"valkey\": {\"dtypes\": {\"room\": \"string\", \"pct\": \"Int64\"}}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_columns_types",
           "result": {
-            "room": "TEXT",
-            "pct": "BIGINT"
+            "pct": "BIGINT",
+            "room": "TEXT"
           }
         },
         {
-          "method": "sync_pipe",
           "args": [],
           "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "room": "string",
-                      "pct": "Int64"
-                    }
-                  }
-                },
-                "temporary": false
-              }
-            },
+            "begin": "",
+            "blocking": true,
+            "callback": null,
+            "check_existing": true,
+            "chunksize": -1,
             "df": {
               "__df__": {
                 "columns": [
                   "room",
                   "pct"
                 ],
-                "dtypes": {
-                  "room": "string",
-                  "pct": "Int64"
-                },
                 "data": {
-                  "room": [
-                    "kitchen",
-                    "attic"
-                  ],
                   "pct": [
                     42,
                     61
+                  ],
+                  "room": [
+                    "kitchen",
+                    "attic"
                   ]
+                },
+                "dtypes": {
+                  "pct": "Int64",
+                  "room": "string"
                 }
               }
             },
-            "begin": "",
             "end": null,
-            "force": false,
-            "retries": 10,
-            "min_seconds": 1,
-            "check_existing": true,
-            "blocking": true,
-            "workers": null,
-            "callback": null,
             "error_callback": null,
+            "force": false,
+            "min_seconds": 1,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}, \"valkey\": {\"dtypes\": {\"room\": \"string\", \"pct\": \"Int64\"}}}",
+                "temporary": false
+              }
+            },
+            "retries": 10,
+            "safe_copy": true,
             "sync_chunks": true,
-            "chunksize": -1,
-            "safe_copy": true
+            "workers": null
           },
+          "method": "sync_pipe",
           "result": [
             true,
             "Inserted 1, updated 1 rows."
           ]
         }
+      ],
+      "docs": [
+        {
+          "pct": 42,
+          "room": "kitchen"
+        },
+        {
+          "pct": 61,
+          "room": "attic"
+        }
+      ],
+      "result": [
+        true,
+        "Inserted 1, updated 1 rows."
       ],
       "state": {
         "demo_humidity": {
@@ -2789,24 +2325,76 @@
           "value": "pipe_id"
         }
       },
-      "docs": [
-        {
-          "room": "kitchen",
-          "pct": 42
-        },
-        {
-          "room": "attic",
-          "pct": 61
-        }
-      ]
+      "step": "sync_humidity_2"
     },
     {
-      "step": "get_data_humidity",
-      "result": {
-        "dtypes": {
-          "pct": "Int64",
-          "room": "string"
+      "calls": [
+        {
+          "args": [],
+          "kwargs": {
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}, \"valkey\": {\"dtypes\": {\"room\": \"string\", \"pct\": \"Int64\"}}}",
+                "temporary": false
+              }
+            }
+          },
+          "method": "pipe_exists",
+          "result": true
         },
+        {
+          "args": [],
+          "kwargs": {
+            "begin": null,
+            "end": null,
+            "limit": null,
+            "omit_columns": null,
+            "order": "asc",
+            "params": null,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}, \"valkey\": {\"dtypes\": {\"room\": \"string\", \"pct\": \"Int64\"}}}",
+                "temporary": false
+              }
+            },
+            "select_columns": null
+          },
+          "method": "get_pipe_data",
+          "result": {
+            "__df__": {
+              "columns": [
+                "pct",
+                "room"
+              ],
+              "data": {
+                "pct": [
+                  42,
+                  55,
+                  61
+                ],
+                "room": [
+                  "kitchen",
+                  "garage",
+                  "attic"
+                ]
+              },
+              "dtypes": {
+                "pct": "Int64",
+                "room": "string"
+              }
+            }
+          }
+        }
+      ],
+      "result": {
         "docs": [
           {
             "pct": 61,
@@ -2820,94 +2408,12 @@
             "pct": 42,
             "room": "kitchen"
           }
-        ]
-      },
-      "calls": [
-        {
-          "method": "pipe_exists",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "room": "string",
-                      "pct": "Int64"
-                    }
-                  }
-                },
-                "temporary": false
-              }
-            }
-          },
-          "result": true
-        },
-        {
-          "method": "get_pipe_data",
-          "args": [],
-          "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "room": "string",
-                      "pct": "Int64"
-                    }
-                  }
-                },
-                "temporary": false
-              }
-            },
-            "select_columns": null,
-            "omit_columns": null,
-            "begin": null,
-            "end": null,
-            "params": null,
-            "limit": null,
-            "order": "asc"
-          },
-          "result": {
-            "__df__": {
-              "columns": [
-                "pct",
-                "room"
-              ],
-              "dtypes": {
-                "pct": "Int64",
-                "room": "string"
-              },
-              "data": {
-                "pct": [
-                  42,
-                  55,
-                  61
-                ],
-                "room": [
-                  "kitchen",
-                  "garage",
-                  "attic"
-                ]
-              }
-            }
-          }
+        ],
+        "dtypes": {
+          "pct": "Int64",
+          "room": "string"
         }
-      ],
+      },
       "state": {
         "demo_humidity": {
           "type": "set",
@@ -3007,70 +2513,52 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "get_data_humidity"
     },
     {
-      "step": "register_counter",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "get_pipe_attributes",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_attributes",
           "result": {}
         },
         {
-          "method": "register_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "register_pipe",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "demo_humidity": {
@@ -3183,116 +2671,70 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "register_counter"
     },
     {
-      "step": "sync_counter_1",
-      "result": [
-        true,
-        "Upserted 2 rows."
-      ],
       "calls": [
         {
-          "method": "get_pipe_id",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_id",
           "result": 3
         },
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": false
         },
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": false
         },
         {
-          "method": "sync_pipe",
           "args": [],
           "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true
-                },
-                "temporary": false
-              }
-            },
+            "begin": "",
+            "blocking": true,
+            "callback": null,
+            "check_existing": true,
+            "chunksize": -1,
             "df": {
               "__df__": {
                 "columns": [
@@ -3300,46 +2742,68 @@
                   "name",
                   "n"
                 ],
-                "dtypes": {
-                  "step": "int64[pyarrow]",
-                  "name": "string",
-                  "n": "Int64"
-                },
                 "data": {
-                  "step": [
-                    1,
-                    2
+                  "n": [
+                    10,
+                    20
                   ],
                   "name": [
                     "x",
                     "x"
                   ],
-                  "n": [
-                    10,
-                    20
+                  "step": [
+                    1,
+                    2
                   ]
+                },
+                "dtypes": {
+                  "n": "Int64",
+                  "name": "string",
+                  "step": "int64[pyarrow]"
                 }
               }
             },
-            "begin": "",
             "end": null,
-            "force": false,
-            "retries": 10,
-            "min_seconds": 1,
-            "check_existing": true,
-            "blocking": true,
-            "workers": null,
-            "callback": null,
             "error_callback": null,
+            "force": false,
+            "min_seconds": 1,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true}",
+                "temporary": false
+              }
+            },
+            "retries": 10,
+            "safe_copy": true,
             "sync_chunks": true,
-            "chunksize": -1,
-            "safe_copy": true
+            "workers": null
           },
+          "method": "sync_pipe",
           "result": [
             true,
             "Upserted 2 rows."
           ]
         }
+      ],
+      "docs": [
+        {
+          "n": 10,
+          "name": "x",
+          "step": 1
+        },
+        {
+          "n": 20,
+          "name": "x",
+          "step": 2
+        }
+      ],
+      "result": [
+        true,
+        "Upserted 2 rows."
       ],
       "state": {
         "demo_counter": {
@@ -3478,126 +2942,56 @@
           "value": "pipe_id"
         }
       },
-      "docs": [
-        {
-          "step": 1,
-          "name": "x",
-          "n": 10
-        },
-        {
-          "step": 2,
-          "name": "x",
-          "n": 20
-        }
-      ]
+      "step": "sync_counter_1"
     },
     {
-      "step": "sync_counter_2",
-      "result": [
-        true,
-        "Upserted 2 rows."
-      ],
       "calls": [
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {
-                      "step": "int64[pyarrow]",
-                      "name": "string",
-                      "n": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {\"step\": \"int64[pyarrow]\", \"name\": \"string\", \"n\": \"Int64\"}}}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": true
         },
         {
-          "method": "get_pipe_columns_types",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {
-                      "step": "int64[pyarrow]",
-                      "name": "string",
-                      "n": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {\"step\": \"int64[pyarrow]\", \"name\": \"string\", \"n\": \"Int64\"}}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_columns_types",
           "result": {
-            "step": "BIGINT",
+            "n": "BIGINT",
             "name": "TEXT",
-            "n": "BIGINT"
+            "step": "BIGINT"
           }
         },
         {
-          "method": "sync_pipe",
           "args": [],
           "kwargs": {
-            "pipe": {
-              "__pipe__": {
-                "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
-                "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {
-                      "step": "int64[pyarrow]",
-                      "name": "string",
-                      "n": "Int64"
-                    }
-                  }
-                },
-                "temporary": false
-              }
-            },
+            "begin": "",
+            "blocking": true,
+            "callback": null,
+            "check_existing": true,
+            "chunksize": -1,
             "df": {
               "__df__": {
                 "columns": [
@@ -3605,46 +2999,68 @@
                   "name",
                   "n"
                 ],
-                "dtypes": {
-                  "step": "Int64",
-                  "name": "string",
-                  "n": "Int64"
-                },
                 "data": {
-                  "step": [
-                    2,
-                    3
+                  "n": [
+                    25,
+                    30
                   ],
                   "name": [
                     "x",
                     "y"
                   ],
-                  "n": [
-                    25,
-                    30
+                  "step": [
+                    2,
+                    3
                   ]
+                },
+                "dtypes": {
+                  "n": "Int64",
+                  "name": "string",
+                  "step": "Int64"
                 }
               }
             },
-            "begin": "",
             "end": null,
-            "force": false,
-            "retries": 10,
-            "min_seconds": 1,
-            "check_existing": true,
-            "blocking": true,
-            "workers": null,
-            "callback": null,
             "error_callback": null,
+            "force": false,
+            "min_seconds": 1,
+            "pipe": {
+              "__pipe__": {
+                "connector_keys": "demo",
+                "instance_keys": "valkey:fixture",
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {\"step\": \"int64[pyarrow]\", \"name\": \"string\", \"n\": \"Int64\"}}}",
+                "temporary": false
+              }
+            },
+            "retries": 10,
+            "safe_copy": true,
             "sync_chunks": true,
-            "chunksize": -1,
-            "safe_copy": true
+            "workers": null
           },
+          "method": "sync_pipe",
           "result": [
             true,
             "Upserted 2 rows."
           ]
         }
+      ],
+      "docs": [
+        {
+          "n": 25,
+          "name": "x",
+          "step": 2
+        },
+        {
+          "n": 30,
+          "name": "y",
+          "step": 3
+        }
+      ],
+      "result": [
+        true,
+        "Upserted 2 rows."
       ],
       "state": {
         "demo_counter": {
@@ -3791,123 +3207,49 @@
           "value": "pipe_id"
         }
       },
-      "docs": [
-        {
-          "step": 2,
-          "name": "x",
-          "n": 25
-        },
-        {
-          "step": 3,
-          "name": "y",
-          "n": 30
-        }
-      ]
+      "step": "sync_counter_2"
     },
     {
-      "step": "queries_counter",
-      "result": {
-        "get_data": {
-          "dtypes": {
-            "n": "Int64",
-            "name": "string",
-            "step": "int64[pyarrow]"
-          },
-          "docs": [
-            {
-              "n": 10,
-              "name": "x",
-              "step": 1
-            },
-            {
-              "n": 25,
-              "name": "x",
-              "step": 2
-            },
-            {
-              "n": 30,
-              "name": "y",
-              "step": 3
-            }
-          ]
-        },
-        "sync_time_newest": 3,
-        "sync_time_oldest": 1,
-        "rowcount": 3,
-        "rowcount_begin": 2
-      },
       "calls": [
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {
-                      "step": "int64[pyarrow]",
-                      "name": "string",
-                      "n": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {\"step\": \"int64[pyarrow]\", \"name\": \"string\", \"n\": \"Int64\"}}}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": true
         },
         {
-          "method": "get_pipe_data",
           "args": [],
           "kwargs": {
+            "begin": null,
+            "end": null,
+            "limit": null,
+            "omit_columns": null,
+            "order": "asc",
+            "params": null,
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {
-                      "step": "int64[pyarrow]",
-                      "name": "string",
-                      "n": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {\"step\": \"int64[pyarrow]\", \"name\": \"string\", \"n\": \"Int64\"}}}",
                 "temporary": false
               }
             },
-            "select_columns": null,
-            "omit_columns": null,
-            "begin": null,
-            "end": null,
-            "params": null,
-            "limit": null,
-            "order": "asc"
+            "select_columns": null
           },
+          "method": "get_pipe_data",
           "result": {
             "__df__": {
               "columns": [
@@ -3915,11 +3257,6 @@
                 "name",
                 "step"
               ],
-              "dtypes": {
-                "n": "Int64",
-                "name": "string",
-                "step": "int64[pyarrow]"
-              },
               "data": {
                 "n": [
                   10,
@@ -3936,110 +3273,66 @@
                   2,
                   3
                 ]
+              },
+              "dtypes": {
+                "n": "Int64",
+                "name": "string",
+                "step": "int64[pyarrow]"
               }
             }
           }
         },
         {
-          "method": "get_sync_time",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {
-                      "step": "int64[pyarrow]",
-                      "name": "string",
-                      "n": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {\"step\": \"int64[pyarrow]\", \"name\": \"string\", \"n\": \"Int64\"}}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {
-            "params": null,
             "newest": true,
+            "params": null,
             "remote": false
           },
+          "method": "get_sync_time",
           "result": 3
         },
         {
-          "method": "get_sync_time",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {
-                      "step": "int64[pyarrow]",
-                      "name": "string",
-                      "n": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {\"step\": \"int64[pyarrow]\", \"name\": \"string\", \"n\": \"Int64\"}}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {
-            "params": null,
             "newest": false,
+            "params": null,
             "remote": false
           },
+          "method": "get_sync_time",
           "result": 1
         },
         {
-          "method": "get_pipe_rowcount",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {
-                      "step": "int64[pyarrow]",
-                      "name": "string",
-                      "n": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {\"step\": \"int64[pyarrow]\", \"name\": \"string\", \"n\": \"Int64\"}}}",
                 "temporary": false
               }
             }
@@ -4050,34 +3343,18 @@
             "params": null,
             "remote": false
           },
+          "method": "get_pipe_rowcount",
           "result": 3
         },
         {
-          "method": "get_pipe_rowcount",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {
-                      "step": "int64[pyarrow]",
-                      "name": "string",
-                      "n": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {\"step\": \"int64[pyarrow]\", \"name\": \"string\", \"n\": \"Int64\"}}}",
                 "temporary": false
               }
             }
@@ -4088,9 +3365,40 @@
             "params": null,
             "remote": false
           },
+          "method": "get_pipe_rowcount",
           "result": 2
         }
       ],
+      "result": {
+        "get_data": {
+          "docs": [
+            {
+              "n": 10,
+              "name": "x",
+              "step": 1
+            },
+            {
+              "n": 25,
+              "name": "x",
+              "step": 2
+            },
+            {
+              "n": 30,
+              "name": "y",
+              "step": 3
+            }
+          ],
+          "dtypes": {
+            "n": "Int64",
+            "name": "string",
+            "step": "int64[pyarrow]"
+          }
+        },
+        "rowcount": 3,
+        "rowcount_begin": 2,
+        "sync_time_newest": 3,
+        "sync_time_oldest": 1
+      },
       "state": {
         "demo_counter": {
           "type": "zset",
@@ -4235,14 +3543,16 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "queries_counter"
     },
     {
-      "step": "fetch_pipes_keys",
-      "result": [
+      "calls": [
         {
+          "args": [],
           "kwargs": {},
-          "keys": [
+          "method": "fetch_pipes_keys",
+          "result": [
             [
               "demo",
               "temperature",
@@ -4264,12 +3574,14 @@
           ]
         },
         {
+          "args": [],
           "kwargs": {
             "connector_keys": [
               "demo"
             ]
           },
-          "keys": [
+          "method": "fetch_pipes_keys",
+          "result": [
             [
               "demo",
               "temperature",
@@ -4291,12 +3603,14 @@
           ]
         },
         {
+          "args": [],
           "kwargs": {
             "metric_keys": [
               "humidity"
             ]
           },
-          "keys": [
+          "method": "fetch_pipes_keys",
+          "result": [
             [
               "demo",
               "humidity",
@@ -4306,12 +3620,14 @@
           ]
         },
         {
+          "args": [],
           "kwargs": {
             "location_keys": [
               "home"
             ]
           },
-          "keys": [
+          "method": "fetch_pipes_keys",
+          "result": [
             [
               "demo",
               "temperature",
@@ -4321,12 +3637,14 @@
           ]
         },
         {
+          "args": [],
           "kwargs": {
             "metric_keys": [
               "_humidity"
             ]
           },
-          "keys": [
+          "method": "fetch_pipes_keys",
+          "result": [
             [
               "demo",
               "temperature",
@@ -4342,12 +3660,9 @@
           ]
         }
       ],
-      "calls": [
+      "result": [
         {
-          "method": "fetch_pipes_keys",
-          "args": [],
-          "kwargs": {},
-          "result": [
+          "keys": [
             [
               "demo",
               "temperature",
@@ -4366,80 +3681,68 @@
               "None",
               {}
             ]
-          ]
+          ],
+          "kwargs": {}
         },
         {
-          "method": "fetch_pipes_keys",
-          "args": [],
+          "keys": [
+            [
+              "demo",
+              "temperature",
+              "home",
+              {}
+            ],
+            [
+              "demo",
+              "humidity",
+              "None",
+              {}
+            ],
+            [
+              "demo",
+              "counter",
+              "None",
+              {}
+            ]
+          ],
           "kwargs": {
             "connector_keys": [
               "demo"
             ]
-          },
-          "result": [
-            [
-              "demo",
-              "temperature",
-              "home",
-              {}
-            ],
+          }
+        },
+        {
+          "keys": [
             [
               "demo",
               "humidity",
               "None",
               {}
-            ],
-            [
-              "demo",
-              "counter",
-              "None",
-              {}
             ]
-          ]
-        },
-        {
-          "method": "fetch_pipes_keys",
-          "args": [],
+          ],
           "kwargs": {
             "metric_keys": [
               "humidity"
             ]
-          },
-          "result": [
-            [
-              "demo",
-              "humidity",
-              "None",
-              {}
-            ]
-          ]
+          }
         },
         {
-          "method": "fetch_pipes_keys",
-          "args": [],
-          "kwargs": {
-            "location_keys": [
-              "home"
-            ]
-          },
-          "result": [
+          "keys": [
             [
               "demo",
               "temperature",
               "home",
               {}
             ]
-          ]
+          ],
+          "kwargs": {
+            "location_keys": [
+              "home"
+            ]
+          }
         },
         {
-          "method": "fetch_pipes_keys",
-          "args": [],
-          "kwargs": {
-            "metric_keys": [
-              "_humidity"
-            ]
-          },
-          "result": [
+          "keys": [
             [
               "demo",
               "temperature",
@@ -4452,7 +3755,12 @@
               "None",
               {}
             ]
-          ]
+          ],
+          "kwargs": {
+            "metric_keys": [
+              "_humidity"
+            ]
+          }
         }
       ],
       "state": {
@@ -4599,40 +3907,20 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "fetch_pipes_keys"
     },
     {
-      "step": "edit_temperature",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "edit_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
                 "temporary": false
               }
             }
@@ -4640,12 +3928,17 @@
           "kwargs": {
             "patch": false
           },
+          "method": "edit_pipe",
           "result": [
             true,
             "Success"
           ]
         }
       ],
+      "result": [
+        true,
+        "Success"
+      ],
       "state": {
         "demo_counter": {
           "type": "zset",
@@ -4790,23 +4083,23 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "edit_temperature"
     },
     {
-      "step": "fetch_pipes_keys_tags",
-      "result": [],
       "calls": [
         {
-          "method": "fetch_pipes_keys",
           "args": [],
           "kwargs": {
             "tags": [
               "outdoor"
             ]
           },
+          "method": "fetch_pipes_keys",
           "result": []
         }
       ],
+      "result": [],
       "state": {
         "demo_counter": {
           "type": "zset",
@@ -4951,108 +4244,58 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "fetch_pipes_keys_tags"
     },
     {
-      "step": "clear_temperature",
-      "result": [
-        true,
-        "Deleted 2 rows."
-      ],
       "calls": [
         {
-          "method": "pipe_exists",
           "args": [],
           "kwargs": {
             "pipe": {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
                 "temporary": false
               }
             }
           },
+          "method": "pipe_exists",
           "result": true
         },
         {
-          "method": "get_pipe_columns_types",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "get_pipe_columns_types",
           "result": {
-            "ts": "TIMESTAMP(6)",
             "station": "TEXT",
+            "ts": "TIMESTAMP(6)",
             "val": "DOUBLE PRECISION"
           }
         },
         {
-          "method": "clear_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
                 "temporary": false
               }
             }
@@ -5065,11 +4308,16 @@
             "end": null,
             "params": null
           },
+          "method": "clear_pipe",
           "result": [
             true,
             "Deleted 2 rows."
           ]
         }
+      ],
+      "result": [
+        true,
+        "Deleted 2 rows."
       ],
       "state": {
         "demo_counter": {
@@ -5207,35 +4455,20 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "clear_temperature"
     },
     {
-      "step": "clear_humidity_params",
-      "result": [
-        true,
-        "Deleted 1 row."
-      ],
       "calls": [
         {
-          "method": "clear_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "room": "string",
-                      "pct": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}, \"valkey\": {\"dtypes\": {\"room\": \"string\", \"pct\": \"Int64\"}}}",
                 "temporary": false
               }
             }
@@ -5247,11 +4480,16 @@
               "room": "garage"
             }
           },
+          "method": "clear_pipe",
           "result": [
             true,
             "Deleted 1 row."
           ]
         }
+      ],
+      "result": [
+        true,
+        "Deleted 1 row."
       ],
       "state": {
         "demo_counter": {
@@ -5385,45 +4623,35 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "clear_humidity_params"
     },
     {
-      "step": "drop_humidity",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "drop_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "room": "string",
-                      "pct": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}, \"valkey\": {\"dtypes\": {\"room\": \"string\", \"pct\": \"Int64\"}}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "drop_pipe",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "demo_counter": {
@@ -5541,83 +4769,55 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "drop_humidity"
     },
     {
-      "step": "delete_counter",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "drop_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {
-                      "step": "int64[pyarrow]",
-                      "name": "string",
-                      "n": "Int64"
-                    }
-                  }
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {\"step\": \"int64[pyarrow]\", \"name\": \"string\", \"n\": \"Int64\"}}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "drop_pipe",
           "result": [
             true,
             "Success"
           ]
         },
         {
-          "method": "delete_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "counter",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "step",
-                    "id": "name"
-                  },
-                  "dtypes": {
-                    "step": "int"
-                  },
-                  "upsert": true,
-                  "valkey": {
-                    "dtypes": {}
-                  }
-                },
+                "location_key": null,
+                "metric_key": "counter",
+                "parameters": "{\"columns\": {\"datetime\": \"step\", \"id\": \"name\"}, \"dtypes\": {\"step\": \"int\"}, \"upsert\": true, \"valkey\": {\"dtypes\": {}}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "delete_pipe",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "demo_temperature_home": {
@@ -5690,36 +4890,36 @@
           "type": "string",
           "value": "pipe_id"
         }
-      }
+      },
+      "step": "delete_counter"
     },
     {
-      "step": "register_user",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "register_user",
           "args": [
             {
               "__user__": {
-                "username": "fixture_user",
-                "password": "fixture_password",
-                "email": "user@example.com",
-                "type": "admin",
                 "attributes": {},
+                "email": "user@example.com",
+                "password": "fixture_password",
+                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA",
+                "type": "admin",
                 "user_id": null,
-                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA"
+                "username": "fixture_user"
               }
             }
           ],
           "kwargs": {},
+          "method": "register_user",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "demo_temperature_home": {
@@ -5826,101 +5026,101 @@
           "type": "string",
           "value": "{\"user_id\":\"fixtureid000\",\"username\":\"fixture_user\"}"
         }
-      }
+      },
+      "step": "register_user"
     },
     {
-      "step": "user_queries",
-      "result": {
-        "user_id": "fixtureid000",
-        "users": [
-          "fixture_user"
-        ],
-        "type": "admin",
-        "attributes": {},
-        "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA"
-      },
       "calls": [
         {
-          "method": "get_user_id",
           "args": [
             {
               "__user__": {
-                "username": "fixture_user",
-                "password": "fixture_password",
-                "email": "user@example.com",
-                "type": "admin",
                 "attributes": {},
+                "email": "user@example.com",
+                "password": "fixture_password",
+                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA",
+                "type": "admin",
                 "user_id": "fixtureid000",
-                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA"
+                "username": "fixture_user"
               }
             }
           ],
           "kwargs": {},
+          "method": "get_user_id",
           "result": "fixtureid000"
         },
         {
-          "method": "get_users",
           "args": [],
           "kwargs": {},
+          "method": "get_users",
           "result": [
             "fixture_user"
           ]
         },
         {
-          "method": "get_user_type",
           "args": [
             {
               "__user__": {
-                "username": "fixture_user",
-                "password": "fixture_password",
-                "email": "user@example.com",
-                "type": "admin",
                 "attributes": {},
+                "email": "user@example.com",
+                "password": "fixture_password",
+                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA",
+                "type": "admin",
                 "user_id": "fixtureid000",
-                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA"
+                "username": "fixture_user"
               }
             }
           ],
           "kwargs": {},
+          "method": "get_user_type",
           "result": "admin"
         },
         {
-          "method": "get_user_attributes",
           "args": [
             {
               "__user__": {
-                "username": "fixture_user",
-                "password": "fixture_password",
-                "email": "user@example.com",
-                "type": "admin",
                 "attributes": {},
+                "email": "user@example.com",
+                "password": "fixture_password",
+                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA",
+                "type": "admin",
                 "user_id": "fixtureid000",
-                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA"
+                "username": "fixture_user"
               }
             }
           ],
           "kwargs": {},
+          "method": "get_user_attributes",
           "result": {}
         },
         {
-          "method": "get_user_password_hash",
           "args": [
             {
               "__user__": {
-                "username": "fixture_user",
-                "password": "fixture_password",
-                "email": "user@example.com",
-                "type": "admin",
                 "attributes": {},
+                "email": "user@example.com",
+                "password": "fixture_password",
+                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA",
+                "type": "admin",
                 "user_id": "fixtureid000",
-                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA"
+                "username": "fixture_user"
               }
             }
           ],
           "kwargs": {},
+          "method": "get_user_password_hash",
           "result": "pbkdf2-sha256$1$c2FsdA$aGFzaA"
         }
       ],
+      "result": {
+        "attributes": {},
+        "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA",
+        "type": "admin",
+        "user_id": "fixtureid000",
+        "users": [
+          "fixture_user"
+        ]
+      },
       "state": {
         "demo_temperature_home": {
           "type": "zset",
@@ -6026,36 +5226,36 @@
           "type": "string",
           "value": "{\"user_id\":\"fixtureid000\",\"username\":\"fixture_user\"}"
         }
-      }
+      },
+      "step": "user_queries"
     },
     {
-      "step": "edit_user",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "edit_user",
           "args": [
             {
               "__user__": {
-                "username": "fixture_user",
-                "password": "fixture_password",
-                "email": "new@example.com",
-                "type": "admin",
                 "attributes": {},
+                "email": "new@example.com",
+                "password": "fixture_password",
+                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA",
+                "type": "admin",
                 "user_id": "fixtureid000",
-                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA"
+                "username": "fixture_user"
               }
             }
           ],
           "kwargs": {},
+          "method": "edit_user",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "demo_temperature_home": {
@@ -6162,33 +5362,33 @@
           "type": "string",
           "value": "{\"user_id\":\"fixtureid000\",\"username\":\"fixture_user\"}"
         }
-      }
+      },
+      "step": "edit_user"
     },
     {
-      "step": "register_plugin",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "register_plugin",
           "args": [
             {
               "__plugin__": {
+                "attributes": {},
                 "name": "fixture_plugin",
-                "version": "1.2.3",
                 "user_id": "fixtureid000",
-                "attributes": {}
+                "version": "1.2.3"
               }
             }
           ],
           "kwargs": {},
+          "method": "register_plugin",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "demo_temperature_home": {
@@ -6317,105 +5517,105 @@
           "type": "string",
           "value": "{\"user_id\":\"fixtureid000\",\"username\":\"fixture_user\"}"
         }
-      }
+      },
+      "step": "register_plugin"
     },
     {
-      "step": "plugin_queries",
-      "result": {
-        "id": "fixture_plugin",
-        "version": "1.2.3",
-        "user_id": "fixtureid000",
-        "username": "fixture_user",
-        "attributes": {},
-        "plugins": [
-          "fixture_plugin"
-        ]
-      },
       "calls": [
         {
-          "method": "get_plugin_id",
           "args": [
             {
               "__plugin__": {
+                "attributes": {},
                 "name": "fixture_plugin",
-                "version": "1.2.3",
                 "user_id": "fixtureid000",
-                "attributes": {}
+                "version": "1.2.3"
               }
             }
           ],
           "kwargs": {},
+          "method": "get_plugin_id",
           "result": "fixture_plugin"
         },
         {
-          "method": "get_plugin_version",
           "args": [
             {
               "__plugin__": {
+                "attributes": {},
                 "name": "fixture_plugin",
-                "version": "1.2.3",
                 "user_id": "fixtureid000",
-                "attributes": {}
+                "version": "1.2.3"
               }
             }
           ],
           "kwargs": {},
+          "method": "get_plugin_version",
           "result": "1.2.3"
         },
         {
-          "method": "get_plugin_user_id",
           "args": [
             {
               "__plugin__": {
+                "attributes": {},
                 "name": "fixture_plugin",
-                "version": "1.2.3",
                 "user_id": "fixtureid000",
-                "attributes": {}
+                "version": "1.2.3"
               }
             }
           ],
           "kwargs": {},
+          "method": "get_plugin_user_id",
           "result": "fixtureid000"
         },
         {
-          "method": "get_plugin_username",
           "args": [
             {
               "__plugin__": {
+                "attributes": {},
                 "name": "fixture_plugin",
-                "version": "1.2.3",
                 "user_id": "fixtureid000",
-                "attributes": {}
+                "version": "1.2.3"
               }
             }
           ],
           "kwargs": {},
+          "method": "get_plugin_username",
           "result": "fixture_user"
         },
         {
-          "method": "get_plugin_attributes",
           "args": [
             {
               "__plugin__": {
+                "attributes": {},
                 "name": "fixture_plugin",
-                "version": "1.2.3",
                 "user_id": "fixtureid000",
-                "attributes": {}
+                "version": "1.2.3"
               }
             }
           ],
           "kwargs": {},
+          "method": "get_plugin_attributes",
           "result": {}
         },
         {
-          "method": "get_plugins",
           "args": [],
           "kwargs": {},
+          "method": "get_plugins",
           "result": [
             "fixture_plugin"
           ]
         }
       ],
+      "result": {
+        "attributes": {},
+        "id": "fixture_plugin",
+        "plugins": [
+          "fixture_plugin"
+        ],
+        "user_id": "fixtureid000",
+        "username": "fixture_user",
+        "version": "1.2.3"
+      },
       "state": {
         "demo_temperature_home": {
           "type": "zset",
@@ -6543,33 +5743,33 @@
           "type": "string",
           "value": "{\"user_id\":\"fixtureid000\",\"username\":\"fixture_user\"}"
         }
-      }
+      },
+      "step": "plugin_queries"
     },
     {
-      "step": "delete_plugin",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "delete_plugin",
           "args": [
             {
               "__plugin__": {
+                "attributes": {},
                 "name": "fixture_plugin",
-                "version": "1.2.3",
                 "user_id": "fixtureid000",
-                "attributes": {}
+                "version": "1.2.3"
               }
             }
           ],
           "kwargs": {},
+          "method": "delete_plugin",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "demo_temperature_home": {
@@ -6682,36 +5882,36 @@
           "type": "string",
           "value": "{\"user_id\":\"fixtureid000\",\"username\":\"fixture_user\"}"
         }
-      }
+      },
+      "step": "delete_plugin"
     },
     {
-      "step": "delete_user",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "delete_user",
           "args": [
             {
               "__user__": {
-                "username": "fixture_user",
-                "password": "fixture_password",
-                "email": "new@example.com",
-                "type": "admin",
                 "attributes": {},
+                "email": "new@example.com",
+                "password": "fixture_password",
+                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA",
+                "type": "admin",
                 "user_id": "fixtureid000",
-                "password_hash": "pbkdf2-sha256$1$c2FsdA$aGFzaA"
+                "username": "fixture_user"
               }
             }
           ],
           "kwargs": {},
+          "method": "delete_user",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "demo_temperature_home": {
@@ -6796,50 +5996,35 @@
             "{\"ix\":\"user_id-_fixtureid000\"}"
           ]
         }
-      }
+      },
+      "step": "delete_user"
     },
     {
-      "step": "drop_temperature",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "drop_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {
-                      "ts": "timestamp[us, tz=UTC][pyarrow]",
-                      "station": "string",
-                      "val": "Float64"
-                    }
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {\"ts\": \"timestamp[us, tz=UTC][pyarrow]\", \"station\": \"string\", \"val\": \"Float64\"}}, \"dtypes\": {\"val\": \"numeric\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "drop_pipe",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "mrsm_pipe:demo:humidity:None": {
@@ -6891,77 +6076,55 @@
             "{\"ix\":\"user_id-_fixtureid000\"}"
           ]
         }
-      }
+      },
+      "step": "drop_temperature"
     },
     {
-      "step": "delete_temperature",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "drop_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {}
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {}}, \"dtypes\": {\"val\": \"numeric\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "drop_pipe",
           "result": [
             true,
             "Pipe('demo', 'temperature', 'home', instance='valkey:fixture') does not exist, so it was not dropped."
           ]
         },
         {
-          "method": "delete_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "temperature",
-                "location_key": "home",
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "datetime": "ts",
-                    "id": "station"
-                  },
-                  "valkey": {
-                    "dtypes": {}
-                  },
-                  "dtypes": {
-                    "val": "numeric"
-                  }
-                },
+                "location_key": "home",
+                "metric_key": "temperature",
+                "parameters": "{\"columns\": {\"datetime\": \"ts\", \"id\": \"station\"}, \"valkey\": {\"dtypes\": {}}, \"dtypes\": {\"val\": \"numeric\"}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "delete_pipe",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "mrsm_pipe:demo:humidity:None": {
@@ -7001,69 +6164,55 @@
             "{\"ix\":\"user_id-_fixtureid000\"}"
           ]
         }
-      }
+      },
+      "step": "delete_temperature"
     },
     {
-      "step": "delete_humidity",
-      "result": [
-        true,
-        "Success"
-      ],
       "calls": [
         {
-          "method": "drop_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  },
-                  "valkey": {
-                    "dtypes": {}
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}, \"valkey\": {\"dtypes\": {}}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "drop_pipe",
           "result": [
             true,
             "Pipe('demo', 'humidity', instance='valkey:fixture') does not exist, so it was not dropped."
           ]
         },
         {
-          "method": "delete_pipe",
           "args": [
             {
               "__pipe__": {
                 "connector_keys": "demo",
-                "metric_key": "humidity",
-                "location_key": null,
                 "instance_keys": "valkey:fixture",
-                "parameters": {
-                  "columns": {
-                    "id": "room"
-                  },
-                  "valkey": {
-                    "dtypes": {}
-                  }
-                },
+                "location_key": null,
+                "metric_key": "humidity",
+                "parameters": "{\"columns\": {\"id\": \"room\"}, \"valkey\": {\"dtypes\": {}}}",
                 "temporary": false
               }
             }
           ],
           "kwargs": {},
+          "method": "delete_pipe",
           "result": [
             true,
             "Success"
           ]
         }
+      ],
+      "result": [
+        true,
+        "Success"
       ],
       "state": {
         "mrsm_pipes:counter": {
@@ -7086,7 +6235,9 @@
             "{\"ix\":\"user_id-_fixtureid000\"}"
           ]
         }
-      }
+      },
+      "step": "delete_humidity"
     }
-  ]
+  ],
+  "uri": "valkey://localhost:6399/11"
 }

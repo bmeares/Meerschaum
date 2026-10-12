@@ -13,11 +13,18 @@ serves these responses, and assert identical requests and parsed results.
 
 Usage (from the repository root):
 
-    PYTHONPATH=$(pwd) python crates/meerschaum-api/tests/fixtures/gen_api.py
-    PYTHONPATH=$(pwd) python crates/meerschaum-api/tests/fixtures/gen_api.py --serve
+    scripts/parity/run.sh crates/meerschaum-api/tests/fixtures/gen_api.py
+    scripts/parity/run.sh crates/meerschaum-api/tests/fixtures/gen_api.py --serve
+
+The generator isolates itself in a temporary root (empty `MRSM_PLUGINS_DIR`), makes token IDs,
+secrets and creation times deterministic, records paths without host or port, and scrubs JWTs,
+current timestamps, durations, the job environment and the multipart boundary, so the fixture
+regenerates byte-identically (sorted keys; order-sensitive keyword arguments are stored as lists
+of pairs).
 
 `--serve` only sets up the root and the server and prints `MRSM_API_CONTRACT_URL=...`, for
-running the Rust live contract test against a real server; it stops on Ctrl-C or EOF.
+running the Rust live contract test against a real server; it stops on Ctrl-C, SIGTERM or after
+`GEN_API_SERVE_SECONDS`.
 
 The server (and its process group) is killed on exit, and the temporary root is removed.
 All data is synthetic.
@@ -49,34 +56,22 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-### Phase 1: create the root and re-exec with the environment set before `meerschaum` imports.
-if 'MRSM_API_FIXTURE_ROOT' not in os.environ:
-    root = tempfile.mkdtemp(prefix='mrsm-api-fixture-')
-    env = dict(os.environ)
-    env.update({
-        'MRSM_API_FIXTURE_ROOT': root,
-        'MRSM_ROOT_DIR': root,
-        'MRSM_PLUGINS_DIR': str(pathlib.Path(root) / 'plugins'),
-        ### Reuse the repository's test venvs so nothing is installed.
-        'MRSM_VENVS_DIR': str(REPO / 'test_root' / 'venvs'),
-        'MRSM_SQL_FIXTURE': f"sqlite:///{root}/fixture.db",
-        'PYTHONPATH': str(REPO),
-        'MRSM_NONINTERACTIVE': 'true',
-    })
-    plugin_dir = pathlib.Path(root) / 'plugins' / 'fixture_plugin'
-    plugin_dir.mkdir(parents=True, exist_ok=True)
-    (plugin_dir / '__init__.py').write_text("__version__ = '0.1.0'\n")
-    try:
-        rc = subprocess.call([sys.executable, __file__] + sys.argv[1:], env=env)
-    finally:
-        if not os.environ.get('MRSM_API_FIXTURE_KEEP'):
-            shutil.rmtree(root, ignore_errors=True)
-        else:
-            print(f"Kept {root}.")
-    sys.exit(rc)
-
-ROOT = pathlib.Path(os.environ['MRSM_API_FIXTURE_ROOT'])
+### Isolate the environment before `meerschaum` is imported: a temporary root with an empty
+### plugins directory and a sqlite instance; the reference's venvs are reused.
+_ORIG_ROOT = os.environ.get('MRSM_ROOT_DIR') or str(REPO / 'test_root')
+ROOT = pathlib.Path(tempfile.mkdtemp(prefix='mrsm-api-fixture-')).resolve()
+(ROOT / 'plugins').mkdir()
+os.environ.update({
+    'MRSM_ROOT_DIR': str(ROOT),
+    'MRSM_PLUGINS_DIR': str(ROOT / 'plugins'),
+    'MRSM_VENVS_DIR': os.environ.get('MRSM_VENVS_DIR') or os.path.join(_ORIG_ROOT, 'venvs'),
+    'MRSM_SQL_FIXTURE': f"sqlite:///{ROOT}/fixture.db",
+    'MRSM_NONINTERACTIVE': 'true',
+})
+os.environ.pop('PYTHONPATH', None)
 SERVE_ONLY = '--serve' in sys.argv
+if not os.environ.get('GEN_API_KEEP_ROOT'):
+    atexit.register(shutil.rmtree, str(ROOT), True)
 
 import meerschaum as mrsm  # noqa: E402
 from meerschaum.core import User  # noqa: E402
@@ -111,11 +106,13 @@ def start_server() -> int:
     log = open(ROOT / 'api.log', 'w')
     _server['proc'] = subprocess.Popen(
         [
-            sys.executable, '-m', 'meerschaum', 'start', 'api',
+            sys.executable, '-s', '-m', 'meerschaum', 'start', 'api',
             '-p', str(port), '-i', 'sql:fixture', '-w', '1',
             '--no-dash', '--no-webterm', '-y',
         ],
-        env=os.environ,
+        ### A fixed hash seed: v4 builds some index names from set iteration.
+        env={**os.environ, 'PYTHONHASHSEED': '0'},
+        cwd=str(ROOT),
         stdout=log,
         stderr=subprocess.STDOUT,
         start_new_session=True,
@@ -155,30 +152,153 @@ def body_repr(body):
     return {'base64': base64.b64encode(body).decode()}
 
 
+import re  # noqa: E402
+from urllib.parse import urlsplit  # noqa: E402
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: E402
+
+_NOW = _dt.now(_tz.utc)
+_DATES = {(_NOW + _td(days=d)).strftime('%Y-%m-%d') for d in (-1, 0, 1)}
+_DATES |= {(_dt.now() + _td(days=d)).strftime('%Y-%m-%d') for d in (-1, 0, 1)}
+_DT_RE = re.compile(
+    r'(?P<date>\d{4}-\d{2}-\d{2})(?P<sep>[ T])(?P<hm>\d{2}:\d{2})'
+    r'(?P<sec>:\d{2})?(?P<frac>\.\d+)?(?P<tz>[+-]\d{2}:?\d{2}|Z)?'
+)
+_JWT_RE = re.compile(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+')
+_DURATION_RE = re.compile(r'It took .+? to sync')
+_BOUNDARY_RE = re.compile(r'boundary=([0-9A-Za-z_-]+)')
+
+
+def _fix_dt(m):
+    """Replace a timestamp of 'now' (dates from the data are kept) with a fixed one."""
+    if m.group('date') not in _DATES:
+        return m.group(0)
+    out = '2000-01-01' + m.group('sep') + '00:00'
+    if m.group('sec'):
+        out += ':00'
+    if m.group('frac'):
+        out += '.' + '0' * (len(m.group('frac')) - 1)
+    if m.group('tz'):
+        out += m.group('tz')
+    return out
+
+
+def scrub_text(text):
+    """Remove run-specific values: the temporary root, JWTs, current timestamps, durations."""
+    if not isinstance(text, str):
+        return text
+    text = text.replace(str(ROOT), '<root>')
+    text = _JWT_RE.sub('<jwt>', text)
+    text = _DT_RE.sub(_fix_dt, text)
+    text = _DURATION_RE.sub('It took <t> to sync', text)
+    return text
+
+
+def scrub_obj(obj):
+    """Drop the job environment (it is the server's whole environment) and process IDs."""
+    if isinstance(obj, dict):
+        return {
+            k: ({} if k == 'env' else (None if k == 'pid' else scrub_obj(v)))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [scrub_obj(v) for v in obj]
+    return obj
+
+
+def scrub_response(text):
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return scrub_text(text)
+    cleaned = scrub_obj(parsed)
+    if cleaned != parsed:
+        text = json.dumps(cleaned, ensure_ascii=False, separators=(',', ':'))
+    return scrub_text(text)
+
+
+def target_of(url):
+    parts = urlsplit(url)
+    return parts.path + (('?' + parts.query) if parts.query else '')
+
+
+def make_deterministic():
+    """Fixed token IDs, secrets and creation times for tokens registered in this process."""
+    import uuid
+    import meerschaum.utils.misc as misc
+    import importlib
+    token_module = importlib.import_module('meerschaum.core.Token._Token')
+    instance_tokens = importlib.import_module('meerschaum.connectors.instance._tokens')
+
+    counter = {'uuid': 0, 'password': 0}
+
+    def uuid4():
+        counter['uuid'] += 1
+        return uuid.UUID(f"00000000-0000-4000-8000-{counter['uuid']:012d}")
+
+    def generate_password(length=12, **kw):
+        counter['password'] += 1
+        return (f"fixturesecret{counter['password']:03d}" * 4)[:length]
+
+    class FixedDatetime(_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return _dt(2000, 1, 1, tzinfo=tz)
+
+    uuid.uuid4 = uuid4
+    misc.generate_password = generate_password
+    token_module.randint = lambda a, b: a
+    instance_tokens.datetime = FixedDatetime
+
+
+
 def install_recorder():
     import requests
     original_send = requests.Session.send
 
     def send(self, request, **kwargs):
-        response = original_send(self, request, **kwargs)
-        content_type = response.headers.get('content-type', '')
+        try:
+            response = original_send(self, request, **kwargs)
+        except requests.exceptions.ConnectionError:
+            ### The server dropped the connection (an unhandled error in its route).
+            response = None
+        content_type = response.headers.get('content-type', '') if response is not None else ''
         is_text = 'json' in content_type or content_type.startswith('text/')
+        headers = {
+            k: v for k, v in request.headers.items() if k.lower() not in SKIP_HEADERS
+        }
+        body = request.body
+        ### The multipart boundary is random: replace it in the header and the body.
+        for k, v in list(headers.items()):
+            m = _BOUNDARY_RE.search(v)
+            if m and body is not None:
+                boundary = m.group(1)
+                headers[k] = v.replace(boundary, 'BOUNDARY')
+                body = (body if isinstance(body, bytes) else body.encode('utf-8')).replace(
+                    boundary.encode(), b'BOUNDARY'
+                )
+        body = body_repr(body)
+        if body is not None and 'text' in body:
+            body = {'text': scrub_text(body['text'])}
         REQUESTS.append({
             'method': request.method,
-            'url': request.url,
-            'headers': {
-                k: v for k, v in request.headers.items() if k.lower() not in SKIP_HEADERS
-            },
+            'url': target_of(request.url),
+            'headers': headers,
             'has_auth': 'Authorization' in request.headers,
-            'body': body_repr(request.body),
-            'status': response.status_code,
+            'body': body,
+            'status': response.status_code if response is not None else None,
             'content_type': content_type,
             'response': (
-                {'text': response.text}
-                if is_text
-                else {'base64': base64.b64encode(response.content).decode()}
+                {'reset': True}
+                if response is None
+                else (
+                    {'text': scrub_response(response.text)}
+                    if is_text
+                    else {'base64': base64.b64encode(response.content).decode()}
+                )
             ),
         })
+        if response is None:
+            raise requests.exceptions.ConnectionError('Connection aborted (reset by the server).')
         return response
 
     requests.Session.send = send
@@ -192,7 +312,7 @@ def install_recorder():
             self.uri = uri
             self.cm = original_connect(uri, *args, **kwargs)
             self.events = []
-            WEBSOCKETS.append({'uri': uri, 'events': self.events})
+            WEBSOCKETS.append({'uri': target_of(uri), 'events': self.events})
 
         async def __aenter__(self):
             self.ws = await self.cm.__aenter__()
@@ -207,7 +327,7 @@ def install_recorder():
 
         async def recv(self):
             data = await self.ws.recv()
-            self.events.append(['recv', data])
+            self.events.append(['recv', scrub_text(data)])
             return data
 
         async def close(self):
@@ -271,6 +391,7 @@ def main_record(port: int):
     from datetime import datetime, timezone
     from meerschaum.core import Token
     install_recorder()
+    make_deterministic()
 
     conn = mrsm.get_connector(
         'api:fixture', host='localhost', port=port, username=USERNAME, password=PASSWORD,
@@ -288,8 +409,8 @@ def main_record(port: int):
             error = f"{type(e).__name__}: {e}"
         steps.append({
             'step': name,
-            'result': tag(result),
-            'error': error,
+            'result': json.loads(scrub_text(json.dumps(tag(result)))),
+            'error': scrub_text(error),
             'requests': list(REQUESTS),
             'websockets': list(WEBSOCKETS),
             **extra,
@@ -343,7 +464,7 @@ def main_record(port: int):
         'sync_pipe_chunked',
         lambda: conn.sync_pipe(pipe, df, chunksize=2, **sync_kwargs),
         sync_df=tag(df),
-        sync_kwargs=sync_kwargs,
+        sync_kwargs=[[k, v] for k, v in sync_kwargs.items()],
         chunksize=2,
     )
     df2 = pd.DataFrame({
@@ -356,7 +477,7 @@ def main_record(port: int):
         'sync_pipe_default_chunks',
         lambda: conn.sync_pipe(pipe, df2, check_existing=False),
         sync_df=tag(df2),
-        sync_kwargs={'check_existing': False},
+        sync_kwargs=[['check_existing', False]],
         chunksize=-1,
     )
     step('pipe_exists_after', lambda: conn.pipe_exists(pipe))
@@ -447,8 +568,9 @@ def main_record(port: int):
     step('get_tokens', lambda: [t.to_model() for t in conn.get_tokens()])
     step('get_tokens_labels', lambda: [t.to_model() for t in conn.get_tokens(labels=['fixture-token'])])
     step('get_token_model', lambda: conn.get_token_model(token.id))
-    _model = conn.get_token_model(token.id)
-    token.creation = _model.creation if _model is not None else None
+    ### `GET /tokens/{id}` fails on this server (sqlite returns scopes as a string), so the
+    ### creation is unknown to the client and `edit_token` sends `null`.
+    token.creation = None
     token.label = 'fixture-token-edited'
     step('edit_token', lambda: conn.edit_token(token))
     step('token_exists', lambda: conn.token_exists(token.id))
@@ -477,9 +599,22 @@ def main_record(port: int):
         use_token=False,
     ).json())
 
-    plugin = mrsm.Plugin('fixture_plugin')
-    archive_path = plugin.make_tar()
-    archive_b64 = base64.b64encode(pathlib.Path(archive_path).read_bytes()).decode()
+    ### A deterministic archive (fixed mtimes and owners), outside the empty plugins directory.
+    import io
+    import gzip
+    import tarfile
+    source = b"__version__ = '0.1.0'\n"
+    tar_buffer = io.BytesIO()
+    with tarfile.open(fileobj=tar_buffer, mode='w', format=tarfile.USTAR_FORMAT) as tar:
+        info = tarfile.TarInfo('fixture_plugin/__init__.py')
+        info.size = len(source)
+        info.mtime = 0
+        info.mode = 0o644
+        tar.addfile(info, io.BytesIO(source))
+    archive_path = ROOT / 'fixture_plugin.tar.gz'
+    archive_path.write_bytes(gzip.compress(tar_buffer.getvalue(), mtime=0))
+    plugin = mrsm.Plugin('fixture_plugin', version='0.1.0', archive_path=archive_path)
+    archive_b64 = base64.b64encode(archive_path.read_bytes()).decode()
     step(
         'register_plugin',
         lambda: conn.register_plugin(plugin, make_archive=False),
@@ -493,9 +628,29 @@ def main_record(port: int):
     step('raw_download_plugin', lambda: len(conn.get('/plugins/fixture_plugin').content))
     step('delete_plugin', lambda: conn.delete_plugin(plugin))
 
-    step('create_job', lambda: conn.create_job('fixture-job', ['show', 'version'], properties={'tags': ['x']}))
+    import requests as _requests
+
+    def wait_for(predicate, timeout=120):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if predicate():
+                return
+            time.sleep(0.5)
+        raise RuntimeError("Timed out waiting for the job.")
+
+    def job_status():
+        conn._job_metadata_cache = {}
+        return conn.get_job_metadata('fixture-job').get('status')
+
+    job_sysargs = ['show', 'version', '--loop', '--min-seconds', '3600']
+    step('create_job', lambda: conn.create_job('fixture-job', job_sysargs, properties={'tags': ['x']}))
+    ### Unrecorded: wait for the first iteration's output so the logs are the same every run.
+    wait_for(lambda: 'Meerschaum v' in (conn.get_logs('fixture-job') or ''))
+    time.sleep(2)
     step('get_job_exists', lambda: conn.get_job_exists('fixture-job'))
-    step('start_job', lambda: conn.start_job('fixture-job'))
+    step('stop_job', lambda: conn.stop_job('fixture-job'))
+    wait_for(lambda: job_status() == 'stopped')
+    conn._job_metadata_cache = {}
     lines = []
     results = []
 
@@ -517,9 +672,10 @@ def main_record(port: int):
     step('get_job_is_blocking_on_stdin', lambda: conn.get_job_is_blocking_on_stdin('fixture-job'))
     from meerschaum.connectors.api._jobs import get_job_prompt_kwargs
     step('get_job_prompt_kwargs', lambda: get_job_prompt_kwargs(conn, 'fixture-job'))
+    ### Stopped: pausing fails deterministically. (Restarting it would race the deletion.)
     step('pause_job', lambda: conn.pause_job('fixture-job'))
-    step('stop_job', lambda: conn.stop_job('fixture-job'))
     step('delete_job', lambda: conn.delete_job('fixture-job'))
+    step('start_job_missing', lambda: conn.start_job('missing-job'))
     step('get_job_missing', lambda: conn.get_job_metadata('missing-job'))
     step('do_action_legacy', lambda: conn.do_action_legacy(['show', 'version']))
 
@@ -527,7 +683,7 @@ def main_record(port: int):
         'username': USERNAME,
         'password': PASSWORD,
         'steps': steps,
-    }, indent=2) + '\n')
+    }, indent=2, sort_keys=True) + '\n')
     print(f"Wrote {len(steps)} steps to {OUT}.")
 
 
@@ -538,8 +694,12 @@ def main():
             f"MRSM_API_CONTRACT_URL=http://{USERNAME}:{PASSWORD}@localhost:{port}",
             flush=True,
         )
+        ### Serve until interrupted (or for `GEN_API_SERVE_SECONDS`); `run.sh` feeds the program
+        ### through stdin, so stdin cannot be used to wait.
+        deadline = time.time() + float(os.environ.get('GEN_API_SERVE_SECONDS', '86400'))
         try:
-            sys.stdin.read()
+            while time.time() < deadline:
+                time.sleep(1)
         except KeyboardInterrupt:
             pass
         return

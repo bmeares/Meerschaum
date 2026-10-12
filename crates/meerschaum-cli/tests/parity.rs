@@ -549,12 +549,11 @@ fn per_action_help_mentions_only_known_flags() {
     .unwrap();
     let mut failures = Vec::new();
     let mut checked = 0;
-    let mut documented_diffs = 0;
     let mut mentions = 0;
     for entry in std::fs::read_dir(fixtures_dir().join("help")).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_stem().unwrap().to_string_lossy().to_string();
-        if name == "_global" {
+        if name.starts_with('_') {
             continue;
         }
         checked += 1;
@@ -567,17 +566,8 @@ fn per_action_help_mentions_only_known_flags() {
             }
             failures.push(format!("{name}: mentions unknown flag {flag}"));
         }
-        // The documented diff: v4 prints the docstring, the Rust port the shared options.
-        let words: Vec<String> = name.split('.').map(str::to_string).collect();
-        let rust = help::format_action_help(&words, 80);
-        if rust != text {
-            documented_diffs += 1;
-        }
     }
-    eprintln!(
-        "per-action help: {checked} pages, {mentions} flag mentions checked; {documented_diffs} pages differ in \
-         text (v4 prints action docstrings, which are not ported yet)"
-    );
+    eprintln!("per-action help: {checked} pages, {mentions} flag mentions checked");
     assert!(
         mentions > 50,
         "the flag extraction found too few mentions ({mentions})"
@@ -585,16 +575,95 @@ fn per_action_help_mentions_only_known_flags() {
     report("per-action help flags", &failures, checked);
 }
 
+/// A config registry over an empty root (defaults only, no writes).
+fn test_config(root: &std::path::Path) -> meerschaum_core::config::Config {
+    let mut opts = meerschaum_core::config::ConfigOptions::with_env(vec![
+        ("MRSM_ROOT_DIR".into(), root.to_string_lossy().into_owned()),
+        (
+            "MRSM_PLUGINS_DIR".into(),
+            root.join("plugins").to_string_lossy().into_owned(),
+        ),
+    ]);
+    opts.allow_writes = false;
+    opts.home = root.to_path_buf();
+    meerschaum_core::config::Config::new(opts).unwrap()
+}
+
+fn test_settings() -> meerschaum_cli::format::FormatSettings {
+    meerschaum_cli::format::FormatSettings {
+        ansi: false,
+        unicode: true,
+        width: 80,
+        cols: 80,
+        no_color: false,
+    }
+}
+
+/// `mrsm <action> [<subaction>] --help` prints exactly the v4 text (the dedented docstring) for
+/// every recorded help page.
+#[test]
+fn per_action_help_matches_python() {
+    let fixture = load("args.json");
+    let tmp = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let mut matched = 0;
+    for entry in std::fs::read_dir(fixtures_dir().join("help")).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_stem().unwrap().to_string_lossy().to_string();
+        if name.starts_with('_') {
+            continue;
+        }
+        checked += 1;
+        let expected = std::fs::read_to_string(&path).unwrap();
+        let mut sysargs: Vec<String> = name.split('.').map(str::to_string).collect();
+        sysargs.push("--help".into());
+        let mut buf: Vec<u8> = Vec::new();
+        {
+            let mut rt = Runtime::new(ctx(&fixture), 80, &mut buf, |_| None);
+            rt.config = Some(test_config(tmp.path()));
+            rt.format = Some(test_settings());
+            assert_eq!(dispatch::main(&sysargs, &mut rt), 0);
+        }
+        let actual = String::from_utf8(buf).unwrap();
+        if actual == expected {
+            matched += 1;
+        } else {
+            failures.push(format!(
+                "{name}:\n--- python\n{expected}\n--- rust\n{actual}"
+            ));
+        }
+    }
+    eprintln!("per-action help: {matched}/{checked} pages match exactly");
+    assert_eq!(checked, 133, "expected 133 recorded help pages");
+    report("per-action help text", &failures, checked);
+}
+
+/// `mrsm <unknown> --help` prints the `show actions` table.
+#[test]
+fn unknown_action_help_matches_python() {
+    let fixture = load("args.json");
+    let tmp = tempfile::tempdir().unwrap();
+    let expected =
+        std::fs::read_to_string(fixtures_dir().join("help").join("_unknown_action.txt")).unwrap();
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut rt = Runtime::new(ctx(&fixture), 80, &mut buf, |_| None);
+        rt.config = Some(test_config(tmp.path()));
+        rt.format = Some(test_settings());
+        dispatch::main(&["foo".to_string(), "--help".to_string()], &mut rt);
+    }
+    assert_eq!(String::from_utf8(buf).unwrap(), expected);
+}
+
 #[test]
 fn dispatch_skeleton() {
     let mut buf: Vec<u8> = Vec::new();
     let fixture = load("args.json");
-    let mut rt = Runtime {
-        dates: ctx(&fixture),
-        columns: 80,
-        out: &mut buf,
-        env: |_| None,
-    };
+    let tmp = tempfile::tempdir().unwrap();
+    let mut rt = Runtime::new(ctx(&fixture), 80, &mut buf, |_| None);
+    rt.config = Some(test_config(tmp.path()));
+    rt.format = Some(test_settings());
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
 
     assert_eq!(
@@ -617,9 +686,10 @@ fn dispatch_skeleton() {
         dispatch::entry(&s(&["show", "pipe"]), &mut rt),
         SuccessTuple::fail("action `show pipes` is not implemented in Rust yet")
     );
+    // Unknown actions run through `sh` (`bash -c 'foo bar'`); the test host exits 0.
     assert_eq!(
         dispatch::entry(&s(&["foo", "bar"]), &mut rt),
-        SuccessTuple::fail("action `sh` is not implemented in Rust yet")
+        SuccessTuple::success()
     );
     assert_eq!(
         dispatch::entry(&s(&["sync", "pipes", "-d"]), &mut rt),
@@ -654,6 +724,7 @@ fn dispatch_skeleton() {
     assert_eq!(dispatch::main(&s(&["sync", "--help"]), &mut rt), 0);
     assert_eq!(dispatch::main(&s(&["-V"]), &mut rt), 0);
     assert_eq!(dispatch::main(&s(&["--print-arg-schema"]), &mut rt), 0);
+    drop(rt);
     let out = String::from_utf8(buf).unwrap();
     assert!(out.contains(env!("CARGO_PKG_VERSION")));
     assert!(out.contains("'connector_keys': ['sql:main']"));

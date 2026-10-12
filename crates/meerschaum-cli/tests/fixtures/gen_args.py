@@ -16,7 +16,9 @@ Outputs (next to this script):
   splitting, and the custom type functions.
 - `parser.json`: an introspection of the v4 `argparse` parser (every action, in order).
 - `actions.json`: the core actions, their subactions, and which accept `executor_keys`.
-- `help/*.txt`: the Python `--help` text, globally and per action / subaction.
+- `help/*.txt`: the Python `--help` text, globally and per action / subaction (compared byte for
+  byte by `tests/parity.rs`), and for an unknown action (`_unknown_action.txt`, the
+  `show actions` table).
 
 Determinism:
 - `now` is fixed (see `FIXED_NOW`) by patching the `datetime` name in `_parser`.
@@ -827,6 +829,20 @@ def gen_help_fixtures(actions_fixture):
         (help_dir / f'{name}.txt').write_text(_norm_message(buf.getvalue()), encoding='utf-8')
 
     (help_dir / '_global.txt').write_text(parser.format_help(), encoding='utf-8')
+
+    ### An unknown action prints `show actions` (`print_options`, which sizes its columns with
+    ### `os.get_terminal_size()`; pin it to `$COLUMNS` for this page).
+    _real_get_terminal_size = os.get_terminal_size
+
+    def _no_terminal(*args, **kwargs):
+        raise OSError("not a terminal")
+
+    os.get_terminal_size = _no_terminal
+    try:
+        _dump('_unknown_action', ['foo', '--help'])
+    finally:
+        os.get_terminal_size = _real_get_terminal_size
+
     for action, info in sorted(actions_fixture.items()):
         _dump(action, [action, '--help'])
         for sub in sorted(info['subactions']):

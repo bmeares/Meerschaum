@@ -5,7 +5,7 @@ use meerschaum_core::pyfmt::{float_repr, json_dumps_str};
 use meerschaum_kernel::serialize::json_serialize_value;
 use meerschaum_kernel::value::Value as KValue;
 
-use meerschaum_api::pipe_ops::Doc;
+use meerschaum_connector::pipe_ops::Doc;
 
 fn write_float(f: f64, out: &mut String) {
     // `json.dumps` writes non-finite floats as JavaScript literals (`allow_nan=True`).

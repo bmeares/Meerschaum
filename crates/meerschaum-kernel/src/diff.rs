@@ -119,7 +119,7 @@ fn normalize_nulls(df: &Frame) -> Frame {
             .values()
             .into_iter()
             .map(|v| match &v {
-                Value::Str(s) if NA_PATTERN.is_match(s) => Value::NA,
+                Value::Str(s) if is_na_string(s) => Value::NA,
                 _ => v,
             })
             .collect();
@@ -136,6 +136,230 @@ fn row_keys(df: &Frame, cols: &[String]) -> Vec<Vec<Value>> {
     (0..df.height())
         .map(|i| datas.iter().map(|d| d[i].clone()).collect())
         .collect()
+}
+
+/// Whether `s` is a null-like string `normalize_nulls` replaces with `NA`.
+fn is_na_string(s: &str) -> bool {
+    // Every alternative is at most 5 characters (20 bytes in UTF-8): skip the regex otherwise.
+    s.len() <= 20 && NA_PATTERN.is_match(s)
+}
+
+/// One column of the anti-join key, as `normalize_nulls` would leave it, compared with
+/// [`Value`]'s key semantics (`PartialEq` / `Hash`): nulls of any kind match each other, `NaN`
+/// is null, numbers compare numerically.
+///
+/// When the old and new columns are native with the same dtype, the comparison runs on the
+/// physical values (integers, timestamps and dates as `i64`, floats as canonical bits, strings
+/// and bytes by reference), which is equivalent within one dtype. Any other pairing compares
+/// materialized [`Value`]s.
+enum KeyCol<'a> {
+    Int(Vec<Option<i64>>),
+    /// Float bits with `NaN` as null and `-0.0` as `0.0`.
+    Float(Vec<Option<u64>>),
+    Str(Vec<Option<&'a str>>),
+    Bytes(Vec<Option<&'a [u8]>>),
+    Values(Vec<Value>),
+}
+
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^ (x >> 31)
+}
+
+fn hash_one<T: std::hash::Hash + ?Sized>(v: &T) -> u64 {
+    use std::hash::{BuildHasher, BuildHasherDefault};
+    BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default().hash_one(v)
+}
+
+const NULL_KEY_HASH: u64 = 0x5bd1_e995_5bd1_e995;
+
+impl KeyCol<'_> {
+    fn hash_at(&self, i: usize) -> u64 {
+        match self {
+            KeyCol::Int(v) => v[i].map_or(NULL_KEY_HASH, |x| splitmix64(x as u64)),
+            KeyCol::Float(v) => v[i].map_or(NULL_KEY_HASH, splitmix64),
+            KeyCol::Str(v) => v[i].map_or(NULL_KEY_HASH, hash_one),
+            KeyCol::Bytes(v) => v[i].map_or(NULL_KEY_HASH, hash_one),
+            KeyCol::Values(v) => hash_one(&v[i]),
+        }
+    }
+
+    fn eq_at(&self, i: usize, other: &Self, j: usize) -> bool {
+        match (self, other) {
+            (KeyCol::Int(a), KeyCol::Int(b)) => a[i] == b[j],
+            (KeyCol::Float(a), KeyCol::Float(b)) => a[i] == b[j],
+            (KeyCol::Str(a), KeyCol::Str(b)) => a[i] == b[j],
+            (KeyCol::Bytes(a), KeyCol::Bytes(b)) => a[i] == b[j],
+            (KeyCol::Values(a), KeyCol::Values(b)) => a[i] == b[j],
+            _ => false,
+        }
+    }
+}
+
+fn values_key(data: &ColumnData) -> KeyCol<'static> {
+    let stringish = matches!(data, ColumnData::Object(_))
+        || matches!(data.polars_dtype(), Some(polars::prelude::DataType::String));
+    let mut values = data.values();
+    if stringish {
+        for v in values.iter_mut() {
+            if matches!(v, Value::Str(s) if is_na_string(s)) {
+                *v = Value::NA;
+            }
+        }
+    }
+    KeyCol::Values(values)
+}
+
+/// The typed key of a native column, or `None` when the dtype has no typed comparison.
+fn typed_key(s: &polars::prelude::Series) -> Option<KeyCol<'_>> {
+    use polars::prelude::DataType as D;
+    Some(match s.dtype() {
+        D::Int8 | D::Int16 | D::Int32 | D::Int64 | D::UInt8 | D::UInt16 | D::UInt32 => {
+            let ints = s.cast(&D::Int64).ok()?;
+            KeyCol::Int(ints.i64().ok()?.into_iter().collect())
+        }
+        // `Value::Int(v as i64)`: the wrap-around is injective, so equality is unchanged.
+        D::UInt64 => KeyCol::Int(
+            s.u64()
+                .ok()?
+                .into_iter()
+                .map(|v| v.map(|x| x as i64))
+                .collect(),
+        ),
+        D::Boolean => KeyCol::Int(
+            s.bool()
+                .ok()?
+                .into_iter()
+                .map(|v| v.map(i64::from))
+                .collect(),
+        ),
+        D::Datetime(..) | D::Date => {
+            let phys = s.to_physical_repr().into_owned();
+            let ints = phys.cast(&D::Int64).ok()?;
+            KeyCol::Int(ints.i64().ok()?.into_iter().collect())
+        }
+        D::Float32 | D::Float64 => {
+            let floats = s.cast(&D::Float64).ok()?;
+            KeyCol::Float(
+                floats
+                    .f64()
+                    .ok()?
+                    .into_iter()
+                    .map(|v| {
+                        v.filter(|f| !f.is_nan())
+                            .map(|f| if f == 0.0 { 0u64 } else { f.to_bits() })
+                    })
+                    .collect(),
+            )
+        }
+        D::String => KeyCol::Str(
+            s.str()
+                .ok()?
+                .into_iter()
+                .map(|v| v.filter(|t| !is_na_string(t)))
+                .collect(),
+        ),
+        D::Binary => KeyCol::Bytes(s.binary().ok()?.into_iter().collect()),
+        _ => return None,
+    })
+}
+
+/// The positions of the rows of `new` with no equal row in `old` on `cols`
+/// (`merge(how='left', indicator=True)` / the Polars anti-join), compared after
+/// `normalize_nulls`.
+fn anti_join_rows(new: &Frame, old: &Frame, cols: &[String]) -> Vec<usize> {
+    let mut new_keys: Vec<KeyCol<'_>> = Vec::with_capacity(cols.len());
+    let mut old_keys: Vec<KeyCol<'_>> = Vec::with_capacity(cols.len());
+    for col in cols {
+        let (Ok(n), Ok(o)) = (new.data(col), old.data(col)) else {
+            let empty = ColumnData::Object(vec![]);
+            let n = new.data(col).unwrap_or(&empty);
+            let o = old.data(col).unwrap_or(&empty);
+            new_keys.push(values_key(n));
+            old_keys.push(values_key(o));
+            continue;
+        };
+        let typed = match (n, o) {
+            (ColumnData::Native(ns), ColumnData::Native(os)) if ns.dtype() == os.dtype() => {
+                typed_key(ns).zip(typed_key(os))
+            }
+            _ => None,
+        };
+        match typed {
+            Some((nk, ok)) => {
+                new_keys.push(nk);
+                old_keys.push(ok);
+            }
+            None => {
+                new_keys.push(values_key(n));
+                old_keys.push(values_key(o));
+            }
+        }
+    }
+    let row_hashes = |keys: &[KeyCol<'_>], height: usize| -> Vec<u64> {
+        let mut hashes = vec![0u64; height];
+        for key in keys {
+            for (i, h) in hashes.iter_mut().enumerate() {
+                *h = splitmix64(h.rotate_left(5) ^ key.hash_at(i));
+            }
+        }
+        hashes
+    };
+    let old_hashes = row_hashes(&old_keys, old.height());
+    let new_hashes = row_hashes(&new_keys, new.height());
+
+    // Chained buckets: `head[hash]` is the last old row with that hash, `next[i]` the previous.
+    let mut head: HashMap<u64, usize, std::hash::BuildHasherDefault<IdentityHasher>> =
+        HashMap::with_capacity_and_hasher(old_hashes.len(), Default::default());
+    let mut next: Vec<usize> = vec![usize::MAX; old_hashes.len()];
+    for (i, h) in old_hashes.iter().enumerate() {
+        if let Some(prev) = head.insert(*h, i) {
+            next[i] = prev;
+        }
+    }
+    let rows_equal = |j: usize, i: usize| -> bool {
+        new_keys
+            .iter()
+            .zip(old_keys.iter())
+            .all(|(nk, ok)| nk.eq_at(j, ok, i))
+    };
+    new_hashes
+        .iter()
+        .enumerate()
+        .filter(|(j, h)| {
+            let mut cursor = head.get(*h).copied();
+            while let Some(i) = cursor {
+                if rows_equal(*j, i) {
+                    return false;
+                }
+                cursor = (next[i] != usize::MAX).then_some(next[i]);
+            }
+            true
+        })
+        .map(|(j, _)| j)
+        .collect()
+}
+
+/// A `Hasher` for keys that are already well-mixed `u64` hashes.
+#[derive(Default)]
+struct IdentityHasher(u64);
+
+impl std::hash::Hasher for IdentityHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 = (self.0 << 8) | u64::from(*b);
+        }
+    }
+
+    fn write_u64(&mut self, i: u64) {
+        self.0 = i;
+    }
 }
 
 /// Options for [`filter_unseen_df`].
@@ -387,20 +611,14 @@ pub fn filter_unseen_df(old: Option<&Frame>, new: &Frame, opts: &FilterUnseenOpt
         .chain(get_geometry_cols(&old))
         .collect();
 
-    let normalized_new = normalize_nulls(&new);
-    let normalized_old = normalize_nulls(&old);
-    let all_cols = normalized_new.names();
-    let old_keys: HashSet<Vec<Value>> = row_keys(&normalized_old, &all_cols).into_iter().collect();
-    let keep: Vec<usize> = row_keys(&normalized_new, &all_cols)
-        .into_iter()
-        .enumerate()
-        .filter(|(_, k)| !old_keys.contains(k))
-        .map(|(i, _)| i)
-        .collect();
-    let mut delta = normalized_new
-        .take(&keep)
+    // `normalize_nulls` is applied per value, so the keys normalize on the fly and only the
+    // delta rows of the new frame are normalized (`normalize(new).take(keep)`).
+    let all_cols = new.names();
+    let keep = anti_join_rows(&new, &old, &all_cols);
+    let normalized_delta = normalize_nulls(&new.take(&keep));
+    let mut delta = normalized_delta
         .select(&new_cols)
-        .unwrap_or_else(|_| normalized_new.take(&keep));
+        .unwrap_or_else(|_| normalized_delta.clone());
 
     // Deserialize the special columns in the delta.
     let delta_json = get_json_cols(&delta);

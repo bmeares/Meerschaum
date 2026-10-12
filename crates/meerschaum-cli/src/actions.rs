@@ -19,6 +19,13 @@ pub struct SubactionDef {
     pub accepts_executor_keys: bool,
 }
 
+impl SubactionDef {
+    /// The function's docstring (`__doc__`), ported from `meerschaum/actions/*.py`.
+    pub fn doc(&self) -> Option<&'static str> {
+        crate::action_docs::docstring(self.function)
+    }
+}
+
 /// A top-level action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActionDef {
@@ -30,6 +37,13 @@ pub struct ActionDef {
     pub accepts_executor_keys: bool,
     /// The subactions, keyed as `get_subactions` returns them.
     pub subactions: &'static [SubactionDef],
+}
+
+impl ActionDef {
+    /// The action function's docstring (`__doc__`), ported from `meerschaum/actions/*.py`.
+    pub fn doc(&self) -> Option<&'static str> {
+        crate::action_docs::docstring(self.function)
+    }
 }
 
 const fn sub(name: &'static str, function: &'static str) -> SubactionDef {

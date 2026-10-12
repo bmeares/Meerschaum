@@ -2,7 +2,7 @@
 //! a live server ([`crate::FredBackend`]) or the in-memory model ([`crate::MemoryBackend`]) used by
 //! unit tests and offline fixture replays.
 
-use meerschaum_api::traits::async_trait;
+use meerschaum_connector::traits::async_trait;
 
 /// A backend error (connection failure, wrong key type, ...).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

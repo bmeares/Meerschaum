@@ -1,1 +1,51 @@
-//! `meerschaum-jobs`: see `docs/design/v5.0.0.md` §4.1 for this crate's responsibilities.
+//! `meerschaum-jobs`: job supervision for Meerschaum v5 (`docs/design/v5.0.0.md` §6.4).
+//!
+//! Jobs keep v4's on-disk layout under `$MRSM_ROOT_DIR`, so jobs created by Python 4.1 are read by
+//! Rust and vice versa:
+//!
+//! ```text
+//! jobs/<name>/properties.json    label, target, result, process.{began,paused,ended}, env, restart, ...
+//! jobs/<name>/process.pid        the PID of the process doing the work (flock'ed while it runs)
+//! jobs/<name>/input.stdin        FIFO (0600) feeding the job's stdin; input.stdin.block while waiting
+//! jobs/<name>/.stop.json         {"stop_time": ..., "action": "quit" | "kill" | "pause"}
+//! jobs/<name>/prompt_kwargs.json, .externally-managed, pickle.pkl (Python only)
+//! logs/<name>.log.<n>            rotating log subfiles; logs/.<name>.log.offset is the read cursor
+//! ```
+//!
+//! Modules:
+//!
+//! - [`daemon`]: `Daemon` (properties, status, signals, `run` / `kill` / `quit` / `pause` / `resume`);
+//! - [`supervisor`]: the detached process which runs a job (double fork, stdio into the log);
+//! - [`job`]: `Job` and `monitor_logs`;
+//! - [`executor`] / [`systemd`]: the executor interface (`local`, `systemd`, `api:` stubs);
+//! - [`rotating`], [`stdin`], [`properties`]: the file formats;
+//! - [`schedule`]: the `-s` grammar; [`laps`]: the lap loop.
+//!
+//! Behavior follows the Python implementation (v4.1.4); preserved quirks are marked `// PARITY:`.
+
+#![warn(missing_docs)]
+
+pub mod config;
+pub mod daemon;
+pub mod executor;
+pub mod job;
+pub mod laps;
+pub mod names;
+pub mod process;
+pub mod properties;
+pub mod pytime;
+pub mod rotating;
+pub mod schedule;
+pub mod shlex;
+pub mod stdin;
+pub mod supervisor;
+pub mod systemd;
+
+pub use config::{JobPaths, JobsConfig, Seconds};
+pub use daemon::{Daemon, JobsContext, Status};
+pub use executor::{JobExecutor, LocalExecutor, get_jobs};
+pub use job::{Job, JobOptions, MonitorControl, MonitorOptions};
+pub use laps::{LoopControl, LoopRunner, SleepFrom};
+pub use rotating::RotatingFile;
+pub use schedule::{Trigger, parse_schedule};
+pub use supervisor::Launcher;

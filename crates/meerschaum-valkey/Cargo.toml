@@ -11,10 +11,9 @@ description = "Meerschaum v5: valkey crate (see docs/design/v5.0.0.md)"
 [dependencies]
 meerschaum-core = { workspace = true }
 meerschaum-kernel = { workspace = true }
-# The shared `InstanceConnector` traits only (no HTTP client).
+meerschaum-connector = { workspace = true }
+# `wire::to_json` (pandas' `to_json`, for `push_df`); no HTTP client.
 meerschaum-api = { path = "../meerschaum-api", default-features = false }
-# `get_db_type_from_pd_type(..., flavor='postgresql')` for `get_pipe_columns_types`.
-meerschaum-sql = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { workspace = true }
 chrono = { workspace = true }

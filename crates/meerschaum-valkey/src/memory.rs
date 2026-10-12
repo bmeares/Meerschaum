@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use indexmap::IndexMap;
-use meerschaum_api::traits::async_trait;
+use meerschaum_connector::traits::async_trait;
 
 use crate::backend::{BackendError, BackendResult, ScoreBound, ValkeyBackend};
 

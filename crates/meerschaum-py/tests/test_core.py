@@ -597,35 +597,133 @@ def test_every_gated_function_has_a_guard():
 
 
 @requires_core
-def test_rust_mode_falls_through_when_symbol_missing(gate):
-    """With `MRSM_CORE=rust`, unbound symbols run the Python implementations unchanged."""
+def test_rust_mode_falls_through_when_symbol_missing(gate, monkeypatch):
+    """With `MRSM_CORE=rust`, a gated feature whose symbol is not bound runs Python unchanged."""
+    from meerschaum.utils.dtypes import to_pandas_dtype
+
+    gate.set_mode('python')
+    expected = to_pandas_dtype('int')
+    monkeypatch.delattr(core, 'to_pandas_dtype', raising=False)
+    gate.set_mode('rust')
+    assert gate.rust_impl('to_pandas_dtype') is None
+    assert to_pandas_dtype('int') == expected
+
+
+@requires_core
+def test_every_gated_feature_is_bound():
+    unbound = [f for f in _gate.GATED_FEATURES if not hasattr(core.load(), f)]
+    assert not unbound, unbound
+
+
+@requires_core
+def test_rust_mode_matches_python(gate):
+    """Every gated feature returns the same values and pandas dtypes in both modes."""
     pd = pytest.importorskip('pandas')
-    from meerschaum.utils.dataframe import filter_unseen_df, enforce_dtypes, query_df
-    from meerschaum.utils.dtypes import are_dtypes_equal, to_pandas_dtype
+    from meerschaum.utils import dataframe as dfu
+    from meerschaum.utils.dtypes import (
+        are_dtypes_equal, to_pandas_dtype, is_dtype_numeric, get_geometry_type_srid,
+    )
+    from meerschaum.utils.dtypes.sql import get_pd_type_from_db_type
     from meerschaum.utils.pipes import replace_pipes_syntax
     from meerschaum.config import get_config
+    from meerschaum.core.User._User import hash_password, verify_password
 
-    unbound = [f for f in gate.GATED_FEATURES if not hasattr(core.load(), f)]
-    assert unbound, 'every gated feature is bound; this test needs a missing symbol'
+    mixed = pd.DataFrame({
+        'dt': [dt.datetime(2024, 1, 1, tzinfo=dt.timezone.utc), dt.datetime(2024, 1, 2, tzinfo=dt.timezone.utc)],
+        'id': [1, 2],
+        'v': [1.5, None],
+        's': ['a', None],
+        'j': [{'a': 1}, None],
+        'n': [decimal.Decimal('1.1'), decimal.Decimal('2')],
+        'u': [uuid.UUID(int=1), uuid.UUID(int=2)],
+        'b': [b'x', b'y'],
+    })
+
+    def frame(df):
+        return (df.dtypes.astype(str).to_dict(), list(df.index), df.astype(object).where(df.notna(), None).to_dict('records'))
 
     def run_all():
         old = pd.DataFrame({'id': [1, 2], 'v': [1.0, 2.0]})
         new = pd.DataFrame({'id': [2, 3], 'v': [2.0, 3.0]})
         return (
-            filter_unseen_df(old, new).to_dict('records'),
-            enforce_dtypes(pd.DataFrame({'a': ['1', '2']}), {'a': 'int'}).dtypes.astype(str).to_dict(),
-            query_df(new, {'id': 3}).to_dict('records'),
+            frame(dfu.filter_unseen_df(old, new)),
+            frame(dfu.filter_unseen_df(mixed.iloc[:1], mixed)),
+            frame(dfu.enforce_dtypes(pd.DataFrame({'a': ['1', '2']}), {'a': 'int'})),
+            frame(dfu.enforce_dtypes(mixed, {'dt': 'datetime', 'id': 'int', 'v': 'float', 'n': 'numeric'})),
+            frame(dfu.query_df(new, {'id': 3})),
+            frame(dfu.query_df(mixed, {'id': [1]})),
+            frame(dfu.query_df(mixed, begin=dt.datetime(2024, 1, 2), datetime_column='dt')),
+            dfu.get_json_cols(mixed), dfu.get_numeric_cols(mixed), dfu.get_uuid_cols(mixed),
+            dfu.get_bytes_cols(mixed), dfu.get_datetime_cols(mixed),
+            dfu.get_datetime_cols(mixed, with_tz_precision=True), dfu.get_geometry_cols(mixed),
             are_dtypes_equal('int', 'Int64'),
             are_dtypes_equal('datetime', 'string'),
-            to_pandas_dtype('datetime'),
+            are_dtypes_equal({'a': 'int'}, {'a': 'int64'}),
+            [to_pandas_dtype(d) for d in ('datetime', 'int', 'numeric[10,2]', 'BIGINT', 'str')],
+            is_dtype_numeric('float64'), is_dtype_numeric('string'),
+            get_geometry_type_srid('geometry[Point, 4326]'),
+            get_geometry_type_srid('geometry[POINT, ESRI:102003]'),
+            get_pd_type_from_db_type('TIMESTAMPTZ'), get_pd_type_from_db_type('NUMERIC(10, 2)'),
             replace_pipes_syntax('no pipes here'),
+            replace_pipes_syntax("SELECT * FROM {{ Pipe('a', 'b', instance='sql:local') }}"),
             get_config('meerschaum', 'instance', warn=False),
+            get_config('does', 'not', 'exist', warn=False),
+            hash_password('pw', salt=b'0123456789abcdef', rounds=1000),
+            verify_password('pw', hash_password('pw', rounds=1000)),
         )
 
     gate.set_mode('python')
     expected = run_all()
     gate.set_mode('rust')
-    assert run_all() == expected
+    actual = run_all()
+    for i, (e, a) in enumerate(zip(expected, actual)):
+        assert e == a, f"item {i}: python={e!r} rust={a!r}"
+
+
+@requires_core
+def test_out_of_range_floats_do_not_saturate(gate):
+    """
+    Integral floats outside int64 (`1e20`, `-1e20`, `2**63`, `2**64`) keep their values in float,
+    numeric and untyped columns, and a failed int cast leaves them alone, as in v4 (they used to
+    saturate to `i64::MAX` / `i64::MIN`).
+    """
+    pd = pytest.importorskip('pandas')
+    from meerschaum.utils import dataframe as dfu
+
+    values = [1e20, -1e20, float(2**63), float(2**64)]
+
+    def frame(df):
+        return (
+            {str(c): str(t) for c, t in df.dtypes.items()},
+            [repr(v) for v in df[df.columns[0]].tolist()],
+        )
+
+    def run_all():
+        out = []
+        for typ in ('float', 'numeric', 'int', None):
+            dtypes = {'a': typ} if typ else {}
+            for series in (
+                pd.Series(values),
+                pd.Series(values, dtype=object),
+                pd.Series([1] + values, dtype=object),
+            ):
+                out.append(frame(dfu.enforce_dtypes(pd.DataFrame({'a': series}), dtypes)))
+        new = pd.DataFrame({'a': values})
+        out.append(frame(dfu.filter_unseen_df(pd.DataFrame({'a': [1.5]}), new)))
+        out.append(frame(dfu.filter_unseen_df(pd.DataFrame({'a': [1]}), new)))
+        out.append(frame(dfu.query_df(new, {'a': values[0]})))
+        return out
+
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        gate.set_mode('python')
+        expected = run_all()
+        gate.set_mode('rust')
+        actual = run_all()
+    for i, (e, a) in enumerate(zip(expected, actual)):
+        assert e == a, f"item {i}: python={e!r} rust={a!r}"
+    assert "'9223372036854775807'" not in repr(actual)
 
 
 @requires_core

@@ -6,8 +6,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use meerschaum_api::pipe_ops::Doc;
-use meerschaum_api::traits::{DataQuery, DateBound, InstanceConnector};
+use meerschaum_connector::pipe_ops::Doc;
+use meerschaum_connector::traits::{DataQuery, DateBound, InstanceConnector};
 use meerschaum_core::users::{Expiration, Token, User};
 use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_kernel::value::{Value as KValue, parse_datetime_value};

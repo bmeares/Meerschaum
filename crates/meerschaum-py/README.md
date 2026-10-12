@@ -1,8 +1,8 @@
 # meerschaum-py: the `meerschaum._core` extension
 
 PyO3 bindings that expose the Rust crates to Python as `meerschaum._core` (design §4.2, D3, D12).
-This wave binds the bridge only, no kernel or core functions. The goal is to prove the build,
-load and data paths before real functions are bound.
+Wave 3 binds the kernel and the core behind the parity-phase `MRSM_CORE` gate; every discrepancy
+the sqlite suite found under `MRSM_CORE=rust` is tracked in [`PARITY.md`](PARITY.md).
 
 | Symbol | What it does |
 |---|---|
@@ -13,6 +13,32 @@ load and data paths before real functions are bound.
 | `polars_roundtrip(df)` | `polars.DataFrame` → `polars::DataFrame` → `polars.DataFrame` through `pyo3-polars` (crate feature `polars`: off for plain cargo builds, on by default in `build_py.sh`) |
 | `HAS_STATIC_CONFIG`, `HAS_POLARS` | Build-time flags |
 
+Kernel and core functions (each takes exactly the arguments its dispatch guard passes, so the
+Python signature is the v4 one):
+
+| Symbol | Python function it replaces | Rust |
+|---|---|---|
+| `enforce_dtypes(df, dtypes, explicit_dtypes, safe_copy, coerce_numeric, coerce_timezone, strip_timezone, as_polars, debug)` | `meerschaum.utils.dataframe.enforce_dtypes` | `kernel::enforce::enforce_dtypes_with_path` |
+| `filter_unseen_df(old_df, new_df, safe_copy, dtypes, include_unchanged_columns, coerce_mixed_numerics, debug)` | `...dataframe.filter_unseen_df` | `kernel::diff::filter_unseen_df` |
+| `query_df(df, params, begin, end, datetime_column, select_columns, omit_columns, inplace, reset_index, coerce_types, debug)` | `...dataframe.query_df` | `kernel::query::query_df` |
+| `get_json_cols`, `get_numeric_cols`, `get_uuid_cols`, `get_bytes_cols` `(df)`; `get_datetime_cols(df, timezone_aware, timezone_naive, with_tz_precision)`; `get_geometry_cols(df, with_types_srids)` | `...dataframe.get_*_cols` | `kernel::detect` |
+| `are_dtypes_equal(ldtype, rdtype)`, `to_pandas_dtype(dtype)`, `is_dtype_numeric(dtype)`, `get_geometry_type_srid(dtype, default_type, default_srid)` | `meerschaum.utils.dtypes.*` | `core::dtypes`, `kernel::dtypes` |
+| `get_pd_type_from_db_type(db_type, allow_custom_dtypes)` | `meerschaum.utils.dtypes.sql.*` | `core::dtypes` |
+| `get_config(*keys, patch, substitute, sync_files, write_missing, as_tuple, warn, debug)` | `meerschaum.config.get_config` | `core::config::Config` |
+| `replace_pipes_syntax(text, _pipe)` | `meerschaum.utils.pipes.replace_pipes_syntax` | `core::template` with a resolver that reads live Python `Pipe`s |
+| `hash_password(password, salt, rounds)`, `verify_password(password, password_hash)` | `meerschaum.core.User._User.*` | `core::users` |
+
+DataFrames cross as Arrow (`src/pandas_bridge.rs`): typed pandas columns through
+`__arrow_c_stream__`, `object` / `geometry` columns value by value (`src/convert.rs`, with one
+vectorized `shapely.to_wkb` / `from_wkb` call per geometry column), Polars frames directly, Dask
+frames computed first. On the way out the boundary restores the pandas dtypes v4 returns
+(`int64[pyarrow]` vs `Int64` vs `int64`, Arrow-backed columns where v4 went through Polars,
+GeoDataFrames with their CRS); `PARITY.md` explains the rules. Columns the kernel returns
+unchanged are copies of the input Series, and `enforce_dtypes` passes untyped pandas columns as
+placeholders (checked after the call, redone with full conversion if one changed).
+[`PERF.md`](PERF.md) has the benchmark (`bench/bench_boundary.py`), the profile and the
+optimizations; `MRSM_CORE_TRACE=1` prints per-stage timings of each call to stderr.
+
 ## Layout
 
 ```
@@ -20,8 +46,11 @@ crates/meerschaum-py/
   Cargo.toml        [lib] name = "_core", crate-type = ["cdylib", "rlib"]
   build.rs          records build_info
   pyproject.toml    maturin config: module-name = "meerschaum._core._core", python-source = "../.."
-  src/              lib.rs (#[pymodule] _core), arrow_bridge.rs, ffi_import.rs, polars_bridge.rs, ...
+  src/              lib.rs (#[pymodule] _core), arrow_bridge.rs, ffi_import.rs, polars_bridge.rs,
+                    convert.rs (Python <-> Value), pandas_bridge.rs (frames), kernel_api.rs,
+                    core_api.rs, trace.rs (MRSM_CORE_TRACE stage timers)
   tests/            arrow_ffi.rs (cargo test), test_core.py (pytest)
+  bench/            bench_boundary.py (python vs rust timings, see PERF.md)
 meerschaum/_core/
   __init__.py       lazy loader (stdlib only)
   _gate.py          MRSM_CORE parity gate (development only, see below)
@@ -107,22 +136,18 @@ match whichever version this crate uses before a second crate depends on pyo3.
 
 ## Sharing the Polars build with the kernel
 
-The crate uses `polars = { workspace = true }` with no extra features. `pyo3-polars` 0.24,
-however, enables `polars-error/python`, which pulls pyo3 into `polars-error`, and
-`polars-core/allow_unused`. Every Polars crate depends on `polars-error`, so whenever the `polars`
-feature is on, the whole Polars stack is compiled with a different fingerprint from the kernel's.
-That means a second copy in `target/` unless a whole-workspace build unifies the features. For this
-reason the `polars` feature is **opt-in**:
+The crate depends on `polars = { workspace = true }` (the kernel's features, used for column
+types at the pandas boundary), so `cargo build/test/clippy -p meerschaum-py` reuses the kernel's
+Polars build. `pyo3-polars` 0.24, however, enables `polars-error/python`, which pulls pyo3 into
+`polars-error`, and `polars-core/allow_unused`. Every Polars crate depends on `polars-error`, so
+whenever the `polars` feature (which now only adds `pyo3-polars`) is on, the whole Polars stack is
+compiled with a different fingerprint from the kernel's. For this reason the `polars` feature is
+**opt-in**: `build_py.sh` turns it on (release by default, so it does not duplicate the kernel's
+dev build) and `--no-polars` leaves it off.
 
-- `cargo build/test/clippy -p meerschaum-py` builds Polars only through `meerschaum-kernel`
-  (this crate depends on core, kernel, sql and cli, the top of the crate layering), with the
-  kernel's features, so it reuses the kernel's build.
-- `build_py.sh` turns it on (release by default, so it does not duplicate the kernel's dev build).
-- `--no-polars` leaves it off.
-
-Once kernel functions are bound, `polars_roundtrip` should move to the stream path (Arrow C stream
-→ `polars::DataFrame` via polars-arrow FFI). That lets `pyo3-polars` be dropped, and the extension
-links exactly the kernel's Polars.
+`polars_roundtrip` should move to the stream path (Arrow C stream → `polars::DataFrame` via
+polars-arrow FFI), so `pyo3-polars` can be dropped and the extension links exactly the kernel's
+Polars. The kernel bindings already take streams.
 
 ## Findings at the Arrow boundary
 
@@ -140,6 +165,13 @@ links exactly the kernel's Polars.
   restores `Int64`, `category` and tz-aware dtypes) and field-level metadata
   (`ARROW:extension:name`, for example GeoArrow WKB) round-trip. Every imported batch carries the
   stream's full schema.
+- **Empty streams have no batches.** A zero-row pandas or Polars frame exports a stream with no
+  batches at all; `pandas_bridge::frame_from_arrow` imports an empty batch carrying the stream's
+  schema so the columns survive.
+- **Polars `Extension` string columns.** Polars 1.36 exports them as `Utf8View` with a buffer
+  layout arrow-rs 56 panics on (`byte_view_array.rs`). The kernel bindings import Polars frames
+  through `DataFrame.to_arrow()` (non-view layout, extension metadata kept) when pyarrow is
+  available, and fall back to the capsule otherwise.
 - **Zero copy.** Imported buffers are the producer's allocations, kept alive by the C Data Interface
   release callbacks. The tests assert that buffer addresses are unchanged.
 
@@ -158,8 +190,11 @@ if (_rust := _rust_impl('filter_unseen_df')) is not None:
 symbol of that name. An unbound symbol falls through to Python. An error raised inside a bound
 function propagates. With `MRSM_CORE=rust` and no build at all, `CoreNotBuiltError` is raised.
 Gated today, listed in `_gate.GATED_FEATURES`: `meerschaum.utils.dataframe.filter_unseen_df`,
-`enforce_dtypes` and `query_df`; `meerschaum.utils.dtypes.are_dtypes_equal` and `to_pandas_dtype`;
-`meerschaum.utils.pipes.replace_pipes_syntax`; `meerschaum.config.get_config`.
+`enforce_dtypes`, `query_df` and the six detectors; `meerschaum.utils.dtypes.are_dtypes_equal`,
+`to_pandas_dtype`, `is_dtype_numeric` and `get_geometry_type_srid`;
+`meerschaum.utils.dtypes.sql.get_pd_type_from_db_type`; `meerschaum.utils.pipes.replace_pipes_syntax`;
+`meerschaum.config.get_config`; `meerschaum.core.User._User.hash_password` and `verify_password`.
+Every gated feature is bound.
 
 **This gate is development-only.** D14 removes the Python core in 5.0, and the shipped package has
 no `MRSM_CORE` switch. The parity oracle is v4.1.x in a separate venv (§10.2). The gate, its guards
