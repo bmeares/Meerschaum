@@ -1,0 +1,6 @@
+
+Run the `setup()` function for Meerschaum plugins.
+
+Example:
+    `setup plugins noaa covid`
+

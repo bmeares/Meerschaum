@@ -1,0 +1,5 @@
+
+Drop and resync pipes or indices.
+
+    Options:
+        `flush [indices, pipes]`

@@ -1,0 +1,4328 @@
+{
+ "generator": "gen_filter_unseen_df.py",
+ "meerschaum_version": "4.1.4",
+ "pandas_version": "3.0.0",
+ "cases": [
+  {
+   "name": "ints_simple",
+   "old": {
+    "columns": [
+     {
+      "name": "a",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "a",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "a",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "changed_values",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 25
+       },
+       {
+        "t": "int",
+        "v": 30
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 25
+       },
+       {
+        "t": "int",
+        "v": 30
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "no_changes",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 20
+       },
+       {
+        "t": "int",
+        "v": 10
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": []
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": []
+     }
+    ],
+    "index": []
+   }
+  },
+  {
+   "name": "new_dups",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 5
+       },
+       {
+        "t": "int",
+        "v": 5
+       },
+       {
+        "t": "int",
+        "v": 10
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 5
+       },
+       {
+        "t": "int",
+        "v": 5
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "old_dups",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 10
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 20
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "int_vs_float",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.0
+       },
+       {
+        "t": "float",
+        "v": 2.5
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "1.0"
+       },
+       {
+        "t": "dec",
+        "v": "2.5"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "int_vs_float_nocoerce",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.0
+       },
+       {
+        "t": "float",
+        "v": 2.5
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {
+    "coerce_mixed_numerics": false
+   },
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 2.5
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "float_vs_int",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.5
+       },
+       {
+        "t": "float",
+        "v": 2.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "1.0"
+       },
+       {
+        "t": "dec",
+        "v": "2.0"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "nan_equal",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.5
+       },
+       {
+        "t": "float",
+        "v": "nan"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.5
+       },
+       {
+        "t": "float",
+        "v": "nan"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": []
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": []
+     }
+    ],
+    "index": []
+   }
+  },
+  {
+   "name": "none_vs_value",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "a",
+       {
+        "t": "float",
+        "v": "nan"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       null,
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "na"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "string_none_is_null",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "a",
+       {
+        "t": "float",
+        "v": "nan"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "a",
+       "None"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": []
+     },
+     {
+      "name": "val",
+      "dtype": "object",
+      "crs": null,
+      "values": []
+     }
+    ],
+    "index": []
+   }
+  },
+  {
+   "name": "string_nan_is_null",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "NaN"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": []
+     },
+     {
+      "name": "val",
+      "dtype": "object",
+      "crs": null,
+      "values": []
+     }
+    ],
+    "index": []
+   }
+  },
+  {
+   "name": "empty_string_not_null",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       ""
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       ""
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "extra_new_col",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       }
+      ]
+     },
+     {
+      "name": "extra",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "x",
+       "y"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       }
+      ]
+     },
+     {
+      "name": "extra",
+      "dtype": "string",
+      "crs": null,
+      "values": [
+       "x",
+       "y"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "partial_new",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       }
+      ]
+     },
+     {
+      "name": "other",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "a",
+       "b"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 21
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 21
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "reordered_cols",
+   "old": {
+    "columns": [
+     {
+      "name": "a",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "b",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "b",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "a",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 4
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "b",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "a",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 4
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "datetimes_utc",
+   "old": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-03T00:00:00+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-03T00:00:00+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "datetimes_new_naive",
+   "old": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-03T00:00:00",
+        "tz": null
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": {
+    "dt": "datetime64[us, UTC]",
+    "val": "int64[pyarrow]"
+   },
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-03T00:00:00+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "datetimes_dtypes_naive",
+   "old": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00",
+        "tz": null
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-03T00:00:00",
+        "tz": null
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 30
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": {
+    "dt": "datetime64[us]",
+    "val": "int64[pyarrow]"
+   },
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-03T00:00:00",
+        "tz": null
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 30
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "json_key_order",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "meta",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "json",
+        "v": {
+         "a": 1,
+         "b": 2
+        }
+       },
+       {
+        "t": "json",
+        "v": {
+         "x": [
+          1,
+          2
+         ]
+        }
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "meta",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "json",
+        "v": {
+         "b": 2,
+         "a": 1
+        }
+       },
+       {
+        "t": "json",
+        "v": {
+         "x": [
+          2,
+          1
+         ]
+        }
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "meta",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "json",
+        "v": {
+         "x": [
+          2,
+          1
+         ]
+        }
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "json_vs_string",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "meta",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "json",
+        "v": {
+         "a": 1
+        }
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "meta",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "{\"a\": 1}"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "meta",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "json",
+        "v": {
+         "a": 1
+        }
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "numeric_scale",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "num",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "1.10"
+       },
+       {
+        "t": "dec",
+        "v": "2"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "num",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "1.1"
+       },
+       {
+        "t": "dec",
+        "v": "2"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "num",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "1.1"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "numeric_dtypes_quantize",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "num",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "1.10"
+       },
+       {
+        "t": "dec",
+        "v": "2.00"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "num",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "1.10"
+       },
+       {
+        "t": "dec",
+        "v": "2.5"
+       },
+       {
+        "t": "dec",
+        "v": "3.333"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "dtypes": {
+    "id": "int64",
+    "num": "numeric[10,2]"
+   },
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "num",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "2.50"
+       },
+       {
+        "t": "dec",
+        "v": "3.33"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "numeric_nan",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "num",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "1"
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "num",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "dec",
+        "v": "1"
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": []
+     },
+     {
+      "name": "num",
+      "dtype": "str",
+      "crs": null,
+      "values": []
+     }
+    ],
+    "index": []
+   }
+  },
+  {
+   "name": "uuids",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "u",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "uuid",
+        "v": "12345678-1234-5678-1234-567812345678"
+       },
+       {
+        "t": "uuid",
+        "v": "87654321-4321-8765-4321-876543218765"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "u",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "uuid",
+        "v": "12345678-1234-5678-1234-567812345678"
+       },
+       {
+        "t": "uuid",
+        "v": "12345678-1234-5678-1234-567812345678"
+       },
+       null
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "u",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "uuid",
+        "v": "12345678-1234-5678-1234-567812345678"
+       },
+       {
+        "t": "na"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "bytes",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "b",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "bytes",
+        "v": "YQ=="
+       },
+       {
+        "t": "bytes",
+        "v": "Yg=="
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "b",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "bytes",
+        "v": "YQ=="
+       },
+       {
+        "t": "bytes",
+        "v": "Yw=="
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "b",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "bytes",
+        "v": "Yw=="
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "geometry",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "g",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "geom",
+        "wkt": "POINT (0 0)",
+        "wkb": "010100000000000000000000000000000000000000"
+       },
+       {
+        "t": "geom",
+        "wkt": "POINT (1 1)",
+        "wkb": "0101000000000000000000F03F000000000000F03F"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "g",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "geom",
+        "wkt": "POINT (0 0)",
+        "wkb": "010100000000000000000000000000000000000000"
+       },
+       {
+        "t": "geom",
+        "wkt": "POINT (1 2)",
+        "wkb": "0101000000000000000000F03F0000000000000040"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "g",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "geom",
+        "wkt": "POINT (1 2)",
+        "wkb": "0101000000000000000000F03F0000000000000040"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "dates",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "d",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "date",
+        "v": "2024-01-01"
+       },
+       {
+        "t": "date",
+        "v": "2024-01-02"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "d",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "date",
+        "v": "2024-01-01"
+       },
+       {
+        "t": "date",
+        "v": "2024-01-03"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "d",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "date",
+        "v": "2024-01-03"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "bools",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "f",
+      "dtype": "boolean",
+      "crs": null,
+      "values": [
+       true,
+       false
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "f",
+      "dtype": "boolean",
+      "crs": null,
+      "values": [
+       true,
+       {
+        "t": "na"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "f",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       {
+        "t": "na"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "nullable_ints",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "Int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "v",
+      "dtype": "Int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "na"
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "Int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "v",
+      "dtype": "Int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "na"
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "Int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "v",
+      "dtype": "Int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty_old",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": []
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": []
+     }
+    ],
+    "index": []
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty_new",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": []
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": []
+     }
+    ],
+    "index": []
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": []
+     },
+     {
+      "name": "val",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": []
+     }
+    ],
+    "index": []
+   }
+  },
+  {
+   "name": "both_empty_no_cols",
+   "old": {
+    "columns": [],
+    "index": []
+   },
+   "new": {
+    "columns": [],
+    "index": []
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [],
+    "index": []
+   }
+  },
+  {
+   "name": "old_none",
+   "old": null,
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "strings",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "s",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "a",
+       "b"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "s",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "a",
+       "B"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "s",
+      "dtype": "object",
+      "crs": null,
+      "values": [
+       "B"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "dtypes_cast_str",
+   "old": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "s",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "1",
+       "2"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "s",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": {
+    "id": "int64",
+    "s": "string"
+   },
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 2
+       }
+      ]
+     },
+     {
+      "name": "s",
+      "dtype": "str",
+      "crs": null,
+      "values": [
+       "3"
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "epochs",
+   "old": {
+    "columns": [
+     {
+      "name": "ts",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1700000000
+       },
+       {
+        "t": "int",
+        "v": 1700000060
+       }
+      ]
+     },
+     {
+      "name": "v",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.0
+       },
+       {
+        "t": "float",
+        "v": 2.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "new": {
+    "columns": [
+     {
+      "name": "ts",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1700000060
+       },
+       {
+        "t": "int",
+        "v": 1700000120
+       }
+      ]
+     },
+     {
+      "name": "v",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 2.0
+       },
+       {
+        "t": "float",
+        "v": 3.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "dtypes": null,
+   "kwargs": {},
+   "ok": {
+    "columns": [
+     {
+      "name": "ts",
+      "dtype": "int64[pyarrow]",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1700000120
+       }
+      ]
+     },
+     {
+      "name": "v",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 3.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -16,6 +16,7 @@ from meerschaum.utils.typing import (
     Optional, Dict, Any, List, Hashable, Generator,
     Iterator, Iterable, Union, TYPE_CHECKING, Tuple,
 )
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 if TYPE_CHECKING:
     pd, dask = mrsm.attempt_import('pandas', 'dask')
@@ -286,6 +287,12 @@ def filter_unseen_df(
     ```
 
     """
+    if (_rust := _rust_impl('filter_unseen_df')) is not None:
+        return _rust(
+            old_df, new_df=new_df, safe_copy=safe_copy, dtypes=dtypes,
+            include_unchanged_columns=include_unchanged_columns,
+            coerce_mixed_numerics=coerce_mixed_numerics, debug=debug,
+        )
     if old_df is None:
         return new_df
 
@@ -1585,6 +1592,12 @@ def enforce_dtypes(
     -------
     The Pandas DataFrame with the types enforced.
     """
+    if (_rust := _rust_impl('enforce_dtypes')) is not None:
+        return _rust(
+            df, dtypes=dtypes, explicit_dtypes=explicit_dtypes, safe_copy=safe_copy,
+            coerce_numeric=coerce_numeric, coerce_timezone=coerce_timezone,
+            strip_timezone=strip_timezone, as_polars=as_polars, debug=debug,
+        )
     import json
     import functools
     from meerschaum.utils.debug import dprint
@@ -2245,6 +2258,12 @@ def query_df(
     -------
     A Pandas DataFrame query result.
     """
+    if (_rust := _rust_impl('query_df')) is not None:
+        return _rust(
+            df, params=params, begin=begin, end=end, datetime_column=datetime_column,
+            select_columns=select_columns, omit_columns=omit_columns, inplace=inplace,
+            reset_index=reset_index, coerce_types=coerce_types, debug=debug,
+        )
 
     def _process_select_columns(_df):
         if not select_columns:

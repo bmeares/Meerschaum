@@ -1,0 +1,152 @@
+{
+  "hashes": [
+    {
+      "password": "hunter2",
+      "hash": "$pbkdf2-sha256$1$AAECAwQFBgcICQoLDA0ODw$agw5Fd..iqqa5x5dvH02ifmCDvjnoVibfSlIxNIR.vA"
+    },
+    {
+      "password": "hunter2",
+      "hash": "$pbkdf2-sha256$1000$AAECAwQFBgcICQoLDA0ODw$9VUOiRGfWTzTZixtfaW9P3qQ4lzS3CIfWKYWbHcnU9M"
+    },
+    {
+      "password": "hunter2",
+      "hash": "$pbkdf2-sha256$29000$AAECAwQFBgcICQoLDA0ODw$DWK2Ri.EJK3cl2tX0KzFEiSGkcuiU7eyT2RuX/Rp3B0"
+    },
+    {
+      "password": "hunter2",
+      "hash": "$pbkdf2-sha256$5000$2c/QgBGTeVy0Mby/xCTAHw$jgT5r4vh4tu/7Cno1qe5Ds.dWMdlzhUBI06W8onPA2Q"
+    },
+    {
+      "password": "",
+      "hash": "$pbkdf2-sha256$1$AQIDBAUGBwgJCgsMDQ4PEA$HAGqQkWV863mDMDgC8RmaIAp8tCMVWqY0PQvje/QXHM"
+    },
+    {
+      "password": "",
+      "hash": "$pbkdf2-sha256$1000$AQIDBAUGBwgJCgsMDQ4PEA$ictY0KTmm7DgHxLBjcPxog3xbkqPJOWV3W41J4aR9xk"
+    },
+    {
+      "password": "",
+      "hash": "$pbkdf2-sha256$29000$AQIDBAUGBwgJCgsMDQ4PEA$GeJiPDIUeh9zkanfR8Evue9czrXpJ/t8Mky7TDgZk2Y"
+    },
+    {
+      "password": "",
+      "hash": "$pbkdf2-sha256$5000$DemJy9RqpEX6o8JUPCchrg$7CPo6ErG9LrMinkA5NMk1HWjgg8c1fpWi1rEZicmOMQ"
+    },
+    {
+      "password": "pässwörd ✓",
+      "hash": "$pbkdf2-sha256$1$AgMEBQYHCAkKCwwNDg8QEQ$B4Qm392pRz2c9PGVJTxlPGt8c41A3nCgzWbEhAnNMr4"
+    },
+    {
+      "password": "pässwörd ✓",
+      "hash": "$pbkdf2-sha256$1000$AgMEBQYHCAkKCwwNDg8QEQ$8Nh14OpxvyaJgBhj5sO4dhm7hhb6/jHHZ.wG9DfcgGk"
+    },
+    {
+      "password": "pässwörd ✓",
+      "hash": "$pbkdf2-sha256$29000$AgMEBQYHCAkKCwwNDg8QEQ$yPlo0rmQ/RK7RfJR95VvwHLq.1rb3u3kxH831qD5shY"
+    },
+    {
+      "password": "pässwörd ✓",
+      "hash": "$pbkdf2-sha256$5000$bS4p7A1NSBSJ1TqavlFvGA$P7QaKO3eIH8b5YUqDHoxl/okrTbAed.I8mIrr5oMxoY"
+    },
+    {
+      "password": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hash": "$pbkdf2-sha256$1$AwQFBgcICQoLDA0ODxAREg$W4ZxLToGJ4YURshgRNkZOf3Eq7rYIolW9TxXD5ONefw"
+    },
+    {
+      "password": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hash": "$pbkdf2-sha256$1000$AwQFBgcICQoLDA0ODxAREg$tm1N11BqBlRjR46Y4qkEMBwXjR9ap7HM4aCbwoerS4w"
+    },
+    {
+      "password": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hash": "$pbkdf2-sha256$29000$AwQFBgcICQoLDA0ODxAREg$Dbj0kv0O1YRGguu7wcltAl8xUdUNS/.DEsV2YIlOhY4"
+    },
+    {
+      "password": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hash": "$pbkdf2-sha256$5000$gdWbpn/x.vXyVVBsGwhvZw$eWOAp6TIshqrjRn9WS2hKzRs/ZEwvWAOA5Avs4AEvJ0"
+    },
+    {
+      "password": " spaces ",
+      "hash": "$pbkdf2-sha256$1$BAUGBwgJCgsMDQ4PEBESEw$VCUKKDZ9WRcoyvvb9Xc8SthCi2xXPNaA9S5h7eYaWTg"
+    },
+    {
+      "password": " spaces ",
+      "hash": "$pbkdf2-sha256$1000$BAUGBwgJCgsMDQ4PEBESEw$301dhSqN42cToLQ08Jjvlsx4ehd8dxjG0na91i/Pm6A"
+    },
+    {
+      "password": " spaces ",
+      "hash": "$pbkdf2-sha256$29000$BAUGBwgJCgsMDQ4PEBESEw$K7YM2oub/ngSZ3nxFkm4J4KpPe1hgZaaM1u2xMOaF2E"
+    },
+    {
+      "password": " spaces ",
+      "hash": "$pbkdf2-sha256$5000$N6.610XH8EzFEHbF19xewA$0vQrV.l.sZ2X196oA4b8ytvyhkzs4aD8/ryn54n6SiA"
+    },
+    {
+      "password": "emoji 🐍",
+      "hash": "$pbkdf2-sha256$1$BQYHCAkKCwwNDg8QERITFA$8TNkucR749EV6OOx84UkseVjyjtJKVyjNJ7TzArUu0g"
+    },
+    {
+      "password": "emoji 🐍",
+      "hash": "$pbkdf2-sha256$1000$BQYHCAkKCwwNDg8QERITFA$O6fRD1PdfgrOhkAplMnXQAgTinpmeGi7Hh1xdtL8JEI"
+    },
+    {
+      "password": "emoji 🐍",
+      "hash": "$pbkdf2-sha256$29000$BQYHCAkKCwwNDg8QERITFA$kggZ5dh6CkiL.INw2n3WA/rj4y4RBSNePiJUt9eV5tU"
+    },
+    {
+      "password": "emoji 🐍",
+      "hash": "$pbkdf2-sha256$5000$4BXPAKF6RRbs3EaItk4H.Q$PCpSUk.F4C34fcYj.zdifDuL8002Uvt758A1xPAWBKg"
+    },
+    {
+      "password": "default-rounds",
+      "hash": "$pbkdf2-sha256$1000000$Zfqg6qfbv37RTgR.n84Tig$NfhgD3UyQOTSW84gKCnk4HaeD4qcWYlWXw0DtD5vg3I"
+    },
+    {
+      "password": "token-secret",
+      "hash": "$pbkdf2-sha256$100000$P7mLC/uzCxlO5TyKocKSfQ$PUXgtxSljFZWNYjWkAMKN5vjTJr0nJCq2IgYwKvzhJ4"
+    }
+  ],
+  "edge_cases": {
+    "standard_alphabet": {
+      "hash": "$pbkdf2-sha256$10$MDEyMzQ1Njc4OWFiY2RlZg$EO1Fh0v3ftfxKQpQUZWMo5nO3o2ihHDaM23AlYa6TBQ",
+      "ok": true
+    },
+    "corrupt_parts": {
+      "hash": "$pbkdf2-sha256$10$abc",
+      "ok": false
+    },
+    "bad_rounds": {
+      "hash": "$pbkdf2-sha256$ten$MDEyMzQ1Njc4OWFiY2RlZg$EO1Fh0v3ftfxKQpQUZWMo5nO3o2ihHDaM23AlYa6TBQ",
+      "ok": false
+    },
+    "whitespace_rounds": {
+      "hash": "$pbkdf2-sha256$ 10 $MDEyMzQ1Njc4OWFiY2RlZg$EO1Fh0v3ftfxKQpQUZWMo5nO3o2ihHDaM23AlYa6TBQ",
+      "ok": true
+    },
+    "bad_base64_len": {
+      "hash": "$pbkdf2-sha256$10$MDEyMzQ1Njc4OWFiY2RlZg$EO1Fh0v3ftfxKQpQUZWMo5nO3o2ihHDaM23AlYa6TBQA",
+      "ok": false
+    },
+    "junk_chars": {
+      "hash": "$pbkdf2-sha256$10$**MDEyMzQ1Njc4OWFiY2RlZg$EO1Fh0v3ftfxKQpQUZWMo5nO3o2ihHDaM23AlYa6TBQ",
+      "ok": false
+    },
+    "sha512": {
+      "hash": "$pbkdf2-sha512$10$MDEyMzQ1Njc4OWFiY2RlZg$EO1Fh0v3ftfxKQpQUZWMo5nO3o2ihHDaM23AlYa6TBQ",
+      "ok": false
+    }
+  },
+  "valid_username": {
+    "alice": true,
+    "a.b-c_d@e": true,
+    "": false,
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": false,
+    "bad name": false,
+    "ünïcode": true,
+    "semi;colon": false
+  },
+  "api_key": {
+    "id": "12345678-1234-5678-1234-567812345678",
+    "secret": "abcDEF123",
+    "key": "mrsm-key:MTIzNDU2NzgtMTIzNC01Njc4LTEyMzQtNTY3ODEyMzQ1Njc4OmFiY0RFRjEyMw=="
+  }
+}

@@ -33,6 +33,8 @@ from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.config._patch import (
     apply_patch_to_config,
 )
+from meerschaum._core._gate import rust_impl as _rust_impl
+
 __all__ = (
     'get_plugin_config',
     'write_plugin_config',
@@ -159,6 +161,11 @@ def get_config(
     >>> get_config('does', 'not', 'exist')
     UserWarning: Invalid keys in config: ('does', 'not', 'exist')
     """
+    if (_rust := _rust_impl('get_config')) is not None:
+        return _rust(
+            *keys, patch=patch, substitute=substitute, sync_files=sync_files,
+            write_missing=write_missing, as_tuple=as_tuple, warn=warn, debug=debug,
+        )
     import json
 
     symlinks_key = STATIC_CONFIG['config']['symlinks_key']

@@ -1,0 +1,24 @@
+
+Edit Meerschaum configuration files.
+
+Specify a specific configuration key to edit.
+Defaults to editing `meerschaum` configuration (connectors, instance, etc.).
+
+Pass `--rollback` to restore a key from its most recent backup instead of
+opening the editor. Backups are taken automatically before each edit.
+
+Examples:
+    ```
+    ### Edit the main 'meerschaum' configuration.
+    edit config
+
+    ### Edit 'system' configuration.
+    edit config system
+
+    ### Create a new configuration file called 'myconfig'.
+    edit config myconfig
+
+    ### Roll back the 'stack' configuration to its previous state.
+    edit config stack --rollback
+    ```
+

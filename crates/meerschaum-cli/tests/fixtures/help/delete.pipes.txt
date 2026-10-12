@@ -1,0 +1,3 @@
+
+Drop pipes and delete their registrations.
+

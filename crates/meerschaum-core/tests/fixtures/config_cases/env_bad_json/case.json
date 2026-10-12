@@ -1,0 +1,15 @@
+{
+  "env": {
+    "MRSM_SQL_BAD_JSON": "{not json}"
+  },
+  "queries": [
+    {
+      "keys": [
+        "meerschaum",
+        "connectors",
+        "sql",
+        "bad_json"
+      ]
+    }
+  ]
+}

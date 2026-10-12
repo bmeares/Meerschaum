@@ -1,0 +1,3 @@
+
+Edit users' registration information.
+

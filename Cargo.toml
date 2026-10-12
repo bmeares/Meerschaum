@@ -57,8 +57,8 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arrow = "56"
-polars = { version = "0.51", features = ["lazy", "dtype-full", "serde", "json", "ipc", "parquet", "strings", "temporal", "timezones", "decimal", "object"] }
+polars = { version = "0.51", features = ["lazy", "dtype-full", "serde", "json", "ipc", "parquet", "strings", "temporal", "timezones", "object"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 clap = { version = "4", features = ["derive", "env", "string"] }
-pyo3 = { version = "0.26", features = ["abi3-py311", "extension-module"] }
+pyo3 = { version = "0.25", features = ["abi3-py311", "extension-module"] }

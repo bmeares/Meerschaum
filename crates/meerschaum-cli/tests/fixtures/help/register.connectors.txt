@@ -1,0 +1,10 @@
+
+Create new connectors programmatically with `--params`.
+See `bootstrap connector`.
+
+Examples:
+
+mrsm register connector sql:tmp --params 'uri:sqlite:////tmp/tmp.db'
+
+mrsm register connector -c sql:new --params '{"database": "/tmp/new.db"}'
+

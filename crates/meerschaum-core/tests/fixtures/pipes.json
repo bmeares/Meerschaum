@@ -1,0 +1,3221 @@
+{
+  "cases": [
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "weather"
+        ]
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'weather')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "weather",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "weather",
+          "location_key": null,
+          "parameters": {},
+          "instance_keys": "sql:main"
+        },
+        "parameters": {},
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_weather",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:noaa",
+          "weather",
+          "us"
+        ],
+        "kwargs": {
+          "instance": "sql:local",
+          "columns": [
+            "ts",
+            "station"
+          ]
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:noaa', 'weather', 'us', instance='sql:local')",
+        "keys": {
+          "connector_keys": "plugin:noaa",
+          "metric_key": "weather",
+          "location_key": "us",
+          "instance_keys": "sql:local"
+        },
+        "state": {
+          "connector_keys": "plugin:noaa",
+          "metric_key": "weather",
+          "location_key": "us",
+          "parameters": {
+            "columns": {
+              "ts": "ts",
+              "station": "station"
+            }
+          },
+          "instance_keys": "sql:local"
+        },
+        "parameters": {
+          "columns": {
+            "ts": "ts",
+            "station": "station"
+          }
+        },
+        "columns": {
+          "ts": "ts",
+          "station": "station"
+        },
+        "dtypes": {},
+        "tags": [],
+        "target": "plugin_noaa_weather_us",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "unique": [
+            "station",
+            "ts"
+          ],
+          "ts": "ts",
+          "station": "station"
+        },
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "temps"
+        ],
+        "kwargs": {
+          "parameters": {
+            "columns": {
+              "datetime": "ts",
+              "id": "station",
+              "value": null,
+              "": "x",
+              "primary": "pk"
+            },
+            "dtypes": {
+              "val": "decimal",
+              "meta": "JSON",
+              "uid": "guid",
+              "shape": "geom",
+              "flag": "boolean",
+              "n": null
+            },
+            "indexes": {
+              "geo": [
+                "lat",
+                "lon"
+              ]
+            },
+            "tags": [
+              "production",
+              "hourly"
+            ],
+            "upsert": true,
+            "autoincrement": true
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'temps')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "temps",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "temps",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "ts",
+              "id": "station",
+              "value": null,
+              "": "x",
+              "primary": "pk"
+            },
+            "dtypes": {
+              "val": "decimal",
+              "meta": "JSON",
+              "uid": "guid",
+              "shape": "geom",
+              "flag": "boolean",
+              "n": null
+            },
+            "indexes": {
+              "geo": [
+                "lat",
+                "lon"
+              ]
+            },
+            "tags": [
+              "production",
+              "hourly"
+            ],
+            "upsert": true,
+            "autoincrement": true
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "ts",
+            "id": "station",
+            "value": null,
+            "": "x",
+            "primary": "pk"
+          },
+          "dtypes": {
+            "val": "decimal",
+            "meta": "JSON",
+            "uid": "guid",
+            "shape": "geom",
+            "flag": "boolean",
+            "n": null
+          },
+          "indexes": {
+            "geo": [
+              "lat",
+              "lon"
+            ]
+          },
+          "tags": [
+            "production",
+            "hourly"
+          ],
+          "upsert": true,
+          "autoincrement": true
+        },
+        "columns": {
+          "datetime": "ts",
+          "id": "station",
+          "primary": "pk"
+        },
+        "dtypes": {
+          "val": "numeric",
+          "meta": "json",
+          "uid": "uuid",
+          "shape": "geometry",
+          "flag": "bool",
+          "ts": "datetime",
+          "pk": "int"
+        },
+        "tags": [
+          "production",
+          "hourly"
+        ],
+        "target": "sql_main_temps",
+        "flags": {
+          "upsert": true,
+          "static": false,
+          "autoincrement": true,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "unique": [
+            "pk",
+            "station",
+            "ts"
+          ],
+          "datetime": "ts",
+          "id": "station",
+          "primary": "pk",
+          "geo": [
+            "lat",
+            "lon"
+          ]
+        },
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "named"
+        ],
+        "kwargs": {
+          "parameters": {
+            "target_name": "custom_table",
+            "target_table": "ignored"
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'named')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "named",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "named",
+          "location_key": null,
+          "parameters": {
+            "target_name": "custom_table",
+            "target_table": "ignored"
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "target_name": "custom_table",
+          "target_table": "ignored"
+        },
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "custom_table",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "named2"
+        ],
+        "kwargs": {
+          "parameters": {
+            "target_table_name": ""
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'named2')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "named2",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "named2",
+          "location_key": null,
+          "parameters": {
+            "target_table_name": ""
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "target_table_name": ""
+        },
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_named2",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "explicit"
+        ],
+        "kwargs": {
+          "target": "my_target",
+          "tags": [
+            "a"
+          ]
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'explicit')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "explicit",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "explicit",
+          "location_key": null,
+          "parameters": {
+            "tags": [
+              "a"
+            ],
+            "target": "my_target"
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "tags": [
+            "a"
+          ],
+          "target": "my_target"
+        },
+        "columns": {},
+        "dtypes": {},
+        "tags": [
+          "a"
+        ],
+        "target": "my_target",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "noloc",
+          "None"
+        ]
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'noloc')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "noloc",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "noloc",
+          "location_key": null,
+          "parameters": {},
+          "instance_keys": "sql:main"
+        },
+        "parameters": {},
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_noloc",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "noloc2",
+          "[None]"
+        ]
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'noloc2')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "noloc2",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "noloc2",
+          "location_key": null,
+          "parameters": {},
+          "instance_keys": "sql:main"
+        },
+        "parameters": {},
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_noloc2",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "emptyloc",
+          ""
+        ]
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'emptyloc')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "emptyloc",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "emptyloc",
+          "location_key": null,
+          "parameters": {},
+          "instance_keys": "sql:main"
+        },
+        "parameters": {},
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_emptyloc",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "kwargs": {
+          "connector_keys": "api:main",
+          "metric_key": "m",
+          "location_key": "l",
+          "instance_keys": "api:other"
+        }
+      },
+      "pipe": {
+        "str": "Pipe('api:main', 'm', 'l', instance='api:other')",
+        "keys": {
+          "connector_keys": "api:main",
+          "metric_key": "m",
+          "location_key": "l",
+          "instance_keys": "api:other"
+        },
+        "state": {
+          "connector_keys": "api:main",
+          "metric_key": "m",
+          "location_key": "l",
+          "parameters": {},
+          "instance_keys": "api:other"
+        },
+        "parameters": {},
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "api_main_m_l",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "intaxis"
+        ],
+        "kwargs": {
+          "precision": "ms",
+          "parameters": {
+            "columns": {
+              "datetime": "id"
+            },
+            "dtypes": {
+              "id": "int"
+            },
+            "verify": {
+              "chunk_days": 1
+            },
+            "precision": {
+              "unit": "ms"
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'intaxis')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "intaxis",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "intaxis",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "id"
+            },
+            "dtypes": {
+              "id": "int"
+            },
+            "verify": {
+              "chunk_days": 1
+            },
+            "precision": {
+              "unit": "ms"
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "id"
+          },
+          "dtypes": {
+            "id": "int"
+          },
+          "verify": {
+            "chunk_days": 1
+          },
+          "precision": {
+            "unit": "ms"
+          }
+        },
+        "columns": {
+          "datetime": "id"
+        },
+        "dtypes": {
+          "id": "int"
+        },
+        "tags": [],
+        "target": "plugin_x_intaxis",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "id"
+        },
+        "precision": {
+          "ok": {
+            "unit": "millisecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "int": 86400000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "int": 5400000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "int": 7
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "chunkrange"
+        ],
+        "kwargs": {
+          "parameters": {
+            "columns": {
+              "datetime": "id"
+            },
+            "dtypes": {
+              "id": "Int64"
+            },
+            "verify": {
+              "chunk_range": 5000,
+              "chunk_days": 1
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'chunkrange')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "chunkrange",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "chunkrange",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "id"
+            },
+            "dtypes": {
+              "id": "Int64"
+            },
+            "verify": {
+              "chunk_range": 5000,
+              "chunk_days": 1
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "id"
+          },
+          "dtypes": {
+            "id": "Int64"
+          },
+          "verify": {
+            "chunk_range": 5000,
+            "chunk_days": 1
+          }
+        },
+        "columns": {
+          "datetime": "id"
+        },
+        "dtypes": {
+          "id": "Int64"
+        },
+        "tags": [],
+        "target": "plugin_x_chunkrange",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "id"
+        },
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "int": 5000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "int": 90
+            }
+          },
+          "int_7": {
+            "ok": {
+              "int": 7
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "intlegacy"
+        ],
+        "kwargs": {
+          "parameters": {
+            "columns": {
+              "datetime": "epoch"
+            },
+            "dtypes": {
+              "epoch": "int"
+            },
+            "verify": {
+              "chunk_hours": 2.5
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'intlegacy')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "intlegacy",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "intlegacy",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "epoch"
+            },
+            "dtypes": {
+              "epoch": "int"
+            },
+            "verify": {
+              "chunk_hours": 2.5
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "epoch"
+          },
+          "dtypes": {
+            "epoch": "int"
+          },
+          "verify": {
+            "chunk_hours": 2.5
+          }
+        },
+        "columns": {
+          "datetime": "epoch"
+        },
+        "dtypes": {
+          "epoch": "int"
+        },
+        "tags": [],
+        "target": "plugin_x_intlegacy",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "epoch"
+        },
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "int": 150
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "int": 90
+            }
+          },
+          "int_7": {
+            "ok": {
+              "int": 7
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "years"
+        ],
+        "kwargs": {
+          "parameters": {
+            "verify": {
+              "chunk_years": 1,
+              "chunk_seconds": 5
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'years')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "years",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "years",
+          "location_key": null,
+          "parameters": {
+            "verify": {
+              "chunk_years": 1,
+              "chunk_seconds": 5
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "verify": {
+            "chunk_years": 1,
+            "chunk_seconds": 5
+          }
+        },
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "plugin_x_years",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 31536000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "weeks"
+        ],
+        "kwargs": {
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "verify": {
+              "chunk_weeks": 0.5
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'weeks')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "weeks",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "weeks",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "verify": {
+              "chunk_weeks": 0.5
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "ts"
+          },
+          "verify": {
+            "chunk_weeks": 0.5
+          }
+        },
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "datetime"
+        },
+        "tags": [],
+        "target": "plugin_x_weeks",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "ts"
+        },
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 302400000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "seconds"
+        ],
+        "kwargs": {
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "verify": {
+              "chunk_seconds": 90.0000005
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'seconds')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "seconds",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "seconds",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "verify": {
+              "chunk_seconds": 90.0000005
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "ts"
+          },
+          "verify": {
+            "chunk_seconds": 90.0000005
+          }
+        },
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "datetime"
+        },
+        "tags": [],
+        "target": "plugin_x_seconds",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "ts"
+        },
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 90000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "ms"
+        ],
+        "kwargs": {
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "dtypes": {
+              "ts": "datetime64[ms, UTC]"
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'ms')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "ms",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "ms",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "dtypes": {
+              "ts": "datetime64[ms, UTC]"
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "ts"
+          },
+          "dtypes": {
+            "ts": "datetime64[ms, UTC]"
+          }
+        },
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "datetime64[ms, UTC]"
+        },
+        "tags": [],
+        "target": "plugin_x_ms",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "ts"
+        },
+        "precision": {
+          "ok": {
+            "unit": "millisecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "int32"
+        ],
+        "kwargs": {
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "dtypes": {
+              "ts": "int32"
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'int32')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "int32",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "int32",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "dtypes": {
+              "ts": "int32"
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "ts"
+          },
+          "dtypes": {
+            "ts": "int32"
+          }
+        },
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "int32"
+        },
+        "tags": [],
+        "target": "plugin_x_int32",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "ts"
+        },
+        "precision": {
+          "ok": {
+            "unit": "second"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "int": 43200
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "int": 90
+            }
+          },
+          "int_7": {
+            "ok": {
+              "int": 7
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "dateaxis"
+        ],
+        "kwargs": {
+          "parameters": {
+            "columns": {
+              "datetime": "d"
+            },
+            "dtypes": {
+              "d": "date"
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'dateaxis')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "dateaxis",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "dateaxis",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "d"
+            },
+            "dtypes": {
+              "d": "date"
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "d"
+          },
+          "dtypes": {
+            "d": "date"
+          }
+        },
+        "columns": {
+          "datetime": "d"
+        },
+        "dtypes": {
+          "d": "date"
+        },
+        "tags": [],
+        "target": "plugin_x_dateaxis",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "d"
+        },
+        "precision": {
+          "ok": {
+            "unit": "day"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "autotime"
+        ],
+        "kwargs": {
+          "autotime": true,
+          "dtypes": {
+            "ts": "datetime64[ns]"
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'autotime')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "autotime",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "autotime",
+          "location_key": null,
+          "parameters": {
+            "dtypes": {
+              "ts": "datetime64[ns]"
+            },
+            "autotime": true
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "dtypes": {
+            "ts": "datetime64[ns]"
+          },
+          "autotime": true
+        },
+        "columns": {},
+        "dtypes": {
+          "ts": "datetime64[ns]"
+        },
+        "tags": [],
+        "target": "plugin_x_autotime",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": true,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "nanosecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "precdict"
+        ],
+        "kwargs": {
+          "precision": {
+            "unit": "h",
+            "interval": 15
+          },
+          "columns": {
+            "datetime": "ts"
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'precdict')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "precdict",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "precdict",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "precision": {
+              "unit": "h",
+              "interval": 15
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "ts"
+          },
+          "precision": {
+            "unit": "h",
+            "interval": 15
+          }
+        },
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "datetime"
+        },
+        "tags": [],
+        "target": "plugin_x_precdict",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "ts"
+        },
+        "precision": {
+          "ok": {
+            "unit": "hour",
+            "interval": 15
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "precbad"
+        ],
+        "kwargs": {
+          "precision": "fortnight",
+          "columns": {
+            "datetime": "ts"
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'precbad')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "precbad",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "precbad",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "precision": {
+              "unit": "fortnight"
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "ts"
+          },
+          "precision": {
+            "unit": "fortnight"
+          }
+        },
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "datetime"
+        },
+        "tags": [],
+        "target": "plugin_x_precbad",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "ts"
+        },
+        "precision": {
+          "error": "ValueError"
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "timestamp"
+        ],
+        "kwargs": {
+          "columns": {
+            "datetime": "ts"
+          },
+          "dtypes": {
+            "ts": "timestamp"
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'timestamp')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "timestamp",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "timestamp",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "ts"
+            },
+            "dtypes": {
+              "ts": "timestamp"
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "ts"
+          },
+          "dtypes": {
+            "ts": "timestamp"
+          }
+        },
+        "columns": {
+          "datetime": "ts"
+        },
+        "dtypes": {
+          "ts": "timestamp"
+        },
+        "tags": [],
+        "target": "plugin_x_timestamp",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "ts"
+        },
+        "precision": {
+          "error": "ValueError"
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "plugin:x",
+          "intprec"
+        ],
+        "kwargs": {
+          "precision": "minute",
+          "parameters": {
+            "columns": {
+              "datetime": "id"
+            },
+            "dtypes": {
+              "id": "int"
+            },
+            "verify": {
+              "chunk_minutes": 30
+            },
+            "precision": {
+              "unit": "minute"
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('plugin:x', 'intprec')",
+        "keys": {
+          "connector_keys": "plugin:x",
+          "metric_key": "intprec",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "plugin:x",
+          "metric_key": "intprec",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "id"
+            },
+            "dtypes": {
+              "id": "int"
+            },
+            "verify": {
+              "chunk_minutes": 30
+            },
+            "precision": {
+              "unit": "minute"
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "id"
+          },
+          "dtypes": {
+            "id": "int"
+          },
+          "verify": {
+            "chunk_minutes": 30
+          },
+          "precision": {
+            "unit": "minute"
+          }
+        },
+        "columns": {
+          "datetime": "id"
+        },
+        "dtypes": {
+          "id": "int"
+        },
+        "tags": [],
+        "target": "plugin_x_intprec",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "id"
+        },
+        "precision": {
+          "ok": {
+            "unit": "minute"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "int": 30
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "int": 90
+            }
+          },
+          "int_7": {
+            "ok": {
+              "int": 7
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "graph"
+        ],
+        "kwargs": {
+          "parameters": {
+            "parents": [
+              "Pipe('sql:main', 'a')",
+              {
+                "connector_keys": "sql:main",
+                "metric_key": "b",
+                "location_key": null,
+                "instance_keys": "sql:other"
+              },
+              {
+                "connector": "plugin:c",
+                "metric": "c",
+                "location": "here"
+              },
+              "mrsm.Pipe(\"plugin:d\", \"d\", instance=\"sql:x\") extra text",
+              "not a pipe",
+              {
+                "metric": "missing_connector"
+              }
+            ],
+            "child": "Pipe(\"sql:main\", \"kid\", \"loc\")",
+            "reference": {
+              "connector": "sql:main",
+              "metric": "base"
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'graph')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "graph",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "graph",
+          "location_key": null,
+          "parameters": {
+            "parents": [
+              "Pipe('sql:main', 'a')",
+              {
+                "connector_keys": "sql:main",
+                "metric_key": "b",
+                "location_key": null,
+                "instance_keys": "sql:other"
+              },
+              {
+                "connector": "plugin:c",
+                "metric": "c",
+                "location": "here"
+              },
+              "mrsm.Pipe(\"plugin:d\", \"d\", instance=\"sql:x\") extra text",
+              "not a pipe",
+              {
+                "metric": "missing_connector"
+              }
+            ],
+            "child": "Pipe(\"sql:main\", \"kid\", \"loc\")",
+            "reference": {
+              "connector": "sql:main",
+              "metric": "base"
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "parents": [
+            "Pipe('sql:main', 'a')",
+            {
+              "connector_keys": "sql:main",
+              "metric_key": "b",
+              "location_key": null,
+              "instance_keys": "sql:other"
+            },
+            {
+              "connector": "plugin:c",
+              "metric": "c",
+              "location": "here"
+            },
+            "mrsm.Pipe(\"plugin:d\", \"d\", instance=\"sql:x\") extra text",
+            "not a pipe",
+            {
+              "metric": "missing_connector"
+            }
+          ],
+          "child": "Pipe(\"sql:main\", \"kid\", \"loc\")",
+          "reference": {
+            "connector": "sql:main",
+            "metric": "base"
+          }
+        },
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_graph",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": [
+            {
+              "connector_keys": "sql:main",
+              "metric_key": "a",
+              "location_key": null,
+              "instance_keys": "sql:main"
+            },
+            {
+              "connector_keys": "sql:main",
+              "metric_key": "b",
+              "location_key": null,
+              "instance_keys": "sql:other"
+            },
+            {
+              "connector_keys": "plugin:c",
+              "metric_key": "c",
+              "location_key": "here",
+              "instance_keys": "sql:main"
+            },
+            {
+              "connector_keys": "plugin:d",
+              "metric_key": "d",
+              "location_key": null,
+              "instance_keys": "sql:x"
+            },
+            null,
+            null
+          ]
+        },
+        "children": {
+          "ok": [
+            {
+              "connector_keys": "sql:main",
+              "metric_key": "kid",
+              "location_key": "loc",
+              "instance_keys": "sql:main"
+            }
+          ]
+        },
+        "references": {
+          "ok": [
+            {
+              "connector_keys": "sql:main",
+              "metric_key": "base",
+              "location_key": null,
+              "instance_keys": "sql:main"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "graph2"
+        ],
+        "kwargs": {
+          "instance": "sql:inst",
+          "parent": "Pipe('a', 'b')",
+          "children": [
+            {
+              "connector": "c",
+              "metric": "d",
+              "instance": "sql:main"
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'graph2', instance='sql:inst')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "graph2",
+          "location_key": null,
+          "instance_keys": "sql:inst"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "graph2",
+          "location_key": null,
+          "parameters": {
+            "parents": [
+              "Pipe('a', 'b')"
+            ],
+            "children": [
+              {
+                "connector": "c",
+                "metric": "d",
+                "instance": "sql:main"
+              }
+            ]
+          },
+          "instance_keys": "sql:inst"
+        },
+        "parameters": {
+          "parents": [
+            "Pipe('a', 'b')"
+          ],
+          "children": [
+            {
+              "connector": "c",
+              "metric": "d",
+              "instance": "sql:main"
+            }
+          ]
+        },
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_graph2",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": [
+            {
+              "connector_keys": "a",
+              "metric_key": "b",
+              "location_key": null,
+              "instance_keys": "sql:inst"
+            }
+          ]
+        },
+        "children": {
+          "ok": [
+            {
+              "connector_keys": "c",
+              "metric_key": "d",
+              "location_key": null,
+              "instance_keys": "sql:main"
+            }
+          ]
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "flags"
+        ],
+        "kwargs": {
+          "static": true,
+          "enforce": false,
+          "null_indices": false,
+          "mixed_numerics": false,
+          "compress": {
+            "after": 10
+          },
+          "upsert": false
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'flags')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "flags",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "flags",
+          "location_key": null,
+          "parameters": {
+            "upsert": false,
+            "static": true,
+            "enforce": false,
+            "null_indices": false,
+            "mixed_numerics": false,
+            "compress": {
+              "after": 10
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "upsert": false,
+          "static": true,
+          "enforce": false,
+          "null_indices": false,
+          "mixed_numerics": false,
+          "compress": {
+            "after": 10
+          }
+        },
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_flags",
+        "flags": {
+          "upsert": false,
+          "static": true,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": false,
+          "null_indices": false,
+          "mixed_numerics": false
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "templ"
+        ],
+        "kwargs": {
+          "columns": "{{ Pipe('sql:main', 'other').columns }}"
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'templ')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "templ",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "templ",
+          "location_key": null,
+          "parameters": {},
+          "instance_keys": "sql:main"
+        },
+        "parameters": {},
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_templ",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "idx"
+        ],
+        "kwargs": {
+          "indices": {
+            "a": "b"
+          },
+          "parameters": {
+            "indexes": {
+              "a": "b"
+            },
+            "columns": {
+              "id": "x"
+            }
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'idx')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "idx",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "idx",
+          "location_key": null,
+          "parameters": {
+            "indexes": {
+              "a": "b"
+            },
+            "columns": {
+              "id": "x"
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "indexes": {
+            "a": "b"
+          },
+          "columns": {
+            "id": "x"
+          }
+        },
+        "columns": {
+          "id": "x"
+        },
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_idx",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "id": "x",
+          "a": "b"
+        },
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "idx2"
+        ],
+        "kwargs": {
+          "indexes": {
+            "a": [
+              "b",
+              "c"
+            ]
+          },
+          "columns": {
+            "datetime": "dt",
+            "id": "dt"
+          }
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'idx2')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "idx2",
+          "location_key": null,
+          "instance_keys": "sql:main"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "idx2",
+          "location_key": null,
+          "parameters": {
+            "columns": {
+              "datetime": "dt",
+              "id": "dt"
+            },
+            "indices": {
+              "a": [
+                "b",
+                "c"
+              ]
+            }
+          },
+          "instance_keys": "sql:main"
+        },
+        "parameters": {
+          "columns": {
+            "datetime": "dt",
+            "id": "dt"
+          },
+          "indices": {
+            "a": [
+              "b",
+              "c"
+            ]
+          }
+        },
+        "columns": {
+          "datetime": "dt",
+          "id": "dt"
+        },
+        "dtypes": {
+          "dt": "datetime"
+        },
+        "tags": [],
+        "target": "sql_main_idx2",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {
+          "datetime": "dt",
+          "id": "dt",
+          "a": [
+            "b",
+            "c"
+          ]
+        },
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "memory"
+        ],
+        "kwargs": {
+          "instance": "sql:memory"
+        }
+      },
+      "pipe": {
+        "str": "Pipe('sql:main', 'memory', instance='sql:memory')",
+        "keys": {
+          "connector_keys": "sql:main",
+          "metric_key": "memory",
+          "location_key": null,
+          "instance_keys": "sql:memory"
+        },
+        "state": {
+          "connector_keys": "sql:main",
+          "metric_key": "memory",
+          "location_key": null,
+          "parameters": {},
+          "instance_keys": "sql:memory"
+        },
+        "parameters": {},
+        "columns": {},
+        "dtypes": {},
+        "tags": [],
+        "target": "sql_main_memory",
+        "flags": {
+          "upsert": false,
+          "static": false,
+          "autoincrement": false,
+          "autotime": false,
+          "enforce": true,
+          "null_indices": true,
+          "mixed_numerics": true
+        },
+        "cache": false,
+        "indices": {},
+        "precision": {
+          "ok": {
+            "unit": "microsecond"
+          }
+        },
+        "chunk": {
+          "none": {
+            "ok": {
+              "delta_us": 2592000000000
+            }
+          },
+          "delta_90m": {
+            "ok": {
+              "delta_us": 5400000000
+            }
+          },
+          "int_7": {
+            "ok": {
+              "delta_us": 420000000
+            }
+          }
+        },
+        "parents": {
+          "ok": []
+        },
+        "children": {
+          "ok": []
+        },
+        "references": {
+          "ok": []
+        }
+      }
+    },
+    {
+      "case": {
+        "args": [
+          "",
+          "m"
+        ]
+      },
+      "error": "Exception"
+    },
+    {
+      "case": {
+        "args": [
+          "_sql",
+          "m"
+        ]
+      },
+      "error": "Exception"
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "m"
+        ],
+        "kwargs": {
+          "tags": [
+            "ok",
+            "_negated"
+          ]
+        }
+      },
+      "error": "Exception"
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "m"
+        ],
+        "kwargs": {
+          "foo": 1
+        }
+      },
+      "error": "TypeError"
+    },
+    {
+      "case": {
+        "args": [
+          "sql:main",
+          "m"
+        ],
+        "kwargs": {
+          "connector": "x"
+        }
+      },
+      "error": "TypeError"
+    }
+  ],
+  "truncate": [
+    {
+      "item": "sql_main_weather",
+      "flavor": "postgresql",
+      "ok": "sql_main_weather"
+    },
+    {
+      "item": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "flavor": "postgresql",
+      "ok": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "item": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "flavor": "postgresql",
+      "ok": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "item": "plugin_noaa_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "flavor": "postgresql",
+      "ok": "p_n_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    },
+    {
+      "item": "plugin_noaa_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "flavor": "oracle",
+      "ok": "p_n_xxxxxxxxxxxx_yyyyyyyyyyyy"
+    },
+    {
+      "item": "plugin_noaa_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "flavor": "mssql",
+      "ok": "plugin_noaa_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    },
+    {
+      "item": "plugin_noaa_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "flavor": "duckdb",
+      "ok": "p_n_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    },
+    {
+      "item": "a_b_c_d_e_f_g_h_i_j_k_l_m_n_o_p_q_r_s_t_u_v_w_x_y_z_a_b_c_d_e_f_g",
+      "flavor": "oracle",
+      "error": "Exception"
+    },
+    {
+      "item": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "flavor": "mysql",
+      "ok": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+    }
+  ]
+}

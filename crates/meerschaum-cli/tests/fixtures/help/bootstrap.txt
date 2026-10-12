@@ -1,0 +1,9 @@
+
+Launch an interactive wizard to bootstrap pipes or connectors.
+
+Example:
+    `bootstrap pipes`
+
+
+    Options:
+        `bootstrap [connectors, jobs, pipes, plugins]`

@@ -1,0 +1,27 @@
+
+Launch a virtual environment's Python interpreter with Meerschaum imported.
+You may pass flags to the Python binary by surrounding each flag with `[]`.
+
+Usage:
+    `python {commands}`
+
+Examples:
+    mrsm python
+    mrsm python -c "print(mrsm.__version__)"
+    mrsm python [-m pip -V]
+
+Flags:
+    `--nopretty`
+    Open a plain Pyhthon REPL rather than ptpython.
+
+    `--noask`
+    Run the supplied Python code and do not open a REPL.
+
+    `--venv`
+    Run the Python interpreter from a virtual environment.
+    Will not have Meercshaum imported.
+
+    `--sub-args` (or flags surrounded by `[]`)
+    Rather than run Python code, execute the interpreter with the given sub-flags
+    (e.g. `mrsm python [-V]`)
+

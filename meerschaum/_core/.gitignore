@@ -1,0 +1,4 @@
+# Built by scripts/rust/build_py.sh; never commit the extension binary.
+_core*.so
+_core*.pyd
+_core*.dylib

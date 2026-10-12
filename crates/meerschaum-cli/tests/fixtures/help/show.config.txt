@@ -1,0 +1,7 @@
+
+Show the configuration dictionary.
+Sub-actions defined in the action list are recursive indices in the config dictionary.
+
+Example:
+    `show config pipes` -> cf['pipes']
+

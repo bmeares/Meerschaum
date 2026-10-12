@@ -1,0 +1,13 @@
+
+Register a new long-lived access token for API access.
+Note that omitting and end time or TTL will generate token which does not expire.
+
+Examples:
+
+mrsm register token --end 2032-01-01
+
+mrsm register token --ttl-days 1000
+
+mrsm register token --name weather-sensor
+
+

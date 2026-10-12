@@ -7,9 +7,35 @@ repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 description = "Meerschaum v5: PyO3 bindings exposed to Python as `meerschaum._core`"
+build = "build.rs"
 
 [lib]
 name = "_core"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = []
+# Enabled by maturin (see pyproject.toml). Kept off for `cargo test` / `cargo clippy` so the
+# rlib and test binaries can link without libpython.
+extension-module = ["pyo3/extension-module"]
+# The `pyo3-polars` zero-copy path (`_core.polars_roundtrip`). Opt-in (scripts/rust/build_py.sh
+# enables it by default): pyo3-polars turns on `polars-error/python` and `polars-core/allow_unused`,
+# which changes the fingerprint of every Polars crate, so with it this crate cannot share the
+# kernel's Polars build. Without it, `cargo build/test/clippy -p meerschaum-py` builds no Polars.
+polars = ["dep:pyo3-polars", "dep:polars"]
+
 [dependencies]
+# VERSION SKEW (see README "Dependency pins"): the workspace pins `pyo3 = 0.26`, but
+# `pyo3-polars` for the workspace's `polars = 0.51` (0.24.x) requires pyo3 0.25, and
+# `pyo3-arrow` for `arrow = 56` exists for pyo3 0.25 (0.11) and 0.26 (0.12). pyo3 0.25 is the
+# only version consistent with both workspace data pins, so it is declared here until the
+# workspace moves pyo3/polars/arrow together.
+pyo3 = { version = "0.25", features = ["abi3-py311"] }
+pyo3-arrow = { version = "0.11", default-features = false }
+pyo3-polars = { version = "0.24", features = ["dtype-full"], optional = true }
+polars = { workspace = true, optional = true }
+arrow = { workspace = true, features = ["ffi"] }
+toml = { workspace = true }
+
+[build-dependencies]
+pyo3-build-config = "0.25"

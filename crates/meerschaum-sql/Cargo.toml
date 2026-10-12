@@ -8,4 +8,29 @@ authors.workspace = true
 rust-version.workspace = true
 description = "Meerschaum v5: sql crate (see docs/design/v5.0.0.md)"
 
+[features]
+default = []
+# Drivers that are not implemented yet (D13). Enabling a feature only changes the runtime
+# error message: the connector is still refused with `SqlError::DriverUnavailable`.
+mssql = []
+oracle = []
+duckdb = []
+
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+regex = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+rust_decimal = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+arrow = { workspace = true }
+sqlx = { workspace = true }
+# Crate-private: stream combinators for the Arrow record-batch stream.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tokio = { workspace = true }

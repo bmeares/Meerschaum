@@ -1,0 +1,3 @@
+
+Delete local cache or temporary tables or keys from a SQL or Valkey connector.
+

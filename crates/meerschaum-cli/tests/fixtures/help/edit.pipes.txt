@@ -1,0 +1,14 @@
+
+Open and edit pipes' configuration files.
+
+If `fetch:definition` is specified, open a definition file (e.g. `.sql` for `sql` pipes).
+
+Usage:
+    ```
+    ### Edit all pipes.
+    edit pipes
+
+    ### Edit a SQL definition for the pipe `sql_main_mymetric`.
+    edit pipes definition -c sql:main -m mymetric
+    ```
+

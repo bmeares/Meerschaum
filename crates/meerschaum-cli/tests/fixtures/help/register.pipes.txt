@@ -1,0 +1,7 @@
+
+Create and register Pipe objects.
+
+Required:
+    `connector_keys` and `metric_keys`.
+    If `location_keys` is empty, assume [`None`].
+

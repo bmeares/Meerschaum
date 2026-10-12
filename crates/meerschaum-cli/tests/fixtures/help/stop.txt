@@ -1,0 +1,5 @@
+
+Stop running jobs.
+
+    Options:
+        `stop [daemons, jobs]`

@@ -1,0 +1,3 @@
+
+Start polling connectors to verify a connection can be made.
+

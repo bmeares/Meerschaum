@@ -1,0 +1,12 @@
+
+Clear pipes of their data, or clear the screen.
+
+Usage:
+- clear
+    - Clear the screen.
+- clear pipes --begin 2022-01-01
+    - For all pipes, remove rows newer than or equal to `2022-01-01 00:00:00`.
+
+
+    Options:
+        `clear [cache, pipes]`

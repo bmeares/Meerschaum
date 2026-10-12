@@ -1,0 +1,5 @@
+
+Drop pipe data (maintaining registration) or tables.
+
+    Options:
+        `drop [indices, pipes]`

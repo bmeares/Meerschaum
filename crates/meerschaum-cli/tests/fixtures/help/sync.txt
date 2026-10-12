@@ -1,0 +1,18 @@
+
+Fetch and sync data for pipes.
+
+Usage:
+    - `--loop`
+        - Sync indefinitely.
+    - `--listen`
+        - Keep the process alive after the initial sync pass
+          (for subscription-style connectors which sync via callbacks).
+    - `--min-seconds 10`
+        - Wait 10 seconds between laps.
+    - `--async`, `--unblock``
+        - Spin up background threads for each pipe.
+    - `--debug`
+        - Print verbose messages.
+
+    Options:
+        `sync [pipes]`

@@ -1,0 +1,8 @@
+
+Show partitioning information for the selected pipes.
+
+For natively range-partitioned pipes (PostgreSQL / PostGIS, MySQL / MariaDB, MSSQL) and
+TimescaleDB hypertables, lists the partition / chunk count, the physical partition width, and
+the approximate number of rows per partition (total rowcount ÷ partition count) — a useful
+signal for tuning the width.
+

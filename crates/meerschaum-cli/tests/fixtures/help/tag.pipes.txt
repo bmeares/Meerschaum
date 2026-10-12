@@ -1,0 +1,12 @@
+
+Add or remove tags to registered pipes.
+Prefix a tag with a leading underscore to remove it.
+
+Note that the `--tags` flag applies to existing tags.
+Specify the tags you wish to add or remove as positional arguments, e.g.:
+
+```
+mrsm tag pipes production sync-daily -c sql:main
+mrsm tag pipes _production --tags production
+```
+

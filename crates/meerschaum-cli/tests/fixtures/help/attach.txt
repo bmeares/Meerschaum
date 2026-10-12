@@ -1,0 +1,5 @@
+
+Attach to a job, and prompt the user when blocking on input.
+
+    Options:
+        `attach [jobs, logs]`

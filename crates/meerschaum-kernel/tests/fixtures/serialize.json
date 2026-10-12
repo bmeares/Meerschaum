@@ -1,0 +1,7526 @@
+{
+ "generator": "gen_serialize.py",
+ "meerschaum_version": "4.1.4",
+ "pandas_version": "3.0.0",
+ "cases": [
+  {
+   "fn": "serialize_bytes",
+   "args": [
+    {
+     "t": "bytes",
+     "v": ""
+    }
+   ],
+   "ok": ""
+  },
+  {
+   "fn": "encode_bytes_for_bytea",
+   "args": [
+    {
+     "t": "bytes",
+     "v": ""
+    }
+   ],
+   "ok": "\\x"
+  },
+  {
+   "fn": "encode_bytes_for_bytea_noprefix",
+   "args": [
+    {
+     "t": "bytes",
+     "v": ""
+    }
+   ],
+   "ok": ""
+  },
+  {
+   "fn": "serialize_bytes",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "YWJj"
+    }
+   ],
+   "ok": "YWJj"
+  },
+  {
+   "fn": "encode_bytes_for_bytea",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "YWJj"
+    }
+   ],
+   "ok": "\\x616263"
+  },
+  {
+   "fn": "encode_bytes_for_bytea_noprefix",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "YWJj"
+    }
+   ],
+   "ok": "616263"
+  },
+  {
+   "fn": "serialize_bytes",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AAH/"
+    }
+   ],
+   "ok": "AAH/"
+  },
+  {
+   "fn": "encode_bytes_for_bytea",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AAH/"
+    }
+   ],
+   "ok": "\\x0001ff"
+  },
+  {
+   "fn": "encode_bytes_for_bytea_noprefix",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AAH/"
+    }
+   ],
+   "ok": "0001ff"
+  },
+  {
+   "fn": "serialize_bytes",
+   "args": [
+    null
+   ],
+   "ok": null
+  },
+  {
+   "fn": "encode_bytes_for_bytea",
+   "args": [
+    null
+   ],
+   "ok": null
+  },
+  {
+   "fn": "encode_bytes_for_bytea_noprefix",
+   "args": [
+    null
+   ],
+   "ok": null
+  },
+  {
+   "fn": "serialize_bytes",
+   "args": [
+    {
+     "t": "float",
+     "v": "nan"
+    }
+   ],
+   "ok": {
+    "t": "float",
+    "v": "nan"
+   }
+  },
+  {
+   "fn": "encode_bytes_for_bytea",
+   "args": [
+    {
+     "t": "float",
+     "v": "nan"
+    }
+   ],
+   "ok": {
+    "t": "float",
+    "v": "nan"
+   }
+  },
+  {
+   "fn": "encode_bytes_for_bytea_noprefix",
+   "args": [
+    {
+     "t": "float",
+     "v": "nan"
+    }
+   ],
+   "ok": {
+    "t": "float",
+    "v": "nan"
+   }
+  },
+  {
+   "fn": "serialize_bytes",
+   "args": [
+    "None"
+   ],
+   "ok": "None"
+  },
+  {
+   "fn": "encode_bytes_for_bytea",
+   "args": [
+    "None"
+   ],
+   "ok": "None"
+  },
+  {
+   "fn": "encode_bytes_for_bytea_noprefix",
+   "args": [
+    "None"
+   ],
+   "ok": "None"
+  },
+  {
+   "fn": "deserialize_bytes_string",
+   "args": [
+    "YWJj"
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "616263"
+   }
+  },
+  {
+   "fn": "deserialize_bytes_string_hex",
+   "args": [
+    "YWJj"
+   ],
+   "err": "Error: Non-hexadecimal digit found"
+  },
+  {
+   "fn": "deserialize_bytes_string",
+   "args": [
+    "\\x616263"
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "616263"
+   }
+  },
+  {
+   "fn": "deserialize_bytes_string_hex",
+   "args": [
+    "\\x616263"
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "616263"
+   }
+  },
+  {
+   "fn": "deserialize_bytes_string",
+   "args": [
+    "616263"
+   ],
+   "err": "Error: Incorrect padding"
+  },
+  {
+   "fn": "deserialize_bytes_string_hex",
+   "args": [
+    "616263"
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "616263"
+   }
+  },
+  {
+   "fn": "deserialize_bytes_string",
+   "args": [
+    "\\xZZ"
+   ],
+   "err": "Error: Non-hexadecimal digit found"
+  },
+  {
+   "fn": "deserialize_bytes_string_hex",
+   "args": [
+    "\\xZZ"
+   ],
+   "err": "Error: Non-hexadecimal digit found"
+  },
+  {
+   "fn": "deserialize_bytes_string",
+   "args": [
+    "not base64!"
+   ],
+   "err": "Error: Invalid base64-encoded string: number of data characters (9) cannot be 1 more than a multiple of 4"
+  },
+  {
+   "fn": "deserialize_bytes_string_hex",
+   "args": [
+    "not base64!"
+   ],
+   "err": "Error: Odd-length string"
+  },
+  {
+   "fn": "deserialize_bytes_string",
+   "args": [
+    "YWJ"
+   ],
+   "err": "Error: Incorrect padding"
+  },
+  {
+   "fn": "deserialize_bytes_string_hex",
+   "args": [
+    "YWJ"
+   ],
+   "err": "Error: Odd-length string"
+  },
+  {
+   "fn": "deserialize_bytes_string",
+   "args": [
+    ""
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": ""
+   }
+  },
+  {
+   "fn": "deserialize_bytes_string_hex",
+   "args": [
+    ""
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": ""
+   }
+  },
+  {
+   "fn": "deserialize_bytes_string",
+   "args": [
+    null
+   ],
+   "ok": null
+  },
+  {
+   "fn": "deserialize_bytes_string_hex",
+   "args": [
+    null
+   ],
+   "ok": null
+  },
+  {
+   "fn": "deserialize_bytes_string",
+   "args": [
+    "None"
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "3689de"
+   }
+  },
+  {
+   "fn": "deserialize_bytes_string_hex",
+   "args": [
+    "None"
+   ],
+   "err": "Error: Non-hexadecimal digit found"
+  },
+  {
+   "fn": "deserialize_bytes_string",
+   "args": [
+    "AAH/"
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0001ff"
+   }
+  },
+  {
+   "fn": "deserialize_bytes_string_hex",
+   "args": [
+    "AAH/"
+   ],
+   "err": "Error: Non-hexadecimal digit found"
+  },
+  {
+   "fn": "serialize_datetime",
+   "args": [
+    {
+     "t": "dt",
+     "v": "2024-01-01T00:00:00+00:00",
+     "tz": "UTC"
+    }
+   ],
+   "ok": "2024-01-01T00:00:00+00:00"
+  },
+  {
+   "fn": "serialize_datetime",
+   "args": [
+    {
+     "t": "dt",
+     "v": "2024-01-01T12:30:15.123456",
+     "tz": null
+    }
+   ],
+   "ok": "2024-01-01T12:30:15.123456Z"
+  },
+  {
+   "fn": "serialize_datetime",
+   "args": [
+    {
+     "t": "dt",
+     "v": "2024-06-01T08:00:00-04:00",
+     "tz": "UTC-04:00"
+    }
+   ],
+   "ok": "2024-06-01T08:00:00-04:00"
+  },
+  {
+   "fn": "serialize_datetime",
+   "args": [
+    {
+     "t": "dt",
+     "v": "0001-01-01T00:00:00",
+     "tz": null
+    }
+   ],
+   "ok": "0001-01-01T00:00:00Z"
+  },
+  {
+   "fn": "serialize_datetime",
+   "args": [
+    {
+     "t": "dt",
+     "v": "9999-12-31T23:59:59.999999",
+     "tz": null
+    }
+   ],
+   "ok": "9999-12-31T23:59:59.999999Z"
+  },
+  {
+   "fn": "serialize_date",
+   "args": [
+    {
+     "t": "date",
+     "v": "2024-01-02"
+    }
+   ],
+   "ok": "2024-01-02"
+  },
+  {
+   "fn": "serialize_date",
+   "args": [
+    {
+     "t": "date",
+     "v": "0001-01-01"
+    }
+   ],
+   "ok": "0001-01-01"
+  },
+  {
+   "fn": "serialize_date",
+   "args": [
+    null
+   ],
+   "ok": null
+  },
+  {
+   "fn": "serialize_date",
+   "args": [
+    "x"
+   ],
+   "ok": null
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    null
+   ],
+   "ok": null
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "int",
+     "v": 1
+    }
+   ],
+   "ok": "1"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "float",
+     "v": 1.5
+    }
+   ],
+   "ok": "1.5"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    "x"
+   ],
+   "ok": "x"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    true
+   ],
+   "ok": "True"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "dec",
+     "v": "1.10"
+    }
+   ],
+   "ok": "1.10"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "dec",
+     "v": "NaN"
+    }
+   ],
+   "ok": null
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "YWJj"
+    }
+   ],
+   "ok": "YWJj"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "uuid",
+     "v": "12345678-1234-5678-1234-567812345678"
+    }
+   ],
+   "ok": "12345678-1234-5678-1234-567812345678"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "dt",
+     "v": "2024-01-01T00:00:00+00:00",
+     "tz": "UTC"
+    }
+   ],
+   "ok": "2024-01-01T00:00:00+00:00"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "dt",
+     "v": "2024-01-01T00:00:00",
+     "tz": null
+    }
+   ],
+   "ok": "2024-01-01T00:00:00Z"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "date",
+     "v": "2024-01-02"
+    }
+   ],
+   "ok": "2024-01-02"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "b": 1,
+      "a": [
+       1,
+       2
+      ]
+     }
+    }
+   ],
+   "ok": "{\"b\":1,\"a\":[1,2]}"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "json",
+     "v": [
+      1,
+      "x",
+      null
+     ]
+    }
+   ],
+   "ok": "[1,\"x\",null]"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "d": 1.5,
+      "nested": {
+       "z": [
+        1,
+        null
+       ]
+      }
+     }
+    }
+   ],
+   "ok": "{\"d\":1.5,\"nested\":{\"z\":[1,null]}}"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "json",
+     "v": [
+      1,
+      2
+     ]
+    }
+   ],
+   "ok": "[1,2]"
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "float",
+     "v": "nan"
+    }
+   ],
+   "ok": null
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    "NaN"
+   ],
+   "ok": null
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    ""
+   ],
+   "ok": null
+  },
+  {
+   "fn": "json_serialize_value",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    }
+   ],
+   "ok": "0101000000000000000000F03F0000000000000040"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0101000000000000000000F03F0000000000000040"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0101000000000000000000F03F0000000000000040"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000000000000000f03f0000000000000040"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000000000000000f03f0000000000000040"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POINT (1 2)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POINT (1 2)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      1.0,
+      2.0
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      1.0,
+      2.0
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff0101000000000000000000f03f0000000000000040"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e61000000101000000000000000000f03f0000000000000040"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1 2)",
+     "wkb": "0101000000000000000000F03F0000000000000040"
+    },
+    4326
+   ],
+   "ok": "0101000020E6100000000000000000F03F0000000000000040"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT (1 2)"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0101000000000000000000F03F0000000000000040"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT (1 2)"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1 2)",
+    "wkb": "0101000000000000000000F03F0000000000000040"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0101000000000000000000F03F0000000000000040"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1 2)",
+    "wkb": "0101000000000000000000F03F0000000000000040"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQEAAAAAAAAAAADwPwAAAAAAAABA"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1 2)",
+    "wkb": "0101000000000000000000F03F0000000000000040"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0101000000000000000000F03F0000000000000040"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1 2)",
+    "wkb": "0101000000000000000000F03F0000000000000040"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAPA/AAAAAAAAAEA="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAPA/AAAAAAAAAEA="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000000000000000000f03f0000000000000040"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAPA/AAAAAAAAAEA="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1 2)",
+    "wkb": "0101000000000000000000F03F0000000000000040"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAQAEBAAAAAAAAAAAA8D8AAAAAAAAAQA=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAQAEBAAAAAAAAAAAA8D8AAAAAAAAAQA=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000000000000000000f03f0000000000000040"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAQAEBAAAAAAAAAAAA8D8AAAAAAAAAQA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1 2)",
+    "wkb": "0101000000000000000000F03F0000000000000040"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "Point",
+      "coordinates": [
+       1.0,
+       2.0
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1 2)",
+    "wkb": "0101000000000000000000F03F0000000000000040"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0101000000369673D3ADF9F13F00000000000004C0"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0101000000369673D3ADF9F13F00000000000004C0"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000369673d3adf9f13f00000000000004c0"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000369673d3adf9f13f00000000000004c0"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POINT (1.123457 -2.5)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POINT (1.123457 -2.5)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      1.123456789,
+      -2.5
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      1.123456789,
+      -2.5
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff0101000000369673d3adf9f13f00000000000004c0"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e61000000101000000369673d3adf9f13f00000000000004c0"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (1.123456789 -2.5)",
+     "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+    },
+    4326
+   ],
+   "ok": "0101000020E6100000369673D3ADF9F13F00000000000004C0"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT (1.123456789 -2.5)"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0101000000369673D3ADF9F13F00000000000004C0"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT (1.123456789 -2.5)"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1.123456789 -2.5)",
+    "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0101000000369673D3ADF9F13F00000000000004C0"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1.123456789 -2.5)",
+    "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQEAAAA2lnPTrfnxPwAAAAAAAATA"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1.123456789 -2.5)",
+    "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0101000000369673D3ADF9F13F00000000000004C0"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1.123456789 -2.5)",
+    "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAADaWc9Ot+fE/AAAAAAAABMA="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAADaWc9Ot+fE/AAAAAAAABMA="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000000369673d3adf9f13f00000000000004c0"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAADaWc9Ot+fE/AAAAAAAABMA="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1.123456789 -2.5)",
+    "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAA2lnPTrfnxPzaWc9Ot+fE/AAAAAAAABMAAAAAAAAAEwAEBAAAANpZz06358T8AAAAAAAAEwA=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAA2lnPTrfnxPzaWc9Ot+fE/AAAAAAAABMAAAAAAAAAEwAEBAAAANpZz06358T8AAAAAAAAEwA=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000000369673d3adf9f13f00000000000004c0"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAA2lnPTrfnxPzaWc9Ot+fE/AAAAAAAABMAAAAAAAAAEwAEBAAAANpZz06358T8AAAAAAAAEwA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1.123456789 -2.5)",
+    "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "Point",
+      "coordinates": [
+       1.123456789,
+       -2.5
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1.123456789 -2.5)",
+    "wkb": "0101000000369673D3ADF9F13F00000000000004C0"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0101000080000000000000F03F00000000000000400000000000000840"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0101000080000000000000F03F00000000000000400000000000000840"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000080000000000000f03f00000000000000400000000000000840"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000080000000000000f03f00000000000000400000000000000840"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POINT Z (1 2 3)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POINT Z (1 2 3)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      1.0,
+      2.0,
+      3.0
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      1.0,
+      2.0,
+      3.0
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff0101000080000000000000f03f00000000000000400000000000000840"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e61000000101000080000000000000f03f00000000000000400000000000000840"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT Z (1 2 3)",
+     "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+    },
+    4326
+   ],
+   "ok": "01010000A0E6100000000000000000F03F00000000000000400000000000000840"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT Z (1 2 3)"
+   ],
+   "ok": null
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0101000080000000000000F03F00000000000000400000000000000840"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT Z (1 2 3)"
+   ],
+   "ok": "POINT Z (1 2 3)"
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0101000080000000000000F03F00000000000000400000000000000840"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT Z (1 2 3)",
+    "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQEAAIAAAAAAAADwPwAAAAAAAABAAAAAAAAACEA="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT Z (1 2 3)",
+    "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0101000080000000000000F03F00000000000000400000000000000840"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT Z (1 2 3)",
+    "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAgAAAAAAAAPA/AAAAAAAAAEAAAAAAAAAIQA=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAgAAAAAAAAPA/AAAAAAAAAEAAAAAAAAAIQA=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000080000000000000f03f00000000000000400000000000000840"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAgAAAAAAAAPA/AAAAAAAAAEAAAAAAAAAIQA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT Z (1 2 3)",
+    "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAQAEBAACAAAAAAAAA8D8AAAAAAAAAQAAAAAAAAAhA"
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAQAEBAACAAAAAAAAA8D8AAAAAAAAAQAAAAAAAAAhA"
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000080000000000000f03f00000000000000400000000000000840"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAQAEBAACAAAAAAAAA8D8AAAAAAAAAQAAAAAAAAAhA"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT Z (1 2 3)",
+    "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "Point",
+      "coordinates": [
+       1.0,
+       2.0,
+       3.0
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT Z (1 2 3)",
+    "wkb": "0101000080000000000000F03F00000000000000400000000000000840"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0101000000000000000000F87F000000000000F87F"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0101000000000000000000F87F000000000000F87F"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000000000000000f87f000000000000f87f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000000000000000f87f000000000000f87f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POINT EMPTY"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POINT EMPTY"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": []
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": []
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500021ffffffff0101000000000000000000f87f000000000000f87f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500021e61000000101000000000000000000f87f000000000000f87f"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT EMPTY",
+     "wkb": "0101000000000000000000F87F000000000000F87F"
+    },
+    4326
+   ],
+   "ok": "0101000020E6100000000000000000F87F000000000000F87F"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT EMPTY"
+   ],
+   "ok": null
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0101000000000000000000F87F000000000000F87F"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT EMPTY"
+   ],
+   "ok": "POINT EMPTY"
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0101000000000000000000F87F000000000000F87F"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT EMPTY",
+    "wkb": "0101000000000000000000F87F000000000000F87F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQEAAAAAAAAAAAD4fwAAAAAAAPh/"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT EMPTY",
+    "wkb": "0101000000000000000000F87F000000000000F87F"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0101000000000000000000F87F000000000000F87F"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT EMPTY",
+    "wkb": "0101000000000000000000F87F000000000000F87F"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "01020000000300000000000000000000000000000000000000000000000000f03f000000000000f03f00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "01020000000300000000000000000000000000000000000000000000000000f03f000000000000f03f00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "LINESTRING (0 0, 1 1, 2 0)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "LINESTRING (0 0, 1 1, 2 0)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       1.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff01020000000300000000000000000000000000000000000000000000000000f03f000000000000f03f00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e610000001020000000300000000000000000000000000000000000000000000000000f03f000000000000f03f00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+     "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+    },
+    4326
+   ],
+   "ok": "0102000020E61000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "LINESTRING (0 0, 1 1, 2 0)"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "LINESTRING (0 0, 1 1, 2 0)"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+    "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+    "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQIAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAQAAAAAAAAAAA"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+    "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+    "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAgAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAABAAAAAAAAAAAA="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAgAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAABAAAAAAAAAAAA="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "01020000000300000000000000000000000000000000000000000000000000f03f000000000000f03f00000000000000400000000000000000"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAgAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAABAAAAAAAAAAAA="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+    "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAADwPwECAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAAA=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAADwPwECAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAAA=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "01020000000300000000000000000000000000000000000000000000000000f03f000000000000f03f00000000000000400000000000000000"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAADwPwECAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAAA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+    "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "LineString",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        2.0,
+        0.0
+       ]
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING (0 0, 1 1, 2 0)",
+    "wkb": "01020000000300000000000000000000000000000000000000000000000000F03F000000000000F03F00000000000000400000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "010200000000000000"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "010200000000000000"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "010200000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "010200000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "LINESTRING EMPTY"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "LINESTRING EMPTY"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "LineString",
+     "coordinates": []
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "LineString",
+     "coordinates": []
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500021ffffffff010200000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500021e6100000010200000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING EMPTY",
+     "wkb": "010200000000000000"
+    },
+    4326
+   ],
+   "ok": "0102000020E610000000000000"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "LINESTRING EMPTY"
+   ],
+   "ok": null
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "010200000000000000"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "LINESTRING EMPTY"
+   ],
+   "ok": "LINESTRING EMPTY"
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "010200000000000000"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING EMPTY",
+    "wkb": "010200000000000000"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQIAAAAAAAAA"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING EMPTY",
+    "wkb": "010200000000000000"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "010200000000000000"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING EMPTY",
+    "wkb": "010200000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POLYGON ((0 0, 1 0, 1 1, 0 0))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POLYGON ((0 0, 1 0, 1 1, 0 0))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        0.0,
+        0.0
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ],
+       [
+        0.0,
+        0.0
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff0103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e61000000103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+     "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+    },
+    4326
+   ],
+   "ok": "0103000020E6100000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POLYGON ((0 0, 1 0, 1 1, 0 0))"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POLYGON ((0 0, 1 0, 1 1, 0 0))"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+    "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+    "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQMAAAABAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAAAAAAAAAAAAAAA="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+    "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+    "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAwAAAAEAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAAA=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAwAAAAEAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAAA=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f00000000000000000000000000000000"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAwAAAAEAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAAA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+    "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwEDAAAAAQAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAA"
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwEDAAAAAQAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAA"
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f00000000000000000000000000000000"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwEDAAAAAQAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAA"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+    "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         1.0,
+         0.0
+        ],
+        [
+         1.0,
+         1.0
+        ],
+        [
+         0.0,
+         0.0
+        ]
+       ]
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+    "wkb": "0103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F00000000000000000000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000f03f000000000000f03f0000000000000040000000000000f03f00000000000000400000000000000040000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000f03f000000000000f03f0000000000000040000000000000f03f00000000000000400000000000000040000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        10.0,
+        0.0
+       ],
+       [
+        10.0,
+        10.0
+       ],
+       [
+        0.0,
+        10.0
+       ],
+       [
+        0.0,
+        0.0
+       ]
+      ],
+      [
+       [
+        1.0,
+        1.0
+       ],
+       [
+        2.0,
+        1.0
+       ],
+       [
+        2.0,
+        2.0
+       ],
+       [
+        1.0,
+        1.0
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        10.0,
+        0.0
+       ],
+       [
+        10.0,
+        10.0
+       ],
+       [
+        0.0,
+        10.0
+       ],
+       [
+        0.0,
+        0.0
+       ]
+      ],
+      [
+       [
+        1.0,
+        1.0
+       ],
+       [
+        2.0,
+        1.0
+       ],
+       [
+        2.0,
+        2.0
+       ],
+       [
+        1.0,
+        1.0
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000f03f000000000000f03f0000000000000040000000000000f03f00000000000000400000000000000040000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e610000001030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000f03f000000000000f03f0000000000000040000000000000f03f00000000000000400000000000000040000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+     "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+    },
+    4326
+   ],
+   "ok": "0103000020E61000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+    "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+    "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQMAAAACAAAABQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAkQAAAAAAAAAAAAAAAAAAAJEAAAAAAAAAkQAAAAAAAAAAAAAAAAAAAJEAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAQAAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAQAAAAAAAAPA/AAAAAAAA8D8="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+    "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+    "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAwAAAAIAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRAAAAAAAAAAAAAAAAAAAAkQAAAAAAAACRAAAAAAAAAAAAAAAAAAAAkQAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAABAAAAAAAAA8D8AAAAAAAAAQAAAAAAAAABAAAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAwAAAAIAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRAAAAAAAAAAAAAAAAAAAAkQAAAAAAAACRAAAAAAAAAAAAAAAAAAAAkQAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAABAAAAAAAAA8D8AAAAAAAAAQAAAAAAAAABAAAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000f03f000000000000f03f0000000000000040000000000000f03f00000000000000400000000000000040000000000000f03f000000000000f03f"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAwAAAAIAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRAAAAAAAAAAAAAAAAAAAAkQAAAAAAAACRAAAAAAAAAAAAAAAAAAAAkQAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAABAAAAAAAAA8D8AAAAAAAAAQAAAAAAAAABAAAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+    "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAACRAAAAAAAAAAAAAAAAAAAAkQAEDAAAAAgAAAAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJEAAAAAAAAAAAAAAAAAAACRAAAAAAAAAJEAAAAAAAAAAAAAAAAAAACRAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAADwPwAAAAAAAABAAAAAAAAAAEAAAAAAAADwPwAAAAAAAPA/"
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAACRAAAAAAAAAAAAAAAAAAAAkQAEDAAAAAgAAAAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJEAAAAAAAAAAAAAAAAAAACRAAAAAAAAAJEAAAAAAAAAAAAAAAAAAACRAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAADwPwAAAAAAAABAAAAAAAAAAEAAAAAAAADwPwAAAAAAAPA/"
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000f03f000000000000f03f0000000000000040000000000000f03f00000000000000400000000000000040000000000000f03f000000000000f03f"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAACRAAAAAAAAAAAAAAAAAAAAkQAEDAAAAAgAAAAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJEAAAAAAAAAAAAAAAAAAACRAAAAAAAAAJEAAAAAAAAAAAAAAAAAAACRAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAADwPwAAAAAAAABAAAAAAAAAAEAAAAAAAADwPwAAAAAAAPA/"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+    "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "Polygon",
+      "coordinates": [
+       [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         10.0
+        ],
+        [
+         0.0,
+         10.0
+        ],
+        [
+         0.0,
+         0.0
+        ]
+       ],
+       [
+        [
+         1.0,
+         1.0
+        ],
+        [
+         2.0,
+         1.0
+        ],
+        [
+         2.0,
+         2.0
+        ],
+        [
+         1.0,
+         1.0
+        ]
+       ]
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (1 1, 2 1, 2 2, 1 1))",
+    "wkb": "01030000000200000005000000000000000000000000000000000000000000000000002440000000000000000000000000000024400000000000002440000000000000000000000000000024400000000000000000000000000000000004000000000000000000F03F000000000000F03F0000000000000040000000000000F03F00000000000000400000000000000040000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "MULTIPOINT ((0 0), (1 1))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "MULTIPOINT ((0 0), (1 1))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "MultiPoint",
+     "coordinates": [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       1.0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "MultiPoint",
+     "coordinates": [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       1.0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff0104000000020000000101000000000000000000000000000000000000000101000000000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e61000000104000000020000000101000000000000000000000000000000000000000101000000000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOINT ((0 0), (1 1))",
+     "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+    },
+    4326
+   ],
+   "ok": "0104000020E6100000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "MULTIPOINT ((0 0), (1 1))"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "MULTIPOINT ((0 0), (1 1))"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOINT ((0 0), (1 1))",
+    "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOINT ((0 0), (1 1))",
+    "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQQAAAACAAAAAQEAAAAAAAAAAAAAAAAAAAAAAAAAAQEAAAAAAAAAAADwPwAAAAAAAPA/"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOINT ((0 0), (1 1))",
+    "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOINT ((0 0), (1 1))",
+    "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBAAAAAIAAAABAQAAAAAAAAAAAAAAAAAAAAAAAAABAQAAAAAAAAAAAPA/AAAAAAAA8D8="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBAAAAAIAAAABAQAAAAAAAAAAAAAAAAAAAAAAAAABAQAAAAAAAAAAAPA/AAAAAAAA8D8="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000f03f000000000000f03f"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBAAAAAIAAAABAQAAAAAAAAAAAAAAAAAAAAAAAAABAQAAAAAAAAAAAPA/AAAAAAAA8D8="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOINT ((0 0), (1 1))",
+    "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwEEAAAAAgAAAAEBAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAAAAAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwEEAAAAAgAAAAEBAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAAAAAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000f03f000000000000f03f"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwEEAAAAAgAAAAEBAAAAAAAAAAAAAAAAAAAAAAAAAAEBAAAAAAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOINT ((0 0), (1 1))",
+    "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "MultiPoint",
+      "coordinates": [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ]
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOINT ((0 0), (1 1))",
+    "wkb": "0104000000020000000101000000000000000000000000000000000000000101000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "01050000000200000001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "01050000000200000001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "MultiLineString",
+     "coordinates": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ]
+      ],
+      [
+       [
+        2.0,
+        2.0
+       ],
+       [
+        3.0,
+        3.0
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "MultiLineString",
+     "coordinates": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0
+       ]
+      ],
+      [
+       [
+        2.0,
+        2.0
+       ],
+       [
+        3.0,
+        3.0
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff01050000000200000001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e610000001050000000200000001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+     "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    4326
+   ],
+   "ok": "0105000020E61000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+    "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+    "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQUAAAACAAAAAQIAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8BAgAAAAIAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAACEAAAAAAAAAIQA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+    "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+    "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBQAAAAIAAAABAgAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwECAAAAAgAAAAAAAAAAAABAAAAAAAAAAEAAAAAAAAAIQAAAAAAAAAhA"
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBQAAAAIAAAABAgAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwECAAAAAgAAAAAAAAAAAABAAAAAAAAAAEAAAAAAAAAIQAAAAAAAAAhA"
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "01050000000200000001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBQAAAAIAAAABAgAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwECAAAAAgAAAAAAAAAAAABAAAAAAAAAAEAAAAAAAAAIQAAAAAAAAAhA"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+    "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAAhAAAAAAAAAAAAAAAAAAAAIQAEFAAAAAgAAAAECAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AQIAAAACAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAhAAAAAAAAACEA="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAAhAAAAAAAAAAAAAAAAAAAAIQAEFAAAAAgAAAAECAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AQIAAAACAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAhAAAAAAAAACEA="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "01050000000200000001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAAhAAAAAAAAAAAAAAAAAAAAIQAEFAAAAAgAAAAECAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AQIAAAACAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAhAAAAAAAAACEA="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+    "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "MultiLineString",
+      "coordinates": [
+       [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         1.0,
+         1.0
+        ]
+       ],
+       [
+        [
+         2.0,
+         2.0
+        ],
+        [
+         3.0,
+         3.0
+        ]
+       ]
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))",
+    "wkb": "01050000000200000001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F0102000000020000000000000000000040000000000000004000000000000008400000000000000840"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "MultiPolygon",
+     "coordinates": [
+      [
+       [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         1.0,
+         0.0
+        ],
+        [
+         1.0,
+         1.0
+        ],
+        [
+         0.0,
+         0.0
+        ]
+       ]
+      ],
+      [
+       [
+        [
+         5.0,
+         5.0
+        ],
+        [
+         6.0,
+         5.0
+        ],
+        [
+         6.0,
+         6.0
+        ],
+        [
+         5.0,
+         5.0
+        ]
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "MultiPolygon",
+     "coordinates": [
+      [
+       [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         1.0,
+         0.0
+        ],
+        [
+         1.0,
+         1.0
+        ],
+        [
+         0.0,
+         0.0
+        ]
+       ]
+      ],
+      [
+       [
+        [
+         5.0,
+         5.0
+        ],
+        [
+         6.0,
+         5.0
+        ],
+        [
+         6.0,
+         6.0
+        ],
+        [
+         5.0,
+         5.0
+        ]
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e61000000106000000020000000103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+     "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    4326
+   ],
+   "ok": "0106000020E6100000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+    "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+    "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQYAAAACAAAAAQMAAAABAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAAAAAAAAAAAAAAABAwAAAAEAAAAEAAAAAAAAAAAAFEAAAAAAAAAUQAAAAAAAABhAAAAAAAAAFEAAAAAAAAAYQAAAAAAAABhAAAAAAAAAFEAAAAAAAAAUQA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+    "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+    "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBgAAAAIAAAABAwAAAAEAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAAAEDAAAAAQAAAAQAAAAAAAAAAAAUQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAUQAAAAAAAABhAAAAAAAAAGEAAAAAAAAAUQAAAAAAAABRA"
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBgAAAAIAAAABAwAAAAEAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAAAEDAAAAAQAAAAQAAAAAAAAAAAAUQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAUQAAAAAAAABhAAAAAAAAAGEAAAAAAAAAUQAAAAAAAABRA"
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBgAAAAIAAAABAwAAAAEAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAAAEDAAAAAQAAAAQAAAAAAAAAAAAUQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAUQAAAAAAAABhAAAAAAAAAGEAAAAAAAAAUQAAAAAAAABRA"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+    "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAABhAAAAAAAAAAAAAAAAAAAAYQAEGAAAAAgAAAAEDAAAAAQAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAQMAAAABAAAABAAAAAAAAAAAABRAAAAAAAAAFEAAAAAAAAAYQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAYQAAAAAAAABRAAAAAAAAAFEA="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAABhAAAAAAAAAAAAAAAAAAAAYQAEGAAAAAgAAAAEDAAAAAQAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAQMAAAABAAAABAAAAAAAAAAAABRAAAAAAAAAFEAAAAAAAAAYQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAYQAAAAAAAABRAAAAAAAAAFEA="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000f03f0000000000000000000000000000f03f000000000000f03f000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAABhAAAAAAAAAAAAAAAAAAAAYQAEGAAAAAgAAAAEDAAAAAQAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAQMAAAABAAAABAAAAAAAAAAAABRAAAAAAAAAFEAAAAAAAAAYQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAYQAAAAAAAABRAAAAAAAAAFEA="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+    "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "MultiPolygon",
+      "coordinates": [
+       [
+        [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ],
+         [
+          0.0,
+          0.0
+         ]
+        ]
+       ],
+       [
+        [
+         [
+          5.0,
+          5.0
+         ],
+         [
+          6.0,
+          5.0
+         ],
+         [
+          6.0,
+          6.0
+         ],
+         [
+          5.0,
+          5.0
+         ]
+        ]
+       ]
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))",
+    "wkb": "0106000000020000000103000000010000000400000000000000000000000000000000000000000000000000F03F0000000000000000000000000000F03F000000000000F03F000000000000000000000000000000000103000000010000000400000000000000000014400000000000001440000000000000184000000000000014400000000000001840000000000000184000000000000014400000000000001440"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0107000000020000000101000000000000000000f03f000000000000004001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0107000000020000000101000000000000000000f03f000000000000004001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "GeometryCollection",
+     "geometries": [
+      {
+       "type": "Point",
+       "coordinates": [
+        1.0,
+        2.0
+       ]
+      },
+      {
+       "type": "LineString",
+       "coordinates": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         1.0,
+         1.0
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "GeometryCollection",
+     "geometries": [
+      {
+       "type": "Point",
+       "coordinates": [
+        1.0,
+        2.0
+       ]
+      },
+      {
+       "type": "LineString",
+       "coordinates": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         1.0,
+         1.0
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff0107000000020000000101000000000000000000f03f000000000000004001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e61000000107000000020000000101000000000000000000f03f000000000000004001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+     "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+    },
+    4326
+   ],
+   "ok": "0107000020E6100000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+    "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+    "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQcAAAACAAAAAQEAAAAAAAAAAADwPwAAAAAAAABAAQIAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+    "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+    "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBwAAAAIAAAABAQAAAAAAAAAAAPA/AAAAAAAAAEABAgAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBwAAAAIAAAABAQAAAAAAAAAAAPA/AAAAAAAAAEABAgAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0107000000020000000101000000000000000000f03f000000000000004001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABBwAAAAIAAAABAQAAAAAAAAAAAPA/AAAAAAAAAEABAgAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+    "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAQAEHAAAAAgAAAAEBAAAAAAAAAAAA8D8AAAAAAAAAQAECAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/"
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAQAEHAAAAAgAAAAEBAAAAAAAAAAAA8D8AAAAAAAAAQAECAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/"
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0107000000020000000101000000000000000000f03f000000000000004001020000000200000000000000000000000000000000000000000000000000f03f000000000000f03f"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAAAAQAEHAAAAAgAAAAEBAAAAAAAAAAAA8D8AAAAAAAAAQAECAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+    "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "GeometryCollection",
+      "geometries": [
+       {
+        "type": "Point",
+        "coordinates": [
+         1.0,
+         2.0
+        ]
+       },
+       {
+        "type": "LineString",
+        "coordinates": [
+         [
+          0.0,
+          0.0
+         ],
+         [
+          1.0,
+          1.0
+         ]
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "GEOMETRYCOLLECTION (POINT (1 2), LINESTRING (0 0, 1 1))",
+    "wkb": "0107000000020000000101000000000000000000F03F000000000000004001020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0101000000000000E87648374248AFBC9AF2D77A3E"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0101000000000000E87648374248AFBC9AF2D77A3E"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000000000e87648374248afbc9af2d77a3e"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000000000e87648374248afbc9af2d77a3e"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POINT (100000000000 1e-7)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POINT (100000000000 1e-7)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      100000000000.0,
+      1e-07
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      100000000000.0,
+      1e-07
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff0101000000000000e87648374248afbc9af2d77a3e"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e61000000101000000000000e87648374248afbc9af2d77a3e"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (100000000000 1e-7)",
+     "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+    },
+    4326
+   ],
+   "ok": "0101000020E6100000000000E87648374248AFBC9AF2D77A3E"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT (100000000000 0.0000001)"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0101000000000000E87648374248AFBC9AF2D77A3E"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT (100000000000 0.0000001)"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (100000000000 1e-7)",
+    "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0101000000000000E87648374248AFBC9AF2D77A3E"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (100000000000 1e-7)",
+    "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQEAAAAAAADodkg3QkivvJry13o+"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (100000000000 1e-7)",
+    "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0101000000000000E87648374248AFBC9AF2D77A3E"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (100000000000 1e-7)",
+    "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAOh2SDdCSK+8mvLXej4="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAOh2SDdCSK+8mvLXej4="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000000000000e87648374248afbc9af2d77a3e"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAOh2SDdCSK+8mvLXej4="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (100000000000 1e-7)",
+    "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAADodkg3QgAAAOh2SDdCSK+8mvLXej5Ir7ya8td6PgEBAAAAAAAA6HZIN0JIr7ya8td6Pg=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAADodkg3QgAAAOh2SDdCSK+8mvLXej5Ir7ya8td6PgEBAAAAAAAA6HZIN0JIr7ya8td6Pg=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000000000000e87648374248afbc9af2d77a3e"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAADodkg3QgAAAOh2SDdCSK+8mvLXej5Ir7ya8td6PgEBAAAAAAAA6HZIN0JIr7ya8td6Pg=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (100000000000 1e-7)",
+    "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "Point",
+      "coordinates": [
+       100000000000.0,
+       1e-07
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (100000000000 1e-7)",
+    "wkb": "0101000000000000E87648374248AFBC9AF2D77A3E"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0101000000000000000000F8BF408CB5781DAF1544"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0101000000000000000000F8BF408CB5781DAF1544"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000000000000000f8bf408cb5781daf1544"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000000000000000f8bf408cb5781daf1544"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POINT (-1.5 1e+20)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POINT (-1.5 1e+20)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      -1.5,
+      1e+20
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      -1.5,
+      1e+20
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff0101000000000000000000f8bf408cb5781daf1544"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e61000000101000000000000000000f8bf408cb5781daf1544"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (-1.5 1e+20)",
+     "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+    },
+    4326
+   ],
+   "ok": "0101000020E6100000000000000000F8BF408CB5781DAF1544"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT (-1.5 1e20)"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0101000000000000000000F8BF408CB5781DAF1544"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT (-1.5 1e20)"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (-1.5 1e+20)",
+    "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0101000000000000000000F8BF408CB5781DAF1544"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (-1.5 1e+20)",
+    "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQEAAAAAAAAAAAD4v0CMtXgdrxVE"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (-1.5 1e+20)",
+    "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0101000000000000000000F8BF408CB5781DAF1544"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (-1.5 1e+20)",
+    "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAPi/QIy1eB2vFUQ="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAPi/QIy1eB2vFUQ="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000000000000000000f8bf408cb5781daf1544"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAPi/QIy1eB2vFUQ="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (-1.5 1e+20)",
+    "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAD4vwAAAAAAAPi/QIy1eB2vFURAjLV4Ha8VRAEBAAAAAAAAAAAA+L9AjLV4Ha8VRA=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAD4vwAAAAAAAPi/QIy1eB2vFURAjLV4Ha8VRAEBAAAAAAAAAAAA+L9AjLV4Ha8VRA=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000000000000000000f8bf408cb5781daf1544"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAD4vwAAAAAAAPi/QIy1eB2vFURAjLV4Ha8VRAEBAAAAAAAAAAAA+L9AjLV4Ha8VRA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (-1.5 1e+20)",
+    "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "Point",
+      "coordinates": [
+       -1.5,
+       1e+20
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (-1.5 1e+20)",
+    "wkb": "0101000000000000000000F8BF408CB5781DAF1544"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "010100000068dce56c4b2e203fe085adf90124fe40"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "010100000068dce56c4b2e203fe085adf90124fe40"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POINT (0.000123 123456.123456)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POINT (0.000123 123456.123456)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      0.00012345,
+      123456.1234565
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      0.00012345,
+      123456.1234565
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff010100000068dce56c4b2e203fe085adf90124fe40"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e6100000010100000068dce56c4b2e203fe085adf90124fe40"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.00012345 123456.1234565)",
+     "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+    },
+    4326
+   ],
+   "ok": "0101000020E610000068DCE56C4B2E203FE085ADF90124FE40"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT (0.00012345 123456.1234565)"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "010100000068DCE56C4B2E203FE085ADF90124FE40"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT (0.00012345 123456.1234565)"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.00012345 123456.1234565)",
+    "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "010100000068DCE56C4B2E203FE085ADF90124FE40"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.00012345 123456.1234565)",
+    "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQEAAABo3OVsSy4gP+CFrfkBJP5A"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.00012345 123456.1234565)",
+    "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "010100000068DCE56C4B2E203FE085ADF90124FE40"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.00012345 123456.1234565)",
+    "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAGjc5WxLLiA/4IWt+QEk/kA="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAGjc5WxLLiA/4IWt+QEk/kA="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "010100000068dce56c4b2e203fe085adf90124fe40"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAGjc5WxLLiA/4IWt+QEk/kA="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.00012345 123456.1234565)",
+    "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAABo3OVsSy4gP2jc5WxLLiA/4IWt+QEk/kDgha35AST+QAEBAAAAaNzlbEsuID/gha35AST+QA=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAABo3OVsSy4gP2jc5WxLLiA/4IWt+QEk/kDgha35AST+QAEBAAAAaNzlbEsuID/gha35AST+QA=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "010100000068dce56c4b2e203fe085adf90124fe40"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAABo3OVsSy4gP2jc5WxLLiA/4IWt+QEk/kDgha35AST+QAEBAAAAaNzlbEsuID/gha35AST+QA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.00012345 123456.1234565)",
+    "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "Point",
+      "coordinates": [
+       0.00012345,
+       123456.1234565
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.00012345 123456.1234565)",
+    "wkb": "010100000068DCE56C4B2E203FE085ADF90124FE40"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "010200008002000000000000000000000000000000000000000000000000000000000000000000f03f000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "010200008002000000000000000000000000000000000000000000000000000000000000000000f03f000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "LINESTRING Z (0 0 0, 1 1 1)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "LINESTRING Z (0 0 0, 1 1 1)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       1.0,
+       1.0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1.0,
+       1.0,
+       1.0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff010200008002000000000000000000000000000000000000000000000000000000000000000000f03f000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e6100000010200008002000000000000000000000000000000000000000000000000000000000000000000f03f000000000000f03f000000000000f03f"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+     "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+    },
+    4326
+   ],
+   "ok": "01020000A0E610000002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "LINESTRING Z (0 0 0, 1 1 1)"
+   ],
+   "ok": null
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "LINESTRING Z (0 0 0, 1 1 1)"
+   ],
+   "ok": "LINESTRING Z (0 0 0, 1 1 1)"
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+    "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQIAAIACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+    "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+    "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAgAAgAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAgAAgAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "010200008002000000000000000000000000000000000000000000000000000000000000000000f03f000000000000f03f000000000000f03f"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAgAAgAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+    "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwECAACAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwECAACAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "010200008002000000000000000000000000000000000000000000000000000000000000000000f03f000000000000f03f000000000000f03f"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAAAAAAAAAAAADwPwECAACAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPw=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+    "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "LineString",
+      "coordinates": [
+       [
+        0.0,
+        0.0,
+        0.0
+       ],
+       [
+        1.0,
+        1.0,
+        1.0
+       ]
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "LINESTRING Z (0 0 0, 1 1 1)",
+    "wkb": "010200008002000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "010100000000000000000000800000000000000000"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "010100000000000000000000800000000000000000"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POINT (0 0)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POINT (0 0)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      -0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      -0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e6100000010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0 0)",
+     "wkb": "010100000000000000000000800000000000000000"
+    },
+    4326
+   ],
+   "ok": "0101000020E610000000000000000000800000000000000000"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT (-0 0)"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "010100000000000000000000800000000000000000"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT (-0 0)"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0 0)",
+    "wkb": "010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "010100000000000000000000800000000000000000"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0 0)",
+    "wkb": "010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQEAAAAAAAAAAAAAgAAAAAAAAAAA"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0 0)",
+    "wkb": "010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "010100000000000000000000800000000000000000"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0 0)",
+    "wkb": "010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAACAAAAAAAAAAAA="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAACAAAAAAAAAAAA="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "010100000000000000000000800000000000000000"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAACAAAAAAAAAAAA="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0 0)",
+    "wkb": "010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAEBAAAAAAAAAAAAAIAAAAAAAAAAAA=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAEBAAAAAAAAAAAAAIAAAAAAAAAAAA=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "010100000000000000000000800000000000000000"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAEBAAAAAAAAAAAAAIAAAAAAAAAAAA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0 0)",
+    "wkb": "010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "Point",
+      "coordinates": [
+       -0.0,
+       0.0
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0 0)",
+    "wkb": "010100000000000000000000800000000000000000"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    "wkb_hex",
+    null
+   ],
+   "ok": "0101000000000000000000E03F83DE1B4300000440"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    "wkb_hex",
+    4326
+   ],
+   "ok": "0101000000000000000000E03F83DE1B4300000440"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    "wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000000000000000e03f83de1b4300000440"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    "wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "0101000000000000000000e03f83de1b4300000440"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    "wkt",
+    null
+   ],
+   "ok": "POINT (0.5 2.5)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    "wkt",
+    4326
+   ],
+   "ok": "POINT (0.5 2.5)"
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    "geojson",
+    null
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      0.5,
+      2.5000005
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    "geojson",
+    4326
+   ],
+   "ok": {
+    "t": "json",
+    "v": {
+     "type": "Point",
+     "coordinates": [
+      0.5,
+      2.5000005
+     ]
+    }
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    "gpkg_wkb",
+    null
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001ffffffff0101000000000000000000e03f83de1b4300000440"
+   }
+  },
+  {
+   "fn": "serialize_geometry",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    "gpkg_wkb",
+    4326
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "47500001e61000000101000000000000000000e03f83de1b4300000440"
+   }
+  },
+  {
+   "fn": "serialize_geometry_with_srid",
+   "args": [
+    {
+     "t": "geom",
+     "wkt": "POINT (0.5 2.5000005)",
+     "wkb": "0101000000000000000000E03F83DE1B4300000440"
+    },
+    4326
+   ],
+   "ok": "0101000020E6100000000000000000E03F83DE1B4300000440"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT (0.5 2.5000005)"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "0101000000000000000000E03F83DE1B4300000440"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT (0.5 2.5000005)"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.5 2.5000005)",
+    "wkb": "0101000000000000000000E03F83DE1B4300000440"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "0101000000000000000000E03F83DE1B4300000440"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.5 2.5000005)",
+    "wkb": "0101000000000000000000E03F83DE1B4300000440"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "AQEAAAAAAAAAAADgP4PeG0MAAARA"
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.5 2.5000005)",
+    "wkb": "0101000000000000000000E03F83DE1B4300000440"
+   }
+  },
+  {
+   "fn": "deserialize_geometry",
+   "args": [
+    "0101000000000000000000E03F83DE1B4300000440"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.5 2.5000005)",
+    "wkb": "0101000000000000000000E03F83DE1B4300000440"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAOA/g94bQwAABEA="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAOA/g94bQwAABEA="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000000000000000000e03f83de1b4300000440"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAAeYQAAABAQAAAAAAAAAAAOA/g94bQwAABEA="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.5 2.5000005)",
+    "wkb": "0101000000000000000000E03F83DE1B4300000440"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAADgPwAAAAAAAOA/g94bQwAABECD3htDAAAEQAEBAAAAAAAAAAAA4D+D3htDAAAEQA=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "gpkg_wkb_to_wkb",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAADgPwAAAAAAAOA/g94bQwAABECD3htDAAAEQAEBAAAAAAAAAAAA4D+D3htDAAAEQA=="
+    }
+   ],
+   "ok": [
+    {
+     "t": "bytes_hex",
+     "v": "0101000000000000000000e03f83de1b4300000440"
+    },
+    {
+     "t": "int",
+     "v": 4326
+    },
+    {
+     "t": "int",
+     "v": 3
+    }
+   ]
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1AAA+YQAAAAAAAAAADgPwAAAAAAAOA/g94bQwAABECD3htDAAAEQAEBAAAAAAAAAAAA4D+D3htDAAAEQA=="
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.5 2.5000005)",
+    "wkb": "0101000000000000000000E03F83DE1B4300000440"
+   }
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "json",
+     "v": {
+      "type": "Point",
+      "coordinates": [
+       0.5,
+       2.5000005
+      ]
+     }
+    }
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (0.5 2.5000005)",
+    "wkb": "0101000000000000000000E03F83DE1B4300000440"
+   }
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT(1 2)"
+   ],
+   "ok": true
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT(1 2)"
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1 2)",
+    "wkb": "0101000000000000000000F03F0000000000000040"
+   }
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "  point (1 2) "
+   ],
+   "ok": true
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "  point (1 2) "
+   ],
+   "ok": {
+    "t": "geom",
+    "wkt": "POINT (1 2)",
+    "wkb": "0101000000000000000000F03F0000000000000040"
+   }
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "POINT 1 2"
+   ],
+   "ok": null
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "POINT 1 2"
+   ],
+   "ok": "POINT 1 2"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "abc"
+   ],
+   "ok": null
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "abc"
+   ],
+   "ok": "abc"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "ABCD"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "ABCD"
+   ],
+   "ok": "ABCD"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "ABC"
+   ],
+   "ok": null
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "ABC"
+   ],
+   "ok": "ABC"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    ""
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    ""
+   ],
+   "ok": ""
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    "xyz"
+   ],
+   "ok": null
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    "xyz"
+   ],
+   "ok": "xyz"
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    null
+   ],
+   "ok": null
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    null
+   ],
+   "ok": null
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    {
+     "t": "int",
+     "v": 5
+    }
+   ],
+   "ok": null
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "int",
+     "v": 5
+    }
+   ],
+   "ok": {
+    "t": "int",
+    "v": 5
+   }
+  },
+  {
+   "fn": "geometry_is_wkt",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1A="
+    }
+   ],
+   "ok": false
+  },
+  {
+   "fn": "attempt_cast_to_geometry",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1A="
+    }
+   ],
+   "ok": {
+    "t": "bytes_hex",
+    "v": "4750"
+   }
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1A="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "Rw=="
+    }
+   ],
+   "ok": false
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": ""
+    }
+   ],
+   "ok": false
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    {
+     "t": "bytes",
+     "v": "R1B4eA=="
+    }
+   ],
+   "ok": true
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    "GP"
+   ],
+   "ok": false
+  },
+  {
+   "fn": "geometry_is_gpkg",
+   "args": [
+    null
+   ],
+   "ok": false
+  },
+  {
+   "fn": "to_polars_geoarrow",
+   "args": [
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   "ok": {
+    "fields": {
+     "id": {
+      "type": "int64",
+      "metadata": {},
+      "extension": null,
+      "ext_metadata": null,
+      "polars_dtype": "Int64"
+     },
+     "geom": {
+      "type": "extension<geoarrow.wkb<WkbType>>",
+      "metadata": {},
+      "extension": "geoarrow.wkb",
+      "ext_metadata": "{}",
+      "polars_dtype": "Extension('geoarrow.wkb', Binary, '{}')"
+     },
+     "meta": {
+      "type": "extension<arrow.json>",
+      "metadata": {},
+      "extension": "arrow.json",
+      "ext_metadata": null,
+      "polars_dtype": "Extension('arrow.json', String, '')"
+     }
+    },
+    "geom_wkb_hex": [
+     "0101000000000000000000f03f0000000000000040",
+     null
+    ],
+    "meta": [
+     "{\"b\":1,\"a\":2}",
+     null
+    ]
+   }
+  },
+  {
+   "fn": "to_polars_geoarrow",
+   "args": [
+    {
+     "t": "int",
+     "v": 4326
+    }
+   ],
+   "ok": {
+    "fields": {
+     "id": {
+      "type": "int64",
+      "metadata": {},
+      "extension": null,
+      "ext_metadata": null,
+      "polars_dtype": "Int64"
+     },
+     "geom": {
+      "type": "extension<geoarrow.wkb<WkbType>>",
+      "metadata": {},
+      "extension": "geoarrow.wkb",
+      "ext_metadata": "{\"crs\": \"EPSG:4326\"}",
+      "polars_dtype": "Extension('geoarrow.wkb', Binary, '{\"crs\":\"EPSG:4326\",\"crs_type\":\"authority_code\"}')"
+     },
+     "meta": {
+      "type": "extension<arrow.json>",
+      "metadata": {},
+      "extension": "arrow.json",
+      "ext_metadata": null,
+      "polars_dtype": "Extension('arrow.json', String, '')"
+     }
+    },
+    "geom_wkb_hex": [
+     "0101000000000000000000f03f0000000000000040",
+     null
+    ],
+    "meta": [
+     "{\"b\":1,\"a\":2}",
+     null
+    ]
+   }
+  },
+  {
+   "fn": "to_polars_geoarrow",
+   "args": [
+    "ESRI:102003"
+   ],
+   "ok": {
+    "fields": {
+     "id": {
+      "type": "int64",
+      "metadata": {},
+      "extension": null,
+      "ext_metadata": null,
+      "polars_dtype": "Int64"
+     },
+     "geom": {
+      "type": "extension<geoarrow.wkb<WkbType>>",
+      "metadata": {},
+      "extension": "geoarrow.wkb",
+      "ext_metadata": "{\"crs\": \"ESRI:102003\"}",
+      "polars_dtype": "Extension('geoarrow.wkb', Binary, '{\"crs\":\"ESRI:102003\",\"crs_type\":\"authority_code\"}')"
+     },
+     "meta": {
+      "type": "extension<arrow.json>",
+      "metadata": {},
+      "extension": "arrow.json",
+      "ext_metadata": null,
+      "polars_dtype": "Extension('arrow.json', String, '')"
+     }
+    },
+    "geom_wkb_hex": [
+     "0101000000000000000000f03f0000000000000040",
+     null
+    ],
+    "meta": [
+     "{\"b\":1,\"a\":2}",
+     null
+    ]
+   }
+  },
+  {
+   "fn": "to_json",
+   "args": [
+    "numerics",
+    "geojson"
+   ],
+   "ok": "[{\"id\":1,\"num\":\"1.10\"},{\"id\":2,\"num\":\"2\"},{\"id\":3,\"num\":null}]"
+  },
+  {
+   "fn": "to_json",
+   "args": [
+    "uuids",
+    "geojson"
+   ],
+   "ok": "[{\"id\":1,\"u\":\"12345678-1234-5678-1234-567812345678\"},{\"id\":2,\"u\":null}]"
+  },
+  {
+   "fn": "to_json",
+   "args": [
+    "bytes",
+    "geojson"
+   ],
+   "ok": "[{\"id\":1,\"blob\":\"AAFhYmM=\"},{\"id\":2,\"blob\":null}]"
+  },
+  {
+   "fn": "to_json",
+   "args": [
+    "dates",
+    "geojson"
+   ],
+   "ok": "[{\"id\":1,\"d\":\"2024-01-01\"},{\"id\":2,\"d\":null}]"
+  },
+  {
+   "fn": "to_json",
+   "args": [
+    "geometry",
+    "geojson"
+   ],
+   "ok": "[{\"id\":1,\"geom\":{\"type\":\"Point\",\"coordinates\":[1.0,2.0]}},{\"id\":2,\"geom\":{\"type\":\"LineString\",\"coordinates\":[[0.0,0.0],[1.0,1.0]]}},{\"id\":3,\"geom\":null}]"
+  },
+  {
+   "fn": "to_json",
+   "args": [
+    "geometry",
+    "wkb_hex"
+   ],
+   "ok": "[{\"id\":1,\"geom\":\"0101000000000000000000F03F0000000000000040\"},{\"id\":2,\"geom\":\"01020000000200000000000000000000000000000000000000000000000000F03F000000000000F03F\"},{\"id\":3,\"geom\":null}]"
+  },
+  {
+   "fn": "to_json",
+   "args": [
+    "geometry",
+    "wkt"
+   ],
+   "ok": "[{\"id\":1,\"geom\":\"POINT (1 2)\"},{\"id\":2,\"geom\":\"LINESTRING (0 0, 1 1)\"},{\"id\":3,\"geom\":null}]"
+  },
+  {
+   "fn": "to_json",
+   "args": [
+    "json",
+    "geojson"
+   ],
+   "ok": "[{\"id\":1,\"meta\":{\"b\":1,\"a\":[1,2]}},{\"id\":2,\"meta\":[1,\"x\"]},{\"id\":3,\"meta\":null}]"
+  },
+  {
+   "fn": "to_json",
+   "args": [
+    "datetimes_utc",
+    "geojson"
+   ],
+   "ok": "[{\"dt\":\"2024-01-01T00:00:00+00:00\",\"id\":1},{\"dt\":\"2024-01-02T00:00:00+00:00\",\"id\":2},{\"dt\":\"NaT\",\"id\":3}]"
+  },
+  {
+   "fn": "to_json",
+   "args": [
+    "datetimes_naive",
+    "geojson"
+   ],
+   "ok": "[{\"dt\":\"2024-01-01T00:00:00\",\"id\":1},{\"dt\":\"2024-01-02T12:30:00\",\"id\":2},{\"dt\":\"2024-01-03T00:00:00\",\"id\":3}]"
+  }
+ ]
+}

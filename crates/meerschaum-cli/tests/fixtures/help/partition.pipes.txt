@@ -1,0 +1,24 @@
+
+Repartition the target tables for the selected pipes.
+
+Select pipes with the standard `-c` / `-m` / `-l` / `-i` / `-t` filters. Each selected pipe is
+repartitioned via `Pipe.repartition()`; non-partitioned pipes (and unsupported flavors like
+SQLite) report a failure and are skipped.
+
+Parameters
+----------
+chunk_minutes: Optional[int], default None
+    The new partition width in minutes (`--chunk-minutes`). Defaults to each pipe's
+    `verify.chunk_minutes` (30 days). For example, `10080` is 7 days and `1440` is 1 day.
+
+yes, force, noask:
+    Confirmation controls. Pass `-y` / `--yes` (or `-f` / `--force`) to skip the prompt — the
+    rebuild reads the whole table into memory and briefly drops it, so confirm for large tables.
+
+Usage:
+- partition pipes -c sql:main -m weather -l us --chunk-minutes 10080
+    - Rebuild one pipe's table to 7-day partitions.
+- partition pipes -i sql:main -f
+    - Repartition every partitioned pipe on `sql:main` to its configured width, no prompt.
+
+

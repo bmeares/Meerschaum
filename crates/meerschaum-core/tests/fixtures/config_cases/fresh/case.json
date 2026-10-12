@@ -1,0 +1,12 @@
+{
+  "env": {},
+  "queries": [
+    {"keys": ["meerschaum", "instance"]},
+    {"keys": ["meerschaum", "api_instance"]},
+    {"keys": ["api", "uvicorn", "port"]},
+    {"keys": ["pipes"]},
+    {"keys": ["formatting", "unicode"]},
+    {"keys": ["plugins"]},
+    {"keys": []}
+  ]
+}

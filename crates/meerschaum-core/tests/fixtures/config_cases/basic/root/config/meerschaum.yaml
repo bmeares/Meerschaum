@@ -1,0 +1,20 @@
+# Synthetic config for parity tests.
+instance: sql:local
+connectors:
+  sql:
+    main:
+      username: alice
+      password: secret
+      flavor: postgresql
+      host: db.example.test
+      database: warehouse
+      port: 5432
+    local:
+      flavor: sqlite
+      database: '{SQLITE_DB_PATH}'
+  api:
+    remote:
+      host: api.example.test
+      port: 8443
+      protocol: https
+      verify: yes

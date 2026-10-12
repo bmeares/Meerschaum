@@ -1,0 +1,3 @@
+
+Show the on-disk sizes of pipes' target tables, sorted largest first.
+

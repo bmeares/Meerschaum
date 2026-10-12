@@ -1,0 +1,1393 @@
+{
+ "prog": "mrsm",
+ "usage": "mrsm [actions] {options}",
+ "description": "Create and Build Pipes with Meerschaum.",
+ "groups": [
+  "positional arguments",
+  "options",
+  "Actions options",
+  "Jobs options",
+  "Pipes options",
+  "Sync options",
+  "API options",
+  "Plugins options",
+  "Tokens options",
+  "Packages options",
+  "Compose options",
+  "Debugging options",
+  "Miscellaneous options"
+ ],
+ "arguments": [
+  {
+   "dest": "action",
+   "option_strings": [],
+   "action": "_StoreAction",
+   "nargs": "*",
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Actions list to execute. E.g. `start api`",
+   "metavar": null,
+   "group": "Actions options"
+  },
+  {
+   "dest": "help",
+   "option_strings": [
+    "-h",
+    "--help"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Print a help message for an action.",
+   "metavar": null,
+   "group": "Actions options"
+  },
+  {
+   "dest": "loop",
+   "option_strings": [
+    "--loop"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Loop the specified action forever (only for select actions)",
+   "metavar": null,
+   "group": "Actions options"
+  },
+  {
+   "dest": "yes",
+   "option_strings": [
+    "-y",
+    "--yes"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Agree to the default choices for prompts",
+   "metavar": null,
+   "group": "Actions options"
+  },
+  {
+   "dest": "force",
+   "option_strings": [
+    "-f",
+    "--force"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Override safety checks",
+   "metavar": null,
+   "group": "Actions options"
+  },
+  {
+   "dest": "noask",
+   "option_strings": [
+    "--noask",
+    "--no-ask"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Automatically choose the defaults answers to questions. Does not result in data loss.",
+   "metavar": null,
+   "group": "Actions options"
+  },
+  {
+   "dest": "sub_args",
+   "option_strings": [
+    "-A",
+    "--sub-args"
+   ],
+   "action": "_StoreAction",
+   "nargs": "...",
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Provide a list of arguments for subprocesses. You can also type sub-arguments in [] instead. E.g. `stack -A='--version'`, `ls [-lh]`, `echo -A these are sub-arguments`",
+   "metavar": null,
+   "group": "Actions options"
+  },
+  {
+   "dest": "daemon",
+   "option_strings": [
+    "-d",
+    "--daemon"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Run an action as a background daemon to create a job.",
+   "metavar": null,
+   "group": "Jobs options"
+  },
+  {
+   "dest": "name",
+   "option_strings": [
+    "--name",
+    "--job-name"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "parse_name",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Assign a name to a job. If no name is provided, a random name will be assigned.",
+   "metavar": null,
+   "group": "Jobs options"
+  },
+  {
+   "dest": "schedule",
+   "option_strings": [
+    "-s",
+    "--schedule",
+    "--cron"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "str",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Continue executing the action according to a schedule (e.g. 'every 1 seconds'). \nOften used with `-d`. See this page for scheduling syntax:\n https://red-engine.readthedocs.io/en/stable/condition_syntax/index.html",
+   "metavar": null,
+   "group": "Jobs options"
+  },
+  {
+   "dest": "restart",
+   "option_strings": [
+    "--restart"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Restart a job if not stopped manually.",
+   "metavar": null,
+   "group": "Jobs options"
+  },
+  {
+   "dest": "executor_keys",
+   "option_strings": [
+    "-e",
+    "--executor-keys"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "parse_executor_keys",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Execute jobs locally or remotely. Supported values are 'local', 'systemd', and 'api:{label}'.",
+   "metavar": null,
+   "group": "Jobs options"
+  },
+  {
+   "dest": "rm",
+   "option_strings": [
+    "--rm"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Delete a job once it has finished executing.",
+   "metavar": null,
+   "group": "Jobs options"
+  },
+  {
+   "dest": "connector_keys",
+   "option_strings": [
+    "-c",
+    "-C",
+    "--connector-keys"
+   ],
+   "action": "_StoreAction",
+   "nargs": "+",
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "List of connector keys to search for. e.g. -c sql:main api:main",
+   "metavar": null,
+   "group": "Pipes options"
+  },
+  {
+   "dest": "metric_keys",
+   "option_strings": [
+    "-m",
+    "-M",
+    "--metric-keys"
+   ],
+   "action": "_StoreAction",
+   "nargs": "+",
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "List of metric keys to include in the search",
+   "metavar": null,
+   "group": "Pipes options"
+  },
+  {
+   "dest": "location_keys",
+   "option_strings": [
+    "-l",
+    "-L",
+    "--location-keys"
+   ],
+   "action": "_StoreAction",
+   "nargs": "+",
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "List of location keys to include in the search",
+   "metavar": null,
+   "group": "Pipes options"
+  },
+  {
+   "dest": "mrsm_instance",
+   "option_strings": [
+    "-i",
+    "-I",
+    "--mrsm-instance",
+    "--instance"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Connector Keys (type:label) to the Meerschaum instance for Pipe objects. If label is omitted, use the configured default interface (usually 'sql:main')",
+   "metavar": null,
+   "group": "Pipes options"
+  },
+  {
+   "dest": "tags",
+   "option_strings": [
+    "-t",
+    "--tags"
+   ],
+   "action": "_StoreAction",
+   "nargs": "+",
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Only include pipes with these tags.",
+   "metavar": null,
+   "group": "Pipes options"
+  },
+  {
+   "dest": "targets",
+   "option_strings": [
+    "--targets",
+    "--target"
+   ],
+   "action": "_StoreAction",
+   "nargs": "+",
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Filter pipes by targets. May be negated with `_`.",
+   "metavar": null,
+   "group": "Pipes options"
+  },
+  {
+   "dest": "datetime_dtypes",
+   "option_strings": [
+    "--datetime-dtypes",
+    "--datetime-dtype",
+    "--dtype",
+    "--dtypes"
+   ],
+   "action": "_StoreAction",
+   "nargs": "+",
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": [
+    "datetime",
+    "int",
+    "None",
+    "_datetime",
+    "_int",
+    "_None"
+   ],
+   "required": false,
+   "help": "Only select pipes with the corresponding datetime dtypes (`datetime`, `int`, or `None`).\nMay be negated with `_`.",
+   "metavar": null,
+   "group": "Pipes options"
+  },
+  {
+   "dest": "no_policy",
+   "option_strings": [
+    "--no-policy",
+    "--nopolicy"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Leave the compression (columnstore) policy untouched. With `compress pipes`, compress existing chunks now without installing a policy; with `decompress pipes`, decompress existing chunks now without removing the policy (they will be recompressed on schedule). TimescaleDB only.",
+   "metavar": null,
+   "group": "Pipes options"
+  },
+  {
+   "dest": "full",
+   "option_strings": [
+    "--full"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "When running `vacuum pipes`, run `VACUUM FULL` to return freed space to the OS. Takes an exclusive lock. PostgreSQL family only.",
+   "metavar": null,
+   "group": "Pipes options"
+  },
+  {
+   "dest": "min_seconds",
+   "option_strings": [
+    "--min-seconds",
+    "--cooldown"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "float",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "The minimum number of seconds between syncing laps. Defaults to 1.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "timeout_seconds",
+   "option_strings": [
+    "--timeout-seconds",
+    "--timeout"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "float",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "The maximum number of seconds before cancelling a pipe's syncing job. Defaults to 300.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "listen",
+   "option_strings": [
+    "--listen"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Keep the process alive after the initial sync pass so subscription-style connectors (e.g. MQTT) continue syncing via callbacks. Stops on `stop jobs` or CTRL-C.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "unblock",
+   "option_strings": [
+    "--unblock"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Run the action asynchronously, if possible.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "async",
+   "option_strings": [
+    "--async"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Run the action asynchronously, if possible. Alias for --unblock",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "begin",
+   "option_strings": [
+    "--begin"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "parse_datetime",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "The begin datetime when syncing, fetching data.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "end",
+   "option_strings": [
+    "--end"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "parse_datetime",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "The end datetime when syncing, fetching data.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "chunksize",
+   "option_strings": [
+    "--chunksize"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "int",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "How many rows per chunk. Defaults to 100,000.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "batchsize",
+   "option_strings": [
+    "--batchsize"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "int",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "How many chunks to process in parallel. Defaults to number of CPUs.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "chunk_minutes",
+   "option_strings": [
+    "--chunk-minutes"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "int",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Specify the chunk interval in minutes for verification syncs (and `partition pipes`). Defaults to 43200 (30 days).",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "chunk_hours",
+   "option_strings": [
+    "--chunk-hours"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "int",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Specify the chunk interval in days for verification syncs. See `--chunk-minutes`.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "chunk_days",
+   "option_strings": [
+    "--chunk-days"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "int",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Specify the chunk interval in days for verification syncs. See `--chunk-minutes`.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "verify",
+   "option_strings": [
+    "--verify"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Completely resync a pipe's entire interval.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "deduplicate",
+   "option_strings": [
+    "--deduplicate",
+    "--dedup"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Remove duplicate rows from a pipe's table.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "bounded",
+   "option_strings": [
+    "--bounded",
+    "--bound"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "When verifying, do not sync outside the existing oldest and newest datetime bounds.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "skip_check_existing",
+   "option_strings": [
+    "--skip-check-existing",
+    "--allow-duplicates"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Skip checking for duplicate rows when syncing. This improves performance when all rows to be synced are unique. ",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "skip_enforce_dtypes",
+   "option_strings": [
+    "--skip-enforce-dtypes"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Skip enforcing incoming data to a pipe's dtypes. This improves performance when all rows are expected to already be of the correct type.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "skip_chunks_with_greater_rowcounts",
+   "option_strings": [
+    "--skip-chunks-with-greater-rowcounts"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "When verifying, skip chunks with rowcounts greater than the remote's.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "check_rowcounts_only",
+   "option_strings": [
+    "--check-rowcounts-only"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Only compare row-counts when verifying pipes.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "skip_hooks",
+   "option_strings": [
+    "--skip-hooks"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Skip calling the sync hooks.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "sync_data",
+   "option_strings": [
+    "--sync-data"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": [
+    "nothing",
+    "backtrack",
+    "incremental",
+    "all",
+    "filter"
+   ],
+   "required": false,
+   "help": "When copying pipes, specify what data to sync into destination pipes. 'backtrack' uses the source pipe's sync time; 'incremental' uses the destination pipe's sync time (both apply the backtrack interval). 'filter' uses --begin, --end, and --params to restrict the range. Defaults to 'nothing' (copy pipe definitions only).",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "cache",
+   "option_strings": [
+    "--cache"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Sync pipes' metadata to disk.",
+   "metavar": null,
+   "group": "Sync options"
+  },
+  {
+   "dest": "port",
+   "option_strings": [
+    "-p",
+    "--port"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "int",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "The port on which to run the Web API server",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "host",
+   "option_strings": [
+    "--host"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "str",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "The host address to bind to for the API server. Defaults to '0.0.0.0'.",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "webterm_port",
+   "option_strings": [
+    "--webterm-port"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "int",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "The port on which to run the webterm server.",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "workers",
+   "option_strings": [
+    "-w",
+    "--workers"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "int",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "How many workers to run a concurrent action (e.g. running the API or syncing pipes)",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "no_dash",
+   "option_strings": [
+    "--no-dash",
+    "--nodash"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "When starting the API, do not start the Web Console dashboard.",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "no_webterm",
+   "option_strings": [
+    "--no-webterm",
+    "--nowebterm"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "When starting the API, do not start the Webterm.",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "private",
+   "option_strings": [
+    "--private",
+    "--private-mode"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Require authentication for all endpoints.",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "secure",
+   "option_strings": [
+    "--secure"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Start the API in secure mode, only allowing `admin` users to execute actions.",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "no_auth",
+   "option_strings": [
+    "--no-auth",
+    "--noauth",
+    "--insecure"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "When starting the API, do not require authentication. WARNING: This is dangerous!",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "production",
+   "option_strings": [
+    "--production",
+    "--gunicorn"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Start the API with the Gunicorn process manager.",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "keyfile",
+   "option_strings": [
+    "--keyfile"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "str",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Start the API server with this keyfile (requires --certfile).",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "certfile",
+   "option_strings": [
+    "--certfile"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "str",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Start the API server with this certfile (requires --keyfile).",
+   "metavar": null,
+   "group": "API options"
+  },
+  {
+   "dest": "repository",
+   "option_strings": [
+    "-r",
+    "--repository",
+    "--repo"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "str",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Meerschaum plugins repository to connect to. Specify an API label (default: 'mrsm')",
+   "metavar": null,
+   "group": "Plugins options"
+  },
+  {
+   "dest": "ttl_days",
+   "option_strings": [
+    "--ttl-days"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "int",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "For how many days should a token be valid.",
+   "metavar": null,
+   "group": "Tokens options"
+  },
+  {
+   "dest": "scopes",
+   "option_strings": [
+    "--scopes",
+    "--scope"
+   ],
+   "action": "_StoreAction",
+   "nargs": "+",
+   "type": null,
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Which scope permissions to grant to a token.",
+   "metavar": null,
+   "group": "Tokens options"
+  },
+  {
+   "dest": "venv",
+   "option_strings": [
+    "--venv"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "str",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Choose which virtual environment to target when installing or removing packages.",
+   "metavar": null,
+   "group": "Packages options"
+  },
+  {
+   "dest": "file",
+   "option_strings": [
+    "--file",
+    "--compose-file"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "Path",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Specify an alternate compose file (default: mrsm-compose.yaml).",
+   "metavar": null,
+   "group": "Compose options"
+  },
+  {
+   "dest": "env_file",
+   "option_strings": [
+    "--env-file"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "Path",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Specify an alternate environment file (default: .env).",
+   "metavar": null,
+   "group": "Compose options"
+  },
+  {
+   "dest": "dry",
+   "option_strings": [
+    "--dry"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Update project pipes without syncing.",
+   "metavar": null,
+   "group": "Compose options"
+  },
+  {
+   "dest": "drop",
+   "option_strings": [
+    "--drop",
+    "-v",
+    "--volumes"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Drop named pipes when running `mrsm compose down`.",
+   "metavar": null,
+   "group": "Compose options"
+  },
+  {
+   "dest": "presync",
+   "option_strings": [
+    "--presync"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Run syncs before bringing up jobs.",
+   "metavar": null,
+   "group": "Compose options"
+  },
+  {
+   "dest": "no_jobs",
+   "option_strings": [
+    "--no-jobs"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Exit before starting background jobs.",
+   "metavar": null,
+   "group": "Compose options"
+  },
+  {
+   "dest": "isolated",
+   "option_strings": [
+    "--isolated"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Execute Compose commands in subprocesses.",
+   "metavar": null,
+   "group": "Compose options"
+  },
+  {
+   "dest": "debug",
+   "option_strings": [
+    "--debug"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Print debug statements (max verbosity)",
+   "metavar": null,
+   "group": "Debugging options"
+  },
+  {
+   "dest": "trace",
+   "option_strings": [
+    "--trace"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Trace execution and open browser windows to visualize the stack.",
+   "metavar": null,
+   "group": "Debugging options"
+  },
+  {
+   "dest": "version",
+   "option_strings": [
+    "-V",
+    "--version"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Print the Meerschaum version and exit. Has no effect from within the shell.",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "patch",
+   "option_strings": [
+    "--patch"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Patch parameters instead of overwriting.",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "nopretty",
+   "option_strings": [
+    "--nopretty"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Print elements without 'pretty' formatting",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "rollback",
+   "option_strings": [
+    "--rollback",
+    "--restore"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "When editing config, restore a key from its most recent backup instead of editing.",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "skip_deps",
+   "option_strings": [
+    "--skip-deps"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Skip dependencies when installing plugins.",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "dry_run",
+   "option_strings": [
+    "--dry-run"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Preview package installation without making changes.",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "params",
+   "option_strings": [
+    "-P",
+    "--params"
+   ],
+   "action": "_StoreAction",
+   "nargs": null,
+   "type": "string_to_dict",
+   "default": null,
+   "const": null,
+   "choices": null,
+   "required": false,
+   "help": "Parameters dictionary in JSON format or simple format. Simple format is for one-depth dictionaries and does not need braces or quotes.\nJSON Example:\n--params '{\"meerschaum\" : { \"connectors\" : \"main\" : { \"host\" : \"localhost\" } } }'\n\nSimple example:\n--params key1:value1,key2:value2",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "temporary",
+   "option_strings": [
+    "--temporary",
+    "--temp"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Skip creating or modifying instance tables when working with pipes (plugins and users still trigger table creation).",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "gui",
+   "option_strings": [
+    "--gui"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Open a DataFrame in an interactive pandasgui or matplotlib window.",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "shell",
+   "option_strings": [
+    "--shell"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Open the Meerschaum shell and execute the provided action.",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "use_bash",
+   "option_strings": [
+    "--use-bash"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Execute non-implemented actions via `bash -c`. Default behavior is to execute directly.",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "allow_shell_job",
+   "option_strings": [
+    "--allow-shell-job"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Allow shell commands to be run as background jobs. Default behavior is to only allow recognized actions.",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  },
+  {
+   "dest": "no_daemon",
+   "option_strings": [
+    "--no-daemon"
+   ],
+   "action": "_StoreTrueAction",
+   "nargs": 0,
+   "type": null,
+   "default": false,
+   "const": true,
+   "choices": null,
+   "required": false,
+   "help": "Do not use the Meerschaum CLI daemon to execute the action.",
+   "metavar": null,
+   "group": "Miscellaneous options"
+  }
+ ]
+}

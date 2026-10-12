@@ -1,0 +1,7 @@
+
+Show the Meerschaum doc string.
+
+Examples:
+    - `show version`
+    - `show version --nopretty`
+

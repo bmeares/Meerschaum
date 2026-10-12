@@ -1,0 +1,6 @@
+
+Install PyPI packages into the Meerschaum virtual environment.
+
+Example:
+    `install packages pandas numpy`
+

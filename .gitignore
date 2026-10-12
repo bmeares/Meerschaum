@@ -149,3 +149,6 @@ dmypy.json
 .claude/*
 !.claude/skills/
 target/
+
+# v5 parity harness reference interpreter (scripts/parity/setup_reference.sh)
+.venv-ref/

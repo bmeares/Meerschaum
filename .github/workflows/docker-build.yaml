@@ -1,5 +1,13 @@
 name: buildx
 
+# Builds the Docker images with scripts/docker/buildx.sh (docs/design/v5-build.md):
+#   minimal (v4 default target), full (`--target full`: v4 full + the native `mrsm`), and slim
+#   (`--target slim`), then runs the §12.1 size gate (slim < 200 MB, full < 900 MB).
+#
+# The size gate starts in `warn` mode: `full` is ~1.9 GB until the v5 dependency cuts (D20) land,
+# so enforcing it now would fail every run. Switch the default to `enforce` once `full` fits;
+# 5.0.0rc1 requires it (§13).
+
 on:
   workflow_dispatch:
     inputs:
@@ -7,11 +15,23 @@ on:
         description: 'Publish the images to DockerHub.'
         type: boolean
         default: false
+      v4_only:
+        description: 'Build only the v4 images (default target per dep group; no Rust, no slim).'
+        type: boolean
+        default: false
+      size_gate:
+        description: 'Size gate mode (slim < 200 MB, full < 900 MB).'
+        type: choice
+        options: [ warn, enforce, skip ]
+        default: warn
   # pull_request:
     # branches: main
   # push:
     # branches: main
     # tags:
+
+permissions:
+  contents: read
 
 jobs:
   buildx:
@@ -31,6 +51,23 @@ jobs:
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Build Docker images
+        id: build
+        run: ./scripts/docker/buildx.sh ${{ inputs.v4_only && '--v4-only' || '' }}
+
+      - name: Size gate
+        if: ${{ !inputs.v4_only && inputs.size_gate != 'skip' }}
+        env:
+          SIZE_GATE_MODE: ${{ inputs.size_gate }}
+          SLIM_IMAGE: ${{ steps.build.outputs.slim_image }}
+          FULL_IMAGE: ${{ steps.build.outputs.full_image }}
+        run: |
+          args=(--slim-image "$SLIM_IMAGE" --full-image "$FULL_IMAGE" --slim-max 200 --full-max 900)
+          if [ "$SIZE_GATE_MODE" = "warn" ]; then
+            args+=(--warn-only)
+          fi
+          ./scripts/docker/size_gate.sh "${args[@]}"
+
       - name: Login to DockerHub
         if: inputs.publish
         uses: docker/login-action@v3
@@ -38,10 +75,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build Docker images
-        if: ${{ !inputs.publish }}
-        run: ./scripts/docker/buildx.sh
-
-      - name: Build and publish Docker images
+      # Reuses the builder's layer cache from the build step above.
+      - name: Publish Docker images
         if: inputs.publish
-        run: ./scripts/docker/buildx.sh --push
+        run: ./scripts/docker/buildx.sh --push ${{ inputs.v4_only && '--v4-only' || '' }}

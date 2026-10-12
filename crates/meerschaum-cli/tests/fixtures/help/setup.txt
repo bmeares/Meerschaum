@@ -1,0 +1,8 @@
+
+Run the `setup()` function for Meerschaum plugins.
+
+Usage:
+    setup plugins noaa
+
+    Options:
+        `setup [plugins]`

@@ -1,0 +1,13 @@
+
+Run a series of Meerschaum commands as a single action.
+
+Add `:` to the end of chained arguments to apply additional flags to the pipeline.
+
+Examples
+--------
+
+`sync pipes -i sql:local + sync pipes -i sql:main : -s 'daily'`
+
+`show version + show arguments : --loop`
+
+

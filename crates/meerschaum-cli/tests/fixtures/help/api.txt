@@ -1,0 +1,19 @@
+
+Send commands to a Meerschaum WebAPI instance.
+
+Usage:
+    `api [commands] {options}`
+
+Examples:
+    - `api [start, boot, init]`
+        - Start the API server
+        - **NOTE:** The command `start api` also starts the server.
+    - `api show config`
+        - Execute `show config` on the `main` api instance
+    - `api main show config`
+        - See above
+
+If command is `start`, launch the Meerschaum WebAPI. If command is an api connector label,
+    connect to that label. Otherwise connect to `main` api connector.
+
+

@@ -18,6 +18,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Dict, Union, Any, Optional, Tuple
 from meerschaum.utils.warnings import warn
 from meerschaum._internal.static import STATIC_CONFIG as _STATIC_CONFIG
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 MRSM_ALIAS_DTYPES: Dict[str, str] = {
     'decimal': 'numeric',
@@ -93,6 +94,8 @@ def to_pandas_dtype(dtype: str) -> str:
     """
     Cast a supported Meerschaum dtype to a Pandas dtype.
     """
+    if (_rust := _rust_impl('to_pandas_dtype')) is not None:
+        return _rust(dtype)
     known_dtype = MRSM_PD_DTYPES.get(dtype, None)
     if known_dtype is not None:
         return known_dtype
@@ -153,6 +156,8 @@ def are_dtypes_equal(
     -------
     A `bool` indicating whether the two dtypes are to be considered equivalent.
     """
+    if (_rust := _rust_impl('are_dtypes_equal')) is not None:
+        return _rust(ldtype, rdtype=rdtype)
     if isinstance(ldtype, dict) and isinstance(rdtype, dict):
         lkeys = sorted([str(k) for k in ldtype.keys()])
         rkeys = sorted([str(k) for k in rdtype.keys()])

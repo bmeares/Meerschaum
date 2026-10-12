@@ -1,0 +1,6 @@
+
+Show the rowcounts for pipes.
+
+To see remote rowcounts (execute `COUNT(*)` on the source server),
+execute `show rowcounts remote`.
+

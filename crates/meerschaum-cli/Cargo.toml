@@ -8,8 +8,18 @@ authors.workspace = true
 rust-version.workspace = true
 description = "Meerschaum v5: the `mrsm` binary (clap CLI, shell, worker pool, Gantt TUI)"
 
+[lib]
+name = "meerschaum_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "mrsm"
 path = "src/main.rs"
 
 [dependencies]
+chrono = { workspace = true }
+clap = { workspace = true }
+indexmap = { workspace = true }
+regex = { workspace = true }
+rust_decimal = { workspace = true }
+serde_json = { workspace = true }

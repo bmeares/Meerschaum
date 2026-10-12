@@ -1,0 +1,38 @@
+# maturin build definition for the `meerschaum._core` extension (v5 parity phase).
+#
+# A maturin *mixed* project whose Python source is the repository root (`python-source = "../.."`),
+# so `maturin develop --skip-install` drops `_core.abi3.so` straight into `meerschaum/_core/`.
+# It lives here, not at the root, while the root `pyproject.toml` stays setuptools so the v4
+# pytest suite and `scripts/test.sh` keep working. Use `scripts/rust/build_py.sh`.
+#
+# `maturin build` from here produces an extension-only wheel (`meerschaum/_core/_core.abi3.so`):
+# maturin does not package Python sources that sit outside this project root. The distribution
+# is deliberately NOT named `meerschaum`, so installing it can never replace an installed v4
+# package. At 5.0 these settings move to the root pyproject (see README.md, "The 5.0 wheels").
+
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "meerschaum-core-dev"
+dynamic = ["version"]
+requires-python = ">=3.11"
+description = "Development build of the meerschaum._core extension (do not upload)."
+classifiers = ["Private :: Do Not Upload"]
+# D20: the 5.0 base wheel has no runtime dependencies.
+dependencies = []
+
+[tool.maturin]
+bindings = "pyo3"
+# `extension-module` is a crate feature (not a default) so `cargo test` can link libpython.
+# NOTE: `maturin ... --features X` replaces this list; build_py.sh passes the full set plus
+# `polars` (the opt-in pyo3-polars path).
+features = ["pyo3/abi3-py311", "extension-module"]
+module-name = "meerschaum._core._core"
+python-source = "../.."
+python-packages = ["meerschaum"]
+exclude = [
+    "**/__pycache__/**",
+    "**/*.pyc",
+]

@@ -13,3 +13,5 @@ portable/
 .pylintrc
 .git/
 .github/
+target/
+.venv-ref/

@@ -1,0 +1,4 @@
+
+Remove virtual environments.
+Specify which venvs to remove, or remove everything at once.
+

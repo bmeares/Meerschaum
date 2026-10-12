@@ -1,0 +1,15 @@
+
+Start the Meerschaum Web Terminal.
+
+Options:
+    - `-p`, `--port`
+        The port to which the webterm binds.
+        Defaults to 8765, and `--force` will choose the next available port.
+
+    - `--host`
+        The host interface to which the webterm binds.
+        Defaults to '127.0.0.1'.
+
+    - `-i`, '--instance'
+        The default instance to use for the Webterm shell.
+

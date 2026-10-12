@@ -1,0 +1,23 @@
+{
+  "cpu_count": 40,
+  "results": [
+    [
+      true,
+      1440
+    ],
+    [
+      true,
+      {}
+    ],
+    [
+      false,
+      null
+    ]
+  ],
+  "config_files": {
+    "custom.json": "{\"a\": 1,}\n",
+    "pipes.yaml": null,
+    "system.json": "{\n  \"connectors\": {\n    \"all\": {\n      \"pandas\": \"pandas\"\n    },\n    \"sql\": {\n      \"bulk_insert\": {\n        \"postgresql\": true,\n        \"postgis\": true,\n        \"citus\": true,\n        \"timescaledb\": true,\n        \"timescaledb-ha\": true,\n        \"mssql\": true\n      },\n      \"instance\": {\n        \"create_metadata_cache_minutes\": 14400,\n        \"stale_temporary_tables_minutes\": 1440,\n        \"temporary_target\": {\n          \"prefix\": \"_\",\n          \"transaction_id_length\": 4,\n          \"separator\": \"_\"\n        },\n        \"max_partitions_per_sync\": 10000\n      },\n      \"chunksize\": 100000,\n      \"poolclass\": \"sqlalchemy.pool.QueuePool\",\n      \"create_engine\": {\n        \"method\": \"multi\",\n        \"pool_size\": 8,\n        \"max_overflow\": 12,\n        \"pool_recycle\": 3600,\n        \"connect_args\": {}\n      }\n    },\n    \"api\": {}\n  },\n  \"cli\": {\n    \"max_daemons\": 120,\n    \"refresh_seconds\": 0.1,\n    \"allowed_prefixes\": [\n      \"*\"\n    ],\n    \"disallowed_prefixes\": [\n      \"edit\",\n      \"start daemon\",\n      \"start job\",\n      \"stop job\",\n      \"delete job\",\n      \"stop daemon\",\n      \"show daemon\",\n      \"restart daemon\",\n      \"install\",\n      \"upgrade\",\n      \"reload\",\n      \"start worker\",\n      \"show log\",\n      \"python\",\n      \"login\",\n      \"executor\",\n      \"os \",\n      \"sh \",\n      \"start api\",\n      \"start webterm\",\n      \"stack\",\n      \"instance\",\n      \"debug\",\n      \"bootstrap\",\n      \"daemon\",\n      \"sql\",\n      \"register plugin\",\n      \"copy \"\n    ]\n  },\n  \"experimental\": {\n    \"fetch\": false,\n    \"cache\": true,\n    \"space\": false,\n    \"join_fetch\": false,\n    \"inplace_sync\": true,\n    \"uv_pip\": true,\n    \"systemd_healthcheck\": false,\n    \"valkey_session_cache\": true,\n    \"cli_daemon\": false\n  }\n}"
+  },
+  "patch_dir_exists": false
+}

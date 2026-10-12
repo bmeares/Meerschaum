@@ -1,0 +1,17 @@
+# Data-library pins for the parity reference venv (.venv-ref), installed next to meerschaum==4.1.4
+# by setup_reference.sh. Fixture output depends on these versions (dtype names, repr of NA values,
+# WKB/WKT formatting), so they are pinned to the versions the committed fixtures were generated
+# with. Bump them deliberately and regenerate every fixture in the same change.
+numpy==2.4.2
+pandas==3.0.0
+pyarrow==23.0.0
+shapely==2.1.2
+pyproj==3.7.2
+geopandas==1.1.1
+pyogrio==0.12.1
+geoarrow-types==0.3.0
+polars==1.44.1
+pytz==2025.2
+
+# v4 `_internal` group (not expressible as a pip extra because of the leading underscore).
+dataclass-wizard>=0.35.0

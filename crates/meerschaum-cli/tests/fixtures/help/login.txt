@@ -1,0 +1,3 @@
+
+Log into a Meerschaum API instance.
+
