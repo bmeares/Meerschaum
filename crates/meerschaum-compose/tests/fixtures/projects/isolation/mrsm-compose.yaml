@@ -1,0 +1,19 @@
+project_name: isolated-project
+isolation: subprocess
+daemon: false
+environment:
+  MRSM_PLUGINS_DIR: '["./plugins", "./more-plugins"]'
+  MRSM_ROOT_DIR: "./env-root"
+  MRSM_WORK_DIR: "./work"
+  OTHER: "1"
+  EMPTY: null
+pipes:
+  - connector: plugin:iso
+    metric: data
+    instance: sql:local
+jobs:
+  api: "start api --port 9000"
+  tagged: "sync pipes -c sql:local -t recompute --loop"
+  named: "sync pipes --name custom-name --loop"
+  compound: "sync pipes -c plugin:iso -t isolated-project + sync pipes -c sql:local : --loop --min-seconds 600 -w 1"
+  quoted: "sql local exec 'SELECT 1' -d"

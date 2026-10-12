@@ -11,12 +11,10 @@ use crate::geometry::{Geometry, geometry_is_gpkg, geometry_is_wkt_str, gpkg_wkb_
 use crate::serialize::deserialize_bytes_string;
 use crate::value::{DateTimeValue, TzInfo, Value, parse_datetime_value};
 
-/// `value_is_null()`: `str(value).lower()` is a null-like string.
+/// `value_is_null()`: `str(value).lower()` is a null-like string
+/// ([`meerschaum_core::dtypes::value_is_null`] on `str(value)`).
 pub fn value_is_null(value: &Value) -> bool {
-    matches!(
-        value.py_str().to_lowercase().as_str(),
-        "none" | "nan" | "na" | "nat" | "natz" | "" | "<na>"
-    )
+    meerschaum_core::dtypes::value_is_null(&value.py_str())
 }
 
 /// `none_if_null()`.
@@ -218,7 +216,7 @@ pub fn to_datetime(
     let unit_str = precision_unit.unwrap_or("microsecond");
     let unit = PrecisionUnit::parse(unit_str)
         .filter(|u| {
-            u.time_unit().is_some()
+            crate::dtypes::precision_time_unit(*u).is_some()
                 || matches!(
                     u,
                     PrecisionUnit::Second

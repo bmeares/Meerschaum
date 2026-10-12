@@ -21,10 +21,16 @@ extension-module = ["pyo3/extension-module"]
 # The `pyo3-polars` zero-copy path (`_core.polars_roundtrip`). Opt-in (scripts/rust/build_py.sh
 # enables it by default): pyo3-polars turns on `polars-error/python` and `polars-core/allow_unused`,
 # which changes the fingerprint of every Polars crate, so with it this crate cannot share the
-# kernel's Polars build. Without it, `cargo build/test/clippy -p meerschaum-py` builds no Polars.
+# kernel's Polars build. Without it, this crate reuses the kernel's Polars build (it depends on
+# `meerschaum-kernel`, see crates/README.md "Crate layering").
 polars = ["dep:pyo3-polars", "dep:polars"]
 
 [dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-sql = { workspace = true }
+# Only this crate depends on the CLI library (top layer, see crates/README.md "Crate layering").
+meerschaum-cli = { path = "../meerschaum-cli" }
 # VERSION SKEW (see README "Dependency pins"): the workspace pins `pyo3 = 0.26`, but
 # `pyo3-polars` for the workspace's `polars = 0.51` (0.24.x) requires pyo3 0.25, and
 # `pyo3-arrow` for `arrow = 56` exists for pyo3 0.25 (0.11) and 0.26 (0.12). pyo3 0.25 is the

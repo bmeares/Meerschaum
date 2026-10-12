@@ -1,0 +1,4303 @@
+{
+ "case": {
+  "description": "A fake instance with registered pipes (up to date, outdated, added parameters, registered under another project, stale) and existing jobs.",
+  "width": 140,
+  "registered": [
+   {
+    "connector": "plugin:reg",
+    "metric": "uptodate",
+    "instance": "sql:local",
+    "id": 1,
+    "parameters": {
+     "tags": [
+      "reg"
+     ]
+    }
+   },
+   {
+    "connector": "plugin:reg",
+    "metric": "outdated",
+    "instance": "sql:local",
+    "id": 2,
+    "parameters": {
+     "columns": {
+      "datetime": "timestamp"
+     },
+     "tags": [
+      "reg"
+     ]
+    }
+   },
+   {
+    "connector": "plugin:reg",
+    "metric": "added",
+    "instance": "sql:local",
+    "id": 3,
+    "parameters": {
+     "tags": [
+      "reg"
+     ],
+     "fetch": {
+      "backtrack_minutes": 10
+     },
+     "extra": true
+    }
+   },
+   {
+    "connector": "plugin:reg",
+    "metric": "untagged",
+    "instance": "sql:local",
+    "id": 4,
+    "parameters": {
+     "tags": [
+      "other-project"
+     ],
+     "custom": 1
+    }
+   },
+   {
+    "connector": "plugin:reg",
+    "metric": "stale",
+    "instance": "sql:local",
+    "id": 5,
+    "parameters": {
+     "tags": [
+      "reg",
+      "shared"
+     ]
+    }
+   }
+  ],
+  "jobs": {
+   "reg sync (sql:local)": {
+    "sysargs": [
+     "sync",
+     "pipes",
+     "-i",
+     "sql:local",
+     "-t",
+     "reg",
+     "--name",
+     "reg sync (sql:local)",
+     "-f",
+     "--loop"
+    ],
+    "env": {
+     "MRSM__COMPOSE_PROJECT": "reg"
+    },
+    "status": "running",
+    "restart": true
+   },
+   "manual": {
+    "sysargs": [
+     "show",
+     "version"
+    ],
+    "env": {},
+    "status": "stopped",
+    "restart": false
+   },
+   "foreign": {
+    "sysargs": [
+     "sync",
+     "pipes"
+    ],
+    "env": {
+     "MRSM__COMPOSE_PROJECT": "beta"
+    },
+    "status": "stopped",
+    "restart": false
+   },
+   "tagged-old": {
+    "sysargs": [
+     "sync",
+     "pipes",
+     "-t",
+     "reg",
+     "--loop"
+    ],
+    "env": {},
+    "status": "paused",
+    "restart": false
+   }
+  },
+  "runs": "all"
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONPATH": "{REPO}",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "explain",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "32b06b714a649e847ef9cc24304e6b2049ee8aa973c610cbed02c1180587de0d",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:reg",
+     "metric": "uptodate",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "outdated",
+     "instance": "sql:local",
+     "columns": {
+      "datetime": "ts"
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "added",
+     "instance": "sql:local",
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      }
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "untagged",
+     "instance": "sql:local",
+     "tags": [
+      "local-tag",
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "new",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:reg', 'uptodate', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "uptodate",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "outdated",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'added', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "added",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "untagged",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "local-tag",
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'new', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "new",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    }
+   ],
+   "explain": "                                                               Pipes in 'reg'                                                               \n                                                                    ╷                                   ╷                                   \n  Defined Pipes                                                     │Compose Parameters                 │Remote Parameters                  \n╶───────────────────────────────────────────────────────────────────┼───────────────────────────────────┼──────────────────────────────────╴\n  ╭────────────────────────── Instance ───────────────────────────╮ │                                   │                                   \n  │ sql:local                                                     │ │                                   │                                   \n  ╰───────────────────────────────────────────────────────────────╯ │                                   │                                   \n                                                                    │                                   │                                   \n  Pipe('plugin:reg', 'uptodate', instance='sql:local')              │{                                  │                                   \n                                                                    │  \"tags\": [                        │                                   \n  ✅ Up-to-date                                                     │    \"reg\"                          │                                   \n                                                                    │  ]                                │                                   \n                                                                    │}                                  │                                   \n                                                                    │                                   │                                   \n  Pipe('plugin:reg', 'outdated', instance='sql:local')              │{                                  │{                                  \n                                                                    │  \"columns\": {                     │  \"columns\": {                     \n  🟨 Params added                                                   │    \"datetime\": \"ts\"               │    \"datetime\": \"timestamp\"        \n                                                                    │  },                               │  },                               \n                                                                    │  \"tags\": [                        │  \"tags\": [                        \n                                                                    │    \"reg\"                          │    \"reg\"                          \n                                                                    │  ]                                │  ]                                \n                                                                    │}                                  │}                                  \n                                                                    │                                   │                                   \n  Pipe('plugin:reg', 'added', instance='sql:local')                 │{                                  │{                                  \n                                                                    │  \"fetch\": {                       │  \"tags\": [                        \n  🟨 Params added                                                   │    \"backtrack_minutes\": 10        │    \"reg\"                          \n                                                                    │  },                               │  ],                               \n                                                                    │  \"tags\": [                        │  \"fetch\": {                       \n                                                                    │    \"reg\"                          │    \"backtrack_minutes\": 10        \n                                                                    │  ]                                │  },                               \n                                                                    │}                                  │  \"extra\": true                    \n                                                                    │                                   │}                                  \n                                                                    │                                   │                                   \n  Pipe('plugin:reg', 'untagged', instance='sql:local')              │{                                  │                                   \n                                                                    │  \"tags\": [                        │                                   \n  ⭕ Not registered                                                 │    \"local-tag\",                   │                                   \n                                                                    │    \"reg\"                          │                                   \n                                                                    │  ]                                │                                   \n                                                                    │}                                  │                                   \n                                                                    │                                   │                                   \n  Pipe('plugin:reg', 'new', instance='sql:local')                   │{                                  │                                   \n                                                                    │  \"tags\": [                        │                                   \n  ⭕ Not registered                                                 │    \"reg\"                          │                                   \n                                                                    │  ]                                │                                   \n                                                                    │}                                  │                                   \n                                                                    ╵                                   ╵                                   \n",
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "up-dry",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "dry": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--dry"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Updated parameters for 5 pipes on 1 instance."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "new",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"reg\"]}",
+      "--noask",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [
+    [
+     "edit",
+     "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'added', instance='sql:local')",
+     {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     {
+      "tags": [
+       "other-project",
+       "local-tag",
+       "reg"
+      ],
+      "custom": 1
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'stale', instance='sql:local')",
+     {
+      "tags": [
+       "shared"
+      ]
+     }
+    ]
+   ],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Updating parameters for Pipe('plugin:reg', 'outdated', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Updating parameters for Pipe('plugin:reg', 'added', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Pipe('plugin:reg', 'untagged', instance='sql:local') already exists on 'sql:local'; adding tag 'reg'..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:reg', 'new', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Removing tag 'reg' from Pipe('plugin:reg', 'stale', instance='sql:local')..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "a0b45a97e4dbcaf6fd22873c1fc82170b5540f592f408819307a9be1f7f31560",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:reg",
+     "metric": "uptodate",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "outdated",
+     "instance": "sql:local",
+     "columns": {
+      "datetime": "ts"
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "added",
+     "instance": "sql:local",
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      }
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "untagged",
+     "instance": "sql:local",
+     "tags": [
+      "local-tag",
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "new",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:reg', 'uptodate', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "uptodate",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "outdated",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'added', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "added",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "untagged",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "local-tag",
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'new', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "new",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "up",
+   "action": [
+    "up"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Syncing 5 pipes on 1 instance.\nRun `mrsm compose logs` or pass `-f` to follow logs output."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "new",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"reg\"]}",
+      "--noask",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "outdated",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "added",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "untagged",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "new",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "delete",
+      "job",
+      "reg sync (sql:local)",
+      "-f",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "delete",
+      "job",
+      "tagged-old",
+      "-f",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-i",
+      "sql:local",
+      "-t",
+      "reg",
+      "--name",
+      "reg sync (sql:local)",
+      "-f",
+      "-d",
+      "--loop"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [
+    [
+     "edit",
+     "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'added', instance='sql:local')",
+     {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     {
+      "tags": [
+       "other-project",
+       "local-tag",
+       "reg"
+      ],
+      "custom": 1
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'stale', instance='sql:local')",
+     {
+      "tags": [
+       "shared"
+      ]
+     }
+    ]
+   ],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Updating parameters for Pipe('plugin:reg', 'outdated', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Updating parameters for Pipe('plugin:reg', 'added', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Pipe('plugin:reg', 'untagged', instance='sql:local') already exists on 'sql:local'; adding tag 'reg'..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:reg', 'new', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Removing tag 'reg' from Pipe('plugin:reg', 'stale', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'outdated', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'added', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'untagged', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'new', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Starting job 'reg sync (sql:local)'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "95dd1270b115a30e8e05384463b1223b206bb95a765671a5d564175ec61471f8",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:reg",
+     "metric": "uptodate",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "outdated",
+     "instance": "sql:local",
+     "columns": {
+      "datetime": "ts"
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "added",
+     "instance": "sql:local",
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      }
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "untagged",
+     "instance": "sql:local",
+     "tags": [
+      "local-tag",
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "new",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:reg', 'uptodate', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "uptodate",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "outdated",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'added', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "added",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "untagged",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "local-tag",
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'new', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "new",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "up-follow",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "force": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "-f"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Syncing 5 pipes on 1 instance."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "new",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"reg\"]}",
+      "--noask",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "outdated",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "-f",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "added",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "-f",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "untagged",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "-f",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "new",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "-f",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "delete",
+      "job",
+      "reg sync (sql:local)",
+      "-f",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "delete",
+      "job",
+      "tagged-old",
+      "-f",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-i",
+      "sql:local",
+      "-t",
+      "reg",
+      "--name",
+      "reg sync (sql:local)",
+      "-f",
+      "-d",
+      "--loop"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "show",
+      "logs",
+      "reg sync (sql:local)",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [
+    [
+     "edit",
+     "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'added', instance='sql:local')",
+     {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     {
+      "tags": [
+       "other-project",
+       "local-tag",
+       "reg"
+      ],
+      "custom": 1
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'stale', instance='sql:local')",
+     {
+      "tags": [
+       "shared"
+      ]
+     }
+    ]
+   ],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Updating parameters for Pipe('plugin:reg', 'outdated', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Updating parameters for Pipe('plugin:reg', 'added', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Pipe('plugin:reg', 'untagged', instance='sql:local') already exists on 'sql:local'; adding tag 'reg'..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:reg', 'new', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Removing tag 'reg' from Pipe('plugin:reg', 'stale', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'outdated', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'added', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'untagged', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'new', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Starting job 'reg sync (sql:local)'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "24646d3b152d4d1412b419109a69388eebab536727793458cff3a702c7ead00b",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:reg",
+     "metric": "uptodate",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "outdated",
+     "instance": "sql:local",
+     "columns": {
+      "datetime": "ts"
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "added",
+     "instance": "sql:local",
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      }
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "untagged",
+     "instance": "sql:local",
+     "tags": [
+      "local-tag",
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "new",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:reg', 'uptodate', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "uptodate",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "outdated",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'added', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "added",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "untagged",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "local-tag",
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'new', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "new",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "up-presync-no-jobs",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "presync": true,
+    "no_jobs": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--presync",
+    "--no-jobs"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Synced 5 pipes across 1 instance."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "new",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"reg\"]}",
+      "--noask",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "uptodate",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "outdated",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "added",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "untagged",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "new",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [
+    [
+     "edit",
+     "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'added', instance='sql:local')",
+     {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     {
+      "tags": [
+       "other-project",
+       "local-tag",
+       "reg"
+      ],
+      "custom": 1
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'stale', instance='sql:local')",
+     {
+      "tags": [
+       "shared"
+      ]
+     }
+    ]
+   ],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Updating parameters for Pipe('plugin:reg', 'outdated', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Updating parameters for Pipe('plugin:reg', 'added', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Pipe('plugin:reg', 'untagged', instance='sql:local') already exists on 'sql:local'; adding tag 'reg'..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:reg', 'new', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Removing tag 'reg' from Pipe('plugin:reg', 'stale', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'uptodate', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'outdated', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'added', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'untagged', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'new', instance='sql:local')..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "227f203d44cc795b391e92c027b81e848196a7819a30744b358bf1c235a1133f",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:reg",
+     "metric": "uptodate",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "outdated",
+     "instance": "sql:local",
+     "columns": {
+      "datetime": "ts"
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "added",
+     "instance": "sql:local",
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      }
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "untagged",
+     "instance": "sql:local",
+     "tags": [
+      "local-tag",
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "new",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:reg', 'uptodate', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "uptodate",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "outdated",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'added', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "added",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "untagged",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "local-tag",
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'new', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "new",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "run",
+   "action": [
+    "run"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "run"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Synced 5 pipes across 1 instance."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "new",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"tags\":[\"reg\"]}",
+      "--noask",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "uptodate",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "outdated",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "added",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "untagged",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:reg",
+      "-m",
+      "new",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [
+    [
+     "edit",
+     "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'added', instance='sql:local')",
+     {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     {
+      "tags": [
+       "other-project",
+       "local-tag",
+       "reg"
+      ],
+      "custom": 1
+     }
+    ],
+    [
+     "edit",
+     "Pipe('plugin:reg', 'stale', instance='sql:local')",
+     {
+      "tags": [
+       "shared"
+      ]
+     }
+    ]
+   ],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Updating parameters for Pipe('plugin:reg', 'outdated', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Updating parameters for Pipe('plugin:reg', 'added', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Pipe('plugin:reg', 'untagged', instance='sql:local') already exists on 'sql:local'; adding tag 'reg'..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:reg', 'new', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Removing tag 'reg' from Pipe('plugin:reg', 'stale', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'uptodate', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'outdated', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'added', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'untagged', instance='sql:local')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:reg', 'new', instance='sql:local')..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "cd52ab4720822099c53bff3bae2fb2714c1eb18df687eca69d97e49ee29cf4e2",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:reg",
+     "metric": "uptodate",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "outdated",
+     "instance": "sql:local",
+     "columns": {
+      "datetime": "ts"
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "added",
+     "instance": "sql:local",
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      }
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "untagged",
+     "instance": "sql:local",
+     "tags": [
+      "local-tag",
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "new",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:reg', 'uptodate', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "uptodate",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "outdated",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'added', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "added",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "untagged",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "local-tag",
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'new', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "new",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "down",
+   "action": [
+    "down"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "down"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "delete",
+      "job",
+      "reg sync (sql:local)",
+      "-f",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "delete",
+      "job",
+      "tagged-old",
+      "-f",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "eae0c04eb1f6fa83180e2550992eef5f960ee5e664c25590e8d458eec053e29c",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "down-volumes",
+   "action": [
+    "down"
+   ],
+   "flags": {
+    "drop": true,
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "down",
+    "-v",
+    "-y"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "delete",
+      "job",
+      "reg sync (sql:local)",
+      "-f",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "delete",
+      "job",
+      "tagged-old",
+      "-f",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [
+    [
+     "delete",
+     "Pipe('plugin:reg', 'uptodate', instance='sql:local')"
+    ],
+    [
+     "delete",
+     "Pipe('plugin:reg', 'outdated', instance='sql:local')"
+    ],
+    [
+     "delete",
+     "Pipe('plugin:reg', 'added', instance='sql:local')"
+    ]
+   ],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Deleting unshared Pipe('plugin:reg', 'uptodate', instance='sql:local')."
+    ],
+    [
+     "info",
+     "Deleting unshared Pipe('plugin:reg', 'outdated', instance='sql:local')."
+    ],
+    [
+     "info",
+     "Deleting unshared Pipe('plugin:reg', 'added', instance='sql:local')."
+    ],
+    [
+     "info",
+     "Preserving Pipe('plugin:reg', 'untagged', instance='sql:local'); it is not tagged as 'reg'."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "3a645fbded4067e873ee3babfd3dba0feac394b8c78cb4cc9b2d2310ae692394",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:reg",
+     "metric": "uptodate",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "outdated",
+     "instance": "sql:local",
+     "columns": {
+      "datetime": "ts"
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "added",
+     "instance": "sql:local",
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      }
+     },
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "untagged",
+     "instance": "sql:local",
+     "tags": [
+      "local-tag",
+      "reg"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:reg",
+     "metric": "new",
+     "instance": "sql:local",
+     "tags": [
+      "reg"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:reg', 'uptodate', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "uptodate",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'outdated', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "outdated",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "columns": {
+       "datetime": "ts"
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'added', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "added",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "fetch": {
+       "backtrack_minutes": 10
+      },
+      "tags": [
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'untagged', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "untagged",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "local-tag",
+       "reg"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:reg', 'new', instance='sql:local')",
+     "connector_keys": "plugin:reg",
+     "metric_key": "new",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "reg"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "ps",
+   "action": [
+    "ps"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "ps"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "jobs",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "52ca1a0633c29c46bace34e2b3ddf9bfe9dbccaf6e430e23a44fbbce6708e8d2",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "logs",
+   "action": [
+    "logs"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "logs"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "logs",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "6941ac9144c34128bfb5b34b6b5f5a0bc602c86be8227da37c8448c361053002",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "sync-pipes",
+   "action": [
+    "sync",
+    "pipes"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "sync",
+    "pipes"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Running 'sync pipes' in compose project 'reg'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "ba6fa5b150fc49399874e2821e21a152deb6684accbb9c876751e5e0bf7f7d9c",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "start-jobs",
+   "action": [
+    "start",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "start",
+    "jobs",
+    "-y"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "start",
+      "jobs",
+      "tagged-old",
+      "-y",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Running 'start jobs' in compose project 'reg'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "0cd8038eddc72fb04357b463423efd4609dd044dcf250f69f75694032ef97cb1",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "stop-jobs",
+   "action": [
+    "stop",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "stop",
+    "jobs",
+    "-y"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "stop",
+      "jobs",
+      "reg sync (sql:local)",
+      "tagged-old",
+      "-y",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Running 'stop jobs' in compose project 'reg'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "62f17ebb835e4b269988f2736e22e968ab159268cbf35c5f9288674692ef8744",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "delete-jobs",
+   "action": [
+    "delete",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "delete",
+    "jobs",
+    "-y"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "delete",
+      "jobs",
+      "reg sync (sql:local)",
+      "tagged-old",
+      "-y",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Running 'delete jobs' in compose project 'reg'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "fc00217504246eca6d104ec18e5d4cc9cee0142dca58eefb6ddf7a028d42f527",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "start-api",
+   "action": [
+    "start",
+    "api"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "start",
+    "api"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "start",
+      "api",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Running 'start api' in compose project 'reg'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "df05adf71a894e0d2f721b4a37499c5a1c8cf3c8b1a296dca4a5f65b29eead3c",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "shell",
+   "action": [],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Starting a shell in compose project 'reg'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "c9c30599f1feab3a4778d542fe960c781936b50740a1f8cf7d736779d585912d",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  },
+  {
+   "name": "init",
+   "action": [
+    "init"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "init"
+   ],
+   "width": 140,
+   "result": [
+    true,
+    "Finished initializing project 'reg'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "reg"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "project_name": "reg",
+    "pipes": [
+     {
+      "connector": "plugin:reg",
+      "metric": "uptodate",
+      "instance": "sql:local"
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "outdated",
+      "instance": "sql:local",
+      "columns": {
+       "datetime": "ts"
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "added",
+      "instance": "sql:local",
+      "parameters": {
+       "fetch": {
+        "backtrack_minutes": 10
+       }
+      }
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "untagged",
+      "instance": "sql:local",
+      "tags": [
+       "local-tag"
+      ]
+     },
+     {
+      "connector": "plugin:reg",
+      "metric": "new",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "reg"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "8ada7b3d928f5ed8008e3a95110e4739ad8f36723632b5622518f1116acfa795",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"project_name\":\"reg\",\"pipes\":[{\"connector\":\"plugin:reg\",\"metric\":\"uptodate\",\"instance\":\"sql:local\"},{\"connector\":\"plugin:reg\",\"metric\":\"outdated\",\"instance\":\"sql:local\",\"columns\":{\"datetime\":\"ts\"}},{\"connector\":\"plugin:reg\",\"metric\":\"added\",\"instance\":\"sql:local\",\"parameters\":{\"fetch\":{\"backtrack_minutes\":10}}},{\"connector\":\"plugin:reg\",\"metric\":\"untagged\",\"instance\":\"sql:local\",\"tags\":[\"local-tag\"]},{\"connector\":\"plugin:reg\",\"metric\":\"new\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "reg",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"reg\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "a4bd5e310fb1811ad17d0369111e4187536e37c3d777ec8396ff7eb931fc4565"
+  }
+ ]
+}

@@ -1,0 +1,251 @@
+{
+ "case": {
+  "description": "Both mrsm-compose.yaml and mrsm-compose.yml exist: warn and use the .yaml file.",
+  "width": 100,
+  "runs": [
+   {
+    "name": "explain",
+    "action": [
+     "explain"
+    ]
+   },
+   {
+    "name": "ps",
+    "action": [
+     "ps"
+    ]
+   }
+  ]
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONPATH": "{REPO}",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "explain",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "from-yaml"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "warn",
+     "Found multiple YAML files. Compose will use this file:\n{PROJECT}/mrsm-compose.yaml."
+    ],
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "project_name": "from-yaml",
+    "pipes": [
+     {
+      "connector": "plugin:both",
+      "metric": "yaml",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "from-yaml"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "54c19cddca499849da495a63868f47bbbe1e39eb83065d332021ea239ce01b3a",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"from-yaml\",\"pipes\":[{\"connector\":\"plugin:both\",\"metric\":\"yaml\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"from-yaml\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "from-yaml",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"from-yaml\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:both",
+     "metric": "yaml",
+     "instance": "sql:local",
+     "tags": [
+      "from-yaml"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:both', 'yaml', instance='sql:local')",
+     "connector_keys": "plugin:both",
+     "metric_key": "yaml",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "from-yaml"
+      ]
+     }
+    }
+   ],
+   "explain": "                                        Pipes in 'from-yaml'                                        \n                                                         ╷                     ╷                    \n  Defined Pipes                                          │Compose Parameters   │Remote Parameters   \n╶────────────────────────────────────────────────────────┼─────────────────────┼───────────────────╴\n  ╭───────────────────── Instance ─────────────────────╮ │                     │                    \n  │ sql:local                                          │ │                     │                    \n  ╰────────────────────────────────────────────────────╯ │                     │                    \n                                                         │                     │                    \n  Pipe('plugin:both', 'yaml', instance='sql:local')      │{                    │                    \n                                                         │  \"tags\": [          │                    \n  ⭕ Not registered                                      │    \"from-yaml\"      │                    \n                                                         │  ]                  │                    \n                                                         │}                    │                    \n                                                         ╵                     ╵                    \n",
+   "written_files": {},
+   "config_hash_normalized": "2ffc0110daf1702e219a8c14e24e8afc50b05e589386c33d26ec974a71c55274"
+  },
+  {
+   "name": "ps",
+   "action": [
+    "ps"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "ps"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "from-yaml"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "jobs",
+      "--tags",
+      "from-yaml"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "warn",
+     "Found multiple YAML files. Compose will use this file:\n{PROJECT}/mrsm-compose.yaml."
+    ],
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "project_name": "from-yaml",
+    "pipes": [
+     {
+      "connector": "plugin:both",
+      "metric": "yaml",
+      "instance": "sql:local"
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "from-yaml"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "b0fc7d2959869a69f45d3670d038a2fc06d0e583f5784c2fac412cdae0da9634",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"from-yaml\",\"pipes\":[{\"connector\":\"plugin:both\",\"metric\":\"yaml\",\"instance\":\"sql:local\"}],\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"from-yaml\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "from-yaml",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"from-yaml\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "2ffc0110daf1702e219a8c14e24e8afc50b05e589386c33d26ec974a71c55274"
+  }
+ ]
+}

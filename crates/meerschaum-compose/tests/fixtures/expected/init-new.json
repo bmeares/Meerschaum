@@ -1,0 +1,207 @@
+{
+ "case": {
+  "description": "compose init in a directory without a compose file.",
+  "width": 100,
+  "runs": [
+   {
+    "name": "init",
+    "action": [
+     "init"
+    ],
+    "flags": {
+     "yes": true
+    }
+   },
+   {
+    "name": "init-no",
+    "action": [
+     "init"
+    ],
+    "flags": {
+     "noask": true
+    }
+   }
+  ]
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONPATH": "{REPO}",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "init",
+   "action": [
+    "init"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "init",
+    "-y"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Finished initializing project 'init-new'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "init-new"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "No compose project could be found."
+    ],
+    [
+     "info",
+     "Run `compose init` with filters (-c, -m, -l, -t, -i) to add pipes."
+    ],
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "plugins": [],
+    "config": {
+     "meerschaum": {
+      "connectors": {
+       "sql": {
+        "main": {
+         "username": "mrsm",
+         "password": "mrsm",
+         "flavor": "timescaledb-ha",
+         "host": "localhost",
+         "database": "meerschaum",
+         "port": 5432
+        }
+       }
+      }
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:main}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "init-new"
+     }
+    },
+    "environment": {},
+    "project_name": "init-new",
+    "pipes": [],
+    "connectors": {
+     "sql": {
+      "main": {
+       "username": "mrsm",
+       "password": "mrsm",
+       "flavor": "timescaledb-ha",
+       "host": "localhost",
+       "database": "meerschaum",
+       "port": 5432
+      }
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "db8ad53dee9aa8297d857343eee25d7a7b1bc4db325c06ae3ddd025546a8459e",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"plugins\":[],\"config\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":{\"username\":\"mrsm\",\"password\":\"mrsm\",\"flavor\":\"timescaledb-ha\",\"host\":\"localhost\",\"database\":\"meerschaum\",\"port\":5432}}}},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:main}\"}}}},\"stack\":{\"project_name\":\"init-new\"}},\"environment\":{},\"project_name\":\"init-new\",\"pipes\":[],\"connectors\":{\"sql\":{\"main\":{\"username\":\"mrsm\",\"password\":\"mrsm\",\"flavor\":\"timescaledb-ha\",\"host\":\"localhost\",\"database\":\"meerschaum\",\"port\":5432}}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "init-new",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":{\"username\":\"mrsm\",\"password\":\"mrsm\",\"flavor\":\"timescaledb-ha\",\"host\":\"localhost\",\"database\":\"meerschaum\",\"port\":5432}}}},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:main}\"}}}},\"stack\":{\"project_name\":\"init-new\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {
+    "mrsm-compose.yaml": "### See https://meerschaum.io/reference/compose/ for the compose schema.\n\nproject_name: init-new\n\nroot_dir: ./root\n\nplugins_dir:\n- ./plugins\n\npipes: []\n\nplugins: []\n\nconfig:\n  meerschaum:\n    connectors:\n      sql:\n        main: MRSM{meerschaum:connectors:sql:main}\n\nenvironment: {}\n"
+   },
+   "config_hash_normalized": "d613184e284e1bf41ef5b8e1409f67cb42829b1b2a41c2c692303812c306273d"
+  },
+  {
+   "name": "init-no",
+   "action": [
+    "init"
+   ],
+   "flags": {
+    "noask": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "init",
+    "--noask"
+   ],
+   "width": 100,
+   "result": [
+    false,
+    "No files were created."
+   ],
+   "commands": [],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "No compose project could be found."
+    ]
+   ],
+   "config": null,
+   "config_hash": null,
+   "env": null,
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": null
+  }
+ ]
+}

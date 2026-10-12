@@ -1,15 +1,13 @@
 //! Size, compression and TimescaleDB Hypercore/columnstore queries
 //! (`meerschaum/connectors/sql/_compress.py`).
 
-use crate::dtypes::{
-    PrecisionScalar, are_dtypes_equal, precision_unit_alias, precision_unit_scalar, py_float,
-    py_is_int,
-};
+use crate::dtypes::{PrecisionScalar, are_dtypes_equal};
 use crate::flavor::Flavor;
 use crate::ident::sql_item_name;
-use crate::pipe::PipeSpec;
+use crate::pipe::SqlPipe;
 use crate::queries::ConnectorCtx;
-use crate::value::PyValue;
+use meerschaum_core::Value;
+use meerschaum_core::pyfmt::{is_int, parse_py_float};
 
 /// `_ORDERBY_DIRECTION_KEYWORDS` (`_compress.py:29`).
 const ORDERBY_DIRECTION_KEYWORDS: [&str; 5] = ["ASC", "DESC", "NULLS", "FIRST", "LAST"];
@@ -19,18 +17,18 @@ pub const DEFAULT_COMPRESS_AFTER: &str = "7 days";
 
 /// `_normalize_columnstore_cols(value, flavor, allow_direction)`.
 pub fn normalize_columnstore_cols(
-    value: &PyValue,
+    value: &Value,
     flavor: Flavor,
     allow_direction: bool,
 ) -> Vec<String> {
-    let raw: Vec<&PyValue> = match value {
-        PyValue::List(items) => items.iter().collect(),
+    let raw: Vec<&Value> = match value {
+        Value::List(items) => items.iter().collect(),
         other => vec![other],
     };
     let mut entries: Vec<String> = Vec::new();
     for item in raw {
         for part in item.py_str().split(',') {
-            entries.push(crate::pytext::py_strip(part).to_string());
+            entries.push(meerschaum_core::pyfmt::py_strip(part).to_string());
         }
     }
     let mut normalized = Vec::new();
@@ -42,7 +40,7 @@ pub fn normalize_columnstore_cols(
         let mut direction = String::new();
         if allow_direction {
             let tokens: Vec<&str> = entry
-                .split(crate::pytext::py_isspace)
+                .split(meerschaum_core::pyfmt::py_isspace)
                 .filter(|t| !t.is_empty())
                 .collect();
             if tokens.len() > 1
@@ -74,20 +72,20 @@ pub struct CompressSettings {
     /// Quoted `orderby` columns with optional directions.
     pub orderby: Vec<String>,
     /// The raw `after` value.
-    pub after: Option<PyValue>,
+    pub after: Option<Value>,
 }
 
 /// `_get_compress_settings(pipe)`.
-pub fn get_compress_settings(flavor: Flavor, pipe: &PipeSpec) -> CompressSettings {
+pub fn get_compress_settings(flavor: Flavor, pipe: &SqlPipe) -> CompressSettings {
     let settings = match pipe.param("compress") {
-        Some(PyValue::Dict(d)) => Some(d.clone()),
+        Some(Value::Map(d)) => Some(d.clone()),
         _ => None,
     };
-    let setting = |k: &str| -> Option<PyValue> {
+    let setting = |k: &str| -> Option<Value> {
         settings
             .as_ref()
             .and_then(|d| d.get(k))
-            .filter(|v| !v.is_none())
+            .filter(|v| !v.is_null())
             .cloned()
     };
     let dt_col = pipe.column("datetime");
@@ -129,7 +127,7 @@ pub fn get_compress_settings(flavor: Flavor, pipe: &PipeSpec) -> CompressSetting
 }
 
 /// `_dt_axis_is_integer(pipe)`: reads the configured dtype only.
-pub fn dt_axis_is_integer(pipe: &PipeSpec) -> bool {
+pub fn dt_axis_is_integer(pipe: &SqlPipe) -> bool {
     let Some(dt_col) = pipe.column("datetime") else {
         return false;
     };
@@ -142,21 +140,21 @@ pub fn dt_axis_is_integer(pipe: &PipeSpec) -> bool {
 }
 
 /// `_get_precision_unit(pipe)`: the alias-resolved unit, `'second'` if unrecognized.
-pub fn get_precision_unit(pipe: &PipeSpec) -> String {
-    let unit = pipe.precision_unit();
-    let true_unit = precision_unit_alias(&unit)
-        .map(str::to_string)
-        .unwrap_or(unit);
-    if precision_unit_scalar(&true_unit).is_some() {
-        true_unit
-    } else {
-        "second".to_string()
-    }
+///
+/// PARITY: Python's `pipe.precision` raises on an unrecognized unit before this function's own
+/// `'second'` fallback is reached; the fallback is applied to that case too.
+pub fn get_precision_unit(pipe: &SqlPipe) -> String {
+    pipe.precision_unit()
+        .map(|u| u.name())
+        .unwrap_or("second")
+        .to_string()
 }
 
 /// `_get_precision_scalar(pipe)`.
-pub fn get_precision_scalar(pipe: &PipeSpec) -> PrecisionScalar {
-    precision_unit_scalar(&get_precision_unit(pipe)).unwrap_or(PrecisionScalar::Int(1))
+pub fn get_precision_scalar(pipe: &SqlPipe) -> PrecisionScalar {
+    pipe.precision_unit()
+        .map(|u| u.py_scalar())
+        .unwrap_or(PrecisionScalar::Int(1))
 }
 
 /// Parse a `pandas.Timedelta` string into seconds.
@@ -166,7 +164,7 @@ pub fn get_precision_scalar(pipe: &PipeSpec) -> PrecisionScalar {
 /// PARITY: pandas accepts more (ISO 8601 `P1D`); those fall back to the default with a warning,
 /// as unparseable values do in Python.
 pub fn parse_pd_timedelta_seconds(s: &str) -> Option<f64> {
-    let t = crate::pytext::py_strip(s).to_lowercase();
+    let t = meerschaum_core::pyfmt::py_strip(s).to_lowercase();
     if t.is_empty() {
         return None;
     }
@@ -252,23 +250,23 @@ pub fn parse_pd_timedelta_seconds(s: &str) -> Option<f64> {
 }
 
 /// `_get_integer_after(pipe, after)`: a compression `after` in integer-axis epoch units.
-pub fn get_integer_after(pipe: &PipeSpec, after: Option<&PyValue>) -> i64 {
+pub fn get_integer_after(pipe: &SqlPipe, after: Option<&Value>) -> i64 {
     let scalar = get_precision_scalar(pipe).as_f64();
     let default_seconds =
         parse_pd_timedelta_seconds(DEFAULT_COMPRESS_AFTER).expect("valid default");
     let after = match after {
-        Some(v) if v.is_truthy() => v,
+        Some(v) if v.truthy() => v,
         _ => return (default_seconds * scalar) as i64,
     };
     // A bare number is already in epoch units.
     match after {
-        PyValue::Float(f) => return *f as i64,
+        Value::Float(f) => return *f as i64,
         // `float(True)` is `1.0`, so `is_int(True)` holds in Python.
-        PyValue::Bool(b) => return *b as i64,
+        Value::Bool(b) => return *b as i64,
         other => {
             let s = other.py_str();
-            if py_is_int(&s) {
-                return py_float(&s).unwrap_or(0.0) as i64;
+            if is_int(&s) {
+                return parse_py_float(&s).unwrap_or(0.0) as i64;
             }
         }
     }
@@ -286,11 +284,11 @@ pub fn get_integer_after(pipe: &PipeSpec, after: Option<&PyValue>) -> i64 {
 }
 
 /// `_get_integer_now_func_name(pipe)`.
-pub fn get_integer_now_func_name(pipe: &PipeSpec) -> String {
+pub fn get_integer_now_func_name(pipe: &SqlPipe) -> String {
     format!("mrsm_integer_now_{}", get_precision_unit(pipe))
 }
 
-fn pipe_name(ctx: &ConnectorCtx, pipe: &PipeSpec) -> String {
+fn pipe_name(ctx: &ConnectorCtx, pipe: &SqlPipe) -> String {
     sql_item_name(
         &pipe.target,
         ctx.flavor,
@@ -299,7 +297,7 @@ fn pipe_name(ctx: &ConnectorCtx, pipe: &PipeSpec) -> String {
 }
 
 /// `_is_hypertable`'s catalog query (TimescaleDB only).
-pub fn get_is_hypertable_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> Option<String> {
+pub fn get_is_hypertable_query(ctx: &ConnectorCtx, pipe: &SqlPipe) -> Option<String> {
     if !ctx.flavor.is_timescaledb() {
         return None;
     }
@@ -315,7 +313,7 @@ pub fn get_is_hypertable_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> Option<St
 }
 
 /// `_get_columnstore_settings_query(pipe)`.
-pub fn get_columnstore_settings_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> String {
+pub fn get_columnstore_settings_query(ctx: &ConnectorCtx, pipe: &SqlPipe) -> String {
     let settings = get_compress_settings(ctx.flavor, pipe);
     let mut set_options = vec!["timescaledb.enable_columnstore".to_string()];
     if !settings.segmentby.is_empty() {
@@ -338,16 +336,16 @@ pub fn get_columnstore_settings_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> St
 }
 
 /// `_get_columnstore_policy_query(pipe)`.
-pub fn get_columnstore_policy_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> String {
+pub fn get_columnstore_policy_query(ctx: &ConnectorCtx, pipe: &SqlPipe) -> String {
     let settings = get_compress_settings(ctx.flavor, pipe);
     let after_clause = if dt_axis_is_integer(pipe) {
         match &settings.after {
-            Some(PyValue::Int(i)) => i.to_string(),
+            Some(Value::Int(i)) => i.to_string(),
             other => get_integer_after(pipe, other.as_ref()).to_string(),
         }
     } else {
         let after = match &settings.after {
-            Some(v) if v.is_truthy() => v.py_str(),
+            Some(v) if v.truthy() => v.py_str(),
             _ => DEFAULT_COMPRESS_AFTER.to_string(),
         };
         format!("INTERVAL '{}'", after.replace('\'', "''"))
@@ -359,7 +357,7 @@ pub fn get_columnstore_policy_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> Stri
 }
 
 /// `_get_columnstore_remove_policy_query(pipe)`.
-pub fn get_columnstore_remove_policy_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> String {
+pub fn get_columnstore_remove_policy_query(ctx: &ConnectorCtx, pipe: &SqlPipe) -> String {
     format!(
         "CALL remove_columnstore_policy('{}', if_exists => true)",
         pipe_name(ctx, pipe)
@@ -367,7 +365,7 @@ pub fn get_columnstore_remove_policy_query(ctx: &ConnectorCtx, pipe: &PipeSpec) 
 }
 
 /// `_get_columnstore_disable_query(pipe)`.
-pub fn get_columnstore_disable_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> String {
+pub fn get_columnstore_disable_query(ctx: &ConnectorCtx, pipe: &SqlPipe) -> String {
     format!(
         "ALTER TABLE {} SET (timescaledb.enable_columnstore = false)",
         pipe_name(ctx, pipe)
@@ -375,7 +373,7 @@ pub fn get_columnstore_disable_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> Str
 }
 
 /// `_get_integer_now_func_queries(pipe)`.
-pub fn get_integer_now_func_queries(ctx: &ConnectorCtx, pipe: &PipeSpec) -> Vec<String> {
+pub fn get_integer_now_func_queries(ctx: &ConnectorCtx, pipe: &SqlPipe) -> Vec<String> {
     if !ctx.flavor.is_timescaledb() || !dt_axis_is_integer(pipe) {
         return Vec::new();
     }
@@ -397,7 +395,7 @@ pub fn get_integer_now_func_queries(ctx: &ConnectorCtx, pipe: &PipeSpec) -> Vec<
 /// mirroring Python's failure tuple.
 pub fn get_compress_query_groups(
     ctx: &ConnectorCtx,
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     is_hypertable: bool,
     no_policy: bool,
 ) -> Result<Vec<Vec<String>>, String> {
@@ -439,7 +437,7 @@ pub fn get_compress_query_groups(
 /// The transaction groups `decompress_pipe` executes (`_compress.py:694`).
 pub fn get_decompress_query_groups(
     ctx: &ConnectorCtx,
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     is_hypertable: bool,
     no_policy: bool,
 ) -> Result<Vec<Vec<String>>, String> {
@@ -480,14 +478,17 @@ pub fn get_decompress_query_groups(
 /// `database` is the MySQL database (`schema or self.database`).
 pub fn get_pipe_size_queries(
     ctx: &ConnectorCtx,
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     database: Option<&str>,
 ) -> Vec<String> {
     let flavor = ctx.flavor;
     let name = pipe_name(ctx, pipe);
     let mut queries = Vec::new();
     if let Some(template) = flavor.hypertable_query_template() {
-        queries.push(crate::pytext::py_format(template, &[("table_name", &name)]));
+        queries.push(meerschaum_core::pyfmt::py_format(
+            template,
+            &[("table_name", &name)],
+        ));
     }
     match flavor {
         Flavor::Timescaledb
@@ -541,7 +542,7 @@ mod tests {
 
     #[test]
     fn orderby_directions() {
-        let v: PyValue = serde_json::from_str(r#"["ts desc nulls last", "a b"]"#).unwrap();
+        let v: Value = serde_json::from_str(r#"["ts desc nulls last", "a b"]"#).unwrap();
         assert_eq!(
             normalize_columnstore_cols(&v, Flavor::Timescaledb, true),
             vec!["\"ts\" DESC NULLS LAST", "\"a b\""]

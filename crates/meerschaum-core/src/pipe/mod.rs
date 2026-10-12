@@ -28,9 +28,9 @@ use crate::pyfmt::py_str;
 use crate::static_config::static_config;
 use crate::value::{Map, Value, apply_patch_maps};
 
-pub use chunk::{ChunkInterval, ChunkIntervalArg};
+pub use chunk::{ChunkInterval, ChunkIntervalArg, DEFAULT_BACKTRACK_MINUTES};
 pub use refs::{pipe_from_string, pipe_from_value};
-pub use target::{TruncateError, truncate_item_name};
+pub use target::{TruncateError, truncate_item_name, truncate_string_sections_best_effort};
 
 /// Errors from constructing a pipe or computing an attribute.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -638,7 +638,8 @@ impl Pipe {
         self.update_parameters(patch);
     }
 
-    fn param(&self, key: &str) -> Option<&Value> {
+    /// A top-level parameter (`pipe.parameters.get(key)`).
+    pub fn param(&self, key: &str) -> Option<&Value> {
         self.parameters.get(key)
     }
 

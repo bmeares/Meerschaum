@@ -9,18 +9,17 @@ use crate::dtypes::{get_db_type_from_pd_type, precision_unit_alias, precision_un
 use crate::error::Result;
 use crate::flavor::Flavor;
 use crate::ident::sql_item_name;
-use crate::pipe::{Interval, PipeSpec, total_seconds};
-use crate::pytext::{PyDateTime, dedent, py_strip};
+use crate::pipe::{ChunkInterval, SqlPipe, total_seconds};
 use crate::queries::cte::{ColsToSelect, format_cte_subquery, wrap_query_with_cte};
-use crate::value::PyValue;
 use crate::where_clause::build_where;
+use meerschaum_core::Value;
+use meerschaum_core::pyfmt::{PyDateTime, dedent, py_strip};
 
 /// `get_pipe_query(pipe)`: the first of `fetch.definition`, `definition`, `query`, `sql`,
 /// dedented and stripped. `{{ Pipe(...) }}` substitution happens before this (core templating).
-pub fn get_pipe_query(pipe: &PipeSpec) -> Option<String> {
-    let truthy_str = |v: Option<&PyValue>| -> Option<String> {
-        v.filter(|v| v.is_truthy()).map(PyValue::py_str)
-    };
+pub fn get_pipe_query(pipe: &SqlPipe) -> Option<String> {
+    let truthy_str =
+        |v: Option<&Value>| -> Option<String> { v.filter(|v| v.truthy()).map(Value::py_str) };
     let definition = truthy_str(pipe.param("fetch").and_then(|f| f.get("definition")))
         .or_else(|| truthy_str(pipe.param("definition")))
         .or_else(|| truthy_str(pipe.param("query")))
@@ -89,9 +88,9 @@ pub struct ParentSpec {
 #[derive(Debug, Clone)]
 pub struct MetadefArgs<'a> {
     /// The pipe (its definition comes from [`get_pipe_query`]).
-    pub pipe: &'a PipeSpec,
+    pub pipe: &'a SqlPipe,
     /// `params`.
-    pub params: Option<&'a IndexMap<String, PyValue>>,
+    pub params: Option<&'a IndexMap<String, Value>>,
     /// `begin` (default [`Bound::Default`]).
     pub begin: Bound,
     /// `end` (default [`Bound::None`]).
@@ -106,7 +105,7 @@ pub struct MetadefArgs<'a> {
 
 impl<'a> MetadefArgs<'a> {
     /// Python's defaults: `begin=''`, `end=None`, `check_existing=True`, no sync time, no parent.
-    pub fn new(pipe: &'a PipeSpec) -> Self {
+    pub fn new(pipe: &'a SqlPipe) -> Self {
         MetadefArgs {
             pipe,
             params: None,
@@ -187,7 +186,7 @@ pub fn get_pipe_metadef(flavor: Flavor, args: &MetadefArgs<'_>) -> Result<Option
     let dt_typ = parent_dt_typ.clone().unwrap_or_else(|| {
         dt_col
             .as_ref()
-            .and_then(|c| pipe.dtypes().get(c).cloned())
+            .and_then(|c| pipe.dtype(c))
             .unwrap_or_else(|| "datetime".to_string())
     });
     let db_dt_typ = if dt_typ.is_empty() {
@@ -198,7 +197,7 @@ pub fn get_pipe_metadef(flavor: Flavor, args: &MetadefArgs<'_>) -> Result<Option
     let precision_unit = if parent_dt_typ.is_some() {
         parent.map(|p| p.precision_unit.clone()).unwrap_or_default()
     } else {
-        pipe.precision_unit()
+        pipe.precision_unit()?.name().to_string()
     };
     let is_guess = dt_col.is_none();
     if is_guess {
@@ -222,10 +221,10 @@ pub fn get_pipe_metadef(flavor: Flavor, args: &MetadefArgs<'_>) -> Result<Option
     }
 
     let apply_backtrack = begin == Bound::Default && args.check_existing;
-    let backtrack_interval = pipe.get_backtrack_interval(args.check_existing);
+    let backtrack_interval = pipe.backtrack_interval(args.check_existing)?;
     let mut btm: i64 = match backtrack_interval {
-        Interval::Duration(d) => (total_seconds(d) / 60.0) as i64,
-        Interval::Int(i) => i,
+        ChunkInterval::Delta(d) => (total_seconds(d) / 60.0) as i64,
+        ChunkInterval::Int(i) => i,
     };
     if begin == Bound::Default {
         begin = args.sync_time.clone();
@@ -235,7 +234,7 @@ pub fn get_pipe_metadef(flavor: Flavor, args: &MetadefArgs<'_>) -> Result<Option
     if is_int_typ {
         begin = bound_to_int(&begin, &precision_unit);
         end = bound_to_int(&end, &precision_unit);
-        if let Interval::Duration(d) = backtrack_interval {
+        if let ChunkInterval::Delta(d) = backtrack_interval {
             let true_unit = precision_unit_alias(&precision_unit)
                 .map(str::to_string)
                 .unwrap_or_else(|| precision_unit.clone());
@@ -321,7 +320,7 @@ pub fn get_pipe_metadef(flavor: Flavor, args: &MetadefArgs<'_>) -> Result<Option
                 if let Some(d) = to_dt(&end) {
                     p_end = Bound::Int(datetime_to_epoch_int(&d, &p_precision_unit));
                 }
-                if let Interval::Duration(d) = backtrack_interval {
+                if let ChunkInterval::Delta(d) = backtrack_interval {
                     p_btm = (total_seconds(d) * scalar_for(&p_precision_unit)) as i64;
                 }
             }
@@ -392,7 +391,7 @@ pub fn get_pipe_metadef(flavor: Flavor, args: &MetadefArgs<'_>) -> Result<Option
         }
     }
 
-    // TODO(core-merge): the experimental `join_fetch` path (`_join_fetch_query`) is not ported;
+    // TODO(port): the experimental `join_fetch` path (`_join_fetch_query`) is not ported;
     // `system.experimental.join_fetch` defaults to `False`.
     let mut meta_def = format_cte_subquery(
         &definition,
@@ -434,5 +433,7 @@ pub fn get_pipe_metadef(flavor: Flavor, args: &MetadefArgs<'_>) -> Result<Option
         meta_def.push_str(&params_where);
     }
 
-    Ok(Some(crate::pytext::py_rstrip(&meta_def).to_string()))
+    Ok(Some(
+        meerschaum_core::pyfmt::py_rstrip(&meta_def).to_string(),
+    ))
 }

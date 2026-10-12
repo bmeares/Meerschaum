@@ -3,8 +3,8 @@
 //! This wave binds only the bridge itself, no kernel or core functions:
 //!
 //! - `__version__` and `build_info()`: what was built, with which toolchain and features.
-//! - `static_config()`: `crates/meerschaum-core/static.toml` (D15) embedded at build time, or
-//!   `None` when the file did not exist when the extension was compiled.
+//! - `static_config()`: `crates/meerschaum-core/static.toml` (D15), parsed by `meerschaum-core`
+//!   (embedded at build time; `HAS_STATIC_CONFIG` is always true).
 //! - `roundtrip_arrow(obj)`: the Arrow PyCapsule stream boundary. Accepts any object implementing
 //!   `__arrow_c_stream__` (or `__arrow_c_array__`) and returns an [`ArrowStream`] that exports the
 //!   same data back through `__arrow_c_stream__`, without importing pyarrow.

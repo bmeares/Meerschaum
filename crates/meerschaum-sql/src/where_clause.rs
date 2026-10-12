@@ -9,14 +9,18 @@
 
 use indexmap::IndexMap;
 
-use crate::dtypes::value_is_null;
 use crate::flavor::Flavor;
 use crate::ident::sql_item_name;
-use crate::value::PyValue;
+use meerschaum_core::Value;
+use meerschaum_core::dtypes::value_is_null;
 
-/// `STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']`.
-/// TODO(core-merge): read from `static.toml` once `meerschaum-core` exposes it.
-pub const NEGATION_PREFIX: &str = "_";
+/// `STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']` (from `static.toml`).
+pub fn negation_prefix() -> &'static str {
+    &meerschaum_core::static_config()
+        .system
+        .fetch_pipes_keys
+        .negation_prefix
+}
 
 /// The words that make `build_where` give up (`utils/sql.py:1134`).
 const BAD_WORDS: [&str; 3] = ["drop ", "--", ";"];
@@ -25,8 +29,9 @@ const BAD_WORDS: [&str; 3] = ["drop ", "--", ";"];
 ///
 /// Returns an empty string (and logs a warning, as Python does) when the serialized params
 /// contain a banned word.
-pub fn build_where(params: &IndexMap<String, PyValue>, flavor: Flavor, with_where: bool) -> String {
-    let params_json = PyValue::Dict(params.clone()).json_dumps().to_lowercase();
+pub fn build_where(params: &IndexMap<String, Value>, flavor: Flavor, with_where: bool) -> String {
+    let params_json = Value::Map(params.clone()).json_dumps().to_lowercase();
+    let negation_prefix = negation_prefix();
     for word in BAD_WORDS {
         if params_json.contains(word) {
             tracing::warn!("Aborting build_where() due to possible SQL injection.");
@@ -34,7 +39,7 @@ pub fn build_where(params: &IndexMap<String, PyValue>, flavor: Flavor, with_wher
         }
     }
 
-    let none_if_null = |v: &PyValue| -> Option<PyValue> {
+    let none_if_null = |v: &Value| -> Option<Value> {
         if value_is_null(&v.py_str()) {
             None
         } else {
@@ -48,24 +53,24 @@ pub fn build_where(params: &IndexMap<String, PyValue>, flavor: Flavor, with_wher
         let key_name = sql_item_name(key, flavor, None);
         match value {
             // Search across a list (`IN` syntax).
-            PyValue::List(items) => {
-                let includes: Vec<Option<PyValue>> = items
+            Value::List(items) => {
+                let includes: Vec<Option<Value>> = items
                     .iter()
-                    .filter(|item| !item.py_str().starts_with(NEGATION_PREFIX))
+                    .filter(|item| !item.py_str().starts_with(negation_prefix))
                     .map(none_if_null)
                     .collect();
                 let has_null_includes = includes.iter().any(Option::is_none);
-                let not_null_includes: Vec<&PyValue> = includes.iter().flatten().collect();
-                let excludes: Vec<Option<PyValue>> = items
+                let not_null_includes: Vec<&Value> = includes.iter().flatten().collect();
+                let excludes: Vec<Option<Value>> = items
                     .iter()
-                    .filter(|item| item.py_str().starts_with(NEGATION_PREFIX))
+                    .filter(|item| item.py_str().starts_with(negation_prefix))
                     .map(|item| {
                         let s = item.py_str();
-                        none_if_null(&PyValue::Str(s[NEGATION_PREFIX.len()..].to_string()))
+                        none_if_null(&Value::Str(s[negation_prefix.len()..].to_string()))
                     })
                     .collect();
                 let has_null_excludes = excludes.iter().any(Option::is_none);
-                let not_null_excludes: Vec<&PyValue> = excludes.iter().flatten().collect();
+                let not_null_excludes: Vec<&Value> = excludes.iter().flatten().collect();
 
                 if !includes.is_empty() {
                     where_.push_str(leading_and);
@@ -114,7 +119,7 @@ pub fn build_where(params: &IndexMap<String, PyValue>, flavor: Flavor, with_wher
                 }
             }
             // Search a dictionary.
-            PyValue::Dict(_) => {
+            Value::Map(_) => {
                 where_.push_str(&format!(
                     "{leading_and}CAST({key_name} AS TEXT) = '{}'",
                     value.json_dumps()
@@ -124,21 +129,21 @@ pub fn build_where(params: &IndexMap<String, PyValue>, flavor: Flavor, with_wher
                 let mut eq_sign = "=";
                 let mut is_null = "IS NULL";
                 let mut value: Option<String> = match value {
-                    PyValue::None => None,
+                    Value::Null => None,
                     other => Some(other.py_str()),
                 };
                 let as_str = value.clone().unwrap_or_else(|| "None".to_string());
                 // PARITY: `str(value).lstrip(negation_prefix)` strips *every* leading underscore
                 // (`utils/sql.py:1198`), so `'__None'` is still treated as `IS NOT NULL`.
-                if value_is_null(as_str.trim_start_matches(NEGATION_PREFIX)) {
-                    value = if as_str.starts_with(NEGATION_PREFIX) {
-                        Some(format!("{NEGATION_PREFIX}None"))
+                if value_is_null(as_str.trim_start_matches(negation_prefix)) {
+                    value = if as_str.starts_with(negation_prefix) {
+                        Some(format!("{negation_prefix}None"))
                     } else {
                         None
                     };
                 }
                 let current = value.clone().unwrap_or_else(|| "None".to_string());
-                if let Some(stripped) = current.strip_prefix(NEGATION_PREFIX) {
+                if let Some(stripped) = current.strip_prefix(negation_prefix) {
                     let stripped = stripped.to_string();
                     eq_sign = "!=";
                     if value_is_null(&stripped) {
@@ -170,7 +175,7 @@ pub fn build_where(params: &IndexMap<String, PyValue>, flavor: Flavor, with_wher
 mod tests {
     use super::*;
 
-    fn params(json: &str) -> IndexMap<String, PyValue> {
+    fn params(json: &str) -> IndexMap<String, Value> {
         serde_json::from_str(json).unwrap()
     }
 

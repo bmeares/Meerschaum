@@ -1,0 +1,73 @@
+### A project exercising every top-level key.
+project_name: "basic"
+root_dir: "./root"
+plugins_dir:
+  - "./plugins"
+  - "./extra-plugins"
+plugins:
+  - "example"
+  - "weather@api:custom"
+  - "noaa"
+
+connectors:
+  sql:
+    local_copy: "{sql:local}"
+    project:
+      flavor: "sqlite"
+      database: "{MRSM_ROOT_DIR}/project.db"
+    secret:
+      flavor: "postgresql"
+      username: "${PGUSER}"
+      password: ${PGPASSWORD}
+      port: $PGPORT
+      database: "$PGDATABASE"
+      host: "localhost"
+  api:
+    upstream: "{api:mrsm}"
+
+config:
+  meerschaum:
+    instance: "sql:project"
+    connectors:
+      sql:
+        main: MRSM{meerschaum:connectors:sql:local}
+  formatting:
+    emoji: false
+
+environment:
+  PROJECT_VAR: "hello"
+  FILE_PATH: "{__file__}"
+  ROOT_PATH: "{MRSM_ROOT_DIR}/data"
+
+sync:
+  schedule: "every 30 seconds"
+  min_seconds: 5
+  timeout_seconds: 300
+  args: "--workers 2 --chunksize 1000"
+
+pipes:
+  - connector: "plugin:example"
+    metric: "temperature"
+    location: "atl"
+    columns:
+      datetime: "timestamp"
+      id: "station"
+    target: "atl_temperature"
+    tags: ["weather"]
+    dtypes:
+      value: "float64"
+    parameters:
+      example:
+        stations: ["KATL"]
+
+  - connector: "sql:project"
+    metric: "fahrenheit"
+    instance: "sql:local_copy"
+    parameters:
+      sql: |-
+        SELECT timestamp, station
+        FROM atl_temperature
+      columns:
+        datetime: "timestamp"
+        id: "station"
+      upsert: true

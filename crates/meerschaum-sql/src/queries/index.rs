@@ -3,43 +3,41 @@
 use indexmap::{IndexMap, IndexSet};
 
 use crate::dtypes::{are_dtypes_equal, get_db_type_from_pd_type, get_pd_type_from_db_type};
+use crate::error::Result;
 use crate::flavor::Flavor;
 use crate::ident::{sql_item_name, truncate_item_name};
-use crate::pipe::{Interval, PipeSpec};
-use crate::pytext::py_format;
+use crate::pipe::{ChunkInterval, SqlPipe, str_map};
 use crate::queries::ConnectorCtx;
 use crate::queries::table::{
     CreateTableOptions, IndexDoc, QueryOrDtypes, get_create_table_queries, get_rename_table_queries,
 };
 use crate::queries::templates::has_update_query;
 use crate::queries::update::get_null_replacement;
-use crate::value::PyValue;
+use meerschaum_core::Value;
+use meerschaum_core::pyfmt::py_format;
 
 /// The default `index_template` (`_pipes.py:480`).
 pub const DEFAULT_INDEX_TEMPLATE: &str = "IX_{schema_str}{target}_{column_names}";
 
 /// `SQLConnector.get_pipe_index_names(pipe)`: index key → (truncated) index name.
-pub fn get_pipe_index_names(ctx: &ConnectorCtx, pipe: &PipeSpec) -> IndexMap<String, String> {
+pub fn get_pipe_index_names(ctx: &ConnectorCtx, pipe: &SqlPipe) -> IndexMap<String, String> {
     let template = pipe
         .param("index_template")
-        .map(PyValue::py_str)
+        .map(Value::py_str)
         .unwrap_or_else(|| DEFAULT_INDEX_TEMPLATE.to_string());
     // PARITY: Python computes a `schema_str` and then overwrites it with `''`
     // (`_pipes.py:489-490`).
     let schema_str = "";
-    let location_key = pipe
-        .location_key
-        .clone()
-        .unwrap_or_else(|| "None".to_string());
+    let location_key = pipe.location_key().unwrap_or("None").to_string();
     let mut seen: IndexMap<String, String> = IndexMap::new();
-    for (ix, cols) in pipe.truthy_indices() {
+    for (ix, cols) in pipe.truthy_index_columns() {
         let name = py_format(
             &template,
             &[
                 ("target", &pipe.target),
                 ("column_names", &cols.joined()),
-                ("connector_keys", &pipe.connector_keys),
-                ("metric_key", &pipe.metric_key),
+                ("connector_keys", pipe.connector_keys()),
+                ("metric_key", pipe.metric_key()),
                 ("location_key", &location_key),
                 ("schema_str", schema_str),
             ],
@@ -85,7 +83,7 @@ pub struct IndexState {
     /// `get_distinct_col_count(id, ...)` when `space_partition` is on.
     pub id_distinct_count: Option<i64>,
     /// Override for `pipe.get_chunk_interval()`.
-    pub chunk_interval: Option<Interval>,
+    pub chunk_interval: Option<ChunkInterval>,
 }
 
 /// Deduplicate preserving first occurrence.
@@ -98,15 +96,17 @@ fn ordered_unique(items: impl IntoIterator<Item = String>) -> Vec<String> {
 }
 
 /// `SQLConnector.get_create_index_queries(pipe)`: key → queries, in Python's insertion order.
+///
+/// Fails where Python's `pipe.get_chunk_interval()` raises (a malformed `verify` config).
 pub fn get_create_index_queries(
     ctx: &ConnectorCtx,
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     state: &IndexState,
-) -> IndexMap<String, Vec<String>> {
+) -> Result<IndexMap<String, Vec<String>>> {
     let flavor = ctx.flavor;
     // NOTE: Due to recent breaking changes in DuckDB, indices don't behave properly.
     if flavor == Flavor::Duckdb {
-        return IndexMap::new();
+        return Ok(IndexMap::new());
     }
     let q = |item: &str| sql_item_name(item, flavor, None);
     let mut index_queries: IndexMap<String, Vec<String>> = IndexMap::new();
@@ -123,8 +123,8 @@ pub fn get_create_index_queries(
     if upsert {
         index_names.shift_remove("unique");
     }
-    let indices = pipe.indices();
-    let columns = pipe.columns();
+    let indices = pipe.index_columns();
+    let columns = str_map(&pipe.columns());
     let existing_cols_types = &state.existing_cols_types;
     let existing_cols_pd_types: IndexMap<String, String> = existing_cols_types
         .iter()
@@ -159,7 +159,7 @@ pub fn get_create_index_queries(
         || primary_key
             .as_ref()
             .is_some_and(|pk| !existing_cols_pd_types.contains_key(pk));
-    let dtypes = pipe.dtypes();
+    let dtypes = str_map(&pipe.dtypes());
     let primary_key_db_type = primary_key.as_ref().map(|pk| {
         let typ = dtypes
             .get(pk)
@@ -214,13 +214,14 @@ pub fn get_create_index_queries(
             } else {
                 "None".to_string()
             };
-            let chunk_interval = state
-                .chunk_interval
-                .unwrap_or_else(|| pipe.get_chunk_interval());
+            let chunk_interval = match state.chunk_interval {
+                Some(interval) => interval,
+                None => pipe.chunk_interval()?,
+            };
             let chunk_interval_minutes = chunk_interval.whole_minutes();
             let chunk_time_interval = match chunk_interval {
-                Interval::Duration(_) => format!("INTERVAL '{chunk_interval_minutes} MINUTES'"),
-                Interval::Int(_) => chunk_interval_minutes.to_string(),
+                ChunkInterval::Delta(_) => format!("INTERVAL '{chunk_interval_minutes} MINUTES'"),
+                ChunkInterval::Int(_) => chunk_interval_minutes.to_string(),
             };
             let space = match (&id, create_space_partition) {
                 (Some(id), true) => format!("'{id}', {id_count}, "),
@@ -478,7 +479,7 @@ pub fn get_create_index_queries(
             }
         }
     }
-    index_queries
+    Ok(index_queries)
 }
 
 /// The table state `get_drop_index_queries` reads from the database in Python.
@@ -497,7 +498,7 @@ pub struct DropIndexState {
 /// `SQLConnector.get_drop_index_queries(pipe)`: key → queries.
 pub fn get_drop_index_queries(
     ctx: &ConnectorCtx,
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     state: &DropIndexState,
 ) -> IndexMap<String, Vec<String>> {
     let flavor = ctx.flavor;

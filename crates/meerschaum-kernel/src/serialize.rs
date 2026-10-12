@@ -206,7 +206,7 @@ pub fn json_dumps_value(value: &Value) -> String {
         Value::Json(j) => compact_json(j),
         Value::Str(s) => compact_json(&serde_json::Value::String(s.clone())),
         Value::Int(i) => i.to_string(),
-        Value::Float(f) => crate::value::py_float_repr(*f),
+        Value::Float(f) => meerschaum_core::pyfmt::float_repr(*f),
         Value::Bool(b) => if *b { "true" } else { "false" }.to_string(),
         v if v.is_na() => "null".to_string(),
         other => compact_json(&json_serialize_value(other)),

@@ -9,6 +9,7 @@ rust-version.workspace = true
 description = "Meerschaum v5: kernel crate (see docs/design/v5.0.0.md)"
 
 [dependencies]
+meerschaum-core = { workspace = true }
 polars = { workspace = true }
 arrow = { workspace = true }
 serde = { workspace = true }

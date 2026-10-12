@@ -3,7 +3,13 @@
 //! Several Meerschaum behaviors are defined by Python's own serializers: `MRSM{}` substitution
 //! rewrites a `json.dumps` string, `{{ Pipe() }}` templating inserts `json.dumps` / `str()` output,
 //! and the `Pipe(...)` argument syntax is parsed with `ast.literal_eval`. This module reproduces
-//! those functions for [`Value`]s.
+//! those functions for [`Value`]s, plus the Python string semantics the SQL query builders depend
+//! on (`str.isspace` / `strip` / `splitlines`, `textwrap.dedent` / `indent` (CPython 3.14),
+//! `str.format` with named fields, `datetime.__str__` / `isoformat`).
+//!
+//! Every crate uses these helpers; none keeps its own copy.
+
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDateTime, Offset, Timelike, Utc};
 
 use crate::value::{Map, Value};
 
@@ -256,7 +262,7 @@ pub fn py_str(value: &Value) -> String {
 /// Python's `int(str)` for base-10 strings: surrounding whitespace, an optional sign, and
 /// single underscores between digits are accepted.
 pub fn parse_py_int(s: &str) -> Option<i64> {
-    let t = s.trim();
+    let t = py_strip(s);
     let (neg, body) = match t.as_bytes().first()? {
         b'-' => (true, &t[1..]),
         b'+' => (false, &t[1..]),
@@ -280,7 +286,7 @@ fn valid_digit_run(s: &str, is_digit: impl Fn(char) -> bool) -> bool {
 
 /// Python's `float(str)`.
 pub fn parse_py_float(s: &str) -> Option<f64> {
-    let t = s.trim();
+    let t = py_strip(s);
     let lower = t.to_ascii_lowercase();
     let (neg, body) = match lower.as_bytes().first()? {
         b'-' => (true, &lower[1..]),
@@ -851,6 +857,401 @@ fn parse_json_map(s: &str) -> Result<Map, String> {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Python string semantics (`str.isspace`, `strip`, `splitlines`, `textwrap`, `str.format`)
+// ---------------------------------------------------------------------------------------------
+
+/// CPython's `str.isspace()` for one character.
+///
+/// This differs from [`char::is_whitespace`] for U+001C..U+001F, which Python treats as
+/// whitespace (bidirectional class B/S).
+pub fn py_isspace(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n'
+            | '\u{0b}'
+            | '\u{0c}'
+            | '\r'
+            | '\u{1c}'
+            | '\u{1d}'
+            | '\u{1e}'
+            | '\u{1f}'
+            | ' '
+            | '\u{85}'
+            | '\u{a0}'
+            | '\u{1680}'
+            | '\u{2000}'
+            ..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
+    )
+}
+
+/// `str.isspace()` for a whole string (`False` for the empty string).
+pub fn py_str_isspace(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(py_isspace)
+}
+
+/// `str.strip()` with no arguments.
+pub fn py_strip(s: &str) -> &str {
+    s.trim_matches(py_isspace)
+}
+
+/// `str.lstrip()` with no arguments.
+pub fn py_lstrip(s: &str) -> &str {
+    s.trim_start_matches(py_isspace)
+}
+
+/// `str.rstrip()` with no arguments.
+pub fn py_rstrip(s: &str) -> &str {
+    s.trim_end_matches(py_isspace)
+}
+
+/// `str.splitlines(keepends)`, splitting on every boundary Python recognizes.
+pub fn py_splitlines(s: &str, keepends: bool) -> Vec<&str> {
+    let mut out = Vec::new();
+    let bytes_len = s.len();
+    let mut start = 0;
+    let mut iter = s.char_indices().peekable();
+    while let Some((i, c)) = iter.next() {
+        let is_break = matches!(
+            c,
+            '\n' | '\r'
+                | '\u{0b}'
+                | '\u{0c}'
+                | '\u{1c}'
+                | '\u{1d}'
+                | '\u{1e}'
+                | '\u{85}'
+                | '\u{2028}'
+                | '\u{2029}'
+        );
+        if !is_break {
+            continue;
+        }
+        let mut end = i + c.len_utf8();
+        if c == '\r' {
+            if let Some(&(_, '\n')) = iter.peek() {
+                iter.next();
+                end += 1;
+            }
+        }
+        out.push(if keepends {
+            &s[start..end]
+        } else {
+            &s[start..i]
+        });
+        start = end;
+    }
+    if start < bytes_len {
+        out.push(&s[start..]);
+    }
+    out
+}
+
+/// `textwrap.dedent` as implemented in CPython 3.14.
+///
+/// The margin is the common `' '`/`'\t'` prefix of the lexicographically smallest and largest
+/// non-blank lines; whitespace-only lines become empty.
+pub fn dedent(text: &str) -> String {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let non_blank: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|l| !l.is_empty() && !py_str_isspace(l))
+        .collect();
+    // Python compares strings by code point, which is also UTF-8 byte order.
+    let l1 = non_blank.iter().min().copied().unwrap_or("");
+    let l2 = non_blank.iter().max().copied().unwrap_or("");
+    let l2_chars: Vec<char> = l2.chars().collect();
+    let mut margin = 0usize;
+    for (i, c) in l1.chars().enumerate() {
+        margin = i;
+        if l2_chars.get(i) != Some(&c) || !(c == ' ' || c == '\t') {
+            break;
+        }
+    }
+    let out: Vec<String> = lines
+        .iter()
+        .map(|l| {
+            if py_str_isspace(l) {
+                String::new()
+            } else {
+                l.chars().skip(margin).collect()
+            }
+        })
+        .collect();
+    out.join("\n")
+}
+
+/// `textwrap.indent(text, prefix)` with the default predicate.
+pub fn indent(text: &str, prefix: &str) -> String {
+    let mut out = String::with_capacity(text.len() + prefix.len() * 4);
+    for line in py_splitlines(text, true) {
+        if !py_str_isspace(line) {
+            out.push_str(prefix);
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+/// `textwrap.dedent(s).lstrip().rstrip()`, the idiom used across `utils/sql.py`.
+pub fn dedent_strip(s: &str) -> String {
+    py_strip(&dedent(s)).to_string()
+}
+
+/// `str.format(**kwargs)` for templates with named fields only (`{name}`, `{{`, `}}`).
+///
+/// Unknown fields are left untouched (Python would raise `KeyError`; the crate's templates never
+/// reference unknown fields).
+pub fn py_format(template: &str, args: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len() + 64);
+    let mut chars = template.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '{' => {
+                if let Some(&(_, '{')) = chars.peek() {
+                    chars.next();
+                    out.push('{');
+                    continue;
+                }
+                let rest = &template[i + 1..];
+                if let Some(close) = rest.find('}') {
+                    let key = &rest[..close];
+                    if let Some((_, val)) = args.iter().find(|(k, _)| *k == key) {
+                        out.push_str(val);
+                        // Skip the key and the closing brace.
+                        for _ in 0..key.chars().count() + 1 {
+                            chars.next();
+                        }
+                        continue;
+                    }
+                }
+                out.push('{');
+            }
+            '}' => {
+                if let Some(&(_, '}')) = chars.peek() {
+                    chars.next();
+                }
+                out.push('}');
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A Python `datetime.datetime`: naive or with a fixed UTC offset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PyDateTime {
+    /// `tzinfo is None`.
+    Naive(NaiveDateTime),
+    /// Timezone-aware with a fixed offset.
+    Aware(DateTime<FixedOffset>),
+}
+
+impl PyDateTime {
+    /// A UTC-aware datetime.
+    pub fn utc(dt: DateTime<Utc>) -> Self {
+        PyDateTime::Aware(dt.with_timezone(&Utc.fix()))
+    }
+
+    /// Whether `tzinfo is not None`.
+    pub fn is_aware(&self) -> bool {
+        matches!(self, PyDateTime::Aware(_))
+    }
+
+    /// The wall-clock (local) naive datetime.
+    pub fn naive_local(&self) -> NaiveDateTime {
+        match self {
+            PyDateTime::Naive(n) => *n,
+            PyDateTime::Aware(a) => a.naive_local(),
+        }
+    }
+
+    /// Microseconds (Python datetimes have microsecond resolution).
+    pub fn microsecond(&self) -> u32 {
+        self.naive_local().nanosecond() / 1_000
+    }
+
+    /// `dt.astimezone(timezone.utc)` for aware values; naive values are returned unchanged.
+    pub fn to_utc(&self) -> Self {
+        match self {
+            PyDateTime::Naive(_) => *self,
+            PyDateTime::Aware(a) => PyDateTime::Aware(a.with_timezone(&Utc.fix())),
+        }
+    }
+
+    /// `dt.replace(tzinfo=None)`.
+    pub fn strip_tz(&self) -> Self {
+        PyDateTime::Naive(self.naive_local())
+    }
+
+    fn date_time_part(&self, sep: char) -> String {
+        let n = self.naive_local();
+        let mut s = format!(
+            "{:04}-{:02}-{:02}{}{:02}:{:02}:{:02}",
+            n.year(),
+            n.month(),
+            n.day(),
+            sep,
+            n.hour(),
+            n.minute(),
+            n.second()
+        );
+        let us = self.microsecond();
+        if us != 0 {
+            s.push_str(&format!(".{:06}", us));
+        }
+        s
+    }
+
+    fn offset_part(&self) -> String {
+        match self {
+            PyDateTime::Naive(_) => String::new(),
+            PyDateTime::Aware(a) => {
+                let secs = a.offset().local_minus_utc();
+                let sign = if secs < 0 { '-' } else { '+' };
+                let secs = secs.abs();
+                let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+                if s != 0 {
+                    format!("{sign}{h:02}:{m:02}:{s:02}")
+                } else {
+                    format!("{sign}{h:02}:{m:02}")
+                }
+            }
+        }
+    }
+
+    /// `str(dt)`: `YYYY-MM-DD HH:MM:SS[.ffffff][+HH:MM]`.
+    pub fn py_str(&self) -> String {
+        format!("{}{}", self.date_time_part(' '), self.offset_part())
+    }
+
+    /// `dt.isoformat()`: `YYYY-MM-DDTHH:MM:SS[.ffffff][+HH:MM]`.
+    pub fn isoformat(&self) -> String {
+        format!("{}{}", self.date_time_part('T'), self.offset_part())
+    }
+
+    /// `dt.strftime('%Y-%m-%d %H:%M:%S.%f')`.
+    pub fn strftime_full(&self) -> String {
+        let n = self.naive_local();
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}",
+            n.year(),
+            n.month(),
+            n.day(),
+            n.hour(),
+            n.minute(),
+            n.second(),
+            self.microsecond()
+        )
+    }
+
+    /// `dt.strftime('%Y%m%d%H%M%S')`.
+    pub fn strftime_compact(&self) -> String {
+        let n = self.naive_local();
+        format!(
+            "{:04}{:02}{:02}{:02}{:02}{:02}",
+            n.year(),
+            n.month(),
+            n.day(),
+            n.hour(),
+            n.minute(),
+            n.second()
+        )
+    }
+
+    /// Parse Python's `isoformat()` output (the fixture encoding).
+    pub fn parse_isoformat(s: &str) -> Option<Self> {
+        if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+            return Some(PyDateTime::Aware(dt));
+        }
+        for fmt in ["%Y-%m-%dT%H:%M:%S%.f%:z", "%Y-%m-%d %H:%M:%S%.f%:z"] {
+            if let Ok(dt) = DateTime::parse_from_str(s, fmt) {
+                return Some(PyDateTime::Aware(dt));
+            }
+        }
+        for fmt in ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"] {
+            if let Ok(n) = NaiveDateTime::parse_from_str(s, fmt) {
+                return Some(PyDateTime::Naive(n));
+            }
+        }
+        None
+    }
+}
+
+/// Python's `str.isupper()`: at least one cased character and no lowercase ones.
+pub fn py_isupper(s: &str) -> bool {
+    let mut cased = false;
+    for c in s.chars() {
+        if c.is_lowercase() {
+            return false;
+        }
+        if c.is_uppercase() {
+            cased = true;
+        }
+    }
+    cased
+}
+
+/// Python's `repr(bytes)`.
+pub fn bytes_repr(b: &[u8]) -> String {
+    let quote = if b.contains(&b'\'') && !b.contains(&b'"') {
+        '"'
+    } else {
+        '\''
+    };
+    let mut out = String::from("b");
+    out.push(quote);
+    for &c in b {
+        match c {
+            b'\\' => out.push_str("\\\\"),
+            b'\t' => out.push_str("\\t"),
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            c if c == quote as u8 => {
+                out.push('\\');
+                out.push(c as char);
+            }
+            0x20..=0x7e => out.push(c as char),
+            _ => out.push_str(&format!("\\x{c:02x}")),
+        }
+    }
+    out.push(quote);
+    out
+}
+
+/// Python's `repr()` of a JSON document parsed with `serde_json` (`{'a': 1, 'b': [True, None]}`).
+///
+/// Unlike converting to a [`Value`] first, integers beyond `i64` keep their digits.
+pub fn py_repr_json(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Null => "None".to_string(),
+        serde_json::Value::Bool(b) => if *b { "True" } else { "False" }.to_string(),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                i.to_string()
+            } else if let Some(u) = n.as_u64() {
+                u.to_string()
+            } else {
+                float_repr(n.as_f64().unwrap_or(f64::NAN))
+            }
+        }
+        serde_json::Value::String(s) => str_repr(s),
+        serde_json::Value::Array(a) => format!(
+            "[{}]",
+            a.iter().map(py_repr_json).collect::<Vec<_>>().join(", ")
+        ),
+        serde_json::Value::Object(o) => format!(
+            "{{{}}}",
+            o.iter()
+                .map(|(k, v)| format!("{}: {}", str_repr(k), py_repr_json(v)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -869,6 +1270,11 @@ mod tests {
             (1e15, "1000000000000000.0"),
             (0.1 + 0.2, "0.30000000000000004"),
             (-12.0, "-12.0"),
+            (1.0 / 60.0, "0.016666666666666666"),
+            (1.0 / 86400.0, "1.1574074074074073e-05"),
+            (123456789.125, "123456789.125"),
+            (1e20, "1e+20"),
+            (9007199254740993.0, "9007199254740992.0"),
         ] {
             assert_eq!(float_repr(f), s);
         }
@@ -912,5 +1318,42 @@ mod tests {
         assert_eq!(parse_py_int("1__0"), None);
         assert!(is_int("4326.0"));
         assert!(!is_int("inf"));
+        // Python strips `str.isspace()` characters, including U+001C..U+001F.
+        assert_eq!(parse_py_int("\u{1c}7\u{1f}"), Some(7));
+    }
+
+    #[test]
+    fn dedent_like_python() {
+        assert_eq!(dedent("    a\n      b\n    c"), "a\n  b\nc");
+        assert_eq!(dedent("  a\n\n  b"), "a\n\nb");
+        assert_eq!(dedent("a\n    b"), "a\n    b");
+        assert_eq!(dedent("   \n  x"), "\nx");
+    }
+
+    #[test]
+    fn indent_like_python() {
+        assert_eq!(indent("a\n\nb", "    "), "    a\n\n    b");
+        assert_eq!(indent("a\r\nb\n", "  "), "  a\r\n  b\n");
+    }
+
+    #[test]
+    fn format_fields() {
+        assert_eq!(py_format("a {x} {{y}} {z}", &[("x", "1")]), "a 1 {y} {z}");
+    }
+
+    #[test]
+    fn datetime_strings() {
+        let dt = PyDateTime::parse_isoformat("2024-01-02T03:04:05.000006+00:00").unwrap();
+        assert_eq!(dt.py_str(), "2024-01-02 03:04:05.000006+00:00");
+        let n = PyDateTime::parse_isoformat("2024-01-02T03:04:05").unwrap();
+        assert_eq!(n.isoformat(), "2024-01-02T03:04:05");
+    }
+
+    #[test]
+    fn bytes_and_upper() {
+        assert_eq!(bytes_repr(b"a\x00'"), "b\"a\\x00'\"");
+        assert!(py_isupper("TEXT PRIMARY"));
+        assert!(!py_isupper("Text"));
+        assert!(!py_isupper("123"));
     }
 }

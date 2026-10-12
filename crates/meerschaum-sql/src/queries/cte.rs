@@ -6,7 +6,7 @@
 use crate::error::{Result, SqlError};
 use crate::flavor::Flavor;
 use crate::ident::sql_item_name;
-use crate::pytext::{indent, py_lstrip, py_rstrip, py_strip};
+use meerschaum_core::pyfmt::{indent, py_lstrip, py_rstrip, py_strip};
 
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'

@@ -601,8 +601,8 @@ fn enforce_object_path(
     let mut geometry_cols: IndexMap<String, (String, Srid)> = IndexMap::new();
     for (c, t) in dtypes {
         if t.starts_with("geometry") || t.starts_with("geography") {
-            let ts = get_geometry_type_srid(t, "geometry", Srid::Int(0))
-                .map_err(EnforceError::Raised)?;
+            let ts = get_geometry_type_srid(t, "geometry", Srid::Code(0))
+                .map_err(|e| EnforceError::Raised(format!("ValueError: {e}")))?;
             geometry_cols.insert(c.clone(), ts);
         }
     }
@@ -704,7 +704,7 @@ fn enforce_object_path(
             // columns' `set_crs` results are discarded (`_ = df[col].set_crs(srid)`).
             let (_, srid) = &geometry_cols[first];
             if let Some(c) = df.column_mut(first) {
-                if srid.is_truthy() {
+                if srid.truthy() {
                     c.crs = Some(srid.clone());
                 }
             }

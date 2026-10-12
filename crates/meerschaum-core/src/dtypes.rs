@@ -312,7 +312,7 @@ pub struct GeometrySpec {
 
 /// An error parsing a `geometry[...]` modifier.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid literal for int() with base 10: {0:?}")]
+#[error("invalid literal for int() with base 10: {}", crate::pyfmt::str_repr(.0))]
 pub struct GeometryParseError(pub String);
 
 /// Port of `get_geometry_type_srid(dtype, default_type, default_srid)`: returns
@@ -662,6 +662,313 @@ pub fn parse_number(s: &str) -> Option<f64> {
     parse_py_float(s)
 }
 
+/// `value_is_null(value)` for a string (`utils/dtypes/__init__.py:523`): `'None'`, `'nan'`,
+/// `'NA'`, `'NaT'`, `'NaTz'`, `''` and `'<NA>'` in any case.
+pub fn value_is_null(value: &str) -> bool {
+    matches!(
+        value.to_lowercase().as_str(),
+        "none" | "nan" | "na" | "nat" | "natz" | "" | "<na>"
+    )
+}
+
+/// A value of `MRSM_PRECISION_UNITS_SCALARS`. Python mixes `int` and `float` values, which is
+/// observable through `str(scalar)` in generated SQL.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PrecisionScalar {
+    /// An integer scalar (`nanosecond` .. `second`).
+    Int(i64),
+    /// A fractional scalar (`minute`, `hour`, `day`).
+    Float(f64),
+}
+
+impl PrecisionScalar {
+    /// The scalar as `f64`.
+    pub fn as_f64(self) -> f64 {
+        match self {
+            PrecisionScalar::Int(i) => i as f64,
+            PrecisionScalar::Float(f) => f,
+        }
+    }
+
+    /// Python `str(scalar)`.
+    pub fn py_str(self) -> String {
+        match self {
+            PrecisionScalar::Int(i) => i.to_string(),
+            PrecisionScalar::Float(f) => crate::pyfmt::float_repr(f),
+        }
+    }
+}
+
+/// `MRSM_PRECISION_UNITS_SCALARS[unit]` for a full unit name (aliases are not resolved).
+pub fn precision_unit_scalar(unit: &str) -> Option<PrecisionScalar> {
+    PrecisionUnit::from_name(unit).map(|u| u.py_scalar())
+}
+
+impl PrecisionUnit {
+    /// `MRSM_PRECISION_UNITS_SCALARS[unit]` with Python's `int` / `float` distinction.
+    pub fn py_scalar(&self) -> PrecisionScalar {
+        match self {
+            PrecisionUnit::Nanosecond => PrecisionScalar::Int(1_000_000_000),
+            PrecisionUnit::Microsecond => PrecisionScalar::Int(1_000_000),
+            PrecisionUnit::Millisecond => PrecisionScalar::Int(1000),
+            PrecisionUnit::Second => PrecisionScalar::Int(1),
+            other => PrecisionScalar::Float(other.scalar()),
+        }
+    }
+
+    /// Microseconds in one unit (`timedelta(**{unit + 's': 1})`); `None` for nanoseconds,
+    /// which `timedelta` cannot represent.
+    pub fn micros(&self) -> Option<i64> {
+        Some(match self {
+            PrecisionUnit::Nanosecond => return None,
+            PrecisionUnit::Microsecond => 1,
+            PrecisionUnit::Millisecond => 1000,
+            PrecisionUnit::Second => 1_000_000,
+            PrecisionUnit::Minute => 60_000_000,
+            PrecisionUnit::Hour => 3_600_000_000,
+            PrecisionUnit::Day => 86_400_000_000,
+        })
+    }
+}
+
+/// Port of `get_next_precision_unit(unit, decrease)` with Python's error messages.
+pub fn get_next_precision_unit(unit: &str, decrease: bool) -> Result<&'static str, String> {
+    let resolved =
+        PrecisionUnit::parse(unit).ok_or_else(|| format!("Invalid precision unit '{unit}'."))?;
+    resolved.next(decrease).map(|u| u.name()).ok_or_else(|| {
+        format!(
+            "No precision {} '{unit}'.",
+            if decrease { "below" } else { "above" }
+        )
+    })
+}
+
+impl Srid {
+    /// The CRS string used in GeoArrow metadata (`EPSG:4326`, `ESRI:102003`); `None` when falsy.
+    pub fn to_crs(&self) -> Option<String> {
+        if !self.truthy() {
+            return None;
+        }
+        Some(match self {
+            Srid::Code(c) => format!("EPSG:{c}"),
+            Srid::Authority(a) if a.contains(':') => a.clone(),
+            Srid::Authority(a) => format!("EPSG:{a}"),
+        })
+    }
+
+    /// The EPSG code: the number itself, or the code of an `EPSG:` authority string.
+    pub fn epsg(&self) -> Option<i64> {
+        match self {
+            Srid::Code(c) => Some(*c),
+            Srid::Authority(a) => a
+                .strip_prefix("EPSG:")
+                .or_else(|| a.strip_prefix("epsg:"))
+                .and_then(|c| c.parse().ok()),
+        }
+    }
+}
+
+/// [`are_dtype_maps_equal`] over any `(column, dtype)` pairs.
+///
+/// PARITY: keys are sorted and `zip`ped, so extra keys on either side are ignored
+/// (`{'a': 'int64'}` equals `{'a': 'int64', 'b': 'float64'}`).
+pub fn are_dtype_items_equal<'a>(
+    left: impl IntoIterator<Item = (&'a str, &'a str)>,
+    right: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> bool {
+    let mut l: Vec<(&str, &str)> = left.into_iter().collect();
+    let mut r: Vec<(&str, &str)> = right.into_iter().collect();
+    l.sort_by(|a, b| a.0.cmp(b.0));
+    r.sort_by(|a, b| a.0.cmp(b.0));
+    l.iter()
+        .zip(r.iter())
+        .all(|((lk, lt), (rk, rt))| lk == rk && are_dtypes_equal(lt, rt))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Database types -> Meerschaum / pandas dtypes (`meerschaum/utils/dtypes/sql.py`)
+// ---------------------------------------------------------------------------------------------
+
+/// `DB_TO_PD_DTYPES` exact keys (`utils/dtypes/sql.py:79`), keyed by the upper-cased type.
+pub const DB_TO_PD_DTYPES: &[(&str, &str)] = &[
+    ("FLOAT", "float64[pyarrow]"),
+    ("REAL", "float64[pyarrow]"),
+    ("DOUBLE_PRECISION", "float64[pyarrow]"),
+    ("DOUBLE", "float64[pyarrow]"),
+    ("DECIMAL", "numeric"),
+    ("BIGINT", "int64[pyarrow]"),
+    ("INT", "int32[pyarrow]"),
+    ("INTEGER", "int32[pyarrow]"),
+    ("NUMBER", "numeric"),
+    ("NUMERIC", "numeric"),
+    ("GEOMETRY", "geometry"),
+    ("GEOMETRY(GEOMETRY)", "geometry"),
+    ("TIMESTAMP", "datetime64[us]"),
+    ("TIMESTAMP WITHOUT TIMEZONE", "datetime64[us]"),
+    ("TIMESTAMP WITH TIMEZONE", "datetime64[us, UTC]"),
+    ("TIMESTAMP WITH TIME ZONE", "datetime64[us, UTC]"),
+    ("TIMESTAMPTZ", "datetime64[us, UTC]"),
+    ("DATE", "date"),
+    ("DATETIME", "datetime64[us]"),
+    ("DATETIME2", "datetime64[us]"),
+    ("DATETIME2(6)", "datetime64[us]"),
+    ("DATETIME2(3)", "datetime64[ms]"),
+    ("DATETIME2(0)", "datetime64[s]"),
+    ("DATETIMEOFFSET", "datetime64[us, UTC]"),
+    ("DATETIMEOFFSET(6)", "datetime64[us, UTC]"),
+    ("DATETIMEOFFSET(3)", "datetime64[ms, UTC]"),
+    ("DATETIMEOFFSET(0)", "datetime64[s, UTC]"),
+    ("TEXT", "string[pyarrow]"),
+    ("VARCHAR", "string[pyarrow]"),
+    ("CLOB", "string[pyarrow]"),
+    ("BOOL", "bool[pyarrow]"),
+    ("BOOLEAN", "bool[pyarrow]"),
+    ("BOOLEAN()", "bool[pyarrow]"),
+    ("TINYINT", "bool[pyarrow]"),
+    ("TINYINT(1)", "bool[pyarrow]"),
+    ("BIT", "bool[pyarrow]"),
+    ("BIT(1)", "bool[pyarrow]"),
+    ("JSON", "json"),
+    ("JSONB", "json"),
+    ("UUID", "uuid"),
+    ("UNIQUEIDENTIFIER", "uuid"),
+    ("BYTEA", "bytes"),
+    ("BLOB", "bytes"),
+    ("VARBINARY", "bytes"),
+    ("VARBINARY(MAX)", "bytes"),
+];
+
+/// `DB_TO_PD_DTYPES['substrings']`, in insertion order (the order is observable).
+pub const DB_TO_PD_SUBSTRINGS: &[(&str, &str)] = &[
+    ("CHAR", "string[pyarrow]"),
+    ("TIMESTAMP", "datetime64[us]"),
+    ("TIME", "datetime64[us]"),
+    ("DATE", "date"),
+    ("DOUBLE", "double[pyarrow]"),
+    ("DECIMAL", "numeric"),
+    ("NUMERIC", "numeric"),
+    ("NUMBER", "numeric"),
+    ("INT", "int64[pyarrow]"),
+    ("BOOL", "bool[pyarrow]"),
+    ("JSON", "json"),
+    ("BYTE", "bytes"),
+    ("LOB", "bytes"),
+    ("BINARY", "bytes"),
+    ("GEOMETRY", "geometry"),
+    ("GEOGRAPHY", "geography"),
+];
+
+/// `DB_TO_PD_DTYPES['default']`.
+pub const DB_TO_PD_DEFAULT: &str = "object";
+
+/// `get_numeric_precision_scale(None, dtype)` (`utils/dtypes/sql.py:1366`): the explicit
+/// precision and scale of `numeric[p,s]` / `NUMERIC(p, s)`, else `(None, None)`. The flavor
+/// defaults of the full function live in `meerschaum-sql`.
+pub fn get_numeric_precision_scale(dtype: Option<&str>) -> (Option<i64>, Option<i64>) {
+    match dtype.and_then(parse_numeric_precision_scale) {
+        Some((p, s)) => (Some(p), Some(s)),
+        None => (None, None),
+    }
+}
+
+/// `get_pd_type_from_db_type(db_type, allow_custom_dtypes)` (`utils/dtypes/sql.py:1162`).
+///
+/// PARITY: substring matching follows dict order, so `GEOGRAPHY(POINT, 4326)` matches `INT`
+/// (inside `POINT`) and maps to `int64[pyarrow]`, and Python passes the matched *substring* to
+/// the custom-dtype parser (`utils/dtypes/sql.py:1205`), so substring matches drop modifiers.
+/// Where Python raises `ValueError` on a malformed geometry modifier (`GEOMETRY(4326.0)`), the
+/// default type and SRID are used.
+pub fn get_pd_type_from_db_type(db_type: &str, allow_custom_dtypes: bool) -> String {
+    fn parse_custom(pd_type: &str, db_type: &str) -> String {
+        if db_type.to_lowercase().contains("json") {
+            return "json".to_string();
+        }
+        if are_dtypes_equal(pd_type, "numeric") && pd_type != "object" {
+            if let (Some(p), Some(s)) = get_numeric_precision_scale(Some(&db_type.to_uppercase())) {
+                if p != 0 && s != 0 {
+                    return format!("numeric[{p},{s}]");
+                }
+            }
+        }
+        if are_dtypes_equal(pd_type, "geometry") && pd_type != "object" {
+            let (geometry_type, srid) =
+                get_geometry_type_srid(&db_type.to_uppercase(), "geometry", Srid::Code(0))
+                    .unwrap_or_else(|_| ("geometry".to_string(), Srid::Code(0)));
+            let mut modifiers = Vec::new();
+            if !geometry_type.is_empty() {
+                modifiers.push(geometry_type);
+            }
+            if srid.truthy() {
+                modifiers.push(srid.to_string());
+            }
+            let typ = if pd_type.to_lowercase().contains("geography") {
+                "geography"
+            } else {
+                "geometry"
+            };
+            if modifiers.is_empty() {
+                return typ.to_string();
+            }
+            return format!("{typ}[{}]", modifiers.join(", "));
+        }
+        pd_type.to_string()
+    }
+
+    let upper = db_type.to_uppercase();
+    let key = crate::pyfmt::py_strip(upper.split('(').next().unwrap_or(""));
+    if let Some((_, pd_type)) = DB_TO_PD_DTYPES.iter().find(|(k, _)| *k == key) {
+        return if allow_custom_dtypes {
+            parse_custom(pd_type, db_type)
+        } else {
+            pd_type.to_string()
+        };
+    }
+    for (db_t, pd_t) in DB_TO_PD_SUBSTRINGS {
+        if upper.contains(db_t) {
+            return if allow_custom_dtypes {
+                parse_custom(pd_t, db_t)
+            } else {
+                pd_t.to_string()
+            };
+        }
+    }
+    DB_TO_PD_DEFAULT.to_string()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Arrow field tags
+// ---------------------------------------------------------------------------------------------
+
+/// Arrow field-metadata keys that tag columns crossing crate boundaries as Arrow (SQL query
+/// results, kernel frames, the Python bridge). Every producer and consumer uses these keys.
+pub mod field_meta {
+    /// The Meerschaum dtype of the column (`json`, `bytes`, `uuid`, `numeric`, `geometry`, ...).
+    pub const DTYPE: &str = "meerschaum:dtype";
+    /// The database type name reported by the driver (`TIMESTAMPTZ`, `GEOMETRY(POINT, 4326)`).
+    pub const DB_TYPE: &str = "meerschaum:db_type";
+    /// How a geometry column's bytes are encoded (`wkb`, `ewkb`, `mysql`).
+    pub const ENCODING: &str = "meerschaum:encoding";
+    /// The Arrow canonical extension name key (`arrow.json`, `arrow.uuid`, `geoarrow.wkb`).
+    pub const EXTENSION_NAME: &str = "ARROW:extension:name";
+    /// The Arrow canonical extension metadata key.
+    pub const EXTENSION_METADATA: &str = "ARROW:extension:metadata";
+}
+
+/// The Meerschaum dtype declared by a column's field tags: the [`field_meta::DTYPE`] tag,
+/// refined by the database type when that is more specific (`geometry` + `GEOMETRY(POINT, 4326)`
+/// is `geometry[POINT, 4326]`; `numeric` + `NUMERIC(10, 2)` is `numeric[10,2]`), else the dtype
+/// mapped from the database type alone (`get_pd_type_from_db_type`).
+pub fn dtype_from_field_tags(dtype: Option<&str>, db_type: Option<&str>) -> Option<String> {
+    let from_db = db_type
+        .filter(|t| !t.is_empty())
+        .map(|t| get_pd_type_from_db_type(t, true));
+    match (dtype.filter(|d| !d.is_empty()), from_db) {
+        (Some(tag), Some(db)) if db != tag && db.starts_with(tag) => Some(db),
+        (Some(tag), _) => Some(tag.to_string()),
+        (None, db) => db,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -718,7 +1025,59 @@ mod tests {
     }
 
     #[test]
+    fn db_types() {
+        assert_eq!(get_pd_type_from_db_type("BIGINT", true), "int64[pyarrow]");
+        assert_eq!(get_pd_type_from_db_type("JSONB", true), "json");
+        assert_eq!(
+            get_pd_type_from_db_type("NUMERIC(10, 2)", true),
+            "numeric[10,2]"
+        );
+        assert_eq!(
+            get_pd_type_from_db_type("GEOMETRY(POINT, 4326)", true),
+            "geometry[POINT, 4326]"
+        );
+        assert_eq!(
+            get_pd_type_from_db_type("GEOMETRY", true),
+            "geometry[geometry]"
+        );
+        // PARITY: substring order matches `INT` inside `POINT`.
+        assert_eq!(
+            get_pd_type_from_db_type("GEOGRAPHY(POINT, 4326)", true),
+            "int64[pyarrow]"
+        );
+        assert_eq!(
+            dtype_from_field_tags(Some("geometry"), Some("GEOMETRY(POINT, 4326)")).as_deref(),
+            Some("geometry[POINT, 4326]")
+        );
+        assert_eq!(
+            dtype_from_field_tags(Some("bytes"), Some("BLOB")).as_deref(),
+            Some("bytes")
+        );
+        assert_eq!(
+            dtype_from_field_tags(None, Some("TIMESTAMPTZ")).as_deref(),
+            Some("datetime64[us, UTC]")
+        );
+        assert_eq!(
+            GeometryParseError("4326.0".into()).to_string(),
+            "invalid literal for int() with base 10: '4326.0'"
+        );
+        assert!(value_is_null("<NA>") && value_is_null("None") && !value_is_null("0"));
+    }
+
+    #[test]
     fn precision_units() {
+        assert_eq!(get_next_precision_unit("ms", true), Ok("second"));
+        assert_eq!(
+            get_next_precision_unit("ns", false).unwrap_err(),
+            "No precision above 'ns'."
+        );
+        assert_eq!(
+            PrecisionUnit::Minute.py_scalar().py_str(),
+            "0.016666666666666666"
+        );
+        assert_eq!(PrecisionUnit::Second.py_scalar().py_str(), "1");
+        assert_eq!(Srid::Code(4326).to_crs().as_deref(), Some("EPSG:4326"));
+        assert_eq!(Srid::Authority("EPSG:2263".into()).epsg(), Some(2263));
         assert_eq!(PrecisionUnit::parse("ms"), Some(PrecisionUnit::Millisecond));
         assert_eq!(
             PrecisionUnit::Nanosecond.next(true),

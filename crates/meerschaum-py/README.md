@@ -8,7 +8,7 @@ load and data paths before real functions are bound.
 |---|---|
 | `__version__` | Cargo version (`5.0.0-a1`); `build_info()['version_pep440']` is the wheel form (`5.0.0a1`) |
 | `build_info()` | rustc version, profile, opt level, target/host, enabled features, Python ABI (`abi3-py311`) |
-| `static_config()` | `crates/meerschaum-core/static.toml` (D15) as a dict, or `None` if the file did not exist at build time. Resolves the file's `{ __null__ = true }` and `{ __cpu_count_or__ = N }` markers the way `STATIC_CONFIG` does |
+| `static_config()` | `crates/meerschaum-core/static.toml` (D15) as a dict, parsed by `meerschaum_core::static_config` (which embeds it at build time). The file's `{ __null__ = true }` and `{ __cpu_count_or__ = N }` markers are resolved the way `STATIC_CONFIG` does, with Python's own `os.cpu_count()` |
 | `roundtrip_arrow(obj)` | Imports anything with `__arrow_c_stream__` / `__arrow_c_array__` into Rust `RecordBatch`es and returns an `ArrowStream`, a pyarrow-free object that exports the data back through `__arrow_c_stream__` / `__arrow_c_schema__` |
 | `polars_roundtrip(df)` | `polars.DataFrame` → `polars::DataFrame` → `polars.DataFrame` through `pyo3-polars` (crate feature `polars`: off for plain cargo builds, on by default in `build_py.sh`) |
 | `HAS_STATIC_CONFIG`, `HAS_POLARS` | Build-time flags |
@@ -18,7 +18,7 @@ load and data paths before real functions are bound.
 ```
 crates/meerschaum-py/
   Cargo.toml        [lib] name = "_core", crate-type = ["cdylib", "rlib"]
-  build.rs          embeds static.toml if present; records build_info
+  build.rs          records build_info
   pyproject.toml    maturin config: module-name = "meerschaum._core._core", python-source = "../.."
   src/              lib.rs (#[pymodule] _core), arrow_bridge.rs, ffi_import.rs, polars_bridge.rs, ...
   tests/            arrow_ffi.rs (cargo test), test_core.py (pytest)
@@ -114,7 +114,9 @@ feature is on, the whole Polars stack is compiled with a different fingerprint f
 That means a second copy in `target/` unless a whole-workspace build unifies the features. For this
 reason the `polars` feature is **opt-in**:
 
-- `cargo build/test/clippy -p meerschaum-py` builds no Polars at all.
+- `cargo build/test/clippy -p meerschaum-py` builds Polars only through `meerschaum-kernel`
+  (this crate depends on core, kernel, sql and cli, the top of the crate layering), with the
+  kernel's features, so it reuses the kernel's build.
 - `build_py.sh` turns it on (release by default, so it does not duplicate the kernel's dev build).
 - `--no-polars` leaves it off.
 

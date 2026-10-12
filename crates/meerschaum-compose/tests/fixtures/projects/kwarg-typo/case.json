@@ -1,0 +1,5 @@
+{
+  "description": "A misspelled pipe keyword (dtype:) outside of parameters makes Pipe() raise, as in Python; the lint still reports it.",
+  "width": 100,
+  "runs": [{"name": "explain", "action": ["explain"]}, {"name": "up-dry", "action": ["up"], "flags": {"dry": true}}]
+}

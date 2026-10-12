@@ -1,0 +1,13 @@
+{
+  "description": "Multiple compose files selected with --file, sharing root and plugins directories.",
+  "width": 120,
+  "runs": [
+    {"name": "explain-extract", "action": ["explain"], "file": "mrsm-compose-00-extract.yaml"},
+    {"name": "explain-load", "action": ["explain"], "file": "mrsm-compose-01-load.yaml"},
+    {"name": "up-dry-extract", "action": ["up"], "flags": {"dry": true}, "file": "mrsm-compose-00-extract.yaml"},
+    {"name": "up-load", "action": ["up"], "file": "mrsm-compose-01-load.yaml"},
+    {"name": "run-extract", "action": ["run"], "file": "mrsm-compose-00-extract.yaml"},
+    {"name": "missing-file", "action": ["explain"]},
+    {"name": "nonexistent-file", "action": ["explain"], "file": "nope.yaml"}
+  ]
+}

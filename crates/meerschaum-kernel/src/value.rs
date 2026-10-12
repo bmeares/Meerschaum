@@ -13,6 +13,8 @@ use chrono::{
     DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, Offset, TimeZone, Timelike,
 };
 
+use meerschaum_core::pyfmt::{bytes_repr, float_repr, py_repr_json};
+
 use crate::decimal::Decimal;
 use crate::geometry::Geometry;
 
@@ -224,9 +226,9 @@ impl Value {
             Value::NaT => "NaT".to_string(),
             Value::Bool(b) => if *b { "True" } else { "False" }.to_string(),
             Value::Int(i) => i.to_string(),
-            Value::Float(f) => py_float_repr(*f),
+            Value::Float(f) => float_repr(*f),
             Value::Str(s) => s.clone(),
-            Value::Bytes(b) => py_bytes_repr(b),
+            Value::Bytes(b) => bytes_repr(b),
             Value::Decimal(d) => d.to_sci_string(),
             Value::Uuid(u) => u.hyphenated().to_string(),
             Value::Datetime(dt) => dt.format_with_sep(' '),
@@ -365,140 +367,52 @@ fn key_eq(a: &Value, b: &Value) -> bool {
     }
 }
 
+impl From<&meerschaum_core::Value> for Value {
+    /// A parameters / config value as a cell: scalars map one to one, `list` / `dict` become
+    /// [`Value::Json`].
+    fn from(v: &meerschaum_core::Value) -> Self {
+        use meerschaum_core::Value as V;
+        match v {
+            V::Null => Value::Null,
+            V::Bool(b) => Value::Bool(*b),
+            V::Int(i) => Value::Int(*i),
+            V::Float(f) => Value::Float(*f),
+            V::Str(s) => Value::Str(s.clone()),
+            V::List(_) | V::Map(_) => {
+                Value::Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
+            }
+        }
+    }
+}
+
+impl From<meerschaum_core::Value> for Value {
+    fn from(v: meerschaum_core::Value) -> Self {
+        Value::from(&v)
+    }
+}
+
+impl Value {
+    /// The JSON-compatible [`meerschaum_core::Value`] for this cell: nulls of every kind become
+    /// `None`, scalars and JSON containers map one to one. `None` for cells with no JSON form
+    /// (bytes, decimals, UUIDs, datetimes, dates and geometries are Python objects).
+    pub fn to_core_value(&self) -> Option<meerschaum_core::Value> {
+        use meerschaum_core::Value as V;
+        Some(match self {
+            Value::Null | Value::NA | Value::NaT => V::Null,
+            Value::Bool(b) => V::Bool(*b),
+            Value::Int(i) => V::Int(*i),
+            Value::Float(f) => V::Float(*f),
+            Value::Str(s) => V::Str(s.clone()),
+            Value::Json(j) => serde_json::from_value(j.clone()).ok()?,
+            _ => return None,
+        })
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.py_str())
     }
-}
-
-/// Python's `repr(float)` / `str(float)`.
-pub fn py_float_repr(f: f64) -> String {
-    if f.is_nan() {
-        return "nan".to_string();
-    }
-    if f.is_infinite() {
-        return if f > 0.0 { "inf" } else { "-inf" }.to_string();
-    }
-    if f == 0.0 {
-        return if f.is_sign_negative() { "-0.0" } else { "0.0" }.to_string();
-    }
-    // Shortest round-trip digits from Rust's `{:e}` (same algorithm class as CPython's repr).
-    let sci = format!("{:e}", f.abs());
-    let (mantissa, exp) = sci.split_once('e').unwrap_or((&sci, "0"));
-    let exp: i64 = exp.parse().unwrap_or(0);
-    let digits: String = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
-    let decpt = exp + 1;
-    let sign = if f < 0.0 { "-" } else { "" };
-    if (-4 < decpt) && (decpt <= 16) {
-        let ndigits = digits.len() as i64;
-        let body = if decpt <= 0 {
-            format!("0.{}{}", "0".repeat((-decpt) as usize), digits)
-        } else if decpt >= ndigits {
-            format!("{}{}.0", digits, "0".repeat((decpt - ndigits) as usize))
-        } else {
-            let (a, b) = digits.split_at(decpt as usize);
-            format!("{a}.{b}")
-        };
-        format!("{sign}{body}")
-    } else {
-        let (first, rest) = digits.split_at(1);
-        let mant = if rest.is_empty() {
-            first.to_string()
-        } else {
-            format!("{first}.{rest}")
-        };
-        let e = decpt - 1;
-        format!(
-            "{sign}{mant}e{}{:02}",
-            if e < 0 { "-" } else { "+" },
-            e.abs()
-        )
-    }
-}
-
-/// Python's `repr(bytes)`.
-pub fn py_bytes_repr(b: &[u8]) -> String {
-    let quote = if b.contains(&b'\'') && !b.contains(&b'"') {
-        '"'
-    } else {
-        '\''
-    };
-    let mut out = String::from("b");
-    out.push(quote);
-    for &c in b {
-        match c {
-            b'\\' => out.push_str("\\\\"),
-            b'\t' => out.push_str("\\t"),
-            b'\n' => out.push_str("\\n"),
-            b'\r' => out.push_str("\\r"),
-            c if c == quote as u8 => {
-                out.push('\\');
-                out.push(c as char)
-            }
-            0x20..=0x7e => out.push(c as char),
-            _ => out.push_str(&format!("\\x{c:02x}")),
-        }
-    }
-    out.push(quote);
-    out
-}
-
-/// Python's `repr()` of a JSON-like structure (`{'a': 1, 'b': [True, None]}`).
-pub fn py_repr_json(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::Null => "None".to_string(),
-        serde_json::Value::Bool(b) => if *b { "True" } else { "False" }.to_string(),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                i.to_string()
-            } else if let Some(u) = n.as_u64() {
-                u.to_string()
-            } else {
-                py_float_repr(n.as_f64().unwrap_or(f64::NAN))
-            }
-        }
-        serde_json::Value::String(s) => py_str_repr(s),
-        serde_json::Value::Array(a) => format!(
-            "[{}]",
-            a.iter().map(py_repr_json).collect::<Vec<_>>().join(", ")
-        ),
-        serde_json::Value::Object(o) => format!(
-            "{{{}}}",
-            o.iter()
-                .map(|(k, v)| format!("{}: {}", py_str_repr(k), py_repr_json(v)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    }
-}
-
-/// Python's `repr(str)` (simplified: escapes quotes, backslashes and control characters).
-pub fn py_str_repr(s: &str) -> String {
-    let quote = if s.contains('\'') && !s.contains('"') {
-        '"'
-    } else {
-        '\''
-    };
-    let mut out = String::new();
-    out.push(quote);
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c == quote => {
-                out.push('\\');
-                out.push(c)
-            }
-            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
-                out.push_str(&format!("\\x{:02x}", c as u32))
-            }
-            c => out.push(c),
-        }
-    }
-    out.push(quote);
-    out
 }
 
 /// Format a UTC offset in seconds as `+HH:MM` (with the colon) or `+HHMM`.
@@ -641,17 +555,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn float_repr() {
-        assert_eq!(py_float_repr(1.0), "1.0");
-        assert_eq!(py_float_repr(1.5), "1.5");
-        assert_eq!(py_float_repr(1e16), "1e+16");
-        assert_eq!(py_float_repr(1e-5), "1e-05");
-        assert_eq!(py_float_repr(0.0001), "0.0001");
-        assert_eq!(py_float_repr(123_456_789.123_456_79), "123456789.12345679");
-        assert_eq!(py_float_repr(1e20), "1e+20");
-        assert_eq!(py_float_repr(1234567890123456.0), "1234567890123456.0");
-        assert_eq!(py_float_repr(-0.0), "-0.0");
-        assert_eq!(py_float_repr(9007199254740993.0), "9007199254740992.0");
+    fn float_repr_matches_python() {
+        assert_eq!(float_repr(1.0), "1.0");
+        assert_eq!(float_repr(1.5), "1.5");
+        assert_eq!(float_repr(1e16), "1e+16");
+        assert_eq!(float_repr(1e-5), "1e-05");
+        assert_eq!(float_repr(0.0001), "0.0001");
+        assert_eq!(float_repr(123_456_789.123_456_79), "123456789.12345679");
+        assert_eq!(float_repr(1e20), "1e+20");
+        assert_eq!(float_repr(1234567890123456.0), "1234567890123456.0");
+        assert_eq!(float_repr(-0.0), "-0.0");
+        assert_eq!(float_repr(9007199254740993.0), "9007199254740992.0");
+    }
+
+    #[test]
+    fn core_value_round_trip() {
+        let core = meerschaum_core::Value::from_json_str(r#"{"a": [1, 2.5, null]}"#).unwrap();
+        let cell = Value::from(&core);
+        assert!(matches!(cell, Value::Json(_)));
+        assert_eq!(cell.py_str(), "{'a': [1, 2.5, None]}");
+        assert_eq!(cell.to_core_value(), Some(core));
+        assert_eq!(
+            Value::NA.to_core_value(),
+            Some(meerschaum_core::Value::Null)
+        );
+        assert_eq!(Value::Bytes(vec![1]).to_core_value(), None);
     }
 
     #[test]

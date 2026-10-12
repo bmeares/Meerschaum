@@ -289,8 +289,8 @@ pub fn decode_frame(j: &J) -> Frame {
         if let Some(crs) = c.get("crs").and_then(|c| c.as_str()) {
             column.crs = Some(
                 match crs.strip_prefix("EPSG:").and_then(|s| s.parse().ok()) {
-                    Some(i) => Srid::Int(i),
-                    None => Srid::Str(crs.to_string()),
+                    Some(i) => Srid::Code(i),
+                    None => Srid::Authority(crs.to_string()),
                 },
             );
         }

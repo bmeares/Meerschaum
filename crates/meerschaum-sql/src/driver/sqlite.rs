@@ -23,7 +23,8 @@ pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<SqliteConnectOpti
     let opts = if database == ":memory:" || database.is_empty() {
         SqliteConnectOptions::from_str("sqlite::memory:")?
     } else {
-        // TODO(core-merge): `{SQLITE_DB_PATH}` is resolved by core's path registry.
+        // TODO(connector-registry): `{SQLITE_DB_PATH}` is resolved from core's `Paths` when the
+        // connector registry builds the spec.
         SqliteConnectOptions::new()
             .filename(database)
             .create_if_missing(true)

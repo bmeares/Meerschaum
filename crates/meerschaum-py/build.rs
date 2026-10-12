@@ -1,38 +1,15 @@
 //! Build script for `meerschaum-py`.
 //!
-//! 1. Embeds `crates/meerschaum-core/static.toml` (D15) when it exists. The file is owned by
-//!    `meerschaum-core` and may not exist yet this wave, so its absence is not an error: the
-//!    `mrsm_static_toml` cfg is simply left unset and `_core.static_config()` returns `None`.
-//! 2. Records toolchain, profile, target and feature information for `_core.build_info()`.
+//! Records toolchain, profile, target and feature information for `_core.build_info()`.
+//! (`static.toml` is embedded by `meerschaum-core`, which this crate depends on.)
 
 use std::env;
-use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    println!("cargo::rustc-check-cfg=cfg(mrsm_static_toml)");
     println!("cargo::rerun-if-changed=build.rs");
 
-    embed_static_toml();
     record_build_info();
-}
-
-fn embed_static_toml() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let core_dir = manifest_dir.join("..").join("meerschaum-core");
-    let static_toml = core_dir.join("static.toml");
-
-    if static_toml.is_file() {
-        let path = static_toml
-            .canonicalize()
-            .unwrap_or_else(|_| static_toml.clone());
-        println!("cargo::rustc-cfg=mrsm_static_toml");
-        println!("cargo::rustc-env=MRSM_STATIC_TOML_PATH={}", path.display());
-        println!("cargo::rerun-if-changed={}", path.display());
-    } else if core_dir.is_dir() {
-        // Watch the directory so the build script reruns once `static.toml` is created.
-        println!("cargo::rerun-if-changed={}", core_dir.display());
-    }
 }
 
 fn record_build_info() {

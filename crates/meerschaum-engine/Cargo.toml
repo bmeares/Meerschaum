@@ -9,3 +9,17 @@ rust-version.workspace = true
 description = "Meerschaum v5: engine crate (see docs/design/v5.0.0.md)"
 
 [dependencies]
+meerschaum-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+# Crate-private: the definition hash (§5.4).
+sha2 = "0.10"
+
+[dev-dependencies]
+proptest = "1"
+tokio = { workspace = true, features = ["test-util"] }

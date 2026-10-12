@@ -6,6 +6,7 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, TimeUnit};
 use futures_util::StreamExt;
+use meerschaum_sql::driver::batch::{META_DB_TYPE, META_DTYPE};
 use meerschaum_sql::driver::{SqlDriver, SqlValue};
 use meerschaum_sql::uri::ConnectionSpec;
 use meerschaum_sql::{Flavor, SqlError};
@@ -82,11 +83,11 @@ async fn exec_read_and_type_mapping() {
         schema
             .field(6)
             .metadata()
-            .get("mrsm:dtype")
+            .get(META_DTYPE)
             .map(String::as_str),
         Some("bytes")
     );
-    assert!(schema.field(0).metadata().contains_key("mrsm:db_type"));
+    assert!(schema.field(0).metadata().contains_key(META_DB_TYPE));
 
     let ids = batch
         .column(0)

@@ -10,8 +10,8 @@ use serde_json::{Value as J, json};
 
 fn srid_json(s: &Srid) -> J {
     match s {
-        Srid::Int(i) => json!(i),
-        Srid::Str(s) => json!(s),
+        Srid::Code(i) => json!(i),
+        Srid::Authority(s) => json!(s),
     }
 }
 

@@ -3,6 +3,7 @@
 use chrono::TimeDelta;
 
 use super::{Pipe, PipeDefaults, PipeError};
+use crate::dtypes::PrecisionScalar;
 use crate::pyfmt::py_int;
 use crate::value::Value;
 
@@ -14,6 +15,24 @@ pub enum ChunkInterval {
     /// An `int` (integer datetime axis).
     Int(i64),
 }
+
+impl ChunkInterval {
+    /// `timedelta(minutes=m)`.
+    pub fn minutes(m: i64) -> ChunkInterval {
+        ChunkInterval::Delta(TimeDelta::minutes(m))
+    }
+
+    /// `int(interval.total_seconds() / 60)` for durations, the value itself for integers.
+    pub fn whole_minutes(&self) -> i64 {
+        match self {
+            ChunkInterval::Delta(d) => (total_seconds(*d) / 60.0) as i64,
+            ChunkInterval::Int(i) => *i,
+        }
+    }
+}
+
+/// `pipes:parameters:fetch:backtrack_minutes` default (`config/_default.py`).
+pub const DEFAULT_BACKTRACK_MINUTES: i64 = 1440;
 
 /// The `chunk_interval` argument of `get_chunk_interval`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,13 +87,88 @@ const MICROS_PER_DAY: i64 = 24 * MICROS_PER_HOUR;
 const MICROS_PER_WEEK: i64 = 7 * MICROS_PER_DAY;
 
 impl Pipe {
-    fn is_int_axis(&self) -> (Option<String>, bool) {
+    fn int_axis_info(&self) -> (Option<String>, bool) {
         let dt_col = self.column("datetime");
         let dtype = match &dt_col {
             Some(c) => self.dtype(c).unwrap_or_else(|| "datetime".to_string()),
             None => "datetime".to_string(),
         };
         (dt_col, dtype.to_lowercase().contains("int"))
+    }
+
+    /// The datetime axis dtype (`pipe.dtypes.get(dt_col, 'datetime')`), or `None` without a
+    /// datetime column.
+    pub fn dt_dtype(&self) -> Option<String> {
+        let dt_col = self.column("datetime")?;
+        Some(
+            self.dtype(&dt_col)
+                .unwrap_or_else(|| "datetime".to_string()),
+        )
+    }
+
+    /// Whether the pipe has an integer datetime axis (`'int' in str(dt_dtype).lower()`).
+    pub fn is_int_axis(&self) -> bool {
+        let (dt_col, is_int) = self.int_axis_info();
+        dt_col.is_some() && is_int
+    }
+
+    /// Port of `get_backtrack_interval(check_existing)` (`core/Pipe/_fetch.py:100`): the
+    /// configured `fetch.backtrack_minutes` (else `default_backtrack_minutes`, the config value
+    /// `pipes:parameters:fetch:backtrack_minutes`) as a duration, or in epoch units on an
+    /// integer axis (minutes verbatim when no `precision` is configured). Zero when
+    /// `check_existing` is false.
+    pub fn get_backtrack_interval(
+        &self,
+        check_existing: bool,
+        default_backtrack_minutes: i64,
+        defaults: &PipeDefaults,
+    ) -> Result<ChunkInterval, PipeError> {
+        let minutes = if check_existing {
+            self.parameters()
+                .get("fetch")
+                .and_then(|f| f.get("backtrack_minutes"))
+                .filter(|v| !v.is_null())
+                .cloned()
+                .unwrap_or(Value::Int(default_backtrack_minutes))
+        } else {
+            Value::Int(0)
+        };
+        let as_delta =
+            || timedelta_from_value(&minutes, MICROS_PER_MINUTE).map(ChunkInterval::Delta);
+        if self.column("datetime").is_none() || !self.is_int_axis() {
+            return as_delta();
+        }
+        let int_minutes = || {
+            py_int(&minutes).ok_or_else(|| {
+                PipeError::TypeError(format!(
+                    "invalid backtrack_minutes: {}",
+                    crate::pyfmt::py_repr(&minutes)
+                ))
+            })
+        };
+        if !self
+            .parameters()
+            .get("precision")
+            .is_some_and(Value::truthy)
+        {
+            return int_minutes().map(ChunkInterval::Int);
+        }
+        let precision = self.precision(defaults)?;
+        // `int(backtrack_minutes * 60 * scalar)`: exact for integer scalars, float otherwise.
+        Ok(ChunkInterval::Int(
+            match (precision.unit.py_scalar(), &minutes) {
+                (PrecisionScalar::Int(scalar), Value::Int(m)) => m.saturating_mul(60 * scalar),
+                (scalar, _) => {
+                    let m = minutes.as_f64().ok_or_else(|| {
+                        PipeError::TypeError(format!(
+                            "invalid backtrack_minutes: {}",
+                            crate::pyfmt::py_repr(&minutes)
+                        ))
+                    })?;
+                    (m * 60.0 * scalar.as_f64()) as i64
+                }
+            },
+        ))
     }
 
     /// Port of `get_chunk_interval(chunk_interval)`.
@@ -88,7 +182,7 @@ impl Pipe {
         chunk_interval: Option<ChunkIntervalArg>,
         defaults: &PipeDefaults,
     ) -> Result<ChunkInterval, PipeError> {
-        let (dt_col, is_int_axis) = self.is_int_axis();
+        let (dt_col, is_int_axis) = self.int_axis_info();
         let verify = self
             .parameters()
             .get("verify")
@@ -217,5 +311,28 @@ mod tests {
             pipe(int_prec).get_chunk_interval(None, &d).unwrap(),
             ChunkInterval::Int(86_400_000)
         );
+    }
+
+    #[test]
+    fn backtrack_intervals() {
+        let d = PipeDefaults::default();
+        let bt = |p: &str, check| {
+            pipe(p)
+                .get_backtrack_interval(check, DEFAULT_BACKTRACK_MINUTES, &d)
+                .unwrap()
+        };
+        assert_eq!(bt("{}", true), ChunkInterval::minutes(1440));
+        assert_eq!(bt("{}", false), ChunkInterval::minutes(0));
+        assert_eq!(
+            bt(r#"{"fetch": {"backtrack_minutes": 5}}"#, true),
+            ChunkInterval::minutes(5)
+        );
+        let int_axis = r#"{"columns": {"datetime": "id"}, "dtypes": {"id": "int"}, "fetch": {"backtrack_minutes": 2}}"#;
+        assert_eq!(bt(int_axis, true), ChunkInterval::Int(2));
+        let int_prec = r#"{"columns": {"datetime": "id"}, "dtypes": {"id": "int"}, "precision": "s", "fetch": {"backtrack_minutes": 2}}"#;
+        assert_eq!(bt(int_prec, true), ChunkInterval::Int(120));
+        assert_eq!(ChunkInterval::minutes(90).whole_minutes(), 90);
+        assert!(pipe(int_axis).is_int_axis());
+        assert_eq!(pipe(int_axis).dt_dtype().as_deref(), Some("int"));
     }
 }

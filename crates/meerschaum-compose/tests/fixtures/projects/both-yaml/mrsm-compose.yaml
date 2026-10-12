@@ -1,0 +1,5 @@
+project_name: from-yaml
+pipes:
+  - connector: plugin:both
+    metric: yaml
+    instance: sql:local

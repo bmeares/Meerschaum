@@ -1,0 +1,15 @@
+{
+  "description": "Three pipes in a cycle through parents and a {{ Pipe() }} reference. Planning a selection that contains the cycle fails and prints the cycle path.",
+  "records": [
+    {"instance": "sql:main", "connector": "sql:main", "metric": "a",
+     "parameters": {"parents": ["Pipe('sql:main', 'c')"]}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "b",
+     "parameters": {"parents": ["Pipe('sql:main', 'a')"]}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "c",
+     "parameters": {"sql": "SELECT * FROM {{ Pipe('sql:main', 'b') }}"}}
+  ],
+  "selection": {"targets": {"refs": ["sql:main|sql:main|a|None"]}, "parents": "all"},
+  "expected": {
+    "error": "cycle in the pipe graph: sql:main/a → sql:main/b → sql:main/c → sql:main/a"
+  }
+}

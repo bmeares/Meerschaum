@@ -30,6 +30,8 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use futures_util::stream::{BoxStream, Stream, StreamExt, TryStreamExt};
 use rust_decimal::Decimal;
 
+use meerschaum_kernel::Frame;
+
 use crate::error::Result;
 use crate::flavor::{DriverFamily, Flavor};
 use crate::uri::ConnectionSpec;
@@ -102,6 +104,11 @@ impl fmt::Display for SqlValue {
             }
         }
     }
+}
+
+/// Convert driver record batches (one schema) into a kernel [`Frame`].
+pub fn batches_to_frame(batches: &[RecordBatch]) -> Result<Frame> {
+    Ok(Frame::from_record_batches(batches)?)
 }
 
 /// A stream of Arrow record batches sharing one schema.
@@ -227,6 +234,20 @@ impl SqlDriver {
             Pool::Mysql(p) => backend::exec::<mysql::MySqlBackend>(p, sql).await,
             Pool::Sqlite(p) => backend::exec::<sqlite::SqliteBackend>(p, sql).await,
         }
+    }
+
+    /// Execute a query and collect the result as a kernel [`Frame`] (the in-memory table type
+    /// shared by every crate). Special columns are decoded from their field tags, and every
+    /// column keeps its `meerschaum:dtype` / `meerschaum:db_type` tags, so
+    /// `meerschaum_kernel::enforce::enforce_dtypes` needs no dtype detection on them.
+    pub async fn read_frame(&self, sql: &str) -> Result<Frame> {
+        let stream = self.read_stream(sql, DEFAULT_CHUNKSIZE).await?;
+        let schema = stream.schema();
+        let batches = stream.collect_batches().await?;
+        if batches.is_empty() {
+            return batches_to_frame(&[RecordBatch::new_empty(schema)]);
+        }
+        batches_to_frame(&batches)
     }
 
     /// Execute a list of queries in a single transaction (`SQLConnector.exec_queries`,

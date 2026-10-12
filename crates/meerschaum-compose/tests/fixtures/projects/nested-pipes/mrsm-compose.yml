@@ -1,0 +1,18 @@
+sync:
+  schedule: "daily starting 00:00"
+  args:
+    - "--begin"
+    - "2024-01-01"
+  pipes:
+    - connector: plugin:nested
+      metric: one
+      instance: sql:local
+    - connector: plugin:nested
+      metric: two
+      location: east
+      instance: sql:memory
+
+pipes:
+  - connector: plugin:nested
+    metric: three
+    instance: sql:local

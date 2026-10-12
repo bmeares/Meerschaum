@@ -22,9 +22,7 @@ use crate::sysargs::{
 use crate::types::DateContext;
 use crate::value::{ArgsMap, PyException, PyValue};
 
-/// `(success, message)`, the v4 `SuccessTuple`.
-// TODO(core-merge): replace with `meerschaum_core::SuccessTuple` once the core crate exports it.
-pub type SuccessTuple = (bool, String);
+pub use meerschaum_core::SuccessTuple;
 
 /// The flag that prints the argument JSON schema (Rust-only; intercepted before parsing).
 pub const PRINT_ARG_SCHEMA_FLAG: &str = "--print-arg-schema";
@@ -77,10 +75,7 @@ pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
     }
     let nopretty = contains(sysargs, "--nopretty");
     let result = if sysargs.is_empty() || contains(sysargs, "--shell") {
-        (
-            false,
-            "The Meerschaum shell is not implemented in Rust yet.".to_string(),
-        )
+        SuccessTuple::fail("The Meerschaum shell is not implemented in Rust yet.")
     } else {
         entry(sysargs, rt)
     };
@@ -90,19 +85,19 @@ pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         return 0;
     }
     print_tuple(&result, rt.out);
-    if result.0 { 0 } else { 1 }
+    if result.success { 0 } else { 1 }
 }
 
 /// `print_tuple(tup, upper_padding=1)`.
 pub fn print_tuple(tup: &SuccessTuple, out: &mut dyn Write) {
     // PARITY: STATIC_CONFIG['system']['success']['ignore'] is missing a comma, so 'success' and
-    // 'Succeeded' are concatenated into 'successSucceeded' (`meerschaum/_internal/static.py`).
-    let ignore = ["Success", "successSucceeded", ""];
-    if ignore.contains(&tup.1.trim()) {
+    // 'Succeeded' are concatenated into 'successSucceeded' (`meerschaum/_internal/static.py`);
+    // `static.toml` keeps the quirk.
+    if tup.is_ignored_message() {
         return;
     }
-    let icon = if tup.0 { "🎉" } else { "💢" };
-    let msg = format!(" {icon} {}", tup.1);
+    let icon = if tup.success { "🎉" } else { "💢" };
+    let msg = format!(" {icon} {}", tup.message);
     let mut lines: Vec<String> = Vec::new();
     for (i, line) in msg.split('\n').enumerate() {
         if i > 0 && !line.starts_with(' ') {
@@ -123,10 +118,7 @@ fn entry_at_depth(sysargs: &[String], rt: &mut Runtime<'_>, depth: usize) -> Suc
     if depth > MAX_ENTRY_DEPTH {
         // PARITY: v4 recurses without bound here and dies with RecursionError
         // (`entry_with_args` re-entering `entry` for `start job x + ...`).
-        return (
-            false,
-            "RecursionError: maximum recursion depth exceeded".into(),
-        );
+        return SuccessTuple::fail("RecursionError: maximum recursion depth exceeded");
     }
     let dates = rt.dates.clone();
     let result = run_chain(sysargs, &dates, None, |args| {
@@ -134,7 +126,7 @@ fn entry_at_depth(sysargs: &[String], rt: &mut Runtime<'_>, depth: usize) -> Suc
     });
     match result {
         Ok(tup) => tup,
-        Err(e) => (false, format!("{}: {}", e.class, e.message)),
+        Err(e) => SuccessTuple::fail(format!("{}: {}", e.class, e.message)),
     }
 }
 
@@ -192,13 +184,13 @@ where
                 }
                 msg.push_str("\n    ");
                 msg.push_str(&e.message);
-                return Ok((false, msg));
+                return Ok(SuccessTuple::fail(msg));
             }
         }
         let start = Instant::now();
         let result = execute(args);
         steps.push((start, Instant::now()));
-        let ok = result.0;
+        let ok = result.success;
         results.push(result);
         if !ok {
             break;
@@ -209,7 +201,7 @@ where
         return Ok(results
             .into_iter()
             .next()
-            .unwrap_or((true, "Success".into())));
+            .unwrap_or_else(SuccessTuple::success));
     }
     Ok(summarize_chain(&chained, &results, &steps))
 }
@@ -239,8 +231,12 @@ fn summarize_chain(
     results: &[SuccessTuple],
     steps: &[(Instant, Instant)],
 ) -> SuccessTuple {
-    let success = results.iter().all(|r| r.0);
-    let successes: Vec<&String> = results.iter().filter(|r| r.0).map(|r| &r.1).collect();
+    let success = results.iter().all(|r| r.success);
+    let successes: Vec<&String> = results
+        .iter()
+        .filter(|r| r.success)
+        .map(|r| &r.message)
+        .collect();
     let total = match (steps.first(), steps.last()) {
         (Some(first), Some(last)) => Some(last.1.duration_since(first.0).as_secs_f64()),
         _ => None,
@@ -282,13 +278,13 @@ fn summarize_chain(
     msg.push_str(&parts.join("\n"));
     let mut msg = msg.trim_end_matches('\n').to_string();
     if let Some(last) = results.last()
-        && !last.0
+        && !last.success
     {
         let fail_step = &chained[results.len() - 1];
         msg.push_str(&format!(
             "\n\nFailed to complete step:\n\n{}\n    {}",
             make_header(&shlex::join(fail_step), 4),
-            last.1
+            last.message
         ));
     }
     if let Some(t) = total {
@@ -300,7 +296,10 @@ fn summarize_chain(
             "-".repeat(header.len())
         ));
     }
-    (success, msg.trim_end().to_string())
+    SuccessTuple {
+        success,
+        message: msg.trim_end().to_string(),
+    }
 }
 
 fn action_words(args: &ArgsMap) -> Vec<String> {
@@ -337,10 +336,7 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
 
     let mut action = action_words(&args);
     if action.is_empty() || (action[0] == "mrsm" && action.len() == 1) {
-        return (
-            false,
-            "The Meerschaum shell is not implemented in Rust yet.".into(),
-        );
+        return SuccessTuple::fail("The Meerschaum shell is not implemented in Rust yet.");
     }
 
     let mut skip_schedule = false;
@@ -372,7 +368,7 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
             action.insert(0, "sh".into());
             match actions::get_action(&["sh"], CORE_ACTIONS) {
                 Some(r) => r,
-                None => return (false, "action `sh` is not available".into()),
+                None => return SuccessTuple::fail("action `sh` is not available"),
             }
         }
     };
@@ -384,9 +380,8 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
     env::apply_env_arguments(&mut args, rt.env);
 
     if args.get("schedule").is_some_and(PyValue::is_truthy) && !skip_schedule {
-        return (
-            false,
-            "Scheduling actions (`--schedule`) is not implemented in Rust yet.".into(),
+        return SuccessTuple::fail(
+            "Scheduling actions (`--schedule`) is not implemented in Rust yet.",
         );
     }
     run_action(&resolved, &args, rt)
@@ -402,23 +397,20 @@ fn run_action(resolved: &Resolved, args: &ArgsMap, rt: &mut Runtime<'_>) -> Succ
             } else {
                 writeln!(rt.out, "Meerschaum v{version}")
             };
-            (true, "Success".into())
+            SuccessTuple::success()
         }
         "_show_arguments" => {
             let _ = writeln!(rt.out, "{}", format_args_map(args));
-            (true, "Success".into())
+            SuccessTuple::success()
         }
         "_show_help" => {
             let _ = write!(rt.out, "{}", help::format_help(rt.columns));
-            (true, "Success".into())
+            SuccessTuple::success()
         }
-        _ => (
-            false,
-            format!(
-                "action `{}` is not implemented in Rust yet",
-                resolved.display_name()
-            ),
-        ),
+        _ => SuccessTuple::fail(format!(
+            "action `{}` is not implemented in Rust yet",
+            resolved.display_name()
+        )),
     }
 }
 

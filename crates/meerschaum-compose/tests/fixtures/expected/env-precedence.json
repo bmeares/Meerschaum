@@ -1,0 +1,925 @@
+{
+ "case": {
+  "description": "Environment substitution precedence: process env, .env through python-dotenv (no override), envyaml's own .env parsing, ${VAR|default}, $$ escapes, undefined variables, keys leaking from the environment.",
+  "width": 120,
+  "process_env": {
+   "FROM_PROCESS": "process-value",
+   "FROM_BOTH": "process-both",
+   "DOTTED.VALUE": "dotted"
+  },
+  "runs": [
+   {
+    "name": "explain",
+    "action": [
+     "explain"
+    ]
+   },
+   {
+    "name": "explain-env-file",
+    "action": [
+     "explain"
+    ],
+    "env_file": "alt.env"
+   },
+   {
+    "name": "explain-dotenv-file",
+    "action": [
+     "explain"
+    ],
+    "env_file": ".env"
+   },
+   {
+    "name": "explain-other-cwd",
+    "action": [
+     "explain"
+    ],
+    "cwd": "..",
+    "file": "env-precedence/mrsm-compose.yaml"
+   },
+   {
+    "name": "show-environment",
+    "action": [
+     "show",
+     "environment"
+    ]
+   }
+  ]
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONPATH": "{REPO}",
+  "PYTHONHASHSEED": "0",
+  "FROM_PROCESS": "process-value",
+  "FROM_BOTH": "process-both",
+  "DOTTED.VALUE": "dotted"
+ },
+ "runs": [
+  {
+   "name": "explain",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "leaked-from-dotenv"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "warn",
+     "'$ALSO_UNDEFINED' and '$UNDEFINED_PORT' are not defined!\n     Using  empty strings for these variables."
+    ],
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "connectors": {
+     "sql": {
+      "db": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/env.db",
+       "username": "process-value",
+       "password": "dotenv-wins-only-via-envyaml",
+       "host": "fallback-host",
+       "port": null,
+       "schema": "",
+       "options": "price is $5",
+       "dotted": "dotted"
+      }
+     }
+    },
+    "environment": {
+     "INTERPOLATED": "dotenv-value-suffix",
+     "QUOTED_VALUE": "single quoted",
+     "EXPORTED": "exported",
+     "MRSM_PLUGINS_DIR": "./plugins"
+    },
+    "project_name": "leaked-from-dotenv",
+    "pipes": [
+     {
+      "connector": "sql:db",
+      "metric": "env",
+      "instance": "sql:db",
+      "parameters": {
+       "note": "trailing comment dotenv-value"
+      }
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {
+       "sql": {
+        "db": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/env.db",
+         "username": "process-value",
+         "password": "dotenv-wins-only-via-envyaml",
+         "host": "fallback-host",
+         "port": null,
+         "schema": "",
+         "options": "price is $5",
+         "dotted": "dotted"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "leaked-from-dotenv"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "c880a65f2eb8dab67092bd0f723e1d6027bcec6e98e8dcb870b63609d4cf4c1b",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "{PROJECT}/plugins",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "FROM_PROCESS": "process-value",
+    "FROM_BOTH": "process-both",
+    "DOTTED.VALUE": "dotted",
+    "DB_DIR": "{MRSM_ROOT_DIR}",
+    "FROM_DOTENV": "dotenv-value",
+    "QUOTED": "single quoted",
+    "EXPORTED_VAR": "exported",
+    "project_name": "leaked-from-dotenv",
+    "INTERP": "process-value-interp",
+    "ALSO_UNDEFINED": "",
+    "UNDEFINED_PORT": "",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"dotenv-wins-only-via-envyaml\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}},\"environment\":{\"INTERPOLATED\":\"dotenv-value-suffix\",\"QUOTED_VALUE\":\"single quoted\",\"EXPORTED\":\"exported\",\"MRSM_PLUGINS_DIR\":\"./plugins\"},\"project_name\":\"leaked-from-dotenv\",\"pipes\":[{\"connector\":\"sql:db\",\"metric\":\"env\",\"instance\":\"sql:db\",\"parameters\":{\"note\":\"trailing comment dotenv-value\"}}],\"config\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"dotenv-wins-only-via-envyaml\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}}},\"stack\":{\"project_name\":\"leaked-from-dotenv\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "leaked-from-dotenv",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"dotenv-wins-only-via-envyaml\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}}},\"stack\":{\"project_name\":\"leaked-from-dotenv\"}}",
+    "INTERPOLATED": "dotenv-value-suffix",
+    "QUOTED_VALUE": "single quoted",
+    "EXPORTED": "exported"
+   },
+   "pipes_meta": [
+    {
+     "connector": "sql:db",
+     "metric": "env",
+     "instance": "sql:db",
+     "parameters": {
+      "note": "trailing comment dotenv-value"
+     },
+     "tags": [
+      "leaked-from-dotenv"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('sql:db', 'env', instance='sql:db')",
+     "connector_keys": "sql:db",
+     "metric_key": "env",
+     "location_key": null,
+     "instance_keys": "sql:db",
+     "temporary": false,
+     "parameters": {
+      "note": "trailing comment dotenv-value",
+      "tags": [
+       "leaked-from-dotenv"
+      ]
+     }
+    }
+   ],
+   "explain": "                                             Pipes in 'leaked-from-dotenv'                                              \n                                                 ╷                                                ╷                     \n  Defined Pipes                                  │Compose Parameters                              │Remote Parameters    \n╶────────────────────────────────────────────────┼────────────────────────────────────────────────┼────────────────────╴\n  ╭───────────────── Instance ─────────────────╮ │                                                │                     \n  │ sql:db                                     │ │                                                │                     \n  ╰────────────────────────────────────────────╯ │                                                │                     \n                                                 │                                                │                     \n  Pipe('sql:db', 'env', instance='sql:db')       │{                                               │                     \n                                                 │  \"note\": \"trailing comment dotenv-value\",      │                     \n  ⭕ Not registered                              │  \"tags\": [                                     │                     \n                                                 │    \"leaked-from-dotenv\"                        │                     \n                                                 │  ]                                             │                     \n                                                 │}                                               │                     \n                                                 ╵                                                ╵                     \n",
+   "written_files": {},
+   "config_hash_normalized": "2ab25a44f8cb7d08ecacc26cfabde75d7b24a743fd117e0e60fa7bf1c28b5e35"
+  },
+  {
+   "name": "explain-env-file",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": "alt.env",
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain",
+    "--env-file",
+    "alt.env"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "env-precedence"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "warn",
+     "'$EXPORTED_VAR', '$ALSO_UNDEFINED', '$QUOTED', and '$UNDEFINED_PORT' are not defined!\n     Using  empty strings for these variables."
+    ],
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "warn",
+     "Mismatched values for attribute 'password' in connector 'sql:db'.\n  - Keyword value: 'alt-both'\n  - Existing value: 'dotenv-wins-only-via-envyaml'\n\nSetting `refresh` to True and recreating connector with type: 'sql' and label 'db'."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "connectors": {
+     "sql": {
+      "db": {
+       "flavor": "sqlite",
+       "database": "/srv/alt/env.db",
+       "username": "process-value",
+       "password": "alt-both",
+       "host": "fallback-host",
+       "port": null,
+       "schema": "",
+       "options": "price is $5",
+       "dotted": "dotted"
+      }
+     }
+    },
+    "environment": {
+     "INTERPOLATED": "alt-value-suffix",
+     "QUOTED_VALUE": null,
+     "EXPORTED": "",
+     "MRSM_PLUGINS_DIR": "./plugins"
+    },
+    "pipes": [
+     {
+      "connector": "sql:db",
+      "metric": "env",
+      "instance": "sql:db",
+      "parameters": {
+       "note": "trailing comment alt-value"
+      }
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {
+       "sql": {
+        "db": {
+         "flavor": "sqlite",
+         "database": "/srv/alt/env.db",
+         "username": "process-value",
+         "password": "alt-both",
+         "host": "fallback-host",
+         "port": null,
+         "schema": "",
+         "options": "price is $5",
+         "dotted": "dotted"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "env-precedence"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "project_name": "env-precedence"
+   },
+   "config_hash": "eb6ac3be6162d90e80c112de01c42d3b3623e0416bb44c90e303544b8b749300",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "{PROJECT}/plugins",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "FROM_PROCESS": "process-value",
+    "FROM_BOTH": "process-both",
+    "DOTTED.VALUE": "dotted",
+    "FROM_DOTENV": "alt-value",
+    "DB_DIR": "/srv/alt",
+    "EXPORTED_VAR": "",
+    "ALSO_UNDEFINED": "",
+    "QUOTED": "",
+    "UNDEFINED_PORT": "",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"/srv/alt/env.db\",\"username\":\"process-value\",\"password\":\"alt-both\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}},\"environment\":{\"INTERPOLATED\":\"alt-value-suffix\",\"QUOTED_VALUE\":null,\"EXPORTED\":\"\",\"MRSM_PLUGINS_DIR\":\"./plugins\"},\"pipes\":[{\"connector\":\"sql:db\",\"metric\":\"env\",\"instance\":\"sql:db\",\"parameters\":{\"note\":\"trailing comment alt-value\"}}],\"config\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"/srv/alt/env.db\",\"username\":\"process-value\",\"password\":\"alt-both\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}}},\"stack\":{\"project_name\":\"env-precedence\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"project_name\":\"env-precedence\"}",
+    "MRSM__COMPOSE_PROJECT": "env-precedence",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"/srv/alt/env.db\",\"username\":\"process-value\",\"password\":\"alt-both\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}}},\"stack\":{\"project_name\":\"env-precedence\"}}",
+    "INTERPOLATED": "alt-value-suffix",
+    "QUOTED_VALUE": "",
+    "EXPORTED": ""
+   },
+   "pipes_meta": [
+    {
+     "connector": "sql:db",
+     "metric": "env",
+     "instance": "sql:db",
+     "parameters": {
+      "note": "trailing comment alt-value"
+     },
+     "tags": [
+      "env-precedence"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('sql:db', 'env', instance='sql:db')",
+     "connector_keys": "sql:db",
+     "metric_key": "env",
+     "location_key": null,
+     "instance_keys": "sql:db",
+     "temporary": false,
+     "parameters": {
+      "note": "trailing comment alt-value",
+      "tags": [
+       "env-precedence"
+      ]
+     }
+    }
+   ],
+   "explain": "                                               Pipes in 'env-precedence'                                                \n                                                  ╷                                               ╷                     \n  Defined Pipes                                   │Compose Parameters                             │Remote Parameters    \n╶─────────────────────────────────────────────────┼───────────────────────────────────────────────┼────────────────────╴\n  ╭───────────────── Instance ──────────────────╮ │                                               │                     \n  │ sql:db                                      │ │                                               │                     \n  ╰─────────────────────────────────────────────╯ │                                               │                     \n                                                  │                                               │                     \n  Pipe('sql:db', 'env', instance='sql:db')        │{                                              │                     \n                                                  │  \"note\": \"trailing comment alt-value\",        │                     \n  ⭕ Not registered                               │  \"tags\": [                                    │                     \n                                                  │    \"env-precedence\"                           │                     \n                                                  │  ]                                            │                     \n                                                  │}                                              │                     \n                                                  ╵                                               ╵                     \n",
+   "written_files": {},
+   "config_hash_normalized": "a2428a5197f953973ea38b5448cf4d8b10418501ae4bfa1a43005777a70b39ae"
+  },
+  {
+   "name": "explain-dotenv-file",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": ".env",
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain",
+    "--env-file",
+    ".env"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "leaked-from-dotenv"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "warn",
+     "'$ALSO_UNDEFINED' and '$UNDEFINED_PORT' are not defined!\n     Using  empty strings for these variables."
+    ],
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "warn",
+     "Mismatched values for attribute 'password' in connector 'sql:db'.\n  - Keyword value: 'dotenv-wins-only-via-envyaml'\n  - Existing value: 'alt-both'\n\nSetting `refresh` to True and recreating connector with type: 'sql' and label 'db'."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "connectors": {
+     "sql": {
+      "db": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/env.db",
+       "username": "process-value",
+       "password": "dotenv-wins-only-via-envyaml",
+       "host": "fallback-host",
+       "port": null,
+       "schema": "",
+       "options": "price is $5",
+       "dotted": "dotted"
+      }
+     }
+    },
+    "environment": {
+     "INTERPOLATED": "dotenv-value-suffix",
+     "QUOTED_VALUE": "single quoted",
+     "EXPORTED": "exported",
+     "MRSM_PLUGINS_DIR": "./plugins"
+    },
+    "project_name": "leaked-from-dotenv",
+    "pipes": [
+     {
+      "connector": "sql:db",
+      "metric": "env",
+      "instance": "sql:db",
+      "parameters": {
+       "note": "trailing comment dotenv-value"
+      }
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {
+       "sql": {
+        "db": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/env.db",
+         "username": "process-value",
+         "password": "dotenv-wins-only-via-envyaml",
+         "host": "fallback-host",
+         "port": null,
+         "schema": "",
+         "options": "price is $5",
+         "dotted": "dotted"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "leaked-from-dotenv"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "28abff5e67f66754b026ff34d89d2824ece68fc3a0f1bd0279b97ef57b2b9264",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "{PROJECT}/plugins",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "FROM_PROCESS": "process-value",
+    "FROM_BOTH": "process-both",
+    "DOTTED.VALUE": "dotted",
+    "DB_DIR": "{MRSM_ROOT_DIR}",
+    "FROM_DOTENV": "dotenv-value",
+    "QUOTED": "single quoted",
+    "EXPORTED_VAR": "exported",
+    "project_name": "leaked-from-dotenv",
+    "INTERP": "process-value-interp",
+    "ALSO_UNDEFINED": "",
+    "UNDEFINED_PORT": "",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"dotenv-wins-only-via-envyaml\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}},\"environment\":{\"INTERPOLATED\":\"dotenv-value-suffix\",\"QUOTED_VALUE\":\"single quoted\",\"EXPORTED\":\"exported\",\"MRSM_PLUGINS_DIR\":\"./plugins\"},\"project_name\":\"leaked-from-dotenv\",\"pipes\":[{\"connector\":\"sql:db\",\"metric\":\"env\",\"instance\":\"sql:db\",\"parameters\":{\"note\":\"trailing comment dotenv-value\"}}],\"config\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"dotenv-wins-only-via-envyaml\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}}},\"stack\":{\"project_name\":\"leaked-from-dotenv\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "leaked-from-dotenv",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"dotenv-wins-only-via-envyaml\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}}},\"stack\":{\"project_name\":\"leaked-from-dotenv\"}}",
+    "INTERPOLATED": "dotenv-value-suffix",
+    "QUOTED_VALUE": "single quoted",
+    "EXPORTED": "exported"
+   },
+   "pipes_meta": [
+    {
+     "connector": "sql:db",
+     "metric": "env",
+     "instance": "sql:db",
+     "parameters": {
+      "note": "trailing comment dotenv-value"
+     },
+     "tags": [
+      "leaked-from-dotenv"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('sql:db', 'env', instance='sql:db')",
+     "connector_keys": "sql:db",
+     "metric_key": "env",
+     "location_key": null,
+     "instance_keys": "sql:db",
+     "temporary": false,
+     "parameters": {
+      "note": "trailing comment dotenv-value",
+      "tags": [
+       "leaked-from-dotenv"
+      ]
+     }
+    }
+   ],
+   "explain": "                                             Pipes in 'leaked-from-dotenv'                                              \n                                                 ╷                                                ╷                     \n  Defined Pipes                                  │Compose Parameters                              │Remote Parameters    \n╶────────────────────────────────────────────────┼────────────────────────────────────────────────┼────────────────────╴\n  ╭───────────────── Instance ─────────────────╮ │                                                │                     \n  │ sql:db                                     │ │                                                │                     \n  ╰────────────────────────────────────────────╯ │                                                │                     \n                                                 │                                                │                     \n  Pipe('sql:db', 'env', instance='sql:db')       │{                                               │                     \n                                                 │  \"note\": \"trailing comment dotenv-value\",      │                     \n  ⭕ Not registered                              │  \"tags\": [                                     │                     \n                                                 │    \"leaked-from-dotenv\"                        │                     \n                                                 │  ]                                             │                     \n                                                 │}                                               │                     \n                                                 ╵                                                ╵                     \n",
+   "written_files": {},
+   "config_hash_normalized": "2ab25a44f8cb7d08ecacc26cfabde75d7b24a743fd117e0e60fa7bf1c28b5e35"
+  },
+  {
+   "name": "explain-other-cwd",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": "env-precedence/mrsm-compose.yaml",
+   "env_file": null,
+   "cwd": "{RUN}",
+   "sysargs": [
+    "compose",
+    "explain",
+    "--file",
+    "env-precedence/mrsm-compose.yaml"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "leaked-from-dotenv"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "warn",
+     "'$ALSO_UNDEFINED' and '$UNDEFINED_PORT' are not defined!\n     Using  empty strings for these variables."
+    ],
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "warn",
+     "Mismatched values for attribute 'password' in connector 'sql:db'.\n  - Keyword value: 'process-both'\n  - Existing value: 'dotenv-wins-only-via-envyaml'\n\nSetting `refresh` to True and recreating connector with type: 'sql' and label 'db'."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "connectors": {
+     "sql": {
+      "db": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/env.db",
+       "username": "process-value",
+       "password": "process-both",
+       "host": "fallback-host",
+       "port": null,
+       "schema": "",
+       "options": "price is $5",
+       "dotted": "dotted"
+      }
+     }
+    },
+    "environment": {
+     "INTERPOLATED": "dotenv-value-suffix",
+     "QUOTED_VALUE": "single quoted",
+     "EXPORTED": "exported",
+     "MRSM_PLUGINS_DIR": "./plugins"
+    },
+    "project_name": "leaked-from-dotenv",
+    "pipes": [
+     {
+      "connector": "sql:db",
+      "metric": "env",
+      "instance": "sql:db",
+      "parameters": {
+       "note": "trailing comment dotenv-value"
+      }
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {
+       "sql": {
+        "db": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/env.db",
+         "username": "process-value",
+         "password": "process-both",
+         "host": "fallback-host",
+         "port": null,
+         "schema": "",
+         "options": "price is $5",
+         "dotted": "dotted"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "leaked-from-dotenv"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "0884c7dc6fac9534f7c8115221abd2c5e7511e5cbbead7981a7e5ebcedf245d0",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "{PROJECT}/plugins",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "FROM_PROCESS": "process-value",
+    "FROM_BOTH": "process-both",
+    "DOTTED.VALUE": "dotted",
+    "DB_DIR": "{MRSM_ROOT_DIR}",
+    "FROM_DOTENV": "dotenv-value",
+    "QUOTED": "single quoted",
+    "EXPORTED_VAR": "exported",
+    "project_name": "leaked-from-dotenv",
+    "INTERP": "process-value-interp",
+    "ALSO_UNDEFINED": "",
+    "UNDEFINED_PORT": "",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"process-both\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}},\"environment\":{\"INTERPOLATED\":\"dotenv-value-suffix\",\"QUOTED_VALUE\":\"single quoted\",\"EXPORTED\":\"exported\",\"MRSM_PLUGINS_DIR\":\"./plugins\"},\"project_name\":\"leaked-from-dotenv\",\"pipes\":[{\"connector\":\"sql:db\",\"metric\":\"env\",\"instance\":\"sql:db\",\"parameters\":{\"note\":\"trailing comment dotenv-value\"}}],\"config\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"process-both\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}}},\"stack\":{\"project_name\":\"leaked-from-dotenv\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "leaked-from-dotenv",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"process-both\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}}},\"stack\":{\"project_name\":\"leaked-from-dotenv\"}}",
+    "INTERPOLATED": "dotenv-value-suffix",
+    "QUOTED_VALUE": "single quoted",
+    "EXPORTED": "exported"
+   },
+   "pipes_meta": [
+    {
+     "connector": "sql:db",
+     "metric": "env",
+     "instance": "sql:db",
+     "parameters": {
+      "note": "trailing comment dotenv-value"
+     },
+     "tags": [
+      "leaked-from-dotenv"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('sql:db', 'env', instance='sql:db')",
+     "connector_keys": "sql:db",
+     "metric_key": "env",
+     "location_key": null,
+     "instance_keys": "sql:db",
+     "temporary": false,
+     "parameters": {
+      "note": "trailing comment dotenv-value",
+      "tags": [
+       "leaked-from-dotenv"
+      ]
+     }
+    }
+   ],
+   "explain": "                                             Pipes in 'leaked-from-dotenv'                                              \n                                                 ╷                                                ╷                     \n  Defined Pipes                                  │Compose Parameters                              │Remote Parameters    \n╶────────────────────────────────────────────────┼────────────────────────────────────────────────┼────────────────────╴\n  ╭───────────────── Instance ─────────────────╮ │                                                │                     \n  │ sql:db                                     │ │                                                │                     \n  ╰────────────────────────────────────────────╯ │                                                │                     \n                                                 │                                                │                     \n  Pipe('sql:db', 'env', instance='sql:db')       │{                                               │                     \n                                                 │  \"note\": \"trailing comment dotenv-value\",      │                     \n  ⭕ Not registered                              │  \"tags\": [                                     │                     \n                                                 │    \"leaked-from-dotenv\"                        │                     \n                                                 │  ]                                             │                     \n                                                 │}                                               │                     \n                                                 ╵                                                ╵                     \n",
+   "written_files": {},
+   "config_hash_normalized": "5c09f7e245320066d43e3366d741f0f0463bbd47884d0019183968fb9df5e688"
+  },
+  {
+   "name": "show-environment",
+   "action": [
+    "show",
+    "environment"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "show",
+    "environment"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "leaked-from-dotenv"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "environment",
+      "--tags",
+      "leaked-from-dotenv"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "warn",
+     "'$ALSO_UNDEFINED' and '$UNDEFINED_PORT' are not defined!\n     Using  empty strings for these variables."
+    ],
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Running 'show environment' in compose project 'leaked-from-dotenv'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ],
+    "connectors": {
+     "sql": {
+      "db": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/env.db",
+       "username": "process-value",
+       "password": "dotenv-wins-only-via-envyaml",
+       "host": "fallback-host",
+       "port": null,
+       "schema": "",
+       "options": "price is $5",
+       "dotted": "dotted"
+      }
+     }
+    },
+    "environment": {
+     "INTERPOLATED": "dotenv-value-suffix",
+     "QUOTED_VALUE": "single quoted",
+     "EXPORTED": "exported",
+     "MRSM_PLUGINS_DIR": "./plugins"
+    },
+    "project_name": "leaked-from-dotenv",
+    "pipes": [
+     {
+      "connector": "sql:db",
+      "metric": "env",
+      "instance": "sql:db",
+      "parameters": {
+       "note": "trailing comment dotenv-value"
+      }
+     }
+    ],
+    "config": {
+     "meerschaum": {
+      "connectors": {
+       "sql": {
+        "db": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/env.db",
+         "username": "process-value",
+         "password": "dotenv-wins-only-via-envyaml",
+         "host": "fallback-host",
+         "port": null,
+         "schema": "",
+         "options": "price is $5",
+         "dotted": "dotted"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "leaked-from-dotenv"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "bb2439b54fcf9e09c047f4d92ac13052c09b5a818b4352dba2f37f9bf4d5366b",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "{PROJECT}/plugins",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "FROM_PROCESS": "process-value",
+    "FROM_BOTH": "process-both",
+    "DOTTED.VALUE": "dotted",
+    "DB_DIR": "{MRSM_ROOT_DIR}",
+    "FROM_DOTENV": "dotenv-value",
+    "QUOTED": "single quoted",
+    "EXPORTED_VAR": "exported",
+    "project_name": "leaked-from-dotenv",
+    "INTERP": "process-value-interp",
+    "ALSO_UNDEFINED": "",
+    "UNDEFINED_PORT": "",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"],\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"dotenv-wins-only-via-envyaml\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}},\"environment\":{\"INTERPOLATED\":\"dotenv-value-suffix\",\"QUOTED_VALUE\":\"single quoted\",\"EXPORTED\":\"exported\",\"MRSM_PLUGINS_DIR\":\"./plugins\"},\"project_name\":\"leaked-from-dotenv\",\"pipes\":[{\"connector\":\"sql:db\",\"metric\":\"env\",\"instance\":\"sql:db\",\"parameters\":{\"note\":\"trailing comment dotenv-value\"}}],\"config\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"dotenv-wins-only-via-envyaml\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}}},\"stack\":{\"project_name\":\"leaked-from-dotenv\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "leaked-from-dotenv",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{\"sql\":{\"db\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/env.db\",\"username\":\"process-value\",\"password\":\"dotenv-wins-only-via-envyaml\",\"host\":\"fallback-host\",\"port\":null,\"schema\":\"\",\"options\":\"price is $5\",\"dotted\":\"dotted\"}}}},\"stack\":{\"project_name\":\"leaked-from-dotenv\"}}",
+    "INTERPOLATED": "dotenv-value-suffix",
+    "QUOTED_VALUE": "single quoted",
+    "EXPORTED": "exported"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "2ab25a44f8cb7d08ecacc26cfabde75d7b24a743fd117e0e60fa7bf1c28b5e35"
+  }
+ ]
+}

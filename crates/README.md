@@ -31,6 +31,63 @@ port table with line counts per Python area is §6.1; the compatibility contract
 - **Never name the private corpora or their organizations** in code, comments, fixtures or docs.
   Fixture data must be synthetic.
 
+## Crate layering
+
+Dependencies point down only. No cycles; `meerschaum-core` is a leaf.
+
+```
+  cli ◀── py           top layer: depend on every crate below; nothing depends on them
+   │      │
+   ▼      ▼
+  ┌─────────────────────────────┐
+  │ sql ──▶ kernel ──▶ core     │
+  │  └────────────────▲         │
+  └─────────────────────────────┘
+```
+
+| Crate | Normal workspace dependencies |
+|---|---|
+| `meerschaum-core` | none |
+| `meerschaum-kernel` | core |
+| `meerschaum-sql` | core, kernel (Arrow conversion of query results, dtype mapping) |
+| `meerschaum-cli` | core, kernel, sql |
+| `meerschaum-py` | core, kernel, sql, cli |
+
+- **core** owns every type shared by two or more crates: `Value` / `Map` (parameters, config and
+  `params`), the Python text helpers (`pyfmt`: `str()`/`repr()`/`json.dumps`, float repr,
+  `strip`/`splitlines`/`dedent`/`indent`, `str.format`, `PyDateTime`), the dtype vocabulary
+  (`dtypes`: aliases, `are_dtypes_equal`, `GeometrySpec`/`Srid`, precision units, the
+  database → pandas table `get_pd_type_from_db_type`, and the Arrow field-tag keys
+  `dtypes::field_meta`), `Pipe` and its attributes (`columns`, `dtypes`, `indices`, `precision`,
+  `get_chunk_interval`, `get_backtrack_interval`, `target`), the config registry, `static.toml`
+  and `SuccessTuple` / `SyncResult`.
+- **kernel** owns the in-memory table: `Frame` is the table type for every crate. It owns the
+  pandas / Polars / Arrow dtype mapping, `enforce_dtypes`, `filter_existing`, `query_df`, and the
+  cell scalar `kernel::Value` (with `pd.NA`, `NaT`, decimals, geometries), which converts to and
+  from `core::Value`.
+- **sql** owns flavor-specific SQL: query builders, the per-flavor pandas → database tables,
+  drivers. Query results are Arrow batches tagged with `meerschaum:dtype` / `meerschaum:db_type`;
+  `SqlDriver::read_frame` / `driver::batches_to_frame` turn them into a kernel `Frame` whose
+  columns keep the tags, so `enforce_dtypes` reads the declared dtypes instead of detecting them.
+  A pipe reaches the query builders as `SqlPipe`: the core `Pipe` plus the flavor-resolved target.
+- **cli** and **py** are the top layer and depend on everything below (py also on cli). In this
+  wave they call only into core (`SuccessTuple`, the text helpers, `static.toml`); the kernel and
+  sql edges are in place for the actions and bindings that come next. Nothing may depend on cli
+  or py.
+- Crates added later (valkey, api, engine, compose, jobs, server, web, plugin) follow the same
+  rule: depend on core (and kernel / sql as needed), never on cli or py, and never re-define a
+  type core owns. Need something shared that core lacks? Add it to core (additively) instead of a
+  local stand-in.
+
+Check the edges with:
+
+```bash
+cargo tree -p meerschaum-sql -e normal --depth 1 | grep meerschaum   # core, kernel
+cargo tree -p meerschaum-kernel -e normal --depth 1 | grep meerschaum # core
+cargo tree -p meerschaum-core -e normal --depth 1 | grep meerschaum   # (only itself)
+cargo tree -p meerschaum-py -e normal --depth 1 | grep meerschaum     # core, kernel, sql, cli
+```
+
 ## Building
 
 ```bash

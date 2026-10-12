@@ -12,8 +12,8 @@ use serde_json::{Value as J, json};
 
 fn srid_json(s: &Srid) -> J {
     match s {
-        Srid::Int(i) => json!(i),
-        Srid::Str(s) => json!(s),
+        Srid::Code(i) => json!(i),
+        Srid::Authority(s) => json!(s),
     }
 }
 
@@ -83,9 +83,9 @@ fn dtypes_parity() {
             }
             "get_geometry_type_srid" | "get_geometry_type_srid_4326" => {
                 let default = if f.ends_with("4326") {
-                    Srid::Int(4326)
+                    Srid::Code(4326)
                 } else {
-                    Srid::Int(0)
+                    Srid::Code(0)
                 };
                 let got = dtypes::get_geometry_type_srid(s(0), "geometry", default);
                 match (got, case.get("ok")) {

@@ -177,8 +177,8 @@ fn serialize_parity() {
             }
             "to_polars_geoarrow" => {
                 let srid = match &arg0 {
-                    Value::Int(i) => Srid::Int(*i),
-                    Value::Str(s) => Srid::Str(s.clone()),
+                    Value::Int(i) => Srid::Code(*i),
+                    Value::Str(s) => Srid::Authority(s.clone()),
                     _ => panic!(),
                 };
                 let mut geom_col = Column::object(

@@ -17,6 +17,9 @@ name = "mrsm"
 path = "src/main.rs"
 
 [dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-sql = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
 indexmap = { workspace = true }

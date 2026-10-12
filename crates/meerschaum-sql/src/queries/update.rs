@@ -8,8 +8,8 @@ use crate::dtypes::{
 };
 use crate::flavor::Flavor;
 use crate::ident::sql_item_name_opt;
-use crate::pytext::{dedent_strip, py_format};
 use crate::queries::templates::update_queries;
+use meerschaum_core::pyfmt::{dedent_strip, py_format, py_isupper};
 
 /// `get_null_replacement(typ, flavor)`: a stand-in literal for `NULL` when joining.
 ///
@@ -69,20 +69,6 @@ pub fn get_null_replacement(typ: &str, flavor: Option<Flavor>) -> String {
             ""
         }
     )
-}
-
-/// Python's `str.isupper()`.
-pub(crate) fn py_isupper(s: &str) -> bool {
-    let mut has_cased = false;
-    for c in s.chars() {
-        if c.is_lowercase() {
-            return false;
-        }
-        if c.is_uppercase() {
-            has_cased = true;
-        }
-    }
-    has_cased
 }
 
 /// Arguments of `get_update_queries` (`utils/sql.py:1667`).

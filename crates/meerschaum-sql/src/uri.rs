@@ -61,7 +61,8 @@ impl ConnectionOptions {
 /// The attributes of a `sql:` connector as found in `connectors.yaml`, keyword arguments or an
 /// `MRSM_SQL_<LABEL>` URI. Every field is optional; [`ConnectionSpec::from_attributes`] applies
 /// the flavor defaults and requirements.
-// TODO(core-merge): built by `meerschaum-core`'s connector registry from the merged config.
+// TODO(connector-registry): built from the merged config (`meerschaum_core::Config`) once the
+// connector registry is ported; not a type duplicate.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConnectorAttributes {
     /// The connector label (`sql:<label>`).
@@ -489,8 +490,9 @@ impl ConnectionSpec {
             if let Some(uri) = &self.uri {
                 return Ok(uri.clone());
             }
-            // TODO(core-merge): `{SQLITE_DB_PATH}` resolves to `paths.SQLITE_DB_PATH`, which
-            // lives in core's path registry.
+            // TODO(connector-registry): `{SQLITE_DB_PATH}` resolves to
+            // `meerschaum_core::config::paths::Paths::path("SQLITE_DB_PATH")` when the registry
+            // builds the connector (`_create_engine.py:82`).
             // PARITY: a missing database renders as `None` (`f"{_engine}:///{_database}"`).
             let database = self.database.clone().unwrap_or_else(|| "None".to_string());
             return Ok(format!("{engine}:///{database}"));

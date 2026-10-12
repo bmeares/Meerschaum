@@ -1,0 +1,5 @@
+{
+  "description": "isolation: subprocess, daemon: false, environment overrides of the directory variables, explicit jobs.",
+  "width": 120,
+  "runs": "all"
+}

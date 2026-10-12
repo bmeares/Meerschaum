@@ -39,6 +39,14 @@ pub enum SqlError {
     #[error(transparent)]
     Arrow(#[from] arrow::error::ArrowError),
 
+    /// A pipe attribute could not be computed (Python raises from the `Pipe` property).
+    #[error(transparent)]
+    Pipe(#[from] meerschaum_core::pipe::PipeError),
+
+    /// Query results could not be converted into a kernel `Frame`.
+    #[error(transparent)]
+    Frame(#[from] meerschaum_kernel::frame::FrameError),
+
     /// A value could not be converted to the column's Arrow type.
     #[error("Failed to convert column '{column}': {reason}")]
     Conversion { column: String, reason: String },

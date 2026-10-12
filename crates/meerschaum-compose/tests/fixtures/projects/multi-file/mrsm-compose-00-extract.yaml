@@ -1,0 +1,9 @@
+project_name: extract
+root_dir: ./shared-root
+plugins_dir: ./shared-plugins
+plugins:
+  - shared
+pipes:
+  - connector: plugin:shared
+    metric: raw
+    instance: sql:local

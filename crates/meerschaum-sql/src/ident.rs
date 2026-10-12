@@ -3,7 +3,7 @@
 
 use crate::error::{Result, SqlError};
 use crate::flavor::{Flavor, max_name_len_for, table_wrappers_for};
-use crate::pytext::truncate_string_sections;
+use meerschaum_core::pipe::truncate_string_sections_best_effort;
 
 /// The substrings `clean()` refuses (`utils/sql.py:674`).
 pub const BANNED_SYMBOLS: [&str; 14] = [
@@ -112,8 +112,11 @@ pub fn truncate_item_name(item: &str, flavor: Flavor) -> String {
 }
 
 /// `truncate_item_name` for an optional flavor key (`None` → `'default'`).
+///
+/// PARITY: Python raises `String could not be truncated` when a name has too many sections to
+/// fit (`utils/misc.py:1336`); the quoting helpers cannot fail, so the shortest name is used.
 pub fn truncate_item_name_opt(item: &str, flavor: Option<Flavor>) -> String {
-    truncate_string_sections(item, "_", max_name_len_for(flavor))
+    truncate_string_sections_best_effort(item, "_", max_name_len_for(flavor))
 }
 
 #[cfg(test)]

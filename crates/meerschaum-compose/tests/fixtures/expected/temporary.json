@@ -1,0 +1,1337 @@
+{
+ "case": {
+  "description": "Temporary pipes, legacy mrsm_instance, the project default instance, non-ASCII and long parameter values.",
+  "width": 120,
+  "runs": [
+   {
+    "name": "explain",
+    "action": [
+     "explain"
+    ]
+   },
+   {
+    "name": "explain-60",
+    "action": [
+     "explain"
+    ],
+    "width": 60
+   },
+   {
+    "name": "up-dry",
+    "action": [
+     "up"
+    ],
+    "flags": {
+     "dry": true
+    }
+   },
+   {
+    "name": "run",
+    "action": [
+     "run"
+    ]
+   },
+   {
+    "name": "up-no-jobs",
+    "action": [
+     "up"
+    ],
+    "flags": {
+     "no_jobs": true
+    }
+   }
+  ]
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONPATH": "{REPO}",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "explain",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "config": {
+     "meerschaum": {
+      "instance": "sql:local"
+     },
+     "stack": {
+      "project_name": "temp"
+     }
+    },
+    "project_name": "temp",
+    "pipes": [
+     {
+      "connector": "plugin:temp",
+      "metric": "scratch",
+      "temporary": true,
+      "columns": [
+       "ts",
+       "id"
+      ]
+     },
+     {
+      "connector": "plugin:temp",
+      "metric": "kept",
+      "location": null,
+      "mrsm_instance": "sql:memory"
+     },
+     {
+      "connector": "plugin:temp",
+      "metric": "unicode",
+      "instance": "sql:local",
+      "parameters": {
+       "label": "café ☕ – ünïcode",
+       "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "c39e20083aa8440845f9716688e918441e381bcc52636be2ea86733d0cbf95b5",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}},\"project_name\":\"temp\",\"pipes\":[{\"connector\":\"plugin:temp\",\"metric\":\"scratch\",\"temporary\":true,\"columns\":[\"ts\",\"id\"]},{\"connector\":\"plugin:temp\",\"metric\":\"kept\",\"location\":null,\"mrsm_instance\":\"sql:memory\"},{\"connector\":\"plugin:temp\",\"metric\":\"unicode\",\"instance\":\"sql:local\",\"parameters\":{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\"}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "temp",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:temp",
+     "metric": "scratch",
+     "temporary": true,
+     "columns": [
+      "ts",
+      "id"
+     ],
+     "tags": [
+      "temp"
+     ],
+     "instance": "sql:local",
+     "cache": true
+    },
+    {
+     "connector": "plugin:temp",
+     "metric": "kept",
+     "location": null,
+     "mrsm_instance": "sql:memory",
+     "tags": [
+      "temp"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:temp",
+     "metric": "unicode",
+     "instance": "sql:local",
+     "parameters": {
+      "label": "café ☕ – ünïcode",
+      "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."
+     },
+     "tags": [
+      "temp"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:temp', 'scratch')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "scratch",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": true,
+     "parameters": {
+      "columns": {
+       "ts": "ts",
+       "id": "id"
+      },
+      "tags": [
+       "temp"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:temp', 'kept', instance='sql:memory')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "kept",
+     "location_key": null,
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "temp"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:temp', 'unicode')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "unicode",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "label": "café ☕ – ünïcode",
+      "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.",
+      "tags": [
+       "temp"
+      ]
+     }
+    }
+   ],
+   "explain": "                                                    Pipes in 'temp'                                                     \n                                                  ╷                                                 ╷                   \n  Defined Pipes                                   │Compose Parameters                               │Remote Parameters  \n╶─────────────────────────────────────────────────┼─────────────────────────────────────────────────┼──────────────────╴\n  ╭───────────────── Instance ──────────────────╮ │                                                 │                   \n  │ sql:local                                   │ │                                                 │                   \n  ╰─────────────────────────────────────────────╯ │                                                 │                   \n                                                  │                                                 │                   \n  Pipe('plugin:temp', 'scratch')                  │{                                                │                   \n                                                  │  \"columns\": {                                   │                   \n  🔳 Temporary                                    │    \"ts\": \"ts\",                                  │                   \n                                                  │    \"id\": \"id\"                                   │                   \n                                                  │  },                                             │                   \n                                                  │  \"tags\": [                                      │                   \n                                                  │    \"temp\"                                       │                   \n                                                  │  ]                                              │                   \n                                                  │}                                                │                   \n                                                  │                                                 │                   \n  Pipe('plugin:temp', 'unicode')                  │{                                                │                   \n                                                  │  \"label\": \"café ☕ – ünïcode\",                  │                   \n  ⭕ Not registered                               │  \"long_text\": \"This is a deliberately long par… │                   \n                                                  │  \"tags\": [                                      │                   \n                                                  │    \"temp\"                                       │                   \n                                                  │  ]                                              │                   \n                                                  │}                                                │                   \n╶─────────────────────────────────────────────────┼─────────────────────────────────────────────────┼──────────────────╴\n  ╭───────────────── Instance ──────────────────╮ │                                                 │                   \n  │ sql:memory                                  │ │                                                 │                   \n  ╰─────────────────────────────────────────────╯ │                                                 │                   \n                                                  │                                                 │                   \n  Pipe('plugin:temp', 'kept',                     │{                                                │                   \n  instance='sql:memory')                          │  \"tags\": [                                      │                   \n                                                  │    \"temp\"                                       │                   \n  ⭕ Not registered                               │  ]                                              │                   \n                                                  │}                                                │                   \n                                                  ╵                                                 ╵                   \n",
+   "written_files": {},
+   "config_hash_normalized": "8765486d5ccdb8691ea4f672d71e8f9dda2c0b1a821b41fabb97f57cd3c64cb9"
+  },
+  {
+   "name": "explain-60",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 60,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "config": {
+     "meerschaum": {
+      "instance": "sql:local"
+     },
+     "stack": {
+      "project_name": "temp"
+     }
+    },
+    "project_name": "temp",
+    "pipes": [
+     {
+      "connector": "plugin:temp",
+      "metric": "scratch",
+      "temporary": true,
+      "columns": [
+       "ts",
+       "id"
+      ]
+     },
+     {
+      "connector": "plugin:temp",
+      "metric": "kept",
+      "location": null,
+      "mrsm_instance": "sql:memory"
+     },
+     {
+      "connector": "plugin:temp",
+      "metric": "unicode",
+      "instance": "sql:local",
+      "parameters": {
+       "label": "café ☕ – ünïcode",
+       "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "a11110b7ddd093d494ef4bd5614a7799842b6101ea5d581af4a4b1a6895bc008",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}},\"project_name\":\"temp\",\"pipes\":[{\"connector\":\"plugin:temp\",\"metric\":\"scratch\",\"temporary\":true,\"columns\":[\"ts\",\"id\"]},{\"connector\":\"plugin:temp\",\"metric\":\"kept\",\"location\":null,\"mrsm_instance\":\"sql:memory\"},{\"connector\":\"plugin:temp\",\"metric\":\"unicode\",\"instance\":\"sql:local\",\"parameters\":{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\"}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "temp",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:temp",
+     "metric": "scratch",
+     "temporary": true,
+     "columns": [
+      "ts",
+      "id"
+     ],
+     "tags": [
+      "temp"
+     ],
+     "instance": "sql:local",
+     "cache": true
+    },
+    {
+     "connector": "plugin:temp",
+     "metric": "kept",
+     "location": null,
+     "mrsm_instance": "sql:memory",
+     "tags": [
+      "temp"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:temp",
+     "metric": "unicode",
+     "instance": "sql:local",
+     "parameters": {
+      "label": "café ☕ – ünïcode",
+      "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."
+     },
+     "tags": [
+      "temp"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:temp', 'scratch')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "scratch",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": true,
+     "parameters": {
+      "columns": {
+       "ts": "ts",
+       "id": "id"
+      },
+      "tags": [
+       "temp"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:temp', 'kept', instance='sql:memory')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "kept",
+     "location_key": null,
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "temp"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:temp', 'unicode')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "unicode",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "label": "café ☕ – ünïcode",
+      "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.",
+      "tags": [
+       "temp"
+      ]
+     }
+    }
+   ],
+   "explain": "                      Pipes in 'temp'                       \n                    ╷                   ╷                   \n  Defined Pipes     │Compose Parameters │Remote Parameters  \n╶───────────────────┼───────────────────┼──────────────────╴\n  ╭── Instance ───╮ │                   │                   \n  │ sql:local     │ │                   │                   \n  ╰───────────────╯ │                   │                   \n                    │                   │                   \n  Pipe('plugin:tem… │{                  │                   \n  'scratch')        │  \"columns\": {     │                   \n                    │    \"ts\": \"ts\",    │                   \n  🔳 Temporary      │    \"id\": \"id\"     │                   \n                    │  },               │                   \n                    │  \"tags\": [        │                   \n                    │    \"temp\"         │                   \n                    │  ]                │                   \n                    │}                  │                   \n                    │                   │                   \n  Pipe('plugin:tem… │{                  │                   \n  'unicode')        │  \"label\": \"café … │                   \n                    │  \"long_text\": \"T… │                   \n  ⭕ Not registered │  \"tags\": [        │                   \n                    │    \"temp\"         │                   \n                    │  ]                │                   \n                    │}                  │                   \n╶───────────────────┼───────────────────┼──────────────────╴\n  ╭── Instance ───╮ │                   │                   \n  │ sql:memory    │ │                   │                   \n  ╰───────────────╯ │                   │                   \n                    │                   │                   \n  Pipe('plugin:tem… │{                  │                   \n  'kept',           │  \"tags\": [        │                   \n  instance='sql:me… │    \"temp\"         │                   \n                    │  ]                │                   \n  ⭕ Not registered │}                  │                   \n                    │                   │                   \n                    ╵                   ╵                   \n",
+   "written_files": {},
+   "config_hash_normalized": "8765486d5ccdb8691ea4f672d71e8f9dda2c0b1a821b41fabb97f57cd3c64cb9"
+  },
+  {
+   "name": "up-dry",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "dry": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--dry"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Updated parameters for 3 pipes across 2 instances."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:temp",
+      "-m",
+      "kept",
+      "-l",
+      "None",
+      "-i",
+      "sql:memory",
+      "--params",
+      "{\"tags\":[\"temp\"]}",
+      "--noask",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:temp",
+      "-m",
+      "unicode",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\",\"tags\":[\"temp\"]}",
+      "--noask",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Pipe('plugin:temp', 'scratch') is temporary, will not modify registration."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:temp', 'kept', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:temp', 'unicode')..."
+    ]
+   ],
+   "config": {
+    "config": {
+     "meerschaum": {
+      "instance": "sql:local"
+     },
+     "stack": {
+      "project_name": "temp"
+     }
+    },
+    "project_name": "temp",
+    "pipes": [
+     {
+      "connector": "plugin:temp",
+      "metric": "scratch",
+      "temporary": true,
+      "columns": [
+       "ts",
+       "id"
+      ]
+     },
+     {
+      "connector": "plugin:temp",
+      "metric": "kept",
+      "location": null,
+      "mrsm_instance": "sql:memory"
+     },
+     {
+      "connector": "plugin:temp",
+      "metric": "unicode",
+      "instance": "sql:local",
+      "parameters": {
+       "label": "café ☕ – ünïcode",
+       "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "fff53c834dca678012046547d44555df0df330e1bc04e7dc108504f23ad284d7",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}},\"project_name\":\"temp\",\"pipes\":[{\"connector\":\"plugin:temp\",\"metric\":\"scratch\",\"temporary\":true,\"columns\":[\"ts\",\"id\"]},{\"connector\":\"plugin:temp\",\"metric\":\"kept\",\"location\":null,\"mrsm_instance\":\"sql:memory\"},{\"connector\":\"plugin:temp\",\"metric\":\"unicode\",\"instance\":\"sql:local\",\"parameters\":{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\"}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "temp",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:temp",
+     "metric": "scratch",
+     "temporary": true,
+     "columns": [
+      "ts",
+      "id"
+     ],
+     "tags": [
+      "temp"
+     ],
+     "instance": "sql:local",
+     "cache": true
+    },
+    {
+     "connector": "plugin:temp",
+     "metric": "kept",
+     "location": null,
+     "mrsm_instance": "sql:memory",
+     "tags": [
+      "temp"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:temp",
+     "metric": "unicode",
+     "instance": "sql:local",
+     "parameters": {
+      "label": "café ☕ – ünïcode",
+      "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."
+     },
+     "tags": [
+      "temp"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:temp', 'scratch')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "scratch",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": true,
+     "parameters": {
+      "columns": {
+       "ts": "ts",
+       "id": "id"
+      },
+      "tags": [
+       "temp"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:temp', 'kept', instance='sql:memory')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "kept",
+     "location_key": null,
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "temp"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:temp', 'unicode')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "unicode",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "label": "café ☕ – ünïcode",
+      "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.",
+      "tags": [
+       "temp"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "8765486d5ccdb8691ea4f672d71e8f9dda2c0b1a821b41fabb97f57cd3c64cb9"
+  },
+  {
+   "name": "run",
+   "action": [
+    "run"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "run"
+   ],
+   "width": 120,
+   "result": [
+    false,
+    "Unable to begin syncing Pipe('plugin:temp', 'scratch'):\nPipe('plugin:temp', 'scratch') does not have a valid connector.\n    Perhaps plugin:temp has a syntax error?"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:temp",
+      "-m",
+      "kept",
+      "-l",
+      "None",
+      "-i",
+      "sql:memory",
+      "--params",
+      "{\"tags\":[\"temp\"]}",
+      "--noask",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:temp",
+      "-m",
+      "unicode",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\",\"tags\":[\"temp\"]}",
+      "--noask",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:temp",
+      "-m",
+      "kept",
+      "-l",
+      "None",
+      "-i",
+      "sql:memory",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:temp",
+      "-m",
+      "unicode",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Pipe('plugin:temp', 'scratch') is temporary, will not modify registration."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:temp', 'kept', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:temp', 'unicode')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:temp', 'scratch')..."
+    ],
+    [
+     "warn",
+     "Exception when creating connector 'plugin:temp'.\n\n 🛑 Plugin 'temp' cannot be found. Is it installed?"
+    ],
+    [
+     "warn",
+     "Failed to sync Pipe('plugin:temp', 'scratch'):\nPipe('plugin:temp', 'scratch') does not have a valid connector.\n    Perhaps plugin:temp has a syntax error?"
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:temp', 'kept', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:temp', 'unicode')..."
+    ],
+    [
+     "info",
+     "Retry syncing Pipe('plugin:temp', 'scratch')..."
+    ],
+    [
+     "warn",
+     "Exception when creating connector 'plugin:temp'.\n\n 🛑 Plugin 'temp' cannot be found. Is it installed?"
+    ],
+    [
+     "warn",
+     "Failed to sync Pipe('plugin:temp', 'scratch'):\nPipe('plugin:temp', 'scratch') does not have a valid connector.\n    Perhaps plugin:temp has a syntax error?"
+    ]
+   ],
+   "config": {
+    "config": {
+     "meerschaum": {
+      "instance": "sql:local"
+     },
+     "stack": {
+      "project_name": "temp"
+     }
+    },
+    "project_name": "temp",
+    "pipes": [
+     {
+      "connector": "plugin:temp",
+      "metric": "scratch",
+      "temporary": true,
+      "columns": [
+       "ts",
+       "id"
+      ]
+     },
+     {
+      "connector": "plugin:temp",
+      "metric": "kept",
+      "location": null,
+      "mrsm_instance": "sql:memory"
+     },
+     {
+      "connector": "plugin:temp",
+      "metric": "unicode",
+      "instance": "sql:local",
+      "parameters": {
+       "label": "café ☕ – ünïcode",
+       "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "9c77249416cf9bdd7dc6fe346bd05492c7e5b6d357aaf06c4d3511f3a32a64ca",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}},\"project_name\":\"temp\",\"pipes\":[{\"connector\":\"plugin:temp\",\"metric\":\"scratch\",\"temporary\":true,\"columns\":[\"ts\",\"id\"]},{\"connector\":\"plugin:temp\",\"metric\":\"kept\",\"location\":null,\"mrsm_instance\":\"sql:memory\"},{\"connector\":\"plugin:temp\",\"metric\":\"unicode\",\"instance\":\"sql:local\",\"parameters\":{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\"}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "temp",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:temp",
+     "metric": "scratch",
+     "temporary": true,
+     "columns": [
+      "ts",
+      "id"
+     ],
+     "tags": [
+      "temp"
+     ],
+     "instance": "sql:local",
+     "cache": true
+    },
+    {
+     "connector": "plugin:temp",
+     "metric": "kept",
+     "location": null,
+     "mrsm_instance": "sql:memory",
+     "tags": [
+      "temp"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:temp",
+     "metric": "unicode",
+     "instance": "sql:local",
+     "parameters": {
+      "label": "café ☕ – ünïcode",
+      "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."
+     },
+     "tags": [
+      "temp"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:temp', 'scratch')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "scratch",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": true,
+     "parameters": {
+      "columns": {
+       "ts": "ts",
+       "id": "id"
+      },
+      "tags": [
+       "temp"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:temp', 'kept', instance='sql:memory')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "kept",
+     "location_key": null,
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "temp"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:temp', 'unicode')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "unicode",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "label": "café ☕ – ünïcode",
+      "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.",
+      "tags": [
+       "temp"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "8765486d5ccdb8691ea4f672d71e8f9dda2c0b1a821b41fabb97f57cd3c64cb9"
+  },
+  {
+   "name": "up-no-jobs",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "no_jobs": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--no-jobs"
+   ],
+   "width": 120,
+   "result": [
+    false,
+    "Unable to begin syncing Pipe('plugin:temp', 'scratch'):\nPipe('plugin:temp', 'scratch') does not have a valid connector.\n    Perhaps plugin:temp has a syntax error?"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:temp",
+      "-m",
+      "kept",
+      "-l",
+      "None",
+      "-i",
+      "sql:memory",
+      "--params",
+      "{\"tags\":[\"temp\"]}",
+      "--noask",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:temp",
+      "-m",
+      "unicode",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "--params",
+      "{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\",\"tags\":[\"temp\"]}",
+      "--noask",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:temp",
+      "-m",
+      "kept",
+      "-l",
+      "None",
+      "-i",
+      "sql:memory",
+      "compose",
+      "up",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:temp",
+      "-m",
+      "unicode",
+      "-l",
+      "None",
+      "-i",
+      "sql:local",
+      "compose",
+      "up",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "temp"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Pipe('plugin:temp', 'scratch') is temporary, will not modify registration."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:temp', 'kept', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:temp', 'unicode')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:temp', 'scratch')..."
+    ],
+    [
+     "warn",
+     "Exception when creating connector 'plugin:temp'.\n\n 🛑 Plugin 'temp' cannot be found. Is it installed?"
+    ],
+    [
+     "warn",
+     "Failed to sync Pipe('plugin:temp', 'scratch'):\nPipe('plugin:temp', 'scratch') does not have a valid connector.\n    Perhaps plugin:temp has a syntax error?"
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:temp', 'kept', instance='sql:memory')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:temp', 'unicode')..."
+    ],
+    [
+     "info",
+     "Retry syncing Pipe('plugin:temp', 'scratch')..."
+    ],
+    [
+     "warn",
+     "Exception when creating connector 'plugin:temp'.\n\n 🛑 Plugin 'temp' cannot be found. Is it installed?"
+    ],
+    [
+     "warn",
+     "Failed to sync Pipe('plugin:temp', 'scratch'):\nPipe('plugin:temp', 'scratch') does not have a valid connector.\n    Perhaps plugin:temp has a syntax error?"
+    ]
+   ],
+   "config": {
+    "config": {
+     "meerschaum": {
+      "instance": "sql:local"
+     },
+     "stack": {
+      "project_name": "temp"
+     }
+    },
+    "project_name": "temp",
+    "pipes": [
+     {
+      "connector": "plugin:temp",
+      "metric": "scratch",
+      "temporary": true,
+      "columns": [
+       "ts",
+       "id"
+      ]
+     },
+     {
+      "connector": "plugin:temp",
+      "metric": "kept",
+      "location": null,
+      "mrsm_instance": "sql:memory"
+     },
+     {
+      "connector": "plugin:temp",
+      "metric": "unicode",
+      "instance": "sql:local",
+      "parameters": {
+       "label": "café ☕ – ünïcode",
+       "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "6fbf7892617f85cbe0e88f2682038a3615307eb369b00fd72fdc660f434dc6b0",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"config\":{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}},\"project_name\":\"temp\",\"pipes\":[{\"connector\":\"plugin:temp\",\"metric\":\"scratch\",\"temporary\":true,\"columns\":[\"ts\",\"id\"]},{\"connector\":\"plugin:temp\",\"metric\":\"kept\",\"location\":null,\"mrsm_instance\":\"sql:memory\"},{\"connector\":\"plugin:temp\",\"metric\":\"unicode\",\"instance\":\"sql:local\",\"parameters\":{\"label\":\"caf\\u00e9 \\u2615 \\u2013 \\u00fcn\\u00efcode\",\"long_text\":\"This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.\"}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "temp",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:local\"},\"stack\":{\"project_name\":\"temp\"}}"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:temp",
+     "metric": "scratch",
+     "temporary": true,
+     "columns": [
+      "ts",
+      "id"
+     ],
+     "tags": [
+      "temp"
+     ],
+     "instance": "sql:local",
+     "cache": true
+    },
+    {
+     "connector": "plugin:temp",
+     "metric": "kept",
+     "location": null,
+     "mrsm_instance": "sql:memory",
+     "tags": [
+      "temp"
+     ],
+     "cache": true
+    },
+    {
+     "connector": "plugin:temp",
+     "metric": "unicode",
+     "instance": "sql:local",
+     "parameters": {
+      "label": "café ☕ – ünïcode",
+      "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse."
+     },
+     "tags": [
+      "temp"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:temp', 'scratch')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "scratch",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": true,
+     "parameters": {
+      "columns": {
+       "ts": "ts",
+       "id": "id"
+      },
+      "tags": [
+       "temp"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:temp', 'kept', instance='sql:memory')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "kept",
+     "location_key": null,
+     "instance_keys": "sql:memory",
+     "temporary": false,
+     "parameters": {
+      "tags": [
+       "temp"
+      ]
+     }
+    },
+    {
+     "str": "Pipe('plugin:temp', 'unicode')",
+     "connector_keys": "plugin:temp",
+     "metric_key": "unicode",
+     "location_key": null,
+     "instance_keys": "sql:local",
+     "temporary": false,
+     "parameters": {
+      "label": "café ☕ – ünïcode",
+      "long_text": "This is a deliberately long parameter value that should be wider than the compose parameters column so that the table has to collapse.",
+      "tags": [
+       "temp"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "8765486d5ccdb8691ea4f672d71e8f9dda2c0b1a821b41fabb97f57cd3c64cb9"
+  }
+ ]
+}

@@ -15,6 +15,9 @@ use chrono::TimeDelta;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
+use meerschaum_core::Value;
+use meerschaum_core::pipe::target::truncate_string_sections;
+use meerschaum_core::pyfmt::PyDateTime;
 use meerschaum_sql::dateadd::{DateArg, Number, dateadd_str};
 use meerschaum_sql::dtypes::{
     DB_FLAVORS_CAST_DTYPES, DB_TO_PD_DEFAULT, DB_TO_PD_DTYPES, DB_TO_PD_SUBSTRINGS,
@@ -23,8 +26,9 @@ use meerschaum_sql::dtypes::{
 };
 use meerschaum_sql::flavor::Flavor;
 use meerschaum_sql::ident::{clean, pg_capital, sql_item_name, truncate_item_name};
-use meerschaum_sql::pipe::{IndexColumns, Interval, PipeSpec};
-use meerschaum_sql::pytext::{PyDateTime, truncate_string_sections};
+use meerschaum_sql::pipe::{
+    ChunkInterval, ChunkIntervalArg, IndexColumns, Pipe, SqlPipe, str_map as str_map_of,
+};
 use meerschaum_sql::queries::ConnectorCtx;
 use meerschaum_sql::queries::compress::{
     get_columnstore_disable_query, get_columnstore_policy_query,
@@ -66,7 +70,6 @@ use meerschaum_sql::queries::templates::{
 use meerschaum_sql::queries::update::{
     UpdateQueriesArgs, get_null_replacement, get_update_queries,
 };
-use meerschaum_sql::value::PyValue;
 use meerschaum_sql::where_clause::build_where;
 
 #[derive(Deserialize)]
@@ -78,9 +81,9 @@ struct Fixture {
 struct Case {
     #[serde(rename = "fn")]
     func: String,
-    args: PyValue,
+    args: Value,
     #[serde(default)]
-    result: Option<PyValue>,
+    result: Option<Value>,
     #[serde(default)]
     error: Option<String>,
 }
@@ -88,7 +91,7 @@ struct Case {
 /// The outcome of replaying one case.
 enum Outcome {
     /// The Rust output (compared with `json.dumps` semantics, so dict order matters).
-    Value(PyValue),
+    Value(Value),
     /// Rust raised (Python must have raised too).
     Error(String),
 }
@@ -97,119 +100,118 @@ enum Outcome {
 // Argument helpers
 // ---------------------------------------------------------------------------------------------
 
-fn get<'a>(args: &'a PyValue, key: &str) -> &'a PyValue {
-    args.get(key).unwrap_or(&PyValue::None)
+fn get<'a>(args: &'a Value, key: &str) -> &'a Value {
+    args.get(key).unwrap_or(&Value::Null)
 }
 
-fn s(args: &PyValue, key: &str) -> String {
+fn s(args: &Value, key: &str) -> String {
     get(args, key).py_str()
 }
 
-fn os(args: &PyValue, key: &str) -> Option<String> {
+fn os(args: &Value, key: &str) -> Option<String> {
     match get(args, key) {
-        PyValue::None => None,
+        Value::Null => None,
         v => Some(v.py_str()),
     }
 }
 
-fn b(args: &PyValue, key: &str) -> bool {
-    get(args, key).is_truthy()
+fn b(args: &Value, key: &str) -> bool {
+    get(args, key).truthy()
 }
 
-fn flavor(args: &PyValue) -> Flavor {
+fn flavor(args: &Value) -> Flavor {
     s(args, "flavor").parse().expect("flavor")
 }
 
-fn opt_flavor(args: &PyValue) -> Option<Flavor> {
+fn opt_flavor(args: &Value) -> Option<Flavor> {
     s(args, "flavor").parse().ok()
 }
 
-fn str_list(v: &PyValue) -> Vec<String> {
+fn str_list(v: &Value) -> Vec<String> {
     match v {
-        PyValue::List(items) => items.iter().map(PyValue::py_str).collect(),
-        PyValue::None => Vec::new(),
+        Value::List(items) => items.iter().map(Value::py_str).collect(),
+        Value::Null => Vec::new(),
         other => vec![other.py_str()],
     }
 }
 
-fn str_map(v: &PyValue) -> IndexMap<String, String> {
-    v.as_dict()
+fn str_map(v: &Value) -> IndexMap<String, String> {
+    v.as_map()
         .map(|d| d.iter().map(|(k, v)| (k.clone(), v.py_str())).collect())
         .unwrap_or_default()
 }
 
-fn dt(v: &PyValue) -> Option<PyDateTime> {
+fn dt(v: &Value) -> Option<PyDateTime> {
     v.get("$dt")
-        .and_then(PyValue::as_str)
+        .and_then(Value::as_str)
         .map(|s| PyDateTime::parse_isoformat(s).expect("isoformat"))
 }
 
-fn date_arg(v: &PyValue) -> DateArg {
+fn date_arg(v: &Value) -> DateArg {
     match v {
-        PyValue::None => DateArg::None,
-        PyValue::Int(i) => DateArg::Int(*i),
-        PyValue::Str(s) => DateArg::Str(s.clone()),
+        Value::Null => DateArg::None,
+        Value::Int(i) => DateArg::Int(*i),
+        Value::Str(s) => DateArg::Str(s.clone()),
         other => DateArg::DateTime(dt(other).expect("datetime")),
     }
 }
 
-fn number(v: &PyValue) -> Number {
+fn number(v: &Value) -> Number {
     match v {
-        PyValue::Int(i) => Number::Int(*i),
-        PyValue::Float(f) => Number::Float(*f),
+        Value::Int(i) => Number::Int(*i),
+        Value::Float(f) => Number::Float(*f),
         other => panic!("bad number {other:?}"),
     }
 }
 
-fn bound(v: &PyValue, default_for_empty: bool) -> Bound {
+fn bound(v: &Value, default_for_empty: bool) -> Bound {
     match v {
-        PyValue::Str(s) if s.is_empty() && default_for_empty => Bound::Default,
-        PyValue::Str(s) => Bound::Str(s.clone()),
-        PyValue::None => Bound::None,
-        PyValue::Int(i) => Bound::Int(*i),
+        Value::Str(s) if s.is_empty() && default_for_empty => Bound::Default,
+        Value::Str(s) => Bound::Str(s.clone()),
+        Value::Null => Bound::None,
+        Value::Int(i) => Bound::Int(*i),
         other => Bound::DateTime(dt(other).expect("datetime")),
     }
 }
 
-fn partition_value(v: &PyValue) -> PartitionValue {
+fn partition_value(v: &Value) -> PartitionValue {
     match v {
-        PyValue::Int(i) => PartitionValue::Int(*i),
+        Value::Int(i) => PartitionValue::Int(*i),
         other => PartitionValue::DateTime(dt(other).expect("datetime")),
     }
 }
 
-fn interval(v: &PyValue) -> Interval {
+fn interval(v: &Value) -> ChunkInterval {
     match v {
-        PyValue::Int(i) => Interval::Int(*i),
-        other => Interval::Duration(TimeDelta::microseconds(
-            other.get("$td_us").and_then(PyValue::as_int).expect("td"),
+        Value::Int(i) => ChunkInterval::Int(*i),
+        other => ChunkInterval::Delta(TimeDelta::microseconds(
+            other.get("$td_us").and_then(Value::as_i64).expect("td"),
         )),
     }
 }
 
-fn pipe(args: &PyValue) -> PipeSpec {
+fn pipe(args: &Value) -> SqlPipe {
     let p = get(args, "pipe");
-    PipeSpec {
-        connector_keys: s(p, "connector_keys"),
-        metric_key: s(p, "metric_key"),
-        location_key: os(p, "location_key"),
-        target: s(p, "target"),
-        parameters: get(p, "parameters").as_dict().cloned().unwrap_or_default(),
-    }
+    let core = Pipe::builder(&s(p, "connector_keys"), &s(p, "metric_key"))
+        .location(os(p, "location_key").as_deref())
+        .parameters(get(p, "parameters").as_map().cloned().unwrap_or_default())
+        .build()
+        .expect("fixture pipe");
+    SqlPipe::with_target(core, s(p, "target"))
 }
 
-fn index_docs(v: &PyValue) -> IndexMap<String, Vec<IndexDoc>> {
+fn index_docs(v: &Value) -> IndexMap<String, Vec<IndexDoc>> {
     let mut out = IndexMap::new();
-    if let Some(d) = v.as_dict() {
+    if let Some(d) = v.as_map() {
         for (col, docs) in d {
             let docs = match docs {
-                PyValue::List(items) => items
+                Value::List(items) => items
                     .iter()
                     .map(|doc| IndexDoc {
                         name: os(doc, "name"),
                         type_: os(doc, "type"),
                         clustered: match doc.get("clustered") {
-                            Some(PyValue::Bool(b)) => Some(*b),
+                            Some(Value::Bool(b)) => Some(*b),
                             _ => None,
                         },
                     })
@@ -226,71 +228,71 @@ fn index_docs(v: &PyValue) -> IndexMap<String, Vec<IndexDoc>> {
 // Result helpers
 // ---------------------------------------------------------------------------------------------
 
-fn v_str(s: impl Into<String>) -> PyValue {
-    PyValue::Str(s.into())
+fn v_str(s: impl Into<String>) -> Value {
+    Value::Str(s.into())
 }
 
-fn v_opt(s: Option<String>) -> PyValue {
-    s.map(PyValue::Str).unwrap_or(PyValue::None)
+fn v_opt(s: Option<String>) -> Value {
+    s.map(Value::Str).unwrap_or(Value::Null)
 }
 
-fn v_list(items: impl IntoIterator<Item = String>) -> PyValue {
-    PyValue::List(items.into_iter().map(PyValue::Str).collect())
+fn v_list(items: impl IntoIterator<Item = String>) -> Value {
+    Value::List(items.into_iter().map(Value::Str).collect())
 }
 
-fn v_map(m: &IndexMap<String, String>) -> PyValue {
-    PyValue::Dict(
+fn v_map(m: &IndexMap<String, String>) -> Value {
+    Value::Map(
         m.iter()
             .map(|(k, v)| (k.clone(), v_str(v.clone())))
             .collect(),
     )
 }
 
-fn v_map_list(m: &IndexMap<String, Vec<String>>) -> PyValue {
-    PyValue::Dict(
+fn v_map_list(m: &IndexMap<String, Vec<String>>) -> Value {
+    Value::Map(
         m.iter()
             .map(|(k, v)| (k.clone(), v_list(v.clone())))
             .collect(),
     )
 }
 
-fn v_dict(pairs: Vec<(&str, PyValue)>) -> PyValue {
-    PyValue::Dict(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+fn v_dict(pairs: Vec<(&str, Value)>) -> Value {
+    Value::Map(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
 }
 
-fn v_dt(d: &PyDateTime) -> PyValue {
+fn v_dt(d: &PyDateTime) -> Value {
     v_dict(vec![("$dt", v_str(d.isoformat()))])
 }
 
-fn v_interval(i: Interval) -> PyValue {
+fn v_interval(i: ChunkInterval) -> Value {
     match i {
-        Interval::Int(i) => PyValue::Int(i),
-        Interval::Duration(d) => v_dict(vec![(
+        ChunkInterval::Int(i) => Value::Int(i),
+        ChunkInterval::Delta(d) => v_dict(vec![(
             "$td_us",
-            PyValue::Int(d.num_microseconds().expect("micros")),
+            Value::Int(d.num_microseconds().expect("micros")),
         )]),
     }
 }
 
-fn v_partition_value(v: PartitionValue) -> PyValue {
+fn v_partition_value(v: PartitionValue) -> Value {
     match v {
-        PartitionValue::Int(i) => PyValue::Int(i),
+        PartitionValue::Int(i) => Value::Int(i),
         PartitionValue::DateTime(d) => v_dt(&d),
     }
 }
 
-fn v_srid(s: &Srid) -> PyValue {
+fn v_srid(s: &Srid) -> Value {
     match s {
-        Srid::Int(i) => PyValue::Int(*i),
-        Srid::Str(s) => v_str(s.clone()),
+        Srid::Code(i) => Value::Int(*i),
+        Srid::Authority(s) => v_str(s.clone()),
     }
 }
 
-fn ok(v: PyValue) -> Outcome {
+fn ok(v: Value) -> Outcome {
     Outcome::Value(v)
 }
 
-fn res<T>(r: meerschaum_sql::Result<T>, f: impl FnOnce(T) -> PyValue) -> Outcome {
+fn res<T>(r: meerschaum_sql::Result<T>, f: impl FnOnce(T) -> Value) -> Outcome {
     match r {
         Ok(v) => Outcome::Value(f(v)),
         Err(e) => Outcome::Error(e.to_string()),
@@ -317,7 +319,7 @@ const PY_FLAVORS: [&str; 13] = [
     "duckdb",
 ];
 
-fn flavors_where(pred: impl Fn(Flavor) -> bool) -> PyValue {
+fn flavors_where(pred: impl Fn(Flavor) -> bool) -> Value {
     let mut names: Vec<String> = Flavor::ALL
         .iter()
         .filter(|f| pred(**f))
@@ -327,17 +329,17 @@ fn flavors_where(pred: impl Fn(Flavor) -> bool) -> PyValue {
     v_list(names)
 }
 
-fn templates_case(expected: &PyValue) -> Vec<String> {
+fn templates_case(expected: &Value) -> Vec<String> {
     let mut failures = Vec::new();
-    let mut check = |name: &str, got: PyValue| {
-        let exp = expected.get(name).cloned().unwrap_or(PyValue::None);
+    let mut check = |name: &str, got: Value| {
+        let exp = expected.get(name).cloned().unwrap_or(Value::Null);
         if exp.json_dumps() != got.json_dumps() {
             failures.push(format!("templates.{name} differs"));
         }
     };
     check(
         "UPDATE_QUERIES",
-        PyValue::Dict(
+        Value::Map(
             UPDATE_QUERIES
                 .iter()
                 .map(|(k, v)| (k.to_string(), v_list(v.iter().map(|s| s.to_string()))))
@@ -345,7 +347,7 @@ fn templates_case(expected: &PyValue) -> Vec<String> {
         ),
     );
     let table = |t: &[(&str, &str)]| {
-        PyValue::Dict(t.iter().map(|(k, v)| (k.to_string(), v_str(*v))).collect())
+        Value::Map(t.iter().map(|(k, v)| (k.to_string(), v_str(*v))).collect())
     };
     check("columns_types_queries", table(COLUMNS_TYPES_QUERIES));
     check("columns_indices_queries", table(COLUMNS_INDICES_QUERIES));
@@ -355,12 +357,12 @@ fn templates_case(expected: &PyValue) -> Vec<String> {
     );
 
     // Per-flavor lookups (Python's `.get(flavor, default)`).
-    let lookup = |name: &str, f: &str| -> PyValue {
+    let lookup = |name: &str, f: &str| -> Value {
         let d = expected.get(name).expect(name);
         d.get(f)
             .or_else(|| d.get("default"))
             .cloned()
-            .unwrap_or(PyValue::None)
+            .unwrap_or(Value::Null)
     };
     for fname in PY_FLAVORS {
         let f: Flavor = fname.parse().unwrap();
@@ -370,7 +372,7 @@ fn templates_case(expected: &PyValue) -> Vec<String> {
         let hq = expected
             .get("hypertable_queries")
             .and_then(|d| d.get(fname))
-            .map(PyValue::py_str);
+            .map(Value::py_str);
         if hq.as_deref() != f.hypertable_query_template() {
             failures.push(format!("hypertable_queries[{fname}]"));
         }
@@ -379,17 +381,17 @@ fn templates_case(expected: &PyValue) -> Vec<String> {
         {
             failures.push(format!("table_wrappers[{fname}]"));
         }
-        if lookup("max_name_lens", fname) != PyValue::Int(f.max_name_len() as i64) {
+        if lookup("max_name_lens", fname) != Value::Int(f.max_name_len() as i64) {
             failures.push(format!("max_name_lens[{fname}]"));
         }
     }
     failures
 }
 
-fn flavor_sets_case(expected: &PyValue) -> Vec<String> {
+fn flavor_sets_case(expected: &Value) -> Vec<String> {
     let mut failures = Vec::new();
-    let mut check = |name: &str, got: PyValue| {
-        let exp = expected.get(name).cloned().unwrap_or(PyValue::None);
+    let mut check = |name: &str, got: Value| {
+        let exp = expected.get(name).cloned().unwrap_or(Value::Null);
         if exp.json_dumps() != got.json_dumps() {
             failures.push(format!(
                 "flavor_sets.{name}: python={} rust={}",
@@ -467,20 +469,20 @@ fn flavor_sets_case(expected: &PyValue) -> Vec<String> {
     let exp_configs = expected.get("flavor_configs").unwrap();
     for f in Flavor::ALL {
         let name = f.as_str();
-        if exp_default.get(name).map(PyValue::py_str) != f.default_schema().map(str::to_string) {
+        if exp_default.get(name).map(Value::py_str) != f.default_schema().map(str::to_string) {
             failures.push(format!("DEFAULT_SCHEMA_FLAVORS[{name}]"));
         }
         let got_num = f
             .numeric_precision()
-            .map(|(p, s)| PyValue::List(vec![PyValue::Int(p), PyValue::Int(s)]));
+            .map(|(p, s)| Value::List(vec![Value::Int(p), Value::Int(s)]));
         if exp_numeric.get(name).cloned() != got_num {
             failures.push(format!("NUMERIC_PRECISION_FLAVORS[{name}]"));
         }
-        if exp_auto.get(name).map(PyValue::py_str).as_deref() != Some(f.auto_increment_column()) {
+        if exp_auto.get(name).map(Value::py_str).as_deref() != Some(f.auto_increment_column()) {
             failures.push(format!("AUTO_INCREMENT_COLUMN_FLAVORS[{name}]"));
         }
         let cfg = exp_configs.get(name).expect("flavor config");
-        if cfg.get("engine").map(PyValue::py_str).as_deref() != Some(f.engine()) {
+        if cfg.get("engine").map(Value::py_str).as_deref() != Some(f.engine()) {
             failures.push(format!("flavor_configs[{name}].engine"));
         }
         let defaults: BTreeMap<String, String> = f
@@ -499,7 +501,7 @@ fn flavor_sets_case(expected: &PyValue) -> Vec<String> {
             failures.push(format!("flavor_configs[{name}].requirements"));
         }
     }
-    if exp_auto.get("default").map(PyValue::py_str).as_deref()
+    if exp_auto.get("default").map(Value::py_str).as_deref()
         != Some("GENERATED BY DEFAULT AS IDENTITY")
     {
         failures.push("AUTO_INCREMENT_COLUMN_FLAVORS[default]".into());
@@ -507,11 +509,11 @@ fn flavor_sets_case(expected: &PyValue) -> Vec<String> {
     failures
 }
 
-fn dtype_tables_case(func: &str, expected: &PyValue) -> Vec<String> {
+fn dtype_tables_case(func: &str, expected: &Value) -> Vec<String> {
     let mut failures = Vec::new();
     match func {
         "pd_to_db_table" => {
-            let d = expected.as_dict().unwrap();
+            let d = expected.as_map().unwrap();
             let got_keys: Vec<&str> = PD_TO_DB_DTYPES_FLAVORS.iter().map(|(k, _)| *k).collect();
             let exp_keys: Vec<&str> = d.keys().map(String::as_str).collect();
             if got_keys != exp_keys {
@@ -520,10 +522,7 @@ fn dtype_tables_case(func: &str, expected: &PyValue) -> Vec<String> {
             for (pd_type, row) in PD_TO_DB_DTYPES_FLAVORS {
                 for (i, col) in PD_TO_DB_COLUMNS.iter().enumerate() {
                     let key = col.map(Flavor::as_str).unwrap_or("default");
-                    let exp = d
-                        .get(*pd_type)
-                        .and_then(|r| r.get(key))
-                        .map(PyValue::py_str);
+                    let exp = d.get(*pd_type).and_then(|r| r.get(key)).map(Value::py_str);
                     if exp.as_deref() != Some(row[i]) {
                         failures.push(format!("PD_TO_DB_DTYPES_FLAVORS[{pd_type}][{key}]"));
                     }
@@ -531,9 +530,9 @@ fn dtype_tables_case(func: &str, expected: &PyValue) -> Vec<String> {
             }
         }
         "db_to_pd_table" => {
-            let d = expected.as_dict().unwrap();
+            let d = expected.as_map().unwrap();
             for (k, v) in DB_TO_PD_DTYPES {
-                if d.get(*k).map(PyValue::py_str).as_deref() != Some(*v) {
+                if d.get(*k).map(Value::py_str).as_deref() != Some(*v) {
                     failures.push(format!("DB_TO_PD_DTYPES[{k}]"));
                 }
             }
@@ -541,7 +540,7 @@ fn dtype_tables_case(func: &str, expected: &PyValue) -> Vec<String> {
             if exact != DB_TO_PD_DTYPES.len() {
                 failures.push("DB_TO_PD_DTYPES length".into());
             }
-            let subs = d.get("substrings").unwrap().as_dict().unwrap();
+            let subs = d.get("substrings").unwrap().as_map().unwrap();
             let got: Vec<(String, String)> = DB_TO_PD_SUBSTRINGS
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -551,20 +550,18 @@ fn dtype_tables_case(func: &str, expected: &PyValue) -> Vec<String> {
             if got != exp {
                 failures.push("DB_TO_PD_DTYPES['substrings']".into());
             }
-            if d.get("default").map(PyValue::py_str).as_deref() != Some(DB_TO_PD_DEFAULT) {
+            if d.get("default").map(Value::py_str).as_deref() != Some(DB_TO_PD_DEFAULT) {
                 failures.push("DB_TO_PD_DTYPES['default']".into());
             }
         }
         "cast_dtypes_table" => {
-            let got = PyValue::Dict(
+            let got = Value::Map(
                 DB_FLAVORS_CAST_DTYPES
                     .iter()
                     .map(|(f, m)| {
                         (
                             f.to_string(),
-                            PyValue::Dict(
-                                m.iter().map(|(k, v)| (k.to_string(), v_str(*v))).collect(),
-                            ),
+                            Value::Map(m.iter().map(|(k, v)| (k.to_string(), v_str(*v))).collect()),
                         )
                     })
                     .collect(),
@@ -582,7 +579,7 @@ fn dtype_tables_case(func: &str, expected: &PyValue) -> Vec<String> {
 // Dispatch
 // ---------------------------------------------------------------------------------------------
 
-fn create_table_options(a: &PyValue) -> CreateTableOptions {
+fn create_table_options(a: &Value) -> CreateTableOptions {
     CreateTableOptions {
         schema: os(a, "schema"),
         primary_key: os(a, "primary_key"),
@@ -594,7 +591,7 @@ fn create_table_options(a: &PyValue) -> CreateTableOptions {
         hypertable_orderby: a.get("hypertable_orderby").map(str_list),
         partition_by_column: os(a, "partition_by_column"),
         partition_bounds: a.get("partition_bounds").map(|v| match v {
-            PyValue::List(items) => items
+            Value::List(items) => items
                 .iter()
                 .map(|pair| {
                     let l = str_list(pair);
@@ -604,11 +601,11 @@ fn create_table_options(a: &PyValue) -> CreateTableOptions {
             _ => Vec::new(),
         }),
         partition_scheme_name: os(a, "partition_scheme_name"),
-        parse_dtypes: a.get("_parse_dtypes").is_none_or(PyValue::is_truthy),
+        parse_dtypes: a.get("_parse_dtypes").is_none_or(Value::truthy),
     }
 }
 
-fn run(func: &str, a: &PyValue) -> Outcome {
+fn run(func: &str, a: &Value) -> Outcome {
     match func {
         "sql_item_name" => ok(v_str(sql_item_name(
             &s(a, "item"),
@@ -617,14 +614,17 @@ fn run(func: &str, a: &PyValue) -> Outcome {
         ))),
         "truncate_item_name" => ok(v_str(truncate_item_name(&s(a, "item"), flavor(a)))),
         "pg_capital" => ok(v_str(pg_capital(&s(a, "s"), b(a, "quote_capitals")))),
-        "clean" => res(clean(&s(a, "s")), |_| PyValue::None),
-        "truncate_string_sections" => ok(v_str(truncate_string_sections(
+        "clean" => res(clean(&s(a, "s")), |_| Value::Null),
+        "truncate_string_sections" => match truncate_string_sections(
             &s(a, "item"),
             "_",
-            get(a, "max_len").as_int().unwrap() as usize,
-        ))),
+            get(a, "max_len").as_i64().unwrap() as usize,
+        ) {
+            Ok(t) => ok(v_str(t)),
+            Err(e) => Outcome::Error(e.to_string()),
+        },
         "build_where" => ok(v_str(build_where(
-            get(a, "params").as_dict().unwrap(),
+            get(a, "params").as_map().unwrap(),
             flavor(a),
             b(a, "with_where"),
         ))),
@@ -648,14 +648,16 @@ fn run(func: &str, a: &PyValue) -> Outcome {
         ))),
         "get_numeric_precision_scale" => {
             let (p, sc) = get_numeric_precision_scale(opt_flavor(a), os(a, "dtype").as_deref());
-            let i = |x: Option<i64>| x.map(PyValue::Int).unwrap_or(PyValue::None);
-            ok(PyValue::List(vec![i(p), i(sc)]))
+            let i = |x: Option<i64>| x.map(Value::Int).unwrap_or(Value::Null);
+            ok(Value::List(vec![i(p), i(sc)]))
         }
         "get_geometry_type_srid" => {
-            let (t, srid) = get_geometry_type_srid(&s(a, "dtype"));
-            ok(PyValue::List(vec![v_str(t), v_srid(&srid)]))
+            match get_geometry_type_srid(&s(a, "dtype"), "geometry", Srid::Code(0)) {
+                Ok((t, srid)) => ok(Value::List(vec![v_str(t), v_srid(&srid)])),
+                Err(e) => Outcome::Error(e.to_string()),
+            }
         }
-        "are_dtypes_equal" => ok(PyValue::Bool(are_dtypes_equal(&s(a, "l"), &s(a, "r")))),
+        "are_dtypes_equal" => ok(Value::Bool(are_dtypes_equal(&s(a, "l"), &s(a, "r")))),
         "get_null_replacement" => ok(v_str(get_null_replacement(&s(a, "typ"), Some(flavor(a))))),
         "get_update_queries" => {
             let target = s(a, "target");
@@ -689,8 +691,8 @@ fn run(func: &str, a: &PyValue) -> Outcome {
         ),
         "format_cte_subquery" => {
             let cols = match get(a, "cols_to_select") {
-                PyValue::List(items) => {
-                    ColsToSelect::Columns(items.iter().map(PyValue::py_str).collect())
+                Value::List(items) => {
+                    ColsToSelect::Columns(items.iter().map(Value::py_str).collect())
                 }
                 other => ColsToSelect::Raw(other.py_str()),
             };
@@ -699,12 +701,12 @@ fn run(func: &str, a: &PyValue) -> Outcome {
                 v_str,
             )
         }
-        "find_top_level_select_index" => ok(PyValue::Int(
+        "find_top_level_select_index" => ok(Value::Int(
             find_top_level_select_index(&s(a, "query"), b(a, "last"))
                 .map(|i| i as i64)
                 .unwrap_or(-1),
         )),
-        "get_leading_with_index" => ok(PyValue::Int(
+        "get_leading_with_index" => ok(Value::Int(
             get_leading_with_index(&s(a, "query"))
                 .map(|i| i as i64)
                 .unwrap_or(-1),
@@ -764,7 +766,7 @@ fn run(func: &str, a: &PyValue) -> Outcome {
                         &column,
                         f,
                         schema.as_deref(),
-                        get(a, "max_id").as_int(),
+                        get(a, "max_id").as_i64(),
                     )),
                 ),
             ]))
@@ -785,8 +787,8 @@ fn run(func: &str, a: &PyValue) -> Outcome {
         "pipe_attributes" => {
             let ctx = ConnectorCtx::new(flavor(a));
             let p = pipe(a);
-            let indices = PyValue::Dict(
-                p.indices()
+            let indices = Value::Map(
+                p.index_columns()
                     .into_iter()
                     .map(|(k, v)| {
                         (
@@ -799,27 +801,32 @@ fn run(func: &str, a: &PyValue) -> Outcome {
                     })
                     .collect(),
             );
-            ok(v_dict(vec![
-                ("dtypes", v_map(&p.dtypes())),
-                ("precision_unit", v_str(p.precision_unit())),
-                ("chunk_interval", v_interval(p.get_chunk_interval())),
-                (
-                    "chunk_interval_60",
-                    v_interval(p.get_chunk_interval_with(Interval::minutes(60))),
-                ),
-                (
-                    "chunk_interval_int",
-                    v_interval(p.get_chunk_interval_with(Interval::Int(90))),
-                ),
-                ("backtrack", v_interval(p.get_backtrack_interval(true))),
-                (
-                    "backtrack_no_existing",
-                    v_interval(p.get_backtrack_interval(false)),
-                ),
-                ("guess_datetime", v_opt(p.guess_datetime())),
-                ("indices", indices),
-                ("schema", v_opt(ctx.get_pipe_schema(&p))),
-            ]))
+            let attrs = || -> meerschaum_sql::Result<Value> {
+                Ok(v_dict(vec![
+                    ("dtypes", v_map(&str_map_of(&p.dtypes()))),
+                    ("precision_unit", v_str(p.precision_unit()?.name())),
+                    ("chunk_interval", v_interval(p.chunk_interval()?)),
+                    (
+                        "chunk_interval_60",
+                        v_interval(p.chunk_interval_with(ChunkIntervalArg::Delta(
+                            TimeDelta::minutes(60),
+                        ))?),
+                    ),
+                    (
+                        "chunk_interval_int",
+                        v_interval(p.chunk_interval_with(ChunkIntervalArg::Int(90))?),
+                    ),
+                    ("backtrack", v_interval(p.backtrack_interval(true)?)),
+                    (
+                        "backtrack_no_existing",
+                        v_interval(p.backtrack_interval(false)?),
+                    ),
+                    ("guess_datetime", v_opt(p.guess_datetime())),
+                    ("indices", indices),
+                    ("schema", v_opt(ctx.get_pipe_schema(&p))),
+                ]))
+            };
+            res(attrs(), |v| v)
         }
         "get_create_index_queries" => {
             let ctx = ConnectorCtx::new(flavor(a));
@@ -829,11 +836,9 @@ fn run(func: &str, a: &PyValue) -> Outcome {
                 existing_cols_indices: index_docs(get(st, "existing_cols_indices")),
                 ..Default::default()
             };
-            ok(v_map_list(&get_create_index_queries(
-                &ctx,
-                &pipe(a),
-                &state,
-            )))
+            res(get_create_index_queries(&ctx, &pipe(a), &state), |m| {
+                v_map_list(&m)
+            })
         }
         "get_drop_index_queries" => {
             let ctx = ConnectorCtx::new(flavor(a));
@@ -858,7 +863,7 @@ fn run(func: &str, a: &PyValue) -> Outcome {
         "get_vacuum_queries" => ok(
             match get_vacuum_queries(flavor(a), &s(a, "pipe_name"), b(a, "full")) {
                 Some(q) => v_list(q),
-                None => PyValue::None,
+                None => Value::Null,
             },
         ),
         "get_analyze_query" => ok(v_opt(get_analyze_query(flavor(a), &s(a, "pipe_name")))),
@@ -873,7 +878,7 @@ fn run(func: &str, a: &PyValue) -> Outcome {
                     v_dict(vec![
                         ("segmentby", v_list(settings.segmentby)),
                         ("orderby", v_list(settings.orderby)),
-                        ("after", settings.after.unwrap_or(PyValue::None)),
+                        ("after", settings.after.unwrap_or(Value::Null)),
                     ]),
                 ),
                 (
@@ -921,7 +926,7 @@ fn run(func: &str, a: &PyValue) -> Outcome {
                 queries.extend(groups.into_iter().flatten());
             }
             ok(v_dict(vec![
-                ("success", PyValue::Bool(success)),
+                ("success", Value::Bool(success)),
                 ("queries", v_list(queries)),
             ]))
         }
@@ -948,7 +953,7 @@ fn run(func: &str, a: &PyValue) -> Outcome {
                     "chunk_count_query",
                     v_str(get_timescaledb_chunk_count_query(&ctx, &p)),
                 ),
-                ("should_partition", PyValue::Bool(should_partition(f, &p))),
+                ("should_partition", Value::Bool(should_partition(f, &p))),
                 ("partition_column", v_opt(get_partition_column(f, &p))),
                 (
                     "cleanup_queries",
@@ -961,10 +966,10 @@ fn run(func: &str, a: &PyValue) -> Outcome {
                 ("scheme_name", v_str(partition_scheme_name(f, &p.target))),
             ];
             if f.is_timescaledb() && p.column("datetime").is_some() {
-                out.push((
-                    "set_chunk_time_interval_query",
-                    v_str(get_set_chunk_time_interval_query(&ctx, &p, 1440)),
-                ));
+                match get_set_chunk_time_interval_query(&ctx, &p, 1440) {
+                    Ok(q) => out.push(("set_chunk_time_interval_query", v_str(q))),
+                    Err(e) => return Outcome::Error(e.to_string()),
+                }
             }
             ok(v_dict(out))
         }
@@ -992,7 +997,7 @@ fn run(func: &str, a: &PyValue) -> Outcome {
             ok(v_dict(vec![
                 (
                     "bounds",
-                    PyValue::List(vec![v_partition_value(lo), v_partition_value(hi)]),
+                    Value::List(vec![v_partition_value(lo), v_partition_value(hi)]),
                 ),
                 (
                     "literals",
@@ -1004,9 +1009,9 @@ fn run(func: &str, a: &PyValue) -> Outcome {
         "get_pipe_metadef" => {
             let f = flavor(a);
             let p = pipe(a);
-            let params = get(a, "params").as_dict().cloned();
+            let params = get(a, "params").as_map().cloned();
             let parent = match get(a, "parent") {
-                PyValue::None => None,
+                Value::Null => None,
                 par => Some(ParentSpec {
                     target: s(par, "target"),
                     schema: os(par, "schema"),
@@ -1028,12 +1033,12 @@ fn run(func: &str, a: &PyValue) -> Outcome {
     }
 }
 
-fn partition_ranges_case(a: &PyValue) -> Outcome {
+fn partition_ranges_case(a: &Value) -> Outcome {
     let f = flavor(a);
     let ctx = ConnectorCtx::new(f);
     let p = pipe(a);
     let values: Vec<PartitionValue> = match get(a, "values") {
-        PyValue::List(items) => items.iter().map(partition_value).collect(),
+        Value::List(items) => items.iter().map(partition_value).collect(),
         _ => Vec::new(),
     };
     let le = |x: &PartitionValue, y: &PartitionValue| match (x, y) {
@@ -1053,7 +1058,10 @@ fn partition_ranges_case(a: &PyValue) -> Outcome {
             max = *v;
         }
     }
-    let chunk = p.get_chunk_interval();
+    let chunk = match p.chunk_interval() {
+        Ok(c) => c,
+        Err(e) => return Outcome::Error(e.to_string()),
+    };
     let (ranges, _) = partition_ranges(min, max, chunk, MAX_PARTITIONS_PER_SYNC);
     let mut out = vec![
         ("min", v_partition_value(min)),
@@ -1061,18 +1069,18 @@ fn partition_ranges_case(a: &PyValue) -> Outcome {
         ("interval", v_interval(chunk)),
         (
             "ranges",
-            PyValue::List(
+            Value::List(
                 ranges
                     .iter()
                     .map(|(lo, hi)| {
-                        PyValue::List(vec![v_partition_value(*lo), v_partition_value(*hi)])
+                        Value::List(vec![v_partition_value(*lo), v_partition_value(*hi)])
                     })
                     .collect(),
             ),
         ),
         (
             "literals",
-            PyValue::List(
+            Value::List(
                 ranges
                     .iter()
                     .map(|(lo, hi)| v_list([partition_literal(f, *lo), partition_literal(f, *hi)]))
@@ -1089,7 +1097,7 @@ fn partition_ranges_case(a: &PyValue) -> Outcome {
         ),
         (
             "initial_bounds",
-            PyValue::List(
+            Value::List(
                 get_initial_partition_bounds(f, &p.target, &ranges)
                     .into_iter()
                     .map(|(n, l)| v_list([n, l]))
@@ -1192,12 +1200,14 @@ fn golden_queries_match_python() {
         }
 
         // PARITY: Python raises when a name cannot be truncated to the flavor's limit
-        // (`utils/misc.py:1341`); the Rust port returns its best effort instead, so those
-        // cases are skipped (and counted).
-        if case
-            .error
-            .as_deref()
-            .is_some_and(|e| e.contains("could not be truncated"))
+        // (`utils/misc.py:1341`); the infallible quoting helpers return their best effort
+        // instead, so those cases are skipped (and counted). `truncate_string_sections` itself
+        // raises like Python.
+        if func != "truncate_string_sections"
+            && case
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("could not be truncated"))
         {
             *skipped.entry(func.to_string()).or_default() += 1;
             continue;
@@ -1205,14 +1215,14 @@ fn golden_queries_match_python() {
 
         let mut args = case.args.clone();
         if func == "partition_ranges" {
-            if let (PyValue::Dict(d), Some(text)) = (
+            if let (Value::Map(d), Some(text)) = (
                 &mut args,
                 case.result
                     .as_ref()
                     .and_then(|r| r.get("mssql_max_boundary_text"))
-                    .map(PyValue::py_str),
+                    .map(Value::py_str),
             ) {
-                d.insert("_mssql_max_text".into(), PyValue::Str(text));
+                d.insert("_mssql_max_text".into(), Value::Str(text));
             }
         }
         let outcome = std::panic::catch_unwind(|| run(func, &args));
@@ -1222,7 +1232,7 @@ fn golden_queries_match_python() {
         };
         // A Python `None` result deserializes as a missing `result`.
         let expected = case.result.clone().or(if case.error.is_none() {
-            Some(PyValue::None)
+            Some(Value::Null)
         } else {
             None
         });
@@ -1242,7 +1252,7 @@ fn golden_queries_match_python() {
                 };
                 let exp = expected
                     .as_ref()
-                    .map(PyValue::json_dumps)
+                    .map(Value::json_dumps)
                     .unwrap_or_else(|| format!("ERROR {}", case.error.clone().unwrap_or_default()));
                 failures.push(format!(
                     "{func} {}\n  python: {exp}\n  rust:   {got}",

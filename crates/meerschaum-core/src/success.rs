@@ -44,15 +44,15 @@ impl SuccessTuple {
         (self.success, &self.message)
     }
 
-    /// Whether the message would be printed after an action: messages in
-    /// `STATIC_CONFIG['system']['success']['ignore']` are suppressed.
+    /// Whether the message would be suppressed after an action: `print_tuple` skips messages
+    /// whose `.strip()` is in `STATIC_CONFIG['system']['success']['ignore']`.
     pub fn is_ignored_message(&self) -> bool {
         crate::static_config::static_config()
             .system
             .success
             .ignore
             .iter()
-            .any(|m| m.as_deref() == Some(self.message.as_str()))
+            .any(|m| m.as_deref() == Some(crate::pyfmt::py_strip(&self.message)))
     }
 }
 
@@ -198,6 +198,8 @@ mod tests {
         assert_eq!(back, SuccessTuple::fail("nope"));
         assert_eq!(t.to_string(), "(True, 'Success')");
         assert!(t.is_ignored_message());
+        assert!(SuccessTuple::ok(" Success\n").is_ignored_message());
+        assert!(!SuccessTuple::ok("Inserted 1").is_ignored_message());
         let r = SyncResult::new(true, "Inserted 1");
         assert_eq!(SuccessTuple::from(r).message, "Inserted 1");
     }

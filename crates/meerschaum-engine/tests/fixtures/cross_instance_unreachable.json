@@ -1,0 +1,42 @@
+{
+  "description": "The same cross-instance edge while the parent's instance is down: the child cannot read the parent's watermark, so the edge is upstream_failed.",
+  "records": [
+    {"instance": "sql:landing", "connector": "plugin:sensors", "metric": "readings",
+     "parameters": {"columns": {"datetime": "ts", "id": "sensor"}, "verify": {"chunk_days": 1}}},
+    {"instance": "sql:warehouse", "connector": "sql:landing", "metric": "readings_hourly",
+     "parameters": {"columns": {"datetime": "hour", "id": "sensor"}, "verify": {"chunk_days": 1},
+                    "parents": ["Pipe('plugin:sensors', 'readings', instance='sql:landing')"]}},
+    {"instance": "sql:warehouse", "connector": "sql:warehouse", "metric": "readings_daily",
+     "parameters": {"columns": {"datetime": "day", "id": "sensor"}, "verify": {"chunk_days": 1},
+                    "parents": ["Pipe('sql:landing', 'readings_hourly')"]}}
+  ],
+  "selection": {"targets": {"refs": ["sql:warehouse|sql:warehouse|readings_daily|None"]}, "parents": "all"},
+  "state": {
+    "watermarks": {
+      "sql:landing|plugin:sensors|readings|None": "2026-10-12T08:30:00Z",
+      "sql:warehouse|sql:landing|readings_hourly|None": "2026-10-12T07:00:00Z",
+      "sql:warehouse|sql:warehouse|readings_daily|None": "2026-10-12T00:00:00Z"
+    },
+    "definition_hashes": {
+      "sql:warehouse|sql:landing|readings_hourly|None": "@current",
+      "sql:warehouse|sql:warehouse|readings_daily|None": "@current"
+    },
+    "cursors": {
+      "sql:warehouse": [
+        {"parent_ref": "sql:landing|plugin:sensors|readings|None", "child_ref": "sql:warehouse|sql:landing|readings_hourly|None", "seq": 7, "parent_watermark_at_cursor": "2026-10-12T08:30:00Z"}
+      ]
+    },
+    "unreachable_instances": ["sql:landing"]
+  },
+  "expected": {
+    "warnings": [],
+    "nodes": [
+      {"node": "sql:landing|plugin:sensors|readings|None", "action": "root", "bounds": {"begin": "", "end": null}},
+      {"node": "sql:warehouse|sql:landing|readings_hourly|None", "action": "upstream_failed", "bounds": null,
+       "provisional": true,
+       "reason_contains": ["cannot read the watermark of plugin:sensors/readings@sql:landing", "instance 'sql:landing' is unreachable"]},
+      {"node": "sql:warehouse|sql:warehouse|readings_daily|None", "action": "upstream_failed", "bounds": null,
+       "reason_contains": ["parent sql:landing/readings_hourly failed"]}
+    ]
+  }
+}

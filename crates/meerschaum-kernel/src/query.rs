@@ -22,6 +22,26 @@ pub enum ParamValue {
     Many(Vec<Value>),
 }
 
+impl From<&meerschaum_core::Value> for ParamValue {
+    /// A `params` entry as `build_where` receives it: a list is `IN`, anything else one value.
+    fn from(v: &meerschaum_core::Value) -> Self {
+        match v {
+            meerschaum_core::Value::List(items) => {
+                ParamValue::Many(items.iter().map(Value::from).collect())
+            }
+            other => ParamValue::One(Value::from(other)),
+        }
+    }
+}
+
+/// Convert a `params` map shared with the SQL `build_where` into `query_df` params.
+pub fn params_from_core(params: &meerschaum_core::Map) -> IndexMap<String, ParamValue> {
+    params
+        .iter()
+        .map(|(k, v)| (k.clone(), ParamValue::from(v)))
+        .collect()
+}
+
 /// The keyword arguments of `query_df`.
 #[derive(Clone, Debug, Default)]
 pub struct QueryOptions {

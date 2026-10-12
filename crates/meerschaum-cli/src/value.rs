@@ -362,7 +362,7 @@ impl PyValue {
             PyValue::Float(f) => float_repr(*f),
             PyValue::Complex(r, i) => complex_repr(*r, *i),
             PyValue::Str(s) => repr_str(s),
-            PyValue::Bytes(b) => repr_bytes(b),
+            PyValue::Bytes(b) => meerschaum_core::pyfmt::bytes_repr(b),
             PyValue::List(items) => {
                 format!(
                     "[{}]",
@@ -561,81 +561,6 @@ fn json_float(f: f64) -> String {
     }
 }
 
-/// `json.encoder.py_encode_basestring_ascii`.
-pub fn json_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0c}' => out.push_str("\\f"),
-            ' '..='~' => out.push(c),
-            _ => {
-                let mut buf = [0u16; 2];
-                for unit in c.encode_utf16(&mut buf) {
-                    let _ = write!(out, "\\u{unit:04x}");
-                }
-            }
-        }
-    }
-    out.push('"');
-    out
-}
-
-/// `float.__repr__`: the shortest round-tripping digits, in Python's layout.
-pub fn float_repr(f: f64) -> String {
-    if f.is_nan() {
-        return "nan".into();
-    }
-    if f.is_infinite() {
-        return if f > 0.0 { "inf" } else { "-inf" }.into();
-    }
-    if f == 0.0 {
-        return if f.is_sign_negative() { "-0.0" } else { "0.0" }.into();
-    }
-    let sci = format!("{f:e}");
-    let (mantissa, exp) = sci.split_once('e').unwrap_or((&sci, "0"));
-    let exp: i32 = exp.parse().unwrap_or(0);
-    let negative = mantissa.starts_with('-');
-    let digits: String = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
-    let mut out = String::new();
-    if negative {
-        out.push('-');
-    }
-    if (-4..16).contains(&exp) {
-        if exp >= 0 {
-            let int_len = (exp + 1) as usize;
-            if digits.len() <= int_len {
-                out.push_str(&digits);
-                out.push_str(&"0".repeat(int_len - digits.len()));
-                out.push_str(".0");
-            } else {
-                out.push_str(&digits[..int_len]);
-                out.push('.');
-                out.push_str(&digits[int_len..]);
-            }
-        } else {
-            out.push_str("0.");
-            out.push_str(&"0".repeat((-exp - 1) as usize));
-            out.push_str(&digits);
-        }
-    } else {
-        out.push_str(&digits[..1]);
-        if digits.len() > 1 {
-            out.push('.');
-            out.push_str(&digits[1..]);
-        }
-        let sign = if exp < 0 { '-' } else { '+' };
-        let _ = write!(out, "e{sign}{:02}", exp.abs());
-    }
-    out
-}
-
 fn complex_repr(r: f64, i: f64) -> String {
     fn part(f: f64) -> String {
         let s = float_repr(f);
@@ -648,86 +573,16 @@ fn complex_repr(r: f64, i: f64) -> String {
     format!("({}{sign}{}j)", part(r), part(i.abs()))
 }
 
-/// Python `repr(str)`.
-pub fn repr_str(s: &str) -> String {
-    let quote = if s.contains('\'') && !s.contains('"') {
-        '"'
-    } else {
-        '\''
-    };
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push(quote);
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c == quote => {
-                out.push('\\');
-                out.push(c);
-            }
-            c if is_printable(c) => out.push(c),
-            c => {
-                let code = c as u32;
-                if code < 0x100 {
-                    let _ = write!(out, "\\x{code:02x}");
-                } else if code < 0x10000 {
-                    let _ = write!(out, "\\u{code:04x}");
-                } else {
-                    let _ = write!(out, "\\U{code:08x}");
-                }
-            }
-        }
-    }
-    out.push(quote);
-    out
-}
+pub use meerschaum_core::pyfmt::{float_repr, str_repr as repr_str};
 
-fn is_printable(c: char) -> bool {
-    if c == ' ' {
-        return true;
-    }
-    !(c.is_control() || c.is_whitespace())
-}
-
-fn repr_bytes(b: &[u8]) -> String {
-    let quote = if b.contains(&b'\'') && !b.contains(&b'"') {
-        '"'
-    } else {
-        '\''
-    };
-    let mut out = String::from("b");
-    out.push(quote);
-    for &x in b {
-        match x {
-            b'\\' => out.push_str("\\\\"),
-            b'\n' => out.push_str("\\n"),
-            b'\r' => out.push_str("\\r"),
-            b'\t' => out.push_str("\\t"),
-            x if x as char == quote => {
-                out.push('\\');
-                out.push(quote);
-            }
-            0x20..=0x7e => out.push(x as char),
-            x => {
-                let _ = write!(out, "\\x{x:02x}");
-            }
-        }
-    }
-    out.push(quote);
-    out
+/// `json.encoder.py_encode_basestring_ascii` (`json.dumps(s)` with `ensure_ascii=True`).
+pub fn json_quote(s: &str) -> String {
+    meerschaum_core::pyfmt::json_dumps_str(s, true)
 }
 
 /// `datetime.isoformat()` for a UTC-aware datetime.
 pub fn datetime_isoformat(dt: &DateTime<Utc>) -> String {
-    let micro = dt.nanosecond() / 1000;
-    let mut s = dt.format("%Y-%m-%dT%H:%M:%S").to_string();
-    if micro != 0 {
-        let _ = write!(s, ".{micro:06}");
-    }
-    s.push_str("+00:00");
-    s
+    meerschaum_core::pyfmt::PyDateTime::utc(*dt).isoformat()
 }
 
 /// Encode an arguments map as tagged JSON (see [`PyValue::to_fixture_json`]).

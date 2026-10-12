@@ -41,46 +41,57 @@ pub fn truncate_string_sections(
     delimiter: &str,
     max_len: usize,
 ) -> Result<String, TruncateError> {
-    if item.chars().count() < max_len {
-        return Ok(item.to_string());
+    let (out, complete) = truncate_sections(item, delimiter, max_len);
+    if complete {
+        Ok(out)
+    } else {
+        Err(TruncateError(item.to_string()))
     }
-    let sections: Vec<(usize, String)> = item
+}
+
+/// [`truncate_string_sections`] for callers that cannot fail (SQL identifier quoting): where
+/// Python raises `String could not be truncated`, return the shortest name reached.
+pub fn truncate_string_sections_best_effort(item: &str, delimiter: &str, max_len: usize) -> String {
+    truncate_sections(item, delimiter, max_len).0
+}
+
+/// The truncation loop: the shortened name and whether it fits.
+fn truncate_sections(item: &str, delimiter: &str, max_len: usize) -> (String, bool) {
+    if item.chars().count() < max_len {
+        return (item.to_string(), true);
+    }
+    let sections: Vec<(usize, Vec<char>)> = item
         .split(delimiter)
-        .map(String::from)
+        .map(|s| s.chars().collect())
         .enumerate()
         .collect();
-    let mut sorted = sections.clone();
+    let mut current = sections.clone();
     // Python's `sorted` is stable: equal lengths keep their original order.
-    sorted.sort_by_key(|(_, s)| std::cmp::Reverse(s.chars().count()));
+    current.sort_by_key(|(_, s)| std::cmp::Reverse(s.len()));
     let available = max_len as i64 - sections.len() as i64;
-    let total =
-        |v: &[(usize, String)]| -> i64 { v.iter().map(|(_, s)| s.chars().count() as i64).sum() };
-    let mut current = sorted;
+    let total = |v: &[(usize, Vec<char>)]| -> i64 { v.iter().map(|(_, s)| s.len() as i64).sum() };
     let mut len = total(&current);
+    let mut complete = true;
     while len > available {
-        current = current
-            .into_iter()
-            .map(|(i, s)| {
-                let n = s.chars().count();
-                if n > 1 {
-                    (i, s.chars().take(n - 1).collect())
-                } else {
-                    (i, s)
-                }
-            })
-            .collect();
+        for (_, s) in current.iter_mut() {
+            if s.len() > 1 {
+                s.pop();
+            }
+        }
         let old = len;
         len = total(&current);
         if old == len {
-            return Err(TruncateError(item.to_string()));
+            complete = false;
+            break;
         }
     }
     current.sort_by_key(|(i, _)| *i);
-    Ok(current
+    let out = current
         .into_iter()
-        .map(|(_, s)| s)
+        .map(|(_, s)| s.into_iter().collect::<String>())
         .collect::<Vec<_>>()
-        .join(delimiter))
+        .join(delimiter);
+    (out, complete)
 }
 
 /// Port of `truncate_item_name(item, flavor)`.
@@ -102,5 +113,8 @@ mod tests {
         // PARITY: exactly max_len is truncated.
         assert_eq!(truncate_item_name(&name, "postgresql").unwrap().len(), 63);
         assert_eq!(truncate_item_name("short", "oracle").unwrap(), "short");
+        let many = vec!["a"; 40].join("_");
+        assert!(truncate_string_sections(&many, "_", 30).is_err());
+        assert_eq!(truncate_string_sections_best_effort(&many, "_", 30), many);
     }
 }

@@ -3,7 +3,9 @@
 //! `get_geometry_cols`, `get_unhashable_cols`, `get_bool_cols`, `get_date_cols`,
 //! `get_special_cols`).
 //!
-//! Most detectors inspect the *first valid value* of each column, as v4 does.
+//! Most detectors inspect the *first valid value* of each column, as v4 does. Columns read from
+//! tagged Arrow fields (SQL query results, see [`crate::frame::ColumnTags`]) are answered from
+//! their `meerschaum:dtype` tag instead.
 
 use indexmap::IndexMap;
 use polars::prelude::{DataType, TimeUnit};
@@ -16,13 +18,18 @@ fn first_valid(data: &ColumnData) -> Option<Value> {
     data.first_valid_index().map(|ix| data.get(ix))
 }
 
-fn cols_where(df: &Frame, pred: impl Fn(&Value) -> bool) -> Vec<String> {
+/// The columns whose first valid value matches `pred` (`kind` detection), except that a column with an explicit `meerschaum:dtype` tag is
+/// answered from the tag (no value inspection); untagged columns are detected from values.
+fn special_cols(df: &Frame, kind: &str, pred: impl Fn(&Value) -> bool) -> Vec<String> {
     if df.height() == 0 {
         return vec![];
     }
     df.columns()
         .iter()
-        .filter(|c| first_valid(&c.data).is_some_and(|v| pred(&v)))
+        .filter(|c| match c.tags.declares(kind) {
+            Some(declared) => declared,
+            None => first_valid(&c.data).is_some_and(|v| pred(&v)),
+        })
         .map(|c| c.name.clone())
         .collect()
 }
@@ -41,17 +48,17 @@ pub fn get_unhashable_cols(df: &Frame) -> Vec<String> {
 
 /// `get_json_cols()`: the first valid value is a `dict` or `list`.
 pub fn get_json_cols(df: &Frame) -> Vec<String> {
-    cols_where(df, |v| matches!(v, Value::Json(_)))
+    special_cols(df, "json", |v| matches!(v, Value::Json(_)))
 }
 
 /// `get_numeric_cols()`: the first valid value is a `Decimal`.
 pub fn get_numeric_cols(df: &Frame) -> Vec<String> {
-    cols_where(df, |v| matches!(v, Value::Decimal(_)))
+    special_cols(df, "numeric", |v| matches!(v, Value::Decimal(_)))
 }
 
 /// `get_uuid_cols()`: the first valid value is a `UUID`.
 pub fn get_uuid_cols(df: &Frame) -> Vec<String> {
-    cols_where(df, |v| matches!(v, Value::Uuid(_)))
+    special_cols(df, "uuid", |v| matches!(v, Value::Uuid(_)))
 }
 
 /// `get_bool_cols()`: columns with a boolean dtype (empty frames return nothing).
@@ -75,9 +82,10 @@ pub fn get_bytes_cols(df: &Frame) -> Vec<String> {
             matches!(
                 c.data.polars_dtype(),
                 Some(DataType::Binary | DataType::BinaryOffset)
-            ) || (df.height() > 0
-                && matches!(&c.data, ColumnData::Object(_))
-                && matches!(first_valid(&c.data), Some(Value::Bytes(_))))
+            ) || (df.height() > 0 && c.tags.declares("bytes") == Some(true))
+                || (df.height() > 0
+                    && matches!(&c.data, ColumnData::Object(_))
+                    && matches!(first_valid(&c.data), Some(Value::Bytes(_))))
         })
         .map(|c| c.name.clone())
         .collect()
@@ -213,7 +221,7 @@ pub fn get_datetime_cols_types(df: &Frame) -> IndexMap<String, String> {
 
 /// `get_geometry_cols()`: the first valid value is a geometry.
 pub fn get_geometry_cols(df: &Frame) -> Vec<String> {
-    cols_where(df, |v| matches!(v, Value::Geometry(_)))
+    special_cols(df, "geometry", |v| matches!(v, Value::Geometry(_)))
 }
 
 /// `get_geometry_cols(df, with_types_srids=True)`: `(geometry type, srid)` per geometry column.
@@ -239,8 +247,8 @@ pub fn get_geometry_cols_types_srids(df: &Frame) -> IndexMap<String, (String, Sr
             .crs
             .as_ref()
             .and_then(Srid::epsg)
-            .map(Srid::Int)
-            .unwrap_or(Srid::Int(0));
+            .map(Srid::Code)
+            .unwrap_or(Srid::Code(0));
         let mut geometry_type = if types.len() == 1 {
             types[0].to_string()
         } else {
@@ -259,14 +267,14 @@ pub fn get_geometry_cols_types(df: &Frame) -> IndexMap<String, String> {
     get_geometry_cols_types_srids(df)
         .into_iter()
         .map(|(col, (geometry_type, srid))| {
-            if !srid.is_truthy() && geometry_type.eq_ignore_ascii_case("geometry") {
+            if !srid.truthy() && geometry_type.eq_ignore_ascii_case("geometry") {
                 return (col, "geometry".to_string());
             }
             let mut modifier = String::from("[");
             if !geometry_type.eq_ignore_ascii_case("geometry") {
                 modifier.push_str(&geometry_type);
             }
-            if srid.is_truthy() {
+            if srid.truthy() {
                 if modifier != "[" {
                     modifier.push_str(", ");
                 }

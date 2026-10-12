@@ -1,0 +1,5513 @@
+{
+ "case": {
+  "description": "Every top-level key, both host reference forms, MRSM{} symlinks, {MRSM_ROOT_DIR}, {__file__}, ${VAR} and $VAR from .env.",
+  "width": 120,
+  "runs": "all"
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONPATH": "{REPO}",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "explain",
+   "action": [
+    "explain"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "explain"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "a57adddba0e1ed7f95c491ccffffe9f2590968a964763ddb221349c6bf91999e",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:example",
+     "metric": "temperature",
+     "location": "atl",
+     "columns": {
+      "datetime": "timestamp",
+      "id": "station"
+     },
+     "target": "atl_temperature",
+     "tags": [
+      "weather",
+      "basic"
+     ],
+     "dtypes": {
+      "value": "float64"
+     },
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      }
+     },
+     "instance": "sql:project",
+     "cache": true
+    },
+    {
+     "connector": "sql:project",
+     "metric": "fahrenheit",
+     "instance": "sql:local_copy",
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true
+     },
+     "tags": [
+      "basic"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:example', 'temperature', 'atl')",
+     "connector_keys": "plugin:example",
+     "metric_key": "temperature",
+     "location_key": "atl",
+     "instance_keys": "sql:project",
+     "temporary": false,
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      },
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "tags": [
+       "weather",
+       "basic"
+      ],
+      "target": "atl_temperature",
+      "dtypes": {
+       "value": "float64"
+      }
+     }
+    },
+    {
+     "str": "Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')",
+     "connector_keys": "sql:project",
+     "metric_key": "fahrenheit",
+     "location_key": null,
+     "instance_keys": "sql:local_copy",
+     "temporary": false,
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true,
+      "tags": [
+       "basic"
+      ]
+     }
+    }
+   ],
+   "explain": "                                                    Pipes in 'basic'                                                    \n                                                  ╷                                                 ╷                   \n  Defined Pipes                                   │Compose Parameters                               │Remote Parameters  \n╶─────────────────────────────────────────────────┼─────────────────────────────────────────────────┼──────────────────╴\n  ╭───────────────── Instance ──────────────────╮ │                                                 │                   \n  │ sql:project                                 │ │                                                 │                   \n  ╰─────────────────────────────────────────────╯ │                                                 │                   \n                                                  │                                                 │                   \n  Pipe('plugin:example', 'temperature', 'atl')    │{                                                │                   \n                                                  │  \"example\": {                                   │                   \n  ⭕ Not registered                               │    \"stations\": [                                │                   \n                                                  │      \"KATL\"                                     │                   \n                                                  │    ]                                            │                   \n                                                  │  },                                             │                   \n                                                  │  \"columns\": {                                   │                   \n                                                  │    \"datetime\": \"timestamp\",                     │                   \n                                                  │    \"id\": \"station\"                              │                   \n                                                  │  },                                             │                   \n                                                  │  \"tags\": [                                      │                   \n                                                  │    \"weather\",                                   │                   \n                                                  │    \"basic\"                                      │                   \n                                                  │  ],                                             │                   \n                                                  │  \"target\": \"atl_temperature\",                   │                   \n                                                  │  \"dtypes\": {                                    │                   \n                                                  │    \"value\": \"float64\"                           │                   \n                                                  │  }                                              │                   \n                                                  │}                                                │                   \n╶─────────────────────────────────────────────────┼─────────────────────────────────────────────────┼──────────────────╴\n  ╭───────────────── Instance ──────────────────╮ │                                                 │                   \n  │ sql:local_copy                              │ │                                                 │                   \n  ╰─────────────────────────────────────────────╯ │                                                 │                   \n                                                  │                                                 │                   \n  Pipe('sql:project', 'fahrenheit',               │{                                                │                   \n  instance='sql:local_copy')                      │  \"sql\": \"SELECT timestamp, station\\nFROM atl_t… │                   \n                                                  │  \"columns\": {                                   │                   \n  ⭕ Not registered                               │    \"datetime\": \"timestamp\",                     │                   \n                                                  │    \"id\": \"station\"                              │                   \n                                                  │  },                                             │                   \n                                                  │  \"upsert\": true,                                │                   \n                                                  │  \"tags\": [                                      │                   \n                                                  │    \"basic\"                                      │                   \n                                                  │  ]                                              │                   \n                                                  │}                                                │                   \n                                                  ╵                                                 ╵                   \n",
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "up-dry",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "dry": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--dry"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Updated parameters for 2 pipes across 2 instances."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "example",
+      "noaa",
+      "-r",
+      "api:mrsm",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "weather",
+      "-r",
+      "api:custom",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:example",
+      "-m",
+      "temperature",
+      "-l",
+      "atl",
+      "-i",
+      "sql:project",
+      "--params",
+      "{\"example\":{\"stations\":[\"KATL\"]},\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"tags\":[\"weather\",\"basic\"],\"target\":\"atl_temperature\",\"dtypes\":{\"value\":\"float64\"}}",
+      "--noask",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "sql:project",
+      "-m",
+      "fahrenheit",
+      "-l",
+      "None",
+      "-i",
+      "sql:local_copy",
+      "--params",
+      "{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true,\"tags\":[\"basic\"]}",
+      "--noask",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ],
+    [
+     "warn",
+     "Mismatched values for attribute 'database' in connector 'sql:project'.\n  - Keyword value: '{PROJECT}/root/project.db'\n  - Existing value: '{TMP}/runs/0/basic/root/project.db'\n\nSetting `refresh` to True and recreating connector with type: 'sql' and label 'project'."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:example', 'temperature', 'atl')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "2c04ba09c7c09d291a67df0690c5f49eb90694d85262f6f983e5e1821f6fb8d1",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:example",
+     "metric": "temperature",
+     "location": "atl",
+     "columns": {
+      "datetime": "timestamp",
+      "id": "station"
+     },
+     "target": "atl_temperature",
+     "tags": [
+      "weather",
+      "basic"
+     ],
+     "dtypes": {
+      "value": "float64"
+     },
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      }
+     },
+     "instance": "sql:project",
+     "cache": true
+    },
+    {
+     "connector": "sql:project",
+     "metric": "fahrenheit",
+     "instance": "sql:local_copy",
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true
+     },
+     "tags": [
+      "basic"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:example', 'temperature', 'atl')",
+     "connector_keys": "plugin:example",
+     "metric_key": "temperature",
+     "location_key": "atl",
+     "instance_keys": "sql:project",
+     "temporary": false,
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      },
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "tags": [
+       "weather",
+       "basic"
+      ],
+      "target": "atl_temperature",
+      "dtypes": {
+       "value": "float64"
+      }
+     }
+    },
+    {
+     "str": "Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')",
+     "connector_keys": "sql:project",
+     "metric_key": "fahrenheit",
+     "location_key": null,
+     "instance_keys": "sql:local_copy",
+     "temporary": false,
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true,
+      "tags": [
+       "basic"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "up",
+   "action": [
+    "up"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Syncing 2 pipes across 2 instances.\nRun `mrsm compose logs` or pass `-f` to follow logs output."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "example",
+      "noaa",
+      "-r",
+      "api:mrsm",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "weather",
+      "-r",
+      "api:custom",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:example",
+      "-m",
+      "temperature",
+      "-l",
+      "atl",
+      "-i",
+      "sql:project",
+      "--params",
+      "{\"example\":{\"stations\":[\"KATL\"]},\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"tags\":[\"weather\",\"basic\"],\"target\":\"atl_temperature\",\"dtypes\":{\"value\":\"float64\"}}",
+      "--noask",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "sql:project",
+      "-m",
+      "fahrenheit",
+      "-l",
+      "None",
+      "-i",
+      "sql:local_copy",
+      "--params",
+      "{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true,\"tags\":[\"basic\"]}",
+      "--noask",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:example",
+      "-m",
+      "temperature",
+      "-l",
+      "atl",
+      "-i",
+      "sql:project",
+      "compose",
+      "up",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "sql:project",
+      "-m",
+      "fahrenheit",
+      "-l",
+      "None",
+      "-i",
+      "sql:local_copy",
+      "compose",
+      "up",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-i",
+      "sql:project",
+      "-t",
+      "basic",
+      "--name",
+      "basic sync (sql:project)",
+      "-f",
+      "-d",
+      "--workers",
+      "2",
+      "--chunksize",
+      "1000",
+      "--schedule",
+      "every 30 seconds",
+      "--min-seconds",
+      "5",
+      "--timeout-seconds",
+      "300"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-i",
+      "sql:local_copy",
+      "-t",
+      "basic",
+      "--name",
+      "basic sync (sql:local_copy)",
+      "-f",
+      "-d",
+      "--workers",
+      "2",
+      "--chunksize",
+      "1000",
+      "--schedule",
+      "every 30 seconds",
+      "--min-seconds",
+      "5",
+      "--timeout-seconds",
+      "300"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ],
+    [
+     "warn",
+     "Mismatched values for attribute 'database' in connector 'sql:project'.\n  - Keyword value: '{PROJECT}/root/project.db'\n  - Existing value: '{TMP}/runs/1/basic/root/project.db'\n\nSetting `refresh` to True and recreating connector with type: 'sql' and label 'project'."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:example', 'temperature', 'atl')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:example', 'temperature', 'atl')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')..."
+    ],
+    [
+     "info",
+     "Starting job 'basic sync (sql:project)'..."
+    ],
+    [
+     "info",
+     "Starting job 'basic sync (sql:local_copy)'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "8cb3162e6f5945d945765f70aecc29020708e9a88647a040426c93303a188b27",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:example",
+     "metric": "temperature",
+     "location": "atl",
+     "columns": {
+      "datetime": "timestamp",
+      "id": "station"
+     },
+     "target": "atl_temperature",
+     "tags": [
+      "weather",
+      "basic"
+     ],
+     "dtypes": {
+      "value": "float64"
+     },
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      }
+     },
+     "instance": "sql:project",
+     "cache": true
+    },
+    {
+     "connector": "sql:project",
+     "metric": "fahrenheit",
+     "instance": "sql:local_copy",
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true
+     },
+     "tags": [
+      "basic"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:example', 'temperature', 'atl')",
+     "connector_keys": "plugin:example",
+     "metric_key": "temperature",
+     "location_key": "atl",
+     "instance_keys": "sql:project",
+     "temporary": false,
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      },
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "tags": [
+       "weather",
+       "basic"
+      ],
+      "target": "atl_temperature",
+      "dtypes": {
+       "value": "float64"
+      }
+     }
+    },
+    {
+     "str": "Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')",
+     "connector_keys": "sql:project",
+     "metric_key": "fahrenheit",
+     "location_key": null,
+     "instance_keys": "sql:local_copy",
+     "temporary": false,
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true,
+      "tags": [
+       "basic"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "up-follow",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "force": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "-f"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Syncing 2 pipes across 2 instances."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "example",
+      "noaa",
+      "-r",
+      "api:mrsm",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "weather",
+      "-r",
+      "api:custom",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:example",
+      "-m",
+      "temperature",
+      "-l",
+      "atl",
+      "-i",
+      "sql:project",
+      "--params",
+      "{\"example\":{\"stations\":[\"KATL\"]},\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"tags\":[\"weather\",\"basic\"],\"target\":\"atl_temperature\",\"dtypes\":{\"value\":\"float64\"}}",
+      "--noask",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "sql:project",
+      "-m",
+      "fahrenheit",
+      "-l",
+      "None",
+      "-i",
+      "sql:local_copy",
+      "--params",
+      "{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true,\"tags\":[\"basic\"]}",
+      "--noask",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:example",
+      "-m",
+      "temperature",
+      "-l",
+      "atl",
+      "-i",
+      "sql:project",
+      "compose",
+      "up",
+      "-f",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "sql:project",
+      "-m",
+      "fahrenheit",
+      "-l",
+      "None",
+      "-i",
+      "sql:local_copy",
+      "compose",
+      "up",
+      "-f",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-i",
+      "sql:project",
+      "-t",
+      "basic",
+      "--name",
+      "basic sync (sql:project)",
+      "-f",
+      "-d",
+      "--workers",
+      "2",
+      "--chunksize",
+      "1000",
+      "--schedule",
+      "every 30 seconds",
+      "--min-seconds",
+      "5",
+      "--timeout-seconds",
+      "300"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-i",
+      "sql:local_copy",
+      "-t",
+      "basic",
+      "--name",
+      "basic sync (sql:local_copy)",
+      "-f",
+      "-d",
+      "--workers",
+      "2",
+      "--chunksize",
+      "1000",
+      "--schedule",
+      "every 30 seconds",
+      "--min-seconds",
+      "5",
+      "--timeout-seconds",
+      "300"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "show",
+      "logs",
+      "basic sync (sql:project)",
+      "basic sync (sql:local_copy)",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ],
+    [
+     "warn",
+     "Mismatched values for attribute 'database' in connector 'sql:project'.\n  - Keyword value: '{PROJECT}/root/project.db'\n  - Existing value: '{TMP}/runs/2/basic/root/project.db'\n\nSetting `refresh` to True and recreating connector with type: 'sql' and label 'project'."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:example', 'temperature', 'atl')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:example', 'temperature', 'atl')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')..."
+    ],
+    [
+     "info",
+     "Starting job 'basic sync (sql:project)'..."
+    ],
+    [
+     "info",
+     "Starting job 'basic sync (sql:local_copy)'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "9fae62454abcc94ebd52a4cd16df77d50231dfcf5991c4cc151e3c3a5635a5be",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:example",
+     "metric": "temperature",
+     "location": "atl",
+     "columns": {
+      "datetime": "timestamp",
+      "id": "station"
+     },
+     "target": "atl_temperature",
+     "tags": [
+      "weather",
+      "basic"
+     ],
+     "dtypes": {
+      "value": "float64"
+     },
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      }
+     },
+     "instance": "sql:project",
+     "cache": true
+    },
+    {
+     "connector": "sql:project",
+     "metric": "fahrenheit",
+     "instance": "sql:local_copy",
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true
+     },
+     "tags": [
+      "basic"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:example', 'temperature', 'atl')",
+     "connector_keys": "plugin:example",
+     "metric_key": "temperature",
+     "location_key": "atl",
+     "instance_keys": "sql:project",
+     "temporary": false,
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      },
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "tags": [
+       "weather",
+       "basic"
+      ],
+      "target": "atl_temperature",
+      "dtypes": {
+       "value": "float64"
+      }
+     }
+    },
+    {
+     "str": "Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')",
+     "connector_keys": "sql:project",
+     "metric_key": "fahrenheit",
+     "location_key": null,
+     "instance_keys": "sql:local_copy",
+     "temporary": false,
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true,
+      "tags": [
+       "basic"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "up-presync-no-jobs",
+   "action": [
+    "up"
+   ],
+   "flags": {
+    "presync": true,
+    "no_jobs": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "up",
+    "--presync",
+    "--no-jobs"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Synced 2 pipes across 2 instances."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "example",
+      "noaa",
+      "-r",
+      "api:mrsm",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "weather",
+      "-r",
+      "api:custom",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:example",
+      "-m",
+      "temperature",
+      "-l",
+      "atl",
+      "-i",
+      "sql:project",
+      "--params",
+      "{\"example\":{\"stations\":[\"KATL\"]},\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"tags\":[\"weather\",\"basic\"],\"target\":\"atl_temperature\",\"dtypes\":{\"value\":\"float64\"}}",
+      "--noask",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "sql:project",
+      "-m",
+      "fahrenheit",
+      "-l",
+      "None",
+      "-i",
+      "sql:local_copy",
+      "--params",
+      "{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true,\"tags\":[\"basic\"]}",
+      "--noask",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:example",
+      "-m",
+      "temperature",
+      "-l",
+      "atl",
+      "-i",
+      "sql:project",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "sql:project",
+      "-m",
+      "fahrenheit",
+      "-l",
+      "None",
+      "-i",
+      "sql:local_copy",
+      "compose",
+      "up",
+      "--presync",
+      "--no-jobs",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ],
+    [
+     "warn",
+     "Mismatched values for attribute 'database' in connector 'sql:project'.\n  - Keyword value: '{PROJECT}/root/project.db'\n  - Existing value: '{TMP}/runs/3/basic/root/project.db'\n\nSetting `refresh` to True and recreating connector with type: 'sql' and label 'project'."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:example', 'temperature', 'atl')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:example', 'temperature', 'atl')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "02043a76f0944bebb05ab69052cd562971a89ee0d8a2e1e2a0448542e0658d08",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:example",
+     "metric": "temperature",
+     "location": "atl",
+     "columns": {
+      "datetime": "timestamp",
+      "id": "station"
+     },
+     "target": "atl_temperature",
+     "tags": [
+      "weather",
+      "basic"
+     ],
+     "dtypes": {
+      "value": "float64"
+     },
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      }
+     },
+     "instance": "sql:project",
+     "cache": true
+    },
+    {
+     "connector": "sql:project",
+     "metric": "fahrenheit",
+     "instance": "sql:local_copy",
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true
+     },
+     "tags": [
+      "basic"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:example', 'temperature', 'atl')",
+     "connector_keys": "plugin:example",
+     "metric_key": "temperature",
+     "location_key": "atl",
+     "instance_keys": "sql:project",
+     "temporary": false,
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      },
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "tags": [
+       "weather",
+       "basic"
+      ],
+      "target": "atl_temperature",
+      "dtypes": {
+       "value": "float64"
+      }
+     }
+    },
+    {
+     "str": "Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')",
+     "connector_keys": "sql:project",
+     "metric_key": "fahrenheit",
+     "location_key": null,
+     "instance_keys": "sql:local_copy",
+     "temporary": false,
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true,
+      "tags": [
+       "basic"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "run",
+   "action": [
+    "run"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "run"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Synced 2 pipes across 2 instances."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "example",
+      "noaa",
+      "-r",
+      "api:mrsm",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "weather",
+      "-r",
+      "api:custom",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "plugin:example",
+      "-m",
+      "temperature",
+      "-l",
+      "atl",
+      "-i",
+      "sql:project",
+      "--params",
+      "{\"example\":{\"stations\":[\"KATL\"]},\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"tags\":[\"weather\",\"basic\"],\"target\":\"atl_temperature\",\"dtypes\":{\"value\":\"float64\"}}",
+      "--noask",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "register",
+      "pipes",
+      "-c",
+      "sql:project",
+      "-m",
+      "fahrenheit",
+      "-l",
+      "None",
+      "-i",
+      "sql:local_copy",
+      "--params",
+      "{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true,\"tags\":[\"basic\"]}",
+      "--noask",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "plugin:example",
+      "-m",
+      "temperature",
+      "-l",
+      "atl",
+      "-i",
+      "sql:project",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "-c",
+      "sql:project",
+      "-m",
+      "fahrenheit",
+      "-l",
+      "None",
+      "-i",
+      "sql:local_copy",
+      "compose",
+      "run",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ],
+    [
+     "warn",
+     "Mismatched values for attribute 'database' in connector 'sql:project'.\n  - Keyword value: '{PROJECT}/root/project.db'\n  - Existing value: '{TMP}/runs/4/basic/root/project.db'\n\nSetting `refresh` to True and recreating connector with type: 'sql' and label 'project'."
+    ],
+    [
+     "info",
+     "Registering Pipe('plugin:example', 'temperature', 'atl')..."
+    ],
+    [
+     "info",
+     "Registering Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('plugin:example', 'temperature', 'atl')..."
+    ],
+    [
+     "info",
+     "Syncing Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "a9ba8588e31adfc4aab5ea99a8d175fc654fac6f8e898aa538c621b409e6327c",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:example",
+     "metric": "temperature",
+     "location": "atl",
+     "columns": {
+      "datetime": "timestamp",
+      "id": "station"
+     },
+     "target": "atl_temperature",
+     "tags": [
+      "weather",
+      "basic"
+     ],
+     "dtypes": {
+      "value": "float64"
+     },
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      }
+     },
+     "instance": "sql:project",
+     "cache": true
+    },
+    {
+     "connector": "sql:project",
+     "metric": "fahrenheit",
+     "instance": "sql:local_copy",
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true
+     },
+     "tags": [
+      "basic"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:example', 'temperature', 'atl')",
+     "connector_keys": "plugin:example",
+     "metric_key": "temperature",
+     "location_key": "atl",
+     "instance_keys": "sql:project",
+     "temporary": false,
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      },
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "tags": [
+       "weather",
+       "basic"
+      ],
+      "target": "atl_temperature",
+      "dtypes": {
+       "value": "float64"
+      }
+     }
+    },
+    {
+     "str": "Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')",
+     "connector_keys": "sql:project",
+     "metric_key": "fahrenheit",
+     "location_key": null,
+     "instance_keys": "sql:local_copy",
+     "temporary": false,
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true,
+      "tags": [
+       "basic"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "down",
+   "action": [
+    "down"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "down"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "61e91eaceb547ce262514b2da903ee749157f582df8099ddf17a9204794b5c73",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "down-volumes",
+   "action": [
+    "down"
+   ],
+   "flags": {
+    "drop": true,
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "down",
+    "-v",
+    "-y"
+   ],
+   "width": 120,
+   "result": [
+    false,
+    "No pipes to delete."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ],
+    [
+     "warn",
+     "Mismatched values for attribute 'database' in connector 'sql:project'.\n  - Keyword value: '{PROJECT}/root/project.db'\n  - Existing value: '{TMP}/runs/5/basic/root/project.db'\n\nSetting `refresh` to True and recreating connector with type: 'sql' and label 'project'."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "b444d9b3ad33c365ea379bb8de7d5e50b3c2ad5bd8517423439ff45d93bf70b4",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": [
+    {
+     "connector": "plugin:example",
+     "metric": "temperature",
+     "location": "atl",
+     "columns": {
+      "datetime": "timestamp",
+      "id": "station"
+     },
+     "target": "atl_temperature",
+     "tags": [
+      "weather",
+      "basic"
+     ],
+     "dtypes": {
+      "value": "float64"
+     },
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      }
+     },
+     "instance": "sql:project",
+     "cache": true
+    },
+    {
+     "connector": "sql:project",
+     "metric": "fahrenheit",
+     "instance": "sql:local_copy",
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true
+     },
+     "tags": [
+      "basic"
+     ],
+     "cache": true
+    }
+   ],
+   "pipes": [
+    {
+     "str": "Pipe('plugin:example', 'temperature', 'atl')",
+     "connector_keys": "plugin:example",
+     "metric_key": "temperature",
+     "location_key": "atl",
+     "instance_keys": "sql:project",
+     "temporary": false,
+     "parameters": {
+      "example": {
+       "stations": [
+        "KATL"
+       ]
+      },
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "tags": [
+       "weather",
+       "basic"
+      ],
+      "target": "atl_temperature",
+      "dtypes": {
+       "value": "float64"
+      }
+     }
+    },
+    {
+     "str": "Pipe('sql:project', 'fahrenheit', instance='sql:local_copy')",
+     "connector_keys": "sql:project",
+     "metric_key": "fahrenheit",
+     "location_key": null,
+     "instance_keys": "sql:local_copy",
+     "temporary": false,
+     "parameters": {
+      "sql": "SELECT timestamp, station\nFROM atl_temperature",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "upsert": true,
+      "tags": [
+       "basic"
+      ]
+     }
+    }
+   ],
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "ps",
+   "action": [
+    "ps"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "ps"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "jobs",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "8ab789d617f5afd620244826ee85b2bbe8288e87e28201b5dc28533a5940441c",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "logs",
+   "action": [
+    "logs"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "logs"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "logs",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "57d30a2ab315bbf87f8a90db80ec6e7d212891a9fee7a653f78bb9b84cb0a612",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "sync-pipes",
+   "action": [
+    "sync",
+    "pipes"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "sync",
+    "pipes"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "sync",
+      "pipes",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ],
+    [
+     "info",
+     "Running 'sync pipes' in compose project 'basic'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "616bfdaa7ed2ee31c03e583b56c9ae5135edc108388633da61795e0c8a460a36",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "start-jobs",
+   "action": [
+    "start",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "start",
+    "jobs",
+    "-y"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "No jobs in compose project 'basic'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "4541ee54bb1711d1ef95349865eb8dfcfee59d2176d9b560459bfe5ca480d35c",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "stop-jobs",
+   "action": [
+    "stop",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "stop",
+    "jobs",
+    "-y"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "No jobs in compose project 'basic'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "1804f6e98b2868dc06b5b65c2c077bc249d09ea21d1175f887c0255341ac64d3",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "delete-jobs",
+   "action": [
+    "delete",
+    "jobs"
+   ],
+   "flags": {
+    "yes": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "delete",
+    "jobs",
+    "-y"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "No jobs in compose project 'basic'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "f99ec5c32a86d3982861d1fcb476b4391f40dc1d6589cd615f7bdba52feff727",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "start-api",
+   "action": [
+    "start",
+    "api"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "start",
+    "api"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "start",
+      "api",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ],
+    [
+     "info",
+     "Running 'start api' in compose project 'basic'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "f48d234f74fa1a570d6dfe21e79e25459066e01de97edb2660116517bf7b510e",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "shell",
+   "action": [],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ],
+    [
+     "info",
+     "Starting a shell in compose project 'basic'..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "77b86fd3631d4ba05b9f5c4ae5c6aadf688fa2ae4d945892740544926be70d22",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  },
+  {
+   "name": "init",
+   "action": [
+    "init"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "init"
+   ],
+   "width": 120,
+   "result": [
+    true,
+    "Finished initializing project 'basic'."
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "example",
+      "noaa",
+      "-r",
+      "api:mrsm",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "plugins",
+      "weather",
+      "-r",
+      "api:custom",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "install",
+      "required",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "setup",
+      "plugins",
+      "--tags",
+      "basic"
+     ],
+     "subprocess": true,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ],
+    [
+     "info",
+     "Installing required packages for plugins..."
+    ]
+   ],
+   "config": {
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins",
+     "{PROJECT}/extra-plugins"
+    ],
+    "plugins": [
+     "example",
+     "weather@api:custom",
+     "noaa"
+    ],
+    "sync": {
+     "schedule": "every 30 seconds",
+     "min_seconds": 5,
+     "timeout_seconds": 300,
+     "args": "--workers 2 --chunksize 1000"
+    },
+    "config": {
+     "meerschaum": {
+      "instance": "sql:project",
+      "connectors": {
+       "sql": {
+        "main": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "local_copy": {
+         "flavor": "sqlite",
+         "database": "{SQLITE_DB_PATH}"
+        },
+        "project": {
+         "flavor": "sqlite",
+         "database": "{PROJECT}/root/project.db"
+        },
+        "secret": {
+         "flavor": "postgresql",
+         "username": "compose_user",
+         "password": "s3cr3t",
+         "port": 5433,
+         "database": "analytics",
+         "host": "localhost"
+        }
+       },
+       "api": {
+        "upstream": {
+         "host": "api.mrsm.io",
+         "port": 443,
+         "protocol": "https"
+        }
+       }
+      }
+     },
+     "formatting": {
+      "emoji": false
+     },
+     "_symlinks": {
+      "meerschaum": {
+       "connectors": {
+        "sql": {
+         "main": "MRSM{meerschaum:connectors:sql:local}"
+        }
+       }
+      }
+     },
+     "stack": {
+      "project_name": "basic"
+     }
+    },
+    "connectors": {
+     "sql": {
+      "main": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "local_copy": {
+       "flavor": "sqlite",
+       "database": "{SQLITE_DB_PATH}"
+      },
+      "project": {
+       "flavor": "sqlite",
+       "database": "{PROJECT}/root/project.db"
+      },
+      "secret": {
+       "flavor": "postgresql",
+       "username": "compose_user",
+       "password": "s3cr3t",
+       "port": 5433,
+       "database": "analytics",
+       "host": "localhost"
+      }
+     },
+     "api": {
+      "upstream": {
+       "host": "api.mrsm.io",
+       "port": 443,
+       "protocol": "https"
+      }
+     }
+    },
+    "environment": {
+     "PROJECT_VAR": "hello",
+     "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+     "ROOT_PATH": "{PROJECT}/root/data"
+    },
+    "project_name": "basic",
+    "pipes": [
+     {
+      "connector": "plugin:example",
+      "metric": "temperature",
+      "location": "atl",
+      "columns": {
+       "datetime": "timestamp",
+       "id": "station"
+      },
+      "target": "atl_temperature",
+      "tags": [
+       "weather"
+      ],
+      "dtypes": {
+       "value": "float64"
+      },
+      "parameters": {
+       "example": {
+        "stations": [
+         "KATL"
+        ]
+       }
+      }
+     },
+     {
+      "connector": "sql:project",
+      "metric": "fahrenheit",
+      "instance": "sql:local_copy",
+      "parameters": {
+       "sql": "SELECT timestamp, station\nFROM atl_temperature",
+       "columns": {
+        "datetime": "timestamp",
+        "id": "station"
+       },
+       "upsert": true
+      }
+     }
+    ],
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml"
+   },
+   "config_hash": "dd7cb0f1cda136fb355dac62a8097b3c5cfeb9d19f6bdfeb8fffc6731a18d600",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "PGUSER": "compose_user",
+    "PGPASSWORD": "s3cr3t",
+    "PGPORT": "5433",
+    "PGDATABASE": "analytics",
+    "MRSM__COMPOSE_CONFIG": "{\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\",\"{PROJECT}/extra-plugins\"],\"plugins\":[\"example\",\"weather@api:custom\",\"noaa\"],\"sync\":{\"schedule\":\"every 30 seconds\",\"min_seconds\":5,\"timeout_seconds\":300,\"args\":\"--workers 2 --chunksize 1000\"},\"config\":{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}},\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}},\"environment\":{\"PROJECT_VAR\":\"hello\",\"FILE_PATH\":\"{PROJECT}/mrsm-compose.yaml\",\"ROOT_PATH\":\"{PROJECT}/root/data\"},\"project_name\":\"basic\",\"pipes\":[{\"connector\":\"plugin:example\",\"metric\":\"temperature\",\"location\":\"atl\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"target\":\"atl_temperature\",\"tags\":[\"weather\"],\"dtypes\":{\"value\":\"float64\"},\"parameters\":{\"example\":{\"stations\":[\"KATL\"]}}},{\"connector\":\"sql:project\",\"metric\":\"fahrenheit\",\"instance\":\"sql:local_copy\",\"parameters\":{\"sql\":\"SELECT timestamp, station\\nFROM atl_temperature\",\"columns\":{\"datetime\":\"timestamp\",\"id\":\"station\"},\"upsert\":true}}],\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\"}",
+    "MRSM__COMPOSE_PROJECT": "basic",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"instance\":\"sql:project\",\"connectors\":{\"sql\":{\"main\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"local_copy\":{\"flavor\":\"sqlite\",\"database\":\"{SQLITE_DB_PATH}\"},\"project\":{\"flavor\":\"sqlite\",\"database\":\"{PROJECT}/root/project.db\"},\"secret\":{\"flavor\":\"postgresql\",\"username\":\"compose_user\",\"password\":\"s3cr3t\",\"port\":5433,\"database\":\"analytics\",\"host\":\"localhost\"}},\"api\":{\"upstream\":{\"host\":\"api.mrsm.io\",\"port\":443,\"protocol\":\"https\"}}}},\"formatting\":{\"emoji\":false},\"_symlinks\":{\"meerschaum\":{\"connectors\":{\"sql\":{\"main\":\"MRSM{meerschaum:connectors:sql:local}\"}}}},\"stack\":{\"project_name\":\"basic\"}}",
+    "PROJECT_VAR": "hello",
+    "FILE_PATH": "{PROJECT}/mrsm-compose.yaml",
+    "ROOT_PATH": "{PROJECT}/root/data"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "b5ea8b8edbbd3ba03971ac2d194b0a5ec7a32b4c314f9a88321fe63768091248"
+  }
+ ]
+}

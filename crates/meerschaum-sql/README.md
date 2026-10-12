@@ -16,9 +16,12 @@ return Arrow record batches.
 | Oracle | `oracle` | `oracle` | not yet |
 | DuckDB | `duckdb` | `duckdb` | not yet |
 
-Arrow fields carry `mrsm:db_type` (the driver's type name) and, for special columns,
-`mrsm:dtype` (`json`, `bytes`, `uuid`, `geometry`, `numeric`) and `mrsm:encoding` (`ewkb` for
-PostGIS, `mysql` for MySQL geometry).
+Arrow fields carry `meerschaum:db_type` (the driver's type name) and, for special columns,
+`meerschaum:dtype` (`json`, `bytes`, `uuid`, `geometry`, `numeric`) and `meerschaum:encoding`
+(`ewkb` for PostGIS, `mysql` for MySQL geometry). The keys are
+`meerschaum_core::dtypes::field_meta`, shared with the kernel: `SqlDriver::read_frame` (or
+`driver::batches_to_frame`) turns query results into a kernel `Frame` whose columns keep these
+tags, so `enforce_dtypes` reads the declared dtypes instead of detecting them.
 
 ## Golden fixtures
 

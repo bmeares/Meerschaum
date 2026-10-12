@@ -1,0 +1,168 @@
+{
+  "description": "The definition hash of a middle node changed (its SQL and dtypes were edited). In an interactive context without --yes the planner proposes `rebuild` and asks for confirmation; the rebuild clears the pipe and re-syncs the full range, capped at the parent's watermark.",
+  "records": [
+    {
+      "instance": "sql:main",
+      "connector": "plugin:orders",
+      "metric": "orders_raw",
+      "parameters": {
+        "columns": {
+          "datetime": "ts",
+          "id": "order_id"
+        },
+        "verify": {
+          "chunk_days": 1
+        }
+      }
+    },
+    {
+      "instance": "sql:main",
+      "connector": "sql:main",
+      "metric": "orders_clean",
+      "parameters": {
+        "columns": {
+          "datetime": "ts",
+          "id": "order_id"
+        },
+        "verify": {
+          "chunk_days": 1
+        },
+        "parents": [
+          "Pipe('plugin:orders', 'orders_raw')"
+        ],
+        "dtypes": {
+          "amount": "numeric"
+        },
+        "sql": "SELECT ts, order_id, amount::numeric AS amount FROM orders_raw_view WHERE status <> 'void'"
+      }
+    },
+    {
+      "instance": "sql:main",
+      "connector": "sql:main",
+      "metric": "orders_report",
+      "parameters": {
+        "columns": {
+          "datetime": "ts"
+        },
+        "verify": {
+          "chunk_days": 1
+        },
+        "parents": [
+          "Pipe('sql:main', 'orders_clean')"
+        ]
+      }
+    }
+  ],
+  "selection": {
+    "targets": {
+      "refs": [
+        "sql:main|sql:main|orders_report|None"
+      ]
+    },
+    "parents": "all"
+  },
+  "options": {
+    "interactive": true,
+    "yes": false
+  },
+  "state": {
+    "watermarks": {
+      "sql:main|plugin:orders|orders_raw|None": "2026-10-12T10:00:00Z",
+      "sql:main|sql:main|orders_clean|None": "2026-10-12T09:00:00Z",
+      "sql:main|sql:main|orders_report|None": "2026-10-12T08:00:00Z"
+    },
+    "definition_hashes": {
+      "sql:main|plugin:orders|orders_raw|None": "@current",
+      "sql:main|sql:main|orders_clean|None": "v1:hash-of-the-previous-sql-definition",
+      "sql:main|sql:main|orders_report|None": "@current"
+    },
+    "ledger": {
+      "sql:main": [
+        {
+          "pipe_ref": "sql:main|plugin:orders|orders_raw|None",
+          "seq": 5,
+          "begin": "2026-10-12T00:00:00Z",
+          "end": "2026-10-13T00:00:00Z"
+        },
+        {
+          "pipe_ref": "sql:main|sql:main|orders_clean|None",
+          "seq": 12,
+          "begin": "2026-10-12T00:00:00Z",
+          "end": "2026-10-13T00:00:00Z"
+        }
+      ]
+    },
+    "cursors": {
+      "sql:main": [
+        {
+          "parent_ref": "sql:main|plugin:orders|orders_raw|None",
+          "child_ref": "sql:main|sql:main|orders_clean|None",
+          "seq": 5,
+          "parent_watermark_at_cursor": "2026-10-12T10:00:00Z"
+        },
+        {
+          "parent_ref": "sql:main|sql:main|orders_clean|None",
+          "child_ref": "sql:main|sql:main|orders_report|None",
+          "seq": 12,
+          "parent_watermark_at_cursor": "2026-10-12T08:00:00Z"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "nodes": [
+      {
+        "node": "sql:main|plugin:orders|orders_raw|None",
+        "action": "root",
+        "bounds": {
+          "begin": "",
+          "end": null
+        }
+      },
+      {
+        "node": "sql:main|sql:main|orders_clean|None",
+        "action": "rebuild",
+        "bounds": {
+          "begin": null,
+          "end": "2026-10-12T10:00:00Z"
+        },
+        "chunks": [],
+        "provisional": true,
+        "requires_confirmation": true,
+        "consumes": [
+          {
+            "parent_ref": "sql:main|plugin:orders|orders_raw|None",
+            "state_instance": "sql:main",
+            "seq": 5
+          }
+        ],
+        "reason_contains": [
+          "definition changed",
+          "confirm or pass --yes"
+        ]
+      },
+      {
+        "node": "sql:main|sql:main|orders_report|None",
+        "action": "incremental",
+        "bounds": {
+          "begin": "2026-10-11T08:00:00Z",
+          "end": "2026-10-12T09:00:00Z"
+        },
+        "chunks": [
+          {
+            "begin": "2026-10-11T08:00:00Z",
+            "end": "2026-10-12T00:00:00Z"
+          },
+          {
+            "begin": "2026-10-12T00:00:00Z",
+            "end": "2026-10-12T09:00:00Z"
+          }
+        ],
+        "provisional": true,
+        "reason_contains": [
+          "sql:main/orders_clean watermark advanced 2026-10-12 08:00 → 2026-10-12 09:00"
+        ]
+      }
+    ]
+  }
+}

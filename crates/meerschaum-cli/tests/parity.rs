@@ -12,7 +12,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use meerschaum_cli::actions::{self, CORE_ACTIONS};
-use meerschaum_cli::dispatch::{self, Runtime};
+use meerschaum_cli::dispatch::{self, Runtime, SuccessTuple};
 use meerschaum_cli::parse::{parse_arguments, parse_line};
 use meerschaum_cli::sysargs;
 use meerschaum_cli::types::{self, DateContext};
@@ -215,7 +215,7 @@ fn chains_and_pipelines_match_python() {
         let mut steps: Vec<Value> = Vec::new();
         let result = dispatch::run_chain(&sysargs, &ctx, None, |args| {
             steps.push(args_to_fixture_json(&args));
-            (true, "captured".into())
+            SuccessTuple::ok("captured")
         });
         let entry = &chain["entry"];
         let expected_steps = entry["steps"].as_array().unwrap();
@@ -235,7 +235,10 @@ fn chains_and_pipelines_match_python() {
         }
         let expected = &entry["result"];
         match result {
-            Ok((success, msg)) => {
+            Ok(SuccessTuple {
+                success,
+                message: msg,
+            }) => {
                 if expected.get("success") != Some(&Value::from(success)) {
                     failures.push(format!(
                         "{sysargs:?}: entry success python={expected} rust={success}"
@@ -596,48 +599,45 @@ fn dispatch_skeleton() {
 
     assert_eq!(
         dispatch::entry(&s(&["show", "version", "--nopretty"]), &mut rt),
-        (true, "Success".into())
+        SuccessTuple::success()
     );
     assert_eq!(
         dispatch::entry(&s(&["show", "help"]), &mut rt),
-        (true, "Success".into())
+        SuccessTuple::success()
     );
     assert_eq!(
         dispatch::entry(&s(&["show", "arguments", "-c", "sql:main"]), &mut rt),
-        (true, "Success".into())
+        SuccessTuple::success()
     );
     assert_eq!(
         dispatch::entry(&s(&["sync", "pipes", "-c", "sql:main"]), &mut rt),
-        (
-            false,
-            "action `sync pipes` is not implemented in Rust yet".into()
-        )
+        SuccessTuple::fail("action `sync pipes` is not implemented in Rust yet")
     );
     assert_eq!(
         dispatch::entry(&s(&["show", "pipe"]), &mut rt),
-        (
-            false,
-            "action `show pipes` is not implemented in Rust yet".into()
-        )
+        SuccessTuple::fail("action `show pipes` is not implemented in Rust yet")
     );
     assert_eq!(
         dispatch::entry(&s(&["foo", "bar"]), &mut rt),
-        (false, "action `sh` is not implemented in Rust yet".into())
+        SuccessTuple::fail("action `sh` is not implemented in Rust yet")
     );
     assert_eq!(
         dispatch::entry(&s(&["sync", "pipes", "-d"]), &mut rt),
-        (
-            false,
-            "action `start jobs` is not implemented in Rust yet".into()
-        )
+        SuccessTuple::fail("action `start jobs` is not implemented in Rust yet")
     );
     assert_eq!(
         dispatch::entry(&s(&["show", "pipes", "-e", "api:main"]), &mut rt),
-        (false, "action `api` is not implemented in Rust yet".into())
+        SuccessTuple::fail("action `api` is not implemented in Rust yet")
     );
-    let (ok, msg) = dispatch::entry(&s(&["show", "version", "+", "sync", "pipes"]), &mut rt);
+    let SuccessTuple {
+        success: ok,
+        message: msg,
+    } = dispatch::entry(&s(&["show", "version", "+", "sync", "pipes"]), &mut rt);
     assert!(!ok && msg.contains("Failed pipeline after 1 step"), "{msg}");
-    let (ok, msg) = dispatch::entry(&s(&["sync", "--begin", "xyz"]), &mut rt);
+    let SuccessTuple {
+        success: ok,
+        message: msg,
+    } = dispatch::entry(&s(&["sync", "--begin", "xyz"]), &mut rt);
     assert!(!ok);
     assert_eq!(
         msg,

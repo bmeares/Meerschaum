@@ -34,7 +34,8 @@ use crate::enforce::{
 };
 use crate::frame::{ColumnData, Frame, json_to_value};
 use crate::serialize::compact_json_sorted;
-use crate::value::{Value, py_float_repr};
+use crate::value::Value;
+use meerschaum_core::pyfmt::float_repr;
 
 /// A target for the per-column casts in `filter_unseen_df`: a pandas dtype string or
 /// `attempt_cast_to_numeric` (the mixed int/float rule).
@@ -92,7 +93,7 @@ fn json_dumps_sorted(v: &Value) -> String {
         Value::Float(f) if f.is_infinite() => {
             if *f > 0.0 { "Infinity" } else { "-Infinity" }.into()
         }
-        Value::Float(f) => py_float_repr(*f),
+        Value::Float(f) => float_repr(*f),
         Value::Str(s) => compact_json_sorted(&serde_json::Value::String(s.clone())),
         other => compact_json_sorted(&serde_json::Value::String(other.py_str())),
     }

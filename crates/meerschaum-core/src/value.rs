@@ -177,6 +177,21 @@ impl Value {
     pub fn to_map(&self) -> Map {
         self.as_map().cloned().unwrap_or_default()
     }
+
+    /// Python's `str(value)` (strings unquoted, everything else `repr`).
+    pub fn py_str(&self) -> String {
+        crate::pyfmt::py_str(self)
+    }
+
+    /// Python's `repr(value)`.
+    pub fn py_repr(&self) -> String {
+        crate::pyfmt::py_repr(self)
+    }
+
+    /// Python's `json.dumps(value)` with the default separators and `ensure_ascii=True`.
+    pub fn json_dumps(&self) -> String {
+        crate::pyfmt::json_dumps(self, crate::pyfmt::JsonStyle::Default, true)
+    }
 }
 
 /// Port of `meerschaum.config._patch.apply_patch_to_config` (cascading dict patch).
@@ -393,6 +408,20 @@ mod tests {
         // PARITY: an empty dict in the patch leaves the base value untouched.
         let out = apply_patch(&base, &json(r#"{"a": {}}"#));
         assert_eq!(out, base);
+    }
+
+    #[test]
+    fn python_renderings() {
+        assert_eq!(Value::Bool(true).py_str(), "True");
+        assert_eq!(Value::Null.py_str(), "None");
+        assert_eq!(Value::Float(1.0).py_str(), "1.0");
+        assert_eq!(Value::from("a'b").py_repr(), "\"a'b\"");
+        let v = json(r#"{"b": 1, "a": [true, null, "é"]}"#);
+        assert_eq!(
+            v.json_dumps(),
+            "{\"b\": 1, \"a\": [true, null, \"\\u00e9\"]}"
+        );
+        assert_eq!(v.py_str(), "{'b': 1, 'a': [True, None, 'é']}");
     }
 
     #[test]

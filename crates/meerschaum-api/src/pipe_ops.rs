@@ -1,0 +1,986 @@
+//! Pipe-level operations needed by connector implementations and by the trait defaults:
+//! value conversions, `Pipe.get_dtypes()`, `Pipe.enforce_dtypes()`, the essentials of
+//! `Pipe.sync()` for internal pipes, `Pipe.get_value()` / `get_doc()`, and the generic users,
+//! plugins and tokens implementations of `meerschaum/connectors/instance/`.
+//!
+//! MERGE NOTE: like [`crate::traits`], this belongs next to `Frame` once core and kernel are
+//! consolidated; the full `Pipe.sync()` flow belongs to `meerschaum-engine`.
+
+use chrono::{DateTime, Utc};
+use indexmap::IndexMap;
+use meerschaum_core::users::{Token, User};
+use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
+use meerschaum_kernel::Frame;
+use meerschaum_kernel::enforce::{
+    PipeDtypesContext, PipeInput, pipe_enforce_dtypes, pipe_get_dtypes, pipe_is_tz_aware,
+};
+use meerschaum_kernel::query::ParamValue;
+use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
+use uuid::Uuid;
+
+use crate::models::TokenModel;
+use crate::traits::{ConnectorResult, DataQuery, InstanceConnector, PluginRecord, SyncOptions};
+
+/// A document: column name to kernel value.
+pub type Doc = IndexMap<String, KValue>;
+
+/// `df.to_dict(orient='records')`.
+pub fn frame_to_docs(df: &Frame) -> Vec<Doc> {
+    let names = df.names();
+    let columns: Vec<Vec<KValue>> = df.columns().iter().map(|c| c.data.values()).collect();
+    (0..df.height())
+        .map(|i| {
+            names
+                .iter()
+                .zip(columns.iter())
+                .map(|(n, vals)| (n.clone(), vals[i].clone()))
+                .collect()
+        })
+        .collect()
+}
+
+/// A core (JSON-like) value as a kernel value. Containers become JSON values.
+pub fn core_to_kernel(v: &Value) -> KValue {
+    match v {
+        Value::Null => KValue::Null,
+        Value::Bool(b) => KValue::Bool(*b),
+        Value::Int(i) => KValue::Int(*i),
+        Value::Float(f) => KValue::Float(*f),
+        Value::Str(s) => KValue::Str(s.clone()),
+        Value::List(_) | Value::Map(_) => {
+            KValue::Json(serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
+        }
+    }
+}
+
+/// A JSON value as a core value.
+pub fn json_to_core(j: &serde_json::Value) -> Value {
+    match j {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => Value::Int(i),
+            None => Value::Float(n.as_f64().unwrap_or(f64::NAN)),
+        },
+        serde_json::Value::String(s) => Value::Str(s.clone()),
+        serde_json::Value::Array(a) => Value::List(a.iter().map(json_to_core).collect()),
+        serde_json::Value::Object(o) => Value::Map(
+            o.iter()
+                .map(|(k, v)| (k.clone(), json_to_core(v)))
+                .collect(),
+        ),
+    }
+}
+
+/// A kernel value as a core value: nulls become `Null`, timestamps and other rich scalars their
+/// JSON serialization (`json_serialize_value`).
+pub fn kernel_to_core(v: &KValue) -> Value {
+    match v {
+        v if v.is_na() => Value::Null,
+        KValue::Bool(b) => Value::Bool(*b),
+        KValue::Int(i) => Value::Int(*i),
+        KValue::Float(f) => Value::Float(*f),
+        KValue::Str(s) => Value::Str(s.clone()),
+        KValue::Json(j) => json_to_core(j),
+        other => json_to_core(&meerschaum_kernel::serialize::json_serialize_value(other)),
+    }
+}
+
+/// A core `params` dict as `query_df` params.
+pub fn params_to_query(params: &Map) -> IndexMap<String, ParamValue> {
+    params
+        .iter()
+        .map(|(k, v)| {
+            let pv = match v {
+                Value::List(items) => ParamValue::Many(items.iter().map(core_to_kernel).collect()),
+                other => ParamValue::One(core_to_kernel(other)),
+            };
+            (k.clone(), pv)
+        })
+        .collect()
+}
+
+/// Coerce string params to the column's value type where Python callers pass rich objects
+/// (UUIDs, timestamps) and pandas compares objects: a `UUID` param matches a UUID column.
+pub fn coerce_params_to_frame(
+    params: IndexMap<String, ParamValue>,
+    df: &Frame,
+) -> IndexMap<String, ParamValue> {
+    let coerce = |sample: &KValue, v: KValue| -> KValue {
+        match (sample, &v) {
+            (KValue::Uuid(_), KValue::Str(s)) => match Uuid::parse_str(s) {
+                Ok(u) => KValue::Uuid(u),
+                Err(_) => v,
+            },
+            (KValue::Datetime(_), KValue::Str(s)) if !s.starts_with('_') => {
+                match meerschaum_kernel::value::parse_datetime_value(s) {
+                    Some(d) => KValue::Datetime(d),
+                    None => v,
+                }
+            }
+            _ => v,
+        }
+    };
+    params
+        .into_iter()
+        .map(|(col, pv)| {
+            let sample = df
+                .column(&col)
+                .and_then(|c| c.data.values().into_iter().find(|v| !v.is_na()));
+            let Some(sample) = sample else {
+                return (col, pv);
+            };
+            let pv = match pv {
+                ParamValue::One(v) => ParamValue::One(coerce(&sample, v)),
+                ParamValue::Many(vs) => {
+                    ParamValue::Many(vs.into_iter().map(|v| coerce(&sample, v)).collect())
+                }
+            };
+            (col, pv)
+        })
+        .collect()
+}
+
+/// `pipe.columns` as a string map.
+pub fn columns_map(pipe: &Pipe) -> IndexMap<String, String> {
+    pipe.columns()
+        .iter()
+        .map(|(k, v)| (k.clone(), meerschaum_core::pyfmt::py_str(v)))
+        .collect()
+}
+
+/// `parameters['dtypes']` as a string map (the configured dtypes).
+pub fn configured_dtypes(parameters: &Map) -> IndexMap<String, String> {
+    match parameters.get("dtypes") {
+        Some(Value::Map(m)) => m
+            .iter()
+            .map(|(k, v)| (k.clone(), meerschaum_core::pyfmt::py_str(v)))
+            .collect(),
+        _ => IndexMap::new(),
+    }
+}
+
+/// `Pipe.infer_dtypes()`: the instance's columns types mapped to pandas dtypes (PostgreSQL-style
+/// upper-case types through `get_pd_type_from_db_type`, others through `to_pandas_dtype`).
+pub async fn infer_dtypes<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+) -> ConnectorResult<IndexMap<String, String>> {
+    if !conn.pipe_exists(pipe).await? {
+        return Ok(IndexMap::new());
+    }
+    let columns_types = conn.get_pipe_columns_types(pipe).await?;
+    Ok(columns_types
+        .into_iter()
+        .map(|(c, t)| {
+            let pd = if meerschaum_kernel::dtypes::py_isupper(&t) {
+                meerschaum_kernel::dtypes::get_pd_type_from_db_type(&t, true)
+            } else {
+                meerschaum_kernel::dtypes::to_pandas_dtype(&t)
+            };
+            (c, pd)
+        })
+        .collect())
+}
+
+/// `Pipe.get_dtypes(infer=...)` for the given parameters.
+pub async fn get_dtypes<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+    parameters: &Map,
+    infer: bool,
+) -> ConnectorResult<IndexMap<String, String>> {
+    let remote = if infer {
+        infer_dtypes(conn, pipe).await?
+    } else {
+        IndexMap::new()
+    };
+    Ok(pipe_get_dtypes(
+        &configured_dtypes(parameters),
+        &remote,
+        &columns_map(pipe),
+        bool_param(parameters, "autoincrement", false),
+    ))
+}
+
+/// A boolean parameter with Python truthiness.
+pub fn bool_param(parameters: &Map, key: &str, default: bool) -> bool {
+    parameters.get(key).map(|v| v.truthy()).unwrap_or(default)
+}
+
+/// The context `Pipe.enforce_dtypes()` needs.
+pub async fn dtypes_context<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+    parameters: &Map,
+) -> ConnectorResult<PipeDtypesContext> {
+    let dtypes = get_dtypes(conn, pipe, parameters, true).await?;
+    let explicit = get_dtypes(conn, pipe, parameters, false).await?;
+    let tz_aware = pipe_is_tz_aware(
+        &columns_map(pipe),
+        &dtypes,
+        bool_param(parameters, "autotime", false),
+        "ts",
+    );
+    Ok(PipeDtypesContext {
+        dtypes,
+        explicit_dtypes: explicit,
+        enforce: bool_param(parameters, "enforce", true),
+        tz_aware,
+        mixed_numerics: bool_param(parameters, "mixed_numerics", true),
+    })
+}
+
+/// The essentials of `Pipe.sync(docs, check_existing=...)` for internal pipes: enforce the
+/// pipe's dtypes on the documents, then `instance.sync_pipe()`.
+pub async fn sync_docs<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+    docs: Vec<Doc>,
+    check_existing: bool,
+) -> SuccessTuple {
+    let ctx = match dtypes_context(conn, pipe, pipe.parameters()).await {
+        Ok(c) => c,
+        Err(e) => return SuccessTuple::fail(e.to_string()),
+    };
+    let df = match pipe_enforce_dtypes(PipeInput::Docs(docs), &ctx) {
+        Ok(df) => df,
+        Err(e) => return SuccessTuple::fail(format!("Failed to enforce dtypes:\n{e}")),
+    };
+    conn.sync_pipe(
+        pipe,
+        df,
+        &SyncOptions {
+            check_existing,
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+/// Compare two kernel values for sorting (`sort_values`, nulls last).
+pub fn compare_values(a: &KValue, b: &KValue) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a.is_na(), b.is_na()) {
+        (true, true) => return Ordering::Equal,
+        (true, false) => return Ordering::Greater,
+        (false, true) => return Ordering::Less,
+        _ => {}
+    }
+    match (a, b) {
+        (KValue::Datetime(x), KValue::Datetime(y)) => x.utc.cmp(&y.utc),
+        (KValue::Int(x), KValue::Int(y)) => x.cmp(y),
+        (KValue::Int(x), KValue::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal),
+        (KValue::Float(x), KValue::Int(y)) => {
+            x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal)
+        }
+        (KValue::Float(x), KValue::Float(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+        (KValue::Bool(x), KValue::Bool(y)) => x.cmp(y),
+        (KValue::Date(x), KValue::Date(y)) => x.cmp(y),
+        (KValue::Decimal(x), KValue::Decimal(y)) => x
+            .to_f64()
+            .partial_cmp(&y.to_f64())
+            .unwrap_or(Ordering::Equal),
+        _ => a.py_str().cmp(&b.py_str()),
+    }
+}
+
+/// `df.sort_values(by=cols, ascending=...)` with a stable sort, then `reset_index(drop=True)`.
+pub fn sort_frame(df: &Frame, cols: &[String], ascending: bool) -> Frame {
+    let keys: Vec<Vec<KValue>> = cols
+        .iter()
+        .filter_map(|c| df.column(c).map(|col| col.data.values()))
+        .collect();
+    if keys.is_empty() {
+        return df.clone();
+    }
+    let mut perm: Vec<usize> = (0..df.height()).collect();
+    perm.sort_by(|&i, &j| {
+        for k in &keys {
+            let (a, b) = (&k[i], &k[j]);
+            let mut ord = compare_values(a, b);
+            if !ascending && !a.is_na() && !b.is_na() {
+                ord = ord.reverse();
+            }
+            if ord != std::cmp::Ordering::Equal {
+                return ord;
+            }
+        }
+        std::cmp::Ordering::Equal
+    });
+    df.take(&perm)
+}
+
+/// The post-processing `Pipe.get_data()` applies to an instance's frame: sort by the datetime
+/// axis then the other index columns (`order`), then `limit`.
+pub fn pipe_postprocess(pipe: &Pipe, df: Frame, query: &DataQuery) -> Frame {
+    let columns = columns_map(pipe);
+    let dt_col = columns.get("datetime").cloned();
+    let mut indices: Vec<String> = Vec::new();
+    if let Some(dt) = dt_col.as_ref().filter(|c| df.contains(c)) {
+        indices.push(dt.clone());
+    }
+    for (role, col) in &columns {
+        if role != "datetime" && df.contains(col) {
+            indices.push(col.clone());
+        }
+    }
+    let order = query.order.clone().unwrap_or_else(|| "asc".into());
+    let mut out = sort_frame(&df, &indices, order.to_lowercase() == "asc");
+    if let Some(limit) = query.limit {
+        let limit = limit.max(0) as usize;
+        if out.height() > limit {
+            out = out.take(&(0..limit).collect::<Vec<_>>());
+        }
+    }
+    out
+}
+
+/// `Pipe.get_data(...)`: the instance's frame with `Pipe`-level sorting and `limit`.
+pub async fn get_data<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+    query: &DataQuery,
+) -> ConnectorResult<Option<Frame>> {
+    Ok(conn
+        .get_pipe_data(pipe, query)
+        .await?
+        .map(|df| pipe_postprocess(pipe, df, query)))
+}
+
+/// `Pipe.get_data(...)` as documents.
+pub async fn get_docs<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+    query: &DataQuery,
+) -> ConnectorResult<Vec<Doc>> {
+    Ok(get_data(conn, pipe, query)
+        .await?
+        .map(|df| frame_to_docs(&df))
+        .unwrap_or_default())
+}
+
+/// `Pipe.get_value(column, params)`: the first value of `column`, or `None`.
+pub async fn get_value<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+    column: &str,
+    params: &Map,
+) -> ConnectorResult<Option<Value>> {
+    let docs = get_docs(
+        conn,
+        pipe,
+        &DataQuery {
+            select_columns: Some(vec![column.to_string()]),
+            params: Some(params.clone()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .await?;
+    Ok(docs
+        .first()
+        .and_then(|d| d.get(column))
+        .filter(|v| !v.is_na())
+        .map(kernel_to_core))
+}
+
+/// `Pipe.get_doc(params)`: the first row, or `None`.
+pub async fn get_doc<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+    params: &Map,
+) -> ConnectorResult<Option<Doc>> {
+    let docs = get_docs(
+        conn,
+        pipe,
+        &DataQuery {
+            params: Some(params.clone()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .await?;
+    Ok(docs.into_iter().next())
+}
+
+fn map_of(pairs: &[(&str, Value)]) -> Map {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect()
+}
+
+fn str_map(pairs: &[(&str, &str)]) -> Value {
+    Value::Map(
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), Value::Str(v.to_string())))
+            .collect(),
+    )
+}
+
+fn build_internal_pipe(instance_keys: &str, metric: &str, kwargs: Map) -> Pipe {
+    let mut builder = Pipe::builder("mrsm", metric).instance(instance_keys);
+    for (k, v) in kwargs {
+        builder = builder.kwarg(&k, v);
+    }
+    builder.build().unwrap_or_else(|_| {
+        // The keys are static and valid; fall back to a bare pipe rather than panic.
+        Pipe::builder("mrsm", metric)
+            .instance(instance_keys)
+            .kwarg("temporary", true)
+            .build()
+            .expect("static internal pipe keys are valid")
+    })
+}
+
+/// `InstanceConnector.get_users_pipe()`.
+pub fn users_pipe(instance_keys: &str) -> Pipe {
+    build_internal_pipe(
+        instance_keys,
+        "users",
+        map_of(&[
+            ("target", Value::Str("mrsm_users".into())),
+            ("temporary", Value::Bool(true)),
+            ("cache", Value::Bool(true)),
+            ("static", Value::Bool(true)),
+            ("null_indices", Value::Bool(false)),
+            ("columns", str_map(&[("primary", "user_id")])),
+            (
+                "dtypes",
+                str_map(&[
+                    ("user_id", "uuid"),
+                    ("username", "string"),
+                    ("password_hash", "string"),
+                    ("email", "string"),
+                    ("user_type", "string"),
+                    ("attributes", "json"),
+                ]),
+            ),
+            ("indices", str_map(&[("unique", "username")])),
+        ]),
+    )
+}
+
+/// `InstanceConnector.get_plugins_pipe()` (`user_id_dtype` from the users pipe).
+pub fn plugins_pipe(instance_keys: &str, user_id_dtype: &str) -> Pipe {
+    build_internal_pipe(
+        instance_keys,
+        "plugins",
+        map_of(&[
+            ("target", Value::Str("mrsm_plugins".into())),
+            ("temporary", Value::Bool(true)),
+            ("cache", Value::Bool(true)),
+            ("static", Value::Bool(true)),
+            ("null_indices", Value::Bool(false)),
+            (
+                "columns",
+                str_map(&[("primary", "plugin_name"), ("user_id", "user_id")]),
+            ),
+            (
+                "dtypes",
+                str_map(&[
+                    ("plugin_name", "string"),
+                    ("user_id", user_id_dtype),
+                    ("attributes", "json"),
+                    ("version", "string"),
+                ]),
+            ),
+        ]),
+    )
+}
+
+/// `InstanceConnector.get_tokens_pipe()` (`user_id_dtype` from the users pipe).
+pub fn tokens_pipe(instance_keys: &str, user_id_dtype: &str) -> Pipe {
+    build_internal_pipe(
+        instance_keys,
+        "tokens",
+        map_of(&[
+            ("target", Value::Str("mrsm_tokens".into())),
+            ("temporary", Value::Bool(true)),
+            ("cache", Value::Bool(true)),
+            ("static", Value::Bool(true)),
+            ("autotime", Value::Bool(true)),
+            ("null_indices", Value::Bool(false)),
+            (
+                "columns",
+                str_map(&[("datetime", "creation"), ("primary", "id")]),
+            ),
+            (
+                "indices",
+                str_map(&[("unique", "label"), ("user_id", "user_id")]),
+            ),
+            (
+                "dtypes",
+                str_map(&[
+                    ("id", "uuid"),
+                    ("creation", "datetime"),
+                    ("expiration", "datetime"),
+                    ("is_valid", "bool"),
+                    ("label", "string"),
+                    ("user_id", user_id_dtype),
+                    ("scopes", "json"),
+                    ("secret_hash", "string"),
+                ]),
+            ),
+        ]),
+    )
+}
+
+/// A UTC timestamp as a kernel value.
+pub fn utc_value(dt: DateTime<Utc>) -> KValue {
+    KValue::Datetime(DateTimeValue::utc(dt.naive_utc()))
+}
+
+/// A UUID-or-string user ID as a kernel value.
+fn user_id_value(v: &Value) -> KValue {
+    match v {
+        Value::Str(s) => match Uuid::parse_str(s) {
+            Ok(u) => KValue::Uuid(u),
+            Err(_) => KValue::Str(s.clone()),
+        },
+        other => core_to_kernel(other),
+    }
+}
+
+/// `user.user_id if user.user_id is not None else self.get_user_id(user)`.
+pub async fn resolve_user_id<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    user: &User,
+) -> ConnectorResult<Option<Value>> {
+    match &user.user_id {
+        Some(id) if !id.is_null() => Ok(Some(id.clone())),
+        _ => conn.get_user_id(user).await,
+    }
+}
+
+/// `get_data([field], params={'user_id': user_id})[field][0]`.
+pub async fn user_field<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    user: &User,
+    field: &str,
+) -> ConnectorResult<Option<Value>> {
+    let user_id = resolve_user_id(conn, user).await?;
+    let pipe = conn.get_users_pipe();
+    let mut params = Map::new();
+    params.insert("user_id".into(), user_id.unwrap_or(Value::Null));
+    get_value(conn, &pipe, field, &params).await
+}
+
+/// `InstanceConnector.register_user()`.
+pub async fn default_register_user<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    user: &mut User,
+) -> SuccessTuple {
+    let pipe = conn.get_users_pipe();
+    let user_id = Uuid::new_v4();
+    user.user_id = Some(Value::Str(user_id.to_string()));
+    let password_hash = match user.get_password_hash() {
+        Ok(h) => h,
+        Err(e) => return SuccessTuple::fail(e.to_string()),
+    };
+    let attributes = Value::Map(user.attributes.clone().unwrap_or_default());
+    let doc: Doc = [
+        ("user_id".to_string(), KValue::Uuid(user_id)),
+        ("username".to_string(), KValue::Str(user.username.clone())),
+        (
+            "email".to_string(),
+            user.email.clone().map(KValue::Str).unwrap_or(KValue::Null),
+        ),
+        ("password_hash".to_string(), KValue::Str(password_hash)),
+        (
+            "user_type".to_string(),
+            user.user_type
+                .clone()
+                .map(KValue::Str)
+                .unwrap_or(KValue::Null),
+        ),
+        ("attributes".to_string(), core_to_kernel(&attributes)),
+    ]
+    .into_iter()
+    .collect();
+    let res = sync_docs(conn, &pipe, vec![doc], false).await;
+    if !res.success {
+        return SuccessTuple::fail(format!(
+            "Failed to register user '{}':\n{}",
+            user.username, res.message
+        ));
+    }
+    SuccessTuple::success()
+}
+
+/// `InstanceConnector.edit_user()`.
+pub async fn default_edit_user<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    user: &User,
+) -> SuccessTuple {
+    let pipe = conn.get_users_pipe();
+    let user_id = match resolve_user_id(conn, user).await {
+        Ok(id) => id.unwrap_or(Value::Null),
+        Err(e) => return SuccessTuple::fail(e.to_string()),
+    };
+    let mut doc: Doc = Doc::new();
+    doc.insert("user_id".into(), user_id_value(&user_id));
+    if let Some(email) = user.email.as_ref().filter(|e| !e.is_empty()) {
+        doc.insert("email".into(), KValue::Str(email.clone()));
+    }
+    if let Some(h) = user.password_hash.as_ref().filter(|h| !h.is_empty()) {
+        doc.insert("password_hash".into(), KValue::Str(h.clone()));
+    } else if !user.password.is_empty() {
+        let mut u = user.clone();
+        if let Ok(h) = u.get_password_hash() {
+            doc.insert("password_hash".into(), KValue::Str(h));
+        }
+    }
+    if let Some(t) = user.user_type.as_ref().filter(|t| !t.is_empty()) {
+        doc.insert("user_type".into(), KValue::Str(t.clone()));
+    }
+    if let Some(attrs) = user.attributes.as_ref().filter(|a| !a.is_empty()) {
+        doc.insert(
+            "attributes".into(),
+            core_to_kernel(&Value::Map(attrs.clone())),
+        );
+    }
+    let res = sync_docs(conn, &pipe, vec![doc], true).await;
+    if !res.success {
+        return SuccessTuple::fail(format!(
+            "Failed to edit user '{}':\n{}",
+            user.username, res.message
+        ));
+    }
+    SuccessTuple::success()
+}
+
+/// `plugins_pipe.get_value(field, {'plugin_name': plugin.name})`.
+pub async fn plugin_field<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    plugin: &PluginRecord,
+    field: &str,
+) -> ConnectorResult<Option<Value>> {
+    let pipe = conn.get_plugins_pipe();
+    let mut params = Map::new();
+    params.insert("plugin_name".into(), Value::Str(plugin.name.clone()));
+    get_value(conn, &pipe, field, &params).await
+}
+
+/// `InstanceConnector.register_plugin()`.
+pub async fn default_register_plugin<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    plugin: &PluginRecord,
+) -> SuccessTuple {
+    match conn.get_plugin_user_id(plugin).await {
+        Ok(Some(user_id)) => {
+            let username = conn
+                .get_username(&user_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|v| meerschaum_core::pyfmt::py_str(&v))
+                .unwrap_or_else(|| "None".into());
+            return SuccessTuple::fail(format!("{plugin} is already registered to '{username}'."));
+        }
+        Ok(None) => {}
+        Err(e) => return SuccessTuple::fail(e.to_string()),
+    }
+    let pipe = conn.get_plugins_pipe();
+    let doc: Doc = [
+        ("plugin_name".to_string(), KValue::Str(plugin.name.clone())),
+        (
+            "version".to_string(),
+            plugin
+                .version
+                .clone()
+                .map(KValue::Str)
+                .unwrap_or(KValue::Null),
+        ),
+        (
+            "attributes".to_string(),
+            core_to_kernel(&Value::Map(plugin.attributes.clone())),
+        ),
+        (
+            "user_id".to_string(),
+            plugin
+                .user_id
+                .as_ref()
+                .map(user_id_value)
+                .unwrap_or(KValue::Null),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let res = sync_docs(conn, &pipe, vec![doc], false).await;
+    if !res.success {
+        return SuccessTuple::fail(format!("Failed to register {plugin}:\n{}", res.message));
+    }
+    SuccessTuple::success()
+}
+
+/// `tokens_pipe.get_value(field, params={'id': token_id})`.
+pub async fn token_field<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    token_id: &Uuid,
+    field: &str,
+) -> ConnectorResult<Option<Value>> {
+    let pipe = conn.get_tokens_pipe();
+    let mut params = Map::new();
+    params.insert("id".into(), Value::Str(token_id.to_string()));
+    get_value(conn, &pipe, field, &params).await
+}
+
+/// `InstanceConnector.register_token()`.
+pub async fn default_register_token<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    token: &mut Token,
+) -> SuccessTuple {
+    let (token_id, secret) = match token.generate_credentials() {
+        Ok(c) => c,
+        Err(e) => return SuccessTuple::fail(e.to_string()),
+    };
+    let user_id = match &token.user {
+        Some(user) => match conn.get_user_id(user).await {
+            Ok(id) => id,
+            Err(e) => return SuccessTuple::fail(e.to_string()),
+        },
+        None => None,
+    };
+    let Some(user_id) = user_id else {
+        return SuccessTuple::fail("Cannot register a token without a user.");
+    };
+    let secret_hash = match Token::hash_secret(&secret) {
+        Ok(h) => h,
+        Err(e) => return SuccessTuple::fail(e.to_string()),
+    };
+    let now = Utc::now();
+    token.creation = Some(now);
+    let doc: Doc = [
+        ("id".to_string(), KValue::Uuid(token_id)),
+        ("user_id".to_string(), user_id_value(&user_id)),
+        ("creation".to_string(), utc_value(now)),
+        (
+            "expiration".to_string(),
+            token.expiration.map(utc_value).unwrap_or(KValue::Null),
+        ),
+        (
+            "label".to_string(),
+            token.label.clone().map(KValue::Str).unwrap_or(KValue::Null),
+        ),
+        ("is_valid".to_string(), KValue::Bool(token.is_valid)),
+        (
+            "scopes".to_string(),
+            KValue::Json(serde_json::Value::Array(
+                token
+                    .scopes
+                    .iter()
+                    .map(|s| serde_json::Value::String(s.clone()))
+                    .collect(),
+            )),
+        ),
+        ("secret_hash".to_string(), KValue::Str(secret_hash)),
+    ]
+    .into_iter()
+    .collect();
+    let pipe = conn.get_tokens_pipe();
+    let res = sync_docs(conn, &pipe, vec![doc], false).await;
+    if !res.success {
+        return SuccessTuple::fail(format!("Failed to register token:\n{}", res.message));
+    }
+    SuccessTuple::success()
+}
+
+/// `InstanceConnector.edit_token()` / `invalidate_token()`.
+pub async fn default_edit_token<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    token: &Token,
+    invalidate: bool,
+) -> SuccessTuple {
+    let Some(token_id) = token.id else {
+        return SuccessTuple::fail("Token ID is not set.");
+    };
+    match conn.token_exists(&token_id).await {
+        Ok(true) => {}
+        Ok(false) => return SuccessTuple::fail(format!("Token {token_id} does not exist.")),
+        Err(e) => return SuccessTuple::fail(e.to_string()),
+    }
+    let creation = match token.creation {
+        Some(c) => Some(c),
+        None => conn
+            .get_token_model(&token_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|m| m.creation),
+    };
+    let mut doc: Doc = Doc::new();
+    doc.insert("id".into(), KValue::Uuid(token_id));
+    doc.insert(
+        "creation".into(),
+        creation.map(utc_value).unwrap_or(KValue::Null),
+    );
+    if invalidate {
+        doc.insert("is_valid".into(), KValue::Bool(false));
+    } else {
+        doc.insert(
+            "expiration".into(),
+            token.expiration.map(utc_value).unwrap_or(KValue::Null),
+        );
+        doc.insert(
+            "label".into(),
+            token.label.clone().map(KValue::Str).unwrap_or(KValue::Null),
+        );
+        doc.insert("is_valid".into(), KValue::Bool(token.is_valid));
+        doc.insert(
+            "scopes".into(),
+            KValue::Json(serde_json::Value::Array(
+                token
+                    .scopes
+                    .iter()
+                    .map(|s| serde_json::Value::String(s.clone()))
+                    .collect(),
+            )),
+        );
+    }
+    let pipe = conn.get_tokens_pipe();
+    let res = sync_docs(conn, &pipe, vec![doc], true).await;
+    if !res.success {
+        let verb = if invalidate { "invalidate" } else { "edit" };
+        return SuccessTuple::fail(format!(
+            "Failed to {verb} token '{token_id}':\n{}",
+            res.message
+        ));
+    }
+    SuccessTuple::success()
+}
+
+/// `InstanceConnector.delete_token()`.
+pub async fn default_delete_token<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    token: &Token,
+) -> SuccessTuple {
+    let Some(token_id) = token.id else {
+        return SuccessTuple::fail("Token ID is not set.");
+    };
+    match conn.token_exists(&token_id).await {
+        Ok(true) => {}
+        Ok(false) => return SuccessTuple::fail(format!("Token {token_id} does not exist.")),
+        Err(e) => return SuccessTuple::fail(e.to_string()),
+    }
+    let pipe = conn.get_tokens_pipe();
+    let mut params = Map::new();
+    params.insert("id".into(), Value::Str(token_id.to_string()));
+    let res = conn
+        .clear_pipe(
+            &pipe,
+            &DataQuery {
+                params: Some(params),
+                ..Default::default()
+            },
+        )
+        .await;
+    if !res.success {
+        return SuccessTuple::fail(format!(
+            "Failed to delete token '{token_id}':\n{}",
+            res.message
+        ));
+    }
+    SuccessTuple::success()
+}
+
+/// A token document as a [`TokenModel`].
+pub fn token_model_from_doc(doc: &Doc) -> TokenModel {
+    let get = |k: &str| doc.get(k).filter(|v| !v.is_na());
+    let dt = |k: &str| match get(k) {
+        Some(KValue::Datetime(d)) => Some(DateTime::<Utc>::from_naive_utc_and_offset(d.utc, Utc)),
+        Some(KValue::Str(s)) => meerschaum_kernel::value::parse_datetime_value(s)
+            .map(|d| DateTime::<Utc>::from_naive_utc_and_offset(d.utc, Utc)),
+        _ => None,
+    };
+    TokenModel {
+        id: match get("id") {
+            Some(KValue::Uuid(u)) => Some(*u),
+            Some(KValue::Str(s)) => Uuid::parse_str(s).ok(),
+            _ => None,
+        },
+        creation: dt("creation"),
+        expiration: dt("expiration"),
+        label: get("label").map(|v| v.py_str()),
+        user_id: get("user_id").map(kernel_to_core),
+        secret_hash: get("secret_hash").map(|v| v.py_str()),
+        scopes: match get("scopes").map(kernel_to_core) {
+            Some(Value::List(items)) => items.iter().map(meerschaum_core::pyfmt::py_str).collect(),
+            Some(Value::Str(s)) => match Value::from_json_str(&s) {
+                Ok(Value::List(items)) => {
+                    items.iter().map(meerschaum_core::pyfmt::py_str).collect()
+                }
+                _ => Vec::new(),
+            },
+            _ => crate::models::scopes::all_scopes(),
+        },
+        is_valid: match get("is_valid") {
+            Some(KValue::Bool(b)) => *b,
+            Some(v) => v.py_str() == "True",
+            None => true,
+        },
+    }
+}
+
+/// `InstanceConnector.get_tokens()`.
+pub async fn default_get_tokens<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    user: Option<&User>,
+    labels: Option<&[String]>,
+    ids: Option<&[Uuid]>,
+) -> ConnectorResult<Vec<TokenModel>> {
+    let pipe = conn.get_tokens_pipe();
+    let user_id = match user {
+        Some(u) => conn.get_user_id(u).await?,
+        None => None,
+    };
+    let user_type = match user {
+        Some(u) => conn.get_user_type(u).await?,
+        None => None,
+    };
+    let mut params = Map::new();
+    if let Some(uid) = user_id {
+        if user_type.as_deref() == Some("admin") {
+            params.insert("user_id".into(), Value::List(vec![uid, Value::Null]));
+        } else {
+            params.insert("user_id".into(), uid);
+        }
+    }
+    if let Some(labels) = labels.filter(|l| !l.is_empty()) {
+        params.insert(
+            "label".into(),
+            Value::List(labels.iter().map(|l| Value::Str(l.clone())).collect()),
+        );
+    }
+    if let Some(ids) = ids.filter(|i| !i.is_empty()) {
+        params.insert(
+            "id".into(),
+            Value::List(ids.iter().map(|i| Value::Str(i.to_string())).collect()),
+        );
+    }
+    let docs = get_docs(
+        conn,
+        &pipe,
+        &DataQuery {
+            params: Some(params),
+            ..Default::default()
+        },
+    )
+    .await?;
+    Ok(docs.iter().rev().map(token_model_from_doc).collect())
+}
+
+/// `InstanceConnector.get_token_model()`.
+pub async fn default_get_token_model<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    token_id: &Uuid,
+) -> ConnectorResult<Option<TokenModel>> {
+    let pipe = conn.get_tokens_pipe();
+    let mut params = Map::new();
+    params.insert("id".into(), Value::Str(token_id.to_string()));
+    Ok(get_doc(conn, &pipe, &params)
+        .await?
+        .map(|d| token_model_from_doc(&d)))
+}

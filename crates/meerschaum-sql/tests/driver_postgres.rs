@@ -10,6 +10,7 @@ use arrow::datatypes::{DataType, TimeUnit};
 use std::panic::AssertUnwindSafe;
 
 use futures_util::FutureExt;
+use meerschaum_sql::driver::batch::META_DTYPE;
 use meerschaum_sql::driver::{SqlDriver, SqlValue};
 use meerschaum_sql::uri::ConnectionSpec;
 
@@ -81,7 +82,7 @@ async fn postgres_types_and_exec_queries() {
             schema
                 .field(4)
                 .metadata()
-                .get("mrsm:dtype")
+                .get(META_DTYPE)
                 .map(String::as_str),
             Some("json")
         );
@@ -230,7 +231,7 @@ async fn postgis_geometry_as_ewkb() {
     let field = schema.field(0);
     assert_eq!(field.data_type(), &DataType::Binary);
     assert_eq!(
-        field.metadata().get("mrsm:dtype").map(String::as_str),
+        field.metadata().get(META_DTYPE).map(String::as_str),
         Some("geometry")
     );
     let geom = batches[0]

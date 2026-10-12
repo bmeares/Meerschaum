@@ -17,7 +17,7 @@ pub fn get_vacuum_queries(flavor: Flavor, pipe_name: &str, full: bool) -> Option
                 format!("({options}) ")
             };
             Some(vec![
-                crate::pytext::py_strip(&format!("VACUUM {opt}{pipe_name}")).to_string(),
+                meerschaum_core::pyfmt::py_strip(&format!("VACUUM {opt}{pipe_name}")).to_string(),
             ])
         }
         // `VACUUM` recurses into a hypertable's chunks; `full` is intentionally ignored.

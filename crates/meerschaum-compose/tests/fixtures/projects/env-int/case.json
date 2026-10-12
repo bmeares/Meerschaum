@@ -1,0 +1,5 @@
+{
+  "description": "A non-string value in `environment:` fails when the project environment is applied (`os.environ` only takes strings), as in Python.",
+  "width": 100,
+  "runs": [{"name": "ps", "action": ["ps"]}]
+}

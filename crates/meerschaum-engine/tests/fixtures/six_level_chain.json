@@ -1,0 +1,68 @@
+{
+  "description": "Six primary-keyed GIS layers without a datetime column. Ledger entries carry only sequence numbers; any change upstream means a full re-sync of the child.",
+  "records": [
+    {"instance": "sql:main", "connector": "plugin:gis", "metric": "parcels_raw",
+     "parameters": {"columns": {"primary": "parcel_id"}}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "parcels_clean",
+     "parameters": {"columns": {"primary": "parcel_id"}, "parents": ["Pipe('plugin:gis', 'parcels_raw')"]}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "parcels_joined",
+     "parameters": {"columns": {"primary": "parcel_id"}, "parents": ["Pipe('sql:main', 'parcels_clean')"]}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "zoning_overlay",
+     "parameters": {"columns": {"primary": "parcel_id"},
+                    "sql": "SELECT * FROM {{ Pipe('sql:main', 'parcels_joined') }} p JOIN zoning z ON ST_Intersects(p.geom, z.geom)"}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "districts",
+     "parameters": {"columns": {"primary": "district_id"}, "parent": {"connector_keys": "sql:main", "metric_key": "zoning_overlay"}}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "district_summary",
+     "parameters": {"columns": {"primary": "district_id"}, "parents": ["Pipe('sql:main', 'districts')"]}}
+  ],
+  "selection": {"targets": {"refs": ["sql:main|sql:main|district_summary|None"]}, "parents": "all"},
+  "state": {
+    "definition_hashes": {
+      "sql:main|plugin:gis|parcels_raw|None": "@current",
+      "sql:main|sql:main|parcels_clean|None": "@current",
+      "sql:main|sql:main|parcels_joined|None": "@current",
+      "sql:main|sql:main|zoning_overlay|None": "@current",
+      "sql:main|sql:main|districts|None": "@current",
+      "sql:main|sql:main|district_summary|None": "@current"
+    },
+    "ledger": {
+      "sql:main": [
+        {"pipe_ref": "sql:main|plugin:gis|parcels_raw|None", "seq": 2, "begin": null, "end": null},
+        {"pipe_ref": "sql:main|plugin:gis|parcels_raw|None", "seq": 3, "begin": null, "end": null},
+        {"pipe_ref": "sql:main|sql:main|parcels_clean|None", "seq": 7, "begin": null, "end": null},
+        {"pipe_ref": "sql:main|sql:main|parcels_joined|None", "seq": 4, "begin": null, "end": null},
+        {"pipe_ref": "sql:main|sql:main|zoning_overlay|None", "seq": 2, "begin": null, "end": null},
+        {"pipe_ref": "sql:main|sql:main|zoning_overlay|None", "seq": 3, "begin": null, "end": null},
+        {"pipe_ref": "sql:main|sql:main|districts|None", "seq": 10, "begin": null, "end": null}
+      ]
+    },
+    "cursors": {
+      "sql:main": [
+        {"parent_ref": "sql:main|plugin:gis|parcels_raw|None", "child_ref": "sql:main|sql:main|parcels_clean|None", "seq": 2, "parent_watermark_at_cursor": null},
+        {"parent_ref": "sql:main|sql:main|parcels_clean|None", "child_ref": "sql:main|sql:main|parcels_joined|None", "seq": 7, "parent_watermark_at_cursor": null},
+        {"parent_ref": "sql:main|sql:main|zoning_overlay|None", "child_ref": "sql:main|sql:main|districts|None", "seq": 2, "parent_watermark_at_cursor": null},
+        {"parent_ref": "sql:main|sql:main|districts|None", "child_ref": "sql:main|sql:main|district_summary|None", "seq": 10, "parent_watermark_at_cursor": null}
+      ]
+    }
+  },
+  "expected": {
+    "nodes": [
+      {"node": "sql:main|plugin:gis|parcels_raw|None", "action": "root", "bounds": {"begin": "", "end": null}},
+      {"node": "sql:main|sql:main|parcels_clean|None", "action": "backfill",
+       "bounds": {"begin": null, "end": null}, "ranges": [{"begin": null, "end": null}], "chunks": [],
+       "provisional": true,
+       "consumes": [{"parent_ref": "sql:main|plugin:gis|parcels_raw|None", "state_instance": "sql:main", "seq": 3}],
+       "reason_contains": ["1 unconsumed ledger entry from plugin:gis/parcels_raw (seq 3)", "no datetime column: full re-sync"]},
+      {"node": "sql:main|sql:main|parcels_joined|None", "action": "skip", "bounds": null, "provisional": true,
+       "reason_contains": ["sql:main/parcels_clean unchanged since its cursor"]},
+      {"node": "sql:main|sql:main|zoning_overlay|None", "action": "incremental",
+       "bounds": {"begin": null, "end": null}, "chunks": [],
+       "consumes": [{"parent_ref": "sql:main|sql:main|parcels_joined|None", "state_instance": "sql:main", "seq": 4}],
+       "reason_contains": ["no cursor on the edge from sql:main/parcels_joined (first engine run)", "full re-sync"]},
+      {"node": "sql:main|sql:main|districts|None", "action": "backfill",
+       "bounds": {"begin": null, "end": null}, "ranges": [{"begin": null, "end": null}], "provisional": true,
+       "reason_contains": ["1 unconsumed ledger entry from sql:main/zoning_overlay (seq 3)"]},
+      {"node": "sql:main|sql:main|district_summary|None", "action": "skip", "bounds": null, "provisional": true}
+    ]
+  }
+}

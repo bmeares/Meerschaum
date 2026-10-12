@@ -5,14 +5,41 @@ use chrono::{Datelike, NaiveDate, NaiveDateTime, TimeDelta};
 use crate::dtypes::get_db_type_from_pd_type;
 use crate::flavor::Flavor;
 use crate::ident::{sql_item_name, truncate_item_name};
-use crate::pipe::{Interval, PipeSpec};
-use crate::pytext::PyDateTime;
+use crate::pipe::{ChunkInterval, ChunkIntervalArg, SqlPipe};
 use crate::queries::ConnectorCtx;
+use meerschaum_core::pyfmt::PyDateTime;
 
 /// `_MAX_PARTITIONS_PER_SYNC` (`_partition.py:43`); overridable via
-/// `system.connectors.sql.instance.max_partitions_per_sync`.
-/// TODO(core-merge): read the override from the config registry.
+/// `system.connectors.sql.instance.max_partitions_per_sync` (see [`max_partitions_per_sync`]).
 pub const MAX_PARTITIONS_PER_SYNC: usize = 10_000;
+
+/// `_max_partitions_per_sync()` (`_partition.py:45`): the configured per-sync cap, else
+/// [`MAX_PARTITIONS_PER_SYNC`] when the key is missing or not an integer.
+///
+/// A cap of zero or below behaves like one partition per sync, as in Python.
+pub fn max_partitions_per_sync(config: &meerschaum_core::Config) -> usize {
+    let opts = meerschaum_core::config::GetOptions {
+        warn: false,
+        ..Default::default()
+    };
+    let (valid, value) = config.get_with(
+        &[
+            "system",
+            "connectors",
+            "sql",
+            "instance",
+            "max_partitions_per_sync",
+        ],
+        opts,
+    );
+    if !valid || value.is_null() {
+        return MAX_PARTITIONS_PER_SYNC;
+    }
+    match meerschaum_core::pyfmt::py_int(&value) {
+        Some(n) => usize::try_from(n).unwrap_or(0),
+        None => MAX_PARTITIONS_PER_SYNC,
+    }
+}
 
 /// A partition boundary: a datetime or an integer-axis value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,15 +101,15 @@ fn with_tz_of(template: &PyDateTime, naive: NaiveDateTime) -> PyDateTime {
 /// `_partition_bounds(value, interval)`: the epoch-aligned `[lo, hi)` containing `value`.
 pub fn partition_bounds(
     value: PartitionValue,
-    interval: Interval,
+    interval: ChunkInterval,
 ) -> (PartitionValue, PartitionValue) {
     match (value, interval) {
-        (PartitionValue::Int(v), Interval::Int(i)) => {
+        (PartitionValue::Int(v), ChunkInterval::Int(i)) => {
             let n = v.div_euclid(i);
             let lo = n * i;
             (PartitionValue::Int(lo), PartitionValue::Int(lo + i))
         }
-        (PartitionValue::DateTime(dt), Interval::Duration(delta)) => {
+        (PartitionValue::DateTime(dt), ChunkInterval::Delta(delta)) => {
             // The epoch shares `value`'s tzinfo, so the arithmetic happens on wall-clock time.
             let epoch = NaiveDate::from_ymd_opt(1970, 1, 1)
                 .expect("valid")
@@ -102,15 +129,15 @@ pub fn partition_bounds(
                 PartitionValue::DateTime(with_tz_of(&dt, hi)),
             )
         }
-        (PartitionValue::Int(v), Interval::Duration(delta)) => {
+        (PartitionValue::Int(v), ChunkInterval::Delta(delta)) => {
             // An int value with a duration: Python would raise; treat the duration as minutes.
             partition_bounds(
                 PartitionValue::Int(v),
-                Interval::Int(delta.num_minutes().max(1)),
+                ChunkInterval::Int(delta.num_minutes().max(1)),
             )
         }
-        (PartitionValue::DateTime(dt), Interval::Int(i)) => {
-            partition_bounds(PartitionValue::DateTime(dt), Interval::minutes(i))
+        (PartitionValue::DateTime(dt), ChunkInterval::Int(i)) => {
+            partition_bounds(PartitionValue::DateTime(dt), ChunkInterval::minutes(i))
         }
     }
 }
@@ -146,7 +173,7 @@ pub fn partition_name(flavor: Flavor, target: &str, lo: PartitionValue) -> Strin
 pub fn partition_ranges(
     min_val: PartitionValue,
     max_val: PartitionValue,
-    interval: Interval,
+    interval: ChunkInterval,
     max_parts: usize,
 ) -> (Vec<(PartitionValue, PartitionValue)>, bool) {
     let mut ranges = Vec::new();
@@ -170,12 +197,12 @@ pub fn partition_ranges(
 }
 
 /// `_should_partition(pipe)`.
-pub fn should_partition(flavor: Flavor, pipe: &PipeSpec) -> bool {
+pub fn should_partition(flavor: Flavor, pipe: &SqlPipe) -> bool {
     flavor.partitionable() && pipe.column("datetime").is_some() && pipe.hypertable()
 }
 
 /// `_get_partition_column(pipe)`.
-pub fn get_partition_column(flavor: Flavor, pipe: &PipeSpec) -> Option<String> {
+pub fn get_partition_column(flavor: Flavor, pipe: &SqlPipe) -> Option<String> {
     if !should_partition(flavor, pipe) {
         return None;
     }
@@ -215,7 +242,7 @@ pub fn partition_scheme_name(flavor: Flavor, target: &str) -> String {
 /// `database` is the MySQL database name (`schema or self.database`).
 pub fn get_partition_count_query(
     ctx: &ConnectorCtx,
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     database: Option<&str>,
 ) -> Option<String> {
     let flavor = ctx.flavor;
@@ -244,7 +271,7 @@ pub fn get_partition_count_query(
 }
 
 /// `_get_chunk_count_timescaledb`'s query (`_partition.py:171`).
-pub fn get_timescaledb_chunk_count_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> String {
+pub fn get_timescaledb_chunk_count_query(ctx: &ConnectorCtx, pipe: &SqlPipe) -> String {
     let schema = ctx.get_pipe_schema(pipe);
     let clean_target = pipe.target.replace('\'', "''");
     let schema_clause = match schema.filter(|s| !s.is_empty()) {
@@ -257,7 +284,7 @@ pub fn get_timescaledb_chunk_count_query(ctx: &ConnectorCtx, pipe: &PipeSpec) ->
 }
 
 /// The `pg_partitioned_table` guard of `_create_missing_partitions_pg` (`_partition.py:412`).
-pub fn get_pg_is_partitioned_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> String {
+pub fn get_pg_is_partitioned_query(ctx: &ConnectorCtx, pipe: &SqlPipe) -> String {
     let schema = ctx.get_pipe_schema(pipe);
     let parent_name = sql_item_name(&pipe.target, ctx.flavor, schema.as_deref());
     format!(
@@ -269,7 +296,7 @@ pub fn get_pg_is_partitioned_query(ctx: &ConnectorCtx, pipe: &PipeSpec) -> Strin
 /// The `CREATE TABLE IF NOT EXISTS ... PARTITION OF` queries of `_create_missing_partitions_pg`.
 pub fn get_pg_partition_creation_queries(
     ctx: &ConnectorCtx,
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     ranges: &[(PartitionValue, PartitionValue)],
 ) -> Vec<String> {
     let flavor = ctx.flavor;
@@ -295,7 +322,7 @@ pub fn get_pg_partition_creation_queries(
 /// `_get_mysql_max_partition_bound`'s query; `None` when no database name is known.
 pub fn get_mysql_max_partition_bound_query(
     ctx: &ConnectorCtx,
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     database: Option<&str>,
 ) -> Option<String> {
     let db_name = ctx
@@ -316,12 +343,12 @@ pub fn parse_mysql_max_partition_bound(
 ) -> Option<PartitionValue> {
     let mut max_bound: Option<PartitionValue> = None;
     for raw in descriptions {
-        let text = crate::pytext::py_strip(raw)
+        let text = meerschaum_core::pyfmt::py_strip(raw)
             .trim_matches('\'')
             .trim_matches('"')
             .to_string();
         let bound = if is_int_axis {
-            match crate::dtypes::py_int(&text) {
+            match meerschaum_core::pyfmt::parse_py_int(&text) {
                 Some(i) => PartitionValue::Int(i),
                 None => continue,
             }
@@ -339,16 +366,18 @@ pub fn parse_mysql_max_partition_bound(
     max_bound
 }
 
-fn add_interval(value: PartitionValue, interval: Interval) -> PartitionValue {
+fn add_interval(value: PartitionValue, interval: ChunkInterval) -> PartitionValue {
     match (value, interval) {
-        (PartitionValue::Int(v), Interval::Int(i)) => PartitionValue::Int(v + i),
-        (PartitionValue::DateTime(dt), Interval::Duration(d)) => {
+        (PartitionValue::Int(v), ChunkInterval::Int(i)) => PartitionValue::Int(v + i),
+        (PartitionValue::DateTime(dt), ChunkInterval::Delta(d)) => {
             let naive = py_add(dt.naive_local(), d).unwrap_or_else(py_datetime_max);
             PartitionValue::DateTime(with_tz_of(&dt, naive))
         }
-        (PartitionValue::Int(v), Interval::Duration(d)) => PartitionValue::Int(v + d.num_minutes()),
-        (PartitionValue::DateTime(dt), Interval::Int(i)) => {
-            add_interval(PartitionValue::DateTime(dt), Interval::minutes(i))
+        (PartitionValue::Int(v), ChunkInterval::Delta(d)) => {
+            PartitionValue::Int(v + d.num_minutes())
+        }
+        (PartitionValue::DateTime(dt), ChunkInterval::Int(i)) => {
+            add_interval(PartitionValue::DateTime(dt), ChunkInterval::minutes(i))
         }
     }
 }
@@ -358,10 +387,10 @@ fn add_interval(value: PartitionValue, interval: Interval) -> PartitionValue {
 /// `max_val` is the frame's maximum datetime; it is normalized to naive UTC like Python.
 pub fn get_mysql_add_partition_queries(
     ctx: &ConnectorCtx,
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     max_bound: PartitionValue,
     max_val: PartitionValue,
-    interval: Interval,
+    interval: ChunkInterval,
     max_parts: usize,
 ) -> Vec<String> {
     let flavor = ctx.flavor;
@@ -402,7 +431,7 @@ pub fn get_mysql_add_partition_queries(
 ///
 /// `boundaries` are the `lo` grid points (`_get_partition_boundary_values`).
 pub fn get_mssql_partition_creation_queries(
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     boundaries: &[PartitionValue],
 ) -> Vec<String> {
     let flavor = Flavor::Mssql;
@@ -416,9 +445,7 @@ pub fn get_mssql_partition_creation_queries(
     let clean_func = func_name.replace('\'', "''");
     let clean_scheme = scheme_name.replace('\'', "''");
     let dt_typ = pipe
-        .dtypes()
-        .get(&dt_col)
-        .cloned()
+        .dtype(&dt_col)
         .unwrap_or_else(|| "datetime".to_string());
     let dt_db_type = get_db_type_from_pd_type(&dt_typ, Some(flavor));
     let values_clause = boundaries
@@ -437,7 +464,7 @@ pub fn get_mssql_partition_creation_queries(
 }
 
 /// `_get_mssql_max_partition_boundary`'s query.
-pub fn get_mssql_max_partition_boundary_query(pipe: &PipeSpec) -> String {
+pub fn get_mssql_max_partition_boundary_query(pipe: &SqlPipe) -> String {
     let func_name = partition_function_name(Flavor::Mssql, &pipe.target).replace('\'', "''");
     let cast_type = if pipe.is_int_axis() {
         "BIGINT"
@@ -451,9 +478,9 @@ pub fn get_mssql_max_partition_boundary_query(pipe: &PipeSpec) -> String {
 
 /// Parse `_get_mssql_max_partition_boundary`'s result (`_partition.py:665-678`).
 pub fn parse_mssql_max_partition_boundary(text: &str, is_int_axis: bool) -> Option<PartitionValue> {
-    let text = crate::pytext::py_strip(text);
+    let text = meerschaum_core::pyfmt::py_strip(text);
     if is_int_axis {
-        return crate::dtypes::py_int(text).map(PartitionValue::Int);
+        return meerschaum_core::pyfmt::parse_py_int(text).map(PartitionValue::Int);
     }
     let head: String = text.chars().take(19).collect();
     let naive = NaiveDateTime::parse_from_str(&head, "%Y-%m-%dT%H:%M:%S")
@@ -464,10 +491,10 @@ pub fn parse_mssql_max_partition_boundary(text: &str, is_int_axis: bool) -> Opti
 
 /// The `SPLIT RANGE` queries of `_create_missing_partitions_mssql`.
 pub fn get_mssql_split_partition_queries(
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     max_bound: PartitionValue,
     max_val: PartitionValue,
-    interval: Interval,
+    interval: ChunkInterval,
     max_parts: usize,
 ) -> Vec<String> {
     let flavor = Flavor::Mssql;
@@ -509,7 +536,7 @@ pub fn get_mssql_split_partition_queries(
 }
 
 /// `_get_partition_cleanup_queries(pipe)`: drop the MSSQL partition scheme then function.
-pub fn get_partition_cleanup_queries(flavor: Flavor, pipe: &PipeSpec) -> Vec<String> {
+pub fn get_partition_cleanup_queries(flavor: Flavor, pipe: &SqlPipe) -> Vec<String> {
     if !flavor.mssql_partition() || !should_partition(flavor, pipe) {
         return Vec::new();
     }
@@ -530,23 +557,28 @@ pub fn get_partition_cleanup_queries(flavor: Flavor, pipe: &PipeSpec) -> Vec<Str
 }
 
 /// The TimescaleDB branch of `partition_pipe`: `SELECT set_chunk_time_interval(...)`.
+///
+/// Fails where Python's `pipe.get_chunk_interval(...)` raises (an invalid `precision`).
 pub fn get_set_chunk_time_interval_query(
     ctx: &ConnectorCtx,
-    pipe: &PipeSpec,
+    pipe: &SqlPipe,
     new_minutes: i64,
-) -> String {
+) -> crate::error::Result<String> {
     let pipe_name = sql_item_name(
         &pipe.target,
         ctx.flavor,
         ctx.get_pipe_schema(pipe).as_deref(),
     );
     let regclass_literal = format!("'{}'", pipe_name.replace('\'', "''"));
-    let interval = pipe.get_chunk_interval_with(Interval::minutes(new_minutes));
+    let interval =
+        pipe.chunk_interval_with(ChunkIntervalArg::Delta(TimeDelta::minutes(new_minutes)))?;
     let chunk_time_interval = match interval {
-        Interval::Int(i) => i.to_string(),
-        Interval::Duration(_) => format!("INTERVAL '{} MINUTES'", interval.whole_minutes()),
+        ChunkInterval::Int(i) => i.to_string(),
+        ChunkInterval::Delta(_) => format!("INTERVAL '{} MINUTES'", interval.whole_minutes()),
     };
-    format!("SELECT set_chunk_time_interval({regclass_literal}, {chunk_time_interval})")
+    Ok(format!(
+        "SELECT set_chunk_time_interval({regclass_literal}, {chunk_time_interval})"
+    ))
 }
 
 #[cfg(test)]
@@ -558,8 +590,42 @@ mod tests {
     }
 
     #[test]
+    fn partition_cap_from_config() {
+        use meerschaum_core::config::{Config, ConfigOptions};
+        let root = std::env::temp_dir().join(format!("_mrsm_rs_cap_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let config_for = |patch: Option<&str>| {
+            let mut env = vec![("MRSM_ROOT_DIR".to_string(), root.display().to_string())];
+            if let Some(p) = patch {
+                env.push(("MRSM_CONFIG".to_string(), p.to_string()));
+            }
+            let mut opts = ConfigOptions::with_env(env);
+            opts.allow_writes = false;
+            Config::new(opts).unwrap()
+        };
+        assert_eq!(
+            max_partitions_per_sync(&config_for(None)),
+            MAX_PARTITIONS_PER_SYNC
+        );
+        let patch = |v: &str| {
+            format!(
+                r#"{{"system": {{"connectors": {{"sql": {{"instance": {{"max_partitions_per_sync": {v}}}}}}}}}}}"#
+            )
+        };
+        assert_eq!(max_partitions_per_sync(&config_for(Some(&patch("7")))), 7);
+        assert_eq!(
+            max_partitions_per_sync(&config_for(Some(&patch("\"x\"")))),
+            MAX_PARTITIONS_PER_SYNC
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn bounds() {
-        let (lo, hi) = partition_bounds(dt("2024-01-15T12:00:00+00:00"), Interval::minutes(43200));
+        let (lo, hi) = partition_bounds(
+            dt("2024-01-15T12:00:00+00:00"),
+            ChunkInterval::minutes(43200),
+        );
         assert_eq!(
             partition_literal(Flavor::Postgresql, lo),
             "'2023-12-19T00:00:00+00:00'"
@@ -569,7 +635,7 @@ mod tests {
             "'2024-01-18 00:00:00.000000'"
         );
         assert_eq!(
-            partition_bounds(PartitionValue::Int(-5), Interval::Int(10)),
+            partition_bounds(PartitionValue::Int(-5), ChunkInterval::Int(10)),
             (PartitionValue::Int(-10), PartitionValue::Int(0))
         );
         assert_eq!(

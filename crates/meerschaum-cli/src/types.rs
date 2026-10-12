@@ -8,6 +8,8 @@ use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc}
 use regex::Regex;
 use std::sync::LazyLock;
 
+use meerschaum_core::pyfmt::py_strip;
+
 use crate::dateutil;
 use crate::pyjson;
 use crate::pyliteral;
@@ -62,11 +64,6 @@ pub fn int_from_decimal_digits(text: &str) -> PyValue {
             trimmed.to_string()
         }),
     }
-}
-
-/// Python's `str.strip()` whitespace set (approximately `str.isspace`).
-fn py_strip(s: &str) -> &str {
-    s.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
 /// Validate digits with PEP 515 underscores (only single underscores between digits).

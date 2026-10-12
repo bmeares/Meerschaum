@@ -1,0 +1,77 @@
+{
+  "description": "A diamond: one root, two branches, one join. Late data on the root backfills one branch; the other branch is quiet; the join runs incrementally and is capped at the slower branch's watermark.",
+  "records": [
+    {"instance": "sql:main", "connector": "plugin:orders", "metric": "orders",
+     "parameters": {"columns": {"datetime": "ts", "id": "order_id"}, "verify": {"chunk_days": 1}}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "orders_by_store",
+     "parameters": {"columns": {"datetime": "ts", "id": "store"}, "verify": {"chunk_days": 1},
+                    "fetch": {"backtrack_minutes": 60},
+                    "parents": ["Pipe('plugin:orders', 'orders')"]}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "orders_by_sku",
+     "parameters": {"columns": {"datetime": "ts", "id": "sku"}, "verify": {"chunk_days": 1},
+                    "sql": "SELECT ts, sku, sum(qty) AS qty FROM {{ Pipe('plugin:orders', 'orders') }} GROUP BY 1, 2"}},
+    {"instance": "sql:main", "connector": "sql:main", "metric": "store_sku_join",
+     "parameters": {"columns": {"datetime": "ts"}, "verify": {"chunk_days": 1},
+                    "fetch": {"backtrack_minutes": 60,
+                              "definition": "SELECT * FROM {{ Pipe('sql:main', 'orders_by_store') }} JOIN {{ Pipe('sql:main', 'orders_by_sku') }} USING (ts)"}}}
+  ],
+  "selection": {"targets": {"refs": ["sql:main|sql:main|store_sku_join|None"]}, "parents": "all"},
+  "state": {
+    "watermarks": {
+      "sql:main|plugin:orders|orders|None": "2026-10-12T12:00:00Z",
+      "sql:main|sql:main|orders_by_store|None": "2026-10-12T11:00:00Z",
+      "sql:main|sql:main|orders_by_sku|None": "2026-10-12T12:00:00Z",
+      "sql:main|sql:main|store_sku_join|None": "2026-10-12T10:00:00Z"
+    },
+    "definition_hashes": {
+      "sql:main|plugin:orders|orders|None": "@current",
+      "sql:main|sql:main|orders_by_store|None": "@current",
+      "sql:main|sql:main|orders_by_sku|None": "@current",
+      "sql:main|sql:main|store_sku_join|None": "@current"
+    },
+    "ledger": {
+      "sql:main": [
+        {"pipe_ref": "sql:main|plugin:orders|orders|None", "seq": 20, "begin": "2026-10-12T00:00:00Z", "end": "2026-10-13T00:00:00Z"},
+        {"pipe_ref": "sql:main|plugin:orders|orders|None", "seq": 21, "begin": "2026-10-03T00:00:00Z", "end": "2026-10-04T00:00:00Z"},
+        {"pipe_ref": "sql:main|sql:main|orders_by_store|None", "seq": 30, "begin": "2026-10-12T00:00:00Z", "end": "2026-10-13T00:00:00Z"},
+        {"pipe_ref": "sql:main|sql:main|orders_by_sku|None", "seq": 15, "begin": "2026-10-12T00:00:00Z", "end": "2026-10-13T00:00:00Z"}
+      ]
+    },
+    "cursors": {
+      "sql:main": [
+        {"parent_ref": "sql:main|plugin:orders|orders|None", "child_ref": "sql:main|sql:main|orders_by_store|None", "seq": 20, "parent_watermark_at_cursor": "2026-10-12T11:00:00Z"},
+        {"parent_ref": "sql:main|plugin:orders|orders|None", "child_ref": "sql:main|sql:main|orders_by_sku|None", "seq": 21, "parent_watermark_at_cursor": "2026-10-12T12:00:00Z"},
+        {"parent_ref": "sql:main|sql:main|orders_by_store|None", "child_ref": "sql:main|sql:main|store_sku_join|None", "seq": 30, "parent_watermark_at_cursor": "2026-10-12T11:00:00Z"},
+        {"parent_ref": "sql:main|sql:main|orders_by_sku|None", "child_ref": "sql:main|sql:main|store_sku_join|None", "seq": 15, "parent_watermark_at_cursor": "2026-10-12T11:00:00Z"}
+      ]
+    }
+  },
+  "expected": {
+    "nodes": [
+      {"node": "sql:main|plugin:orders|orders|None", "action": "root", "bounds": {"begin": "", "end": null}},
+      {"node": "sql:main|sql:main|orders_by_store|None", "action": "backfill",
+       "bounds": {"begin": "2026-10-03T00:00:00Z", "end": "2026-10-12T12:00:00Z"},
+       "ranges": [
+         {"begin": "2026-10-03T00:00:00Z", "end": "2026-10-04T00:00:00Z"},
+         {"begin": "2026-10-12T10:00:00Z", "end": "2026-10-12T12:00:00Z"}
+       ],
+       "chunks": [
+         {"begin": "2026-10-03T00:00:00Z", "end": "2026-10-04T00:00:00Z"},
+         {"begin": "2026-10-12T10:00:00Z", "end": "2026-10-12T12:00:00Z"}
+       ],
+       "provisional": true,
+       "consumes": [{"parent_ref": "sql:main|plugin:orders|orders|None", "state_instance": "sql:main", "seq": 21}],
+       "reason_contains": ["1 unconsumed ledger entry from plugin:orders/orders (seq 21), watermark advanced 2026-10-12 11:00 → 2026-10-12 12:00", "before the tail (2026-10-12 10:00)"]},
+      {"node": "sql:main|sql:main|orders_by_sku|None", "action": "skip", "bounds": null, "provisional": true},
+      {"node": "sql:main|sql:main|store_sku_join|None", "action": "incremental",
+       "bounds": {"begin": "2026-10-12T09:00:00Z", "end": "2026-10-12T11:00:00Z"},
+       "chunks": [{"begin": "2026-10-12T09:00:00Z", "end": "2026-10-12T11:00:00Z"}],
+       "provisional": true,
+       "consumes": [
+         {"parent_ref": "sql:main|sql:main|orders_by_store|None", "state_instance": "sql:main", "seq": 30},
+         {"parent_ref": "sql:main|sql:main|orders_by_sku|None", "state_instance": "sql:main", "seq": 15}
+       ],
+       "reason_contains": ["sql:main/orders_by_sku watermark advanced 2026-10-12 11:00 → 2026-10-12 12:00 since its cursor", "to min parent watermark"]}
+    ]
+  }
+}

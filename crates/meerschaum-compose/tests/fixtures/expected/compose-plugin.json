@@ -1,0 +1,234 @@
+{
+ "case": {
+  "description": "The superseded `compose` plugin is installed in the host plugins directory: warn once.",
+  "width": 100,
+  "host_plugins": {
+   "compose.py": "\"\"\"The legacy compose plugin.\"\"\"\n__version__ = '1.0.0'\n"
+  },
+  "runs": [
+   {
+    "name": "ps",
+    "action": [
+     "ps"
+    ]
+   },
+   {
+    "name": "logs",
+    "action": [
+     "logs"
+    ],
+    "flags": {
+     "nopretty": true
+    }
+   }
+  ]
+ },
+ "base_env": {
+  "PATH": "/usr/bin:/bin",
+  "HOME": "{TMP}/home",
+  "LANG": "C.UTF-8",
+  "MRSM_ROOT_DIR": "{TMP}/host-root",
+  "MRSM_PLUGINS_DIR": "{TMP}/host-plugins",
+  "MRSM_VENVS_DIR": "{TMP}/venvs",
+  "MRSM_NO_AUTO_INSTALL": "1",
+  "MRSM_CORE": "python",
+  "PYTHONPATH": "{REPO}",
+  "PYTHONHASHSEED": "0"
+ },
+ "runs": [
+  {
+   "name": "ps",
+   "action": [
+    "ps"
+   ],
+   "flags": {},
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "ps"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "legacy"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "jobs",
+      "--tags",
+      "legacy"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": false
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "warn",
+     "The 'compose' plugin is superseded by Meerschaum's built-in compose action. The built-in action is being used; uninstall the plugin with `mrsm uninstall plugin compose`."
+    ],
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "project_name": "legacy",
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "legacy"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "a32e4088960477f258b5bc95dbcfc2f538a26c17d49bed98f05b71403c5c2628",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"legacy\",\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"legacy\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "legacy",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"legacy\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "be7c7528a8e4bddf076b6f4953ce51a652bbb71b642d71ef3ae8695276035e0c"
+  },
+  {
+   "name": "logs",
+   "action": [
+    "logs"
+   ],
+   "flags": {
+    "nopretty": true
+   },
+   "file": null,
+   "env_file": null,
+   "cwd": "{PROJECT}",
+   "sysargs": [
+    "compose",
+    "logs",
+    "--nopretty"
+   ],
+   "width": 100,
+   "result": [
+    true,
+    "Success"
+   ],
+   "commands": [
+    {
+     "sysargs": [
+      "show",
+      "version",
+      "--no-daemon",
+      "--tags",
+      "legacy"
+     ],
+     "subprocess": true,
+     "capture_output": true,
+     "replace": true
+    },
+    {
+     "sysargs": [
+      "show",
+      "logs",
+      "--nopretty",
+      "--tags",
+      "legacy"
+     ],
+     "subprocess": false,
+     "capture_output": false,
+     "replace": true
+    }
+   ],
+   "events": [],
+   "warnings": [],
+   "messages": [
+    [
+     "warn",
+     "The 'compose' plugin is superseded by Meerschaum's built-in compose action. The built-in action is being used; uninstall the plugin with `mrsm uninstall plugin compose`."
+    ],
+    [
+     "info",
+     "Initializing Meerschaum root directory:\n    {PROJECT}/root\n    This should only take a few seconds..."
+    ]
+   ],
+   "config": {
+    "project_name": "legacy",
+    "config": {
+     "meerschaum": {
+      "connectors": {}
+     },
+     "stack": {
+      "project_name": "legacy"
+     }
+    },
+    "isolation": "config",
+    "daemon": true,
+    "__file__": "{PROJECT}/mrsm-compose.yaml",
+    "root_dir": "{PROJECT}/root",
+    "plugins_dir": [
+     "{PROJECT}/plugins"
+    ]
+   },
+   "config_hash": "46e834a071fd4053d522327f7e49f356eb0ba4e092c8cfc4748cca81b06dbdcf",
+   "env": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "{TMP}/home",
+    "LANG": "C.UTF-8",
+    "MRSM_ROOT_DIR": "{PROJECT}/root",
+    "MRSM_PLUGINS_DIR": "[\"{PROJECT}/plugins\"]",
+    "MRSM_VENVS_DIR": "{TMP}/venvs",
+    "MRSM_NO_AUTO_INSTALL": "1",
+    "MRSM_CORE": "python",
+    "PYTHONPATH": "{REPO}",
+    "PYTHONHASHSEED": "0",
+    "MRSM__COMPOSE_CONFIG": "{\"project_name\":\"legacy\",\"config\":{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"legacy\"}},\"isolation\":\"config\",\"daemon\":true,\"__file__\":\"{PROJECT}/mrsm-compose.yaml\",\"root_dir\":\"{PROJECT}/root\",\"plugins_dir\":[\"{PROJECT}/plugins\"]}",
+    "MRSM__COMPOSE_PROJECT": "legacy",
+    "MRSM_CONFIG": "{\"meerschaum\":{\"connectors\":{}},\"stack\":{\"project_name\":\"legacy\"}}"
+   },
+   "pipes_meta": null,
+   "pipes": null,
+   "explain": null,
+   "written_files": {},
+   "config_hash_normalized": "be7c7528a8e4bddf076b6f4953ce51a652bbb71b642d71ef3ae8695276035e0c"
+  }
+ ]
+}

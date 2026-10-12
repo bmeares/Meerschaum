@@ -4,6 +4,9 @@
 //! cell; this module turns a column of cells into an Arrow array, coercing mismatched cells
 //! (int → float, anything → text, text → timestamp, …) instead of failing where a lossless
 //! conversion exists.
+//!
+//! Fields are tagged with the shared [`meerschaum_core::dtypes::field_meta`] keys, which the
+//! kernel's `Frame::from_record_batches` reads (see [`super::batches_to_frame`]).
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -20,18 +23,21 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZon
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 
+use meerschaum_core::dtypes::field_meta;
+
 use super::SqlValue;
 use crate::error::{Result, SqlError};
 
-/// Field metadata key holding the database type name reported by the driver.
-pub const META_DB_TYPE: &str = "mrsm:db_type";
+/// Field metadata key holding the database type name reported by the driver
+/// (`meerschaum:db_type`, owned by [`meerschaum_core::dtypes::field_meta`]).
+pub const META_DB_TYPE: &str = field_meta::DB_TYPE;
 /// Field metadata key holding the Meerschaum dtype for special columns
 /// (`json`, `bytes`, `uuid`, `geometry`, `numeric`).
-pub const META_DTYPE: &str = "mrsm:dtype";
+pub const META_DTYPE: &str = field_meta::DTYPE;
 /// Field metadata key holding the geometry encoding (`ewkb`, `mysql`).
-pub const META_ENCODING: &str = "mrsm:encoding";
+pub const META_ENCODING: &str = field_meta::ENCODING;
 /// The Arrow canonical extension-name metadata key.
-pub const META_EXTENSION_NAME: &str = "ARROW:extension:name";
+pub const META_EXTENSION_NAME: &str = field_meta::EXTENSION_NAME;
 
 /// Decimal precision used for `NUMERIC` / `DECIMAL` columns.
 pub const DECIMAL_PRECISION: u8 = 38;
@@ -75,13 +81,13 @@ pub enum ColumnKind {
     /// `Decimal128(38, scale)`.
     Decimal,
     Utf8,
-    /// JSON text (`Utf8` with `mrsm:dtype=json`).
+    /// JSON text (`Utf8` with `meerschaum:dtype=json`).
     Json,
-    /// `Binary` with `mrsm:dtype=bytes`.
+    /// `Binary` with `meerschaum:dtype=bytes`.
     Bytes,
     /// `FixedSizeBinary(16)` with the `arrow.uuid` extension name.
     Uuid,
-    /// `Binary` geometry with `mrsm:dtype=geometry`.
+    /// `Binary` geometry with `meerschaum:dtype=geometry`.
     Geometry(GeometryEncoding),
     Date,
     Time,
@@ -142,7 +148,7 @@ impl ColumnPlan {
         }
     }
 
-    /// The Arrow field, with `mrsm:*` metadata.
+    /// The Arrow field, with `meerschaum:*` metadata.
     pub fn field(&self) -> Field {
         let mut meta = HashMap::new();
         meta.insert(META_DB_TYPE.to_string(), self.db_type.clone());

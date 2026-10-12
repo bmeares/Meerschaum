@@ -1,0 +1,21 @@
+project_name: host-refs
+instance: sql:alias
+connectors:
+  sql:
+    alias: "{sql:local}"
+    missing: "{sql:nonexistent}"
+    invalid: "not-a-reference"
+    too_many: "{sql:a:b}"
+    empty:
+  api:
+    mrsm_copy: "{api:mrsm}"
+config:
+  meerschaum:
+    connectors:
+      sql:
+        nested:
+          flavor: sqlite
+          database: ":memory:"
+        alias:
+          extra: "nested values are replaced by the root reference"
+  instance: sql:ignored

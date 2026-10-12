@@ -7,11 +7,11 @@ use crate::dtypes::get_db_type_from_pd_type;
 use crate::error::{Result, SqlError};
 use crate::flavor::Flavor;
 use crate::ident::{clean, sql_item_name, truncate_item_name};
-use crate::pytext::{dedent_strip, indent, py_format, py_lstrip, py_rstrip};
 use crate::queries::cte::{char_slice, find_top_level_select_index, get_leading_with_index};
 use crate::queries::templates::{
     COLUMNS_INDICES_QUERIES, COLUMNS_TYPES_QUERIES, RESET_AUTOINCREMENT_QUERIES, lookup,
 };
+use meerschaum_core::pyfmt::{dedent_strip, indent, py_format, py_lstrip, py_rstrip};
 
 /// The first argument of `get_create_table_queries`: a `SELECT` or a `dtypes` dict.
 #[derive(Debug, Clone, PartialEq)]

@@ -1,353 +1,21 @@
-//! SQL dtype mapping (`meerschaum/utils/dtypes/sql.py`) plus the few Meerschaum dtype helpers it
-//! needs from `meerschaum/utils/dtypes/__init__.py`.
+//! SQL dtype mapping (`meerschaum/utils/dtypes/sql.py`): the per-flavor pandas → database type
+//! tables, the cast tables, and the flavor-aware `get_numeric_precision_scale` /
+//! `get_db_type_from_pd_type`.
 //!
-//! TODO(core-merge): `MRSM_ALIAS_DTYPES`, `are_dtypes_equal`, `get_geometry_type_srid`,
-//! `value_is_null` and the precision-unit tables belong to `meerschaum-core` / the kernel. They
-//! are reproduced here (string-only) until that crate lands; switch to its exports then.
+//! The Meerschaum dtype vocabulary (`MRSM_ALIAS_DTYPES`, `are_dtypes_equal`,
+//! `get_geometry_type_srid`, the precision-unit tables) and the database → pandas direction
+//! (`DB_TO_PD_DTYPES`, `get_pd_type_from_db_type`) are owned by [`meerschaum_core::dtypes`] and
+//! re-exported here.
+
+use meerschaum_core::pyfmt::parse_py_int;
 
 use crate::flavor::Flavor;
 
-// ---------------------------------------------------------------------------------------------
-// Helpers from `meerschaum/utils/dtypes/__init__.py` (TODO(core-merge))
-// ---------------------------------------------------------------------------------------------
-
-/// `MRSM_ALIAS_DTYPES` (`utils/dtypes/__init__.py:22`).
-pub const MRSM_ALIAS_DTYPES: &[(&str, &str)] = &[
-    ("decimal", "numeric"),
-    ("Decimal", "numeric"),
-    ("number", "numeric"),
-    ("jsonl", "json"),
-    ("JSON", "json"),
-    ("binary", "bytes"),
-    ("blob", "bytes"),
-    ("varbinary", "bytes"),
-    ("bytea", "bytes"),
-    ("guid", "uuid"),
-    ("UUID", "uuid"),
-    ("geom", "geometry"),
-    ("geog", "geography"),
-    ("boolean", "bool"),
-    ("day", "date"),
-];
-
-/// Resolve an alias in `MRSM_ALIAS_DTYPES`.
-pub fn alias_dtype(dtype: &str) -> Option<&'static str> {
-    MRSM_ALIAS_DTYPES
-        .iter()
-        .find(|(k, _)| *k == dtype)
-        .map(|(_, v)| *v)
-}
-
-/// `MRSM_PRECISION_UNITS_ALIASES` (`utils/dtypes/__init__.py:67`).
-pub fn precision_unit_alias(unit: &str) -> Option<&'static str> {
-    Some(match unit {
-        "ns" => "nanosecond",
-        "us" => "microsecond",
-        "ms" => "millisecond",
-        "s" | "sec" => "second",
-        "m" | "min" => "minute",
-        "h" | "hr" => "hour",
-        "d" | "D" => "day",
-        _ => return None,
-    })
-}
-
-/// A value of `MRSM_PRECISION_UNITS_SCALARS` (Python mixes `int` and `float` values).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PrecisionScalar {
-    /// An integer scalar (`nanosecond` .. `second`).
-    Int(i64),
-    /// A fractional scalar (`minute`, `hour`, `day`).
-    Float(f64),
-}
-
-impl PrecisionScalar {
-    /// The scalar as `f64`.
-    pub fn as_f64(self) -> f64 {
-        match self {
-            PrecisionScalar::Int(i) => i as f64,
-            PrecisionScalar::Float(f) => f,
-        }
-    }
-
-    /// Python `str(scalar)`.
-    pub fn py_str(self) -> String {
-        match self {
-            PrecisionScalar::Int(i) => i.to_string(),
-            PrecisionScalar::Float(f) => crate::pytext::py_float_repr(f),
-        }
-    }
-}
-
-/// `MRSM_PRECISION_UNITS_SCALARS` (`utils/dtypes/__init__.py:57`): units per second.
-pub fn precision_unit_scalar(unit: &str) -> Option<PrecisionScalar> {
-    Some(match unit {
-        "nanosecond" => PrecisionScalar::Int(1_000_000_000),
-        "microsecond" => PrecisionScalar::Int(1_000_000),
-        "millisecond" => PrecisionScalar::Int(1000),
-        "second" => PrecisionScalar::Int(1),
-        "minute" => PrecisionScalar::Float(1.0 / 60.0),
-        "hour" => PrecisionScalar::Float(1.0 / 3600.0),
-        "day" => PrecisionScalar::Float(1.0 / 86400.0),
-        _ => return None,
-    })
-}
-
-/// `value_is_null(value)` for a string (`utils/dtypes/__init__.py:523`).
-pub fn value_is_null(value: &str) -> bool {
-    matches!(
-        value.to_lowercase().as_str(),
-        "none" | "nan" | "na" | "nat" | "natz" | "" | "<na>"
-    )
-}
-
-/// `are_dtypes_equal(ldtype, rdtype)` for dtype strings (`utils/dtypes/__init__.py:134`).
-pub fn are_dtypes_equal(ldtype: &str, rdtype: &str) -> bool {
-    if ldtype == rdtype {
-        return true;
-    }
-    let mut l = ldtype.split('[').next().unwrap_or("");
-    let mut r = rdtype.split('[').next().unwrap_or("");
-    if let Some(a) = alias_dtype(l) {
-        l = a;
-    }
-    if let Some(a) = alias_dtype(r) {
-        r = a;
-    }
-
-    let within = |set: &[&str], x: &str| set.contains(&x);
-
-    let json_dtypes = ["json", "object"];
-    if within(&json_dtypes, l) && within(&json_dtypes, r) {
-        return true;
-    }
-
-    let numeric_dtypes = ["numeric", "decimal", "object"];
-    if (within(&numeric_dtypes, l) || l.starts_with("decimal"))
-        && (within(&numeric_dtypes, r) || r.starts_with("decimal"))
-    {
-        return true;
-    }
-
-    let uuid_dtypes = ["uuid", "object"];
-    if within(&uuid_dtypes, l) && within(&uuid_dtypes, r) {
-        return true;
-    }
-
-    let bytes_dtypes = ["bytes", "object", "binary", "large_binary"];
-    if within(&bytes_dtypes, l) && within(&bytes_dtypes, r) {
-        return true;
-    }
-
-    let geometry_dtypes = ["geometry", "object", "geography"];
-    if within(&geometry_dtypes, l) && within(&geometry_dtypes, r) {
-        return true;
-    }
-
-    let l_lower = l.to_lowercase();
-    let r_lower = r.to_lowercase();
-    if l_lower == r_lower {
-        return true;
-    }
-
-    let mut l_dt = false;
-    let mut r_dt = false;
-    for prefix in ["datetime", "timestamp"] {
-        l_dt = l_lower.contains(prefix) || l_dt;
-        r_dt = r_lower.contains(prefix) || r_dt;
-    }
-    if l_dt && r_dt {
-        return true;
-    }
-
-    let string_dtypes = ["str", "string", "large_string", "string_view", "object"];
-    if within(&string_dtypes, l) && within(&string_dtypes, r) {
-        return true;
-    }
-
-    let int_dtypes = [
-        "int", "int64", "int32", "int16", "int8", "uint", "uint64", "uint32", "uint16", "uint8",
-    ];
-    if within(&int_dtypes, &l_lower) && within(&int_dtypes, &r_lower) {
-        return true;
-    }
-    if l_lower.contains("int") && r_lower.contains("int") {
-        return true;
-    }
-
-    let float_dtypes = [
-        "float", "float64", "float32", "float16", "float128", "double",
-    ];
-    if within(&float_dtypes, &l_lower) && within(&float_dtypes, &r_lower) {
-        return true;
-    }
-
-    let bool_dtypes = ["bool", "boolean"];
-    if within(&bool_dtypes, l) && within(&bool_dtypes, r) {
-        return true;
-    }
-
-    let date_dtypes = [
-        "date",
-        "date32",
-        "date32[pyarrow]",
-        "date32[day][pyarrow]",
-        "date64",
-        "date64[pyarrow]",
-        "date64[ms][pyarrow]",
-    ];
-    if within(&date_dtypes, l) && within(&date_dtypes, r) {
-        return true;
-    }
-
-    false
-}
-
-/// `meerschaum.utils.misc.is_int(s)`: `float(s).is_integer()`.
-pub fn py_is_int(s: &str) -> bool {
-    py_float(s).is_some_and(|f| f.is_finite() && f.fract() == 0.0)
-}
-
-/// Python's `float(s)` for a string (whitespace-stripped, underscores between digits allowed).
-pub fn py_float(s: &str) -> Option<f64> {
-    let t = crate::pytext::py_strip(s);
-    if t.is_empty() {
-        return None;
-    }
-    let lower = t.to_lowercase();
-    let unsigned = lower.trim_start_matches(['+', '-']);
-    if matches!(unsigned, "inf" | "infinity" | "nan") {
-        return lower.parse::<f64>().ok().or(Some(f64::NAN));
-    }
-    let cleaned: String = if t.contains('_') {
-        let chars: Vec<char> = t.chars().collect();
-        let ok = chars.iter().enumerate().all(|(i, c)| {
-            *c != '_'
-                || (i > 0
-                    && i + 1 < chars.len()
-                    && chars[i - 1].is_ascii_digit()
-                    && chars[i + 1].is_ascii_digit())
-        });
-        if !ok {
-            return None;
-        }
-        t.replace('_', "")
-    } else {
-        t.to_string()
-    };
-    cleaned.parse::<f64>().ok()
-}
-
-/// Python's `int(s)` for a string.
-pub fn py_int(s: &str) -> Option<i64> {
-    let t = crate::pytext::py_strip(s);
-    let cleaned = if t.contains('_') {
-        if t.starts_with('_') || t.ends_with('_') || t.contains("__") {
-            return None;
-        }
-        t.replace('_', "")
-    } else {
-        t.to_string()
-    };
-    cleaned.parse::<i64>().ok()
-}
-
-/// The SRID half of `get_geometry_type_srid` (an `int` or an `'AUTH:CODE'` string).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Srid {
-    /// A numeric SRID (`0` means unset).
-    Int(i64),
-    /// An authority string such as `EPSG:4326` or `ESRI:102003`.
-    Str(String),
-}
-
-impl Srid {
-    /// Python truthiness of the SRID value.
-    pub fn is_truthy(&self) -> bool {
-        match self {
-            Srid::Int(i) => *i != 0,
-            Srid::Str(s) => !s.is_empty(),
-        }
-    }
-
-    /// Python `str(srid)`.
-    pub fn py_str(&self) -> String {
-        match self {
-            Srid::Int(i) => i.to_string(),
-            Srid::Str(s) => s.clone(),
-        }
-    }
-}
-
-/// `get_geometry_type_srid(dtype, default_type='geometry', default_srid=0)`
-/// (`utils/dtypes/__init__.py:1011`).
-pub fn get_geometry_type_srid(dtype: &str) -> (String, Srid) {
-    let default_type = "geometry".to_string();
-    let default_srid = Srid::Int(0);
-    // NOTE: PostGIS syntax must also be parsed.
-    let dtype = dtype.replace('(', "[").replace(')', "]");
-    let bare = dtype.split('[').next().unwrap_or("").to_string();
-    // PARITY: `dtype.split(bare_dtype, maxsplit=1)[-1]` (an empty `bare_dtype` would raise in
-    // Python; it cannot happen for the inputs the connector produces).
-    let after = if bare.is_empty() {
-        dtype.as_str()
-    } else {
-        dtype
-            .split_once(bare.as_str())
-            .map(|(_, r)| r)
-            .unwrap_or("")
-    };
-    let modifier = after.trim_start_matches('[').trim_end_matches(']');
-    if modifier.is_empty() {
-        return (default_type, default_srid);
-    }
-
-    enum Part {
-        Int(i64),
-        Str(String),
-    }
-    let parts: Vec<Part> = modifier
-        .split(',')
-        .map(|part| {
-            let p = crate::pytext::py_strip(part.rsplit('=').next().unwrap_or("")).to_string();
-            if py_is_int(&p) {
-                match py_int(&p) {
-                    Some(i) => Part::Int(i),
-                    // PARITY: Python's `int('4326.0')` raises `ValueError` here; keep the string.
-                    None => Part::Str(p),
-                }
-            } else {
-                Part::Str(p)
-            }
-        })
-        .collect();
-
-    let mut srid = default_srid;
-    for part in &parts {
-        match part {
-            Part::Int(i) => {
-                srid = Srid::Int(*i);
-                break;
-            }
-            Part::Str(s) if s.contains(':') => {
-                srid = Srid::Str(s.clone());
-                break;
-            }
-            _ => {}
-        }
-    }
-
-    let mut geometry_type = default_type;
-    for part in &parts {
-        if let Part::Str(s) = part {
-            if srid != Srid::Str(s.clone()) {
-                geometry_type = s.clone();
-                break;
-            }
-        }
-    }
-    (geometry_type, srid)
-}
+pub use meerschaum_core::dtypes::{
+    DB_TO_PD_DEFAULT, DB_TO_PD_DTYPES, DB_TO_PD_SUBSTRINGS, MRSM_ALIAS_DTYPES, PrecisionScalar,
+    Srid, alias_dtype, are_dtypes_equal, get_geometry_type_srid, get_pd_type_from_db_type,
+    precision_unit_alias, precision_unit_scalar, value_is_null,
+};
 
 // ---------------------------------------------------------------------------------------------
 // `meerschaum/utils/dtypes/sql.py`
@@ -859,78 +527,6 @@ pub const PD_TO_DB_DTYPES_FLAVORS: &[(&str, [&str; 14])] = &[
     ),
 ];
 
-/// `DB_TO_PD_DTYPES` exact keys (`utils/dtypes/sql.py:79`), generated from Python.
-pub const DB_TO_PD_DTYPES: &[(&str, &str)] = &[
-    ("FLOAT", "float64[pyarrow]"),
-    ("REAL", "float64[pyarrow]"),
-    ("DOUBLE_PRECISION", "float64[pyarrow]"),
-    ("DOUBLE", "float64[pyarrow]"),
-    ("DECIMAL", "numeric"),
-    ("BIGINT", "int64[pyarrow]"),
-    ("INT", "int32[pyarrow]"),
-    ("INTEGER", "int32[pyarrow]"),
-    ("NUMBER", "numeric"),
-    ("NUMERIC", "numeric"),
-    ("GEOMETRY", "geometry"),
-    ("GEOMETRY(GEOMETRY)", "geometry"),
-    ("TIMESTAMP", "datetime64[us]"),
-    ("TIMESTAMP WITHOUT TIMEZONE", "datetime64[us]"),
-    ("TIMESTAMP WITH TIMEZONE", "datetime64[us, UTC]"),
-    ("TIMESTAMP WITH TIME ZONE", "datetime64[us, UTC]"),
-    ("TIMESTAMPTZ", "datetime64[us, UTC]"),
-    ("DATE", "date"),
-    ("DATETIME", "datetime64[us]"),
-    ("DATETIME2", "datetime64[us]"),
-    ("DATETIME2(6)", "datetime64[us]"),
-    ("DATETIME2(3)", "datetime64[ms]"),
-    ("DATETIME2(0)", "datetime64[s]"),
-    ("DATETIMEOFFSET", "datetime64[us, UTC]"),
-    ("DATETIMEOFFSET(6)", "datetime64[us, UTC]"),
-    ("DATETIMEOFFSET(3)", "datetime64[ms, UTC]"),
-    ("DATETIMEOFFSET(0)", "datetime64[s, UTC]"),
-    ("TEXT", "string[pyarrow]"),
-    ("VARCHAR", "string[pyarrow]"),
-    ("CLOB", "string[pyarrow]"),
-    ("BOOL", "bool[pyarrow]"),
-    ("BOOLEAN", "bool[pyarrow]"),
-    ("BOOLEAN()", "bool[pyarrow]"),
-    ("TINYINT", "bool[pyarrow]"),
-    ("TINYINT(1)", "bool[pyarrow]"),
-    ("BIT", "bool[pyarrow]"),
-    ("BIT(1)", "bool[pyarrow]"),
-    ("JSON", "json"),
-    ("JSONB", "json"),
-    ("UUID", "uuid"),
-    ("UNIQUEIDENTIFIER", "uuid"),
-    ("BYTEA", "bytes"),
-    ("BLOB", "bytes"),
-    ("VARBINARY", "bytes"),
-    ("VARBINARY(MAX)", "bytes"),
-];
-
-/// `DB_TO_PD_DTYPES['substrings']`, in order.
-pub const DB_TO_PD_SUBSTRINGS: &[(&str, &str)] = &[
-    ("CHAR", "string[pyarrow]"),
-    ("TIMESTAMP", "datetime64[us]"),
-    ("TIME", "datetime64[us]"),
-    ("DATE", "date"),
-    ("DOUBLE", "double[pyarrow]"),
-    ("DECIMAL", "numeric"),
-    ("NUMERIC", "numeric"),
-    ("NUMBER", "numeric"),
-    ("INT", "int64[pyarrow]"),
-    ("BOOL", "bool[pyarrow]"),
-    ("JSON", "json"),
-    ("BYTE", "bytes"),
-    ("LOB", "bytes"),
-    ("BINARY", "bytes"),
-    ("GEOMETRY", "geometry"),
-    ("GEOGRAPHY", "geography"),
-];
-
-/// `DB_TO_PD_DTYPES['default']`.
-pub const DB_TO_PD_DEFAULT: &str = "object";
-
 /// `DB_FLAVORS_CAST_DTYPES` (`utils/dtypes/sql.py:23`, plus the numeric entries added at line 68).
 pub const DB_FLAVORS_CAST_DTYPES: &[(&str, &[(&str, &str)])] = &[
     (
@@ -1032,86 +628,13 @@ pub fn get_numeric_precision_scale(
     let Some(dtype) = dtype.filter(|d| !d.is_empty()) else {
         return (None, None);
     };
-    let (lbracket, rbracket) = if dtype.contains('[') {
-        ('[', ']')
-    } else {
-        ('(', ')')
-    };
-    if dtype.contains(lbracket) && dtype.matches(',').count() == 1 && dtype.ends_with(rbracket) {
-        let inner = dtype
-            .split_once(lbracket)
-            .map(|(_, r)| r)
-            .unwrap_or("")
-            .trim_end_matches(rbracket);
-        if let Some((p, s)) = inner.split_once(',') {
-            if let (Some(p), Some(s)) = (py_int(p), py_int(s)) {
-                return (Some(p), Some(s));
-            }
-        }
+    if let (Some(p), Some(s)) = meerschaum_core::dtypes::get_numeric_precision_scale(Some(dtype)) {
+        return (Some(p), Some(s));
     }
     match flavor.and_then(Flavor::numeric_precision) {
         Some((p, s)) => (Some(p), Some(s)),
         None => (None, None),
     }
-}
-
-/// `get_pd_type_from_db_type(db_type, allow_custom_dtypes)` (`utils/dtypes/sql.py:1162`).
-pub fn get_pd_type_from_db_type(db_type: &str, allow_custom_dtypes: bool) -> String {
-    fn parse_custom(pd_type: &str, db_type: &str) -> String {
-        if db_type.to_lowercase().contains("json") {
-            return "json".to_string();
-        }
-        if are_dtypes_equal(pd_type, "numeric") && pd_type != "object" {
-            let upper = db_type.to_uppercase();
-            if let (Some(p), Some(s)) = get_numeric_precision_scale(None, Some(&upper)) {
-                if p != 0 && s != 0 {
-                    return format!("numeric[{p},{s}]");
-                }
-            }
-        }
-        if are_dtypes_equal(pd_type, "geometry") && pd_type != "object" {
-            let (geometry_type, srid) = get_geometry_type_srid(&db_type.to_uppercase());
-            let mut modifiers = Vec::new();
-            if !geometry_type.is_empty() {
-                modifiers.push(geometry_type);
-            }
-            if srid.is_truthy() {
-                modifiers.push(srid.py_str());
-            }
-            let typ = if pd_type.to_lowercase().contains("geography") {
-                "geography"
-            } else {
-                "geometry"
-            };
-            if modifiers.is_empty() {
-                return typ.to_string();
-            }
-            return format!("{typ}[{}]", modifiers.join(", "));
-        }
-        pd_type.to_string()
-    }
-
-    let upper = db_type.to_uppercase();
-    let key = crate::pytext::py_strip(upper.split('(').next().unwrap_or(""));
-    if let Some((_, pd_type)) = DB_TO_PD_DTYPES.iter().find(|(k, _)| *k == key) {
-        return if allow_custom_dtypes {
-            parse_custom(pd_type, db_type)
-        } else {
-            pd_type.to_string()
-        };
-    }
-    for (db_t, pd_t) in DB_TO_PD_SUBSTRINGS {
-        if upper.contains(db_t) {
-            // PARITY: Python passes the matched *substring* (not the full type) to
-            // `parse_custom` (`utils/dtypes/sql.py:1205`), so modifiers are dropped here.
-            return if allow_custom_dtypes {
-                parse_custom(pd_t, db_t)
-            } else {
-                pd_t.to_string()
-            };
-        }
-    }
-    DB_TO_PD_DEFAULT.to_string()
 }
 
 /// `get_db_type_from_pd_type(pd_type, flavor)` with `as_sqlalchemy=False`
@@ -1143,12 +666,18 @@ pub fn get_db_type_from_pd_type(pd_type: &str, flavor: Option<Flavor>) -> String
         } else {
             "geography".to_string()
         };
-        let (gtype, srid) = get_geometry_type_srid(&og);
+        // PARITY: Python raises `ValueError` on a malformed modifier (`geometry[4326.0]`);
+        // the default type and SRID are used instead.
+        let (gtype, srid) = get_geometry_type_srid(&og, "geometry", Srid::Code(0))
+            .unwrap_or_else(|_| ("geometry".to_string(), Srid::Code(0)));
+        // `int(srid.split(':', maxsplit=1)[-1])` (`utils/dtypes/sql.py:1273`).
         let srid = match srid {
-            Srid::Str(s) => match py_int(s.split_once(':').map(|(_, r)| r).unwrap_or(&s)) {
-                Some(i) => Srid::Int(i),
-                None => Srid::Str(s),
-            },
+            Srid::Authority(s) => {
+                match parse_py_int(s.split_once(':').map(|(_, r)| r).unwrap_or(&s)) {
+                    Some(i) => Srid::Code(i),
+                    None => Srid::Authority(s),
+                }
+            }
             other => other,
         };
         geometry = Some((gtype, srid));
@@ -1178,7 +707,7 @@ pub fn get_db_type_from_pd_type(pd_type: &str, flavor: Option<Flavor>) -> String
             return db_type.to_string();
         }
         let bare = db_type.split('(').next().unwrap_or("");
-        return format!("{bare}({}, {})", gtype.to_uppercase(), srid.py_str());
+        return format!("{bare}({}, {srid})", gtype.to_uppercase());
     }
     db_type.to_string()
 }
@@ -1227,13 +756,11 @@ mod tests {
 
     #[test]
     fn geometry_srid() {
+        let g = |d: &str| get_geometry_type_srid(d, "geometry", Srid::Code(0)).unwrap();
         assert_eq!(
-            get_geometry_type_srid("geometry[POINT, ESRI:102003]"),
-            ("POINT".to_string(), Srid::Str("ESRI:102003".into()))
+            g("geometry[POINT, ESRI:102003]"),
+            ("POINT".to_string(), Srid::Authority("ESRI:102003".into()))
         );
-        assert_eq!(
-            get_geometry_type_srid("geometry[0]"),
-            ("geometry".to_string(), Srid::Int(0))
-        );
+        assert_eq!(g("geometry[0]"), ("geometry".to_string(), Srid::Code(0)));
     }
 }

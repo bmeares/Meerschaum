@@ -1,0 +1,5 @@
+{
+  "description": "String-typed `tags:` on a pipe make compose fail while appending the project tag, as in Python; the lint reports it.",
+  "width": 100,
+  "runs": [{"name": "explain", "action": ["explain"]}]
+}

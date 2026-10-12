@@ -13,6 +13,8 @@ use chrono::NaiveDate;
 use indexmap::IndexMap;
 use polars::prelude::*;
 
+use meerschaum_core::dtypes::field_meta as meta;
+
 use crate::decimal::Decimal;
 use crate::dtypes::{Srid, pandas_dtype_of};
 use crate::geometry::Geometry;
@@ -153,12 +155,53 @@ impl ColumnData {
     }
 }
 
-/// A named column with an optional CRS (GeoPandas column CRS for geometry columns).
+/// The Arrow field tags a column was read with (see [`meerschaum_core::dtypes::field_meta`]):
+/// the Meerschaum dtype declared by the producer and the database type reported by the driver.
+///
+/// Tags are authoritative: the detectors in [`crate::detect`] answer from an explicit `dtype` tag
+/// instead of inspecting values. Replacing a column's data ([`Frame::set`]) drops its tags.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ColumnTags {
+    /// `meerschaum:dtype` (`json`, `bytes`, `uuid`, `numeric`, `geometry`, ...).
+    pub dtype: Option<String>,
+    /// `meerschaum:db_type` (`TIMESTAMPTZ`, `GEOMETRY(POINT, 4326)`, ...).
+    pub db_type: Option<String>,
+}
+
+impl ColumnTags {
+    /// Whether the column carries no tags.
+    pub fn is_empty(&self) -> bool {
+        self.dtype.is_none() && self.db_type.is_none()
+    }
+
+    /// The Meerschaum dtype the tags declare (the explicit tag refined by the database type,
+    /// else the dtype mapped from the database type), via
+    /// [`meerschaum_core::dtypes::dtype_from_field_tags`].
+    pub fn mrsm_dtype(&self) -> Option<String> {
+        meerschaum_core::dtypes::dtype_from_field_tags(
+            self.dtype.as_deref(),
+            self.db_type.as_deref(),
+        )
+    }
+
+    /// Whether the explicit `dtype` tag is `kind` (`json`, `uuid`, `numeric[10,2]` is `numeric`,
+    /// `geometry[POINT, 4326]` is `geometry`). `None` when there is no explicit tag.
+    pub fn declares(&self, kind: &str) -> Option<bool> {
+        let tag = self.dtype.as_deref()?;
+        let base = tag.split('[').next().unwrap_or(tag);
+        let base = meerschaum_core::dtypes::resolve_alias(base);
+        Some(base == kind || (kind == "geometry" && base == "geography"))
+    }
+}
+
+/// A named column with an optional CRS (GeoPandas column CRS for geometry columns) and the
+/// source tags it was read with.
 #[derive(Clone, Debug)]
 pub struct Column {
     pub name: String,
     pub data: ColumnData,
     pub crs: Option<Srid>,
+    pub tags: ColumnTags,
 }
 
 impl Column {
@@ -167,6 +210,7 @@ impl Column {
             name: name.into(),
             data,
             crs: None,
+            tags: ColumnTags::default(),
         }
     }
 
@@ -280,21 +324,36 @@ impl Frame {
             other => other,
         };
         match self.column_mut(name) {
-            Some(c) => c.data = data,
+            Some(c) => {
+                c.data = data;
+                // The new data is no longer what the source declared.
+                c.tags = ColumnTags::default();
+            }
             None => self.columns.push(Column::new(name, data)),
         }
         Ok(())
     }
 
-    /// Append or replace a whole column (keeps the CRS given).
+    /// Append or replace a whole column (keeps the CRS and tags given).
     pub fn set_column(&mut self, column: Column) -> FrameResult<()> {
         let crs = column.crs.clone();
+        let tags = column.tags.clone();
         let name = column.name.clone();
         self.set(&name, column.data)?;
         if let Some(c) = self.column_mut(&name) {
             c.crs = crs;
+            c.tags = tags;
         }
         Ok(())
+    }
+
+    /// The Meerschaum dtype each tagged column declares ([`ColumnTags::mrsm_dtype`]), in column
+    /// order. Untagged columns are omitted.
+    pub fn source_dtypes(&self) -> IndexMap<String, String> {
+        self.columns
+            .iter()
+            .filter_map(|c| c.tags.mrsm_dtype().map(|d| (c.name.clone(), d)))
+            .collect()
     }
 
     /// `del df[name]`.
@@ -327,6 +386,7 @@ impl Frame {
                     name: c.name.clone(),
                     data: c.data.take(indices),
                     crs: c.crs.clone(),
+                    tags: c.tags.clone(),
                 })
                 .collect(),
             height: indices.len(),
@@ -396,7 +456,9 @@ impl Frame {
         let mut out = IndexMap::new();
         for c in &self.columns {
             if let ColumnData::Object(values) = &c.data {
-                if let Some(kind) = special_kind_of(values) {
+                if let Some(kind) =
+                    special_kind_of_tags(&c.tags).or_else(|| special_kind_of(values))
+                {
                     let kind = match kind {
                         SpecialKind::Geometry { .. } => {
                             SpecialKind::Geometry { crs: c.crs.clone() }
@@ -438,15 +500,23 @@ impl Frame {
             let mut array = batch.column(i).clone();
             let mut metadata: HashMap<String, String> = HashMap::new();
             let mut data_type = field.data_type().clone();
+            if let Some(col) = self.column(field.name()) {
+                if let Some(db_type) = &col.tags.db_type {
+                    metadata.insert(meta::DB_TYPE.into(), db_type.clone());
+                }
+                if let Some(dtype) = &col.tags.dtype {
+                    metadata.insert(meta::DTYPE.into(), dtype.clone());
+                }
+            }
             if let Some(kind) = kinds.get(field.name()) {
-                metadata.insert("meerschaum:dtype".into(), kind.mrsm_dtype());
+                metadata.insert(meta::DTYPE.into(), kind.mrsm_dtype());
                 match kind {
                     SpecialKind::Json => {
-                        metadata.insert("ARROW:extension:name".into(), "arrow.json".into());
-                        metadata.insert("ARROW:extension:metadata".into(), String::new());
+                        metadata.insert(meta::EXTENSION_NAME.into(), "arrow.json".into());
+                        metadata.insert(meta::EXTENSION_METADATA.into(), String::new());
                     }
                     SpecialKind::Geometry { crs } => {
-                        metadata.insert("ARROW:extension:name".into(), "geoarrow.wkb".into());
+                        metadata.insert(meta::EXTENSION_NAME.into(), "geoarrow.wkb".into());
                         let ext = match crs.as_ref().and_then(Srid::to_crs) {
                             Some(crs) => {
                                 serde_json::json!({"crs": crs, "crs_type": "authority_code"})
@@ -454,7 +524,7 @@ impl Frame {
                             }
                             None => "{}".to_string(),
                         };
-                        metadata.insert("ARROW:extension:metadata".into(), ext);
+                        metadata.insert(meta::EXTENSION_METADATA.into(), ext);
                     }
                     SpecialKind::Uuid => {
                         let strings = array
@@ -482,8 +552,8 @@ impl Frame {
                         }
                         array = Arc::new(builder.finish());
                         data_type = ADataType::FixedSizeBinary(16);
-                        metadata.insert("ARROW:extension:name".into(), "arrow.uuid".into());
-                        metadata.insert("ARROW:extension:metadata".into(), String::new());
+                        metadata.insert(meta::EXTENSION_NAME.into(), "arrow.uuid".into());
+                        metadata.insert(meta::EXTENSION_METADATA.into(), String::new());
                     }
                     SpecialKind::Numeric => {}
                 }
@@ -500,33 +570,76 @@ impl Frame {
     }
 
     /// Build from an Arrow `RecordBatch`, restoring object columns from extension metadata
-    /// (`geoarrow.wkb`, `arrow.json`, `arrow.uuid`, `meerschaum:dtype`).
+    /// (`geoarrow.wkb`, `arrow.json`, `arrow.uuid`) and the Meerschaum field tags
+    /// ([`meerschaum_core::dtypes::field_meta`]) that SQL query results carry:
+    ///
+    /// - `meerschaum:dtype = json` (UTF-8 text) becomes an object column of parsed JSON;
+    /// - `numeric` (UTF-8 text or `Decimal128`) becomes an object column of decimals;
+    /// - `uuid` (`FixedSizeBinary(16)` or text) becomes an object column of UUIDs;
+    /// - `geometry` (WKB, or EWKB / MySQL-internal per `meerschaum:encoding`) becomes an object
+    ///   column of geometries, with the CRS from the extension metadata, the SRIDs or the
+    ///   database type;
+    /// - `bytes` and every other column stay native.
+    ///
+    /// Every column keeps its `meerschaum:dtype` / `meerschaum:db_type` tags ([`ColumnTags`]).
     pub fn from_record_batch(batch: &arrow::record_batch::RecordBatch) -> FrameResult<Frame> {
+        Self::from_record_batches(std::slice::from_ref(batch))
+    }
+
+    /// [`Frame::from_record_batch`] over batches sharing one schema (a query result stream).
+    pub fn from_record_batches(batches: &[arrow::record_batch::RecordBatch]) -> FrameResult<Frame> {
         use arrow::array::{
-            Array, BinaryArray, FixedSizeBinaryArray, LargeBinaryArray, LargeStringArray,
-            StringArray,
+            Array, BinaryArray, Decimal128Array, FixedSizeBinaryArray, LargeBinaryArray,
+            LargeStringArray, StringArray,
         };
         use arrow::datatypes::{Field, Schema};
 
-        let mut special: IndexMap<String, (String, Option<String>)> = IndexMap::new();
+        let Some(first) = batches.first() else {
+            return Ok(Frame::empty());
+        };
+        let batch = if batches.len() == 1 {
+            first.clone()
+        } else {
+            arrow::compute::concat_batches(&first.schema(), batches)?
+        };
+
+        // kind, extension metadata, encoding
+        let mut special: IndexMap<String, (String, Option<String>, Option<String>)> =
+            IndexMap::new();
+        let mut tags: IndexMap<String, ColumnTags> = IndexMap::new();
         let mut plain_fields = Vec::new();
         let mut plain_arrays = Vec::new();
         for (i, field) in batch.schema().fields().iter().enumerate() {
             let md = field.metadata();
-            let ext = md.get("ARROW:extension:name").cloned();
-            let mrsm = md.get("meerschaum:dtype").cloned();
-            let kind = match (ext.as_deref(), mrsm.as_deref()) {
-                (Some("geoarrow.wkb"), _) => Some("geometry".to_string()),
-                (Some("arrow.json"), _) => Some("json".to_string()),
-                (Some("arrow.uuid"), _) => Some("uuid".to_string()),
-                (_, Some(d)) => Some(d.to_string()),
+            let ext = md.get(meta::EXTENSION_NAME).cloned();
+            let dtype_tag = md.get(meta::DTYPE).cloned();
+            let col_tags = ColumnTags {
+                dtype: dtype_tag.clone(),
+                db_type: md.get(meta::DB_TYPE).cloned(),
+            };
+            let tag_base = dtype_tag
+                .as_deref()
+                .map(|d| meerschaum_core::dtypes::resolve_alias(d.split('[').next().unwrap_or(d)));
+            let kind = match (ext.as_deref(), tag_base) {
+                (Some("geoarrow.wkb"), _) => Some("geometry"),
+                (Some("arrow.json"), _) => Some("json"),
+                (Some("arrow.uuid"), _) => Some("uuid"),
+                (_, Some("geometry" | "geography")) => Some("geometry"),
+                (_, Some(d @ ("json" | "uuid" | "numeric"))) => Some(d),
                 _ => None,
             };
             if let Some(kind) = kind {
                 special.insert(
                     field.name().clone(),
-                    (kind, md.get("ARROW:extension:metadata").cloned()),
+                    (
+                        kind.to_string(),
+                        md.get(meta::EXTENSION_METADATA).cloned(),
+                        md.get(meta::ENCODING).cloned(),
+                    ),
                 );
+            }
+            if !col_tags.is_empty() {
+                tags.insert(field.name().clone(), col_tags);
             }
             plain_fields.push(Field::new(field.name(), field.data_type().clone(), true));
             plain_arrays.push(batch.column(i).clone());
@@ -557,7 +670,8 @@ impl Frame {
         };
         for (i, field) in schema.fields().iter().enumerate() {
             let name = field.name();
-            if let Some((kind, ext_md)) = special.get(name) {
+            let col_tags = tags.get(name).cloned().unwrap_or_default();
+            if let Some((kind, ext_md, encoding)) = special.get(name) {
                 let array = plain.column(i);
                 let n = array.len();
                 let mut values = Vec::with_capacity(n);
@@ -580,14 +694,22 @@ impl Frame {
                     if let Some(a) = array.as_any().downcast_ref::<LargeStringArray>() {
                         return (!a.is_null(ix)).then(|| a.value(ix).to_string());
                     }
+                    if let Some(a) = array.as_any().downcast_ref::<Decimal128Array>() {
+                        return (!a.is_null(ix)).then(|| a.value_as_string(ix));
+                    }
                     None
                 };
-                let mut crs = None;
+                let mut srid_seen: Option<i32> = None;
                 for ix in 0..n {
                     let v = match kind.as_str() {
                         "geometry" => get_bytes(ix)
-                            .and_then(|b| Geometry::from_wkb(&b).ok())
-                            .map(Value::Geometry)
+                            .and_then(|b| decode_geometry(&b, encoding.as_deref()))
+                            .map(|g| {
+                                if srid_seen.is_none() {
+                                    srid_seen = g.srid.filter(|s| *s != 0);
+                                }
+                                Value::Geometry(g)
+                            })
                             .unwrap_or(Value::Null),
                         "json" => get_str(ix)
                             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
@@ -605,30 +727,57 @@ impl Frame {
                     };
                     values.push(v);
                 }
+                let mut crs = None;
                 if kind == "geometry" {
-                    if let Some(md) = ext_md {
-                        crs = serde_json::from_str::<serde_json::Value>(md)
-                            .ok()
-                            .and_then(|j| j.get("crs").and_then(|c| c.as_str().map(str::to_string)))
-                            .map(
-                                |c| match c.strip_prefix("EPSG:").and_then(|s| s.parse().ok()) {
-                                    Some(i) => Srid::Int(i),
-                                    None => Srid::Str(c),
-                                },
-                            );
-                    }
+                    crs = ext_md
+                        .as_deref()
+                        .and_then(|md| serde_json::from_str::<serde_json::Value>(md).ok())
+                        .and_then(|j| j.get("crs").and_then(|c| c.as_str().map(str::to_string)))
+                        .map(
+                            |c| match c.strip_prefix("EPSG:").and_then(|s| s.parse().ok()) {
+                                Some(i) => Srid::Code(i),
+                                None => Srid::Authority(c),
+                            },
+                        )
+                        .or_else(|| srid_seen.map(|s| Srid::Code(i64::from(s))))
+                        .or_else(|| {
+                            let dtype = col_tags.mrsm_dtype()?;
+                            meerschaum_core::dtypes::GeometrySpec::parse(&dtype)
+                                .ok()
+                                .flatten()
+                                .map(|spec| spec.srid)
+                                .filter(Srid::truthy)
+                        });
                 }
                 let mut col = Column::object(name.clone(), values);
                 col.crs = crs;
+                col.tags = col_tags;
                 columns.push(col);
             } else if let Some(df) = &native_df {
                 let s = df.column(name)?.as_materialized_series().clone();
-                columns.push(Column::native(s));
+                let mut col = Column::native(s);
+                col.tags = col_tags;
+                columns.push(col);
             }
         }
         let mut frame = Frame::new(columns)?;
         frame.height = batch.num_rows();
         Ok(frame)
+    }
+}
+
+/// Decode geometry bytes per `meerschaum:encoding`: WKB / EWKB (the default and `ewkb`) or
+/// MySQL's internal format (`mysql`: a little-endian SRID followed by WKB).
+fn decode_geometry(bytes: &[u8], encoding: Option<&str>) -> Option<Geometry> {
+    match encoding {
+        Some("mysql") => {
+            let (srid, wkb) = bytes.split_at_checked(4)?;
+            let mut g = Geometry::from_wkb(wkb).ok()?;
+            let srid = i32::from_le_bytes(srid.try_into().ok()?);
+            g.srid = (srid != 0).then_some(srid);
+            Some(g)
+        }
+        _ => Geometry::from_wkb(bytes).ok(),
     }
 }
 
@@ -647,11 +796,26 @@ impl SpecialKind {
             SpecialKind::Json => "json".into(),
             SpecialKind::Uuid => "uuid".into(),
             SpecialKind::Numeric => "numeric".into(),
-            SpecialKind::Geometry { crs } => match crs.as_ref().filter(|c| c.is_truthy()) {
+            SpecialKind::Geometry { crs } => match crs.as_ref().filter(|c| c.truthy()) {
                 Some(c) => format!("geometry[{c}]"),
                 None => "geometry".into(),
             },
         }
+    }
+}
+
+/// The special kind an explicit `meerschaum:dtype` tag declares.
+fn special_kind_of_tags(tags: &ColumnTags) -> Option<SpecialKind> {
+    if tags.declares("json")? {
+        Some(SpecialKind::Json)
+    } else if tags.declares("uuid")? {
+        Some(SpecialKind::Uuid)
+    } else if tags.declares("numeric")? {
+        Some(SpecialKind::Numeric)
+    } else if tags.declares("geometry")? {
+        Some(SpecialKind::Geometry { crs: None })
+    } else {
+        None
     }
 }
 

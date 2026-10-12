@@ -7,7 +7,7 @@ use crate::dtypes::{get_db_type_from_pd_type, get_pd_type_from_db_type};
 use crate::error::{Result, SqlError};
 use crate::flavor::Flavor;
 use crate::ident::clean;
-use crate::pytext::{PyDateTime, py_float_repr, py_strip};
+use meerschaum_core::pyfmt::{PyDateTime, float_repr, py_strip};
 
 /// `_VALID_DATEPARTS` (`utils/sql.py:685`).
 pub const VALID_DATEPARTS: [&str; 6] = ["year", "month", "day", "hour", "minute", "second"];
@@ -60,7 +60,7 @@ impl Number {
     pub fn py_str(self) -> String {
         match self {
             Number::Int(i) => i.to_string(),
-            Number::Float(f) => py_float_repr(f),
+            Number::Float(f) => float_repr(f),
         }
     }
 }

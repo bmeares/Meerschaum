@@ -2,8 +2,14 @@
 //!
 //! Ports v4's dataframe semantics to Rust with observable parity:
 //!
-//! - [`dtypes`], [`value`], [`decimal`], [`cast`]: Meerschaum / pandas / Polars dtype strings and
-//!   Python-like scalar casts (`meerschaum/utils/dtypes/__init__.py`).
+//! - [`dtypes`], [`value`], [`decimal`], [`cast`]: pandas / Polars dtype strings (the Meerschaum
+//!   dtype vocabulary itself comes from `meerschaum_core::dtypes`) and Python-like scalar casts
+//!   (`meerschaum/utils/dtypes/__init__.py`). [`Value`] is the *cell* scalar of object columns
+//!   (with `pd.NA`, `NaT`, decimals, geometries); it converts to and from
+//!   `meerschaum_core::Value`, the parameters value.
+//! - [`frame`]: [`Frame`], the in-memory table type of every crate. Arrow batches convert into it
+//!   ([`Frame::from_record_batches`]), keeping the `meerschaum:dtype` / `meerschaum:db_type`
+//!   field tags on each column ([`frame::ColumnTags`]).
 //! - [`detect`]: dtype detection on frames (`get_json_cols`, `get_numeric_cols`, ...).
 //! - [`enforce`]: `enforce_dtypes` and the `Pipe.enforce_dtypes` call path.
 //! - [`diff`]: `filter_unseen_df` and the DataFrame part of `Pipe.filter_existing`.

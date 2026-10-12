@@ -17,6 +17,8 @@ oracle = []
 duckdb = []
 
 [dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { workspace = true }

@@ -16,8 +16,8 @@ pub mod templates;
 pub mod update;
 
 use crate::flavor::Flavor;
-use crate::pipe::PipeSpec;
-use crate::value::PyValue;
+use crate::pipe::SqlPipe;
+use meerschaum_core::Value;
 
 /// The connector attributes the pipe-level builders read (`self.flavor`, `self.schema`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,14 +51,14 @@ impl ConnectorCtx {
     }
 
     /// `SQLConnector.get_pipe_schema(pipe)` (`_pipes.py:4215`).
-    pub fn get_pipe_schema(&self, pipe: &PipeSpec) -> Option<String> {
+    pub fn get_pipe_schema(&self, pipe: &SqlPipe) -> Option<String> {
         if matches!(self.flavor, Flavor::Sqlite | Flavor::Geopackage) {
             return self.schema.clone();
         }
         // `pipe.parameters.get('schema', self.schema)`: an explicit `None` wins.
-        match pipe.parameters.get("schema") {
+        match pipe.param("schema") {
             None => self.schema.clone(),
-            Some(PyValue::None) => None,
+            Some(Value::Null) => None,
             Some(v) => Some(v.py_str()),
         }
     }
