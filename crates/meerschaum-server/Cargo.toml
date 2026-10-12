@@ -13,7 +13,7 @@ meerschaum-core = { workspace = true }
 meerschaum-kernel = { workspace = true }
 meerschaum-connector = { workspace = true }
 # Only the shared route/auth models (`models`, `routes`, `wire`); no HTTP client.
-meerschaum-api = { workspace = true, default-features = false }
+meerschaum-api = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { workspace = true }

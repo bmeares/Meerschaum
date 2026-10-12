@@ -93,6 +93,26 @@ def kill_server():
             pass
 
 
+def kill_job_daemons():
+    """
+    Kill the job daemons the server started. They detach into their own sessions, so killing
+    the server's process group misses them, and an orphaned `fixture-job` daemon makes the next
+    run's `create_job` answer "already running" (its root is gone, but v4 still finds it).
+    """
+    marker = f"MRSM_ROOT_DIR={ROOT}".encode()
+    for pid in os.listdir('/proc') if os.path.isdir('/proc') else []:
+        if not pid.isdigit() or int(pid) == os.getpid():
+            continue
+        try:
+            with open(f'/proc/{pid}/environ', 'rb') as f:
+                if marker not in f.read().split(b'\0'):
+                    continue
+            os.kill(int(pid), signal.SIGKILL)
+        except Exception:
+            pass
+
+
+atexit.register(kill_job_daemons)
 atexit.register(kill_server)
 signal.signal(signal.SIGTERM, lambda *a: sys.exit(1))
 

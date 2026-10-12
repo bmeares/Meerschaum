@@ -34,7 +34,7 @@ meerschaum-kernel = { path = "crates/meerschaum-kernel" }
 meerschaum-connector = { path = "crates/meerschaum-connector" }
 meerschaum-sql = { path = "crates/meerschaum-sql" }
 meerschaum-valkey = { path = "crates/meerschaum-valkey" }
-meerschaum-api = { path = "crates/meerschaum-api" }
+meerschaum-api = { path = "crates/meerschaum-api", default-features = false }
 meerschaum-engine = { path = "crates/meerschaum-engine" }
 meerschaum-jobs = { path = "crates/meerschaum-jobs" }
 meerschaum-compose = { path = "crates/meerschaum-compose" }

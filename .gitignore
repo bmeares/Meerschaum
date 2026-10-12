@@ -121,6 +121,8 @@ celerybeat.pid
 
 # Environments
 .env
+# Compose parity fixture: dummy values that the recorded output depends on.
+!crates/meerschaum-compose/tests/fixtures/projects/*/.env
 .venv
 env/
 # venv/
