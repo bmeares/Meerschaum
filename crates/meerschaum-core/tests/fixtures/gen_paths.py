@@ -44,6 +44,10 @@ def child(out_path):
         out[name] = value if isinstance(value, str) else value.as_posix()
     out['PLUGINS_DIR_PATHS'] = [p.as_posix() for p in paths.PLUGINS_DIR_PATHS]
     out['DOT_CONFIG_DIR_PATH'] = paths.DOT_CONFIG_DIR_PATH.as_posix()
+    # Report where this interpreter imported meerschaum from, so the parent can normalize the
+    # package directory to `{PACKAGE}` whether the working tree or the parity reference ran.
+    import meerschaum
+    out['__package__'] = pathlib.Path(meerschaum.__file__).parent.as_posix()
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(out, f)
 
@@ -72,9 +76,20 @@ def main():
                 env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=True,
             )
             with open(out_path, encoding='utf-8') as f:
-                text = f.read()
-            package = str(pathlib.Path.cwd() / 'meerschaum')
-            text = text.replace(package, '{PACKAGE}').replace(tmp, '{TMP}')
+                data = json.load(f)
+            package = data.pop('__package__')
+            text = json.dumps(data)
+            # A venv on Fedora exposes the package under both lib/ and lib64/ (a symlink); paths
+            # derived from __file__ may use either spelling, so normalize every variant.
+            variants = {
+                package,
+                pathlib.Path(package).resolve().as_posix(),
+                package.replace('/lib64/', '/lib/'),
+                package.replace('/lib/', '/lib64/'),
+            }
+            for variant in sorted(variants, key=len, reverse=True):
+                text = text.replace(variant, '{PACKAGE}')
+            text = text.replace(tmp, '{TMP}')
             results[case] = {'env': extra, 'paths': json.loads(text)}
     with open(HERE / 'paths.json', 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2)

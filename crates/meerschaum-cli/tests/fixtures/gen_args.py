@@ -844,7 +844,7 @@ def main():
     actions_fixture = gen_actions_fixture()
     _assert_core_only()
     with open(HERE / 'actions.json', 'w', encoding='utf-8') as f:
-        json.dump(actions_fixture, f, indent=1, ensure_ascii=False, allow_nan=False)
+        json.dump(actions_fixture, f, indent=1, ensure_ascii=False, allow_nan=False, sort_keys=True)
         f.write('\n')
     with open(HERE / 'parser.json', 'w', encoding='utf-8') as f:
         json.dump(gen_parser_fixture(), f, indent=1, ensure_ascii=False, allow_nan=False)

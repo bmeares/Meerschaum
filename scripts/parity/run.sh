@@ -55,20 +55,54 @@ mkdir -p "$MRSM_ROOT_DIR"
 
 cd "$REPO"
 exec "$ref_py" -s -E - "$gen" "$VERSION" "$VENV" "$@" <<'PY'
-import os, runpy, sys
+import importlib.abc, importlib.util, os, re, runpy, sys
 
 gen, expected, venv, *args = sys.argv[1:]
 # Drop the cwd entry ('' for stdin scripts) so the repository's meerschaum/ is not importable.
 sys.path[:] = [p for p in sys.path if p not in ('', os.getcwd())]
 
-import meerschaum
-here = os.path.realpath(meerschaum.__file__)
-if meerschaum.__version__ != expected or not here.startswith(os.path.realpath(venv) + os.sep):
+# Locate the reference package WITHOUT importing it. Importing meerschaum reads the config
+# registry at import time, and generators isolate their environment (MRSM_ROOT_DIR, MRSM_CONFIG,
+# MRSM_PLUGINS_DIR) only when they start; a pre-import would freeze the wrong config.
+venv_real = os.path.realpath(venv) + os.sep
+spec = importlib.util.find_spec('meerschaum')
+origin = os.path.realpath(spec.origin) if spec and spec.origin else ''
+version = ''
+if origin:
+    with open(os.path.join(os.path.dirname(origin), 'config', '_version.py'), encoding='utf-8') as f:
+        m = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", f.read())
+        version = m.group(1) if m else ''
+if version != expected or not origin.startswith(venv_real):
     sys.exit(
-        f"parity/run.sh: refusing to run: imported meerschaum {meerschaum.__version__} from {here}, "
-        f"expected {expected} from {venv}"
+        f"parity/run.sh: refusing to run: meerschaum {version or '?'} at {origin or '?'}, "
+        f"expected {expected} under {venv}"
     )
-print(f"[parity] meerschaum {meerschaum.__version__} ({here}) -> {gen}", file=sys.stderr)
+print(f"[parity] meerschaum {version} ({origin}) -> {gen}", file=sys.stderr)
+
+
+class _RefOnly(importlib.abc.MetaPathFinder):
+    """Refuse any `meerschaum` import that would not come from the reference venv (a generator
+    that inserts the repository root into sys.path must still get the reference package)."""
+
+    def find_spec(self, name, path=None, target=None):
+        if name != 'meerschaum' and not name.startswith('meerschaum.'):
+            return None
+        for finder in sys.meta_path:
+            if finder is self:
+                continue
+            found = getattr(finder, 'find_spec', lambda *a, **k: None)(name, path, target)
+            if found is None:
+                continue
+            found_origin = os.path.realpath(found.origin) if found.origin else ''
+            if found_origin and not found_origin.startswith(venv_real):
+                raise ImportError(
+                    f"parity/run.sh: {name} resolved to {found_origin}, outside the reference venv {venv}"
+                )
+            return found
+        return None
+
+
+sys.meta_path.insert(0, _RefOnly())
 
 sys.argv = [gen, *args]
 sys.path.insert(0, os.path.dirname(gen))

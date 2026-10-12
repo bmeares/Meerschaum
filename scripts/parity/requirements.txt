@@ -15,3 +15,6 @@ pytz==2025.2
 
 # v4 `_internal` group (not expressible as a pip extra because of the leading underscore).
 dataclass-wizard>=0.35.0
+
+# v4 `compose` group, needed by crates/meerschaum-compose/tests/fixtures/gen_compose.py.
+envyaml>=1.10.211231

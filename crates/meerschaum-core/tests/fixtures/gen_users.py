@@ -38,9 +38,11 @@ def main():
         salt = bytes(range(i, i + 16))
         for rounds in (1, 1000, 29000):
             hashes.append({'password': password, 'hash': hash_password(password, salt=salt, rounds=rounds)})
-        hashes.append({'password': password, 'hash': hash_password(password, rounds=5000)})
-    hashes.append({'password': 'default-rounds', 'hash': hash_password('default-rounds')})
-    hashes.append({'password': 'token-secret', 'hash': hash_password('token-secret', rounds=100_000)})
+        # Fixed salts throughout: the fixture must regenerate byte-identically from the
+        # parity reference. Random-salt behavior is covered by the Rust side's own tests.
+        hashes.append({'password': password, 'hash': hash_password(password, salt=salt[::-1], rounds=5000)})
+    hashes.append({'password': 'default-rounds', 'hash': hash_password('default-rounds', salt=b'fixed-salt-16byt')})
+    hashes.append({'password': 'token-secret', 'hash': hash_password('token-secret', salt=b'token-salt-16byt', rounds=100_000)})
 
     good = hash_password('pw', salt=b'0123456789abcdef', rounds=10)
     edge = {
