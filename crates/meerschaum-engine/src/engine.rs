@@ -1027,7 +1027,7 @@ impl Engine {
             }
             if streams.is_none() && (loop_opts.listen || loop_opts.run_loop) {
                 if let Ok((graph, sub, _)) = self.resolve(&opts).await {
-                    let (set, excluded) = self.spawn_streams(&graph, &sub, &stop);
+                    let (set, excluded) = self.spawn_streams(&graph, &sub, &stop, &opts.sync);
                     if !excluded.is_empty() {
                         opts.exclude.extend(excluded);
                     }
@@ -1097,6 +1097,7 @@ impl Engine {
         graph: &Arc<Graph>,
         sub: &Subgraph,
         stop: &StopToken,
+        sync: &NodeSyncOptions,
     ) -> (tokio::task::JoinSet<()>, BTreeSet<PipeRef>) {
         let mut set = tokio::task::JoinSet::new();
         let mut owned = BTreeSet::new();
@@ -1105,7 +1106,11 @@ impl Engine {
             default_backtrack_minutes: self.config.default_backtrack_minutes,
             filter_params_index_limit: self.config.filter_params_index_limit,
             write_ledger: true,
-            sync: NodeSyncOptions::default(),
+            sync: sync.clone(),
+        };
+        let sink_options = SinkOptions {
+            skip_check_existing: !sync.check_existing,
+            ..Default::default()
         };
         let executor = Arc::new(NativeExecutor::new(
             self.registry.clone(),
@@ -1154,7 +1159,7 @@ impl Engine {
                     let sink = run_sink(
                         &pipe,
                         config,
-                        SinkOptions::default(),
+                        sink_options,
                         rx,
                         source.as_ref(),
                         &flusher,

@@ -425,6 +425,15 @@ impl SqlDriver {
     /// shared by every crate). Special columns are decoded from their field tags, and every
     /// column keeps its `meerschaum:dtype` / `meerschaum:db_type` tags, so
     /// `meerschaum_kernel::enforce::enforce_dtypes` needs no dtype detection on them.
+    pub async fn read_docs_frame(&self, sql: &str) -> Result<Frame> {
+        // PARITY: v4 get_docs uses result.mappings(): SQLite timestamps remain raw text.
+        if let Pool::Sqlite(pool) = &self.pool {
+            return sqlite::read_docs_frame(pool, sql).await;
+        }
+        self.read_frame(sql).await
+    }
+
+    /// Read typed query results as a kernel frame.
     pub async fn read_frame(&self, sql: &str) -> Result<Frame> {
         let stream = self.read_stream(sql, DEFAULT_CHUNKSIZE).await?;
         let schema = stream.schema();

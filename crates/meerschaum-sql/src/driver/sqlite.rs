@@ -19,12 +19,11 @@ use crate::uri::ConnectionSpec;
 pub(crate) struct SqliteBackend;
 
 pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<SqliteConnectOptions> {
-    let database = spec.database.as_deref().unwrap_or(":memory:");
+    let resolved = spec.resolved_database()?;
+    let database = resolved.as_deref().unwrap_or(":memory:");
     let opts = if database == ":memory:" || database.is_empty() {
         SqliteConnectOptions::from_str("sqlite::memory:")?
     } else {
-        // TODO(connector-registry): `{SQLITE_DB_PATH}` is resolved from core's `Paths` when the
-        // connector registry builds the spec.
         SqliteConnectOptions::new()
             .filename(database)
             .create_if_missing(true)
@@ -32,6 +31,7 @@ pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<SqliteConnectOpti
     // Python's `sqlite3` leaves foreign keys off and keeps the rollback journal (`DELETE`);
     // sqlx turns foreign keys on and switches files to WAL by default.
     Ok(opts
+        .row_buffer_size(8192)
         .foreign_keys(false)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Delete))
 }
@@ -123,6 +123,7 @@ fn infer_kind(cells: &[SqlValue]) -> ColumnKind {
 
 impl Backend for SqliteBackend {
     type DB = Sqlite;
+    const DYNAMIC_TYPES: bool = true;
 
     fn plan(columns: &[SqliteColumn]) -> Vec<ColumnPlan> {
         columns
@@ -192,6 +193,92 @@ impl Backend for SqliteBackend {
         }
     }
 
+    fn array(rows: &[SqliteRow], idx: usize, plan: &ColumnPlan) -> Result<arrow::array::ArrayRef> {
+        use arrow::array::*;
+        use std::sync::Arc;
+        macro_rules! primitive {
+            ($builder:ty, $ty:ty) => {{
+                let mut b = <$builder>::with_capacity(rows.len());
+                for row in rows {
+                    b.append_option(row.try_get_unchecked::<Option<$ty>, _>(idx)?);
+                }
+                return Ok(Arc::new(b.finish()));
+            }};
+        }
+        // SQLite affinity is advisory. Preserve coercion when later batches change storage.
+        let compatible = rows.iter().all(|row| {
+            row.try_get_raw(idx).is_ok_and(|v| {
+                v.is_null()
+                    || match plan.kind {
+                        ColumnKind::Int64 => v.type_info().name() == "INTEGER",
+                        ColumnKind::Float64 => matches!(v.type_info().name(), "INTEGER" | "REAL"),
+                        ColumnKind::Utf8 | ColumnKind::Timestamp | ColumnKind::TimestampTz => {
+                            v.type_info().name() == "TEXT"
+                        }
+                        ColumnKind::Bytes => v.type_info().name() == "BLOB",
+                        _ => false,
+                    }
+            })
+        });
+        if compatible {
+            match plan.kind {
+                ColumnKind::Int64 => primitive!(Int64Builder, i64),
+                ColumnKind::Float64 => primitive!(Float64Builder, f64),
+                ColumnKind::Timestamp | ColumnKind::TimestampTz => {
+                    let mut b = TimestampMicrosecondBuilder::with_capacity(rows.len());
+                    for row in rows {
+                        let value = row.try_get::<Option<&str>, _>(idx)?;
+                        let dt = value
+                            .map(|s| {
+                                super::batch::parse_datetime_text(s)
+                                    .and_then(|(n, offset)| match offset {
+                                        Some(o) => {
+                                            use chrono::TimeZone;
+                                            o.from_local_datetime(&n)
+                                                .single()
+                                                .map(|d| d.timestamp_micros())
+                                        }
+                                        None => Some(n.and_utc().timestamp_micros()),
+                                    })
+                                    .ok_or_else(|| SqlError::Conversion {
+                                        column: plan.name.clone(),
+                                        reason: format!("Invalid timestamp: {s}"),
+                                    })
+                            })
+                            .transpose()?;
+                        b.append_option(dt);
+                    }
+                    let arr = b.finish();
+                    return Ok(Arc::new(if plan.kind == ColumnKind::TimestampTz {
+                        arr.with_timezone("UTC")
+                    } else {
+                        arr
+                    }));
+                }
+                ColumnKind::Utf8 => {
+                    let mut b = StringBuilder::with_capacity(rows.len(), rows.len() * 16);
+                    for row in rows {
+                        b.append_option(row.try_get::<Option<&str>, _>(idx)?);
+                    }
+                    return Ok(Arc::new(b.finish()));
+                }
+                ColumnKind::Bytes => {
+                    let mut b = BinaryBuilder::with_capacity(rows.len(), rows.len() * 16);
+                    for row in rows {
+                        b.append_option(row.try_get::<Option<&[u8]>, _>(idx)?);
+                    }
+                    return Ok(Arc::new(b.finish()));
+                }
+                _ => {}
+            }
+        }
+        let cells = rows
+            .iter()
+            .map(|r| Self::cell(r, idx, plan))
+            .collect::<Result<Vec<_>>>()?;
+        super::batch::build_array(plan, &cells)
+    }
+
     fn rows_affected(result: &sqlx::sqlite::SqliteQueryResult) -> u64 {
         result.rows_affected()
     }
@@ -202,4 +289,38 @@ impl Backend for SqliteBackend {
     ) -> sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
         super::params::bind_sqlite(q, p)
     }
+}
+
+/// sqlite3 mappings preserve each value's storage class, even within a mixed column.
+pub(crate) async fn read_docs_frame(
+    pool: &SqlitePool,
+    sql: &str,
+) -> Result<meerschaum_kernel::Frame> {
+    use futures_util::TryStreamExt;
+    use meerschaum_kernel::value::Value;
+    let mut rows = sqlx::query(sql).persistent(false).fetch(pool);
+    let mut columns: Vec<(String, Vec<Value>)> = Vec::new();
+    while let Some(row) = rows.try_next().await? {
+        if columns.is_empty() {
+            columns = row
+                .columns()
+                .iter()
+                .map(|c| (c.name().into(), Vec::new()))
+                .collect();
+        }
+        for (i, (_, values)) in columns.iter_mut().enumerate() {
+            let raw = row.try_get_raw(i)?;
+            values.push(if raw.is_null() {
+                Value::Null
+            } else {
+                match raw.type_info().name() {
+                    "INTEGER" => Value::Int(row.try_get_unchecked(i)?),
+                    "REAL" => Value::Float(row.try_get_unchecked(i)?),
+                    "BLOB" => Value::Bytes(row.try_get_unchecked(i)?),
+                    _ => Value::Str(row.try_get_unchecked(i)?),
+                }
+            });
+        }
+    }
+    Ok(meerschaum_kernel::Frame::from_object_columns(columns)?)
 }

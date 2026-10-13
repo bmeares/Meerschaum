@@ -57,7 +57,7 @@ pub fn register_pipe(rt: &mut Runtime<'_>, inst: &Instance, pipe: &mut Pipe) -> 
             "Cannot register pipes created with `temporary=True` (read-only).",
         );
     }
-    if pipe.parameters().is_empty() {
+    if pipe.raw_parameters().is_empty() {
         let cols = pipe.columns();
         let cols = if cols.is_empty() {
             let mut m = Map::new();
@@ -105,7 +105,7 @@ pub fn register_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     for sp in pipes {
         let mut pipe = sp.pipe;
         if !params.is_empty() {
-            let existing = pipe.parameters().clone();
+            let existing = pipe.raw_parameters().clone();
             pipe.set_parameters(apply_patch_maps(&params, &existing));
         }
         let res = register_pipe(rt, &inst, &mut pipe);
@@ -200,7 +200,7 @@ pub fn edit_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             &format!("Will patch the following parameters into {}:", sp.pipe),
         );
         pprint(rt, &PyObj::from_value(&Value::Map(params.clone())), false);
-        let patched = apply_patch_maps(sp.pipe.parameters(), params);
+        let patched = apply_patch_maps(sp.pipe.raw_parameters(), params);
         sp.pipe.set_parameters(patched);
         let v = validate_indices(&sp.pipe);
         let res = if !v.success {
@@ -610,7 +610,7 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             sp.pipe.metric_key(),
             sp.pipe.location_key(),
             &dest.keys(),
-            Some(sp.pipe.parameters().clone()),
+            Some(sp.pipe.raw_parameters().clone()),
             &defaults,
         )?;
         let exists = session
@@ -725,7 +725,7 @@ pub fn copy_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 /// `register plugins [plugins]`: the checks before the upload. Packaging and uploading a
 /// plugin needs its Python module (the worker path), so the upload itself returns a failure.
 pub fn register_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
-    let repo = super::show::repo_keys(args, rt)?;
+    let _repo = super::show::repo_keys(args, rt)?;
     let action = words(args, "action");
     if action.is_empty() || action == [""] {
         return Ok(SuccessTuple::fail("No plugins to register."));
@@ -749,8 +749,5 @@ pub fn register_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             "Finished registering 0 plugins\n    (0 succeeded, 0 failed).",
         ));
     }
-    Ok(SuccessTuple::fail(format!(
-        "Registering plugins to '{repo}' requires the Python worker, which the Rust CLI does not start yet ({}).",
-        super::items_str(&to_register)
-    )))
+    crate::python::core_action("register plugins", args, rt)
 }

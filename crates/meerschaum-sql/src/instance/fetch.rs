@@ -6,7 +6,9 @@ use meerschaum_connector::{ConnectorResult, DateBound};
 use meerschaum_core::{Pipe, Value};
 use meerschaum_kernel::Frame;
 
-use crate::queries::metadef::{Bound, MetadefArgs, ParentSpec, get_pipe_metadef};
+use crate::queries::metadef::{
+    Bound, MetadefArgs, ParentSpec, get_pipe_metadef_for_execution as get_pipe_metadef,
+};
 
 use super::values::py_datetime;
 use super::{SqlConnector, be};

@@ -600,6 +600,9 @@ pub fn parse_datetime_text(s: &str) -> Option<(NaiveDateTime, Option<FixedOffset
         let naive = parse_naive(body)?;
         return Some((naive, FixedOffset::east_opt(0)));
     }
+    if !body.get(10..).is_some_and(|t| t.contains(['+', '-'])) {
+        return parse_naive(body).map(|n| (n, None));
+    }
     for fmt in [
         "%Y-%m-%d %H:%M:%S%.f%#z",
         "%Y-%m-%dT%H:%M:%S%.f%#z",

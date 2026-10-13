@@ -16,7 +16,7 @@ use meerschaum_compose::project::{Host, Session};
 use meerschaum_compose::subactions::{ComposeArgs, Services, compose};
 use meerschaum_core::SuccessTuple;
 
-use crate::builtin::{ActionError, ActionResult, not_implemented};
+use crate::builtin::{ActionError, ActionResult};
 use crate::dispatch::{CommandSpec, Runtime};
 use crate::value::{ArgsMap, PyValue};
 
@@ -99,9 +99,7 @@ pub fn compose_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let sub = action.first().map(String::as_str).unwrap_or("default");
     let supported = matches!(sub, "explain" | "init") || (sub == "up" && dry);
     if !supported {
-        return Ok(not_implemented(
-            format!("compose {}", action.join(" ")).trim_end(),
-        ));
+        return crate::python::core_action("compose", args, rt);
     }
     let settings = rt.settings();
     let compose_args = ComposeArgs {

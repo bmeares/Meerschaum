@@ -470,7 +470,7 @@ fn run_case(name: &str, expected: &Value, run_ix: usize, run: &Value) -> Vec<Str
                         );
                         m.insert("instance_keys".into(), p.instance_keys().into());
                         m.insert("temporary".into(), p.temporary.into());
-                        m.insert("parameters".into(), Value::Map(p.parameters().clone()));
+                        m.insert("parameters".into(), Value::Map(p.raw_parameters().clone()));
                         Value::Map(m)
                     })
                     .collect(),

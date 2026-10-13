@@ -1036,6 +1036,9 @@ pub fn series_attempt_cast_to_geometry(col: &Column) -> Result<Column, String> {
         }
     };
     out.data = ColumnData::Object(new_values);
+    // A successful cast changes the authoritative Arrow field tag as well as the values.
+    out.tags.dtype = Some("geometry".into());
+    out.tags.db_type = None;
     Ok(out)
 }
 
@@ -1307,7 +1310,7 @@ pub fn pipe_enforce_dtypes(
     if ctx.dtypes.is_empty() {
         return Ok(df);
     }
-    enforce_dtypes(
+    let (mut out, path) = enforce_dtypes_with_report(
         &df,
         &ctx.dtypes,
         &EnforceOptions {
@@ -1316,7 +1319,40 @@ pub fn pipe_enforce_dtypes(
             coerce_timezone: enforce,
             strip_timezone: !ctx.tz_aware,
         },
-    )
+    )?;
+    for (name, dtype) in &ctx.dtypes {
+        let Some(col) = out.column_mut(name) else {
+            continue;
+        };
+        let norm = normalized(dtype);
+        let all_values =
+            |matches: fn(&Value) -> bool| col.data.values().iter().all(|v| v.is_na() || matches(v));
+        let matches = match norm.as_str() {
+            "json" => {
+                path == EnforcePath::Native
+                    || matches!(&path, EnforcePath::Subset(names) if names.contains(name))
+                    || df.data(name).is_ok_and(|source| {
+                        source.values().iter().all(|v| match v {
+                            Value::Str(s) => serde_json::from_str::<serde_json::Value>(s).is_ok(),
+                            _ => true,
+                        })
+                    })
+            }
+            t if t.starts_with("geometry") || t.starts_with("geography") => {
+                all_values(|v| matches!(v, Value::Geometry(_)))
+            }
+            t if t.starts_with("numeric") => all_values(|v| matches!(v, Value::Decimal(_))),
+            "bytes" => all_values(|v| matches!(v, Value::Bytes(_))),
+            "uuid" => all_values(|v| matches!(v, Value::Uuid(_))),
+            _ => are_dtypes_equal(&col.data.dtype_str(), dtype),
+        };
+        // Failed v4 casts leave the source column alone; do not label those as converted.
+        if matches {
+            col.tags.dtype = Some(dtype.clone());
+            col.tags.db_type = None;
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

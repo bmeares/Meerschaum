@@ -55,6 +55,8 @@ pub enum SyncBegin {
 /// The keyword arguments of `Pipe.sync()` the native flow honors.
 #[derive(Debug, Clone)]
 pub struct SyncArgs {
+    /// Additional CLI and plugin-specific keyword arguments passed to Python syncs and hooks.
+    pub extra: Map,
     /// `begin`.
     pub begin: SyncBegin,
     /// `end` (exclusive).
@@ -85,6 +87,7 @@ pub struct SyncArgs {
 impl Default for SyncArgs {
     fn default() -> Self {
         SyncArgs {
+            extra: Map::new(),
             begin: SyncBegin::Default,
             end: None,
             params: None,
@@ -162,7 +165,7 @@ impl TemplateResolver for EngineResolver<'_> {
             .known
             .and_then(|k| k.get(&PipeRef::from_pipe(pipe)))
         {
-            out.set_parameters(apply_patch_maps(params, pipe.parameters()));
+            out.set_parameters(apply_patch_maps(params, pipe.raw_parameters()));
         }
         out
     }
@@ -185,11 +188,12 @@ fn has_templates(v: &Value) -> bool {
 /// `pipe.parameters` (the property): `{{ Pipe(...) }}` templates resolved.
 pub fn resolve_parameters(env: &SyncEnv<'_>, pipe: &Pipe) -> (Pipe, Vec<String>) {
     let mut warnings = Vec::new();
-    if !has_templates(&Value::Map(pipe.parameters().clone())) {
+    if !has_templates(&Value::Map(pipe.raw_parameters().clone())) {
         return (pipe.clone(), warnings);
     }
     let resolver = EngineResolver { env };
-    let resolved = replace_in_parameters(pipe.parameters(), Some(pipe), &resolver, &mut warnings);
+    let resolved =
+        replace_in_parameters(pipe.raw_parameters(), Some(pipe), &resolver, &mut warnings);
     let mut out = pipe.clone();
     out.set_parameters(resolved);
     (out, warnings)
@@ -445,7 +449,7 @@ async fn sync_inner(
     if !args.parameters_loaded && !pipe.temporary {
         if let Ok(attrs) = instance.get_pipe_attributes(&pipe).await {
             if let Some(Value::Map(registered)) = attrs.get("parameters") {
-                let merged = apply_patch_maps(registered, pipe.parameters());
+                let merged = apply_patch_maps(registered, pipe.raw_parameters());
                 pipe.set_parameters(merged);
             }
         }
@@ -473,9 +477,9 @@ async fn sync_inner(
         Some(i) => i,
         None => {
             if let Some(ps) = env.registry.plugin_sync(pipe.connector_keys()) {
-                return ps.sync(&pipe, args).await;
+                return ps.sync_native(&pipe, args, env, observer).await;
             }
-            let source = match env.registry.source(pipe.connector_keys()) {
+            let source = match env.registry.source_for_sync(pipe.connector_keys(), args) {
                 Ok(Some(s)) => s,
                 Ok(None) => {
                     return SyncResult::new(
@@ -540,6 +544,14 @@ async fn sync_inner(
                 ..Default::default()
             };
             match source.fetch(&pipe, &query).await {
+                Ok(Some(df)) if source.connector_type() == "sql" && args.chunksize.is_some() => {
+                    let size = args
+                        .chunksize
+                        .filter(|n| *n > 0)
+                        .map(|n| n as usize)
+                        .unwrap_or_else(|| env.registry.fetch_chunksize(pipe.connector_keys()));
+                    return sync_fetched_chunks(env, &pipe, df, args, observer, size.max(1)).await;
+                }
                 Ok(Some(df)) => PipeInput::Frame(df),
                 Ok(None) => return fail(format!("No data were fetched for {pipe}.")),
                 Err(ConnectorError::NotImplemented(_)) => {
@@ -708,6 +720,101 @@ pub fn date_bound_to_bound(b: &DateBound) -> Option<meerschaum_core::success::Bo
             dt.utc, Utc,
         ))),
     }
+}
+
+/// SQL `fetch` yields chunks in v4, including one empty chunk for an empty result.
+async fn sync_fetched_chunks(
+    env: &SyncEnv<'_>,
+    pipe: &Pipe,
+    df: Frame,
+    args: &SyncArgs,
+    observer: Option<&dyn DeltaObserver>,
+    size: usize,
+) -> SyncResult {
+    let mut results = Vec::new();
+    let mut aggregate = SyncResult::new(true, String::new());
+    for start in (0..df.height().max(1)).step_by(size) {
+        let chunk = df.take(&(start..(start + size).min(df.height())).collect::<Vec<_>>());
+        let label = fetched_chunk_label(&chunk, pipe.column("datetime").as_deref());
+        let rows = chunk.height();
+        let result = Box::pin(sync_inner(
+            env,
+            pipe,
+            Some(PipeInput::Frame(chunk)),
+            args,
+            observer,
+        ))
+        .await;
+        let message = if results.is_empty() {
+            let msg = format!("\n{label}\n{}", result.message);
+            if !result.success {
+                return fail(format!("Unable to sync initial chunk for {pipe}:\n{msg}"));
+            }
+            msg
+        } else {
+            format!(
+                "{} a chunk ({} row{}) to {pipe}:\n{label}\n{}",
+                if result.success {
+                    "Synced"
+                } else {
+                    "Failed to sync"
+                },
+                comma_count(rows),
+                if rows == 1 { "" } else { "s" },
+                result.message
+            )
+        };
+        aggregate.success &= result.success;
+        aggregate.inserted += result.inserted;
+        aggregate.updated += result.updated;
+        aggregate.upserted += result.upserted;
+        aggregate.deleted += result.deleted;
+        aggregate.begin = aggregate.begin.or(result.begin);
+        aggregate.end = result.end;
+        aggregate.changed_intervals.extend(result.changed_intervals);
+        results.push((result.success, message));
+    }
+    // PARITY: v4 sorts the `(success, message)` tuples, putting failed chunks first.
+    results.sort();
+    let succeeded = results.iter().filter(|r| r.0).count();
+    let failed = results.len() - succeeded;
+    let messages = results
+        .iter()
+        .map(|r| r.1.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    aggregate.message = format!(
+        "Synced {} chunk{} to {pipe}\n({succeeded} succeeded, {failed} failed):\n\n{}",
+        comma_count(results.len()),
+        if results.len() == 1 { "" } else { "s" },
+        messages.trim()
+    );
+    aggregate
+}
+
+fn fetched_chunk_label(df: &Frame, dt: Option<&str>) -> String {
+    let Some(column) = dt.and_then(|c| df.column(c)) else {
+        return String::new();
+    };
+    let values = column.data.values();
+    let mut present = values.iter().filter(|v| !v.is_na()).collect::<Vec<_>>();
+    present.sort_by(|a, b| pipe_ops::compare_values(a, b));
+    match (present.first(), present.last()) {
+        (Some(a), Some(b)) => format!("{} - {}", a.py_str(), b.py_str()),
+        _ => String::new(),
+    }
+}
+
+fn comma_count(count: usize) -> String {
+    let digits = count.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
 }
 
 #[cfg(test)]

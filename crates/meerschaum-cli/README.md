@@ -42,19 +42,29 @@ cursor position query, then scrolled by the same rule) and applies prompt_toolki
 
 ### The CLI daemon
 
-v5 has no CLI daemon: actions run natively in the `mrsm` process, so there is no Python process to
-keep warm. `daemon` keeps v4's toggle and message (`CLI daemon mode is on.`), reads its initial
+v5 has no CLI daemon: `mrsm` dispatches actions directly and pools any Python workers within
+the process. `daemon` keeps v4's toggle and message (`CLI daemon mode is on.`), reads its initial
 state from `system:experimental:cli_daemon`, and adds one info line saying the daemon is not used
 in v5. The toolbar keeps showing the instance (v4 shows `daemon` there while the mode is on).
 `--no-daemon` is accepted and has nothing to disable.
 
 ### Plugin completers
 
-The plugin manifest (`meerschaum-worker`) records plugin actions but not their `complete_<action>`
-functions, and the CLI does not load plugin actions yet. `completer::PluginCompleter` is the seam:
-plugin actions fall back to `default_action_completer` (their subactions), as in v4 for a plugin
-without a completer. `plugin:<name>` labels (data plugins) need the manifest's `data_functions`
-and are not listed yet.
+The process session owns one `WorkerPool` and refreshes `ensure_manifest` at startup. An empty
+plugin directory and a fresh cache need no Python process. Manifest actions, data connectors,
+arguments, docstrings and `complete_<action>` functions feed help and shell completion. Plugin
+argument parsing uses the plugin's Python argparse declarations. Actions run through the pool,
+with stdout/stderr streamed to the CLI and `Pipe.sync` calls forwarded into the native engine.
+
+`native/sync.rs` runs selected pipes through the engine, including graph traversal, bounds,
+worker limits and continuous/listening mode. `native/engine.rs` resolves native connectors and
+wraps them in `PythonRegistry`. Same-instance SQL uses a compatibility adapter which preserves
+v4's in-place output and writes the engine's delta ledger around the commit.
+
+`server.rs` hosts `start api` and `start mcp`: native HTTP/MCP backends, a shared worker session,
+and a supervised Python API host selected by the manifest. MCP stdout contains protocol messages
+only. Unported core actions use the worker's `core_action` compatibility operation; this is a
+transitional deviation from the all-native b1 target. `python` keeps its native interpreter launch.
 
 ### Tests and fixtures
 
@@ -116,5 +126,12 @@ both shells are measured against the same terminal model.
 - In reverse-i-search, keys other than the search keys accept the search and then run (prompt_toolkit
   edits the search text with them, e.g. Left/Right).
 - Escape-F accepts the next word of a suggestion but does not reopen the completion menu.
-- Plugin completers and data-plugin connector labels (see above).
 - `api:` executors list no jobs during completion (v4 queries the remote executor).
+
+### Wiring regression tests
+
+`tests/wiring_parity.rs` compares plugin actions, custom flags, fetch results, callback writes,
+and a parent graph run against `tests/fixtures/wiring_transcript.json`. Regenerate it with
+`scripts/parity/run.sh crates/meerschaum-cli/tests/fixtures/gen_actions.py --wiring-only`.
+The original actions transcript remains a separate unchanged fixture. `tests/server_modes.rs`
+checks API startup on a disposable port and MCP stdout isolation with temporary SQLite roots.

@@ -31,6 +31,17 @@ use crate::protocol::{
 };
 use crate::worker::{CallOptions, Reply};
 
+// PARITY: v4 parses explicit date bounds before invoking a plugin's sync().
+// Keep the empty-string sentinel and integer axes intact.
+pub(crate) fn sync_bound_wire(value: &CValue) -> Wire {
+    match value {
+        CValue::Str(s) if !s.is_empty() => DateBound::parse(s)
+            .map(|bound| bound_to_wire(Some(&bound)))
+            .unwrap_or_else(|| core_to_wire(value)),
+        _ => core_to_wire(value),
+    }
+}
+
 /// What the worker reports about a connector (`describe_connector`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConnectorInfo {
@@ -149,6 +160,7 @@ pub struct PythonConnector {
     pool: WorkerPool,
     info: ConnectorInfo,
     callbacks: Arc<dyn CallbackHandler>,
+    fetch_kwargs: Map,
 }
 
 impl std::fmt::Debug for PythonConnector {
@@ -249,6 +261,7 @@ impl PythonConnector {
             pool,
             info,
             callbacks: Arc::new(NoCallbacks),
+            fetch_kwargs: Map::new(),
         }
     }
 
@@ -256,6 +269,15 @@ impl PythonConnector {
     /// `chunk_hook`, streaming callbacks).
     pub fn with_callbacks(mut self, handler: Arc<dyn CallbackHandler>) -> PythonConnector {
         self.callbacks = handler;
+        self
+    }
+
+    /// Additional keyword arguments for fetches through the native connector trait.
+    pub fn with_fetch_kwargs(mut self, mut kwargs: Map) -> Self {
+        for key in ["begin", "end", "params"] {
+            kwargs.shift_remove(key);
+        }
+        self.fetch_kwargs = kwargs;
         self
     }
 
@@ -374,9 +396,12 @@ impl PythonConnector {
             .set("pipe", pipe_wire(pipe))
             .set(
                 "begin",
-                begin.as_ref().map(core_to_wire).unwrap_or(Wire::Nil),
+                begin.as_ref().map(sync_bound_wire).unwrap_or(Wire::Nil),
             )
-            .set("end", end.as_ref().map(core_to_wire).unwrap_or(Wire::Nil))
+            .set(
+                "end",
+                end.as_ref().map(sync_bound_wire).unwrap_or(Wire::Nil),
+            )
             .set("kwargs", map_to_wire(&kwargs));
         let reply = self.call("sync", args, Vec::new()).await?;
         Ok(success_from(&reply.value))
@@ -513,6 +538,7 @@ impl Connector for PythonConnector {
                     begin: query.begin.clone(),
                     end: query.end.clone(),
                     params: query.params.clone(),
+                    kwargs: self.fetch_kwargs.clone(),
                     ..Default::default()
                 },
             )
@@ -912,5 +938,22 @@ impl InstanceConnector for PythonConnector {
             ),
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod bound_tests {
+    use super::*;
+
+    #[test]
+    fn plugin_sync_bounds_preserve_datetime_type_and_default_sentinel() {
+        let timestamp = CValue::Str("2026-01-02T03:04:05+00:00".into());
+        assert!(matches!(
+            wire_to_bound(&sync_bound_wire(&timestamp)),
+            Some(DateBound::Datetime(_))
+        ));
+        assert_eq!(sync_bound_wire(&CValue::Str(String::new())), Wire::from(""));
+        assert_eq!(sync_bound_wire(&CValue::Int(42)), Wire::from(42));
+        assert_eq!(sync_bound_wire(&CValue::Null), Wire::Nil);
     }
 }

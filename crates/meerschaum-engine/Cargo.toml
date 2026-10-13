@@ -12,6 +12,7 @@ description = "Meerschaum v5: engine crate (see docs/design/v5.0.0.md)"
 meerschaum-core = { workspace = true }
 meerschaum-kernel = { workspace = true }
 meerschaum-connector = { workspace = true }
+meerschaum-worker = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

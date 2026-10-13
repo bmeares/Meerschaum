@@ -27,6 +27,8 @@ use crate::pipe::{Pipe, PipeDefaults};
 use crate::pyfmt::{JsonStyle, json_dumps, literal_eval_constant, parse_arguments_str, py_str};
 use crate::value::{Map, Value};
 
+// PARITY: v4's regex does not treat backslashes or extra surrounding braces as escapes;
+// `\{{ self.metric }}` and `{{{ self.metric }}}` still substitute the inner template.
 /// The `{{ Pipe(...) }}` pattern from `replace_pipes_syntax`.
 pub const PIPE_PATTERN: &str = r"\{\{\s*(?:mrsm\.)?Pipe\((.*?)\)((?:\.[\w]+|\[[^\]]+\])*)\s*\}\}";
 /// The `{{ self... }}` pattern from `replace_pipes_syntax`.
@@ -206,7 +208,7 @@ pub trait TemplateResolver {
 
     /// `pipe.attributes['parameters']`: the raw parameters (used for `{{ self.parameters }}`).
     fn raw_parameters(&self, pipe: &Pipe) -> Map {
-        pipe.parameters().clone()
+        pipe.raw_parameters().clone()
     }
 
     /// The config registry used to resolve `MRSM{}` symlinks in parameters (none by default).
@@ -234,8 +236,8 @@ impl TemplateResolver for InMemoryResolver {
             Some(registered) => {
                 let mut out = pipe.clone();
                 out.set_parameters(crate::value::apply_patch_maps(
-                    registered.parameters(),
-                    pipe.parameters(),
+                    registered.raw_parameters(),
+                    pipe.raw_parameters(),
                 ));
                 out
             }
@@ -320,6 +322,7 @@ fn with_resolved_parameters(
     warnings.extend(resolved.warnings);
     let mut out = pipe.clone();
     out.set_parameters(resolved.parameters);
+    out.resolution_snapshot = true;
     Ok(out)
 }
 

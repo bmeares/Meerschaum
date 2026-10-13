@@ -86,7 +86,7 @@ fn static_extraction_finds_every_reference() {
     let fixture = common::load_fixture("templates.json");
     let r = resolver(&fixture);
     let clone = r.pipes.iter().find(|p| p.metric_key() == "clone").unwrap();
-    let refs = referenced_pipes_in_parameters(clone.parameters(), Some(clone), &r.defaults);
+    let refs = referenced_pipes_in_parameters(clone.raw_parameters(), Some(clone), &r.defaults);
     assert_eq!(refs.len(), 1);
     assert_eq!(refs[0].to_string(), "Pipe('sql:main', 'src')");
 

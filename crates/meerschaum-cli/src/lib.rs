@@ -44,3 +44,8 @@ pub use parse::{parse_arguments, parse_line};
 /// The version `show version` and `--version` print.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub use value::{ArgsMap, PyException, PyValue};
+
+/// Python action and manifest integration.
+pub mod python;
+/// Rust HTTP and MCP server startup.
+pub mod server;

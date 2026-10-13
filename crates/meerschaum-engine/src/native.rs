@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use meerschaum_connector::{DataQuery, async_trait};
 use meerschaum_core::pipe::PipeDefaults;
 use meerschaum_core::success::{Bound, ChangedInterval, SyncResult};
-use meerschaum_core::{Map, Pipe};
+use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::enforce::PipeInput;
 use meerschaum_kernel::value::Value as KValue;
@@ -54,6 +54,8 @@ pub trait FaultInjector: Send + Sync {
 /// The sync options an engine run applies to every node (`sync pipes` flags).
 #[derive(Debug, Clone)]
 pub struct NodeSyncOptions {
+    /// Additional CLI and plugin-specific keyword arguments.
+    pub extra: Map,
     /// `--skip-check-existing` inverted.
     pub check_existing: bool,
     /// `--chunksize`.
@@ -73,6 +75,7 @@ pub struct NodeSyncOptions {
 impl Default for NodeSyncOptions {
     fn default() -> Self {
         NodeSyncOptions {
+            extra: Map::new(),
             check_existing: true,
             chunksize: Some(-1),
             force: false,
@@ -302,6 +305,7 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
     fn base_args(&self) -> SyncArgs {
         let s = &self.config.sync;
         SyncArgs {
+            extra: s.extra.clone(),
             check_existing: s.check_existing,
             chunksize: s.chunksize,
             force: s.force,
@@ -336,7 +340,11 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
             (None, None) => None,
         };
         let env = self.env();
-        let hooks = self.registry.hooks();
+        let hooks = if args.extra.get("skip_hooks").is_some_and(Value::truthy) {
+            None
+        } else {
+            self.registry.hooks()
+        };
         if let Some(h) = &hooks {
             h.pre_sync(pipe, args).await;
         }

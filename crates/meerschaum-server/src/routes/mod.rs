@@ -221,13 +221,17 @@ pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServe
     if let Some(static_path) = cfg.static_path.clone() {
         app = app.nest_service("/static", tower_http::services::ServeDir::new(static_path));
     }
-    app.fallback(fallback)
-        .method_not_allowed_fallback(method_not_allowed)
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            rate_limit,
-        ))
-        .with_state(state)
+    app.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        crate::web::protect_sessions,
+    ))
+    .fallback(fallback)
+    .method_not_allowed_fallback(method_not_allowed)
+    .layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        rate_limit,
+    ))
+    .with_state(state)
 }
 
 /// Read a request body to bytes (Starlette's `await request.body()`).

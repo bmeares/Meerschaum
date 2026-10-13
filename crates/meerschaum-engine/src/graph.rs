@@ -477,7 +477,7 @@ impl Graph {
                 });
                 Axis::none()
             });
-            let definition_hash = definition_hash(pipe.parameters());
+            let definition_hash = definition_hash(pipe.raw_parameters());
             graph.nodes.insert(
                 pipe_ref.clone(),
                 Node {
@@ -510,7 +510,8 @@ impl Graph {
                 }
             }
             if options.implicit_edges {
-                let mut params = pipe.parameters().clone();
+                // Dependency discovery needs the template expression before resolution.
+                let mut params = pipe.raw_parameters().clone();
                 params.shift_remove("reference");
                 params.shift_remove("references");
                 for referenced in

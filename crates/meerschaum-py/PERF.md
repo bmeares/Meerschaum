@@ -275,3 +275,62 @@ The sqlite pytest suite takes 87 s under `rust` and 271 s under `python`; postgi
 concurrent builds): `filter_unseen_df` 2.68 s / 1.12 s, `enforce_all_string` 0.94 / 0.72,
 `enforce_mixed` 0.067 / 0.049, `enforce_special` 1.00 / 0.81, `filter_special` 2.11 / 1.33
 (python / rust), with the known `blob` dtype difference.
+
+## Wave 5 SQL driver measurements
+
+The before run used the existing release extension, 1M rows, `--repeat 1`, 100 updated rows
+on SQLite and 10,000 on PostGIS. Python used the pinned reference data libraries from an
+isolated temporary environment, with a fresh `MRSM_ROOT_DIR`, empty `MRSM_PLUGINS_DIR`, and
+`w5sql_bench` pipe keys. Rust builds from the other wave agents were active during these runs,
+so these are single-run observations under shared CPU load. Both modes returned identical
+1.5M-row frames and row counts.
+
+| Flavor / step | Python before | Rust before |
+|---|---:|---:|
+| SQLite new table | 74.886 s | 7.581 s |
+| SQLite half overlap | 37.270 s | 7.440 s |
+| SQLite update | 27.769 s | 25.977 s |
+| SQLite read | 14.212 s | 7.106 s |
+| SQLite sync time | 4 ms | 3 ms |
+| SQLite row count | 10 ms | 8 ms |
+| PostGIS new table | 31.804 s | 6.801 s |
+| PostGIS half overlap | 14.527 s | 11.239 s |
+| PostGIS update | 14.240 s | 10.762 s |
+| PostGIS read | 10.126 s | 2.447 s |
+| PostGIS sync time | 3 ms | 5 ms |
+| PostGIS row count | 72 ms | 55 ms |
+
+The SQL façade now passes cached column metadata into sync, shares its data-read implementation
+with the instance layer, and uses the driver's raw-document path for SQLite `get_docs`.
+
+After the Arrow builder path, metadata reuse, and SQLite staging expression index, with the
+same row counts and shared-load caveat:
+
+| Flavor / step | Python after | Rust after |
+|---|---:|---:|
+| SQLite new table | 100.244 s | 5.886 s |
+| SQLite half overlap | 41.767 s | 9.360 s |
+| SQLite update | 23.408 s | 15.551 s |
+| SQLite read | 9.075 s | 7.175 s |
+| SQLite sync time | 2 ms | 6 ms |
+| SQLite row count | 7 ms | 13 ms |
+| PostGIS new table | 25.007 s | 5.515 s |
+| PostGIS half overlap | 13.571 s | 6.937 s |
+| PostGIS update | 13.628 s | 6.248 s |
+| PostGIS read | 9.180 s | 1.782 s |
+| PostGIS sync time | 3 ms | 3 ms |
+| PostGIS row count | 77 ms | 55 ms |
+
+Both final 1.5M-row frames match. The SQLite update trace attributes 1.518 s to filtering and
+13.995 s to executing the SQL update. An intermediate run without the staging expression
+index took 79.525 s for the Rust update (Python 28.180 s); the final implementation adds an
+index matching the existing COALESCE comparisons on the temporary patch table. These runs
+are not a controlled attribution study: concurrent builds varied CPU load considerably.
+
+A separate PostGIS test of 20 warm one-row updates (integer primary key and value) measured
+median Python / Rust sync times of 122.76 / 46.36 ms, and uncached column-type lookups of
+5.15 / 4.50 ms. This is a new small-write scenario, not a reproduction of the earlier 89 ms
+measurement. The remaining millisecond-scale sync-time / row-count overhead means the
+single-run benchmark does **not** establish v4 parity on every step, despite faster large
+sync and read operations. All runs used isolated roots, empty plugin directories, the
+disposable PostGIS port 5449, and `w5sql_` pipe keys.

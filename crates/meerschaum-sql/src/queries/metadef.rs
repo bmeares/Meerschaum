@@ -174,6 +174,23 @@ fn bound_to_int(b: &Bound, unit: &str) -> Bound {
 ///
 /// Returns `Ok(None)` when the pipe has no definition (Python raises `ValueError`).
 pub fn get_pipe_metadef(flavor: Flavor, args: &MetadefArgs<'_>) -> Result<Option<String>> {
+    metadef_impl(flavor, args, false)
+}
+
+/// Runtime query variant for driver-specific, semantically equivalent expressions.
+pub(crate) fn get_pipe_metadef_for_execution(
+    flavor: Flavor,
+    args: &MetadefArgs<'_>,
+) -> Result<Option<String>> {
+    metadef_impl(flavor, args, true)
+}
+
+fn metadef_impl(flavor: Flavor, args: &MetadefArgs<'_>, execution: bool) -> Result<Option<String>> {
+    let dateadd_str = if execution {
+        crate::dateadd::dateadd_for_execution
+    } else {
+        dateadd_str
+    };
     let pipe = args.pipe;
     let parent = args.parent.as_ref();
     let parent_dt_col = parent.and_then(|p| p.dt_col.clone());

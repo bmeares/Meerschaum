@@ -15,10 +15,41 @@ use meerschaum_core::Config;
 use meerschaum_core::pipe::PipeDefaults;
 use tokio::sync::Semaphore;
 
-use crate::callback::CallbackHandler;
+use crate::callback::{CallbackHandler, CallbackRequest};
 use crate::error::{WorkerError, WorkerResult};
 use crate::protocol::Msg;
 use crate::worker::{CallOptions, Reply, Worker, WorkerOptions};
+
+tokio::task_local! {
+    static CALLBACK_DEPTH: usize;
+}
+
+/// Run native callback processing in a reentrant worker-call scope.
+/// Hosts which relay callbacks through channels must preserve this scope around native work.
+pub async fn callback_scope<F: std::future::Future>(future: F) -> F::Output {
+    let depth = CALLBACK_DEPTH.try_with(|depth| *depth).unwrap_or(0) + 1;
+    CALLBACK_DEPTH.scope(depth, future).await
+}
+
+/// Enter callback scope on a blocking host thread, e.g. while constructing a lazy connector.
+/// This lets an existing host runtime execute nested worker calls without taking a main permit.
+pub fn callback_scope_blocking<T>(f: impl FnOnce() -> T) -> T {
+    let depth = CALLBACK_DEPTH.try_with(|depth| *depth).unwrap_or(0) + 1;
+    CALLBACK_DEPTH.sync_scope(depth, f)
+}
+
+struct ReentrantHandler {
+    handler: Arc<dyn CallbackHandler>,
+    depth: usize,
+}
+#[meerschaum_connector::async_trait]
+impl CallbackHandler for ReentrantHandler {
+    async fn handle(&self, request: CallbackRequest) -> meerschaum_core::SuccessTuple {
+        CALLBACK_DEPTH
+            .scope(self.depth, self.handler.handle(request))
+            .await
+    }
+}
 
 /// The config key for the pool size.
 pub const PYTHON_WORKERS_KEY: [&str; 3] = ["system", "engine", "python_workers"];
@@ -118,6 +149,7 @@ pub struct PoolStats {
 struct Inner {
     config: PoolConfig,
     permits: Arc<Semaphore>,
+    callback_permits: Arc<Semaphore>,
     idle: Mutex<Vec<(u64, Worker)>>,
     generation: AtomicU64,
     backoff: Mutex<Backoff>,
@@ -149,6 +181,7 @@ impl WorkerPool {
         WorkerPool {
             inner: Arc::new(Inner {
                 permits: Arc::new(Semaphore::new(size)),
+                callback_permits: Arc::new(Semaphore::new(size.saturating_mul(8))),
                 config,
                 idle: Mutex::new(Vec::new()),
                 generation: AtomicU64::new(0),
@@ -262,11 +295,18 @@ impl WorkerPool {
             worker.shutdown(Duration::from_secs(5)).await;
             return;
         }
-        self.inner
-            .idle
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push((generation, worker));
+        let excess = {
+            let mut idle = self.inner.idle.lock().unwrap_or_else(|e| e.into_inner());
+            if idle.len() < self.inner.config.size.max(1) {
+                idle.push((generation, worker));
+                None
+            } else {
+                Some(worker)
+            }
+        };
+        if let Some(worker) = excess {
+            worker.shutdown(Duration::from_secs(5)).await;
+        }
     }
 
     /// Run `op` on a pooled worker. `handler` receives callbacks from plugin code made during
@@ -283,15 +323,39 @@ impl WorkerPool {
         if self.inner.closed.load(Ordering::SeqCst) {
             return Err(WorkerError::ShuttingDown);
         }
-        let _permit = Arc::clone(&self.inner.permits)
-            .acquire_owned()
-            .await
-            .map_err(|_| WorkerError::ShuttingDown)?;
+        let depth = CALLBACK_DEPTH.try_with(|depth| *depth).unwrap_or(0);
+        let _permit = if depth > 0 {
+            if depth > 8 {
+                return Err(WorkerError::Protocol(
+                    "Python callback nesting exceeds 8 levels.".into(),
+                ));
+            }
+            // A worker awaiting this callback retains its main permit. Never queue behind
+            // that permit: a size-one pool would deadlock. The reserve is bounded and fails
+            // immediately when saturated, including for callbacks on parallel plugin threads.
+            self.inner
+                .callback_permits
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| {
+                    WorkerError::Protocol("Python callback worker reserve is exhausted.".into())
+                })?
+        } else {
+            Arc::clone(&self.inner.permits)
+                .acquire_owned()
+                .await
+                .map_err(|_| WorkerError::ShuttingDown)?
+        };
         let (generation, worker) = self.checkout().await?;
         if opts.timeout.is_none() {
             opts.timeout = self.inner.config.call_timeout;
         }
-        worker.set_callback_handler(handler);
+        worker.set_callback_handler(handler.map(|handler| {
+            Arc::new(ReentrantHandler {
+                handler,
+                depth: depth + 1,
+            }) as Arc<dyn CallbackHandler>
+        }));
         let result = worker.call(op, args, frames, opts).await;
         worker.set_callback_handler(None);
         self.inner.calls.fetch_add(1, Ordering::SeqCst);
@@ -326,6 +390,7 @@ impl WorkerPool {
     pub async fn shutdown(&self) {
         self.inner.closed.store(true, Ordering::SeqCst);
         self.inner.permits.close();
+        self.inner.callback_permits.close();
         let workers: Vec<(u64, Worker)> =
             std::mem::take(&mut *self.inner.idle.lock().unwrap_or_else(|e| e.into_inner()));
         for (_, w) in workers {
@@ -349,6 +414,19 @@ mod tests {
         assert_eq!(pool.backoff_delay(2), Duration::from_millis(200));
         assert_eq!(pool.backoff_delay(4), Duration::from_millis(800));
         assert_eq!(pool.backoff_delay(10), Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn callback_reserve_rejects_excessive_nesting_without_spawning() {
+        let pool = WorkerPool::new(PoolConfig::default());
+        let result = CALLBACK_DEPTH
+            .scope(
+                9,
+                pool.call("ping", Msg::new(), vec![], CallOptions::default(), None),
+            )
+            .await;
+        assert!(result.unwrap_err().to_string().contains("nesting exceeds"));
+        assert_eq!(pool.stats().spawned, 0);
     }
 
     #[test]

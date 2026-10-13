@@ -178,3 +178,44 @@ async fn failed_spawns_back_off() {
     assert!(ping(&pool).await.is_err());
     assert!(started.elapsed() >= Duration::from_millis(150));
 }
+
+struct NestedPing(meerschaum_worker::WorkerPool);
+#[meerschaum_connector::async_trait]
+impl meerschaum_worker::CallbackHandler for NestedPing {
+    async fn handle(&self, _: meerschaum_worker::CallbackRequest) -> meerschaum_core::SuccessTuple {
+        match ping(&self.0).await {
+            Ok(_) => meerschaum_core::SuccessTuple::success(),
+            Err(e) => meerschaum_core::SuccessTuple::fail(e.to_string()),
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn size_one_pool_services_reentrant_callbacks() {
+    require_python!();
+    let env = TestEnv::new();
+    let pool = env.pool(1);
+    let connector = meerschaum_worker::PythonConnector::connect("plugin:wk_syncer", pool.clone())
+        .await
+        .unwrap()
+        .with_callbacks(std::sync::Arc::new(NestedPing(pool.clone())));
+    // The callback never reaches an instance; its nested ping needs another interpreter.
+    let pipe = meerschaum_core::Pipe::builder("plugin:wk_syncer", "reentrant")
+        .instance("sql:wiring_unused")
+        .build()
+        .unwrap();
+    let result = tokio::time::timeout(
+        Duration::from_secs(60),
+        connector.sync(&pipe, &Default::default()),
+    )
+    .await
+    .expect("nested calls must not deadlock behind the parent permit")
+    .unwrap();
+    assert!(result.success, "{}", result.message);
+    assert_eq!(
+        pool.stats().spawned,
+        2,
+        "reuse the callback worker for both batches"
+    );
+    pool.shutdown().await;
+}

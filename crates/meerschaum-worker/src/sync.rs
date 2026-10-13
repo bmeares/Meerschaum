@@ -135,7 +135,7 @@ pub async fn register_python_pipe(
     if source.info().has_register {
         match source.register(pipe).await {
             Ok(outcome) if outcome.valid => {
-                let merged = apply_patch_maps(&outcome.parameters, pipe.parameters());
+                let merged = apply_patch_maps(&outcome.parameters, pipe.raw_parameters());
                 pipe.set_parameters(merged);
             }
             Ok(outcome) => tracing::warn!(

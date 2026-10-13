@@ -244,7 +244,7 @@ pub fn hydrate(rt: &mut Runtime<'_>, inst: &Instance, sp: &mut SelectedPipe) {
     if let Ok(attrs) = session.block_on(inst.conn().get_pipe_attributes(&sp.pipe)) {
         if let Some(p) = attrs.get("parameters").and_then(Value::as_map) {
             let mut params = p.clone();
-            for (k, v) in sp.pipe.parameters() {
+            for (k, v) in sp.pipe.raw_parameters() {
                 params.insert(k.clone(), v.clone());
             }
             sp.pipe.set_parameters(params);
@@ -285,7 +285,10 @@ pub fn pipe_state(pipe: &Pipe) -> Map {
             .map(|l| Value::Str(l.into()))
             .unwrap_or(Value::Null),
     );
-    m.insert("parameters".into(), Value::Map(pipe.parameters().clone()));
+    m.insert(
+        "parameters".into(),
+        Value::Map(pipe.raw_parameters().clone()),
+    );
     m.insert(
         "instance_keys".into(),
         Value::Str(pipe.instance_keys().into()),

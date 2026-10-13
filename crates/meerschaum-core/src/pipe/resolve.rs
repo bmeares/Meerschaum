@@ -87,6 +87,7 @@ fn resolve_inner(
     let mut parameters = Map::new();
     let mut with_raw = pipe.clone();
     with_raw.set_parameters(raw.clone());
+    with_raw.resolution_snapshot = true;
     for ref_pipe in with_raw.references(&defaults)? {
         let Some(ref_pipe) = ref_pipe else {
             warnings.push(format!(

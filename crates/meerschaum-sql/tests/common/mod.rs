@@ -73,7 +73,7 @@ pub async fn ctx(flavor: &'static str, test: &str) -> Option<Ctx> {
         .map(|(_, e)| *e)
         .unwrap_or("");
     let short = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
-    let prefix = format!("rs{short}{}", &test[..test.len().min(12)]);
+    let prefix = format!("w5sql_{short}{}", &test[..test.len().min(12)]);
     if flavor == "sqlite" {
         let path = temp_sqlite_path(test);
         let uri = format!("sqlite:///{}", path.display());

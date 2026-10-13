@@ -157,10 +157,10 @@ impl InstanceOps for InMemoryInstance {
     fn edit_pipe(&mut self, pipe: &Pipe) -> SuccessTuple {
         self.events.push(InstanceEvent::Edit(
             pipe.to_string(),
-            pipe.parameters().clone(),
+            pipe.raw_parameters().clone(),
         ));
         if let Some(r) = self.pipes.iter_mut().find(|r| r.matches(pipe)) {
-            r.parameters = pipe.parameters().clone();
+            r.parameters = pipe.raw_parameters().clone();
         }
         SuccessTuple::success()
     }

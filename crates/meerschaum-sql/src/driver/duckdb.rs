@@ -1,11 +1,13 @@
 //! DuckDB (`duckdb`) over the `duckdb` crate (bundled DuckDB, cargo feature `duckdb`).
 //!
 //! DuckDB is embedded and synchronous: every call runs on a blocking thread. One database
-//! instance is opened per connector (opening the same file twice in one process conflicts on
-//! the file lock), and the pool's connections are clones of it. Bound parameters are `$1`,
+//! instance is shared per file within this process; every pool uses clones of it. Independent
+//! DuckDB instances can otherwise maintain incompatible snapshots of the same file. Bound parameters are `$1`,
 //! `$2`, ...
 
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use arrow::datatypes::DataType;
 use async_trait::async_trait;
@@ -41,7 +43,7 @@ fn database_path(spec: &ConnectionSpec) -> Option<String> {
 struct DuckdbConnector {
     path: Option<String>,
     /// The database instance, opened on first use; connections are clones of it.
-    primary: Mutex<Option<Connection>>,
+    primary: Arc<Mutex<Option<Connection>>>,
 }
 
 impl DuckdbConnector {
@@ -85,11 +87,44 @@ pub(crate) async fn connect(spec: &ConnectionSpec) -> Result<NativePool> {
 
 /// Build the pool without opening the database.
 pub(crate) fn connect_lazy(spec: &ConnectionSpec) -> Result<NativePool> {
+    type Primary = Mutex<Option<Connection>>;
+    static DATABASES: OnceLock<Mutex<HashMap<PathBuf, Weak<Primary>>>> = OnceLock::new();
+    let path = database_path(spec);
+    let primary = match &path {
+        Some(path) => {
+            let path = PathBuf::from(path);
+            let absolute = if path.is_absolute() {
+                path
+            } else {
+                std::env::current_dir()
+                    .map_err(|e| SqlError::Database(e.to_string()))?
+                    .join(path)
+            };
+            let key = absolute.canonicalize().unwrap_or_else(|_| {
+                let parent = absolute.parent().and_then(|p| p.canonicalize().ok());
+                match (parent, absolute.file_name()) {
+                    (Some(parent), Some(name)) => parent.join(name),
+                    _ => absolute.clone(),
+                }
+            });
+            let mut databases = DATABASES
+                .get_or_init(Default::default)
+                .lock()
+                .map_err(|_| SqlError::Database("The DuckDB registry lock is poisoned.".into()))?;
+            databases.retain(|_, primary| primary.strong_count() > 0);
+            match databases.get(&key).and_then(Weak::upgrade) {
+                Some(primary) => primary,
+                None => {
+                    let primary = Arc::new(Mutex::new(None));
+                    databases.insert(key, Arc::downgrade(&primary));
+                    primary
+                }
+            }
+        }
+        None => Arc::new(Mutex::new(None)),
+    };
     Ok(NativePool::new(
-        Box::new(DuckdbConnector {
-            path: database_path(spec),
-            primary: Mutex::new(None),
-        }),
+        Box::new(DuckdbConnector { path, primary }),
         spec.max_connections(),
     ))
 }

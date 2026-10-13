@@ -107,6 +107,7 @@ const COMPOSE_OPTIONS: &[(&str, &[&str])] = &[
 pub fn parse_arguments(sysargs: &[String], ctx: &DateContext) -> Result<ArgsMap, PyException> {
     let sysargs = rewrite_python_code_flag(sysargs);
     let (sub_arguments, filtered_sysargs) = extract_decorated_sub_args(&sysargs);
+    let (filtered_sysargs, engine_args) = engine_arguments(&filtered_sysargs)?;
 
     let mut args: ArgsMap = match PARSER.parse_known_args(&filtered_sysargs, ctx) {
         Ok((ns, _unknown)) => ns.into_iter().collect(),
@@ -129,6 +130,8 @@ pub fn parse_arguments(sysargs: &[String], ctx: &DateContext) -> Result<ArgsMap,
             m
         }
     };
+
+    args.extend(engine_args);
 
     // PARITY: native Compose keeps its flags registered for every action; v4 gives them back to
     // other actions as sub-arguments instead of stealing `-v` / `--file` (`_parse_arguments.py`).
@@ -287,5 +290,91 @@ pub fn parse_line(line: &str, ctx: &DateContext) -> ArgsMap {
     match shlex::split(line) {
         Ok(sysargs) => parse_arguments(&sysargs, ctx).unwrap_or_else(|_| fallback()),
         Err(_) => fallback(),
+    }
+}
+
+/// v5-only graph options are separate from the frozen v4 argument schema.
+fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyException> {
+    let mut rest = Vec::new();
+    let mut args = ArgsMap::new();
+    let mut i = 0;
+    while i < sysargs.len() {
+        let token = &sysargs[i];
+        if token == "--" || token == "-A" {
+            rest.extend_from_slice(&sysargs[i..]);
+            break;
+        }
+        let (flag, attached) = token
+            .split_once('=')
+            .map_or((token.as_str(), None), |(a, b)| (a, Some(b)));
+        if matches!(flag, "--parents" | "--children") {
+            let value = attached.or_else(|| {
+                sysargs
+                    .get(i + 1)
+                    .map(String::as_str)
+                    .filter(|s| s.parse::<i128>().is_ok())
+            });
+            let depth = match value {
+                None => PyValue::Bool(true),
+                Some(s) => {
+                    let n = s.parse::<i128>().ok().filter(|n| *n >= 0).ok_or_else(|| {
+                        PyException::new(
+                            "InvalidArgumentException",
+                            format!("{flag} requires a non-negative depth"),
+                        )
+                    })?;
+                    if attached.is_none() {
+                        i += 1;
+                    }
+                    PyValue::Int(n)
+                }
+            };
+            args.insert(flag.trim_start_matches('-').into(), depth);
+        } else if flag == "--resume" {
+            let value = attached
+                .or_else(|| {
+                    sysargs
+                        .get(i + 1)
+                        .map(String::as_str)
+                        .filter(|s| !s.starts_with('-'))
+                })
+                .ok_or_else(|| {
+                    PyException::new("InvalidArgumentException", "--resume requires a run ID")
+                })?;
+            args.insert("resume".into(), PyValue::Str(value.to_owned()));
+            if attached.is_none() {
+                i += 1;
+            }
+        } else {
+            rest.push(token.clone());
+        }
+        i += 1;
+    }
+    Ok((rest, args))
+}
+
+#[cfg(test)]
+mod engine_argument_tests {
+    use super::*;
+    #[test]
+    fn graph_depths_and_resume_are_preserved() {
+        let words = [
+            "sync",
+            "pipes",
+            "--parents",
+            "--children=2",
+            "--resume",
+            "run-1",
+            "-w",
+            "1",
+        ]
+        .map(str::to_owned);
+        let (rest, args) = engine_arguments(&words).unwrap();
+        assert_eq!(rest, ["sync", "pipes", "-w", "1"]);
+        assert_eq!(args["parents"], PyValue::Bool(true));
+        assert_eq!(args["children"], PyValue::Int(2));
+        assert_eq!(args["resume"], PyValue::Str("run-1".into()));
+        assert!(engine_arguments(&["--parents=-1".into()]).is_err());
+        assert!(engine_arguments(&["--resume".into()]).is_err());
     }
 }

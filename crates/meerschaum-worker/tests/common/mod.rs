@@ -145,6 +145,19 @@ impl TestEnv {
                 "MRSM_PLUGINS_DIR".to_string(),
                 self.plugins.path().to_string_lossy().into_owned(),
             ),
+            // Fetch-only tests use sql:main as an inert pipe key. Always resolve it to this
+            // test's disposable SQLite file if v4 consults its instance capabilities.
+            (
+                "MRSM_SQL_MAIN".to_string(),
+                format!(
+                    "sqlite:///{}",
+                    self.root.path().join("wiring_main.sqlite").display()
+                ),
+            ),
+            (
+                "UV_PYTHON".to_string(),
+                python().to_string_lossy().into_owned(),
+            ),
             ("MRSM_WORKER_ALLOW_CRASH".to_string(), "1".to_string()),
             ("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string()),
         ];

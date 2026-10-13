@@ -18,12 +18,27 @@ use crate::error::{Result, SqlError};
 /// One driver family.
 pub(crate) trait Backend: 'static {
     type DB: Database;
+    const DYNAMIC_TYPES: bool = false;
 
     /// Plan the output columns from the statement's column metadata.
     fn plan(columns: &[<Self::DB as Database>::Column]) -> Vec<ColumnPlan>;
 
     /// Decode one cell.
     fn cell(row: &<Self::DB as Database>::Row, idx: usize, plan: &ColumnPlan) -> Result<SqlValue>;
+
+    /// Decode a column directly into Arrow when its storage layout is known.
+    /// Special types retain the lossless conversion path (decimal scale, geometry, etc.).
+    fn array(
+        rows: &[<Self::DB as Database>::Row],
+        idx: usize,
+        plan: &ColumnPlan,
+    ) -> Result<arrow::array::ArrayRef> {
+        let cells = rows
+            .iter()
+            .map(|r| Self::cell(r, idx, plan))
+            .collect::<Result<Vec<_>>>()?;
+        batch::build_array(plan, &cells)
+    }
 
     /// Adjust the plan after the first batch's cells are known (SQLite's dynamic typing).
     fn refine(_plans: &mut [ColumnPlan], _columns: &[Vec<SqlValue>]) {}
@@ -62,6 +77,17 @@ fn make_batch<B: Backend>(
     if state.is_none() {
         let columns = rows.first().map(|r| r.columns()).unwrap_or(&[]);
         let mut plans = B::plan(columns);
+        if !B::DYNAMIC_TYPES && plans.iter().all(|p| p.kind != batch::ColumnKind::Decimal) {
+            let schema = batch::schema_for(&plans);
+            let arrays = plans
+                .iter()
+                .enumerate()
+                .map(|(i, p)| B::array(rows, i, p))
+                .collect::<Result<Vec<_>>>()?;
+            let out = RecordBatch::try_new(schema.clone(), arrays)?;
+            *state = Some(StreamState { schema, plans });
+            return Ok(out);
+        }
         let cells = rows_to_cells::<B>(rows, &plans)?;
         B::refine(&mut plans, &cells);
         batch::resolve_decimal_scales(&mut plans, &cells);
@@ -71,8 +97,17 @@ fn make_batch<B: Backend>(
         return Ok(out);
     }
     let st = state.as_ref().expect("state");
-    let cells = rows_to_cells::<B>(rows, &st.plans)?;
-    batch::build_batch(&st.schema, &st.plans, cells, rows.len())
+    let arrays = st
+        .plans
+        .iter()
+        .enumerate()
+        .map(|(i, p)| B::array(rows, i, p))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(RecordBatch::try_new_with_options(
+        st.schema.clone(),
+        arrays,
+        &arrow::array::RecordBatchOptions::new().with_row_count(Some(rows.len())),
+    )?)
 }
 
 /// Stream a query's rows as record batches.

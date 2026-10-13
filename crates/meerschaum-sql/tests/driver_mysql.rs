@@ -20,7 +20,7 @@ async fn mysql_types_and_exec_queries() {
     };
     let spec = ConnectionSpec::from_uri(&uri, None, None).unwrap();
     let driver = SqlDriver::connect(&spec).await.unwrap();
-    let table = format!("_mrsm_rs_test_{}", uuid::Uuid::new_v4().simple());
+    let table = format!("w5sql_test_{}", uuid::Uuid::new_v4().simple());
 
     driver
         .exec(&format!(

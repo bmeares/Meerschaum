@@ -38,7 +38,7 @@ async fn driver_for(env: &str, flavor: &str) -> Option<(SqlDriver, Option<std::p
 #[allow(dead_code)]
 async fn exercise(driver: &SqlDriver, q: impl Fn(&str) -> String, ph: impl Fn(usize) -> String) {
     let table = format!(
-        "w4sql_drv_{}",
+        "w5sql_drv_{}",
         &uuid::Uuid::new_v4().simple().to_string()[..12]
     );
     let t = q(&table);

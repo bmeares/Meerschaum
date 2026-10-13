@@ -146,3 +146,31 @@ fn filter_unseen_does_not_saturate() {
     .collect();
     assert_eq!(delta.data("a").unwrap().values(), expected);
 }
+
+#[test]
+fn integral_float_reference_matrix() {
+    let cases: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/big_floats.json")).unwrap();
+    for case in cases.as_array().unwrap() {
+        let input = case["input"].as_f64().unwrap();
+        let data = convert_dtypes("a", &[Value::Float(input)]);
+        let expected_dtype = if case["converted_dtype"] == "Int64" {
+            "Int64"
+        } else {
+            "Float64"
+        };
+        let ColumnData::Native(series) = &data else {
+            panic!("expected native data")
+        };
+        assert_eq!(format!("{:?}", series.dtype()), expected_dtype);
+        let frame = Frame::new(vec![Column::new("a", data)]).unwrap();
+        let (out, _) =
+            enforce_dtypes_with_path(&frame, &dtypes("int"), &EnforceOptions::default()).unwrap();
+        let value = match out.data("a").unwrap().values()[0] {
+            Value::Float(f) => f,
+            Value::Int(i) => i as f64,
+            ref v => panic!("unexpected value: {v:?}"),
+        };
+        assert_eq!(value, case["enforced_value"].as_f64().unwrap());
+    }
+}

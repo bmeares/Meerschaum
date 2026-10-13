@@ -20,7 +20,7 @@ use meerschaum_core::success::SyncResult;
 use meerschaum_core::{Pipe, SuccessTuple};
 
 use crate::stream::{LegacyStream, StreamSource};
-use crate::sync::SyncArgs;
+use crate::sync::{DeltaObserver, SyncArgs, SyncEnv};
 
 /// A plugin connector whose module defines `sync(pipe, **kw)` (v4 `Pipe.sync` returns its
 /// result instead of fetching, `core/Pipe/_sync.py` "If connector is a plugin with a `sync()`
@@ -29,6 +29,19 @@ use crate::sync::SyncArgs;
 pub trait PluginSync: Send + Sync {
     /// Run the plugin's `sync()` for `pipe`.
     async fn sync(&self, pipe: &Pipe, args: &SyncArgs) -> SyncResult;
+
+    /// Run with the enclosing native sync context, including its pre-commit ledger observer.
+    /// Adapters may forward plugin callbacks through this context before acknowledging them.
+    async fn sync_native(
+        &self,
+        pipe: &Pipe,
+        args: &SyncArgs,
+        env: &SyncEnv<'_>,
+        observer: Option<&dyn DeltaObserver>,
+    ) -> SyncResult {
+        let _ = (env, observer);
+        self.sync(pipe, args).await
+    }
 }
 
 /// `@pre_sync_hook` / `@post_sync_hook` (§4.2). Called around every engine-run node sync with
@@ -49,6 +62,21 @@ pub trait ConnectorRegistry: Send + Sync {
     /// The source connector for `connector_keys`. `Ok(None)` when the keys name no
     /// connector that can fetch (v4: keys without `:`, "does not support fetching").
     fn source(&self, keys: &str) -> Result<Option<Arc<dyn Connector>>, String>;
+
+    /// SQL fetch chunk size when the caller requests the configured default.
+    fn fetch_chunksize(&self, _keys: &str) -> usize {
+        100_000
+    }
+
+    /// Resolve a source for a sync, retaining plugin-specific keyword arguments.
+    fn source_for_sync(
+        &self,
+        keys: &str,
+        args: &SyncArgs,
+    ) -> Result<Option<Arc<dyn Connector>>, String> {
+        let _ = args;
+        self.source(keys)
+    }
 
     /// A plugin connector with its own `sync()`, if `keys` names one.
     fn plugin_sync(&self, keys: &str) -> Option<Arc<dyn PluginSync>> {
@@ -97,6 +125,7 @@ type TableRefFn = Arc<dyn Fn(&Pipe) -> Result<String, String> + Send + Sync>;
 pub struct StaticRegistry {
     instances: HashMap<String, Arc<dyn InstanceConnector>>,
     sources: HashMap<String, Arc<dyn Connector>>,
+    chunksizes: HashMap<String, usize>,
     plugin_syncs: HashMap<String, Arc<dyn PluginSync>>,
     streams: HashMap<String, Arc<dyn StreamSource>>,
     hooks: Option<Arc<dyn SyncHooks>>,
@@ -130,6 +159,12 @@ impl StaticRegistry {
         self
     }
 
+    /// Set the configured SQL fetch chunk size.
+    pub fn with_fetch_chunksize(mut self, keys: &str, chunksize: usize) -> Self {
+        self.chunksizes.insert(keys.to_owned(), chunksize.max(1));
+        self
+    }
+
     /// Register a plugin `sync()`.
     pub fn with_plugin_sync(mut self, keys: &str, sync: Arc<dyn PluginSync>) -> Self {
         self.plugin_syncs.insert(keys.to_string(), sync);
@@ -159,6 +194,10 @@ impl StaticRegistry {
 }
 
 impl ConnectorRegistry for StaticRegistry {
+    fn fetch_chunksize(&self, keys: &str) -> usize {
+        self.chunksizes.get(keys).copied().unwrap_or(100_000)
+    }
+
     fn instance(&self, keys: &str) -> Result<Arc<dyn InstanceConnector>, String> {
         self.instances
             .get(keys)

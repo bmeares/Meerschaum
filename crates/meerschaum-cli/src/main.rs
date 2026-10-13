@@ -19,9 +19,11 @@ fn main() -> ExitCode {
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
+    let mut out = std::io::stdout();
     let mut rt = Runtime::system(&mut out);
     let rc = dispatch::main(&sysargs, &mut rt);
+    if let Some(session) = &rt.native {
+        session.shutdown();
+    }
     ExitCode::from(u8::try_from(rc).unwrap_or(1))
 }

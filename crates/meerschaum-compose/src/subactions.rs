@@ -440,7 +440,7 @@ impl TemplateResolver for InstanceResolver<'_> {
     fn load_pipe(&self, pipe: &Pipe) -> Pipe {
         let mut out = pipe.clone();
         if let Some(params) = self.instance.borrow_mut().get_parameters(pipe) {
-            out.set_parameters(apply_patch_maps(&params, pipe.parameters()));
+            out.set_parameters(apply_patch_maps(&params, pipe.raw_parameters()));
         }
         out
     }
@@ -453,7 +453,7 @@ impl TemplateResolver for InstanceResolver<'_> {
 /// `pipe.parameters` (the property): the registered parameters patched with the local ones,
 /// with references, `{{ Pipe() }}` templates and `MRSM{}` symlinks resolved.
 fn effective_parameters(ctx: &mut Ctx, pc: &ProjectConfig, pipe: &Pipe) -> Map {
-    let local = pipe.parameters().clone();
+    let local = pipe.raw_parameters().clone();
     let remote = if pipe.temporary {
         None
     } else {
@@ -557,7 +557,7 @@ fn compose_up(
                 })
             });
         let remote_params = ctx.instance.get_parameters(pipe).unwrap_or_default();
-        let local_params = pipe.parameters().clone();
+        let local_params = pipe.raw_parameters().clone();
         let local_str = json_sorted_compact(&Value::Map(local_params.clone()));
         let remote_str = json_sorted_compact(&Value::Map(remote_params.clone()));
 
@@ -653,8 +653,8 @@ fn compose_up(
             let params = ctx
                 .instance
                 .get_parameters(&tagged_pipe)
-                .map(|r| apply_patch_maps(&r, tagged_pipe.parameters()))
-                .unwrap_or_else(|| tagged_pipe.parameters().clone());
+                .map(|r| apply_patch_maps(&r, tagged_pipe.raw_parameters()))
+                .unwrap_or_else(|| tagged_pipe.raw_parameters().clone());
             let Some(Value::List(current)) = params.get("tags").cloned() else {
                 ctx.out.messages.warn(format!(
                     "{tagged_pipe} was incorrectly tagged with '{project_name}'..."
@@ -1126,7 +1126,7 @@ fn compose_explain(
                 })
             });
             let remote_params = ctx.instance.get_parameters(pipe).unwrap_or_default();
-            let local_params = pipe.parameters().clone();
+            let local_params = pipe.raw_parameters().clone();
             let (status, include_remote) =
                 registration_status(pipe.temporary, registered, &local_params, &remote_params);
             let end_section = i == idxs.len() - 1;

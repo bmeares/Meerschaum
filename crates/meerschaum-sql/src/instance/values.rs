@@ -225,8 +225,14 @@ pub fn encode_param(v: &KValue, flavor: Flavor, enc: &ColumnEncoding) -> SqlPara
             } else {
                 dt.local()
             };
-            SqlParam::Text(sa_datetime_text(&wall))
+            if flavor == Flavor::Oracle {
+                // OCI binds timestamps natively; text would depend on NLS_TIMESTAMP_FORMAT.
+                SqlParam::Timestamp(wall)
+            } else {
+                SqlParam::Text(sa_datetime_text(&wall))
+            }
         }
+        KValue::Date(d) if flavor == Flavor::Oracle => SqlParam::Date(*d),
         KValue::Date(d) => SqlParam::Text(d.format("%Y-%m-%d").to_string()),
         KValue::Json(j) => match j {
             serde_json::Value::Object(_) | serde_json::Value::Array(_) => {

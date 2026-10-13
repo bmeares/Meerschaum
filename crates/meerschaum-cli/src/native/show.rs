@@ -43,7 +43,7 @@ pub fn pipe_attributes(rt: &mut Runtime<'_>, inst: &Instance, sp: &mut SelectedP
     );
     m.insert(
         "parameters".into(),
-        Value::Map(sp.pipe.parameters().clone()),
+        Value::Map(sp.pipe.raw_parameters().clone()),
     );
     if let Some(id) = &sp.id {
         m.insert("pipe_id".into(), id.to_value());

@@ -185,7 +185,22 @@ impl SqlConnector {
         schema: Option<&str>,
     ) -> IndexMap<String, String> {
         let query = get_table_cols_types_query(table, self.flavor);
-        let Ok(df) = self.read(&query).await else {
+        // Restrict the information_schema view before its privilege/type joins. Keep v4's
+        // cross-schema fallback when the requested schema has no matching table.
+        let scoped = if self.flavor.driver_family() == DriverFamily::Postgres {
+            introspection_schema(self.flavor, schema)
+                .map(|s| format!("{query} AND table_schema = '{}'", s.replace("'", "''")))
+        } else {
+            None
+        };
+        let df = match scoped {
+            Some(q) => match self.read(&q).await {
+                Ok(df) if df.height() > 0 => Ok(df),
+                _ => self.read(&query).await,
+            },
+            None => self.read(&query).await,
+        };
+        let Ok(df) = df else {
             return IndexMap::new();
         };
         let rows = type_rows(&frame_docs(&df));

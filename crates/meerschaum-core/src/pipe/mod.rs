@@ -6,9 +6,8 @@
 //! (the default instance, `pipes:cache:enabled`) or while computing an attribute (the default
 //! chunk size, the autotime column name), the values come from [`PipeDefaults`].
 //!
-//! The accessors read the pipe's in-memory parameters (`attributes['parameters']`). Python's
-//! `Pipe.parameters` also merges reference pipes and resolves `{{ Pipe() }}` / `MRSM{}`
-//! syntax; that needs an instance and lives in [`resolve`] behind a resolver trait.
+//! Accessors share a lazy parameter snapshot. Instance-backed resolution is supplied through
+//! [`Pipe::resolve_parameters_with`]; raw metadata remains available for persistence and planning.
 //! Python's `dtypes` property additionally merges dtypes inferred from the instance table;
 //! [`Pipe::dtypes`] is the configured part (`get_dtypes(infer=False)`).
 
@@ -178,6 +177,8 @@ pub struct Pipe {
     location_key: Option<String>,
     instance_keys: String,
     parameters: Map,
+    resolved_cache: std::sync::OnceLock<Map>,
+    pub(crate) resolution_snapshot: bool,
     /// `temporary`: never create instance tables.
     pub temporary: bool,
     /// `cache`: whether metadata is cached to disk.
@@ -522,6 +523,8 @@ impl Pipe {
             location_key,
             instance_keys,
             parameters: params,
+            resolved_cache: std::sync::OnceLock::new(),
+            resolution_snapshot: false,
             temporary,
             cache,
             cache_connector_keys,
@@ -612,23 +615,58 @@ impl Pipe {
         Pipe::from_call(&[], state, defaults)
     }
 
-    /// The in-memory parameters (`pipe.attributes['parameters']`).
+    /// Lazily resolved parameters. Instance-backed references may be supplied with
+    /// [`Pipe::resolve_parameters_with`]; ordinary access resolves self templates and config.
     pub fn parameters(&self) -> &Map {
+        if self.resolution_snapshot {
+            return &self.parameters;
+        }
+        self.resolved_cache.get_or_init(|| {
+            let resolver = crate::template::InMemoryResolver::default();
+            let config = Value::Map(self.parameters.clone())
+                .to_json_string()
+                .contains("MRSM{")
+                .then(crate::config::Config::from_env)
+                .and_then(Result::ok);
+            self.resolved_parameters(&resolver, config.as_ref())
+                .map(|r| r.parameters)
+                .unwrap_or_else(|_| self.parameters.clone())
+        })
+    }
+
+    /// Unresolved metadata for persistence, definition hashes, and dependency extraction.
+    pub fn raw_parameters(&self) -> &Map {
         &self.parameters
+    }
+
+    /// Resolve a run's instance-backed references and cache the snapshot for all consumers.
+    /// Mutating parameters invalidates this snapshot; call again after registered state changes.
+    pub fn resolve_parameters_with(
+        &mut self,
+        resolver: &dyn crate::template::TemplateResolver,
+        config: Option<&crate::config::Config>,
+    ) -> Result<Vec<String>, PipeError> {
+        let result = self.resolved_parameters(resolver, config)?;
+        self.resolved_cache.take();
+        let _ = self.resolved_cache.set(result.parameters);
+        Ok(result.warnings)
     }
 
     /// Mutable access to the in-memory parameters (the live `parameters` dict).
     pub fn parameters_mut(&mut self) -> &mut Map {
+        self.resolved_cache.take();
         &mut self.parameters
     }
 
     /// `pipe.parameters = {...}`.
     pub fn set_parameters(&mut self, parameters: Map) {
+        self.resolved_cache.take();
         self.parameters = parameters;
     }
 
     /// `pipe.update_parameters(patch, persist=False)`: deep-merge a patch.
     pub fn update_parameters(&mut self, patch: Map) {
+        self.resolved_cache.take();
         self.parameters = apply_patch_maps(&self.parameters, &patch);
     }
 
@@ -640,7 +678,7 @@ impl Pipe {
 
     /// A top-level parameter (`pipe.parameters.get(key)`).
     pub fn param(&self, key: &str) -> Option<&Value> {
-        self.parameters.get(key)
+        self.parameters().get(key)
     }
 
     /// `pipe.columns`: the `columns` dict without falsy names or roles.
@@ -679,7 +717,7 @@ impl Pipe {
     }
 
     fn indices_key(&self) -> &'static str {
-        if self.parameters.contains_key("indexes") {
+        if self.parameters().contains_key("indexes") {
             "indexes"
         } else {
             "indices"
@@ -1074,7 +1112,7 @@ impl Pipe {
             }
             "metric_key" | "metric" => Value::Str(self.metric_key.clone()),
             "location_key" | "location" => self.location_key.clone().into(),
-            "parameters" => Value::Map(self.parameters.clone()),
+            "parameters" => Value::Map(self.parameters().clone()),
             "instance" | "instance_key" | "instance_keys" => Value::Str(self.instance_keys.clone()),
             other => self.attribute(other).unwrap_or(Value::Null),
         }
@@ -1089,7 +1127,7 @@ impl Pipe {
             "metric_key" | "metric" => Value::Str(self.metric_key.clone()),
             "location_key" | "location" => self.location_key.clone().into(),
             "instance_keys" | "instance" => Value::Str(self.instance_keys.clone()),
-            "parameters" => Value::Map(self.parameters.clone()),
+            "parameters" => Value::Map(self.parameters().clone()),
             "columns" => Value::Map(self.columns()),
             "dtypes" => Value::Map(self.dtypes()),
             "indices" | "indexes" => Value::Map(self.indices()),
@@ -1117,7 +1155,7 @@ impl Pipe {
             "references" => "reference",
             other => other,
         };
-        let key = if self.parameters.contains_key(plural) {
+        let key = if self.parameters().contains_key(plural) {
             plural
         } else {
             singular

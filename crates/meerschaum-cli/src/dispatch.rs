@@ -2,8 +2,8 @@
 //! `meerschaum/_internal/entry.py` (`entry_without_daemon`, `entry_with_args`) and
 //! `meerschaum/_internal/arguments/_parser.py` (`parse_help`, `parse_version`).
 //!
-//! The actions that need no instance run natively (see [`crate::builtin`]); every other action
-//! resolves by the v4 naming convention and returns the not-implemented tuple.
+//! Core actions resolve by the v4 naming convention and use native implementations or the
+//! shared Python worker for compatibility operations.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -250,6 +250,9 @@ fn contains(sysargs: &[String], flag: &str) -> bool {
 
 /// `meerschaum.__main__.main`: returns the process exit code.
 pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
+    if let Err(e) = crate::python::manifest(rt) {
+        rt.eprint(&format!("Unable to load plugin manifest: {}\n", e.message));
+    }
     if contains(sysargs, PRINT_ARG_SCHEMA_FLAG) {
         let schema = serde_json::to_string_pretty(&schema::arg_schema()).unwrap_or_default();
         let _ = writeln!(rt.out, "{schema}");
@@ -275,6 +278,17 @@ pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         return 0;
     }
     let result = entry(sysargs, rt);
+    let stdio_mcp = parse_arguments(sysargs, &rt.dates)
+        .map(|args| {
+            crate::native::words(&args, "action").starts_with(&["start".into(), "mcp".into()])
+        })
+        .unwrap_or(false);
+    if stdio_mcp {
+        if !result.success {
+            rt.eprint(&format!("{}\n", result.message));
+        }
+        return if result.success { 0 } else { 1 };
+    }
     // A job's worker reports its result to the supervisor (`meerschaum-jobs`), which records it
     // in the job's properties like v4's daemon does.
     if let Some(path) = (rt.env)(meerschaum_jobs::supervisor::RESULT_PATH_ENV) {
@@ -549,6 +563,11 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
         return SuccessTuple::success();
     }
 
+    if let Ok(manifest) = crate::python::manifest(rt)
+        && let Err(e) = crate::python::arguments(&mut args, &manifest, rt)
+    {
+        return SuccessTuple::fail(format!("Invalid arguments:\n    {}", e.message));
+    }
     let mut skip_schedule = false;
     let executor_keys = args
         .get("executor_keys")
@@ -570,6 +589,14 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
     }
     if args.get("daemon").is_some_and(PyValue::is_truthy) && action[0] != "stack" {
         action.splice(0..0, ["start".to_string(), "jobs".to_string()]);
+    }
+    if let Ok(manifest) = crate::python::manifest(rt)
+        && crate::python::action_name(&action, &manifest).is_some()
+        && !args.get("daemon").is_some_and(PyValue::is_truthy)
+    {
+        env::apply_env_arguments(&mut args, rt.env);
+        return crate::python::plugin_action(&args, rt)
+            .unwrap_or_else(|e| SuccessTuple::fail(format!("{}: {}", e.class, e.message)));
     }
     let resolved: Resolved = match actions::get_action(&action, CORE_ACTIONS) {
         Some(r) => r,
@@ -613,11 +640,13 @@ fn run_action(resolved: &Resolved, args: &ArgsMap, rt: &mut Runtime<'_>) -> Succ
         "reload" => builtin::reload(args, rt),
         "compose" => crate::compose_action::compose_action(args, rt),
         "python" => builtin::python(args, rt),
+        "_start_api" => crate::server::start_api(args, rt),
+        "_start_mcp" => crate::server::start_mcp(args, rt),
         "sh" => builtin::sh(args, rt),
         "clear" => builtin::clear(args, rt),
         other => match crate::native::run(other, args, rt) {
             Some(r) => r,
-            None => Ok(builtin::not_implemented(&resolved.display_name())),
+            None => crate::python::core_action(&resolved.display_name(), args, rt),
         },
     };
     match result {
@@ -678,6 +707,17 @@ pub fn format_args_map(args: &ArgsMap) -> String {
 pub fn parse_help(sysargs: &[String], rt: &mut Runtime<'_>) {
     let args = parse_arguments(sysargs, &rt.dates).unwrap_or_default();
     let action = action_words(&args);
+    if let Ok(manifest) = crate::python::manifest(rt)
+        && let Some(name) = crate::python::action_name(&action, &manifest)
+        && let Some(info) = manifest
+            .plugins
+            .values()
+            .flat_map(|p| &p.actions)
+            .find(|a| a.name == name)
+    {
+        rt.print(&format!("{}\n", info.doc.as_deref().unwrap_or_default()));
+        return;
+    }
     if action.is_empty() {
         let _ = builtin::show_help(&args, rt);
         return;

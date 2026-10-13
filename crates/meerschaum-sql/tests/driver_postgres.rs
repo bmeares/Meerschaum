@@ -15,7 +15,7 @@ use meerschaum_sql::driver::{SqlDriver, SqlValue};
 use meerschaum_sql::uri::ConnectionSpec;
 
 fn table_name() -> String {
-    format!("_mrsm_rs_test_{}", uuid::Uuid::new_v4().simple())
+    format!("w5sql_test_{}", uuid::Uuid::new_v4().simple())
 }
 
 async fn driver_from_env(var: &str) -> Option<SqlDriver> {

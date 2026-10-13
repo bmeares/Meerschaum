@@ -7,12 +7,7 @@
 //! The algorithm is reproduced literally, quirks included (each marked `PARITY:`), and checked
 //! against `tests/fixtures/shell_completions.json`, recorded from v4.1.4.
 //!
-//! Plugin completers (`complete_<action>` functions in plugin modules) are not reachable here:
-//! the plugin manifest (`meerschaum-worker`) records actions but not their completers, and the
-//! CLI does not load plugin actions yet. [`PluginCompleter`] is the seam: when the manifest
-//! grows a `completers` list and a worker call to run one, plugin actions plug in there. Until
-//! then plugin actions (if any are added to [`CompletionData::actions`]) fall back to
-//! `default_action_completer`, as v4 does for plugin actions without a completer.
+//! Plugin actions, flags and completers come from the cached worker manifest.
 
 use std::sync::{Arc, LazyLock};
 
@@ -164,6 +159,10 @@ pub struct CompletionData {
     pub executor_keys: String,
     /// Lists the jobs of an executor (`get_jobs(executor_keys, include_hidden=False)`).
     pub jobs: Option<JobLister>,
+    /// Actions declared by installed Python plugins.
+    pub plugin_actions: Vec<meerschaum_worker::manifest::ActionManifest>,
+    /// Plugin argument declarations.
+    pub plugin_arguments: Vec<meerschaum_worker::manifest::ArgumentManifest>,
     /// Plugin completers.
     pub plugins: Option<Arc<dyn PluginCompleter>>,
 }
@@ -193,6 +192,8 @@ impl Default for CompletionData {
             executor_keys: "local".into(),
             jobs: None,
             plugins: None,
+            plugin_actions: Vec::new(),
+            plugin_arguments: Vec::new(),
         }
     }
 }
@@ -343,6 +344,24 @@ impl CompletionData {
                 .collect();
         }
 
+        if let Some(argument) = flag_token.and_then(|flag| {
+            self.plugin_arguments
+                .iter()
+                .find(|a| a.option_strings.iter().any(|s| s == flag))
+        }) && let Some(choices) = argument.choices.as_array()
+        {
+            return choices
+                .iter()
+                .map(|c| {
+                    c.as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| c.to_string())
+                })
+                .filter(|c| c.starts_with(partial))
+                .map(|c| Completion::new(c, chars(partial), chars(partial)))
+                .collect();
+        }
+
         // `shell.complete(text, i)` → `cmd.Cmd.completenames`.
         let mut out: Vec<Completion> = Vec::new();
         let prefix = parsed_text.trim_start_matches('_');
@@ -364,6 +383,38 @@ impl CompletionData {
             .and_then(PyValue::as_list)
             .map(|l| l.iter().map(PyValue::py_str).collect())
             .unwrap_or_default();
+        if let Some(plugin) = self
+            .plugin_actions
+            .iter()
+            .filter(|a| {
+                let parts: Vec<_> = a.name.split('_').collect();
+                action.len() >= parts.len()
+                    && action.iter().zip(parts).all(|(word, part)| word == part)
+            })
+            .max_by_key(|a| a.name.len())
+        {
+            if current_action_line.contains(' ') {
+                let found = self
+                    .check_complete_keys(current_action_line)
+                    .or_else(|| {
+                        self.plugins
+                            .as_ref()
+                            .and_then(|p| p.complete(&plugin.name, &action, current_action_line))
+                    })
+                    .unwrap_or_else(|| {
+                        let partial = last_space_word(current_action_line);
+                        plugin
+                            .subactions
+                            .iter()
+                            .filter(|s| s.name.starts_with(partial) && s.name != partial)
+                            .map(|s| s.name.clone())
+                            .collect()
+                    });
+                let n = chars(last_space_word(text));
+                out.extend(found.into_iter().map(|p| Completion::new(p, n, n)));
+            }
+            return out;
+        }
         if actions::get_action(&action, self.actions).is_none() {
             return out;
         }
@@ -500,6 +551,14 @@ impl CompletionData {
                     if trigger.starts_with(last_word) && (*trigger != last_word || !ends_with_space)
                     {
                         possibilities.push(trigger.to_string());
+                    }
+                }
+            }
+            for argument in &self.plugin_arguments {
+                for trigger in &argument.option_strings {
+                    if trigger.starts_with(last_word) && (trigger != last_word || !ends_with_space)
+                    {
+                        possibilities.push(trigger.clone());
                     }
                 }
             }

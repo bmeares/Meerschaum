@@ -171,6 +171,20 @@ fn show_plugins_scans_the_plugins_directories() {
         meerschaum_cli::builtin::plugin_names(&[plugins]),
         vec!["pkg".to_string(), "single".to_string()]
     );
+    // Startup discovers plugin metadata. Reuse the reference interpreter's environment
+    // rather than asking Python to create dependency environments for these empty modules.
+    #[cfg(unix)]
+    {
+        let reference = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.venv-ref");
+        if reference.exists() {
+            let venvs = tmp.path().join("venvs");
+            std::fs::create_dir_all(&venvs).unwrap();
+            for name in ["mrsm", "pkg", "single", "not_a_plugin"] {
+                std::os::unix::fs::symlink(reference.canonicalize().unwrap(), venvs.join(name))
+                    .unwrap();
+            }
+        }
+    }
     let host = SharedHost::default();
     let (r, out) = run(
         tmp.path(),
@@ -242,7 +256,7 @@ fn python_writes_an_init_script_and_starts_the_interpreter() {
 }
 
 #[test]
-fn compose_explain_and_unsupported_subactions() {
+fn compose_explain_and_worker_subactions() {
     let tmp = tempfile::tempdir().unwrap();
     let project = tmp.path().join("proj");
     std::fs::create_dir_all(&project).unwrap();
@@ -282,22 +296,34 @@ fn compose_explain_and_unsupported_subactions() {
         "{commands:?}"
     );
 
-    let (r, _) = run(tmp.path(), &["compose", "down"], no_env, &host);
-    assert_eq!(
-        r,
-        SuccessTuple::fail("action `compose down` is not implemented in Rust yet")
-    );
+    assert_worker_dispatch(tmp.path(), &["compose", "down"]);
 }
 
 #[test]
-fn other_actions_are_not_implemented() {
+fn python_only_actions_dispatch_to_worker() {
     let tmp = tempfile::tempdir().unwrap();
     let host = SharedHost::default();
-    let (r, _) = run(tmp.path(), &["install", "plugins", "noaa"], no_env, &host);
-    assert_eq!(
-        r,
-        SuccessTuple::fail("action `install plugins` is not implemented in Rust yet")
-    );
+    assert_worker_dispatch(tmp.path(), &["install", "plugins", "synthetic_wiring_test"]);
     let (r, _) = run(tmp.path(), &["reload"], no_env, &host);
     assert_eq!(r, SuccessTuple::success());
+}
+
+/// A deliberately absent interpreter proves delegation without installing anything or
+/// starting Docker. Process-local environment also keeps concurrent tests isolated.
+fn assert_worker_dispatch(root: &Path, args: &[&str]) {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm"))
+        .args(args)
+        .env("MRSM_ROOT_DIR", root)
+        .env("MRSM_PLUGINS_DIR", root.join("plugins"))
+        .env("MRSM_PYTHON", root.join("absent-python"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!text.contains("is not implemented in Rust yet"), "{text}");
+    assert!(text.contains("failed to start the Python worker"), "{text}");
 }

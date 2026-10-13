@@ -1,0 +1,14 @@
+{
+  "htmx.min.js": "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js",
+  "htmx.LICENSE": "https://unpkg.com/htmx.org@2.0.4/LICENSE",
+  "plotly.min.js": "https://unpkg.com/plotly.js-dist-min@2.35.2/plotly.min.js",
+  "plotly.LICENSE": "https://unpkg.com/plotly.js-dist-min@2.35.2/LICENSE",
+  "maplibre-gl.js": "https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js",
+  "maplibre-gl.css": "https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css",
+  "maplibre.LICENSE": "https://unpkg.com/maplibre-gl@4.7.1/LICENSE.txt",
+  "cytoscape.min.js": "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js",
+  "cytoscape.LICENSE": "https://unpkg.com/cytoscape@3.30.4/LICENSE",
+  "xterm.js": "https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js",
+  "xterm.css": "https://unpkg.com/@xterm/xterm@5.5.0/css/xterm.css",
+  "xterm.LICENSE": "https://unpkg.com/@xterm/xterm@5.5.0/LICENSE"
+}

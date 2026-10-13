@@ -105,7 +105,7 @@ pub async fn sync_chunk_native(
         }
         Err(e) => return SuccessTuple::fail(e.to_string()),
     };
-    if pipe.parameters().is_empty() {
+    if pipe.raw_parameters().is_empty() {
         // `Pipe.parameters` reads the registered parameters unless set in memory.
         if let Ok(attrs) = instance.get_pipe_attributes(&pipe).await {
             if let Some(CValue::Map(params)) = attrs.get("parameters") {

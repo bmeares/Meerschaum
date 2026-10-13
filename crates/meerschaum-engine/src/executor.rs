@@ -755,19 +755,25 @@ where
                     }
                 }
                 let pipe_ref = request.pipe_ref.clone();
-                let sync = executor.sync(request);
-                tokio::pin!(sync);
-                let period = (ttl / 3).max(Duration::from_millis(1));
-                let mut heartbeat =
-                    tokio::time::interval_at(tokio::time::Instant::now() + period, period);
-                let result = loop {
-                    tokio::select! {
-                        result = &mut sync => break result,
-                        _ = heartbeat.tick() => {
-                            let _ = leases.renew(&pipe_ref, &holder, ttl).await;
+                let result = {
+                    let sync = executor.sync(request);
+                    tokio::pin!(sync);
+                    let period = (ttl / 3).max(Duration::from_millis(1));
+                    let mut heartbeat =
+                        tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+                    loop {
+                        tokio::select! {
+                            result = &mut sync => break result,
+                            _ = heartbeat.tick() => {
+                                match leases.renew(&pipe_ref, &holder, ttl).await {
+                                    Ok(true) => {},
+                                    Ok(false) => break SyncResult::new(false, format!("the lease on {} was lost during sync", pipe_ref.label())),
+                                    Err(e) => break SyncResult::new(false, format!("cannot renew the lease during sync: {e}")),
+                                }
+                            }
                         }
                     }
-                };
+                }; // Drop the cancelled sync future before releasing its lease.
                 let _ = leases.release(&pipe_ref, &holder).await;
                 TaskOutput::Done {
                     pipe_ref,

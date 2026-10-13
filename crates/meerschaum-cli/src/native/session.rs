@@ -6,11 +6,12 @@
 //! section, which includes the `MRSM_SQL_<LABEL>` / `MRSM_API_<LABEL>` environment connectors
 //! (the config registry adds them when it is created).
 
-use std::cell::RefCell;
+use meerschaum_worker::manifest::{Manifest, ensure_manifest, manifest_path};
+use meerschaum_worker::{PoolConfig, WorkerPool};
 use std::collections::HashMap;
 use std::future::Future;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::io::IsTerminal;
+use std::sync::{Arc, Mutex};
 
 use meerschaum_connector::InstanceConnector;
 use meerschaum_core::config::Config;
@@ -65,7 +66,9 @@ impl Instance {
 #[derive(Clone)]
 pub struct Session {
     rt: Arc<tokio::runtime::Runtime>,
-    instances: Rc<RefCell<HashMap<String, Instance>>>,
+    instances: Arc<Mutex<HashMap<String, Instance>>>,
+    pool: Arc<Mutex<Option<WorkerPool>>>,
+    manifest: Arc<Mutex<Option<Arc<Manifest>>>>,
 }
 
 impl Default for Session {
@@ -83,7 +86,46 @@ impl Session {
             .expect("tokio runtime");
         Session {
             rt: Arc::new(rt),
-            instances: Rc::new(RefCell::new(HashMap::new())),
+            instances: Arc::new(Mutex::new(HashMap::new())),
+            pool: Arc::new(Mutex::new(None)),
+            manifest: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// The single lazily-created Python pool shared by this process session.
+    pub fn pool(&self, config: &Config) -> WorkerPool {
+        self.pool
+            .lock()
+            .expect("worker pool")
+            .get_or_insert_with(|| {
+                let mut settings = PoolConfig::from_config(config);
+                settings.worker.inherit_stdin = std::io::stdin().is_terminal();
+                WorkerPool::new(settings)
+            })
+            .clone()
+    }
+
+    /// Refresh the fingerprinted manifest without starting Python for an empty plugin tree.
+    pub fn manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+        let paths = config.paths();
+        let pool = self.pool(config);
+        let (manifest, _) = self
+            .block_on(ensure_manifest(
+                &pool,
+                &manifest_path(&paths.root_dir),
+                &paths.plugins_dirs,
+            ))
+            .map_err(|e| ActionError::new("WorkerError", e.to_string()))?;
+        let manifest = Arc::new(manifest);
+        *self.manifest.lock().expect("manifest") = Some(manifest.clone());
+        Ok(manifest)
+    }
+
+    /// Shut down pooled children before dropping the Tokio runtime.
+    pub fn shutdown(&self) {
+        let pool = self.pool.lock().expect("worker pool").clone();
+        if let Some(pool) = pool {
+            self.block_on(pool.shutdown());
         }
     }
 
@@ -102,7 +144,13 @@ impl Session {
 
     /// The labels of connectors built so far, by type (`show connectors`' "Active connectors").
     pub fn active(&self) -> Vec<(String, String)> {
-        let mut keys: Vec<String> = self.instances.borrow().keys().cloned().collect();
+        let mut keys: Vec<String> = self
+            .instances
+            .lock()
+            .expect("instances")
+            .keys()
+            .cloned()
+            .collect();
         keys.sort();
         keys.into_iter()
             .filter_map(|k| {
@@ -116,7 +164,7 @@ impl Session {
     pub fn instance(&self, keys: &str, config: &Config) -> Result<Instance, ActionError> {
         let (typ, label) = split_keys(keys);
         let full = format!("{typ}:{label}");
-        if let Some(i) = self.instances.borrow().get(&full) {
+        if let Some(i) = self.instances.lock().expect("instances").get(&full) {
             return Ok(i.clone());
         }
         let inst = match typ.as_str() {
@@ -135,13 +183,25 @@ impl Session {
                 Instance::Other(Arc::new(c))
             }
             _ => {
-                return Err(ActionError::new(
-                    "Exception",
-                    format!("Unable to parse connector keys '{keys}'"),
-                ));
+                let connector = self
+                    .block_on(meerschaum_worker::PythonConnector::connect(
+                        keys,
+                        self.pool(config),
+                    ))
+                    .map_err(|e| ActionError::new("WorkerError", e.to_string()))?;
+                if !connector.info().is_instance {
+                    return Err(ActionError::new(
+                        "Exception",
+                        format!("'{keys}' is not an instance connector."),
+                    ));
+                }
+                Instance::Other(Arc::new(connector))
             }
         };
-        self.instances.borrow_mut().insert(full, inst.clone());
+        self.instances
+            .lock()
+            .expect("instances")
+            .insert(full, inst.clone());
         Ok(inst)
     }
 

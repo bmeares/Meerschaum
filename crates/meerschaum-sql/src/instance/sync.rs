@@ -66,6 +66,7 @@ fn max_chunks(flavor: Flavor) -> Option<i64> {
 /// The internal options `sync_pipe` threads through recursive temporary syncs.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct InternalSync {
+    pub cached_state: Option<PipeState>,
     /// `temp_pipe._cache_value('_columns_types', ...)`.
     pub columns_types: Option<IndexMap<String, String>>,
     /// `temp_pipe._cache_value('_skip_check_indices', True)`.
@@ -272,6 +273,15 @@ impl SqlConnector {
                 Ok(r) => r,
                 Err(e) => SyncResult::new(false, e.to_string()),
             };
+            if !result.success {
+                if let Ok(sp) = self.sql_pipe(pipe) {
+                    self.state
+                        .lock()
+                        .expect("state")
+                        .internal_pipe_states
+                        .remove(&self.pipe_table_name(&sp));
+                }
+            }
             result.duration = Some(start.elapsed());
             result
         })
@@ -296,19 +306,44 @@ impl SqlConnector {
         }
 
         let mut check_existing = opts.check_existing;
-        let exists = self.table_exists(&sp0.target, schema.as_deref()).await;
+        let cache_internal = pipe.temporary && sp0.is_static() && pipe.connector_keys() == "mrsm";
+        let cache_key = self.pipe_table_name(&sp0);
+        let cached = internal.cached_state.clone().or_else(|| {
+            if cache_internal {
+                self.state
+                    .lock()
+                    .expect("state")
+                    .internal_pipe_states
+                    .get(&cache_key)
+                    .cloned()
+            } else {
+                None
+            }
+        });
+        let mut state = match cached {
+            Some(state) => state,
+            None => self.pipe_state(&sp0).await,
+        };
+        let exists = state.exists;
         let is_new = !exists;
         if is_new {
             check_existing = false;
         } else {
-            let add_cols_queries = self.get_add_columns_queries(&sp0, &df).await;
+            let add_cols_queries = self.add_columns_queries_for(
+                &sp0,
+                &Self::df_cols_types_refined(&df),
+                &state.cols_types,
+            );
             if !add_cols_queries.is_empty()
                 && !self.exec_queries_all(&add_cols_queries, false, true).await
             {
                 tracing::warn!("Failed to add new columns to {pipe}.");
             }
+            if !add_cols_queries.is_empty() {
+                state = self.pipe_state(&sp0).await;
+            }
             let alter_cols_queries = self
-                .get_alter_columns_queries(pipe, &df, internal.new_special_cols.as_ref())
+                .alter_columns_with_state(pipe, &df, internal.new_special_cols.as_ref(), &state)
                 .await;
             if !alter_cols_queries.is_empty()
                 && !self
@@ -317,25 +352,33 @@ impl SqlConnector {
             {
                 tracing::warn!("Failed to alter columns for {pipe}.");
             }
+            if !alter_cols_queries.is_empty() {
+                state = self.pipe_state(&self.sql_pipe(pipe)?).await;
+            }
         }
         let sp = self.sql_pipe(pipe)?;
-        let mut state = self.pipe_state(&sp).await;
+        state.dtypes = super::data::pipe_dtypes(&sp, &state.cols_types, true);
+        state.explicit_dtypes = super::data::pipe_dtypes(&sp, &state.cols_types, false);
         if let Some(ct) = &internal.columns_types {
             state.cols_types = ct.clone();
         }
         let dtypes = state.dtypes.clone();
 
-        let upsert = sp.upsert() && has_update_query(&format!("{}-upsert", flavor.as_str()));
+        let internal_duckdb = flavor == Flavor::Duckdb && pipe.connector_keys() == "mrsm";
+        let upsert = sp.upsert()
+            && (has_update_query(&format!("{}-upsert", flavor.as_str())) || internal_duckdb);
         if upsert {
             check_existing = false;
         }
 
+        let filter_start = std::time::Instant::now();
         let (mut unseen_df, mut update_df, mut delta_df) = if check_existing {
             let (u, up, d) = self.filter_existing_frame(&sp, &state, df).await?;
             (u, Some(up), d)
         } else {
             (df.clone(), None, df)
         };
+        crate::facade::trace("sql: filter existing", filter_start);
         if upsert {
             unseen_df = delta_df.clear();
             update_df = Some(delta_df.clone());
@@ -497,7 +540,7 @@ impl SqlConnector {
                 if update_count != 1 { "s" } else { "" }
             )
         };
-        if !internal.skip_temporary_tables_check {
+        if !internal.skip_temporary_tables_check && !cache_internal {
             let (ok, m) = self.drop_old_temporary_tables(false).await;
             if !ok {
                 tracing::warn!("{m}");
@@ -509,6 +552,16 @@ impl SqlConnector {
         } else {
             result.inserted = unseen_count;
             result.updated = update_count;
+        }
+        if cache_internal {
+            if is_new {
+                state = self.pipe_state(&sp).await;
+            }
+            self.state
+                .lock()
+                .expect("state")
+                .internal_pipe_states
+                .insert(cache_key, state);
         }
         let _ = dt_col;
         Ok(result)
@@ -549,11 +602,179 @@ impl SqlConnector {
                     params: Some(backtrack_params(req)),
                     ..Default::default()
                 };
-                self.get_pipe_data_with_state(sp, state, &q).await?
+                self.get_pipe_data_with_state(
+                    sp,
+                    state,
+                    &q,
+                    &super::data::DataQueryOptions::default(),
+                )
+                .await?
             }
             _ => None,
         };
         filter_existing(PipeInput::Frame(df), &fe_params, move |_| backtrack).map_err(be)
+    }
+
+    /// Internal state updates need no staging table. Null/duplicate keys keep the general path.
+    async fn upsert_small_internal(
+        &self,
+        sp: &SqlPipe,
+        state: &PipeState,
+        df: &Frame,
+    ) -> ConnectorResult<Option<(bool, String)>> {
+        let cols = df.names();
+        let mut keys = sp
+            .column("primary")
+            .map(|k| vec![k])
+            .unwrap_or_else(|| columns_map(sp).into_values().collect());
+        if self.should_partition(sp) || self.flavor.is_timescaledb() {
+            if let Some(dt) = sp.column("datetime") {
+                if !keys.contains(&dt) {
+                    keys.push(dt);
+                }
+            }
+        }
+        let mut unique_keys = std::collections::HashSet::new();
+        keys.retain(|key| unique_keys.insert(key.clone()));
+        if keys.is_empty() || keys.iter().any(|k| !df.contains(k)) {
+            return Ok(None);
+        }
+        let columns: Vec<Vec<KValue>> = cols
+            .iter()
+            .map(|c| df.data(c).expect("column").values())
+            .collect();
+        let key_indices: Vec<usize> = keys
+            .iter()
+            .map(|k| cols.iter().position(|c| c == k).expect("key"))
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        for (row, _) in columns[0].iter().enumerate() {
+            let values: Vec<String> = key_indices
+                .iter()
+                .map(|&i| columns[i][row].py_str())
+                .collect();
+            if key_indices.iter().any(|&i| columns[i][row].is_na()) || !seen.insert(values) {
+                return Ok(None);
+            }
+        }
+        let f = self.flavor;
+        let q = |c: &str| sql_item_name(c, f, None);
+        let quoted: Vec<String> = cols.iter().map(|c| q(c)).collect();
+        let key_sql = keys.iter().map(|k| q(k)).collect::<Vec<_>>().join(", ");
+        let updates: Vec<&String> = cols.iter().filter(|c| !keys.contains(c)).collect();
+        let mut params = Vec::new();
+        let mut values = Vec::new();
+        let mut selects = Vec::new();
+        for (row, _) in columns[0].iter().enumerate() {
+            let mut cells = Vec::new();
+            for (i, col) in cols.iter().enumerate() {
+                let enc = ColumnEncoding {
+                    name: col.clone(),
+                    numeric: state
+                        .cols_types
+                        .get(col)
+                        .and_then(|t| numeric_precision_scale(t))
+                        .map(|(p, s)| (Some(p), Some(s))),
+                };
+                params.push(encode_param(&columns[i][row], f, &enc));
+                cells.push(crate::driver::params::placeholder(f, params.len()));
+            }
+            values.push(format!("({})", cells.join(", ")));
+            selects.push(format!(
+                "SELECT {}{}",
+                cells
+                    .iter()
+                    .zip(&quoted)
+                    .map(|(v, c)| format!("{v} AS {c}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if f == Flavor::Oracle {
+                    " FROM dual"
+                } else {
+                    ""
+                }
+            ));
+        }
+        let table = self.pipe_table_name(sp);
+        let insert = format!(
+            "INSERT INTO {table} ({}) VALUES {}",
+            quoted.join(", "),
+            values.join(", ")
+        );
+        let sql = match f.driver_family() {
+            DriverFamily::Postgres | DriverFamily::Sqlite => {
+                let action = if updates.is_empty() {
+                    "NOTHING".into()
+                } else {
+                    format!(
+                        "UPDATE SET {}",
+                        updates
+                            .iter()
+                            .map(|c| format!("{}=excluded.{}", q(c), q(c)))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                let target = if f.driver_family() == DriverFamily::Sqlite {
+                    // SQLite can retain a pre-DDL schema on another pooled connection while
+                    // preparing an explicit conflict target. Internal pipes have only their
+                    // declared key constraints, so the targetless form is equivalent.
+                    String::new()
+                } else {
+                    format!(" ({key_sql})")
+                };
+                format!("{insert} ON CONFLICT{target} DO {action}")
+            }
+            DriverFamily::Mysql => {
+                let update = if updates.is_empty() {
+                    vec![format!("{}={}", q(&keys[0]), q(&keys[0]))]
+                } else {
+                    updates
+                        .iter()
+                        .map(|c| format!("{}=VALUES({})", q(c), q(c)))
+                        .collect()
+                };
+                format!("{insert} ON DUPLICATE KEY UPDATE {}", update.join(", "))
+            }
+            DriverFamily::Mssql | DriverFamily::Oracle | DriverFamily::Duckdb => {
+                let on = keys
+                    .iter()
+                    .map(|k| format!("t.{}=s.{}", q(k), q(k)))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+                let update = if updates.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " WHEN MATCHED THEN UPDATE SET {}",
+                        updates
+                            .iter()
+                            .map(|c| format!("{}=s.{}", q(c), q(c)))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                let lock = if f == Flavor::Mssql {
+                    " WITH (HOLDLOCK)"
+                } else {
+                    ""
+                };
+                let terminator = if f == Flavor::Mssql { ";" } else { "" };
+                format!(
+                    "MERGE INTO {table}{lock} t USING ({}) s ON ({on}){update} WHEN NOT MATCHED THEN INSERT ({}) VALUES ({}){terminator}",
+                    selects.join(" UNION ALL "),
+                    quoted.join(", "),
+                    quoted
+                        .iter()
+                        .map(|c| format!("s.{c}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        };
+        self.log(&sql);
+        self.driver.exec_with(&sql, &params).await.map_err(be)?;
+        Ok(Some((true, String::new())))
     }
 
     /// The update / upsert path of `sync_pipe`: stage the rows in a temporary table, then
@@ -568,6 +789,22 @@ impl SqlConnector {
     ) -> ConnectorResult<(bool, String)> {
         let flavor = self.flavor;
         let pipe = sp.pipe();
+        if upsert
+            && !autoincrement
+            && pipe.connector_keys() == "mrsm"
+            && (update_df.height() <= 64 || flavor == Flavor::Duckdb)
+        {
+            if let Some(result) = self.upsert_small_internal(sp, state, update_df).await? {
+                return Ok(result);
+            }
+            if flavor == Flavor::Duckdb {
+                // v4 skips DuckDB indices and has no staged upsert template. Do not silently
+                // turn an invalid internal upsert into a plain insert or an empty update.
+                return Err(be(
+                    "Internal DuckDB upserts require unique non-null keys in each batch.",
+                ));
+            }
+        }
         let temp_target = self.get_temporary_target(
             &sp.target,
             None,
@@ -657,6 +894,7 @@ impl SqlConnector {
                 update_df.clone(),
                 &temp_opts,
                 InternalSync {
+                    cached_state: None,
                     columns_types: Some(temp_columns_types.clone()),
                     skip_check_indices: true,
                     new_special_cols: None,
@@ -668,7 +906,11 @@ impl SqlConnector {
             return Ok((false, temp_result.message));
         }
 
-        let existing_cols = self.columns_types(sp).await;
+        let existing_cols = if state.cols_types.is_empty() {
+            self.columns_types(sp).await
+        } else {
+            state.cols_types.clone()
+        };
         let dt_col = sp.column("datetime");
         let primary_key = sp.column("primary");
         // A partitioned table folds the datetime column into its composite primary key, so the
@@ -711,8 +953,39 @@ impl SqlConnector {
         args.null_indices = sp.null_indices();
         args.cast_columns = sp.enforce();
         args.db_version = db_version.as_deref();
+        // SQLite cannot use a plain key index for the COALESCE equality used by v4.
+        // Index the small staging table's exact expressions so a scattered update does not
+        // scan that table once per row in the (potentially very large) target date range.
+        // PARITY: retain v4's null-sentinel matching, including sentinel collisions.
+        if matches!(flavor, Flavor::Sqlite | Flavor::Geopackage) && args.null_indices && !upsert {
+            let expressions = args
+                .join_cols
+                .iter()
+                .filter_map(|column| {
+                    args.target_cols_types.get(column).map(|dtype| {
+                        format!(
+                            "COALESCE({}, {})",
+                            sql_item_name(column, flavor, None),
+                            crate::queries::update::get_null_replacement(dtype, Some(flavor))
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            if !expressions.is_empty() {
+                let index = sql_item_name(&format!("IX_{temp_target}_join"), flavor, None);
+                let table = sql_item_name(&temp_target, flavor, internal_schema.as_deref());
+                let _ = self
+                    .exec(&format!(
+                        "CREATE INDEX {index} ON {table} ({})",
+                        expressions.join(", ")
+                    ))
+                    .await;
+            }
+        }
         let update_queries = get_update_queries(&args);
+        let update_start = std::time::Instant::now();
         let update_success = self.exec_queries_all(&update_queries, true, true).await;
+        crate::facade::trace("sql: execute update", update_start);
         let _ = self
             .log_temporary_tables_creation(&[temp_target], true, !pipe.temporary)
             .await;
@@ -741,7 +1014,7 @@ impl SqlConnector {
                 .cloned()
                 .unwrap_or_else(|| df_dtypes.get(pk).cloned().unwrap_or_else(|| "int".into()))
         });
-        let primary_key_db_type = primary_key_typ
+        let mut primary_key_db_type = primary_key_typ
             .as_ref()
             .map(|t| get_db_type_from_pd_type(t, Some(flavor)));
         let dt_col = sp.column("datetime");
@@ -768,6 +1041,31 @@ impl SqlConnector {
             if let Some(pk) = &primary_key {
                 new_dtypes.shift_remove(pk);
             }
+        }
+        // Internal state keys must be indexable on engines which disallow TEXT keys.
+        // Keep the public pipe dtype unchanged; only the physical key type is bounded.
+        let internal_key_types = sp.pipe().connector_keys() == "mrsm"
+            && matches!(flavor, Flavor::Mysql | Flavor::Mariadb | Flavor::Mssql);
+        if internal_key_types {
+            let keys = columns_map(sp);
+            for (column, dtype) in &mut new_dtypes {
+                let db_type = get_db_type_from_pd_type(dtype, Some(flavor));
+                *dtype = if keys.values().any(|key| key == column)
+                    && matches!(db_type.as_str(), "TEXT" | "NVARCHAR(MAX)" | "VARCHAR(MAX)")
+                {
+                    if flavor == Flavor::Mssql {
+                        "NVARCHAR(255)"
+                    } else {
+                        "VARCHAR(255)"
+                    }
+                    .into()
+                } else {
+                    db_type
+                };
+            }
+            primary_key_db_type = primary_key
+                .as_ref()
+                .and_then(|key| new_dtypes.get(key).cloned());
         }
         let schema = self.get_pipe_schema(sp);
 
@@ -832,7 +1130,7 @@ impl SqlConnector {
                 partition_by_column: partition_by_column.clone(),
                 partition_bounds: partition_bounds.clone(),
                 partition_scheme_name: partition_scheme_name.clone(),
-                parse_dtypes: true,
+                parse_dtypes: !internal_key_types,
             };
             let mut queries = get_create_table_queries(
                 &QueryOrDtypes::Dtypes(new_dtypes.clone()),
@@ -966,14 +1264,28 @@ impl SqlConnector {
         if !self.table_exists(&sp.target, schema.as_deref()).await || sp.is_static() {
             return Vec::new();
         }
-        let db_cols_types = self
-            .get_table_cols_types(&sp.target, schema.as_deref())
-            .await;
         let state = self.pipe_state(&sp).await;
+        self.alter_columns_with_state(pipe, df, new_special_cols, &state)
+            .await
+    }
+
+    async fn alter_columns_with_state(
+        &self,
+        pipe: &mut Pipe,
+        df: &Frame,
+        new_special_cols: Option<&IndexMap<String, String>>,
+        state: &PipeState,
+    ) -> Vec<String> {
+        let Ok(sp) = self.sql_pipe(pipe) else {
+            return Vec::new();
+        };
+        if !state.exists || sp.is_static() {
+            return Vec::new();
+        }
         let input = AlterColumnsInput {
             df_cols_types: df.dtypes(),
             numeric_cols: get_numeric_cols(df),
-            db_cols_types,
+            db_cols_types: state.cols_types.clone(),
             pipe_dtypes: state.dtypes.clone(),
             explicit_dtypes: state.explicit_dtypes.clone(),
             new_special_cols: new_special_cols.cloned().unwrap_or_default(),
@@ -1353,9 +1665,15 @@ impl SqlConnector {
             }
         }
         let max_rows_per_stmt = (max_bind_params(flavor) / cols.len()).max(1);
-        let rows_per_stmt = chunk
-            .map(|c| (c.max(1) as usize).min(max_rows_per_stmt))
-            .unwrap_or(max_rows_per_stmt);
+        let rows_per_stmt = if flavor == Flavor::Oracle {
+            // PARITY: SQLAlchemy uses executemany on Oracle. Multi-row VALUES is unavailable
+            // before 23c, and INSERT ALL evaluates an identity sequence only once per statement.
+            1
+        } else {
+            chunk
+                .map(|c| (c.max(1) as usize).min(max_rows_per_stmt))
+                .unwrap_or(max_rows_per_stmt)
+        };
         let col_names: Vec<String> = cols
             .iter()
             .map(|c| sql_item_name(c, flavor, None))
@@ -1374,14 +1692,12 @@ impl SqlConnector {
                 }
                 groups.push(format!("({})", placeholders(flavor, base, cols.len())));
             }
-            statements.push((
-                format!(
-                    "INSERT INTO {table_name} ({}) VALUES {}",
-                    col_names.join(", "),
-                    groups.join(", ")
-                ),
-                params,
-            ));
+            let sql = format!(
+                "INSERT INTO {table_name} ({}) VALUES {}",
+                col_names.join(", "),
+                groups.join(", ")
+            );
+            statements.push((sql, params));
             start = end;
         }
         self.exec_insert_statements(statements, &table_name, identity_insert)

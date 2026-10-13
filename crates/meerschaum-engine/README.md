@@ -104,7 +104,28 @@ for all of a node's edges (after the sync succeeds); `tests/state_cost.rs` measu
 | `tests/continuous.rs` | Lap-compatible `--loop --min-seconds`, `-l _negation`, `-w 1` order, v4's error cooldown, a supervised in-memory stream under `--listen`. |
 | `tests/state_cost.rs` | The engine-state write path. |
 | `tests/bare_sync.rs` | A bare `pipe.sync()` (R1). |
+| `tests/python_glue.rs` | Manifest routing, native callbacks, scoped ledger observers, real plugin sync and custom fetch kwargs. |
 | `tests/date_bounds.rs` | v4's `parse_date_bounds` on the fetch path: UTC-aware, naive and epoch-integer bounds. |
 
 Regenerate the v4 fixture with
-`PYTHONPATH=$(pwd) python crates/meerschaum-engine/tests/fixtures/v4_sync/gen_v4_sync.py`.
+`scripts/parity/run.sh crates/meerschaum-engine/tests/fixtures/v4_sync/gen_v4_sync.py`.
+
+## Worker integration
+
+`python::PythonRegistry::new(native, pool, manifest, config)` adds Python sources, custom
+instances, sync overrides, hooks and both stream modes to a native registry. Pass the process's
+single `WorkerPool` and its cached startup `Manifest`. `callbacks()` exposes the same native
+engine sync handler for plugin actions. Callback syncs preserve bounds, dtype enforcement,
+autotime and native diffing. Subscribe pushes are acknowledged only after the engine sink
+commits them; the engine owns restart policy for both stream modes.
+
+Callbacks for the currently syncing pipe inherit its enclosing node's pre-commit delta observer;
+callbacks targeting another pipe use the bare native sync path (R1). Nested Python calls use
+the worker pool's bounded callback reserve, including with `python_workers: 1`. Call
+`enable_legacy_streams()` for `--listen` to recognize v4 subscribe-and-return sync overrides;
+ordinary batch sync overrides otherwise remain batch sources. `set_stream_kwargs()` carries
+CLI flags and plugin arguments into either stream entry point.
+
+Per-root schedule/debounce and stream-flush triggering of graph children remain open. Lease
+renewal failure now aborts an in-flight node sync; a regression test checks that it does not
+continue to the commit after losing its lease.

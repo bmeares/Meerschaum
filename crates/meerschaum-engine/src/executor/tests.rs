@@ -372,3 +372,49 @@ async fn rebuild_pending_does_not_block_descendants() {
         "v1:0000".to_string()
     );
 }
+
+struct LostLease;
+impl LeaseSource for LostLease {
+    async fn acquire(&self, _: &PipeRef, _: &str, _: Duration) -> Result<bool, StateError> {
+        Ok(true)
+    }
+    async fn renew(&self, _: &PipeRef, _: &str, _: Duration) -> Result<bool, StateError> {
+        Ok(false)
+    }
+    async fn release(&self, _: &PipeRef, _: &str) -> Result<(), StateError> {
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lost_lease_cancels_sync_before_it_commits() {
+    let h = Harness::new(vec![rec("a", "{}")], MemoryStateData::default());
+    let mut step = FakeStep::ok(Duration::from_secs(60));
+    step.watermark = Some(Some(Bound::Int(99)));
+    h.fake.script(&r("a"), step);
+    let selection = Selection::refs([r("a")]);
+    let sub = Pipeline::new(selection).resolve(&h.graph).unwrap();
+    let options = ExecutorOptions {
+        lease_ttl: Duration::from_secs(3),
+        ..Default::default()
+    };
+    let plan = plan(&h.graph, &sub, &*h.state, &options.plan).await;
+    let record = execute(
+        ExecuteContext {
+            graph: &h.graph,
+            subgraph: &sub,
+            state: &*h.state,
+            executor: h.fake.clone(),
+            leases: Arc::new(LostLease),
+            sink: h.sink.clone(),
+            durations: &h.durations,
+        },
+        plan,
+        &options,
+    )
+    .await;
+    let row = record.node(&r("a")).unwrap();
+    assert_eq!(row.status, NodeStatus::Failed);
+    assert!(row.message.as_deref().unwrap().contains("lost during sync"));
+    assert_eq!(h.state.watermark(&r("a")).await.unwrap(), None);
+}

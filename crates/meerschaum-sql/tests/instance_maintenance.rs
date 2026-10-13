@@ -98,8 +98,15 @@ flavor_tests!(test_vacuum_full, |c: Ctx| async move {
 flavor_tests!(test_analyze, |c: Ctx| async move {
     let pipe = build_synced_pipe(&c, "maintenance_analyze").await;
     let before = rows(&c, &pipe).await;
-    let res = ok(c.conn.analyze_pipe(&pipe).await);
-    assert!(res.message.starts_with("Analyzed "), "{}", res.message);
+    let res = c.conn.analyze_pipe(&pipe).await;
+    if c.conn.flavor().analyzable() {
+        let res = ok(res);
+        assert!(res.message.starts_with("Analyzed "), "{}", res.message);
+    } else {
+        // PARITY: v4 does not support analyze_pipe on Oracle.
+        assert!(!res.success);
+        assert!(res.message.contains("not supported"));
+    }
     assert_eq!(rows(&c, &pipe).await, before);
     c.delete(&pipe).await;
 });

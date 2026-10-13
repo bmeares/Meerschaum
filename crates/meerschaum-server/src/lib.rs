@@ -39,6 +39,7 @@ pub mod ratelimit;
 pub mod routes;
 pub mod serialize;
 pub mod state;
+pub mod web;
 
 pub use config::{ServerConfig, ServerFlags};
 pub use state::AppState;
@@ -83,4 +84,10 @@ pub async fn serve_with_mcp(
         app_with_mcp(state, mcp).into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .await
+}
+
+/// Compose exact console routes with the API without making server depend on web.
+/// The console must not install a fallback or a wildcard under `/dash`.
+pub fn app_with_console(state: AppState, console: axum::Router) -> axum::Router {
+    app(state).merge(console)
 }

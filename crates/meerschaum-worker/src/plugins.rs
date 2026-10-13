@@ -110,7 +110,14 @@ impl SyncHookContext {
     fn to_wire(&self) -> Wire {
         let mut m = Msg::new();
         for (k, v) in &self.extra {
-            m.insert(k, core_to_wire(v));
+            m.insert(
+                k,
+                if matches!(k.as_str(), "begin" | "end") {
+                    crate::connector::sync_bound_wire(v)
+                } else {
+                    core_to_wire(v)
+                },
+            );
         }
         if let Some(ts) = &self.sync_timestamp {
             m.insert("sync_timestamp", utc_wire(ts));

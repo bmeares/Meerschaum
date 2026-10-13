@@ -140,6 +140,33 @@ fn split_tz_suffix(s: &str) -> (&str, Option<FixedOffset>) {
     (s, None)
 }
 
+/// Execution equivalent for bundled DuckDB, whose TIMESTAMPTZ interval overload needs ICU.
+/// Arithmetic on UTC wall time keeps the same instant without loading extensions. The public
+/// v4 query renderer stays byte-for-byte compatible with the reference fixtures.
+pub(crate) fn dateadd_for_execution(
+    flavor: Option<Flavor>,
+    datepart: Option<&str>,
+    number: Number,
+    begin: &DateArg,
+    db_type: Option<&str>,
+) -> Result<String> {
+    let sql = dateadd_str(flavor, datepart, number, begin, db_type)?;
+    #[cfg(feature = "duckdb")]
+    if flavor == Some(Flavor::Duckdb) {
+        if let Some((base, interval)) = sql.rsplit_once(" + INTERVAL ") {
+            if base.contains("TIMESTAMPTZ")
+                || base.contains("TIMESTAMP WITH TIME ZONE")
+                || base == "NOW()"
+            {
+                return Ok(format!(
+                    "CAST(CAST({base} AS TIMESTAMP) + INTERVAL {interval} AS TIMESTAMPTZ)"
+                ));
+            }
+        }
+    }
+    Ok(sql)
+}
+
 /// `dateadd_str(flavor, datepart, number, begin, db_type)`.
 ///
 /// `flavor = None` reproduces Python being handed a key that is not a flavor (e.g. the

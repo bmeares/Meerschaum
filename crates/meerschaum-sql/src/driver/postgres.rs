@@ -245,6 +245,68 @@ impl Backend for PgBackend {
         })
     }
 
+    fn array(rows: &[PgRow], idx: usize, plan: &ColumnPlan) -> Result<arrow::array::ArrayRef> {
+        use arrow::array::*;
+        use std::sync::Arc;
+        macro_rules! primitive {
+            ($builder:ty, $ty:ty) => {{
+                let mut b = <$builder>::with_capacity(rows.len());
+                for row in rows {
+                    b.append_option(row.try_get::<Option<$ty>, _>(idx)?);
+                }
+                return Ok(Arc::new(b.finish()));
+            }};
+        }
+        match plan.kind {
+            ColumnKind::Int64 => primitive!(Int64Builder, i64),
+            ColumnKind::Float64 => primitive!(Float64Builder, f64),
+            ColumnKind::Int16 => primitive!(Int16Builder, i16),
+            ColumnKind::Int32 => primitive!(Int32Builder, i32),
+            ColumnKind::Float32 => primitive!(Float32Builder, f32),
+            ColumnKind::Boolean => primitive!(BooleanBuilder, bool),
+            ColumnKind::Timestamp => {
+                let mut b = TimestampMicrosecondBuilder::with_capacity(rows.len());
+                for row in rows {
+                    b.append_option(
+                        row.try_get::<Option<NaiveDateTime>, _>(idx)?
+                            .map(|d| d.and_utc().timestamp_micros()),
+                    );
+                }
+                return Ok(Arc::new(b.finish()));
+            }
+            ColumnKind::TimestampTz => {
+                let mut b = TimestampMicrosecondBuilder::with_capacity(rows.len());
+                for row in rows {
+                    b.append_option(
+                        row.try_get::<Option<DateTime<Utc>>, _>(idx)?
+                            .map(|d| d.timestamp_micros()),
+                    );
+                }
+                return Ok(Arc::new(b.finish().with_timezone("UTC")));
+            }
+            ColumnKind::Utf8 => {
+                let mut b = StringBuilder::with_capacity(rows.len(), rows.len() * 16);
+                for row in rows {
+                    b.append_option(row.try_get_unchecked::<Option<&str>, _>(idx)?);
+                }
+                return Ok(Arc::new(b.finish()));
+            }
+            ColumnKind::Bytes => {
+                let mut b = BinaryBuilder::with_capacity(rows.len(), rows.len() * 16);
+                for row in rows {
+                    b.append_option(row.try_get::<Option<&[u8]>, _>(idx)?);
+                }
+                return Ok(Arc::new(b.finish()));
+            }
+            _ => {}
+        }
+        let cells = rows
+            .iter()
+            .map(|r| Self::cell(r, idx, plan))
+            .collect::<Result<Vec<_>>>()?;
+        super::batch::build_array(plan, &cells)
+    }
+
     fn rows_affected(result: &sqlx::postgres::PgQueryResult) -> u64 {
         result.rows_affected()
     }

@@ -678,11 +678,23 @@ fn dispatch_skeleton() {
         dispatch::entry(&s(&["show", "arguments", "-c", "sql:main"]), &mut rt),
         SuccessTuple::success()
     );
-    // Instance actions are native; keep this test off real instances (`sql:main` is a server).
-    assert_eq!(
-        dispatch::entry(&s(&["install", "plugins", "noaa"]), &mut rt),
-        SuccessTuple::fail("action `install plugins` is not implemented in Rust yet")
-    );
+    // Verify compatibility delegation with an absent interpreter; never install packages
+    // or contact an API while checking dispatch.
+    for args in [
+        vec!["install", "plugins", "synthetic_wiring_test"],
+        vec!["show", "pipes", "-e", "api:synthetic_wiring_test"],
+    ] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm"))
+            .args(args)
+            .env("MRSM_ROOT_DIR", tmp.path())
+            .env("MRSM_PLUGINS_DIR", tmp.path().join("plugins"))
+            .env("MRSM_PYTHON", tmp.path().join("absent-python"))
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(text.contains("failed to start the Python worker"), "{text}");
+    }
     assert_eq!(
         dispatch::entry(&s(&["show", "pipe", "-i", "sql:memory"]), &mut rt),
         SuccessTuple::ok("No pipes to show.")
@@ -693,7 +705,10 @@ fn dispatch_skeleton() {
         SuccessTuple::success()
     );
     // `-d` becomes `start jobs`; the test host has no input, so the job is not created.
-    let started = dispatch::entry(&s(&["install", "plugins", "noaa", "-d"]), &mut rt);
+    let started = dispatch::entry(
+        &s(&["install", "plugins", "synthetic_wiring_test", "-d"]),
+        &mut rt,
+    );
     assert!(
         !started.success && started.message.starts_with("Failed to start job"),
         "{started:?}"
@@ -705,15 +720,18 @@ fn dispatch_skeleton() {
                 .next()
                 .is_none()
     );
-    assert_eq!(
-        dispatch::entry(&s(&["show", "pipes", "-e", "api:main"]), &mut rt),
-        SuccessTuple::fail("action `api` is not implemented in Rust yet")
-    );
     let SuccessTuple {
         success: ok,
         message: msg,
     } = dispatch::entry(
-        &s(&["show", "version", "+", "install", "plugins", "x"]),
+        &s(&[
+            "show",
+            "version",
+            "+",
+            "show",
+            "config",
+            "synthetic_missing_key",
+        ]),
         &mut rt,
     );
     assert!(!ok && msg.contains("Failed pipeline after 1 step"), "{msg}");
@@ -727,9 +745,15 @@ fn dispatch_skeleton() {
         "Invalid arguments:\nsync --begin xyz\n    'xyz' is not a valid datetime format."
     );
 
-    assert_eq!(dispatch::main(&s(&["install", "plugins", "x"]), &mut rt), 1);
     assert_eq!(
-        dispatch::main(&s(&["install", "plugins", "x", "--nopretty"]), &mut rt),
+        dispatch::main(&s(&["show", "config", "synthetic_missing_key"]), &mut rt),
+        1
+    );
+    assert_eq!(
+        dispatch::main(
+            &s(&["show", "config", "synthetic_missing_key", "--nopretty"]),
+            &mut rt
+        ),
         0
     );
     assert_eq!(dispatch::main(&s(&["show", "version"]), &mut rt), 0);

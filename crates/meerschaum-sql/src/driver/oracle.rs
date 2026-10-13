@@ -225,7 +225,18 @@ fn query_blocking(
         .iter()
         .map(|c| {
             let (kind, db_type, scale) = kind_for(c.oracle_type());
-            let mut plan = ColumnPlan::new(c.name(), kind, db_type);
+            // PARITY: SQLAlchemy normalizes Oracle's unquoted uppercase result labels.
+            // Quoted mixed-case labels retain their spelling.
+            let name = c.name();
+            let lower = name.to_lowercase();
+            let name = if name == name.to_uppercase()
+                && crate::ident::sql_item_name(&lower, crate::flavor::Flavor::Oracle, None) == lower
+            {
+                lower
+            } else {
+                name.to_string()
+            };
+            let mut plan = ColumnPlan::new(name, kind, db_type);
             if kind == ColumnKind::Decimal {
                 plan.scale = scale;
             }

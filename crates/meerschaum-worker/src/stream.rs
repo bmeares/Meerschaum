@@ -108,10 +108,19 @@ impl PythonStream {
     ) -> (PythonStream, mpsc::UnboundedReceiver<StreamEvent>) {
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let (stop_tx, stop_rx) = watch::channel(false);
-        let args = Msg::new()
+        let mut kwargs = kwargs.clone();
+        let mut args = Msg::new();
+        if mode == StreamMode::V4Sync {
+            for key in ["begin", "end"] {
+                if let Some(value) = kwargs.shift_remove(key) {
+                    args.insert(key, crate::connector::sync_bound_wire(&value));
+                }
+            }
+        }
+        let args = args
             .set("connector", connector_keys)
             .set("pipe", map_to_wire(&pipe.to_state()))
-            .set("kwargs", map_to_wire(kwargs))
+            .set("kwargs", map_to_wire(&kwargs))
             .set("keep_alive", true);
         let op = match mode {
             StreamMode::V4Sync => "sync",

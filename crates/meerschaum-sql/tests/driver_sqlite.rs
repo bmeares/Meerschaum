@@ -17,7 +17,7 @@ struct TempDb {
 
 impl TempDb {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("_mrsm_rs_test_{}.db", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("w5sql_test_{}.db", uuid::Uuid::new_v4()));
         Self { path }
     }
 

@@ -818,7 +818,10 @@ flavor_tests!(test_mixed_timezone_aware_and_naive, |c: Ctx| async move {
     let int_type = meerschaum_sql::dtypes::get_db_type_from_pd_type("int64", Some(flavor));
     let q = |n: &str| meerschaum_sql::ident::sql_item_name(n, flavor, None);
     let table = table_of(&c, &pipe);
-    let ts_lit = if c.is_pg() {
+    let ts_lit = if c.flavor == "oracle" {
+        // Model SQLAlchemy's native timestamp bind without depending on NLS session formats.
+        "TIMESTAMP '2024-01-01 00:00:00.000000'"
+    } else if c.is_pg() {
         "'2024-01-01 00:00:00'"
     } else {
         "'2024-01-01 00:00:00.000000'"

@@ -12,3 +12,11 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 opt-level = 1
 debug = false
+
+# Isolation guard: every process cargo launches (`cargo test`, `cargo run`, build scripts) gets
+# the throwaway Meerschaum root `.mrsm-cargo-root` (tracked, so it always exists; its contents are
+# ignored) unless MRSM_ROOT_DIR is already set. Nothing run through cargo can then fall back to the
+# real `~/.config/meerschaum` root or its connectors (a wave-3 test once synced against a
+# developer's real instance that way). Tests that need their own root still set it explicitly.
+[env]
+MRSM_ROOT_DIR = { value = ".mrsm-cargo-root", relative = true, force = false }

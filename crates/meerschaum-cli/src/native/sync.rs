@@ -1,26 +1,15 @@
-//! `sync pipes` (`meerschaum/actions/sync.py`) and the sync seam.
-//!
-//! # The sync seam
-//!
-//! [`sync_pipe`] is the CLI's stand-in for the engine's `Engine::run` (§5.5): it reproduces
-//! `Pipe.sync()` (`meerschaum/core/Pipe/_sync.py`) for `sql:` source pipes over the
-//! `InstanceConnector` trait: register → (in-place sync when source == instance) → fetch the
-//! metadefinition (`_determine_begin` + `SQLConnector.fetch`) → per chunk: enforce dtypes, add the
-//! autotime column, capture new special columns and `sync_pipe` → assemble v4's chunk message.
-//! The orchestrator swaps this function for `Engine::run` once the engine's executor lands;
-//! keep the signature narrow so that swap is local.
+//! `sync pipes`: engine execution with v4 action output and lap timing.
+
+#[path = "engine.rs"]
+mod engine;
 
 use std::time::Instant;
 
 use meerschaum_connector::{DateBound, SyncOptions, pipe_ops};
 use meerschaum_core::SuccessTuple;
-use meerschaum_core::pipe::chunk::ChunkInterval;
 use meerschaum_core::value::Map;
 use meerschaum_kernel::Frame;
 use meerschaum_kernel::enforce::{PipeInput, pipe_enforce_dtypes};
-use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
-use meerschaum_sql::instance::fetch::{FetchArgs, metadef_bound};
-use meerschaum_sql::queries::metadef::Bound;
 
 use crate::builtin::ActionResult;
 use crate::dispatch::Runtime;
@@ -103,106 +92,39 @@ pub struct SyncArgs {
     pub check_existing: bool,
     /// `chunksize` (`-1` → `system:connectors:sql:chunksize`).
     pub chunksize: Option<i64>,
+    /// Additional plugin arguments passed through to Python.
+    pub extra: Map,
 }
 
 impl SyncArgs {
     /// From the parsed action arguments.
     pub fn from_args(args: &ArgsMap) -> SyncArgs {
+        let mut extra: Map = args
+            .iter()
+            .map(|(k, v)| (k.clone(), super::py_to_value(v)))
+            .collect();
+        extra.insert(
+            "blocking".into(),
+            meerschaum_core::Value::Bool(!flag(args, "unblock")),
+        );
+        extra.insert(
+            "debug".into(),
+            meerschaum_core::Value::Bool(flag(args, "debug")),
+        );
+        extra
+            .entry("bounded".to_owned())
+            .or_insert(meerschaum_core::Value::Null);
+        extra
+            .entry("chunk_interval".to_owned())
+            .or_insert(meerschaum_core::Value::Null);
         SyncArgs {
             begin: bound(args, "begin"),
             end: bound(args, "end"),
             params: super::params(args),
             check_existing: !flag(args, "skip_check_existing"),
             chunksize: super::int(args, "chunksize").or(Some(-1)),
+            extra,
         }
-    }
-}
-
-fn to_bound(b: Option<&DateBound>) -> Bound {
-    metadef_bound(b)
-}
-
-/// `_determine_begin(pipe, begin, end, check_existing)`.
-async fn determine_begin(
-    inst: &Instance,
-    sp: &SelectedPipe,
-    args: &SyncArgs,
-    chunk_defaults: &meerschaum_core::pipe::PipeDefaults,
-) -> Option<DateBound> {
-    if let Some(b) = &args.begin {
-        return Some(b.clone());
-    }
-    if args.end.is_some() {
-        return None;
-    }
-    let sync_time = inst
-        .conn()
-        .get_sync_time(&sp.pipe, None, true)
-        .await
-        .ok()
-        .flatten()?;
-    let default_minutes = backtrack_default(inst);
-    let interval = sp
-        .pipe
-        .get_backtrack_interval(args.check_existing, default_minutes, chunk_defaults)
-        .ok()?;
-    Some(match (sync_time, interval) {
-        (DateBound::Int(i), ChunkInterval::Int(n)) => DateBound::Int(i - n),
-        (DateBound::Int(i), ChunkInterval::Delta(d)) => DateBound::Int(i - d.num_minutes()),
-        (DateBound::Datetime(dt), ChunkInterval::Delta(d)) => DateBound::Datetime(DateTimeValue {
-            utc: dt.utc - d,
-            tz: dt.tz,
-        }),
-        (DateBound::Datetime(dt), ChunkInterval::Int(n)) => DateBound::Datetime(DateTimeValue {
-            utc: dt.utc - chrono::Duration::minutes(n),
-            tz: dt.tz,
-        }),
-    })
-}
-
-/// `pipes:parameters:fetch:backtrack_minutes`.
-fn backtrack_default(inst: &Instance) -> i64 {
-    match inst {
-        Instance::Sql(s) => s.settings.backtrack_minutes,
-        Instance::Other(_) => meerschaum_sql::pipe::DEFAULT_BACKTRACK_MINUTES,
-    }
-}
-
-/// `get_datetime_bound_from_df(chunk, dt_col, minimum)` as `str()`.
-fn chunk_bound(df: &Frame, dt_col: Option<&str>, minimum: bool) -> Option<String> {
-    let col = df.column(dt_col?)?;
-    let values: Vec<KValue> = col
-        .data
-        .values()
-        .into_iter()
-        .filter(|v| !v.is_na())
-        .collect();
-    let mut best: Option<&KValue> = None;
-    for v in &values {
-        best = Some(match best {
-            None => v,
-            Some(b) => {
-                let ord = pipe_ops::compare_values(v, b);
-                let better = if minimum {
-                    ord == std::cmp::Ordering::Less
-                } else {
-                    ord == std::cmp::Ordering::Greater
-                };
-                if better { v } else { b }
-            }
-        });
-    }
-    best.map(KValue::py_str)
-}
-
-/// `Pipe._get_chunk_label(chunk, dt_col)`.
-fn chunk_label(df: &Frame, dt_col: Option<&str>) -> String {
-    match (
-        chunk_bound(df, dt_col, true),
-        chunk_bound(df, dt_col, false),
-    ) {
-        (Some(a), Some(b)) => format!("{a} - {b}"),
-        _ => String::new(),
     }
 }
 
@@ -253,10 +175,7 @@ pub fn sync_frame_public(
     session.block_on(sync_frame(inst, sp, df, args))
 }
 
-/// THE SYNC SEAM: `pipe.sync(**sync_kwargs)` for a pipe selected from `inst`.
-///
-/// The engine agent replaces this with `Engine::run` (`meerschaum-engine`); everything the
-/// actions need from a sync is the returned [`SuccessTuple`].
+/// Run a bare `pipe.sync()` through the same native engine path as worker callbacks.
 pub fn sync_pipe(
     rt: &mut Runtime<'_>,
     session: &Session,
@@ -265,155 +184,37 @@ pub fn sync_pipe(
     args: &SyncArgs,
 ) -> SuccessTuple {
     hydrate(rt, inst, sp);
-    let defaults = super::pipes::defaults(rt);
-    let pipe_str = sp.pipe.to_string();
-    let conn = inst.conn();
-
-    // Ensure that the pipe is registered.
-    if !sp.pipe.temporary && sp.id.is_none() {
-        let res = session.block_on(conn.register_pipe(&sp.pipe));
-        if !res.success && !res.message.contains("already") {
-            return res;
-        }
-        if let Ok(Some(id)) = session.block_on(conn.get_pipe_id(&sp.pipe)) {
-            sp.id = Some(id);
-        }
-    }
-
-    let ck = sp.pipe.connector_keys().to_string();
-    if !ck.contains(':') {
-        return SuccessTuple::ok(format!(
-            "{pipe_str} does not support fetching; nothing to do."
-        ));
-    }
-    let typ = ck.split(':').next().unwrap_or_default().to_string();
-    if typ != "sql" {
-        // Plugin and custom-connector pipes run through the Python worker (§4.4).
-        return SuccessTuple::fail(format!(
-            "Syncing {pipe_str} requires the Python worker for '{typ}' connectors, \
-             which the Rust CLI does not start yet."
-        ));
-    }
-    let source = match session.instance(&ck, rt.config()) {
-        Ok(Instance::Sql(s)) => s,
-        _ => return SuccessTuple::fail(format!("{pipe_str} does not have a valid connector.")),
+    let engine = match engine::build(
+        rt,
+        session,
+        inst,
+        std::slice::from_ref(sp),
+        true,
+        false,
+        None,
+    ) {
+        Ok(e) => e,
+        Err(e) => return SuccessTuple::fail(e.message),
     };
-
-    // Sync in place when the source is the instance.
-    let inplace_enabled = rt
-        .config()
-        .get(&["system", "experimental", "inplace_sync"])
-        .is_none_or(|v| v.truthy());
-    if let Instance::Sql(sql) = inst
-        && ck == inst.keys()
-        && inplace_enabled
-    {
-        let begin = match &args.begin {
-            Some(b) => to_bound(Some(b)),
-            None => Bound::Default,
-        };
-        return session.block_on(sql.sync_pipe_inplace(
-            &sp.pipe,
-            args.params.as_ref(),
-            begin,
-            to_bound(args.end.as_ref()),
-            args.check_existing,
-        ));
-    }
-
-    // Fetch.
-    let begin = session.block_on(determine_begin(inst, sp, args, &defaults));
-    let fetch_args = FetchArgs {
-        begin: to_bound(begin.as_ref()),
-        end: to_bound(args.end.as_ref()),
-        check_existing: args.check_existing,
+    let args = meerschaum_engine::SyncArgs {
+        begin: args
+            .begin
+            .clone()
+            .map(meerschaum_engine::SyncBegin::At)
+            .unwrap_or_default(),
+        end: args.end.clone(),
         params: args.params.clone(),
-        sync_time: None,
-        parent: None,
+        check_existing: args.check_existing,
+        chunksize: args.chunksize,
+        extra: args.extra.clone(),
+        force: args.extra.get("force").is_some_and(|v| v.truthy()),
+        ..Default::default()
     };
-    let df = match session.block_on(source.fetch(&sp.pipe, &fetch_args)) {
-        Ok(Some(df)) => df,
-        Ok(None) => return SuccessTuple::fail(format!("No data were fetched for {pipe_str}.")),
-        Err(e) => {
-            warn(rt, &format!("Failed to fetch data from {ck}:\n    {e}"));
-            return SuccessTuple::fail(format!("No data were fetched for {pipe_str}."));
-        }
-    };
-
-    // `read(chunksize=...)` yields chunks of `chunksize` rows (at least one, possibly empty).
-    let chunksize = match args.chunksize {
-        Some(c) if c > 0 => c as usize,
-        _ => source.settings.chunksize.max(1) as usize,
-    };
-    let n = df.height();
-    let mut chunks: Vec<Frame> = Vec::new();
-    if n <= chunksize {
-        chunks.push(df);
-    } else {
-        let mut start = 0;
-        while start < n {
-            let end = (start + chunksize).min(n);
-            let ix: Vec<usize> = (start..end).collect();
-            chunks.push(df.take(&ix));
-            start = end;
-        }
-    }
-    let dt_col = sp.pipe.column("datetime");
-    let mut results: Vec<(bool, String)> = Vec::new();
-    for (i, chunk) in chunks.into_iter().enumerate() {
-        let label = chunk_label(&chunk, dt_col.as_deref());
-        let rows = chunk.height();
-        let res = session.block_on(sync_frame(inst, sp, chunk, args));
-        if i == 0 {
-            let msg = format!("\n{label}\n{}", res.message);
-            if !res.success {
-                return SuccessTuple::fail(format!(
-                    "Unable to sync initial chunk for {pipe_str}:\n{msg}"
-                ));
-            }
-            results.push((true, msg));
-        } else {
-            let rows_str = if rows != 1 {
-                format!("{} rows", super::thousands(rows as i64))
-            } else {
-                format!("{rows} row")
-            };
-            let msg = format!(
-                "{} a chunk ({rows_str}) to {pipe_str}:\n{label}\n{}",
-                if res.success {
-                    "Synced"
-                } else {
-                    "Failed to sync"
-                },
-                res.message
-            );
-            print_tuple(
-                rt,
-                &SuccessTuple {
-                    success: res.success,
-                    message: msg.clone(),
-                },
-                TupleArgs {
-                    calm: true,
-                    ..TupleArgs::default()
-                },
-            );
-            results.push((res.success, msg));
-        }
-    }
-    results.sort();
-    let successes = results.iter().filter(|r| r.0).count();
-    let failures = results.len() - successes;
-    let joined: Vec<&str> = results.iter().map(|r| r.1.as_str()).collect();
-    let msg = format!(
-        "Synced {} chunk{} to {pipe_str}\n({successes} succeeded, {failures} failed):\n\n{}",
-        super::thousands(results.len() as i64),
-        plural(results.len()),
-        joined.join("\n\n").trim()
-    );
+    let result = session.block_on(engine.sync_pipe(&sp.pipe, None, &args));
+    print_chunk_progress(rt, &result.message);
     SuccessTuple {
-        success: failures == 0,
-        message: msg.trim().to_string(),
+        success: result.success,
+        message: result.message,
     }
 }
 
@@ -505,6 +306,9 @@ pub enum LapMethod {
 /// `_sync_pipes(**kw)`: laps of syncing (`--loop`, `--min-seconds`), shared by `verify pipes`
 /// and `deduplicate pipes`.
 pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) -> ActionResult {
+    if method == LapMethod::Sync && (flag(args, "listen") || flag(args, "loop")) {
+        return listen(args, rt);
+    }
     let nopretty = flag(args, "nopretty");
     let do_loop = flag(args, "loop");
     let unblock = flag(args, "unblock");
@@ -525,10 +329,61 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
     loop {
         let lap_begin = Instant::now();
         let (inst, pipes) = super::pipes::selected_pipes(rt, args)?;
+        let engine_results = if method == LapMethod::Sync {
+            let traversal = flag(args, "parents") || flag(args, "children");
+            let engine = engine::build(rt, &session, &inst, &pipes, !traversal, false, None)?;
+            let opts = run_options(args, &inst, &pipes, &sync_args);
+            let result = session.block_on(engine.run(opts));
+            for warning in &result.warnings {
+                warn(rt, warning);
+            }
+            if !result.success && result.outcomes.is_empty() {
+                return Ok(SuccessTuple::fail(result.message));
+            }
+            Some(result.outcomes)
+        } else {
+            None
+        };
+        let pipes = if let Some(outcomes) = &engine_results {
+            let defaults = super::pipes::defaults(rt);
+            outcomes
+                .iter()
+                .map(|outcome| {
+                    let parts = outcome.pipe_ref.parts();
+                    super::pipes::build_pipe(
+                        parts.connector_keys,
+                        parts.metric_key,
+                        parts.location_key,
+                        parts.instance_keys,
+                        None,
+                        &defaults,
+                    )
+                    .map(|pipe| SelectedPipe {
+                        pipe,
+                        id: None,
+                        hydrated: false,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            pipes
+        };
         let mut results: Vec<(meerschaum_core::Pipe, SuccessTuple)> = Vec::new();
         for mut sp in pipes {
             let tup = match method {
-                LapMethod::Sync => sync_pipe(rt, &session, &inst, &mut sp, &sync_args),
+                LapMethod::Sync => {
+                    let result = &engine_results
+                        .as_ref()
+                        .expect("engine outcomes")
+                        .iter()
+                        .find(|o| o.pipe_ref == meerschaum_engine::PipeRef::from_pipe(&sp.pipe))
+                        .expect("selected outcome")
+                        .result;
+                    SuccessTuple {
+                        success: result.success,
+                        message: result.message.clone(),
+                    }
+                }
                 LapMethod::Verify => {
                     super::verify::verify_pipe(rt, &session, &inst, &mut sp, args, &sync_args)
                 }
@@ -536,6 +391,9 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
                     super::verify::deduplicate_pipe(rt, &session, &inst, &mut sp, args)
                 }
             };
+            if method == LapMethod::Sync {
+                print_chunk_progress(rt, &tup.message);
+            }
             if !nopretty {
                 let m = format!(
                     "{}{}\n",
@@ -628,4 +486,311 @@ pub fn sync_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         LapMethod::Sync
     };
     sync_pipes_with(args, rt, method)
+}
+
+fn depth(args: &ArgsMap, key: &str) -> Option<meerschaum_engine::Depth> {
+    match args.get(key) {
+        Some(crate::value::PyValue::Int(n)) if *n > 0 => Some(meerschaum_engine::Depth::N(
+            u32::try_from(*n).unwrap_or(u32::MAX),
+        )),
+        Some(v) if v.is_truthy() => Some(meerschaum_engine::Depth::All),
+        _ => None,
+    }
+}
+
+fn run_options(
+    args: &ArgsMap,
+    inst: &Instance,
+    pipes: &[SelectedPipe],
+    sync_args: &SyncArgs,
+) -> meerschaum_engine::RunOptions {
+    let selection = meerschaum_engine::Selection::refs(
+        pipes
+            .iter()
+            .map(|p| meerschaum_engine::PipeRef::from_pipe(&p.pipe)),
+    )
+    .with_parents(depth(args, "parents"))
+    .with_children(depth(args, "children"));
+    let resume = args
+        .get("resume")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+    let explicit_selection = [
+        "connector_keys",
+        "metric_keys",
+        "location_keys",
+        "tags",
+        "parents",
+        "children",
+    ]
+    .iter()
+    .any(|key| args.get(*key).is_some_and(|v| v.is_truthy()));
+    meerschaum_engine::RunOptions {
+        selection: if resume.is_some() && !explicit_selection {
+            None
+        } else {
+            Some(selection)
+        },
+        instances: vec![inst.keys()],
+        begin: sync_args
+            .begin
+            .as_ref()
+            .and_then(meerschaum_engine::sync::date_bound_to_bound),
+        end: sync_args
+            .end
+            .as_ref()
+            .and_then(meerschaum_engine::sync::date_bound_to_bound),
+        workers: super::int(args, "workers")
+            .and_then(|w| usize::try_from(w).ok())
+            .filter(|w| *w > 0),
+        yes: flag(args, "yes") || flag(args, "force"),
+        resume,
+        sync: meerschaum_engine::NodeSyncOptions {
+            check_existing: sync_args.check_existing,
+            chunksize: sync_args.chunksize,
+            params: sync_args.params.clone(),
+            force: flag(args, "force"),
+            min_seconds: float(args, "min_seconds").unwrap_or(1.0),
+            extra: sync_args.extra.clone(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// Keep the engine's subscriptions alive and render its lap events on the CLI thread.
+fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    use meerschaum_engine::{LapEvent, LoopOptions, StopToken};
+    use std::sync::{Arc, mpsc};
+    let session = session(rt);
+    super::jobs::install_stop_handler(&session);
+    let signal = super::jobs::stop_requested_flag();
+    let stop = StopToken::default();
+    let (inst, pipes) = super::pipes::selected_pipes(rt, args)?;
+    let sync_args = SyncArgs::from_args(args);
+    let mut stream_kwargs = sync_args.extra.clone();
+    stream_kwargs.insert(
+        "force".into(),
+        meerschaum_core::Value::Bool(flag(args, "force")),
+    );
+    stream_kwargs.insert(
+        "min_seconds".into(),
+        meerschaum_core::Value::Float(float(args, "min_seconds").unwrap_or(1.0)),
+    );
+    stream_kwargs
+        .entry("workers".to_owned())
+        .or_insert(meerschaum_core::Value::Null);
+    stream_kwargs.insert(
+        "check_existing".into(),
+        meerschaum_core::Value::Bool(sync_args.check_existing),
+    );
+    stream_kwargs.insert(
+        "chunksize".into(),
+        sync_args
+            .chunksize
+            .map(meerschaum_core::Value::Int)
+            .unwrap_or(meerschaum_core::Value::Null),
+    );
+    if sync_args.begin.is_none() {
+        stream_kwargs.insert("begin".into(), meerschaum_core::Value::Str(String::new()));
+    }
+    let engine = engine::build(
+        rt,
+        &session,
+        &inst,
+        &pipes,
+        depth(args, "parents").is_none() && depth(args, "children").is_none(),
+        flag(args, "listen"),
+        Some(stream_kwargs),
+    )?;
+    let opts = run_options(args, &inst, &pipes, &sync_args);
+    let defaults = super::pipes::defaults(rt);
+    let nopretty = flag(args, "nopretty");
+    let loop_opts = LoopOptions {
+        run_loop: flag(args, "loop"),
+        listen: flag(args, "listen"),
+        min_seconds: float(args, "min_seconds").unwrap_or(1.0),
+        stop: stop.clone(),
+        ..Default::default()
+    };
+    let (sender, receiver) = mpsc::channel();
+    session.spawn(async move {
+        engine
+            .run_loop(
+                opts,
+                loop_opts,
+                Arc::new(move |event| {
+                    let _ = sender.send(event);
+                }),
+            )
+            .await;
+    });
+    let mut results = Vec::new();
+    let mut result = SuccessTuple::success();
+    loop {
+        if signal.load(std::sync::atomic::Ordering::SeqCst) {
+            stop.stop();
+        }
+        match receiver.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(LapEvent::PipeFinished(outcome)) => {
+                print_chunk_progress(rt, &outcome.result.message);
+                if !nopretty {
+                    print_tuple(
+                        rt,
+                        &SuccessTuple {
+                            success: outcome.result.success,
+                            message: outcome.v4_message(),
+                        },
+                        TupleArgs {
+                            calm: true,
+                            ..Default::default()
+                        },
+                    );
+                }
+                let parts = outcome.pipe_ref.parts();
+                let pipe = super::pipes::build_pipe(
+                    parts.connector_keys,
+                    parts.metric_key,
+                    parts.location_key,
+                    parts.instance_keys,
+                    None,
+                    &defaults,
+                )?;
+                results.push((
+                    pipe,
+                    SuccessTuple {
+                        success: outcome.result.success,
+                        message: outcome.result.message,
+                    },
+                ));
+            }
+            Ok(LapEvent::LapFinished(summary)) => {
+                rt.print("\n");
+                print_pipes_results(
+                    rt,
+                    &results,
+                    "Successfully synced pipes:",
+                    "Failed to sync pipes:",
+                    nopretty,
+                );
+                results.clear();
+                result = SuccessTuple {
+                    success: summary.v4_success(),
+                    message: summary.v4_message(&interval_str(summary.duration.as_secs_f64())),
+                };
+                if !flag(args, "loop") {
+                    info(
+                        rt,
+                        "Listening for new data; subscribed connectors will keep syncing.\n    Stop with `stop jobs` (or CTRL-C).",
+                    );
+                }
+            }
+            Ok(LapEvent::Sleeping { message, .. }) => {
+                rt.print("\n");
+                info(rt, &message);
+            }
+            Ok(LapEvent::Cooldown { message, .. }) => warn(rt, &message),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+    }
+    Ok(result)
+}
+
+/// Resolve native pipe callbacks only when plugin code actually invokes a pipe method.
+pub(crate) fn callbacks(
+    rt: &mut Runtime<'_>,
+    _args: &ArgsMap,
+) -> Result<
+    std::sync::Arc<dyn meerschaum_worker::callback::CallbackHandler>,
+    crate::builtin::ActionError,
+> {
+    use meerschaum_core::config::{Config, ConfigOptions};
+    let session = session(rt);
+    let original = rt.config();
+    let paths = original.paths();
+    let mut options = ConfigOptions::from_process();
+    let plugins = std::env::join_paths(&paths.plugins_dirs)
+        .map_err(|e| crate::builtin::ActionError::new("ConfigError", e.to_string()))?;
+    for (key, value) in [
+        (
+            "MRSM_ROOT_DIR",
+            paths.root_dir.to_string_lossy().into_owned(),
+        ),
+        (
+            "MRSM_CONFIG_DIR",
+            paths.config_dir.to_string_lossy().into_owned(),
+        ),
+        ("MRSM_PLUGINS_DIR", plugins.to_string_lossy().into_owned()),
+    ] {
+        options.env.retain(|(k, _)| k != key);
+        options.env.push((key.into(), value));
+    }
+    options.allow_writes = false;
+    let config = Config::new(options)
+        .map_err(|e| crate::builtin::ActionError::new("ConfigError", e.to_string()))?;
+    config.set_config(original.snapshot());
+    Ok(std::sync::Arc::new(ActionCallbacks {
+        session,
+        config: std::sync::Arc::new(config),
+    }))
+}
+
+struct ActionCallbacks {
+    session: Session,
+    config: std::sync::Arc<meerschaum_core::config::Config>,
+}
+#[meerschaum_connector::async_trait]
+impl meerschaum_worker::callback::CallbackHandler for ActionCallbacks {
+    async fn handle(&self, request: meerschaum_worker::callback::CallbackRequest) -> SuccessTuple {
+        let Some(pipe) = request.pipe.clone() else {
+            return SuccessTuple::fail("Missing pipe in callback.");
+        };
+        let config = self.config.clone();
+        let session = self.session.clone();
+        let registry = tokio::task::spawn_blocking(move || {
+            meerschaum_worker::pool::callback_scope_blocking(|| {
+                let inst = session.instance(pipe.instance_keys(), &config)?;
+                let selected = SelectedPipe {
+                    pipe,
+                    id: None,
+                    hydrated: true,
+                };
+                engine::registry(&config, &session, &inst, &[selected], true)
+                    .map(|(registry, _)| registry)
+            })
+        })
+        .await;
+        let registry = match registry {
+            Ok(Ok(registry)) => registry,
+            Ok(Err(error)) => return SuccessTuple::fail(error.message),
+            Err(error) => return SuccessTuple::fail(error.to_string()),
+        };
+        let result =
+            meerschaum_worker::pool::callback_scope(registry.callbacks().handle(request)).await;
+        drop(registry);
+        result
+    }
+}
+
+/// PARITY: v4 prints every chunk after the first in addition to the aggregate result.
+fn print_chunk_progress(rt: &mut Runtime<'_>, message: &str) {
+    if !message.starts_with("Synced ") || !message.contains(" succeeded, ") {
+        return;
+    }
+    for chunk in message.split("\n\n") {
+        if chunk.starts_with("Synced a chunk (") || chunk.starts_with("Failed to sync a chunk (") {
+            print_tuple(
+                rt,
+                &SuccessTuple {
+                    success: chunk.starts_with("Synced"),
+                    message: chunk.to_owned(),
+                },
+                TupleArgs {
+                    calm: true,
+                    ..Default::default()
+                },
+            );
+        }
+    }
 }

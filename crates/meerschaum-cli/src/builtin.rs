@@ -118,6 +118,7 @@ pub fn show_version(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 pub fn show_help(_args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let text = format!("{}\n", help::format_help(rt.columns));
     rt.print(&text);
+    crate::python::print_help(rt);
     Ok(SuccessTuple::success())
 }
 
@@ -138,6 +139,15 @@ pub fn show_actions(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         ..options_args(args)
     };
     let mut actions = listed_actions();
+    if let Ok(manifest) = crate::python::manifest(rt) {
+        actions.extend(
+            manifest
+                .plugins
+                .values()
+                .flat_map(|p| &p.actions)
+                .map(|a| a.name.clone()),
+        );
+    }
     if rt.in_shell {
         // PARITY: the shell adds its commands to v4's global `actions` dict
         // (`shell_attrs['_actions']` is that dict), so `show actions` lists them there.
@@ -354,11 +364,6 @@ pub fn show_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     Ok(SuccessTuple::success())
 }
 
-/// The failure tuple for actions the Rust CLI does not run yet.
-pub fn not_implemented(name: &str) -> SuccessTuple {
-    SuccessTuple::fail(format!("action `{name}` is not implemented in Rust yet"))
-}
-
 /// `reload`: a no-op in Rust (every command reads the config fresh).
 pub fn reload(_args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let text = rt.with_formatter(|f| {
@@ -394,7 +399,7 @@ pub fn possible_config_keys(rt: &mut Runtime<'_>) -> Vec<String> {
 /// `edit config [keys...]`: open each key's file in `$EDITOR`, re-read it, then `reload`.
 pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     if flag(args, "rollback") {
-        return Ok(not_implemented("edit config --rollback"));
+        return crate::python::core_action("edit config", args, rt);
     }
     let mut action = words(args, "action");
     if action.is_empty() {
@@ -493,7 +498,7 @@ pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 /// `clear` without a subaction: clear the screen (`clear pipes` needs an instance).
 pub fn clear(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     if !words(args, "action").is_empty() {
-        return Ok(not_implemented("clear"));
+        return crate::python::core_action("clear", args, rt);
     }
     crate::shell::clear_screen(rt, flag(args, "debug"));
     Ok(SuccessTuple::ok(""))

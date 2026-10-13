@@ -735,7 +735,7 @@ impl PySqlConnector {
                 ..Default::default()
             };
             let sql = c.build_data_query(&sp, &state, &q, &opts).await?;
-            Ok(c.read(&sql).await.ok())
+            Ok(c.driver().read_docs_frame(&sql).await.ok())
         })
         .map_err(backend_err)?;
         match df {
@@ -843,10 +843,11 @@ impl PySqlConnector {
             extra,
         };
         let c = self.conn();
+        let cached = cached_columns_types(pipe);
         let (res, p) = {
             let _t = crate::trace::Stage::new("sql: sync_pipe");
             block_on(py, async move {
-                let res = c.sync_pipe_mut(&mut p, frame, &opts).await;
+                let res = c.sync_pipe_mut_cached(&mut p, frame, &opts, cached).await;
                 (res, p)
             })
         };
@@ -1085,7 +1086,18 @@ impl PySqlConnector {
     ) -> PyResult<Bound<'py, PyTuple>> {
         let p = core_pipe(pipe, ParamsView::Resolved)?;
         let c = self.conn();
-        let res = block_on(py, async move { c.partition_pipe(&p, chunk_minutes).await });
+        let (res, patch) = block_on(py, async move {
+            c.partition_pipe_with_parameters(&p, chunk_minutes).await
+        });
+        if !patch.is_empty() {
+            let kw = PyDict::new(py);
+            kw.set_item("persist", false)?;
+            pipe.call_method(
+                "update_parameters",
+                (core_to_py(py, &Value::Map(patch))?,),
+                Some(&kw),
+            )?;
+        }
         success_to_py(py, &res)
     }
 

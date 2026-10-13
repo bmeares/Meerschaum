@@ -25,6 +25,11 @@ meerschaum-sql = { workspace = true }
 meerschaum-valkey = { workspace = true }
 meerschaum-api = { workspace = true, features = ["client"] }
 meerschaum-jobs = { workspace = true }
+meerschaum-worker = { workspace = true }
+meerschaum-engine = { workspace = true }
+meerschaum-server = { workspace = true }
+async-trait = "0.1"
+rmpv = "1"
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }

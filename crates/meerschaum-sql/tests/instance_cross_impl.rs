@@ -1,12 +1,12 @@
 //! Cross-implementation test: the same synthetic pipes are synced by the Python implementation
-//! (`tests/fixtures/cross_impl/cross_impl.py`, run as a subprocess against this repository) into
+//! (`tests/fixtures/cross_impl/cross_impl.py`, run as a subprocess against released v4.1.4) into
 //! one SQLite file and by Rust into another. The test asserts identical schemas (`sqlite_master`
 //! DDL and `PRAGMA table_info`), row counts and stored values (with SQLite storage classes), and
 //! that each implementation reads, syncs into and queries the other's database with the same
 //! results.
 //!
 //! Requires the Python reference environment: `MRSM_TEST_PYTHON` (default
-//! `~/.config/meerschaum/venvs/mrsm/bin/python`). Skips when it is missing.
+//! `.venv-ref/bin/python`). Skips when it is missing.
 
 mod common;
 
@@ -35,8 +35,7 @@ fn python() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("MRSM_TEST_PYTHON") {
         return Some(PathBuf::from(p));
     }
-    let home = std::env::var("HOME").ok()?;
-    let p = Path::new(&home).join(".config/meerschaum/venvs/mrsm/bin/python");
+    let p = repo_root().join(".venv-ref/bin/python");
     p.exists().then_some(p)
 }
 
@@ -61,13 +60,17 @@ impl Py {
 
     fn run(&self, args: &[&str]) -> J {
         let mut cmd = Command::new(&self.exe);
-        cmd.arg(fixtures().join("cross_impl.py"))
+        // Ignore PYTHONPATH for the released reference while keeping it explicit in the
+        // subprocess environment (manual working-tree runs still use the repository path).
+        cmd.args(["-s", "-E"])
+            .arg(fixtures().join("cross_impl.py"))
             .args(args)
             .current_dir(repo_root())
             .env("PYTHONPATH", repo_root())
             .env("MRSM_ROOT_DIR", &self.root_dir)
             .env("MRSM_PLUGINS_DIR", &self.plugins_dir)
-            .env("PYTHONHASHSEED", "0");
+            .env("PYTHONHASHSEED", "0")
+            .env("MRSM_CORE", "python");
         // Database drivers (pyodbc, ...) live in the reference interpreter's own venv.
         if let Some(venvs) = self
             .exe
@@ -79,6 +82,15 @@ impl Py {
                 cmd.env("MRSM_VENVS_DIR", venvs);
             }
         }
+        // Use the reference harness's already prepared dependency environment. A fresh
+        // secondary v4 venv recursively reads config during bootstrap on Python 3.14.
+        if std::env::var_os("MRSM_VENVS_DIR").is_none() {
+            let reference_venvs = repo_root().join(".venv-ref/mrsm_root/venvs");
+            if reference_venvs.join("mrsm").exists() {
+                cmd.env("MRSM_VENVS_DIR", reference_venvs);
+            }
+        }
+        cmd.env("MRSM_NO_AUTO_INSTALL", "1");
         let out = cmd.output().expect("python runs");
         let stdout = String::from_utf8_lossy(&out.stdout);
         let last = stdout
@@ -442,7 +454,7 @@ async fn cross_implementation_sqlite() {
 
 /// The MSSQL variant (`MRSM_TEST_MSSQL_URI`, e.g.
 /// `mssql://sa:<password>@localhost:1439/master`): the four databases of the SQLite test are four
-/// fresh `w4sql_xi_*` schemas (created and dropped by the test), and the dumps list each schema's
+/// fresh `w5sql_xi_*` schemas (created and dropped by the test), and the dumps list each schema's
 /// tables from `information_schema` (column types, rows, indices).
 #[cfg(feature = "mssql")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -471,7 +483,7 @@ async fn cross_implementation_mssql() {
     let sp = scenario_path.to_str().unwrap();
     let base = ConnectionSpec::from_uri(&uri, Some("xi_rs"), None).unwrap();
     let id = &uuid::Uuid::new_v4().simple().to_string()[..8];
-    let schema = |tag: &str| format!("w4sql_xi_{id}_{tag}");
+    let schema = |tag: &str| format!("w5sql_xi_{id}_{tag}");
     let admin = SqlConnector::connect("xi_admin", base.clone())
         .await
         .unwrap();

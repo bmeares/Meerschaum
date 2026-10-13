@@ -2,7 +2,7 @@
 //!
 //! The engine understands the pipe graph, decides which syncs need to run and how wide their
 //! bounds must be, runs independent branches in parallel, and records what happened. This crate
-//! is pure logic written against traits; it holds no instance connector of its own:
+//! runs against connector traits; [`python`] adds the host's shared worker pool and manifest:
 //!
 //! | Module | Spec | What it does |
 //! |---|---|---|
@@ -19,6 +19,7 @@
 //! | [`runs`] | §5.8 | Run history rows and the internal `mrsm:engine_*` pipes |
 //! | [`stream`] | §5.6 | Micro-batching triggers for stream sources |
 //! | [`viz`] | §5.9 | The static ASCII Gantt chart and DAG listing |
+//! | [`python`] | §4.2, §4.4 | Python connector, hook, callback and stream adapters over the host's worker pool |
 //! | [`registry`] | §4.4, D11 | [`ConnectorRegistry`]: how the engine reaches connectors and plugin seams |
 //! | [`sync`] | §5.4, R1 | The native `Pipe.sync()` flow over the connector traits |
 //! | [`native`] | §5.5, D11 | [`NativeExecutor`]: the [`SyncExecutor`] that runs planned nodes, ledger first |
@@ -42,6 +43,7 @@ pub mod ledger;
 pub mod native;
 pub mod node;
 pub mod plan;
+pub mod python;
 pub mod registry;
 pub mod runs;
 pub mod schedule;

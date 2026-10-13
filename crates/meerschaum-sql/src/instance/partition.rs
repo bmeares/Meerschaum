@@ -355,6 +355,30 @@ impl SqlConnector {
     /// `partition_pipe(pipe, chunk_minutes)`: rebuild the target table at a new partition width
     /// (TimescaleDB: `set_chunk_time_interval` for future chunks).
     pub async fn partition_pipe(&self, pipe: &Pipe, chunk_minutes: Option<i64>) -> SuccessTuple {
+        self.partition_pipe_with_parameters(pipe, chunk_minutes)
+            .await
+            .0
+    }
+
+    /// Return the parameter patch applied during repartitioning, including on a later failure.
+    pub async fn partition_pipe_with_parameters(
+        &self,
+        pipe: &Pipe,
+        chunk_minutes: Option<i64>,
+    ) -> (SuccessTuple, Map) {
+        let mut changed = Map::new();
+        let result = self
+            .partition_pipe_inner(pipe, chunk_minutes, &mut changed)
+            .await;
+        (result, changed)
+    }
+
+    async fn partition_pipe_inner(
+        &self,
+        pipe: &Pipe,
+        chunk_minutes: Option<i64>,
+        changed: &mut Map,
+    ) -> SuccessTuple {
         let flavor = self.flavor;
         if !(flavor.partitionable() || flavor.is_timescaledb()) {
             return SuccessTuple::fail(format!(
@@ -415,6 +439,7 @@ impl SqlConnector {
             let interval =
                 sp.chunk_interval_with(ChunkIntervalArg::Delta(TimeDelta::minutes(new_minutes)));
             let mut updated = pipe.clone();
+            *changed = patch.clone();
             updated.update_parameters(patch);
             let _ = self.edit_pipe(&updated, false).await;
             let desc = match interval {
@@ -452,6 +477,7 @@ impl SqlConnector {
             }
         };
         let mut updated = pipe.clone();
+        *changed = patch.clone();
         updated.update_parameters(patch);
         if !updated.temporary {
             let res = self.edit_pipe(&updated, false).await;

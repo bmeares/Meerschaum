@@ -170,6 +170,8 @@ fn truncation_matches_python() {
 }
 
 #[test]
+// The lazy parameter cache is excluded from both equality and hashing.
+#[allow(clippy::mutable_key_type)]
 fn equality_and_hash_use_keys_only() {
     use std::collections::HashSet;
     let a = Pipe::builder("sql:main", "m")
@@ -185,4 +187,8 @@ fn equality_and_hash_use_keys_only() {
     assert_ne!(a, c);
     let set: HashSet<Pipe> = [a, b, c].into_iter().collect();
     assert_eq!(set.len(), 2);
+    for pipe in &set {
+        let _ = pipe.parameters();
+    }
+    assert!(set.contains(&Pipe::new("sql:main", "m").unwrap()));
 }

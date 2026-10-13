@@ -1,0 +1,268 @@
+{
+  "plugins": {
+    "wiring.py": "from meerschaum.actions import make_action\nfrom meerschaum._internal.arguments import add_plugin_argument\nfrom meerschaum.connectors import Connector, make_connector\n@make_connector\nclass WiringfeedConnector(Connector):\n    REQUIRED_ATTRIBUTES = []\n    def fetch(self, pipe, **kw):\n        return [{'id': 6, 'val': 60}]\nadd_plugin_argument('--wiring-count', type=int, default=2, help='Synthetic row count.')\n@make_action\ndef wiring_echo(action=None, wiring_count=2, **kw):\n    print('wiring output: ' + ' '.join(action or []))\n    return True, 'count=' + str(wiring_count)\ndef _complete_wiring_echo(action=None, **kw):\n    return ['alpha', 'beta']\n@make_action\ndef wiring_write(mrsm_instance='sql:local', **kw):\n    import meerschaum as mrsm\n    pipe = mrsm.Pipe('plugin:wiring', 'wiring_action', instance=mrsm_instance, parameters={'columns': {'id': 'id'}, 'target': 'wiring_action'})\n    result = pipe.sync([{'id': 5, 'val': 50}])\n    return result[0], 'Synthetic action callback complete.'\ndef fetch(pipe, **kw):\n    return [{'id': 1, 'val': 10}, {'id': 2, 'val': 20}]\ndef setup(**kw):\n    return True, 'Synthetic setup complete.'\n",
+    "wiring_sync.py": "def sync(pipe, **kw):\n    result = pipe.sync([{'id': 3, 'val': 30}, {'id': 4, 'val': 40}])\n    return result[0], 'Synthetic callback complete.'\n",
+    "wk_custom/__init__.py": "#! /usr/bin/env python3\n# -*- coding: utf-8 -*-\n\n\"\"\"\nWorker test plugin: custom connectors.\n\n- `wkfeed:<label>`: a plain connector with `fetch()`.\n- `wkmem:<label>`: an `IS_INSTANCE = True` connector storing pipes as JSON files (one per label) under the root\n  directory, so every worker process sees the same data.\n- `wkstream:<label>`: an `IS_STREAMING = True` connector with `subscribe(pipe, sink)`.\n\"\"\"\n\n__version__ = '0.3.0'\n\nfrom ._impl import WkfeedConnector, WkmemConnector, WkstreamConnector  # noqa: F401\n",
+    "wk_custom/_impl.py": "#! /usr/bin/env python3\n# -*- coding: utf-8 -*-\n\n\"\"\"The custom connectors of the `wk_custom` test plugin.\"\"\"\n\nimport json\nimport os\nimport pathlib\nfrom datetime import datetime, timezone, timedelta\n\nimport meerschaum as mrsm\nfrom meerschaum.connectors import make_connector, Connector, InstanceConnector\n\n\n@make_connector\nclass WkfeedConnector(Connector):\n    \"\"\"A plain custom connector with `fetch()`.\"\"\"\n\n    REQUIRED_ATTRIBUTES = []\n\n    def fetch(self, pipe, begin=None, end=None, **kwargs):\n        base = datetime(2024, 4, 1, tzinfo=timezone.utc)\n        return [\n            {'ts': base + timedelta(hours=i), 'sensor': self.label, 'reading': i * 10}\n            for i in range(4)\n        ]\n\n\ndef _store_path(label: str) -> pathlib.Path:\n    import meerschaum.config.paths as paths\n    return pathlib.Path(paths.ROOT_DIR_PATH) / f'wkmem_{label}.json'\n\n\ndef _load(label: str) -> dict:\n    path = _store_path(label)\n    if not path.exists():\n        return {'pipes': {}, 'next_id': 1}\n    with open(path, 'r', encoding='utf-8') as f:\n        return json.load(f)\n\n\ndef _save(label: str, store: dict) -> None:\n    path = _store_path(label)\n    tmp = path.with_suffix('.tmp')\n    with open(tmp, 'w', encoding='utf-8') as f:\n        json.dump(store, f, default=str)\n    os.replace(tmp, path)\n\n\ndef _key(pipe) -> str:\n    return f\"{pipe.connector_keys}|{pipe.metric_key}|{pipe.location_key}\"\n\n\n@make_connector\nclass WkmemConnector(InstanceConnector):\n    \"\"\"A file-backed instance connector.\"\"\"\n\n    IS_INSTANCE = True\n    REQUIRED_ATTRIBUTES = []\n\n    def register_pipe(self, pipe, debug=False, **kwargs):\n        store = _load(self.label)\n        key = _key(pipe)\n        if key in store['pipes']:\n            return False, f\"{pipe} is already registered.\"\n        store['pipes'][key] = {\n            'pipe_id': store['next_id'],\n            'connector_keys': pipe.connector_keys,\n            'metric_key': pipe.metric_key,\n            'location_key': pipe.location_key,\n            'parameters': pipe._attributes.get('parameters', {}),\n            'rows': [],\n        }\n        store['next_id'] += 1\n        _save(self.label, store)\n        return True, \"Success\"\n\n    def get_pipe_attributes(self, pipe, debug=False, **kwargs):\n        doc = _load(self.label)['pipes'].get(_key(pipe), None)\n        if doc is None:\n            return {}\n        return {k: v for k, v in doc.items() if k != 'rows'}\n\n    def get_pipe_id(self, pipe, debug=False, **kwargs):\n        doc = _load(self.label)['pipes'].get(_key(pipe), None)\n        return doc['pipe_id'] if doc else None\n\n    def edit_pipe(self, pipe, debug=False, **kwargs):\n        store = _load(self.label)\n        doc = store['pipes'].get(_key(pipe), None)\n        if doc is None:\n            return False, f\"{pipe} is not registered.\"\n        doc['parameters'] = pipe._attributes.get('parameters', {})\n        _save(self.label, store)\n        return True, \"Success\"\n\n    def delete_pipe(self, pipe, debug=False, **kwargs):\n        store = _load(self.label)\n        store['pipes'].pop(_key(pipe), None)\n        _save(self.label, store)\n        return True, \"Success\"\n\n    def fetch_pipes_keys(self, connector_keys=None, metric_keys=None, location_keys=None,\n                         tags=None, params=None, debug=False, **kwargs):\n        keys = []\n        for doc in _load(self.label)['pipes'].values():\n            if connector_keys and doc['connector_keys'] not in connector_keys:\n                continue\n            if metric_keys and doc['metric_key'] not in metric_keys:\n                continue\n            keys.append((doc['connector_keys'], doc['metric_key'], doc['location_key']))\n        return keys\n\n    def pipe_exists(self, pipe, debug=False, **kwargs):\n        doc = _load(self.label)['pipes'].get(_key(pipe), None)\n        return bool(doc and doc['rows'])\n\n    def drop_pipe(self, pipe, debug=False, **kwargs):\n        store = _load(self.label)\n        doc = store['pipes'].get(_key(pipe), None)\n        if doc is not None:\n            doc['rows'] = []\n            _save(self.label, store)\n        return True, \"Success\"\n\n    def sync_pipe(self, pipe, df=None, check_existing=True, debug=False, **kwargs):\n        store = _load(self.label)\n        doc = store['pipes'].setdefault(_key(pipe), {\n            'pipe_id': store['next_id'],\n            'connector_keys': pipe.connector_keys,\n            'metric_key': pipe.metric_key,\n            'location_key': pipe.location_key,\n            'parameters': {},\n            'rows': [],\n        })\n        records = json.loads(df.to_json(orient='records', date_format='iso', date_unit='us'))\n        doc['rows'].extend(records)\n        _save(self.label, store)\n        return True, f\"Inserted {len(records)} rows (check_existing={check_existing}).\"\n\n    def clear_pipe(self, pipe, begin=None, end=None, params=None, debug=False, **kwargs):\n        store = _load(self.label)\n        doc = store['pipes'].get(_key(pipe), None)\n        if doc is not None:\n            doc['rows'] = []\n            _save(self.label, store)\n        return True, \"Success\"\n\n    def get_pipe_data(self, pipe, select_columns=None, omit_columns=None, begin=None, end=None,\n                      params=None, debug=False, **kwargs):\n        import pandas as pd\n        doc = _load(self.label)['pipes'].get(_key(pipe), None)\n        if doc is None:\n            return None\n        df = pd.DataFrame(doc['rows'])\n        dt_col = pipe.columns.get('datetime', None)\n        if dt_col and dt_col in df.columns:\n            df[dt_col] = pd.to_datetime(df[dt_col], utc=True)\n            if begin is not None:\n                df = df[df[dt_col] >= begin]\n            if end is not None:\n                df = df[df[dt_col] < end]\n        return df.reset_index(drop=True)\n\n    def get_sync_time(self, pipe, params=None, newest=True, debug=False, **kwargs):\n        df = self.get_pipe_data(pipe)\n        dt_col = pipe.columns.get('datetime', None)\n        if df is None or df.empty or not dt_col:\n            return None\n        value = df[dt_col].max() if newest else df[dt_col].min()\n        return value.to_pydatetime()\n\n    def get_pipe_rowcount(self, pipe, begin=None, end=None, params=None, remote=False,\n                          debug=False, **kwargs):\n        df = self.get_pipe_data(pipe, begin=begin, end=end)\n        return 0 if df is None else len(df)\n\n    def get_pipe_columns_types(self, pipe, debug=False, **kwargs):\n        return {}\n\n\n@make_connector\nclass WkstreamConnector(Connector):\n    \"\"\"A streaming connector (`IS_STREAMING = True`) pushing batches into the engine's sink.\"\"\"\n\n    IS_STREAMING = True\n    REQUIRED_ATTRIBUTES = []\n\n    def subscribe(self, pipe, sink, **kwargs):\n        base = datetime(2024, 6, 1, tzinfo=timezone.utc)\n        results = []\n        for i in range(3):\n            results.append(sink([{'dt': base + timedelta(minutes=i), 'id': 1, 'val': i}]))\n        failed = [msg for success, msg in results if not success]\n        if failed:\n            return False, '\\n'.join(failed)\n        return True, f\"pushed {len(results)} batches\"\n"
+  },
+  "steps": [
+    {
+      "args": [
+        "wiring",
+        "echo",
+        "hello",
+        "--wiring-count",
+        "3",
+        "-i",
+        "sql:local"
+      ],
+      "rc": 0,
+      "stdout": "wiring output: hello\n\n + count=3\n\n",
+      "stderr": "",
+      "compare": [
+        "rc",
+        "stdout"
+      ]
+    },
+    {
+      "args": [
+        "setup",
+        "plugins",
+        "wiring",
+        "--noask"
+      ],
+      "rc": 0,
+      "stdout": "\n + Completed setting up 1 plugins\n    (1 succeeded, 0 failed).\n\n",
+      "stderr": "",
+      "compare": [
+        "rc",
+        "stdout"
+      ]
+    },
+    {
+      "args": [
+        "wiring",
+        "write",
+        "-i",
+        "sql:local"
+      ],
+      "rc": 0,
+      "stdout": "\n + Synthetic action callback complete.\n\n",
+      "stderr": "",
+      "compare": [
+        "rc",
+        "stdout"
+      ]
+    },
+    {
+      "args": [
+        "register",
+        "pipes",
+        "-c",
+        "wiringfeed:source",
+        "-m",
+        "wiring_custom",
+        "-i",
+        "sql:local",
+        "--params",
+        "{\"columns\":{\"id\":\"id\"},\"target\":\"wiring_custom\"}"
+      ],
+      "rc": 0,
+      "stdout": "\n + Successfully registered 1 pipe.\n\n",
+      "stderr": "",
+      "compare": [
+        "rc",
+        "stdout"
+      ]
+    },
+    {
+      "args": [
+        "sync",
+        "pipes",
+        "-c",
+        "wiringfeed:source",
+        "-i",
+        "sql:local",
+        "--nopretty",
+        "-w",
+        "1"
+      ],
+      "rc": 0,
+      "stdout": "\n{\"pipe\": {\"connector_keys\": \"wiringfeed:source\", \"metric_key\": \"wiring_custom\", \"location_key\": null, \"instance_keys\": \"sql:local\"}, \"success\": true, \"message\": \"Inserted 1, updated 0 rows.\"}\n",
+      "stderr": "",
+      "compare": [
+        "rc"
+      ]
+    },
+    {
+      "args": [
+        "register",
+        "pipes",
+        "-c",
+        "plugin:wiring_sync",
+        "-m",
+        "wiring_instance",
+        "-i",
+        "wkmem:wiring",
+        "--params",
+        "{\"columns\":{\"id\":\"id\"}}"
+      ],
+      "rc": 0,
+      "stdout": "\n + Successfully registered 1 pipe.\n\n",
+      "stderr": "",
+      "compare": [
+        "rc",
+        "stdout"
+      ]
+    },
+    {
+      "args": [
+        "sync",
+        "pipes",
+        "-i",
+        "wkmem:wiring",
+        "--nopretty",
+        "-w",
+        "1"
+      ],
+      "rc": 0,
+      "stdout": "\n{\"pipe\": {\"connector_keys\": \"plugin:wiring_sync\", \"metric_key\": \"wiring_instance\", \"location_key\": null, \"instance_keys\": \"wkmem:wiring\"}, \"success\": true, \"message\": \"Synthetic callback complete.\"}\n",
+      "stderr": "",
+      "compare": [
+        "rc"
+      ]
+    },
+    {
+      "args": [
+        "sync",
+        "pipes",
+        "-c",
+        "plugin:wiring",
+        "-i",
+        "sql:local",
+        "--nopretty",
+        "-w",
+        "1"
+      ],
+      "rc": 0,
+      "stdout": "\n{\"pipe\": {\"connector_keys\": \"plugin:wiring\", \"metric_key\": \"wiring_action\", \"location_key\": null, \"instance_keys\": \"sql:local\"}, \"success\": true, \"message\": \"Inserted 2, updated 0 rows.\"}\n{\"pipe\": {\"connector_keys\": \"plugin:wiring\", \"metric_key\": \"wiring_fetch\", \"location_key\": null, \"instance_keys\": \"sql:local\"}, \"success\": true, \"message\": \"Inserted 2, updated 0 rows.\"}\n",
+      "stderr": "",
+      "compare": [
+        "rc"
+      ]
+    },
+    {
+      "args": [
+        "sync",
+        "pipes",
+        "-c",
+        "plugin:wiring_sync",
+        "-i",
+        "sql:local",
+        "--nopretty",
+        "-w",
+        "1"
+      ],
+      "rc": 0,
+      "stdout": "\n{\"pipe\": {\"connector_keys\": \"plugin:wiring_sync\", \"metric_key\": \"wiring_callback\", \"location_key\": null, \"instance_keys\": \"sql:local\"}, \"success\": true, \"message\": \"Synthetic callback complete.\"}\n",
+      "stderr": "",
+      "compare": [
+        "rc"
+      ]
+    },
+    {
+      "args": [
+        "sync",
+        "pipes",
+        "-m",
+        "wiring_fetch",
+        "wiring_child",
+        "-i",
+        "sql:local",
+        "--nopretty",
+        "-w",
+        "1"
+      ],
+      "rc": 0,
+      "stdout": "\n{\"pipe\": {\"connector_keys\": \"plugin:wiring\", \"metric_key\": \"wiring_fetch\", \"location_key\": null, \"instance_keys\": \"sql:local\"}, \"success\": true, \"message\": \"Inserted 0, updated 0 rows.\"}\n{\"pipe\": {\"connector_keys\": \"sql:local\", \"metric_key\": \"wiring_child\", \"location_key\": null, \"instance_keys\": \"sql:local\"}, \"success\": true, \"message\": \"Inserted 2, updated 0 rows.\"}\n",
+      "stderr": "",
+      "compare": [
+        "rc"
+      ],
+      "rust_args": [
+        "sync",
+        "pipes",
+        "-m",
+        "wiring_child",
+        "-i",
+        "sql:local",
+        "--parents",
+        "--nopretty",
+        "-w",
+        "1"
+      ]
+    }
+  ],
+  "tables": {
+    "wiring_fetch": [
+      [
+        1,
+        10
+      ],
+      [
+        2,
+        20
+      ]
+    ],
+    "wiring_callback": [
+      [
+        3,
+        30
+      ],
+      [
+        4,
+        40
+      ]
+    ],
+    "wiring_action": [
+      [
+        1,
+        10
+      ],
+      [
+        2,
+        20
+      ],
+      [
+        5,
+        50
+      ]
+    ],
+    "wiring_child": [
+      [
+        1,
+        20
+      ],
+      [
+        2,
+        40
+      ]
+    ],
+    "wiring_custom": [
+      [
+        6,
+        60
+      ]
+    ]
+  },
+  "instance_rows": [
+    {
+      "id": 3,
+      "val": 30
+    },
+    {
+      "id": 4,
+      "val": 40
+    }
+  ]
+}

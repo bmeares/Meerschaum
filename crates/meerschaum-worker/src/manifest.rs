@@ -25,7 +25,7 @@ use crate::protocol::{Msg, wire_to_json};
 use crate::worker::CallOptions;
 
 /// The manifest schema version.
-pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 /// The manifest file name under the cache directory.
 pub const MANIFEST_FILE_NAME: &str = "plugins_manifest.json";
@@ -43,6 +43,9 @@ pub struct ActionManifest {
     /// `make_action(daemon=...)`: whether `-d` may detach it.
     #[serde(default = "default_true")]
     pub daemon: bool,
+    /// Whether the plugin defines a custom action completer.
+    #[serde(default)]
+    pub has_completer: bool,
     /// Subactions defined in the plugin module (`<action>_<sub>`).
     #[serde(default)]
     pub subactions: Vec<SubactionManifest>,
@@ -498,6 +501,13 @@ pub fn stale_plugins(manifest: &Manifest, plugins_dirs: &[PathBuf]) -> (bool, Ve
 pub async fn build_manifest(pool: &WorkerPool, plugins_dirs: &[PathBuf]) -> WorkerResult<Manifest> {
     // Fingerprint first: a plugin edited while the worker imports it is rebuilt next time.
     let (combined, per_plugin) = fingerprint(plugins_dirs);
+    if per_plugin.is_empty() {
+        return Ok(Manifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            fingerprint: Some(combined),
+            ..Manifest::default()
+        });
+    }
     let worker = pool.spawn_worker().await?;
     let reply = worker
         .call(
@@ -515,6 +525,7 @@ pub async fn build_manifest(pool: &WorkerPool, plugins_dirs: &[PathBuf]) -> Work
     let json = wire_to_json(&reply.value);
     let mut manifest: Manifest = serde_json::from_value(json)
         .map_err(|e| WorkerError::Protocol(format!("invalid manifest from the worker: {e}")))?;
+    manifest.schema_version = MANIFEST_SCHEMA_VERSION;
     manifest.fingerprint = Some(combined);
     for (name, info) in manifest.plugins.iter_mut() {
         info.fingerprint = per_plugin.get(name).cloned();
@@ -554,6 +565,25 @@ pub async fn ensure_manifest(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn empty_manifest_never_starts_python() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = tempfile::tempdir().unwrap();
+        let mut config = crate::PoolConfig::default();
+        config.worker.python = root.path().join("python-does-not-exist");
+        let pool = WorkerPool::new(config);
+        let path = manifest_path(root.path());
+        let dirs = vec![plugins.path().to_path_buf()];
+        let (manifest, source) = ensure_manifest(&pool, &path, &dirs).await.unwrap();
+        assert!(manifest.plugins.is_empty());
+        assert_eq!(source, ManifestSource::Built);
+        assert_eq!(
+            ensure_manifest(&pool, &path, &dirs).await.unwrap().1,
+            ManifestSource::Cache
+        );
+        assert_eq!(pool.stats().spawned, 0);
+    }
 
     #[test]
     fn fingerprint_tracks_changes() {

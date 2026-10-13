@@ -83,7 +83,19 @@ pub enum ConfigError {
 pub fn default_config(root_dir: &str, cpu_count: i64, windows: bool) -> Map {
     let raw = Value::from_json_str(DEFAULT_CONFIG_JSON).expect("embedded default_config.json");
     match resolve_default_markers(raw, root_dir, cpu_count, windows) {
-        Value::Map(m) => m,
+        Value::Map(mut m) => {
+            if let Some(Value::Map(system)) = m.get_mut("system") {
+                system.insert(
+                    "engine".into(),
+                    Value::Map(Map::from([
+                        ("python_workers".into(), Value::Int(cpu_count.clamp(1, 4))),
+                        ("inclusive_cap".into(), Value::Bool(true)),
+                        ("flat_ledger".into(), Value::Bool(true)),
+                    ])),
+                );
+            }
+            m
+        }
         _ => Map::new(),
     }
 }

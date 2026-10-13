@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use meerschaum_core::dtypes::get_pd_type_from_db_type;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 
-use crate::dateadd::{DateArg, Number, dateadd_str};
+use crate::dateadd::{DateArg, Number, dateadd_for_execution as dateadd_str};
 use crate::driver::{SqlTransaction, SqlValue};
 use crate::dtypes::get_db_type_from_pd_type;
 use crate::flavor::{DriverFamily, Flavor};

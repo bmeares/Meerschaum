@@ -42,6 +42,8 @@ pub struct WorkerOptions {
     pub startup_timeout: Duration,
     /// Where to create the socket directory (default: the system temporary directory).
     pub socket_dir: Option<PathBuf>,
+    /// Allow interactive CLI actions to read the host terminal. Servers leave this disabled.
+    pub inherit_stdin: bool,
     /// Discard the worker's stdout / stderr instead of inheriting them.
     pub quiet: bool,
     /// The defaults used to rebuild pipes sent back by the worker.
@@ -69,6 +71,7 @@ impl Default for WorkerOptions {
             startup_timeout: Duration::from_secs(60),
             socket_dir: None,
             quiet: false,
+            inherit_stdin: false,
             pipe_defaults: PipeDefaults::default(),
         }
     }
@@ -179,11 +182,18 @@ impl Worker {
     pub async fn spawn(opts: &WorkerOptions) -> WorkerResult<Worker> {
         let listener = Listener::bind(opts.socket_dir.as_deref())?;
         let mut cmd = Command::new(&opts.python);
-        cmd.arg("-m")
-            .arg(&opts.module)
-            .arg("--socket")
+        if opts.module == "meerschaum.worker" {
+            cmd.arg("-c").arg(include_str!("../python/host.py"));
+        } else {
+            cmd.arg("-m").arg(&opts.module);
+        }
+        cmd.arg("--socket")
             .arg(listener.address())
-            .stdin(Stdio::null())
+            .stdin(if opts.inherit_stdin {
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            })
             .kill_on_drop(true);
         if opts.quiet {
             cmd.stdout(Stdio::null()).stderr(Stdio::null());

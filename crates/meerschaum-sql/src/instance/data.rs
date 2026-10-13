@@ -15,7 +15,7 @@ use meerschaum_kernel::enforce::{
 };
 use meerschaum_kernel::value::DateTimeValue;
 
-use crate::dateadd::{DateArg, Number, dateadd_str};
+use crate::dateadd::{DateArg, Number, dateadd_for_execution as dateadd_str};
 use crate::dtypes::get_db_type_from_pd_type;
 use crate::flavor::Flavor;
 use crate::ident::sql_item_name;
@@ -620,7 +620,27 @@ impl SqlConnector {
         if !state.exists {
             return Ok(None);
         }
-        self.get_pipe_data_with_state(&sp, &state, query).await
+        self.get_pipe_data_with_state(&sp, &state, query, &DataQueryOptions::default())
+            .await
+    }
+
+    /// Raw database documents, matching v4's result.mappings() (no pipe dtype enforcement).
+    pub async fn get_pipe_docs(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Vec<IndexMap<String, meerschaum_kernel::Value>>> {
+        let sp = self.sql_pipe(pipe)?;
+        let state = self.pipe_state(&sp).await;
+        if !state.exists {
+            return Ok(Vec::new());
+        }
+        let sql = self
+            .build_data_query(&sp, &state, query, &DataQueryOptions::default())
+            .await?;
+        self.log(&sql);
+        let df = self.driver.read_docs_frame(&sql).await.map_err(be)?;
+        Ok(super::frame_docs(&df))
     }
 
     pub(crate) async fn get_pipe_data_with_state(
@@ -628,10 +648,9 @@ impl SqlConnector {
         sp: &SqlPipe,
         state: &PipeState,
         query: &DataQuery,
+        options: &DataQueryOptions,
     ) -> ConnectorResult<Option<Frame>> {
-        let sql = self
-            .build_data_query(sp, state, query, &DataQueryOptions::default())
-            .await?;
+        let sql = self.build_data_query(sp, state, query, options).await?;
         let df = self.read(&sql).await.map_err(be)?;
 
         // `Pipe.get_data()`: keep the requested columns, add missing ones as nulls.
@@ -689,9 +708,18 @@ impl SqlConnector {
                 }
             }
         }
-        Ok(Some(meerschaum_connector::pipe_ops::pipe_postprocess(
-            sp, df, query,
-        )))
+        if options.no_order {
+            if let Some(limit) = query.limit {
+                if df.height() > limit.max(0) as usize {
+                    df = df.take(&(0..limit.max(0) as usize).collect::<Vec<_>>());
+                }
+            }
+            Ok(Some(df))
+        } else {
+            Ok(Some(meerschaum_connector::pipe_ops::pipe_postprocess(
+                sp, df, query,
+            )))
+        }
     }
 
     /// `Pipe.get_data(as_iterator=True)`: the data in chunks of `get_chunk_bounds`
@@ -778,7 +806,7 @@ impl SqlConnector {
                 ..query.clone()
             };
             return Ok(self
-                .get_pipe_data_with_state(&sp, &state, &q)
+                .get_pipe_data_with_state(&sp, &state, &q, &DataQueryOptions::default())
                 .await?
                 .into_iter()
                 .collect());
@@ -792,7 +820,10 @@ impl SqlConnector {
                 end: e,
                 ..query.clone()
             };
-            if let Some(chunk) = self.get_pipe_data_with_state(&sp, &state, &q).await? {
+            if let Some(chunk) = self
+                .get_pipe_data_with_state(&sp, &state, &q, &DataQueryOptions::default())
+                .await?
+            {
                 if chunk.height() > 0 {
                     out.push(chunk);
                 }
@@ -840,7 +871,8 @@ impl SqlConnector {
             order: Some(query.order.clone().unwrap_or_else(|| "desc".into())),
             ..query.clone()
         };
-        self.get_pipe_data_with_state(&sp, &state, &q).await
+        self.get_pipe_data_with_state(&sp, &state, &q, &DataQueryOptions::default())
+            .await
     }
 
     /// `get_sync_time(pipe, params, newest, remote)`: the newest (or oldest) datetime-axis
@@ -869,7 +901,11 @@ impl SqlConnector {
     ) -> Option<DateBound> {
         let query = self.get_sync_time_query(sp, state, params, newest)?;
         let v = self.value(&query).await?;
-        sync_time_from_sql(&v)
+        let bound = sync_time_from_sql(&v)?;
+        // PARITY: v4 restores the pipe timezone after parsing SQLite's raw timestamp text.
+        self.parse_date_bound(sp, &state.dtypes, Some(bound))
+            .ok()
+            .flatten()
     }
 
     /// The query `get_sync_time(pipe, params, newest)` executes (`None` when the pipe has no
@@ -965,7 +1001,6 @@ impl SqlConnector {
         args.params = params_map.as_ref();
         args.begin = crate::queries::metadef::Bound::None;
         args.end = crate::queries::metadef::Bound::None;
-        let _ = state;
         let Some(src_query) =
             crate::queries::metadef::get_pipe_metadef(self.flavor, &args).map_err(be)?
         else {
@@ -976,10 +1011,14 @@ impl SqlConnector {
         let query = self
             .sync_time_query(sp, &dt_col, &src_query, newest, self.flavor, true)
             .map_err(be)?;
-        Ok(self
+        let bound = self
             .value(&query)
             .await
-            .and_then(|v| sync_time_from_sql(&v)))
+            .and_then(|v| sync_time_from_sql(&v));
+        Ok(self
+            .parse_date_bound(sp, &state.dtypes, bound)
+            .ok()
+            .flatten())
     }
 
     /// `get_pipe_rowcount(pipe, begin, end, params, remote)`.
@@ -1151,6 +1190,11 @@ impl SqlConnector {
         };
         let schema = self.get_pipe_schema(&sp);
         let target_name = self.pipe_table_name(&sp);
+        self.state
+            .lock()
+            .expect("state")
+            .internal_pipe_states
+            .remove(&target_name);
         let mut success = true;
         if self.table_exists(&sp.target, schema.as_deref()).await {
             let if_exists = if self.flavor.drop_if_exists() {

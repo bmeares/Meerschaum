@@ -849,17 +849,47 @@ pub fn completion_data(state: &ShellState, rt: &mut Runtime<'_>) -> completer::C
             })
             .collect()
     };
-    completer::CompletionData {
+    let mut data = completer::CompletionData {
         connectors,
-        // Data plugins need the plugin manifest (`fetch` / `sync` per plugin); see the seam
-        // in `completer`.
         data_plugins: Vec::new(),
         plugin_names,
         config_keys,
         executor_keys: remove_ansi(&state.executor_keys),
         jobs: Some(std::sync::Arc::new(jobs)),
         ..completer::CompletionData::default()
+    };
+    if let Ok(manifest) = crate::python::manifest(rt) {
+        data.plugin_actions = manifest
+            .plugins
+            .values()
+            .flat_map(|p| p.actions.clone())
+            .collect();
+        data.plugin_arguments = manifest
+            .plugins
+            .values()
+            .flat_map(|p| p.arguments.clone())
+            .collect();
+        data.do_names
+            .extend(data.plugin_actions.iter().map(|a| a.name.clone()));
+        data.do_names.sort();
+        data.do_names.dedup();
+        data.data_plugins = manifest
+            .plugins
+            .values()
+            .filter(|p| {
+                p.data_functions
+                    .iter()
+                    .any(|f| matches!(f.as_str(), "fetch" | "sync"))
+            })
+            .map(|p| format!("plugin:{}", p.name))
+            .collect();
+        let session = crate::native::session(rt);
+        let pool = session.pool(rt.config());
+        data.plugins = Some(std::sync::Arc::new(crate::python::Completer::new(
+            session, pool, manifest,
+        )));
     }
+    data
 }
 
 /// The toolbar values for the session (`bottom_toolbar()`'s inputs).

@@ -144,6 +144,14 @@ impl InstanceConnector for SqlConnector {
         SqlConnector::get_pipe_data(self, pipe, query).await
     }
 
+    async fn get_pipe_docs(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+    ) -> ConnectorResult<Vec<IndexMap<String, meerschaum_kernel::Value>>> {
+        SqlConnector::get_pipe_docs(self, pipe, query).await
+    }
+
     async fn get_backtrack_data(
         &self,
         pipe: &Pipe,
@@ -227,6 +235,19 @@ impl InstanceConnector for SqlConnector {
 
     async fn analyze_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         SqlConnector::analyze_pipe(self, pipe).await
+    }
+
+    async fn acquire_pipe_lease(
+        &self,
+        pipe: &Pipe,
+        holder: &str,
+        ttl: std::time::Duration,
+    ) -> ConnectorResult<bool> {
+        SqlConnector::acquire_pipe_lease(self, pipe, holder, ttl).await
+    }
+
+    async fn release_pipe_lease(&self, pipe: &Pipe, holder: &str) -> ConnectorResult<bool> {
+        SqlConnector::release_pipe_lease(self, pipe, holder).await
     }
 
     async fn partition_pipe(&self, pipe: &Pipe, chunk_minutes: Option<i64>) -> SuccessTuple {

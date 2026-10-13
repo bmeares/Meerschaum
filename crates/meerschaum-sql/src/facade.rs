@@ -11,15 +11,14 @@ use indexmap::IndexMap;
 use meerschaum_connector::{ConnectorResult, DataQuery, DateBound, SyncOptions};
 use meerschaum_core::{Map, Pipe, SyncResult};
 use meerschaum_kernel::Frame;
-use meerschaum_kernel::enforce::{PipeInput, pipe_enforce_dtypes};
 
+use crate::instance::SqlConnector;
 use crate::instance::data::{DataQueryOptions, PipeState, pipe_dtypes};
 use crate::instance::sync::InternalSync;
-use crate::instance::{SqlConnector, be};
 use crate::pipe::SqlPipe;
 
 /// `MRSM_CORE_TRACE=1`: per-stage timings on stderr (same format as the bindings' tracer).
-fn trace(stage: &str, start: Instant) {
+pub(crate) fn trace(stage: &str, start: Instant) {
     if std::env::var_os("MRSM_CORE_TRACE").is_some() {
         eprintln!(
             "[trace] {:<50} {:9.2} ms",
@@ -103,7 +102,26 @@ impl SqlConnector {
         df: Frame,
         opts: &SyncOptions,
     ) -> SyncResult {
+        self.sync_pipe_mut_cached(pipe, df, opts, None).await
+    }
+
+    /// Sync using table metadata already cached by the caller. Schema changes refresh it.
+    pub async fn sync_pipe_mut_cached(
+        &self,
+        pipe: &mut Pipe,
+        df: Frame,
+        opts: &SyncOptions,
+        cached: Option<IndexMap<String, String>>,
+    ) -> SyncResult {
+        let cached_state = match cached.filter(|c| !c.is_empty()) {
+            Some(c) => match self.sql_pipe(pipe) {
+                Ok(sp) => Some(self.pipe_state_cached(&sp, Some(c)).await),
+                Err(e) => return SyncResult::new(false, e.to_string()),
+            },
+            None => None,
+        };
         let internal = InternalSync {
+            cached_state,
             new_special_cols: opts
                 .extra
                 .get("new_special_cols")
@@ -121,8 +139,7 @@ impl SqlConnector {
     /// [`pipe_state_cached`](SqlConnector::pipe_state_cached)).
     ///
     /// `no_order` is v4's `order=None`: no `ORDER BY` and no sort (the rows come back in the
-    /// database's order), where `get_pipe_data` treats a missing order as `'asc'`. The body
-    /// follows `get_pipe_data_with_state` (keep the two in step).
+    /// database's order), where `get_pipe_data` treats a missing order as `'asc'`. The implementation is shared with `get_pipe_data_with_state`.
     pub async fn get_pipe_data_and_state(
         &self,
         pipe: &Pipe,
@@ -139,67 +156,9 @@ impl SqlConnector {
             no_order,
             ..Default::default()
         };
-        let start = Instant::now();
-        let sql = self.build_data_query(&sp, &state, query, &opts).await?;
-        trace("sql: build_data_query", start);
-        let start = Instant::now();
-        let df = self.read(&sql).await.map_err(be)?;
-        trace("sql: read", start);
-
-        // `Pipe.get_data()`: keep the requested columns, add missing ones as nulls.
-        let start = Instant::now();
-        let user_select: Vec<String> = query
-            .select_columns
-            .clone()
-            .filter(|c| !c.is_empty())
-            .unwrap_or_else(|| df.names());
-        let omit = query.omit_columns.clone().unwrap_or_default();
-        let keep: Vec<String> = df
-            .names()
-            .into_iter()
-            .filter(|c| !omit.contains(c) && user_select.contains(c))
-            .collect();
-        let mut df = if keep.len() != df.width() {
-            df.select(&keep).map_err(be)?
-        } else {
-            df
-        };
-        let cols_to_add: IndexMap<String, String> = user_select
-            .iter()
-            .filter(|c| !df.contains(c))
-            .map(|c| {
-                (
-                    c.clone(),
-                    state
-                        .dtypes
-                        .get(c)
-                        .cloned()
-                        .unwrap_or_else(|| "string".into()),
-                )
-            })
-            .collect();
-        if !cols_to_add.is_empty() {
-            df = meerschaum_kernel::diff::add_missing_cols(&df, &{
-                let mut all: IndexMap<String, String> = df.dtypes();
-                all.extend(cols_to_add);
-                all
-            });
-        }
-        let ctx = self.dtypes_ctx(&sp, &state);
-        let df = pipe_enforce_dtypes(PipeInput::Frame(df), &ctx).map_err(be)?;
-        trace("sql: select + enforce_dtypes", start);
-        let start = Instant::now();
-        let df = if no_order {
-            match query.limit {
-                Some(limit) if df.height() > limit.max(0) as usize => {
-                    df.take(&(0..limit.max(0) as usize).collect::<Vec<_>>())
-                }
-                _ => df,
-            }
-        } else {
-            meerschaum_connector::pipe_ops::pipe_postprocess(&sp, df, query)
-        };
-        trace("sql: sort + limit", start);
-        Ok((Some(df), state))
+        let df = self
+            .get_pipe_data_with_state(&sp, &state, query, &opts)
+            .await?;
+        Ok((df, state))
     }
 }

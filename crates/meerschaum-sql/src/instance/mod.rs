@@ -16,6 +16,7 @@ pub mod fetch;
 pub mod geopackage;
 pub mod indices;
 pub mod inplace;
+mod leases;
 pub mod maintenance;
 pub mod partition;
 pub mod pipes;
@@ -184,6 +185,8 @@ struct State {
     stale_check: Option<Instant>,
     /// Whether the instance tables were created (or found) in this process.
     tables_ready: bool,
+    leases_ready: bool,
+    internal_pipe_states: HashMap<String, data::PipeState>,
     /// `db_version`.
     db_version: Option<String>,
     /// Executed statements, when the query log is enabled (tests record emitted DDL).

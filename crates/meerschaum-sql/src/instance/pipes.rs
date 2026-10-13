@@ -76,7 +76,8 @@ impl SqlConnector {
             SqlParam::Text(pipe.connector_keys().to_string()),
             SqlParam::Text(pipe.metric_key().to_string()),
             SqlParam::opt_text(pipe.location_key()),
-            self.json_param(pipe.parameters()),
+            // Persist the raw definition (templates unresolved), as v4 stores `pipe._attributes['parameters']`.
+            self.json_param(pipe.raw_parameters()),
         ];
         match self.exec_params(&query, &params).await {
             Some(_) => SuccessTuple::ok(format!("Successfully registered {pipe}.")),
@@ -173,14 +174,15 @@ impl SqlConnector {
             }
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
+        // Raw parameters: resolved templates must never be written back (see `register_pipe`).
         let parameters = if !patch {
-            pipe.parameters().clone()
+            pipe.raw_parameters().clone()
         } else {
             let original = match self.get_pipe_parameters(pipe).await {
                 Ok(p) => p.unwrap_or_default(),
                 Err(e) => return SuccessTuple::fail(e.to_string()),
             };
-            apply_patch_maps(&original, pipe.parameters())
+            apply_patch_maps(&original, pipe.raw_parameters())
         };
         let table = self.instance_table_name("mrsm_pipes");
         let f = self.flavor;

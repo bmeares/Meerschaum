@@ -205,3 +205,27 @@ They skip when `python3` lacks `pyarrow` and `pandas`.
   implementation over the connector's pipe methods); Python overrides are not forwarded.
 - PARITY (deliberate): v4's CLI runs a module-named plugin action (`def <plugin_name>()`) only
   until the plugin's venv exists; the worker always runs it.
+
+## Rust-host protocol extensions
+
+The Rust binary embeds `python/host.py` and starts it with the selected SDK interpreter. It
+registers `host_action` (plugin dispatch with native Pipe.sync callbacks), `core_action`
+(transitional Python-only CLI operations), `parse_plugin_args`, and `complete`. Captured action
+and completion replies contain `result`, `stdout`, and `stderr`; other worker diagnostics go to
+stderr so MCP stdio stays clean. Interactive `python` is launched by the CLI directly.
+
+Manifest schema version 2 adds `actions[].has_completer`. An empty plugin tree is fingerprinted
+and cached entirely in Rust, including when no Python interpreter is installed.
+
+Nested calls from native callback processing have a bounded reserve in the same pool, so a
+plugin syncing into a Python instance cannot deadlock a size-one pool. Main-call concurrency
+still uses `python_workers`; callback calls may temporarily use up to eight reserve workers
+per configured worker, with at most eight nested levels. Reserve exhaustion fails immediately.
+Idle workers are trimmed back to the configured pool size. Hosts relaying callbacks through
+channels use `pool::callback_scope` around the receiving native sync operation.
+
+CLI action calls request `stream_output`: console writes arrive immediately as text chunks
+containing JSON `{stream, text}` and the reply's captured strings are empty. This keeps custom
+loops from buffering unbounded output and shows prompts before actions finish. A CLI attached to
+a terminal enables `WorkerOptions.inherit_stdin`; stdio servers and ordinary pool users leave it
+disabled. Shell-patched action kwargs retain datetime/timedelta MessagePack extension types.

@@ -171,3 +171,87 @@ cargo test -p meerschaum-sql --features oracle     # + Oracle
 `tests/driver_native.rs` exercises the MSSQL / DuckDB / Oracle drivers directly. MSSQL's
 instance schema must exist (v4 does not create it either); add `?schema=<name>` to the URI to
 use one other than `dbo`.
+
+## Engine state and cached metadata (wave 5)
+
+`InstanceConnector` leases are implemented by an internal `mrsm_pipe_leases` table. A unique
+SHA-256 pipe key arbitrates independent pools, conditional updates renew or take over expired
+leases, and conditional deletes protect a replacement holder. Expiry uses the database clock,
+not the caller's clock. Holder hashes preserve case-sensitive identity on case-insensitive
+MySQL / MSSQL collations. `tests/instance_leases.rs` exercises two independent connections.
+
+Small upserts (up to 64 rows) to `mrsm` pipes use one bound INSERT / MERGE statement.
+MySQL / MariaDB and SQL Server store internal string keys as bounded VARCHAR / NVARCHAR
+(255 characters) so their primary and composite keys can be indexed. Null or
+repeated keys retain the general staging path (DuckDB internal writes reject these keys
+explicitly, because v4 has no staged upsert template for DuckDB). Static temporary internal pipes cache their
+metadata after creation; `drop_pipe` invalidates the cache. Warm engine state writes therefore
+need one DML statement. `tests/w5sql.rs` checks this along with cached façade reads, SQLite UTC
+sync times, raw document timestamps, and `{SQLITE_DB_PATH}` resolution.
+
+`facade::sync_pipe_mut_cached` accepts the caller's cached column types, derives the pipe's
+dtypes, and refreshes metadata after schema changes. The existing `sync_pipe_mut` remains
+available. `get_pipe_data_and_state` shares the `DataQueryOptions`-aware read implementation.
+`partition_pipe_with_parameters` returns both the success tuple and the patch it applied;
+`partition_pipe` retains its original return type.
+
+The sqlx drivers build native Arrow columns directly once output types are known. SQLite
+retains first-batch affinity inference and falls back to cell coercion when later storage
+classes differ. `read_docs_frame` preserves SQLite's raw timestamp strings (v4 `get_docs`),
+and mixed SQLite storage classes remain heterogeneous object values. `read_frame` continues
+to decode typed timestamps. Special decimal and geometry columns
+retain their existing lossless conversion paths.
+
+With the `duckdb` feature, runtime queries execute UTC timestamp arithmetic through
+naive UTC timestamps before restoring TIMESTAMPTZ, avoiding the ICU-dependent interval
+operator. The public v4 query renderer and its reference fixtures remain unchanged.
+
+SQLite staged updates index the temporary table’s COALESCE key expressions to avoid repeated
+full scans while preserving v4’s null-sentinel comparisons. `MRSM_CORE_TRACE=1` reports
+filtering and SQL update stage times.
+
+DuckDB pools share a single native database instance per canonical file path; connections
+remain independent. This prevents separately opened instances from acquiring incompatible
+leases against independent snapshots. DuckDB internal pipes use MERGE, since v4 skips
+DuckDB indices. Lease tests also race two connections to take over an expired lease.
+
+Oracle writes bind dates/timestamps natively and execute bulk rows in one transaction using
+individual INSERT statements (pre-23c syntax, with correct identity sequence increments).
+Oracle result labels follow SQLAlchemy's unquoted-name normalization.
+
+### Wave 5 verification and remaining gaps
+
+All runs used isolated roots/plugins (the Python suite used the documented `test_root` and
+`tests/plugins`), disposable database ports, and `w5sql_` logical pipe/table prefixes. Harness
+counts include unconfigured flavor cases which return early; each server URI was configured
+in a separate run.
+
+- `cargo fmt -p meerschaum-sql` and `cargo fmt -p meerschaum-py` completed.
+- Default `cargo clippy -p meerschaum-sql --all-targets -- -D warnings` passed; the release
+  `duckdb,oracle` feature combination also passed Clippy with all targets and denied warnings.
+- Default SQL suite: 845 passed, including `instance_cross_impl` against released v4.1.4.
+- Separate PostgreSQL, PostGIS, TimescaleDB, TimescaleDB-HA, MariaDB, MySQL, MSSQL, and GeoPackage
+  full runs: 844 passed each before the final mixed-storage document regression was added.
+  MSSQL also passed the server cross-implementation scenario. The strengthened
+  `instance_leases` expiry-takeover race was rerun successfully on all those deployments.
+- DuckDB full run with `--release --features duckdb,oracle`: 1,039 passed. The focused
+  `instance_inplace`, `instance_leases`, and `w5sql` run passed 63 tests, including all three
+  ICU-sensitive in-place cases, shared-file concurrency, and primary/composite internal MERGE.
+- Oracle (`--features oracle`): the full run reported 935 passed and 7 failed. One failure was
+  a test-table collision caused by identifier truncation discarding the random suffix; after
+  shortening that test target, `test_autoincrement_primary_key::oracle` passed. Lease renewal,
+  concurrent expiry takeover, internal primary/composite upserts, and inferred identities pass.
+- Rust-mode SQLite pytest: 606 passed, 2 skipped, 3 deselected, with the documented exclusions.
+- `scripts/parity/check_fixture_hygiene.sh crates/meerschaum-sql/tests/fixtures`: clean.
+
+Six Oracle cases remain unresolved (the full Oracle suite is **not** green):
+`test_infer_numeric_from_mixed_types`, `test_sync_uuids_simple_upsert`,
+`test_sync_change_columns_dtypes`, `test_sync_bools_inplace`, `test_fetch_pipes_keys`
+(ORA-12704 character-set mismatch), and `test_sync_null_indices`. These need Oracle-specific
+numeric/type evolution and general staged-update/key-query work; they are not being treated
+as approved parity deviations. Oracle `analyze_pipe` deliberately returns unsupported, as
+v4 does, and the test now asserts that behavior.
+
+See `../meerschaum-py/PERF.md` for before/after 1M-row SQLite/PostGIS measurements. Large sync
+and read steps beat Python in the final run, but millisecond-scale SQLite sync-time and
+row-count calls remain slower: the every-step performance acceptance target is not yet met.

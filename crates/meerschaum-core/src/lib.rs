@@ -32,6 +32,7 @@ pub mod success;
 pub mod template;
 pub mod users;
 pub mod value;
+pub mod version;
 pub mod yaml;
 
 pub use config::Config;

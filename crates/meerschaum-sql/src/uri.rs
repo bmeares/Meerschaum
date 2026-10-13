@@ -456,6 +456,14 @@ impl ConnectionSpec {
         })
     }
 
+    /// Resolve v4's SQLite path placeholder using the core path registry.
+    pub fn resolved_database(&self) -> Result<Option<String>> {
+        self.database
+            .as_deref()
+            .map(resolve_sqlite_path)
+            .transpose()
+    }
+
     /// Whether this is an in-memory SQLite / DuckDB database.
     pub fn is_memory(&self) -> bool {
         self.database.as_deref() == Some(":memory:")
@@ -488,13 +496,12 @@ impl ConnectionSpec {
             Flavor::Sqlite | Flavor::Duckdb | Flavor::Geopackage
         ) {
             if let Some(uri) = &self.uri {
-                return Ok(uri.clone());
+                return resolve_sqlite_path(uri);
             }
-            // TODO(connector-registry): `{SQLITE_DB_PATH}` resolves to
-            // `meerschaum_core::config::paths::Paths::path("SQLITE_DB_PATH")` when the registry
-            // builds the connector (`_create_engine.py:82`).
             // PARITY: a missing database renders as `None` (`f"{_engine}:///{_database}"`).
-            let database = self.database.clone().unwrap_or_else(|| "None".to_string());
+            let database = self
+                .resolved_database()?
+                .unwrap_or_else(|| "None".to_string());
             return Ok(format!("{engine}:///{database}"));
         }
 
@@ -683,6 +690,29 @@ pub fn parse_qs(qs: &str) -> IndexMap<String, Vec<String>> {
         out.entry(k).or_default().push(v);
     }
     out
+}
+
+/// Resolve only the documented database placeholder; ordinary filenames are untouched.
+fn resolve_sqlite_path(value: &str) -> Result<String> {
+    if !value.contains("{SQLITE_DB_PATH}") {
+        return Ok(value.to_string());
+    }
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    let paths = meerschaum_core::config::paths::Paths::from_env(
+        &|key| std::env::var(key).ok(),
+        &home,
+        cfg!(windows),
+        None,
+    )
+    .map_err(|e| SqlError::InvalidConnection(e.to_string()))?;
+    let path = paths.path("SQLITE_DB_PATH");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| SqlError::InvalidConnection(e.to_string()))?;
+    }
+    Ok(value.replace("{SQLITE_DB_PATH}", &path.to_string_lossy()))
 }
 
 #[cfg(test)]

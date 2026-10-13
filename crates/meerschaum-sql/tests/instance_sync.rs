@@ -655,9 +655,11 @@ flavor_tests!(test_autoincrement_primary_key, |c: Ctx| async move {
         "primary_key",
         Some("autoincrement"),
         &format!(
-            r#"{{"target": "{}Test Sync Primary Key Autoincrement", "columns": {{"primary": "{id_col}"}},
+            // Keep the random prefix intact under Oracle's 30-character identifier limit;
+            // the v4 truncation algorithm can reduce a long name's random section to one letter.
+            r#"{{"target": "{} Test PK", "columns": {{"primary": "{id_col}"}},
                 "autoincrement": true, "dtypes": {{"{id_col}": "int"}}}}"#,
-            c.prefix
+            &c.prefix[..14]
         ),
     );
     ok(sync_live(
