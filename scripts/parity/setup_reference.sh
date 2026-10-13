@@ -46,7 +46,8 @@ installed_version() {
 }
 
 stamp="$VENV/.mrsm-ref-stamp"
-want_stamp="$VERSION|$PY_SPEC|$EXTRAS|$(cksum < "$REQUIREMENTS")"
+SORTED_GLOB="$REPO/scripts/parity/_mrsm_parity_sorted_glob.py"
+want_stamp="$VERSION|$PY_SPEC|$EXTRAS|$(cksum < "$REQUIREMENTS")|$(cksum < "$SORTED_GLOB")"
 if [ -z "$force" ] && [ -x "$ref_py" ] && [ "$(installed_version)" = "$VERSION" ] \
   && [ "$(cat "$stamp" 2>/dev/null)" = "$want_stamp" ]; then
   echo "Reference venv ready: $VENV (meerschaum $VERSION)"
@@ -62,6 +63,11 @@ ref_py="$VENV/bin/python"
 spec="meerschaum==$VERSION"
 [ -n "$EXTRAS" ] && spec="meerschaum[$EXTRAS]==$VERSION"
 uv pip install --python "$ref_py" "$spec" -r "$REQUIREMENTS"
+
+# Deterministic `glob` order for every reference process (see the module's docstring).
+site_dir="$(cd / && "$ref_py" -I -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+cp "$SORTED_GLOB" "$site_dir/_mrsm_parity_sorted_glob.py"
+echo "import _mrsm_parity_sorted_glob" > "$site_dir/_mrsm_parity_sorted_glob.pth"
 
 got="$(installed_version)"
 if [ "$got" != "$VERSION" ]; then

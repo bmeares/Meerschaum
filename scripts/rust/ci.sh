@@ -92,10 +92,17 @@ step_parity() {
   local dirs=()
   for gen in "${gens[@]}"; do dirs+=("$(dirname "$gen")"); done
   mapfile -t dirs < <(printf '%s\n' "${dirs[@]}" | sort -u)
-  local rc=0
-  git diff --stat --exit-code -- "${dirs[@]}" || rc=1
+  local rc=0 clean=1
   # Recorded fixtures must never carry machine-specific or sensitive content.
-  "$REPO/scripts/parity/check_fixture_hygiene.sh" "${dirs[@]}" || rc=1
+  "$REPO/scripts/parity/check_fixture_hygiene.sh" "${dirs[@]}" || { rc=1; clean=0; }
+  if ! git diff --stat --exit-code -- "${dirs[@]}"; then
+    rc=1
+    # Print the (truncated) diff so a runner-only difference can be diagnosed from the log, but
+    # only when the regenerated files passed the hygiene check (never echo a leak into the log).
+    if [ "$clean" -eq 1 ]; then
+      git diff -- "${dirs[@]}" | head -n 400
+    fi
+  fi
   local untracked
   untracked="$(git ls-files --others --exclude-standard -- "${dirs[@]}")"
   if [ -n "$untracked" ]; then
