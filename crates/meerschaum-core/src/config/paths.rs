@@ -406,6 +406,21 @@ pub fn dedupe_plugins_dirs(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     paths
 }
 
+/// Whether a development build must refuse the real default root.
+///
+/// Debug builds (`cargo build`, `maturin develop`) refuse to fall back to `~/.config/meerschaum`
+/// unless `MRSM_ROOT_DIR` is set (in `env` or in the process) or `MRSM_ALLOW_DEFAULT_ROOT` is set
+/// in the process. Manual runs of `target/debug/mrsm` during development once modified a
+/// developer's real root; release builds are unaffected. Lookups with an injected environment
+/// (unit tests) are allowed whenever the process itself has a root, as `cargo test` always does.
+fn default_root_refused(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    if !cfg!(debug_assertions) || env("MRSM_ROOT_DIR").is_some() {
+        return false;
+    }
+    let allowed = |key: &str| std::env::var_os(key).is_some_and(|v| !v.is_empty());
+    !(allowed("MRSM_ROOT_DIR") || allowed("MRSM_ALLOW_DEFAULT_ROOT"))
+}
+
 impl Paths {
     /// Derive the paths from environment variables, like importing `meerschaum.config._paths`.
     ///
@@ -440,7 +455,14 @@ impl Paths {
                 }
                 p
             }
-            None => default_root,
+            None => {
+                if default_root_refused(env) {
+                    return Err(ConfigError::DefaultRootRefused {
+                        path: posix(&default_root),
+                    });
+                }
+                default_root
+            }
         };
 
         let config_dir = match env("MRSM_CONFIG_DIR") {

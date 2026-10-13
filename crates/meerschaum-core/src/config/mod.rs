@@ -72,6 +72,15 @@ pub enum ConfigError {
         /// The parser's message.
         message: String,
     },
+    /// A development build refused to fall back to the real default root.
+    #[error(
+        "Refusing to use the default root '{path}' from a development build. \
+         Set MRSM_ROOT_DIR to a scratch directory, or set MRSM_ALLOW_DEFAULT_ROOT=1 to use the real root."
+    )]
+    DefaultRootRefused {
+        /// The default root that would have been used.
+        path: String,
+    },
     /// An I/O error.
     #[error(transparent)]
     Io(#[from] std::io::Error),

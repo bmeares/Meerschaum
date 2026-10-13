@@ -207,7 +207,11 @@ impl<'a> Runtime<'a> {
     /// The config registry.
     pub fn config(&mut self) -> &Config {
         self.config.get_or_insert_with(|| {
-            Config::new(ConfigOptions::from_process()).unwrap_or_else(|_| {
+            Config::new(ConfigOptions::from_process()).unwrap_or_else(|e| {
+                if let meerschaum_core::config::ConfigError::DefaultRootRefused { .. } = e {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
                 let mut opts = ConfigOptions::from_process();
                 opts.allow_writes = false;
                 Config::new(opts).expect("config registry")
