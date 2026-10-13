@@ -122,6 +122,20 @@ def start_server() -> int:
     user = User(USERNAME, PASSWORD, type='admin', instance=instance)
     success, msg = instance.register_user(user)
     assert success, msg
+    ### The reference server occasionally never answers `/healthcheck` successfully (seen in CI
+    ### and locally about one run in six); start it again on a fresh port once before giving up.
+    errors = []
+    for _attempt in range(2):
+        try:
+            return _launch_server()
+        except RuntimeError as e:
+            errors.append(str(e))
+            print(f"gen_api.py: retrying the reference server: {str(e).splitlines()[0]}", file=sys.stderr)
+            kill_server()
+    raise RuntimeError("\n\n".join(errors))
+
+
+def _launch_server() -> int:
     port = free_port()
     log = open(ROOT / 'api.log', 'w')
     _server['proc'] = subprocess.Popen(
@@ -138,17 +152,23 @@ def start_server() -> int:
         start_new_session=True,
     )
     import requests
-    deadline = time.time() + 180
+    deadline = time.time() + 90
+    last = 'no response'
     while time.time() < deadline:
         if _server['proc'].poll() is not None:
             raise RuntimeError("API server exited:\n" + (ROOT / 'api.log').read_text())
         try:
-            if requests.get(f"http://localhost:{port}/healthcheck", timeout=2).ok:
+            response = requests.get(f"http://localhost:{port}/healthcheck", timeout=2)
+            if response.ok:
                 return port
-        except Exception:
-            pass
+            last = f"HTTP {response.status_code}: {response.text[:200]}"
+        except Exception as e:
+            last = f"{type(e).__name__}: {e}"
         time.sleep(0.5)
-    raise RuntimeError("API server did not start:\n" + (ROOT / 'api.log').read_text())
+    raise RuntimeError(
+        f"API server did not become healthy (last /healthcheck: {last}):\n"
+        + (ROOT / 'api.log').read_text()
+    )
 
 
 SKIP_HEADERS = {

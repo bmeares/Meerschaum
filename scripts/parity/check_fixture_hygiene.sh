@@ -48,6 +48,14 @@ scan() {
   if hits=$(grep -rIl $flags -E --exclude='*.py' --exclude='*.md' -- "$pattern" "${paths[@]}" 2>/dev/null) && [ -n "$hits" ]; then
     echo "check_fixture_hygiene: pattern '$pattern' found in:"
     echo "$hits" | sed 's/^/  /'
+    # For path patterns, show where they occur (line number and up to 80 characters BEFORE the
+    # match, never the match or anything after it) so CI logs can locate the leaking field.
+    case "$pattern" in
+      /*)
+        grep -rIn $flags -o -E --exclude='*.py' --exclude='*.md' -- ".{0,80}$pattern" "${paths[@]}" 2>/dev/null \
+          | sed -E "s#$pattern\$#<REDACTED>#" | head -n 20 | sed 's/^/    /' || true
+        ;;
+    esac
     status=1
   fi
 }
