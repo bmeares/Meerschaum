@@ -20,6 +20,8 @@
 #                     makes `get_tables()` skip building `conn.metadata`)
 #   MRSM_VENVS_DIR    default .venv-ref/mrsm_root/venvs when the root is temporary, so the
 #                     reference's own v4 venvs are built once and stay apart from test_root
+# Every other inherited MRSM_* variable is removed (v4 would read most as connectors), except
+# MRSM_VALKEY_FIXTURE_* for gen_valkey.py.
 #   MRSM_PLUGINS_DIR  default tests/plugins
 #   MRSM_REF_VERSION  version to assert (default 4.1.4)
 #   UV_PYTHON         forced to the reference interpreter (v4's `uv venv` calls omit --python)
@@ -46,6 +48,16 @@ if [ ! -x "$ref_py" ]; then
   echo "run.sh: reference venv missing; run scripts/parity/setup_reference.sh first." >&2
   exit 2
 fi
+
+# v4 reads every `MRSM_<TYPE>_<LABEL>` variable as a connector (CI's `MRSM_CI_MIN_FREE_GB` became a
+# `ci:min_free_gb` connector in recorded `/connectors` and shell completions), so drop every
+# inherited MRSM_* variable except the harness's own.
+for var in $(compgen -e | grep '^MRSM_' || true); do
+  case "$var" in
+    MRSM_ROOT_DIR|MRSM_PLUGINS_DIR|MRSM_VENVS_DIR|MRSM_REF_VERSION|MRSM_VALKEY_FIXTURE_*) ;;
+    *) unset "$var" ;;
+  esac
+done
 
 if [ -z "${MRSM_ROOT_DIR:-}" ]; then
   tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/mrsm-parity-root.XXXXXX")"
