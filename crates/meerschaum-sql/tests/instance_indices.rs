@@ -115,6 +115,10 @@ fn test_postgresql_upsert_recognizes_and_drops_constraint_index() {
 // Live: the upsert pipe's unique index (or constraint) is created on the first sync and
 // recognized / dropped by `drop_indices`, then recreated by `create_indices`.
 flavor_tests!(test_create_drop_indices_upsert, |c: Ctx| async move {
+    if c.is_duckdb() {
+        // PARITY: v4 has no DuckDB columns-indices query, so indices are never reported.
+        return;
+    }
     let pipe = c.pipe(
         "test",
         "upsert_ix",
@@ -161,6 +165,26 @@ flavor_tests!(test_create_drop_indices_upsert, |c: Ctx| async move {
         )
         .await);
         assert_eq!(c.docs(&pipe).await.len(), 2);
+        c.delete(&pipe).await;
+        return;
+    }
+    if c.is_mssql() {
+        // PARITY: MSSQL rejects the unique constraint on the `NVARCHAR(MAX)` `id` column
+        // ("is of a type that is invalid for use as a key column", as v4 does), but the
+        // `MERGE` upsert still updates the row in place.
+        assert!(!have.contains(&expect), "{have:?}");
+        ok(c.sync(
+            &pipe,
+            vec![doc(vec![
+                ("dt", ndt(2024, 1, 1, 0, 0)),
+                ("id", s("a")),
+                ("v", i(2)),
+            ])],
+        )
+        .await);
+        let docs = c.docs(&pipe).await;
+        assert_eq!(docs.len(), 1);
+        assert_eq!(as_int(&docs[0]["v"]), Some(2));
         c.delete(&pipe).await;
         return;
     }

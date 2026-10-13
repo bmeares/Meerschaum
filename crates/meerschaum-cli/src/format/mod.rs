@@ -767,7 +767,10 @@ impl<'c> Formatter<'c> {
             }
             cols.push(Box::new(conn_tree));
         }
-        out.push_str(&self.console.print(&Columns { renderables: cols }));
+        out.push_str(&self.console.print(&Columns {
+            renderables: cols,
+            equal: false,
+        }));
         out
     }
 
@@ -842,7 +845,10 @@ impl<'c> Formatter<'c> {
             .into_iter()
             .map(|t| Box::new(t) as Box<dyn Renderable>)
             .collect();
-        self.console.print(&Columns { renderables })
+        self.console.print(&Columns {
+            renderables,
+            equal: false,
+        })
     }
 
     /// `info(message, icon=True)`: the printed text.

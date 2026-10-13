@@ -9,12 +9,13 @@ rust-version.workspace = true
 description = "Meerschaum v5: sql crate (see docs/design/v5.0.0.md)"
 
 [features]
-default = []
-# Drivers that are not implemented yet (D13). Enabling a feature only changes the runtime
-# error message: the connector is still refused with `SqlError::DriverUnavailable`.
-mssql = []
-oracle = []
-duckdb = []
+default = ["mssql"]
+# The non-`sqlx` drivers (D13). `mssql` (pure Rust, `tiberius` + rustls) is on by default.
+# `duckdb` compiles the bundled DuckDB C++ library (several minutes, ~1 GB of objects), and
+# `oracle` needs Oracle Instant Client at runtime (as v4's thick mode did), so both are opt-in.
+mssql = ["dep:tiberius", "dep:tokio-util"]
+oracle = ["dep:oracle"]
+duckdb = ["dep:duckdb"]
 
 [dependencies]
 meerschaum-core = { workspace = true }
@@ -34,6 +35,14 @@ arrow = { workspace = true }
 sqlx = { workspace = true }
 # Crate-private: stream combinators for the Arrow record-batch stream.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+async-trait = "0.1"
+# The same `libsqlite3-sys` sqlx links, for registering the GeoPackage SQL functions.
+libsqlite3-sys = { version = "0.30", default-features = false }
+tiberius = { version = "0.12", default-features = false, features = ["tds73", "rustls", "chrono", "rust_decimal"], optional = true }
+tokio-util = { version = "0.7", features = ["compat"], optional = true }
+# 1.4 shares the workspace's Arrow major (56); newer releases pull a second Arrow.
+duckdb = { version = "~1.4", features = ["bundled"], optional = true }
+oracle = { version = "0.6", features = ["chrono"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

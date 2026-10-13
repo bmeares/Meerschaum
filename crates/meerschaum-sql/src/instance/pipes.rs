@@ -375,7 +375,13 @@ impl SqlConnector {
             wheres.push(format!("({})", ors.join(" OR ")));
         }
         let true_lit = match f {
-            Flavor::Mysql | Flavor::Mariadb | Flavor::Sqlite | Flavor::Geopackage => "1 = 1",
+            // SQLAlchemy renders `true` as `1 = 1` without native booleans.
+            Flavor::Mysql
+            | Flavor::Mariadb
+            | Flavor::Sqlite
+            | Flavor::Geopackage
+            | Flavor::Mssql
+            | Flavor::Oracle => "1 = 1",
             _ => "true",
         };
         let mut where_str = true_lit.to_string();

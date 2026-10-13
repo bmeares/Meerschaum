@@ -15,7 +15,7 @@ use meerschaum_sql::queries::partition::{PartitionValue, partition_bounds};
 use meerschaum_sql::queries::table::{CreateTableOptions, get_create_table_query_from_dtypes};
 
 const CHUNK_MINUTES: i64 = 1440;
-const PARTITIONABLE: &[&str] = &["postgresql", "postgis", "mysql", "mariadb"];
+const PARTITIONABLE: &[&str] = &["postgresql", "postgis", "mysql", "mariadb", "mssql"];
 
 fn partitioned_params() -> String {
     format!(
@@ -102,7 +102,10 @@ flavor_tests!(test_partitioned_sync_roundtrip, |c: Ctx| async move {
     );
     let n = count_partitions(&c, &part).await;
     assert!(n > 1, "expected multiple partitions, got {n}");
-    assert_eq!(count_partitions(&c, &plain).await, 0);
+    // PARITY: `_get_partition_count` counts a `RANGE RIGHT` function's boundaries + 1 on MSSQL,
+    // so a table without a partition function reports one partition (`_partition.py:164`).
+    let plain_count = if c.is_mssql() { 1 } else { 0 };
+    assert_eq!(count_partitions(&c, &plain).await, plain_count);
     c.delete(&part).await;
     c.delete(&plain).await;
 });

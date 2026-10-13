@@ -28,6 +28,43 @@ Python signature is the v4 one):
 | `replace_pipes_syntax(text, _pipe)` | `meerschaum.utils.pipes.replace_pipes_syntax` | `core::template` with a resolver that reads live Python `Pipe`s |
 | `hash_password(password, salt, rounds)`, `verify_password(password, password_hash)` | `meerschaum.core.User._User.*` | `core::users` |
 
+### The SQL instance connector (`_core.SqlConnector`, wave 4)
+
+`SqlConnector(label, attributes)` wraps `meerschaum_sql::SqlConnector` (the instance layer). It is
+built lazily, once per Python `SQLConnector`, by `SQLConnector._rust_method()` from the attributes
+v4 already resolved (`flavor`, `uri`, `host`, `port`, `username`, `password`, `database` and
+`self.schema`), so `connectors.yaml`, keyword arguments and `MRSM_SQL_<LABEL>` URIs all work
+unchanged. The pool connects on first use. Every method takes the v4 method's arguments (extra
+keywords such as `debug` are accepted and ignored) and reads pipes, users and plugins by
+attribute only (duck typing, design §4.4). Database I/O runs on the extension's multi-threaded
+Tokio runtime (`src/runtime.rs`) with the GIL released; frames cross as Arrow through
+`pandas_bridge` with the pipe's dtypes as hints (`read(dtype=...)` in v4), Polars with
+`as_polars=True`.
+
+| Group | Methods (v4 names) |
+|---|---|
+| Registration | `register_pipe`, `edit_pipe`, `delete_pipe`, `get_pipe_id`, `get_pipe_attributes`, `fetch_pipes_keys` |
+| Data | `sync_pipe`, `get_pipe_data` (also `as_iterator`), `get_pipe_docs`, `get_pipe_data_query`, `get_sync_time`, `get_pipe_rowcount`, `pipe_exists`, `get_pipe_columns_types`, `get_pipe_columns_indices`, `clear_pipe`, `drop_pipe`, `deduplicate_pipe` |
+| Indices | `create_indices`, `drop_indices`, `create_pipe_indices`, `drop_pipe_indices`, `get_create_index_queries`, `get_drop_index_queries`, `get_pipe_index_names` |
+| Maintenance | `get_pipe_size`, `compress_pipe`, `decompress_pipe`, `apply_compression_policy`, `vacuum_pipe`, `analyze_pipe`, `partition_pipe`, `get_partition_info` |
+| Users | `register_user`, `edit_user`, `delete_user`, `get_user_id`, `get_users`, `get_user_password_hash`, `get_user_type`, `get_user_attributes` |
+| Plugins | `register_plugin`, `delete_plugin`, `get_plugin_id`, `get_plugin_version`, `get_plugin_user_id`, `get_plugin_username`, `get_plugin_attributes`, `get_plugins` |
+
+Tokens need no binding: the SQL instance stores them in the tokens pipe through the pipe methods
+above. Per D16, `read`, `exec`, `value`, `to_sql`, `.engine` and `get_tables()` stay SQLAlchemy and
+are not bound; `sync_pipe_inplace` (SQL-to-SQL syncs on the same instance) stays Python for now
+and reaches the routed methods through `self`. `sync_pipe` writes the parameter changes v4's
+`sync_pipe` makes (`autoincrement`, numeric `dtypes`) back into the Python pipe's in-memory
+parameters (`update_parameters(..., persist=False)`, Rust already persisted them) and clears the
+pipe's `_exists` / column-type / index caches.
+
+Routed flavors are those with a Rust driver (`postgresql`, `postgis`, `timescaledb`,
+`timescaledb-ha`, `citus`, `cockroachdb`, `mysql`, `mariadb`, `sqlite`, `geopackage`); `mssql`,
+`oracle`, `duckdb` and in-memory SQLite databases (where SQLAlchemy and the Rust pool would see
+different databases) stay on the v4 path. `src/pipe_bridge.rs` converts the duck-typed objects;
+`meerschaum_sql::facade` (`crates/meerschaum-sql/src/facade.rs`) holds the two additive helpers
+the bindings need (`sync_pipe_mut`, `get_pipe_data_and_state`).
+
 DataFrames cross as Arrow (`src/pandas_bridge.rs`): typed pandas columns through
 `__arrow_c_stream__`, `object` / `geometry` columns value by value (`src/convert.rs`, with one
 vectorized `shapely.to_wkb` / `from_wkb` call per geometry column), Polars frames directly, Dask
@@ -48,9 +85,10 @@ crates/meerschaum-py/
   pyproject.toml    maturin config: module-name = "meerschaum._core._core", python-source = "../.."
   src/              lib.rs (#[pymodule] _core), arrow_bridge.rs, ffi_import.rs, polars_bridge.rs,
                     convert.rs (Python <-> Value), pandas_bridge.rs (frames), kernel_api.rs,
-                    core_api.rs, trace.rs (MRSM_CORE_TRACE stage timers)
+                    core_api.rs, trace.rs (MRSM_CORE_TRACE stage timers), runtime.rs (Tokio),
+                    pipe_bridge.rs (duck-typed pipes/users/plugins), sql_api.rs (SqlConnector)
   tests/            arrow_ffi.rs (cargo test), test_core.py (pytest)
-  bench/            bench_boundary.py (python vs rust timings, see PERF.md)
+  bench/            bench_boundary.py, bench_sync.py (python vs rust timings, see PERF.md)
 meerschaum/_core/
   __init__.py       lazy loader (stdlib only)
   _gate.py          MRSM_CORE parity gate (development only, see below)
@@ -195,6 +233,19 @@ Gated today, listed in `_gate.GATED_FEATURES`: `meerschaum.utils.dataframe.filte
 `meerschaum.utils.dtypes.sql.get_pd_type_from_db_type`; `meerschaum.utils.pipes.replace_pipes_syntax`;
 `meerschaum.config.get_config`; `meerschaum.core.User._User.hash_password` and `verify_password`.
 Every gated feature is bound.
+
+Classes are gated too (`_gate.GATED_CLASSES`): the v4 `SQLConnector` methods listed above start
+with
+
+```python
+if (_rust := _rust_method(self, 'sync_pipe')) is not None:
+    return _rust(pipe, df, begin=begin, end=end, chunksize=chunksize, ...)
+```
+
+where `_rust_method` is `_gate.rust_method(obj, name)`: `None` in `python` mode, for objects
+without a `_rust_method` (tests and plugins call these functions with stub objects as `self`), for
+unrouted flavors and for unbound names. The feature name for `MRSM_CORE=rust:...` is
+`sqlconnector`.
 
 **This gate is development-only.** D14 removes the Python core in 5.0, and the shipped package has
 no `MRSM_CORE` switch. The parity oracle is v4.1.x in a separate venv (§10.2). The gate, its guards

@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use meerschaum_cli::dispatch::{self, CommandSpec, Host, RecordingHost, Runtime};
 use meerschaum_cli::format::FormatSettings;
-use meerschaum_cli::shell::{self, Control, PromptState, ShellCompleter, ShellState};
+use meerschaum_cli::shell::{self, Control, PromptState, ShellState};
 use meerschaum_cli::types::DateContext;
 use meerschaum_core::config::{Config, ConfigOptions};
 
@@ -258,24 +258,20 @@ fn completion_candidates() {
     let h = Harness::new();
     let mut out = Vec::new();
     let mut rt = h.runtime(&mut out, no_env);
-    let c = ShellCompleter::new(&mut rt);
-    assert_eq!(c.candidates("syn").0, vec!["sync"]);
-    assert!(c.candidates("show pi").0.contains(&"pipes".to_string()));
-    assert_eq!(c.candidates("show pipes -i sql:l").0, vec!["sql:local"]);
-    assert!(
-        c.candidates("sync pipes --lo")
-            .0
-            .contains(&"--loop".to_string())
-    );
-    assert!(
-        c.candidates("show config sys")
-            .0
-            .contains(&"system".to_string())
-    );
-    assert_eq!(c.candidates("compose ex").0, vec!["explain"]);
-    assert!(
-        c.candidates("instance ")
-            .0
-            .contains(&"sql:main".to_string())
-    );
+    let state = ShellState::new(&mut rt, None);
+    let data = shell::completion_data(&state, &mut rt);
+    let dates = DateContext::system();
+    let texts = |line: &str| -> Vec<String> {
+        data.get_completions(line, &dates)
+            .into_iter()
+            .map(|c| c.text)
+            .collect()
+    };
+    assert_eq!(texts("syn"), vec!["sync"]);
+    assert_eq!(texts("show pi"), vec!["pipes"]);
+    assert_eq!(texts("show pipes -i sql:l"), vec!["sql:local"]);
+    assert!(texts("sync pipes --lo").contains(&"--loop".to_string()));
+    assert_eq!(texts("show config sys"), vec!["system"]);
+    assert_eq!(texts("compose ex"), vec!["explain"]);
+    assert!(texts("instance ").contains(&"sql:main".to_string()));
 }

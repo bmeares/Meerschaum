@@ -673,7 +673,22 @@ impl SqlConnector {
             });
         }
         let ctx = self.dtypes_ctx(sp, state);
-        let df = pipe_enforce_dtypes(PipeInput::Frame(df), &ctx).map_err(be)?;
+        let mut df = pipe_enforce_dtypes(PipeInput::Frame(df), &ctx).map_err(be)?;
+        if self.flavor == Flavor::Geopackage {
+            // GeoPackage geometries are `BLOB`s, which the driver tags as `bytes`; once enforced
+            // as geometries the tag must not make the frame's bytes columns claim them (the
+            // `filter_existing` diff would base64-decode the new geometries).
+            for (col, typ) in &state.dtypes {
+                if !are_dtypes_equal(typ, "geometry") && !typ.starts_with("geography") {
+                    continue;
+                }
+                if let Some(c) = df.column_mut(col) {
+                    if c.tags.dtype.as_deref() == Some("bytes") {
+                        c.tags.dtype = Some("geometry".into());
+                    }
+                }
+            }
+        }
         Ok(Some(meerschaum_connector::pipe_ops::pipe_postprocess(
             sp, df, query,
         )))
@@ -1147,6 +1162,10 @@ impl SqlConnector {
                 .exec(&format!("DROP TABLE {if_exists} {target_name}"))
                 .await
                 .is_some();
+        }
+        // Remove the table's GeoPackage metadata and spatial index (no-op otherwise).
+        if success && self.flavor == crate::flavor::Flavor::Geopackage {
+            let _ = self.drop_geopackage_metadata(&sp.target).await;
         }
         // Drop any MSSQL partition scheme + function the table referenced (no-op otherwise).
         if success {

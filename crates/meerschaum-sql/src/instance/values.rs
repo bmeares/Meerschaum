@@ -238,8 +238,69 @@ pub fn encode_param(v: &KValue, flavor: Flavor, enc: &ColumnEncoding) -> SqlPara
             }
             other => SqlParam::Text(other.to_string()),
         },
-        KValue::Geometry(g) => SqlParam::Text(g.to_wkb_hex(true)),
+        KValue::Geometry(g) => match flavor {
+            // `geometry_format` in `to_sql` (`_sql.py:942`).
+            Flavor::Mssql => SqlParam::Text(g.to_wkt()),
+            Flavor::Geopackage => SqlParam::Bytes(g.to_gpkg_wkb(None)),
+            _ => SqlParam::Text(g.to_wkb_hex(true)),
+        },
         KValue::Null | KValue::NA | KValue::NaT => SqlParam::Null,
+    }
+}
+
+/// `datetime.isoformat()`: microseconds only when non-zero.
+fn py_isoformat(dt: &NaiveDateTime) -> String {
+    if dt.and_utc().timestamp_subsec_micros() == 0 {
+        dt.format("%Y-%m-%dT%H:%M:%S").to_string()
+    } else {
+        dt.format("%Y-%m-%dT%H:%M:%S%.6f").to_string()
+    }
+}
+
+/// Encode one cell for `mssql_insert_json` (`_sql.py:1192`): the row documents serialized with
+/// `json.dumps(..., default=json_serialize_value)` after `to_sql`'s per-type preparation
+/// (timezone-stripped datetimes, base64 bytes, WKT geometry, dumped JSON, quantized decimals).
+pub fn encode_json_cell(v: &KValue, flavor: Flavor, enc: &ColumnEncoding) -> serde_json::Value {
+    use serde_json::Value as J;
+    if v.is_na() {
+        return J::Null;
+    }
+    match v {
+        KValue::Bool(b) => J::Bool(*b),
+        KValue::Int(i) => {
+            if enc.numeric.is_some() {
+                J::String(i.to_string())
+            } else {
+                J::from(*i)
+            }
+        }
+        KValue::Float(f) => serde_json::Number::from_f64(*f).map_or(J::Null, J::Number),
+        KValue::Str(s) => J::String(s.clone()),
+        KValue::Bytes(b) => J::String(
+            meerschaum_kernel::serialize::serialize_bytes(&KValue::Bytes(b.clone()))
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+        ),
+        KValue::Decimal(d) => decimal_text(d, enc).map_or(J::Null, J::String),
+        KValue::Uuid(u) => J::String(u.hyphenated().to_string()),
+        KValue::Datetime(dt) => {
+            // `serialize_datetime`: naive values get a `Z` suffix.
+            if flavor.timezone_naive() {
+                J::String(format!("{}Z", py_isoformat(&dt.utc)))
+            } else {
+                J::String(serialize_datetime(dt))
+            }
+        }
+        KValue::Date(d) => J::String(d.format("%Y-%m-%d").to_string()),
+        KValue::Json(j) => match j {
+            serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+                J::String(json_dumps_default(j, true))
+            }
+            other => other.clone(),
+        },
+        KValue::Geometry(g) => J::String(g.to_wkt()),
+        KValue::Null | KValue::NA | KValue::NaT => J::Null,
     }
 }
 

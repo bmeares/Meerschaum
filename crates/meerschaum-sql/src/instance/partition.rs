@@ -10,14 +10,17 @@ use meerschaum_kernel::value::Value as KValue;
 use crate::flavor::Flavor;
 use crate::pipe::{ChunkInterval, ChunkIntervalArg, SqlPipe};
 use crate::queries::partition::{
-    PartitionValue, get_mysql_add_partition_queries, get_mysql_max_partition_bound_query,
-    get_partition_count_query, get_pg_is_partitioned_query, get_pg_partition_creation_queries,
-    get_set_chunk_time_interval_query, get_timescaledb_chunk_count_query,
-    parse_mysql_max_partition_bound, partition_ranges, should_partition,
+    PartitionValue, get_mssql_max_partition_boundary_query, get_mssql_partition_creation_queries,
+    get_mssql_split_partition_queries, get_mysql_add_partition_queries,
+    get_mysql_max_partition_bound_query, get_partition_count_query, get_pg_is_partitioned_query,
+    get_pg_partition_creation_queries, get_set_chunk_time_interval_query,
+    get_timescaledb_chunk_count_query, parse_mssql_max_partition_boundary,
+    parse_mysql_max_partition_bound, partition_ranges, partition_scheme_name, should_partition,
 };
 
 use super::values::py_datetime;
 use super::{SqlConnector, frame_docs, kv_str};
+use crate::driver::SqlValue;
 
 /// `_normalize_boundary(val)`: datetimes and integers as partition values; dates become
 /// midnight datetimes.
@@ -123,7 +126,72 @@ impl SqlConnector {
         if self.flavor.mysql_partition() {
             return self.create_missing_partitions_mysql(sp, df).await;
         }
+        if self.flavor.mssql_partition() {
+            return self.create_missing_partitions_mssql(sp, df).await;
+        }
         SuccessTuple::ok("Pipe is not partitioned.")
+    }
+
+    /// `_get_mssql_partition_creation_queries(pipe, df)`: the partition scheme name and the
+    /// queries creating the partition function and scheme, run before `CREATE TABLE`.
+    pub(crate) fn mssql_partition_creation(
+        &self,
+        sp: &SqlPipe,
+        df: &Frame,
+    ) -> (String, Vec<String>) {
+        let boundaries: Vec<PartitionValue> = self
+            .partition_ranges_for_frame(sp, df)
+            .into_iter()
+            .map(|(lo, _)| lo)
+            .collect();
+        (
+            partition_scheme_name(self.flavor, &sp.target),
+            get_mssql_partition_creation_queries(sp, &boundaries),
+        )
+    }
+
+    /// `_get_mssql_max_partition_boundary(pipe)`.
+    pub async fn get_mssql_max_partition_boundary(&self, sp: &SqlPipe) -> Option<PartitionValue> {
+        let query = get_mssql_max_partition_boundary_query(sp);
+        let text = match self.value(&query).await? {
+            SqlValue::Null => return None,
+            v => v.to_string(),
+        };
+        parse_mssql_max_partition_boundary(&text, sp.is_int_axis())
+    }
+
+    /// `_create_missing_partitions_mssql(pipe, df)`: extend the partition function upward with
+    /// `SPLIT RANGE` (each after `NEXT USED`).
+    async fn create_missing_partitions_mssql(&self, sp: &SqlPipe, df: &Frame) -> SuccessTuple {
+        let Some(dt_col) = sp.column("datetime").filter(|c| df.contains(c)) else {
+            return SuccessTuple::ok("No partitions to create.");
+        };
+        let Some((_, max_val)) = frame_axis_bounds(df, &dt_col) else {
+            return SuccessTuple::ok("No partitions to create.");
+        };
+        let Some(max_bound) = self.get_mssql_max_partition_boundary(sp).await else {
+            return SuccessTuple::ok("No partitions to create.");
+        };
+        let Ok(interval) = sp.chunk_interval() else {
+            return SuccessTuple::ok("No partitions to create.");
+        };
+        let max_parts = self.settings.max_partitions_per_sync;
+        let queries =
+            get_mssql_split_partition_queries(sp, max_bound, max_val, interval, max_parts);
+        if queries.is_empty() {
+            return SuccessTuple::ok("No partitions to create.");
+        }
+        let count = queries.len() / 2;
+        if count >= max_parts {
+            tracing::warn!(
+                "Reached the {max_parts}-partition limit for {}; consider a larger `chunk_minutes`.",
+                sp.pipe()
+            );
+        }
+        if !self.exec_queries_all(&queries, true, true).await {
+            return SuccessTuple::fail(format!("Failed to split partitions for {}.", sp.pipe()));
+        }
+        SuccessTuple::ok(format!("Split {count} partition(s) for {}.", sp.pipe()))
     }
 
     async fn create_missing_partitions_pg(&self, sp: &SqlPipe, df: &Frame) -> SuccessTuple {

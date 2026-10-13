@@ -340,19 +340,32 @@ async fn geopackage_is_sqlite() {
 
 #[tokio::test]
 async fn unsupported_flavors_error_cleanly() {
-    for (uri, flavor) in [
-        ("mssql+pyodbc://sa:pw@localhost:1439/master", Flavor::Mssql),
+    // Only the drivers whose cargo feature is off are refused.
+    for (uri, flavor, enabled) in [
+        (
+            "mssql+pyodbc://sa:pw@localhost:1439/master",
+            Flavor::Mssql,
+            cfg!(feature = "mssql"),
+        ),
         (
             "oracle+oracledb://system:oracle@localhost:1529/xe",
             Flavor::Oracle,
+            cfg!(feature = "oracle"),
         ),
-        ("duckdb:///x.duckdb", Flavor::Duckdb),
+        (
+            "duckdb:///x.duckdb",
+            Flavor::Duckdb,
+            cfg!(feature = "duckdb"),
+        ),
     ] {
+        if enabled {
+            continue;
+        }
         let spec = ConnectionSpec::from_uri(uri, None, None).unwrap();
         match SqlDriver::connect(&spec).await {
             Err(SqlError::DriverUnavailable { flavor: f, reason }) => {
                 assert_eq!(f, flavor);
-                assert!(reason.contains("not implemented yet"), "{reason}");
+                assert!(reason.contains("cargo feature"), "{reason}");
             }
             other => panic!("expected DriverUnavailable for {uri}, got {other:?}"),
         }

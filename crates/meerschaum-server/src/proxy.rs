@@ -27,6 +27,31 @@ const HOP_BY_HOP: &[&str] = &[
     "upgrade",
 ];
 
+/// The connection to the API host: a Unix-domain stream.
+#[cfg(unix)]
+pub type HostStream = tokio::net::UnixStream;
+
+/// The connection to the API host (Unix sockets only for now; see [`connect_host`]).
+#[cfg(not(unix))]
+pub type HostStream = tokio::net::TcpStream;
+
+/// Connect to the API host's socket.
+#[cfg(unix)]
+pub async fn connect_host(socket: &Path) -> std::io::Result<HostStream> {
+    tokio::net::UnixStream::connect(socket).await
+}
+
+/// Connect to the API host's socket. The host listens on a Unix socket, which this platform's
+/// build does not support yet, so this always fails (the server then answers `502` for
+/// unmatched routes, and MCP federation reports the host as unavailable).
+#[cfg(not(unix))]
+pub async fn connect_host(_socket: &Path) -> std::io::Result<HostStream> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "the Python API host is not supported on this platform yet (it needs Unix sockets)",
+    ))
+}
+
 /// Forwards unmatched requests to the API host's Unix socket.
 #[derive(Clone)]
 pub struct HostProxy {
@@ -87,6 +112,18 @@ impl HostProxy {
         }
     }
 
+    /// Whether requests may be forwarded: always for an unsupervised proxy, and while the
+    /// manifest says a plugin needs the host for a supervised one (else the host never starts
+    /// and unmatched routes answer `404`).
+    pub fn is_active(&self) -> bool {
+        self.supervisor.as_ref().is_none_or(|s| s.is_needed())
+    }
+
+    /// The supervisor, when the proxy starts the host on demand.
+    pub fn supervisor(&self) -> Option<&Arc<HostSupervisor>> {
+        self.supervisor.as_ref()
+    }
+
     /// The host's socket.
     pub fn socket(&self) -> &Path {
         &self.socket
@@ -100,7 +137,7 @@ impl HostProxy {
                 return bad_gateway("The API host is unavailable.");
             }
         }
-        let stream = match tokio::net::UnixStream::connect(&self.socket).await {
+        let stream = match connect_host(&self.socket).await {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("Failed to connect to the API host: {e}");

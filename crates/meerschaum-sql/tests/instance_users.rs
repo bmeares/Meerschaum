@@ -169,7 +169,7 @@ flavor_tests!(test_plugins_roundtrip, |c: Ctx| async move {
     };
     ok(c.conn.register_plugin(&plugin2, false).await);
     let res = c.conn.delete_user(&user).await;
-    if c.flavor == "sqlite" {
+    if c.is_sqlite() || c.is_duckdb() {
         // SQLite leaves foreign keys off: the user row goes, then their plugins.
         ok(res);
         assert_eq!(c.conn.get_plugin_id(&plugin2).await.unwrap(), None);

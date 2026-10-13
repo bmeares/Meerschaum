@@ -219,6 +219,7 @@ mod tests {
                     num_nodes: nodes.len(),
                     resumed_from: None,
                     holder: "test".into(),
+                    selection: None,
                 },
                 nodes,
             }

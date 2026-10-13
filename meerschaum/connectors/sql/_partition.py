@@ -17,6 +17,7 @@ default 43200 — 30 days).
 
 from __future__ import annotations
 
+from meerschaum._core._gate import rust_method as _rust_method
 from datetime import datetime, date, timedelta, timezone
 
 import meerschaum as mrsm
@@ -198,6 +199,8 @@ def get_partition_info(self, pipe: mrsm.Pipe, debug: bool = False) -> dict:
     - `count`: the number of partitions / chunks (`None` if unknown).
     - `interval`: the physical partition width (`timedelta`, epoch-`int`, or `None`).
     """
+    if (_rust := _rust_method(self, 'get_partition_info')) is not None:
+        return _rust(pipe)
     info = {'flavor': self.flavor, 'partitioned': False, 'count': None, 'interval': None}
     try:
         if not pipe.exists(debug=debug):
@@ -831,6 +834,23 @@ def partition_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
+    if (_rust := _rust_method(self, 'partition_pipe')) is not None:
+        _rust_result = _rust(pipe, chunk_minutes=chunk_minutes)
+        if _rust_result[0] and not pipe.temporary:
+            ### v4 sets `verify.chunk_minutes` on the Python pipe (`update_parameters`);
+            ### Rust persisted it, so mirror the registered value in memory.
+            _verify = (
+                (self.get_pipe_attributes(pipe, debug=debug) or {})
+                .get('parameters', {})
+                .get('verify', None)
+            )
+            if isinstance(_verify, dict) and 'chunk_minutes' in _verify:
+                pipe.update_parameters(
+                    {'verify': {'chunk_minutes': _verify['chunk_minutes']}},
+                    persist=False,
+                    debug=debug,
+                )
+        return _rust_result
     from meerschaum.config import get_config
     from meerschaum.utils.warnings import warn
 

@@ -7,6 +7,7 @@ use indexmap::IndexMap;
 use meerschaum_connector::ConnectorResult;
 use meerschaum_core::{Pipe, SuccessTuple};
 
+use crate::flavor::Flavor;
 use crate::ident::sql_item_name;
 use crate::pipe::SqlPipe;
 use crate::queries::index::{
@@ -14,7 +15,7 @@ use crate::queries::index::{
     get_pipe_index_names,
 };
 
-use super::{SqlConnector, be};
+use super::{SqlConnector, be, geopackage};
 
 impl SqlConnector {
     /// `get_pipe_index_names(pipe)`: index key → index name on the database.
@@ -52,7 +53,31 @@ impl SqlConnector {
             id_distinct_count: None,
             chunk_interval: None,
         };
-        get_create_index_queries(&self.ctx(), sp, &state).map_err(be)
+        let mut queries = get_create_index_queries(&self.ctx(), sp, &state).map_err(be)?;
+        // GeoPackage: an index over the registered geometry column is an R-tree (§6.2).
+        if self.flavor == Flavor::Geopackage {
+            for (key, col) in self.geopackage_spatial_index_keys(sp).await {
+                if queries.contains_key(&key)
+                    || !self
+                        .sqlite_master_has(&geopackage::rtree_name(&sp.target, &col))
+                        .await
+                {
+                    queries.insert(key, geopackage::get_rtree_create_queries(&sp.target, &col));
+                }
+            }
+        }
+        Ok(queries)
+    }
+
+    async fn sqlite_master_has(&self, name: &str) -> bool {
+        self.value_params(
+            "SELECT 1 FROM sqlite_master WHERE name = ?",
+            &[crate::driver::SqlParam::Text(name.to_string())],
+        )
+        .await
+        .ok()
+        .flatten()
+        .is_some()
     }
 
     /// `get_drop_index_queries(pipe)`: index key → queries.
@@ -87,7 +112,22 @@ impl SqlConnector {
             is_hypertable,
             temp_table_exists,
         };
-        Ok(get_drop_index_queries(&self.ctx(), &sp, &state))
+        let mut queries = get_drop_index_queries(&self.ctx(), &sp, &state);
+        if self.flavor == Flavor::Geopackage {
+            let extensions = self.sqlite_master_has("gpkg_extensions").await;
+            for (key, col) in self.geopackage_spatial_index_keys(&sp).await {
+                if self
+                    .sqlite_master_has(&geopackage::rtree_name(&sp.target, &col))
+                    .await
+                {
+                    queries.insert(
+                        key,
+                        geopackage::get_rtree_drop_queries(&sp.target, &col, extensions),
+                    );
+                }
+            }
+        }
+        Ok(queries)
     }
 
     /// `create_indices(pipe, columns, indices)`: create the pipe's indices (only those keyed by

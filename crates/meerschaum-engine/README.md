@@ -1,0 +1,110 @@
+# meerschaum-engine
+
+The dependency-aware Syncing Engine (`docs/design/v5.0.0.md` §5). It plans and runs syncs over
+the implicit pipe graph against the `InstanceConnector` / `Connector` traits of
+`meerschaum-connector`, so SQL, Valkey, API and Python-adapter connectors all plug in.
+
+## Public API
+
+```rust
+use std::sync::Arc;
+use meerschaum_engine::{
+    Depth, Engine, EngineConfig, LoopOptions, RunOptions, Selection, StaticRegistry,
+};
+
+let registry: Arc<dyn meerschaum_engine::ConnectorRegistry> = Arc::new(
+    StaticRegistry::new()
+        .with_instance("sql:main", instance.clone())   // Arc<dyn InstanceConnector>
+        .with_source("sql:main", source.clone()),      // Arc<dyn Connector>
+);
+let engine = Engine::new(registry, EngineConfig::from_config(&config, Some(&root_dir)));
+
+// Live events (§5.7): one typed event per transition, for every run of this engine.
+let mut events = engine.subscribe();
+
+// `mrsm sync pipes -m daily_rollup --parents` / `pipe.sync(parents=True)` / `Pipeline.run()`.
+let result = engine
+    .run(RunOptions {
+        selection: Some(Selection::refs([pipe_ref]).with_parents(Some(Depth::All))),
+        ..Default::default()
+    })
+    .await;
+result.success;            // §5.10 "Run outcome"
+result.outcomes;           // per node, completion order, with `SyncResult` counts
+result.record;             // the persisted `RunRecord` (run row plus node rows)
+
+// `mrsm plan pipes ...`: no data movement.
+let planned = engine.plan(&RunOptions { /* ... */ ..Default::default() }).await?;
+println!("{}", planned.plan);
+
+// `--resume <run_id>`: re-plans only nodes that failed or never ran.
+engine.run(RunOptions { resume: Some(run_id), ..Default::default() }).await;
+
+// A bare `pipe.sync()` (R1): v4 behavior, no graph, no capping, no engine state.
+engine.sync_pipe(&pipe, None, &Default::default()).await;
+
+// Continuous mode: `--loop --min-seconds N` (laps), `--listen` (stream sources).
+engine.run_loop(opts, LoopOptions { run_loop: true, min_seconds: 20.0, ..Default::default() },
+                Arc::new(|lap_event| { /* v4 lap output */ })).await;
+
+// Run history for `show runs` / the Gantt view.
+engine.state().recent_runs(10).await?;
+engine.state().load_run(&run_id).await?;
+engine.state().load_events(&run_id).await?;
+```
+
+| Item | Purpose |
+|---|---|
+| `Engine::run(RunOptions) -> RunResult` | One engine run: build the graph (one `fetch_pipes_keys` per instance), resolve the selection, plan, execute under leases, persist the run, compact the ledger. |
+| `Engine::plan` | The plan only. |
+| `Engine::subscribe() -> broadcast::Receiver<Event>` | The live event stream (`run_started` … `run_finished`, `stream_flushed`, `stream_restarted`). |
+| `Engine::sync_pipe` | A bare `pipe.sync()` (R1). |
+| `Engine::run_loop` | Continuous mode; reports `LapEvent`s in v4's output order. |
+| `Engine::state()` | `InstanceState`: the `mrsm:engine_*` pipes (run history, ledger, cursors, hashes). |
+| `ConnectorRegistry` | How the engine reaches connectors. Hosts (CLI, `meerschaum-py`, server) implement it; `StaticRegistry` is a fixed map. |
+| `EngineConfig::from_config` | `system.engine.*` (`workers`, `limits.connectors`, `limits.instances`, `python_workers`, `auto_rebuild`, `implicit_edges`, `state_flush_ms`, `run_history_days`, `events`, `inclusive_cap`, `flat_ledger`, `persist_runs`, `chunk_pipelining`). |
+
+## Seams for other crates
+
+- **Python connectors (worker agent).** A `PythonConnector` is a `Connector` (fetch) and/or an
+  `InstanceConnector`; nothing else is needed for plain `fetch` plugins. Additional seams, all
+  returned by the host's `ConnectorRegistry`:
+  - `PluginSync` — a plugin module with its own `sync(pipe, **kw)` (v4 `Pipe.sync` returns its
+    result instead of fetching);
+  - `SyncHooks` — `@pre_sync_hook` / `@post_sync_hook`, called around every engine node sync;
+  - `StreamSource` — `IS_STREAMING = True` connectors with `subscribe(pipe, sink)`; the engine
+    supplies the micro-batching sink (`stream::run_sink`) and acknowledges after commit;
+  - `LegacyStream` — the v4 pattern (a `sync()` that subscribes and returns, callbacks call
+    `pipe.sync()`): `run(pipe, stop)` keeps the worker alive and forwards each callback sync to
+    the native path; the engine supervises it like a `subscribe` stream;
+  - `is_python(keys)` — counts the node against `system.engine.python_workers`.
+- **Leases.** `InstanceConnector::acquire_pipe_lease` / `release_pipe_lease`. An instance that
+  answers `NotImplemented` falls back to interprocess file locks under
+  `{root}/cache/engine_leases` with a one-time warning.
+- **Crash injection (tests).** `Engine::with_faults(Arc<dyn FaultInjector>)`.
+
+## Engine state
+
+Every durable row lives on an instance as a `temporary`, `static` internal pipe keyed on
+`pipe_ref` (R5, R13): `mrsm:engine_state` (definition hashes, the pipe's instance),
+`mrsm:engine_ledger` and `mrsm:engine_cursors` (the child's instance), `mrsm:engine_runs`,
+`mrsm:engine_nodes` and `mrsm:engine_events` (the home instance). Writes go through
+`sync_pipe(check_existing=False, enforce=False, _check_temporary_tables=False)`. Per user sync
+the engine adds one ledger insert (before the data commit, parents only) and one cursor upsert
+for all of a node's edges (after the sync succeeds); `tests/state_cost.rs` measures this.
+
+## Tests
+
+| Test | What it covers |
+|---|---|
+| `tests/golden.rs` | The planner golden fixtures (`tests/fixtures/*.json`). |
+| `tests/v4_sync.rs` | A six-level chain and a diamond on SQLite over three phases of source changes, `--parents` and flat `-w 1`, against tables recorded from v4.1 (`tests/fixtures/v4_sync/`). |
+| `tests/crash.rs` | Crashes between ledger write and data commit, and between data commit and cursor advance; `--resume`. |
+| `tests/leases.rs` | Lease contention across two processes on one SQLite instance. |
+| `tests/continuous.rs` | Lap-compatible `--loop --min-seconds`, `-l _negation`, `-w 1` order, v4's error cooldown, a supervised in-memory stream under `--listen`. |
+| `tests/state_cost.rs` | The engine-state write path. |
+| `tests/bare_sync.rs` | A bare `pipe.sync()` (R1). |
+| `tests/date_bounds.rs` | v4's `parse_date_bounds` on the fetch path: UTC-aware, naive and epoch-integer bounds. |
+
+Regenerate the v4 fixture with
+`PYTHONPATH=$(pwd) python crates/meerschaum-engine/tests/fixtures/v4_sync/gen_v4_sync.py`.

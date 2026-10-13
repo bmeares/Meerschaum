@@ -6,16 +6,28 @@
 //! | PostgreSQL | `postgresql`, `timescaledb`, `timescaledb-ha`, `postgis`, `citus`, `cockroachdb` | `sqlx` |
 //! | MySQL | `mysql`, `mariadb` | `sqlx` |
 //! | SQLite | `sqlite`, `geopackage` | `sqlx` |
-//! | MSSQL | `mssql` | `tiberius` — not implemented yet ([`SqlError::DriverUnavailable`]) |
-//! | Oracle | `oracle` | `oracle` — not implemented yet |
-//! | DuckDB | `duckdb` | `duckdb` — not implemented yet |
+//! | MSSQL | `mssql` | `tiberius` (cargo feature `mssql`, on by default) |
+//! | Oracle | `oracle` | `oracle` (cargo feature `oracle`; Oracle Instant Client at runtime) |
+//! | DuckDB | `duckdb` | `duckdb` (cargo feature `duckdb`, bundled DuckDB) |
+//!
+//! Without its cargo feature a flavor is refused with [`SqlError::DriverUnavailable`].
+//! The non-`sqlx` drivers share the pool and operation layer in `native.rs`.
 //!
 //! Per D16 the Python SDK keeps SQLAlchemy for user SQL; these methods serve the Rust core and
 //! Rust plugins.
 
 mod backend;
 pub mod batch;
+#[cfg(feature = "duckdb")]
+mod duckdb;
+pub mod gpkg_functions;
+#[cfg(feature = "mssql")]
+mod mssql;
 mod mysql;
+#[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+mod native;
+#[cfg(feature = "oracle")]
+mod oracle;
 pub mod params;
 mod postgres;
 mod sqlite;
@@ -184,6 +196,8 @@ macro_rules! on_pool {
                 use backend::sqlite_tx as $M;
                 tokio::spawn(async move { $body })
             }
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            Pool::Native(_) => unreachable!("native pools are dispatched before `on_pool!`"),
         };
         handle.await.map_err(|e| {
             crate::error::SqlError::InvalidArgument(format!("The database task failed: {e}"))
@@ -201,6 +215,8 @@ enum TxInner {
     Postgres(sqlx::Transaction<'static, sqlx::Postgres>),
     Mysql(sqlx::Transaction<'static, sqlx::MySql>),
     Sqlite(sqlx::Transaction<'static, sqlx::Sqlite>),
+    #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+    Native(native::NativeTx),
 }
 
 impl fmt::Debug for SqlTransaction {
@@ -216,6 +232,8 @@ impl SqlTransaction {
             TxInner::Postgres(tx) => backend::pg_tx::tx_exec(tx, sql).await,
             TxInner::Mysql(tx) => backend::mysql_tx::tx_exec(tx, sql).await,
             TxInner::Sqlite(tx) => backend::sqlite_tx::tx_exec(tx, sql).await,
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            TxInner::Native(tx) => tx.exec(sql).await,
         }
     }
 
@@ -225,6 +243,8 @@ impl SqlTransaction {
             TxInner::Postgres(tx) => backend::pg_tx::tx_read(tx, sql).await?,
             TxInner::Mysql(tx) => backend::mysql_tx::tx_read(tx, sql).await?,
             TxInner::Sqlite(tx) => backend::sqlite_tx::tx_read(tx, sql).await?,
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            TxInner::Native(tx) => tx.read(sql).await?,
         };
         batches_to_frame(&batches)
     }
@@ -235,6 +255,8 @@ impl SqlTransaction {
             TxInner::Postgres(tx) => tx.commit().await?,
             TxInner::Mysql(tx) => tx.commit().await?,
             TxInner::Sqlite(tx) => tx.commit().await?,
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            TxInner::Native(tx) => tx.commit().await?,
         }
         Ok(())
     }
@@ -245,6 +267,8 @@ impl SqlTransaction {
             TxInner::Postgres(tx) => tx.rollback().await?,
             TxInner::Mysql(tx) => tx.rollback().await?,
             TxInner::Sqlite(tx) => tx.rollback().await?,
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            TxInner::Native(tx) => tx.rollback().await?,
         }
         Ok(())
     }
@@ -255,6 +279,52 @@ enum Pool {
     Postgres(sqlx::PgPool),
     Mysql(sqlx::MySqlPool),
     Sqlite(sqlx::SqlitePool),
+    /// `tiberius`, `duckdb` or `oracle` (see `native.rs`).
+    #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+    Native(native::NativePool),
+}
+
+/// Run a native-pool operation on its own task (isolating driver panics, as `on_pool!` does).
+#[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+macro_rules! on_native {
+    ($pool:expr, $p:ident => $body:expr) => {
+        if let Pool::Native(p) = &$pool {
+            let $p = p.clone();
+            return tokio::spawn(async move { $body }).await.map_err(|e| {
+                crate::error::SqlError::InvalidArgument(format!("The database task failed: {e}"))
+            })?;
+        }
+    };
+}
+#[cfg(not(any(feature = "mssql", feature = "duckdb", feature = "oracle")))]
+macro_rules! on_native {
+    ($pool:expr, $p:ident => $body:expr) => {};
+}
+
+/// Open a native pool for the MSSQL / Oracle / DuckDB families, verifying one connection.
+async fn connect_native(spec: &ConnectionSpec) -> Result<Pool> {
+    match spec.flavor.driver_family() {
+        #[cfg(feature = "mssql")]
+        DriverFamily::Mssql => Ok(Pool::Native(mssql::connect(spec).await?)),
+        #[cfg(feature = "duckdb")]
+        DriverFamily::Duckdb => Ok(Pool::Native(duckdb::connect(spec).await?)),
+        #[cfg(feature = "oracle")]
+        DriverFamily::Oracle => Ok(Pool::Native(oracle::connect(spec).await?)),
+        _ => Err(unsupported::unavailable(spec.flavor)),
+    }
+}
+
+/// Build a native pool without connecting (connections open on first use).
+fn connect_native_lazy(spec: &ConnectionSpec) -> Result<Pool> {
+    match spec.flavor.driver_family() {
+        #[cfg(feature = "mssql")]
+        DriverFamily::Mssql => Ok(Pool::Native(mssql::connect_lazy(spec)?)),
+        #[cfg(feature = "duckdb")]
+        DriverFamily::Duckdb => Ok(Pool::Native(duckdb::connect_lazy(spec)?)),
+        #[cfg(feature = "oracle")]
+        DriverFamily::Oracle => Ok(Pool::Native(oracle::connect_lazy(spec)?)),
+        _ => Err(unsupported::unavailable(spec.flavor)),
+    }
 }
 
 /// A pooled connection to one database.
@@ -281,7 +351,7 @@ impl SqlDriver {
             DriverFamily::Mysql => Pool::Mysql(mysql::connect(spec).await?),
             DriverFamily::Sqlite => Pool::Sqlite(sqlite::connect(spec).await?),
             DriverFamily::Mssql | DriverFamily::Oracle | DriverFamily::Duckdb => {
-                return Err(unsupported::unavailable(spec.flavor));
+                connect_native(spec).await?
             }
         };
         Ok(Self {
@@ -306,12 +376,10 @@ impl SqlDriver {
                     .connect_lazy_with(mysql::connect_options(spec)?),
             ),
             DriverFamily::Sqlite => Pool::Sqlite(
-                sqlx::sqlite::SqlitePoolOptions::new()
-                    .max_connections(max)
-                    .connect_lazy_with(sqlite::connect_options(spec)?),
+                sqlite::pool_options(spec).connect_lazy_with(sqlite::connect_options(spec)?),
             ),
             DriverFamily::Mssql | DriverFamily::Oracle | DriverFamily::Duckdb => {
-                return Err(unsupported::unavailable(spec.flavor));
+                connect_native_lazy(spec)?
             }
         };
         Ok(Self {
@@ -333,6 +401,7 @@ impl SqlDriver {
     pub async fn read_stream(&self, sql: &str, chunksize: usize) -> Result<RecordBatchStream> {
         let chunksize = chunksize.max(1);
         let sql = sql.to_string();
+        on_native!(self.pool, p => p.read_stream(sql, chunksize).await);
         on_pool!(self.pool, p, B => backend::read_stream::<B>(p, sql, chunksize).await)
     }
 
@@ -348,6 +417,7 @@ impl SqlDriver {
     /// returning the number of rows affected.
     pub async fn exec(&self, sql: &str) -> Result<u64> {
         let sql = sql.to_string();
+        on_native!(self.pool, p => p.exec(&sql).await);
         on_pool!(self.pool, p, B => backend::exec::<B>(&p, &sql).await)
     }
 
@@ -380,6 +450,7 @@ impl SqlDriver {
         rollback: bool,
     ) -> Result<Vec<Option<u64>>> {
         let queries = queries.to_vec();
+        on_native!(self.pool, p => p.exec_queries(&queries, break_on_error, rollback).await);
         on_pool!(self.pool, p, B, M => M::exec_queries(&p, &queries, break_on_error, rollback).await)
     }
 
@@ -388,6 +459,7 @@ impl SqlDriver {
     /// Returns whether every statement succeeded.
     pub async fn exec_autocommit(&self, queries: &[String]) -> Result<bool> {
         let queries = queries.to_vec();
+        on_native!(self.pool, p => p.exec_autocommit(&queries).await);
         on_pool!(self.pool, p, B, M => M::exec_autocommit(&p, &queries).await)
     }
 
@@ -396,12 +468,14 @@ impl SqlDriver {
     /// `Ok(None)` when the query returns no rows; `Ok(Some(SqlValue::Null))` for a `NULL`.
     pub async fn value(&self, sql: &str) -> Result<Option<SqlValue>> {
         let sql = sql.to_string();
+        on_native!(self.pool, p => p.value_with(&sql, &[]).await);
         on_pool!(self.pool, p, B => backend::value::<B>(&p, &sql).await)
     }
 
     /// Execute one statement with bound parameters, returning the rows affected.
     pub async fn exec_with(&self, sql: &str, params: &[SqlParam]) -> Result<u64> {
         let (sql, params) = (sql.to_string(), params.to_vec());
+        on_native!(self.pool, p => p.exec_with(&sql, &params).await);
         on_pool!(self.pool, p, B => backend::exec_with::<B>(&p, &sql, &params).await)
     }
 
@@ -412,20 +486,27 @@ impl SqlDriver {
         statements: &[(String, Vec<SqlParam>)],
     ) -> Result<Vec<Option<u64>>> {
         let statements = statements.to_vec();
+        on_native!(self.pool, p => p.exec_many_with(&statements).await);
         on_pool!(self.pool, p, B, M => M::exec_many_with(&p, &statements).await)
     }
 
     /// Run a query with bound parameters and collect the result as a kernel [`Frame`].
     pub async fn read_frame_with(&self, sql: &str, params: &[SqlParam]) -> Result<Frame> {
-        let (sql, params) = (sql.to_string(), params.to_vec());
-        let batches =
-            on_pool!(self.pool, p, B => backend::read_with::<B>(&p, &sql, &params).await)?;
+        let batches = self.read_with(sql, params).await?;
         batches_to_frame(&batches)
+    }
+
+    /// Run a query with bound parameters and collect its rows as record batches.
+    pub async fn read_with(&self, sql: &str, params: &[SqlParam]) -> Result<Vec<RecordBatch>> {
+        let (sql, params) = (sql.to_string(), params.to_vec());
+        on_native!(self.pool, p => p.read_with(&sql, &params).await);
+        on_pool!(self.pool, p, B => backend::read_with::<B>(&p, &sql, &params).await)
     }
 
     /// The first column of the first row of a query with bound parameters.
     pub async fn value_with(&self, sql: &str, params: &[SqlParam]) -> Result<Option<SqlValue>> {
         let (sql, params) = (sql.to_string(), params.to_vec());
+        on_native!(self.pool, p => p.value_with(&sql, &params).await);
         on_pool!(self.pool, p, B => backend::value_with::<B>(&p, &sql, &params).await)
     }
 
@@ -457,6 +538,8 @@ impl SqlDriver {
             Pool::Postgres(p) => TxInner::Postgres(p.begin().await?),
             Pool::Mysql(p) => TxInner::Mysql(p.begin().await?),
             Pool::Sqlite(p) => TxInner::Sqlite(p.begin().await?),
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            Pool::Native(p) => TxInner::Native(p.begin().await?),
         };
         Ok(SqlTransaction { inner })
     }
@@ -467,6 +550,8 @@ impl SqlDriver {
             Pool::Postgres(p) => p.close().await,
             Pool::Mysql(p) => p.close().await,
             Pool::Sqlite(p) => p.close().await,
+            #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
+            Pool::Native(p) => p.close(),
         }
     }
 }

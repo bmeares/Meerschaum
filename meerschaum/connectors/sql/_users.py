@@ -8,6 +8,7 @@ Manage users via the SQL Connector
 
 from __future__ import annotations
 
+from meerschaum._core._gate import rust_method as _rust_method
 import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Optional, Any, Dict, List, Union
 
@@ -52,6 +53,8 @@ def register_user(
     **kw: Any
 ) -> SuccessTuple:
     """Register a new user."""
+    if (_rust := _rust_method(self, 'register_user')) is not None:
+        return _rust(user)
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import json_flavors
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
@@ -136,6 +139,8 @@ def edit_user(
     **kw: Any
 ) -> SuccessTuple:
     """Update an existing user's metadata."""
+    if (_rust := _rust_method(self, 'edit_user')) is not None:
+        return _rust(user)
     from meerschaum.utils.packages import attempt_import
     from meerschaum.utils.sql import json_flavors
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
@@ -190,6 +195,8 @@ def get_user_id(
     debug: bool = False
 ) -> Optional[int]:
     """If a user is registered, return the `user_id`."""
+    if (_rust := _rust_method(self, 'get_user_id')) is not None:
+        return _rust(user)
     ### ensure users table exists
     from meerschaum.utils.packages import attempt_import
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
@@ -214,6 +221,8 @@ def get_user_attributes(
     """
     Return the user's attributes.
     """
+    if (_rust := _rust_method(self, 'get_user_attributes')) is not None:
+        return _rust(user)
     ### ensure users table exists
     from meerschaum.utils.warnings import warn
     from meerschaum.utils.packages import attempt_import
@@ -252,6 +261,8 @@ def delete_user(
     debug: bool = False
 ) -> SuccessTuple:
     """Delete a user's record from the users table."""
+    if (_rust := _rust_method(self, 'delete_user')) is not None:
+        return _rust(user)
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
@@ -286,6 +297,8 @@ def get_users(
     """
     Get the registered usernames.
     """
+    if (_rust := _rust_method(self, 'get_users')) is not None:
+        return _rust()
     ### ensure users table exists
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
@@ -307,6 +320,8 @@ def get_user_password_hash(
     Return the password has for a user.
     **NOTE**: This may be dangerous and is only allowed if the security settings explicity allow it.
     """
+    if (_rust := _rust_method(self, 'get_user_password_hash')) is not None:
+        return _rust(user)
     from meerschaum.utils.debug import dprint
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
@@ -339,6 +354,8 @@ def get_user_type(
     """
     Return the user's type.
     """
+    if (_rust := _rust_method(self, 'get_user_type')) is not None:
+        return _rust(user)
     from meerschaum.connectors.sql.tables import get_tables
     users_tbl = get_tables(mrsm_instance=self, debug=debug)['users']
     from meerschaum.utils.packages import attempt_import

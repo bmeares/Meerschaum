@@ -63,6 +63,15 @@ GATED_FEATURES = {
     'get_config': 'meerschaum.config',
 }
 
+#: Classes bound in `meerschaum._core` whose methods replace a v4 class's methods, mapped to the
+#: module defining the guarded class. The method guards call `rust_method(self, name)`, which asks
+#: the Python object for its Rust counterpart (built once per object, see
+#: `SQLConnector._rust_method`). The feature name for `MRSM_CORE=rust:...` is the lowercased
+#: class name (`sqlconnector`).
+GATED_CLASSES = {
+    'SqlConnector': 'meerschaum.connectors.sql._SQLConnector',
+}
+
 
 def parse_mode(value: Optional[str]) -> Tuple[str, Optional[FrozenSet[str]]]:
     """
@@ -99,7 +108,7 @@ def use_rust(feature: str) -> bool:
     """Return whether the gate prefers the Rust implementation of `feature`."""
     if _MODE == PYTHON:
         return False
-    return _FEATURES is None or feature in _FEATURES
+    return _FEATURES is None or feature.lower() in _FEATURES
 
 
 def rust_impl(feature: str, name: Optional[str] = None) -> Optional[Callable[..., Any]]:
@@ -117,6 +126,21 @@ def rust_impl(feature: str, name: Optional[str] = None) -> Optional[Callable[...
         return getattr(_core, name or feature)
     except AttributeError:
         return None
+
+
+def rust_method(obj: Any, name: str) -> Optional[Callable[..., Any]]:
+    """
+    Return the Rust method `name` bound to `obj`'s `_core` counterpart, or `None` to run Python.
+
+    The guarded v4 methods are plain functions that tests and plugins also call with stub objects
+    as `self` (duck typing, design §4.4), so an object without `_rust_method` runs Python.
+    """
+    if _MODE == PYTHON:
+        return None
+    getter = getattr(obj, '_rust_method', None)
+    if getter is None:
+        return None
+    return getter(name)
 
 
 def set_mode(value: Optional[str]) -> None:

@@ -2,7 +2,8 @@
 //!
 //! This wave covers the flavor-aware query-building layer (ported function by function from
 //! `meerschaum/utils/sql.py`, `meerschaum/utils/dtypes/sql.py` and `meerschaum/connectors/sql/`)
-//! and the driver layer (`sqlx` pools for the PostgreSQL, MySQL and SQLite families).
+//! and the driver layer (`sqlx` pools for the PostgreSQL, MySQL and SQLite / GeoPackage
+//! families; `tiberius` for MSSQL, `duckdb` and `oracle` behind their cargo features).
 //! Pipe attributes, the dtype vocabulary, `Value` and the Python text helpers come from
 //! `meerschaum-core`; query results convert into the kernel's `Frame` (see
 //! [`driver::SqlDriver::read_frame`]). [`instance::SqlConnector`] ports the instance methods
@@ -16,6 +17,7 @@ pub mod dateadd;
 pub mod driver;
 pub mod dtypes;
 pub mod error;
+pub mod facade;
 pub mod flavor;
 pub mod ident;
 pub mod instance;

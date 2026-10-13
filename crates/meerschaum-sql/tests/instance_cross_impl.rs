@@ -60,16 +60,26 @@ impl Py {
     }
 
     fn run(&self, args: &[&str]) -> J {
-        let out = Command::new(&self.exe)
-            .arg(fixtures().join("cross_impl.py"))
+        let mut cmd = Command::new(&self.exe);
+        cmd.arg(fixtures().join("cross_impl.py"))
             .args(args)
             .current_dir(repo_root())
             .env("PYTHONPATH", repo_root())
             .env("MRSM_ROOT_DIR", &self.root_dir)
             .env("MRSM_PLUGINS_DIR", &self.plugins_dir)
-            .env("PYTHONHASHSEED", "0")
-            .output()
-            .expect("python runs");
+            .env("PYTHONHASHSEED", "0");
+        // Database drivers (pyodbc, ...) live in the reference interpreter's own venv.
+        if let Some(venvs) = self
+            .exe
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+        {
+            if venvs.ends_with("venvs") {
+                cmd.env("MRSM_VENVS_DIR", venvs);
+            }
+        }
+        let out = cmd.output().expect("python runs");
         let stdout = String::from_utf8_lossy(&out.stdout);
         let last = stdout
             .lines()
@@ -156,10 +166,15 @@ async fn connect(db: &Path) -> SqlConnector {
 
 async fn rust_sync(db: &Path, phase: usize) -> Vec<(bool, String)> {
     let conn = connect(db).await;
-    let sc = scenario();
+    let out = rust_sync_conn(&conn, &scenario(), phase).await;
+    conn.driver().close().await;
+    out
+}
+
+async fn rust_sync_conn(conn: &SqlConnector, sc: &J, phase: usize) -> Vec<(bool, String)> {
     let mut out = Vec::new();
     for spec in sc["pipes"].as_array().unwrap() {
-        let pipe = spec_pipe(&conn, spec);
+        let pipe = spec_pipe(conn, spec);
         if spec["inplace"].as_bool() == Some(true) {
             // `Pipe.sync()` registers the pipe before syncing in place.
             if conn.get_pipe_id(&pipe).await.unwrap().is_none() {
@@ -195,7 +210,6 @@ async fn rust_sync(db: &Path, phase: usize) -> Vec<(bool, String)> {
             .await;
         out.push((res.success, res.message));
     }
-    conn.driver().close().await;
     out
 }
 
@@ -209,10 +223,15 @@ fn normalize(v: &KValue) -> J {
 
 async fn rust_read(db: &Path) -> J {
     let conn = connect(db).await;
-    let sc = scenario();
+    let out = rust_read_conn(&conn, &scenario()).await;
+    conn.driver().close().await;
+    out
+}
+
+async fn rust_read_conn(conn: &SqlConnector, sc: &J) -> J {
     let mut out = serde_json::Map::new();
     for spec in sc["pipes"].as_array().unwrap() {
-        let pipe = spec_pipe(&conn, spec);
+        let pipe = spec_pipe(conn, spec);
         let key = spec_key(spec);
         let docs = conn
             .get_pipe_data(&pipe, &DataQuery::default())
@@ -251,7 +270,6 @@ async fn rust_read(db: &Path) -> J {
             serde_json::to_value(conn.get_pipe_columns_types(&pipe).await.unwrap()).unwrap(),
         );
     }
-    conn.driver().close().await;
     J::Object(out)
 }
 
@@ -407,6 +425,179 @@ async fn cross_implementation_sqlite() {
         &py_read_py,
         &py_read_rs,
     ));
+
+    let report = failures.join("\n");
+    std::fs::write(work.join("report.txt"), &report).unwrap();
+    if failures.is_empty() && std::env::var("MRSM_TEST_KEEP").is_err() {
+        let _ = std::fs::remove_dir_all(&work);
+    }
+    eprintln!("cross-implementation artifacts: {}", work.display());
+    assert!(
+        failures.is_empty(),
+        "{} difference(s) (artifacts in {}):\n{report}",
+        failures.len(),
+        work.display()
+    );
+}
+
+/// The MSSQL variant (`MRSM_TEST_MSSQL_URI`, e.g.
+/// `mssql://sa:<password>@localhost:1439/master`): the four databases of the SQLite test are four
+/// fresh `w4sql_xi_*` schemas (created and dropped by the test), and the dumps list each schema's
+/// tables from `information_schema` (column types, rows, indices).
+#[cfg(feature = "mssql")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cross_implementation_mssql() {
+    use meerschaum_sql::uri::ConnectionSpec;
+    let Ok(uri) = std::env::var("MRSM_TEST_MSSQL_URI") else {
+        eprintln!("Skipping mssql: set MRSM_TEST_MSSQL_URI.");
+        return;
+    };
+    let Some(exe) = python() else {
+        eprintln!("Skipping: no Python reference environment (set MRSM_TEST_PYTHON).");
+        return;
+    };
+    let work = std::env::temp_dir().join(format!("_mrsm_rs_xi_{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&work).unwrap();
+    let py = Py::new(exe, &work);
+    // The in-place pipe's definition names its source table without a schema, which resolves
+    // to the login's default schema on MSSQL; it is covered by the SQLite variant.
+    let mut sc = scenario();
+    sc["pipes"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|p| p["inplace"].as_bool() != Some(true));
+    let scenario_path = work.join("scenario.json");
+    std::fs::write(&scenario_path, sc.to_string()).unwrap();
+    let sp = scenario_path.to_str().unwrap();
+    let base = ConnectionSpec::from_uri(&uri, Some("xi_rs"), None).unwrap();
+    let id = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let schema = |tag: &str| format!("w4sql_xi_{id}_{tag}");
+    let admin = SqlConnector::connect("xi_admin", base.clone())
+        .await
+        .unwrap();
+    for tag in ["py", "rs", "pyrs", "rspy"] {
+        admin
+            .driver()
+            .exec(&format!("CREATE SCHEMA {}", schema(tag)))
+            .await
+            .unwrap();
+    }
+    let py_target = |tag: &str| -> String {
+        json!({
+            "flavor": "mssql",
+            "host": base.host,
+            "port": base.port,
+            "username": base.username,
+            "password": base.password,
+            "database": base.database,
+            "schema": schema(tag),
+        })
+        .to_string()
+    };
+    let rs_conn = |tag: &str| {
+        let mut spec = base.clone();
+        spec.schema = Some(schema(tag));
+        async move { SqlConnector::connect("xi", spec).await.unwrap() }
+    };
+    let mut failures: Vec<String> = Vec::new();
+
+    // Phase 0 on each implementation's own schema (and on the cross-write schemas).
+    let py_res = py.run(&["sync", &py_target("py"), sp, "0"]);
+    let rs = rs_conn("rs").await;
+    let rs_res = rust_sync_conn(&rs, &sc, 0).await;
+    for (i, (ok, msg)) in rs_res.iter().enumerate() {
+        assert!(ok, "rust phase 0 pipe {i}: {msg}");
+        assert!(
+            py_res[i][0].as_bool().unwrap(),
+            "python phase 0 pipe {i}: {}",
+            py_res[i]
+        );
+        assert_eq!(
+            py_res[i][1].as_str().unwrap(),
+            msg,
+            "phase 0 message of pipe {i}"
+        );
+    }
+    let _ = py.run(&["sync", &py_target("pyrs"), sp, "0"]);
+    let rspy = rs_conn("rspy").await;
+    for (i, (ok, msg)) in rust_sync_conn(&rspy, &sc, 0).await.iter().enumerate() {
+        assert!(ok, "rust phase 0 (rspy) pipe {i}: {msg}");
+    }
+    let py_dump = stable_dump(py.run(&["dump", &py_target("py")]));
+    let rs_dump = stable_dump(py.run(&["dump", &py_target("rs")]));
+    failures.extend(diff("phase0", &py_dump, &rs_dump));
+
+    // Phase 1, including each implementation syncing into the other's schema.
+    let py_res = py.run(&["sync", &py_target("py"), sp, "1"]);
+    let rs_res = rust_sync_conn(&rs, &sc, 1).await;
+    for (i, (ok, msg)) in rs_res.iter().enumerate() {
+        assert!(ok, "rust phase 1 pipe {i}: {msg}");
+        assert_eq!(
+            py_res[i][1].as_str().unwrap(),
+            msg,
+            "phase 1 message of pipe {i}"
+        );
+    }
+    let pyrs = rs_conn("pyrs").await;
+    for (i, (ok, msg)) in rust_sync_conn(&pyrs, &sc, 1).await.iter().enumerate() {
+        assert!(ok, "rust sync into python schema, pipe {i}: {msg}");
+    }
+    for (i, r) in py
+        .run(&["sync", &py_target("rspy"), sp, "1"])
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        assert!(
+            r[0].as_bool().unwrap(),
+            "python sync into rust schema, pipe {i}: {r}"
+        );
+    }
+    let py_dump = stable_dump(py.run(&["dump", &py_target("py")]));
+    let rs_dump = stable_dump(py.run(&["dump", &py_target("rs")]));
+    let pyrs_dump = stable_dump(py.run(&["dump", &py_target("pyrs")]));
+    let rspy_dump = stable_dump(py.run(&["dump", &py_target("rspy")]));
+    failures.extend(diff("phase1 py vs rs", &py_dump, &rs_dump));
+    failures.extend(diff("phase1 py vs py_then_rs", &py_dump, &pyrs_dump));
+    failures.extend(diff("phase1 py vs rs_then_py", &py_dump, &rspy_dump));
+
+    // Reads: both implementations read both schemas.
+    let py_read_py = py.run(&["read", &py_target("py"), sp]);
+    let py_read_rs = py.run(&["read", &py_target("rs"), sp]);
+    let rs_read_py = rust_read_conn(&rs_conn("py").await, &sc).await;
+    let rs_read_rs = rust_read_conn(&rs, &sc).await;
+    failures.extend(diff("read py (python vs rust)", &py_read_py, &rs_read_py));
+    failures.extend(diff("read rs (python vs rust)", &py_read_rs, &rs_read_rs));
+    failures.extend(diff("python reads py vs rs", &py_read_py, &py_read_rs));
+
+    // Drop the schemas (and the database-scoped partition objects of their tables).
+    for tag in ["py", "rs", "pyrs", "rspy"] {
+        let s = schema(tag);
+        let tables = admin
+            .read(&format!(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = '{s}'"
+            ))
+            .await
+            .map(|df| meerschaum_connector::pipe_ops::frame_to_docs(&df))
+            .unwrap_or_default();
+        for t in tables {
+            if let Some(KValue::Str(name)) = t.values().next() {
+                let _ = admin
+                    .driver()
+                    .exec(&format!("DROP TABLE [{s}].[{name}]"))
+                    .await;
+            }
+        }
+        let _ = admin.driver().exec(&format!("DROP SCHEMA [{s}]")).await;
+    }
+    for spec in sc["pipes"].as_array().unwrap() {
+        let pipe = spec_pipe(&admin, spec);
+        let sp = admin.sql_pipe(&pipe).unwrap();
+        let cleanup =
+            meerschaum_sql::queries::partition::get_partition_cleanup_queries(admin.flavor(), &sp);
+        let _ = admin.exec_queries(&cleanup, false, false).await;
+    }
 
     let report = failures.join("\n");
     std::fs::write(work.join("report.txt"), &report).unwrap();

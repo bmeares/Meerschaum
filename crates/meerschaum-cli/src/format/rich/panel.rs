@@ -338,6 +338,26 @@ impl<'a> Renderable for Box<dyn Renderable + 'a> {
 pub struct Columns<'a> {
     /// The renderables.
     pub renderables: Vec<Box<dyn Renderable + 'a>>,
+    /// `equal`: every column as wide as the widest renderable (each wrapped in `Constrain`).
+    pub equal: bool,
+}
+
+/// `rich.constrain.Constrain(renderable, width)`.
+struct Constrain<'a> {
+    renderable: &'a dyn Renderable,
+    width: usize,
+}
+
+impl Renderable for Constrain<'_> {
+    fn render(&self, console: &Console, options: &RenderOptions) -> Vec<Segment> {
+        let o = options.with_width(self.width.min(options.max_width));
+        console.render(self.renderable, &o)
+    }
+
+    fn measure(&self, console: &Console, options: &RenderOptions) -> Measurement {
+        let o = options.with_width(self.width);
+        Measurement::get(console, &o, self.renderable)
+    }
 }
 
 impl Renderable for Columns<'_> {
@@ -348,11 +368,16 @@ impl Renderable for Columns<'_> {
         let padding = (0usize, 1usize, 0usize, 1usize);
         let width_padding = padding.1.max(padding.3);
         let max_width = options.max_width;
-        let renderable_widths: Vec<usize> = self
+        let mut renderable_widths: Vec<usize> = self
             .renderables
             .iter()
             .map(|r| Measurement::get(console, options, r.as_ref()).maximum)
             .collect();
+        if self.equal {
+            let max = renderable_widths.iter().copied().max().unwrap_or(0);
+            renderable_widths = vec![max; renderable_widths.len()];
+        }
+        let equal_width = renderable_widths.first().copied().unwrap_or(0);
         let item_count = self.renderables.len();
         let iter_widths = |column_count: usize| -> Vec<usize> {
             let mut v: Vec<usize> = renderable_widths.clone();
@@ -398,10 +423,22 @@ impl Renderable for Columns<'_> {
         for _ in 0..column_count.min(cells.len()) {
             table.add_column(Column::default());
         }
+        let equal = self.equal;
         for row in cells.chunks(column_count) {
             let row: Vec<Option<Box<dyn Renderable + '_>>> = row
                 .iter()
-                .map(|c| c.map(|r| Box::new(Ref(r)) as Box<dyn Renderable>))
+                .map(|c| {
+                    c.map(|r| {
+                        if equal {
+                            Box::new(Constrain {
+                                renderable: r,
+                                width: equal_width,
+                            }) as Box<dyn Renderable>
+                        } else {
+                            Box::new(Ref(r)) as Box<dyn Renderable>
+                        }
+                    })
+                })
                 .collect();
             table.add_row(row);
         }

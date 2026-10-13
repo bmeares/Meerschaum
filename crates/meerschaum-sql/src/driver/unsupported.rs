@@ -1,4 +1,4 @@
-//! Flavors without a Rust driver yet (D13 lists `tiberius`, `oracle` and `duckdb`).
+//! Flavors whose driver was not compiled in (the `mssql`, `oracle` and `duckdb` cargo features).
 //!
 //! Connecting returns [`SqlError::DriverUnavailable`]; nothing here panics.
 
@@ -19,11 +19,11 @@ pub(crate) fn unavailable(flavor: Flavor) -> SqlError {
         }
     };
     let reason = if enabled {
-        format!("the `{krate}` driver is not implemented yet (D13)")
+        format!("the `{krate}` driver is compiled in but could not be selected")
     } else {
         format!(
             "meerschaum-sql was built without the `{feature}` cargo feature \
-             (and the `{krate}` driver is not implemented yet, D13)"
+             (the `{krate}` driver)"
         )
     };
     SqlError::DriverUnavailable { flavor, reason }

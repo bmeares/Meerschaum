@@ -291,6 +291,21 @@ impl SqlConnector {
         if !success {
             return SuccessTuple::fail(format!("Failed to vacuum {pipe}."));
         }
+        // `VACUUM` may renumber the rowids the GeoPackage R-tree keys on; rebuild it.
+        if flavor == crate::flavor::Flavor::Geopackage {
+            if let Some(col) = self.geopackage_geometry_column(&sp.target).await {
+                let rtree = crate::instance::geopackage::rtree_name(&sp.target, &col);
+                if self.table_exists(&rtree, None).await {
+                    let queries =
+                        crate::instance::geopackage::get_rtree_create_queries(&sp.target, &col);
+                    if !self.exec_queries_all(&queries, true, true).await {
+                        return SuccessTuple::fail(format!(
+                            "Failed to rebuild the spatial index of {pipe}."
+                        ));
+                    }
+                }
+            }
+        }
         let size_after = self.pipe_size(&sp).await;
         SuccessTuple::ok(size_change_message(
             size_before,

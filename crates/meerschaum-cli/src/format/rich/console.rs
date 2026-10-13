@@ -270,6 +270,37 @@ impl Renderable for Padding<'_> {
     }
 }
 
+/// `rich.console.Group(*renderables)`: the renderables one after another.
+pub struct Group<'a> {
+    /// The renderables.
+    pub renderables: Vec<Box<dyn Renderable + 'a>>,
+}
+
+impl Renderable for Group<'_> {
+    fn render(&self, console: &Console, options: &RenderOptions) -> Vec<Segment> {
+        let mut out = Vec::new();
+        for r in &self.renderables {
+            out.extend(console.render(r.as_ref(), options));
+        }
+        out
+    }
+
+    fn measure(&self, console: &Console, options: &RenderOptions) -> Measurement {
+        if self.renderables.is_empty() {
+            return Measurement::new(0, 0);
+        }
+        let ms: Vec<Measurement> = self
+            .renderables
+            .iter()
+            .map(|r| Measurement::get(console, options, r.as_ref()))
+            .collect();
+        Measurement::new(
+            ms.iter().map(|m| m.minimum).max().unwrap_or(0),
+            ms.iter().map(|m| m.maximum).max().unwrap_or(0),
+        )
+    }
+}
+
 /// `rich.styled.Styled(renderable, style)`.
 pub struct Styled<'a> {
     /// The inner renderable.

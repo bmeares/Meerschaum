@@ -19,8 +19,8 @@ The work happens in a child process of the same interpreter with a minimal, cont
 environment (`env -i` plus only `PATH`, `HOME` (temporary), `MRSM_ROOT_DIR`, `MRSM_PLUGINS_DIR`,
 `MRSM_VENVS_DIR`, `MRSM_NO_AUTO_INSTALL` and `PYTHONHASHSEED=0`): a temporary root, an empty plugins
 directory, a home directory, and a venvs directory whose `mrsm` venv links to
-`test_root/venvs/mrsm` (the job machinery imports `daemon`, `dill` and `psutil` from it; nothing
-is installed). Nothing from the host environment reaches the daemons or the fixture; the only
+the reference venv under `scripts/parity/run.sh`, or to `test_root/venvs/mrsm` otherwise (the job
+machinery imports `daemon`, `dill` and `psutil` from it; nothing is installed). Nothing from the host environment reaches the daemons or the fixture; the only
 environment maps recorded are the synthetic `env` given to a job and Python's job defaults.
 
 The child creates jobs with `meerschaum.jobs.Job` whose sysargs exit immediately
@@ -56,7 +56,13 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent.parent.parent.parent
 OUT = HERE / 'jobs.json'
-MRSM_VENV = REPO / 'test_root' / 'venvs' / 'mrsm'
+### Under the reference harness the reference venv itself provides daemon, dill and psutil
+### (pinned in scripts/parity/requirements.txt); against the working tree, test_root's `mrsm` venv.
+MRSM_VENV = (
+    pathlib.Path(sys.prefix)
+    if os.environ.get('MRSM_PARITY_REFERENCE')
+    else REPO / 'test_root' / 'venvs' / 'mrsm'
+)
 
 TS_LOG = '2000-01-01 00:00 | '
 TS_PROCESS = {

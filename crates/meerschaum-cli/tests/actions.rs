@@ -293,10 +293,10 @@ fn compose_explain_and_unsupported_subactions() {
 fn other_actions_are_not_implemented() {
     let tmp = tempfile::tempdir().unwrap();
     let host = SharedHost::default();
-    let (r, _) = run(tmp.path(), &["sync", "pipes"], no_env, &host);
+    let (r, _) = run(tmp.path(), &["install", "plugins", "noaa"], no_env, &host);
     assert_eq!(
         r,
-        SuccessTuple::fail("action `sync pipes` is not implemented in Rust yet")
+        SuccessTuple::fail("action `install plugins` is not implemented in Rust yet")
     );
     let (r, _) = run(tmp.path(), &["reload"], no_env, &host);
     assert_eq!(r, SuccessTuple::success());

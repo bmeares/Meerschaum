@@ -36,10 +36,13 @@ impl SqlParam {
     }
 }
 
-/// The `n`-th (1-based) placeholder for a flavor: `$n` on PostgreSQL, `?` elsewhere.
+/// The `n`-th (1-based) placeholder for a flavor: `$n` on PostgreSQL and DuckDB, `@Pn` on
+/// MSSQL (`tiberius`), `:n` on Oracle, `?` elsewhere.
 pub fn placeholder(flavor: Flavor, n: usize) -> String {
     match flavor.driver_family() {
-        DriverFamily::Postgres => format!("${n}"),
+        DriverFamily::Postgres | DriverFamily::Duckdb => format!("${n}"),
+        DriverFamily::Mssql => format!("@P{n}"),
+        DriverFamily::Oracle => format!(":{n}"),
         _ => "?".to_string(),
     }
 }
@@ -57,6 +60,9 @@ pub fn max_bind_params(flavor: Flavor) -> usize {
     match flavor.driver_family() {
         // SQLite's `SQLITE_MAX_VARIABLE_NUMBER` is 32766 since 3.32; stay well below.
         DriverFamily::Sqlite => 30_000,
+        // MSSQL accepts at most 2,100 parameters per request.
+        DriverFamily::Mssql => 2_000,
+        DriverFamily::Oracle => 30_000,
         _ => 60_000,
     }
 }

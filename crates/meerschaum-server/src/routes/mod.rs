@@ -62,6 +62,8 @@ pub fn route_group_of(path: &str) -> &'static str {
         "engine" => "engine",
         "info" | "chaining" | "healthcheck" | "favicon.ico" | "id" => "misc",
         "docs" | "redoc" | "openapi.json" => "docs",
+        "mcp" => "mcp",
+        "_mrsm" => "internal",
         _ if first.starts_with("jobs") => "jobs",
         _ => "other",
     }
@@ -102,7 +104,9 @@ pub struct Unmatched;
 
 async fn fallback(State(state): State<AppState>, req: Request) -> Response {
     if let Some(host) = state.host.clone() {
-        return host.forward(req).await;
+        if host.is_active() && is_proxyable(&state.config, req.uri().path()) {
+            return host.forward(req).await;
+        }
     }
     let mut resp = ApiError::not_found().into_response();
     resp.extensions_mut().insert(Unmatched);
@@ -164,11 +168,29 @@ async fn rate_limit(State(state): State<AppState>, req: Request, next: Next) -> 
     next.run(req).await
 }
 
+/// Whether an unmatched path may be proxied to the API host (§7.3): never the host's internal
+/// routes (`/_mrsm/`), and never a core route group the allowlist removed, so that
+/// `api:permissions:routes:allowlist` cannot be bypassed by a plugin serving the same path.
+pub fn is_proxyable(cfg: &crate::config::ServerConfig, path: &str) -> bool {
+    if path.starts_with(crate::mcp::federation::INTERNAL_PREFIX) {
+        return false;
+    }
+    let group = route_group_of(path);
+    let core = CORE_ROUTE_GROUPS.contains(&group) || group == "mcp";
+    !(core && !cfg.route_group_is_allowed(group))
+}
+
 /// Registers one route group.
 type AddRoutes = fn(Router<AppState>, &crate::config::ServerConfig) -> Router<AppState>;
 
-/// Build the application router for a state.
+/// Build the application router for a state (with the default MCP server).
 pub fn router(state: AppState) -> Router {
+    let mcp = std::sync::Arc::new(crate::mcp::McpServer::for_state(&state));
+    router_with_mcp(state, mcp)
+}
+
+/// Build the application router with a configured MCP server (backend, federation).
+pub fn router_with_mcp(state: AppState, mcp: std::sync::Arc<crate::mcp::McpServer>) -> Router {
     let cfg = state.config.clone();
     let mut app: Router<AppState> = Router::new();
     // `/login` is always registered (`api/routes/__init__.py`).
@@ -190,6 +212,10 @@ pub fn router(state: AppState) -> Router {
         if cfg.route_group_is_allowed(group) {
             app = add(app, &cfg);
         }
+    }
+    // Registered like v4: when `api:mcp:enabled` and the `mcp` group is allowed.
+    if cfg.mcp.enabled && cfg.route_group_is_allowed("mcp") {
+        app = crate::mcp::http::routes(app, mcp);
     }
     app = docs::routes(app, &cfg);
     if let Some(static_path) = cfg.static_path.clone() {
@@ -290,6 +316,8 @@ mod tests {
         assert_eq!(route_group_of("/"), "index");
         assert_eq!(route_group_of("/favicon.ico"), "misc");
         assert_eq!(route_group_of("/plugin-route"), "other");
+        assert_eq!(route_group_of("/mcp"), "mcp");
+        assert_eq!(route_group_of("/_mrsm/host/mcp"), "internal");
     }
 
     #[test]

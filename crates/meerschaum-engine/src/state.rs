@@ -92,6 +92,22 @@ pub trait StateWriter: Send + Sync {
         cursor: EdgeCursor,
     ) -> impl Future<Output = Result<(), StateError>> + Send;
 
+    /// Upsert several cursors on one state instance. Implementations write them in one
+    /// statement where they can (the engine-state cost target, §5.8); the default writes them
+    /// one at a time.
+    fn put_cursors(
+        &self,
+        state_instance: &str,
+        cursors: Vec<EdgeCursor>,
+    ) -> impl Future<Output = Result<(), StateError>> + Send {
+        async move {
+            for c in cursors {
+                self.put_cursor(state_instance, c).await?;
+            }
+            Ok(())
+        }
+    }
+
     /// Upsert a pipe's definition hash.
     fn put_definition_hash(
         &self,
@@ -315,7 +331,14 @@ impl StateWriter for MemoryState {
         let mut data = self.check(state_instance)?;
         let entries = data.ledger.entry(state_instance.to_string()).or_default();
         let before = entries.len();
-        entries.retain(|e| !(e.pipe_ref == *parent && e.seq <= through_seq));
+        // Keep the newest entry: it holds the sequence high-water mark (see `InstanceState`).
+        let newest = entries
+            .iter()
+            .filter(|e| e.pipe_ref == *parent)
+            .map(|e| e.seq)
+            .max();
+        entries
+            .retain(|e| !(e.pipe_ref == *parent && e.seq <= through_seq && Some(e.seq) != newest));
         Ok(before - entries.len())
     }
 

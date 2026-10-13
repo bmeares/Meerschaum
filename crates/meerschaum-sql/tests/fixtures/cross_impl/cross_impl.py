@@ -11,6 +11,10 @@ Run with `PYTHONPATH=<repo root>` and empty temporary `MRSM_ROOT_DIR` / `MRSM_PL
     python cross_impl.py read <db> <scenario.json>           # get_data() of every pipe
     python cross_impl.py dump <db>                           # schema + rows of every table
 
+`<db>` is a SQLite file path, or a JSON object of connector attributes (`flavor`, `host`,
+`port`, `username`, `password`, `database`, `schema`) for a server flavor such as MSSQL, whose
+`dump` lists the tables of the connector's schema.
+
 All output is JSON on the last line of stdout.
 """
 
@@ -55,6 +59,8 @@ def normalize(value):
 def get_conn(db_path):
     import meerschaum as mrsm
     ### NOTE: The label is fixed so `sql:xi` pipes are synced in place (connector == instance).
+    if db_path.startswith('{'):
+        return mrsm.get_connector('sql', 'xi', **json.loads(db_path))
     return mrsm.get_connector('sql', 'xi', flavor='sqlite', database=db_path)
 
 
@@ -114,7 +120,63 @@ def encode_cell(value):
     return value
 
 
+def do_dump_server(target):
+    """Schema and rows of every table in a server connector's schema."""
+    conn = get_conn(target)
+    schema = conn.schema
+    tables = conn.read(
+        "SELECT table_name FROM information_schema.tables "
+        f"WHERE table_schema = '{schema}' ORDER BY table_name"
+    )['table_name'].tolist()
+    out = {'tables': {}}
+    for table in tables:
+        info = conn.read(
+            "SELECT column_name, data_type, character_maximum_length, numeric_precision, "
+            "numeric_scale, is_nullable FROM information_schema.columns "
+            f"WHERE table_schema = '{schema}' AND table_name = '{table}' "
+            "ORDER BY ordinal_position"
+        )
+        from meerschaum.utils.sql import sql_item_name
+        df = conn.read(f"SELECT * FROM {sql_item_name(table, conn.flavor, schema)}")
+        rows = sorted(
+            json.dumps([normalize_dump(v) for v in row], default=str)
+            for row in df.itertuples(index=False)
+        )
+        out['tables'][table] = {
+            'info': [[normalize_dump(v) for v in row] for row in info.itertuples(index=False)],
+            'count': len(df),
+            'rows': rows,
+        }
+        out['tables'][table]['indices'] = _server_indices(conn, schema, table)
+    return out
+
+
+def _server_indices(conn, schema, table):
+    from meerschaum.utils.sql import get_table_cols_indices
+    cols_indices = get_table_cols_indices(table, conn, schema=schema)
+    return sorted(
+        f"{col}:{ix.get('type')}"
+        for col, ixs in cols_indices.items()
+        for ix in ixs
+    )
+
+
+def normalize_dump(value):
+    """`str()` of a cell, with every null spelling as `None` and bytes as hex."""
+    import pandas as pd
+    if isinstance(value, (bytes, bytearray)):
+        return value.hex()
+    try:
+        if value is None or pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
 def do_dump(db_path):
+    if db_path.startswith('{'):
+        return do_dump_server(db_path)
     con = sqlite3.connect(db_path)
     out = {}
     objects = con.execute(

@@ -41,6 +41,8 @@ __all__ = (
     'encode_cursor',
     'decode_cursor',
     'paginate',
+    'is_builtin',
+    'get_plugin_registry',
 )
 
 
@@ -442,3 +444,64 @@ def paginate(
     next_offset = offset + len(page)
     next_cursor = encode_cursor(next_offset) if next_offset < len(items) else None
     return page, next_cursor
+
+
+def is_builtin(entry: Any) -> bool:
+    """
+    Return whether a registered tool, resource, or prompt is one of Meerschaum's own
+    (its handler lives in `meerschaum.*`) rather than a plugin's.
+    """
+    module = getattr(getattr(entry, 'handler', None), '__module__', '') or ''
+    return module == 'meerschaum' or module.startswith('meerschaum.')
+
+
+def get_plugin_registry() -> Dict[str, Any]:
+    """
+    Return the tools, resources, and prompts registered by plugins, as data.
+
+    The Python API host serves this to the Rust MCP server, which implements the built-ins
+    itself and federates these (v5 design §7.2). The fields are the constructor arguments, so
+    the Rust side applies the same scope and read-only rules.
+    """
+    return {
+        'tools': [
+            {
+                'name': tool.name,
+                'description': tool.description,
+                'title': tool.title,
+                'scopes': tool.scopes,
+                'read_only': tool.read_only,
+                'destructive': tool.destructive,
+                'idempotent': tool.idempotent,
+                'open_world': tool.open_world,
+                'input_schema': tool.input_schema,
+                'output_schema': tool.output_schema,
+            }
+            for tool in get_tools().values()
+            if not is_builtin(tool)
+        ],
+        'resources': [
+            {
+                'name': res.name,
+                'description': res.description,
+                'title': res.title,
+                'uri': res.uri,
+                'uri_template': res.uri_template,
+                'mime_type': res.mime_type,
+                'scopes': res.scopes,
+            }
+            for res in get_all_resources()
+            if not is_builtin(res)
+        ],
+        'prompts': [
+            {
+                'name': prompt.name,
+                'description': prompt.description,
+                'title': prompt.title,
+                'arguments': prompt.arguments,
+                'scopes': prompt.scopes,
+            }
+            for prompt in get_prompts().values()
+            if not is_builtin(prompt)
+        ],
+    }

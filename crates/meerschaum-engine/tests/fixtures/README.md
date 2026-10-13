@@ -21,8 +21,9 @@ All data is synthetic.
 | `expected.warnings` | Substrings that must appear in the plan's warnings. When empty, the plan must have none. |
 | `expected.nodes` | Every node, in dependency order: `action`, `bounds` (`begin` is `""` for v4's `begin=''`, `null` for unbounded), optionally `ranges`, `chunks` / `chunk_count`, `consumes` (the cursors written after success), `provisional`, `requires_confirmation`, and `reason_contains` substrings. |
 
-`provisional: true` means a parent runs first in this run: the static plan shows the action
-against the state **as it is now**, and the executor re-plans the node once its parents finish.
+`provisional: true` means a parent runs first in this run (or is a provisional `skip` that may
+run after re-planning): the static plan shows the action against the state **as it is now**, and
+the executor re-plans the node once its parents finish.
 
 Times are UTC. Unless a fixture says otherwise, `fetch.backtrack_minutes` is the default 1440.
 
@@ -53,7 +54,10 @@ in the `keys()` dict form.
 | `districts` | cursor 2, entry 3 unconsumed | `backfill`, full range |
 | `district_summary` | cursor 10 = latest | `skip` |
 
-`zoning_overlay` is not provisional: its parent is `skip`, so it does not run first.
+`zoning_overlay` is provisional although its parent is `skip`: that parent is itself provisional
+(re-planned after `parcels_clean` runs) and may run first, so every descendant of a provisional
+`skip` is provisional too. A provisional `rebuild_pending` or `observe` parent never runs, so it
+does not make its children provisional.
 
 ### `diamond.json` — branches, a join, and the capping rule
 

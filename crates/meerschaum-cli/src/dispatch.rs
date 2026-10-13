@@ -148,6 +148,8 @@ pub struct Runtime<'a> {
     pub cwd: Option<PathBuf>,
     /// Running inside the interactive shell.
     pub in_shell: bool,
+    /// The connectors and Tokio runtime the native instance actions use (built on first use).
+    pub native: Option<crate::native::Session>,
 }
 
 fn no_vars() -> Vec<(String, String)> {
@@ -173,6 +175,7 @@ impl<'a> Runtime<'a> {
             host: Box::new(SystemHost),
             cwd: None,
             in_shell: false,
+            native: None,
         }
     }
 
@@ -196,6 +199,7 @@ impl<'a> Runtime<'a> {
             host: Box::new(RecordingHost::default()),
             cwd: None,
             in_shell: false,
+            native: None,
         }
     }
 
@@ -271,6 +275,12 @@ pub fn main(sysargs: &[String], rt: &mut Runtime<'_>) -> i32 {
         return 0;
     }
     let result = entry(sysargs, rt);
+    // A job's worker reports its result to the supervisor (`meerschaum-jobs`), which records it
+    // in the job's properties like v4's daemon does.
+    if let Some(path) = (rt.env)(meerschaum_jobs::supervisor::RESULT_PATH_ENV) {
+        let json = serde_json::json!([result.success, result.message]).to_string();
+        let _ = std::fs::write(path, json);
+    }
     // PARITY: v4 only sets a failing exit code when the tuple is printed, so `--nopretty`
     // always exits 0 (`meerschaum/__main__.py` `main`).
     if nopretty {
@@ -579,10 +589,13 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
     args.insert("action".into(), PyValue::str_list(&remaining));
     env::apply_env_arguments(&mut args, rt.env);
 
-    if args.get("schedule").is_some_and(PyValue::is_truthy) && !skip_schedule {
-        return SuccessTuple::fail(
-            "Scheduling actions (`--schedule`) is not implemented in Rust yet.",
-        );
+    if let Some(schedule) = args.get("schedule").filter(|v| v.is_truthy())
+        && !skip_schedule
+    {
+        let schedule = schedule.py_str();
+        return crate::native::jobs::run_schedule(rt, &schedule, |rt| {
+            run_action(&resolved, &args, rt)
+        });
     }
     run_action(&resolved, &args, rt)
 }
@@ -602,7 +615,10 @@ fn run_action(resolved: &Resolved, args: &ArgsMap, rt: &mut Runtime<'_>) -> Succ
         "python" => builtin::python(args, rt),
         "sh" => builtin::sh(args, rt),
         "clear" => builtin::clear(args, rt),
-        _ => Ok(builtin::not_implemented(&resolved.display_name())),
+        other => match crate::native::run(other, args, rt) {
+            Some(r) => r,
+            None => Ok(builtin::not_implemented(&resolved.display_name())),
+        },
     };
     match result {
         Ok(tup) => tup,

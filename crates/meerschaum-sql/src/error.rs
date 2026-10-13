@@ -35,6 +35,10 @@ pub enum SqlError {
     #[error(transparent)]
     Driver(#[from] sqlx::Error),
 
+    /// An error from a native (non-`sqlx`) driver: `tiberius`, `duckdb` or `oracle`.
+    #[error("{0}")]
+    Database(String),
+
     /// An Arrow error while building record batches.
     #[error(transparent)]
     Arrow(#[from] arrow::error::ArrowError),

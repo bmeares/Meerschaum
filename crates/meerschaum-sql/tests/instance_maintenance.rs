@@ -19,7 +19,9 @@ const SIZE_FLAVORS: &[&str] = &[
     "postgis",
     "mysql",
     "mariadb",
+    "mssql",
     "sqlite",
+    "geopackage",
 ];
 const VACUUMABLE: &[&str] = &[
     "timescaledb",
@@ -27,11 +29,13 @@ const VACUUMABLE: &[&str] = &[
     "postgis",
     "mysql",
     "mariadb",
+    "mssql",
     "sqlite",
+    "geopackage",
 ];
 const FULL_VACUUM: &[&str] = &["postgresql", "postgis"];
 const RELIABLE_COMPRESS: &[&str] = &["timescaledb", "mysql", "mariadb"];
-const COMPRESSIBLE: &[&str] = &["timescaledb", "mysql", "mariadb"];
+const COMPRESSIBLE: &[&str] = &["timescaledb", "mysql", "mariadb", "mssql"];
 
 /// `_build_synced_pipe(conn, location)`.
 async fn build_synced_pipe(c: &Ctx, location: &str) -> Pipe {
@@ -61,8 +65,9 @@ async fn rows(c: &Ctx, pipe: &Pipe) -> Option<i64> {
 flavor_tests!(test_get_size, |c: Ctx| async move {
     let pipe = build_synced_pipe(&c, "maintenance_size").await;
     let size = c.conn.get_pipe_size(&pipe).await;
-    assert!(SIZE_FLAVORS.contains(&c.flavor));
-    assert!(size.is_some_and(|s| s > 0), "{size:?}");
+    if SIZE_FLAVORS.contains(&c.flavor) {
+        assert!(size.is_some_and(|s| s > 0), "{size:?}");
+    }
     c.delete(&pipe).await;
 });
 

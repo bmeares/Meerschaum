@@ -2,6 +2,7 @@
 //! routes are forwarded with method, path, query, headers, cookies and body unchanged; bodies
 //! stream; websockets are bridged; the supervisor starts the host on demand and restarts it
 //! after a crash.
+#![cfg(unix)]
 
 mod common;
 

@@ -15,6 +15,7 @@ members = [
     "crates/meerschaum-plugin",
     "crates/meerschaum-cli",
     "crates/meerschaum-py",
+    "crates/meerschaum-worker",
 ]
 
 [workspace.package]
@@ -41,6 +42,7 @@ meerschaum-compose = { path = "crates/meerschaum-compose" }
 meerschaum-server = { path = "crates/meerschaum-server" }
 meerschaum-web = { path = "crates/meerschaum-web" }
 meerschaum-plugin = { path = "crates/meerschaum-plugin" }
+meerschaum-worker = { path = "crates/meerschaum-worker" }
 
 anyhow = "1"
 thiserror = "2"

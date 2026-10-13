@@ -13,6 +13,7 @@
 //!   the Python behaviors they depend on.
 //! - [`schema`]: the JSON schema (`mrsm --print-arg-schema`).
 //! - [`actions`], [`dispatch`], [`env`]: action resolution and the entry point.
+//! - [`native`]: the instance and job actions (`show`/`sync`/`verify`/... pipes, users, jobs).
 #![deny(unsafe_code)]
 
 pub mod action_docs;
@@ -26,6 +27,7 @@ pub mod dispatch;
 pub mod env;
 pub mod format;
 pub mod help;
+pub mod native;
 pub mod parse;
 pub mod pyjson;
 pub mod pyliteral;

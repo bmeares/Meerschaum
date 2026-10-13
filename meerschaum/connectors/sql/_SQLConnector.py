@@ -15,6 +15,12 @@ from meerschaum.utils.typing import Optional, Any, Union
 from meerschaum.connectors import InstanceConnector
 from meerschaum.utils.warnings import error, warn
 
+#: Flavors with a Rust driver (`meerschaum-sql`), routed through `_core` under `MRSM_CORE=rust`.
+_RUST_FLAVORS = {
+    'postgresql', 'postgis', 'timescaledb', 'timescaledb-ha', 'citus', 'cockroachdb',
+    'mysql', 'mariadb', 'sqlite', 'geopackage',
+}
+
 
 class SQLConnector(InstanceConnector):
     """
@@ -441,7 +447,61 @@ class SQLConnector(InstanceConnector):
         return paths.SQL_CONN_CACHE_RESOURCES_PATH / filename
 
     def __getstate__(self):
-        return self.__dict__
+        if '_rust_connector' not in self.__dict__:
+            return self.__dict__
+        return {
+            k: v
+            for k, v in self.__dict__.items()
+            if k not in ('_rust_connector', '_rust_connector_pid')
+        }
+
+    def _rust_method(self, name: str):
+        """
+        Return the `meerschaum._core.SqlConnector` method `name` when the parity-phase
+        `MRSM_CORE` gate routes this connector's pipe, user and plugin methods to Rust, else `None`
+        (run the Python implementation). Development-only (see `meerschaum/_core/_gate.py`).
+
+        Flavors without a Rust driver (`mssql`, `oracle`, `duckdb`, ...) and in-memory databases
+        (whose SQLAlchemy and Rust pools would see different databases) stay on Python.
+        `read`, `exec`, `value`, `to_sql` and `.engine` always stay SQLAlchemy (D16).
+
+        The Rust connector (and its pool) is built once per process: a forked child (v4 job
+        daemons) builds its own, like SQLAlchemy engines must.
+        """
+        import os
+        rust = self.__dict__.get('_rust_connector', None)
+        if rust is False:
+            return None
+        if rust is not None and self.__dict__.get('_rust_connector_pid', None) != os.getpid():
+            rust = None
+        if rust is None:
+            from meerschaum._core._gate import rust_impl
+            rust_cls = rust_impl('SqlConnector')
+            if rust_cls is None:
+                return None
+            database = str(self.__dict__.get('database', None) or '')
+            uri = str(self.__dict__.get('uri', None) or '')
+            if self.flavor not in _RUST_FLAVORS or ':memory:' in database or ':memory:' in uri:
+                self.__dict__['_rust_connector'] = False
+                return None
+            attributes = {
+                key: self.__dict__.get(key, None)
+                for key in ('flavor', 'uri', 'host', 'port', 'username', 'password', 'database')
+            }
+            attributes['schema'] = self.schema
+            try:
+                rust = rust_cls(self.label, attributes)
+            except Exception as e:
+                warn(
+                    f"Cannot build the Rust connector for '{self}' ({e}); "
+                    "using the Python implementation.",
+                    stack=False,
+                )
+                self.__dict__['_rust_connector'] = False
+                return None
+            self.__dict__['_rust_connector'] = rust
+            self.__dict__['_rust_connector_pid'] = os.getpid()
+        return getattr(rust, name, None)
 
     def __setstate__(self, d):
         self.__dict__.update(d)

@@ -1,7 +1,9 @@
 # Parity gate: `MRSM_CORE=python` vs `MRSM_CORE=rust`
 
 The first façade switch-over (wave 3) binds the kernel and core functions listed in
-[`README.md`](README.md) and runs the v4 pytest suite twice on the sqlite flavor:
+[`README.md`](README.md) and runs the v4 pytest suite twice on the sqlite flavor. Wave 4 routes
+the `SQLConnector` pipe, user and plugin methods through Rust and runs both modes on five flavors
+(section "Wave 4" below):
 
 ```bash
 scripts/rust/build_py.sh
@@ -94,6 +96,77 @@ the state and the Python dictionary becomes a proxy (design §4.4).
 
 Skipped by `--ignore` in both modes (they need services): `test_jobs.py`, `test_mcp.py`,
 `test_listen_shutdown.py`, `test_api_config.py`.
+
+## Wave 4: `SQLConnector` pipe, user and plugin methods through `_core.SqlConnector`
+
+The v4 `SQLConnector` methods listed in [`README.md`](README.md) ("The SQL instance connector")
+start with a `_rust_method(self, name)` guard; under `MRSM_CORE=rust` they run
+`meerschaum_sql::SqlConnector` on the extension's Tokio runtime, with the GIL released. The v4
+`Pipe` methods are unchanged and reach Rust through the instance connector and the kernel
+bindings. Run per flavor (sequentially; flavor keys from `tests/connectors.py`):
+
+```bash
+for flavor in sqlite postgis timescaledb mariadb mysql; do
+  for mode in python rust; do
+    MRSM_CORE=$mode MRSM_TEST_FLAVORS=$flavor PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root \
+      MRSM_PLUGINS_DIR=./tests/plugins python3 -m pytest tests/ -q -p no:cacheprovider \
+      --ignore=tests/test_jobs.py --ignore=tests/test_mcp.py \
+      --ignore=tests/test_listen_shutdown.py --ignore=tests/test_api_config.py \
+      $DESELECT   # rust only: row 11 above and rows 19-20 below
+  done
+done
+```
+
+`DESELECT` under rust: `tests/utils/test_dataframe.py::test_filter_unseen_df_polars_preserves_source_order`,
+`tests/test_pipe_attributes.py::test_sql_attribute_errors_are_not_unregistered`,
+`tests/test_pipe_attributes.py::test_sql_no_row_is_still_empty`.
+
+### Discrepancies
+
+| # | Test(s) | Symptom | Root cause | Resolution |
+|---|---|---|---|---|
+| 19 | `tests/test_pipe_attributes.py::test_sql_attribute_errors_are_not_unregistered`, `::test_sql_no_row_is_still_empty` | under rust, the mocked `exec` is never called (no `RuntimeError`; a real row instead of `{}`) | both tests monkeypatch `SQLConnector.exec` (SQLAlchemy) to fake the metadata query; the routed `get_pipe_attributes` reads through the Rust driver | **Deselected under rust.** The behavior they protect (a failed metadata read raises instead of reporting "unregistered") is covered with a real failure by `tests/test_facade_sql.py::test_attribute_read_errors_propagate` (Rust errors surface as `RuntimeError`) |
+| 20 | `tests/test_index_queries.py::test_postgresql_upsert_creates_one_unique_constraint` (and every test calling a v4 SQL function with a stub `self`) | **python mode**: `AttributeError: 'SimpleNamespace' object has no attribute '_rust_method'` | the first guards called `self._rust_method(...)`; tests (and plugins) call these functions with `SimpleNamespace` stand-ins for the connector | Guards call `_gate.rust_method(self, name)`, which returns `None` in `python` mode before touching `self`, and for objects without `_rust_method` (duck typing, §4.4). Regression test `tests/test_facade_sql.py::test_stub_self_runs_python`, `test_core.py::test_rust_method_runs_python_for_stubs_and_python_mode` |
+| 21 | `tests/test_partition.py::test_repartition_roundtrip[postgis]` | `pipe.parameters['verify']['chunk_minutes']` kept the old width after `partition_pipe` | v4's `partition_pipe` calls `pipe.update_parameters({'verify': {'chunk_minutes': n}})` on the Python pipe; Rust persisted the new width to `mrsm_pipes` but cannot mutate the Python object | Guard: after a successful Rust `partition_pipe`, mirror the registered `verify.chunk_minutes` into the in-memory parameters (`persist=False`) |
+| 22 | (review, `sync_pipe`) | the Python pipe's in-memory `autoincrement` / numeric `dtypes` and its caches went stale after a Rust sync | v4's `sync_pipe` mutates the Python pipe (`update_parameters`, `pipe.dtypes = ...`) and clears `_columns_types` / `_columns_indices` | `facade::sync_pipe_mut` returns the mutated core pipe; the binding patches the changed top-level parameters into the Python pipe (`persist=False`, Rust persisted them) and the guard clears `_exists`, `_columns_types(_timestamp)`, `_columns_indices(_timestamp)` |
+| 23 | (review, `create_indices`) | the guard ran before v4's `_skip_check_indices` early return | ordering | guard moved below the early return (likewise `get_pipe_columns_indices`) |
+| 24 | (found by a smoke check, `get_pipe_docs`) | NULL cells came back as `nan` | `Column::values()` gives the pandas null flavor of the column type (`NaN` for floats and strings) | Binding: `NULL` → `None` through the null mask, as `result.mappings()` gives |
+| 25 | (found by a smoke check, `get_pipe_docs` on SQLite) | `datetime` cells are `datetime` objects under rust, `'2024-01-01 00:00:00.000000'` strings under v4 | v4 returns the raw `sqlite3` values (SQLite stores the timestamps as text); the Rust driver types the column from its declared `TIMESTAMP` type | **Open (snapshot)**: the typed value is what every other flavor returns in v4; no test depends on the string. `get_data()` is identical in both modes |
+| 26 | (review, `get_pipe_data(order=None)`) | rows sorted ascending | the binding mapped `order=None` to `'asc'` | `facade::get_pipe_data_and_state(..., no_order)`: no `ORDER BY` and no sort, as v4 |
+| 27 | (review, jobs) | `block_on` would hang in a forked child (v4 job daemons fork) | a forked child inherits the Tokio runtime object but none of its threads, and the parent's pool sockets | the runtime is keyed by PID (a child builds its own; the parent's is leaked, not dropped) and `SQLConnector._rust_method` rebuilds `_core.SqlConnector` when `os.getpid()` changed |
+| 28 | (perf, all PostgreSQL tests) | small calls 3-4x slower than v4 (`get_sync_time` 13.8 ms vs 3.3 ms) | every Rust data method re-read the table state (`table_exists` + a columns-types catalog query), where v4 reads the pipe's cached `get_columns_types()` | the bindings pass `pipe.get_columns_types()` (v4's own 60 s cache) into `facade::pipe_state_cached`; see `PERF.md` |
+| 29 | (design §4.4, not a test) | `pipe.parameters['tags'] = [...]` then `pipe.edit()` does **not** persist, in both modes | v4.1.4's `parameters` property returns a resolved copy (`pipe.parameters is pipe.parameters` is `False`); attribute setters (`pipe.tags = ...`) write `_attributes['parameters']` | Unchanged (parity). The live-dict proxy of §4.4 belongs to the `Pipe` façade switch-over, not to this wave; `tests/test_facade_sql.py::test_attribute_aliases_persist` pins the setter path |
+
+Not routed (stay v4 Python on purpose): `read`, `exec`, `value`, `to_sql`, `.engine`,
+`get_tables()` (D16); `sync_pipe_inplace` (it reaches the routed methods through `self`);
+`get_add_columns_queries` / `get_alter_columns_queries` / `get_to_sql_dtype` /
+`create_pipe_table_from_df` (only used by the Python `sync_pipe` and `sync_pipe_inplace`); the
+`mssql`, `oracle` and `duckdb` flavors and in-memory SQLite databases (their SQLAlchemy and Rust
+connections would see different databases).
+
+### Results (wave 4)
+
+Final runs (same build and guards for both modes; 609 tests collected per flavor, including
+this wave's `tests/test_facade_sql.py`). "2 failed" in every row are the two `test_worker.py`
+tests explained below.
+
+| Flavor | `python` | `rust` |
+|---|---|---|
+| `sqlite` | 604 passed, 3 skipped, 2 failed (192 s) | **602 passed, 2 skipped, 3 deselected**, 2 failed (84 s) |
+| `postgis` | 604 passed, 3 skipped, 2 failed (231 s) | **602 passed, 2 skipped, 3 deselected**, 2 failed (100 s) |
+| `timescaledb` | 604 passed, 3 skipped, 2 failed (219 s) | **602 passed, 2 skipped, 3 deselected**, 2 failed (109 s) |
+| `mariadb` | 604 passed, 3 skipped, 2 failed (223 s) | **602 passed, 2 skipped, 3 deselected**, 2 failed (90 s) |
+| `mysql` | 604 passed, 3 skipped, 2 failed (227 s) | **602 passed, 2 skipped, 3 deselected**, 2 failed (93 s) |
+| crate tests (`crates/meerschaum-py/tests/test_core.py`) | 132 passed, 1 xfailed | |
+
+The extra `python` skip is `test_facade_sql.py::test_attribute_read_errors_propagate` (rust only).
+First rust pass on sqlite (before rows 19-29): 2 failed (row 19); on postgis: 1 more (row 21).
+Under `python`, before row 20, the stub-`self` tests (`test_index_queries.py`) failed in the guard itself.
+
+`tests/test_worker.py::test_fallback_codec_roundtrip` and `::test_fallback_codec_matches_msgpack`
+belong to the concurrent `meerschaum-worker` work: they fail in **both** modes when run after the
+rest of the suite and pass alone (order-dependent `msgpack` fallback state), so they are not
+façade discrepancies.
 
 ## Performance
 

@@ -11,6 +11,7 @@ These methods are mixed into `SQLConnector` (see `meerschaum/connectors/sql/_SQL
 
 from __future__ import annotations
 
+from meerschaum._core._gate import rust_method as _rust_method
 import meerschaum as mrsm
 from meerschaum.utils.typing import Union, Any, Optional, List, SuccessTuple
 from meerschaum.utils.debug import dprint
@@ -191,6 +192,8 @@ def vacuum_pipe(
     -------
     A `SuccessTuple` indicating success, including the amount of disk reclaimed.
     """
+    if (_rust := _rust_method(self, 'vacuum_pipe')) is not None:
+        return _rust(pipe, full=full)
     from meerschaum.utils.sql import sql_item_name
     from meerschaum.utils.formatting import format_bytes
 
@@ -263,6 +266,8 @@ def analyze_pipe(
     -------
     A `SuccessTuple` indicating success.
     """
+    if (_rust := _rust_method(self, 'analyze_pipe')) is not None:
+        return _rust(pipe)
     from meerschaum.utils.sql import sql_item_name
 
     if not pipe.exists(debug=debug):

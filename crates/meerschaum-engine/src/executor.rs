@@ -15,11 +15,11 @@
 //! - **Write ordering**: a node's edge cursors and definition hash are written only after its
 //!   sync succeeds.
 //!
-//! Each node runs through a [`SyncExecutor`] (D11). The native `Pipe::sync` and the Python
-//! adapter arrive in later waves; [`FakeExecutor`] serves tests.
-//!
-//! Not in this wave: continuous mode (`--loop`) and chunk pipelining (`--chunk-pipelining`,
-//! accepted and ignored).
+//! Each node runs through a [`SyncExecutor`] (D11): [`crate::native::NativeExecutor`] runs the
+//! native `Pipe.sync()` flow over the connector traits (Python connectors reach it through the
+//! worker's `PythonConnector`); [`FakeExecutor`] serves tests. Continuous mode lives in
+//! [`crate::engine::Engine::run_loop`]. Chunk pipelining (`--chunk-pipelining`, R6) is accepted
+//! and ignored.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
@@ -255,6 +255,20 @@ pub struct ExecutorOptions {
     pub run_id: Option<String>,
     /// The planner options used to re-plan provisional nodes (must match the plan's).
     pub plan: PlanOptions,
+    /// The selection as JSON, recorded on the run row for `--resume`.
+    pub selection: Option<String>,
+    /// Dispatch order among ready nodes.
+    pub priority: Priority,
+}
+
+/// How ready nodes are ordered when more are ready than can run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Priority {
+    /// HEFT upward rank (the critical path first), ties in plan order (§5.5).
+    #[default]
+    UpwardRank,
+    /// Plan order only. Flat selections use it so `-w 1` laps sync in v4's order.
+    PlanOrder,
 }
 
 impl Default for ExecutorOptions {
@@ -269,6 +283,8 @@ impl Default for ExecutorOptions {
             chunk_pipelining: false,
             run_id: None,
             plan: PlanOptions::default(),
+            selection: None,
+            priority: Priority::UpwardRank,
         }
     }
 }
@@ -466,18 +482,26 @@ where
     async fn on_success(&mut self, r: &PipeRef, result: &SyncResult) {
         let node = self.planned[r].clone();
         if !self.flat {
+            // One write per state instance (usually one: the child's own instance).
+            let mut by_instance: IndexMap<String, Vec<EdgeCursor>> = IndexMap::new();
             for c in &node.consumes {
-                let cursor = EdgeCursor {
-                    parent_ref: c.parent_ref.clone(),
-                    child_ref: c.child_ref.clone(),
-                    seq: c.seq,
-                    parent_watermark_at_cursor: c.parent_watermark,
-                };
-                if let Err(e) = self.ctx.state.put_cursor(&c.state_instance, cursor).await {
+                by_instance
+                    .entry(c.state_instance.clone())
+                    .or_default()
+                    .push(EdgeCursor {
+                        parent_ref: c.parent_ref.clone(),
+                        child_ref: c.child_ref.clone(),
+                        seq: c.seq,
+                        parent_watermark_at_cursor: c.parent_watermark,
+                    });
+            }
+            for (instance, cursors) in by_instance {
+                let parents: Vec<String> = cursors.iter().map(|c| c.parent_ref.label()).collect();
+                if let Err(e) = self.ctx.state.put_cursors(&instance, cursors).await {
                     self.state_warnings.push(format!(
-                        "{}: cannot advance the cursor from {}: {e}",
+                        "{}: cannot advance the cursors from {}: {e}",
                         r.label(),
-                        c.parent_ref.label()
+                        parents.join(", ")
                     ));
                 }
             }
@@ -620,7 +644,14 @@ where
         .limits
         .python_workers
         .map(|n| Arc::new(Semaphore::new(n)));
-    let rank = |r: &PipeRef| sched.nodes.get(r).map_or(Duration::ZERO, |t| t.upward_rank);
+    let by_rank = options.priority == Priority::UpwardRank;
+    let rank = |r: &PipeRef| {
+        if by_rank {
+            sched.nodes.get(r).map_or(Duration::ZERO, |t| t.upward_rank)
+        } else {
+            Duration::ZERO
+        }
+    };
 
     let mut ready: Vec<PipeRef> = plan
         .nodes
@@ -882,6 +913,7 @@ where
             num_nodes: plan.nodes.len(),
             resumed_from: options.plan.resumed_from.clone(),
             holder: options.holder.clone(),
+            selection: options.selection.clone(),
         },
         nodes: d.rows.into_values().collect(),
     };

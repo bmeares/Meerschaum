@@ -29,6 +29,9 @@ polars = ["dep:pyo3-polars"]
 meerschaum-core = { workspace = true }
 meerschaum-kernel = { workspace = true }
 meerschaum-sql = { workspace = true }
+meerschaum-connector = { workspace = true }
+# The runtime the instance methods run on (owned by the extension, design §4.2).
+tokio = { workspace = true }
 # Only this crate depends on the CLI library (top layer, see crates/README.md "Crate layering").
 meerschaum-cli = { path = "../meerschaum-cli" }
 # VERSION SKEW (see README "Dependency pins"): the workspace pins `pyo3 = 0.26`, but

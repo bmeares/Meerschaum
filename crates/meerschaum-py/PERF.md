@@ -201,3 +201,77 @@ columns, `filter_unseen_df`, `query_df`).
   from `MRSM_CORE_TRACE`.
 - Never rebuild the extension while a test run has it loaded: `maturin` replaces the `.so` in
   place.
+
+## Wave 4: end-to-end `Pipe` operations through the `SQLConnector` façade
+
+`bench/bench_sync.py` times real `Pipe` calls (the v4 `Pipe` methods, with the instance methods
+routed through `_core.SqlConnector` under `rust`). Both modes run in one process on separate pipes;
+frames have a UTC `datetime`, a random `int` id, a `float` and a string label. `sync (half
+overlap)` syncs 1M rows of which 500k are already stored (backtrack read + `filter_existing` +
+insert); `sync (update)` changes the value of `--update-rows` stored rows spread over the whole
+table (so the backtrack read covers all 1.5M rows). Release build, same machine as above, the
+`get_data()` results are compared (identical in every run).
+
+```bash
+PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
+    python3 crates/meerschaum-py/bench/bench_sync.py --rows 1000000 --update-rows 10000 --flavor postgis
+PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \
+    python3 crates/meerschaum-py/bench/bench_sync.py --rows 1000000 --update-rows 100 --flavor sqlite
+```
+
+**PostGIS** (test container, `--update-rows 10000`):
+
+| Step | `python` | `rust` | rust/python |
+|---|---|---|---|
+| `sync` (new table, 1M rows) | 22.74 s | 5.69 s | 0.25x |
+| `sync` (1M rows, half overlap) | 15.68 s | 11.61 s | 0.74x |
+| `sync` (update 10k rows) | 18.04 s | 6.62 s | 0.37x |
+| `get_data()` (1.5M rows) | 12.91 s | 2.76 s | 0.21x |
+| `get_sync_time()` | 3 ms | 4 ms | (noise) |
+| `get_rowcount()` | 71 ms | 43 ms | 0.61x |
+
+**SQLite** (`--update-rows 100`):
+
+| Step | `python` | `rust` | rust/python |
+|---|---|---|---|
+| `sync` (new table, 1M rows) | 61.40 s | 5.84 s | 0.10x |
+| `sync` (1M rows, half overlap) | 37.41 s | 11.76 s | 0.31x |
+| `sync` (update 100 rows) | 21.45 s | 25.92 s | **1.21x** |
+| `get_data()` (1.5M rows) | 7.97 s | 7.09 s | 0.89x |
+| `get_sync_time()` | 3 ms | 3 ms | 1.09x |
+| `get_rowcount()` | 7 ms | 9 ms | (noise) |
+
+Explained regressions:
+
+- **SQLite reads.** `MRSM_CORE_TRACE=1` splits a Rust `get_pipe_data` into `pipe_state`,
+  `build_data_query`, `read`, `select + enforce_dtypes` and `sort + limit`
+  (`meerschaum_sql::facade`). On 150k rows the driver's `read` is 972 ms of the 1,007 ms
+  (enforce < 1 ms, sort 34 ms, frame → pandas 25 ms), about 6.5 µs per row, where v4's
+  `pandas.read_sql` through `sqlite3` takes about 630 ms in total: `sqlx`'s SQLite driver decodes
+  row by row into `SqlValue` cells (one `String` per text cell) on its worker thread. At 1M rows
+  the rest of the pipeline makes up for it (`get_data` 0.89x), but the `sync (update)` step, whose
+  backtrack read covers all 1.5M rows, is 21% slower. Request filed with `meerschaum-sql`: decode
+  SQLite results straight into Arrow builders (e.g. `rusqlite` column access).
+- **SQLite updates are slow in both modes.** v4's `sqlite_delete_insert` update
+  (`DELETE ... WHERE ROWID IN (SELECT ... INNER JOIN patch ON <COALESCE'd join>)`) cannot use the
+  index, so 1,000 updated rows on a 150k-row table take about 21 s under v4 and 25 s under Rust
+  (same query text, kept for parity). Hence `--update-rows 100` on SQLite.
+- **Per-call catalog queries (fixed).** Every Rust data method starts with `pipe_state`
+  (`table_exists` + the columns-types catalog query), where v4 reads the Python pipe's
+  `get_columns_types()` cache (60 s). On PostGIS that made small calls 3-4x slower
+  (`get_sync_time` 13.8 ms vs 3.3 ms, `get_rowcount` 10.9 vs 2.0 ms, a 28-row `get_data` 26 vs
+  10 ms). The bindings now pass `pipe.get_columns_types()` (v4's own cache, which v4's
+  `get_sync_time` reads too) to `facade::pipe_state_cached`, and the numbers are at parity
+  (6.1 vs 6.0 ms, 2.9 vs 3.0 ms, 9.1 vs 10.4 ms). `sync_pipe` still reads the table state itself
+  (a 1-row sync is 89 ms vs 80 ms on PostGIS, 26 ms vs 62 ms on SQLite); passing the cached state
+  into `sync_pipe_impl` needs a change in `meerschaum-sql` (requested).
+- `get_pipe_columns_types()` called directly (uncached in both modes) is slower on PostgreSQL
+  (8.5 ms vs 3.2 ms): the Rust connector runs `table_exists` before the columns query and its
+  catalog query is heavier. Reported to `meerschaum-sql`.
+
+The sqlite pytest suite takes 87 s under `rust` and 271 s under `python`; postgis 116 s vs 267 s.
+
+`bench_boundary.py` re-run after this wave (unchanged code paths, same machine under load from
+concurrent builds): `filter_unseen_df` 2.68 s / 1.12 s, `enforce_all_string` 0.94 / 0.72,
+`enforce_mixed` 0.067 / 0.049, `enforce_special` 1.00 / 0.81, `filter_special` 2.11 / 1.33
+(python / rust), with the known `blob` dtype difference.

@@ -250,6 +250,8 @@ pub struct Table<'a> {
     pub border_style: StyleRef,
     /// `style`.
     pub style: StyleRef,
+    /// `show_lines`: a separator between rows.
+    pub show_lines: bool,
     rows: usize,
 }
 
@@ -269,6 +271,7 @@ impl<'a> Table<'a> {
             header_style: StyleRef::Name("table.header".into()),
             border_style: StyleRef::default(),
             style: StyleRef::Name("none".into()),
+            show_lines: false,
             rows: 0,
         }
     }
@@ -766,6 +769,15 @@ impl Table<'_> {
             {
                 out.push(Segment::new(
                     b.get_row(widths, "head", self.show_edge),
+                    border,
+                ));
+                out.push(Segment::line());
+            } else if let Some(b) = &box_chars
+                && self.show_lines
+                && !last
+            {
+                out.push(Segment::new(
+                    b.get_row(widths, "row", self.show_edge),
                     border,
                 ));
                 out.push(Segment::line());

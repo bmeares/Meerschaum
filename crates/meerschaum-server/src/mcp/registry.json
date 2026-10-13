@@ -1,0 +1,1227 @@
+{
+  "protocol_version": "2025-06-18",
+  "supported_protocol_versions": [
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05"
+  ],
+  "server_name": "meerschaum",
+  "primer": "Meerschaum is an ETL framework built around **pipes** — named data streams synced into tables.\n\nA pipe is identified by three string keys:\n- `connector_keys`: the data source, e.g. `sql:main`, `plugin:noaa`.\n- `metric_key`: a label for the stream, e.g. `weather`.\n- `location_key`: an optional tag/shard (often null).\n\nA fourth key, the **instance connector** (`instance_keys`, e.g. `sql:main`), is where a pipe's\nmetadata and data are stored. Tools default to the configured instance when it is omitted.\n\nA pipe's metadata lives in `pipe.parameters` (a dict). Key fields:\n- `columns`: maps roles to column names — `datetime` (drives incremental sync), `id`/`primary`\n  (uniqueness), `value`.\n- `dtypes`: explicit column types. Meerschaum dtype strings: `datetime`, `int`, `numeric`, `uuid`,\n  `json`, `bytes`, `geometry[srid]`; any Pandas dtype (`Int64`, `float64`, `bool`) also works.\n- `tags`: list of labels for grouping pipes.\n\nThe `params` filter (used by the data tools) builds a SQL `WHERE`:\n- `{\"color\": \"red\"}` -> `= 'red'`; `{\"color\": [\"red\", \"blue\"]}` -> `IN (...)`.\n- Prefix `_` negates: `{\"color\": \"_red\"}` -> `!= 'red'`.\n- Null: `{\"color\": null}` or `{\"color\": \"None\"}` -> `IS NULL`; `\"_None\"` -> `IS NOT NULL`.\n\nHow to work here:\n- Call `list_pipes` to discover pipes, then `get_pipe_attributes` for one pipe's parameters and\n  `get_pipe_stats` for its rowcount, sync time, and actual database column types.\n- Read data with `get_pipe_data` (+ `params`/`begin`/`end`), or `read_sql` for ad-hoc queries.\n- `sync_pipe` ingests new data from the pipe's source; `sync_documents` ingests rows you supply;\n  `verify_pipe` re-syncs a historical range.\n- For anything without a dedicated tool, `execute_action` runs any Meerschaum CLI action. The\n  `mrsm://actions` resource lists what is available.\n- Times accept ISO datetimes or integers (for integer-axis pipes).\n- Prefer narrowing with `begin`/`end`/`params` over paging through everything: on a datetime-axis\n  pipe a time window is far cheaper than a deep cursor.\n\nRead the `mrsm://docs` resource for the tool and scope reference. For anything deeper, fetch\nhttps://meerschaum.io/llms.txt (an index of the docs) and follow the relevant link, or\nhttps://meerschaum.io/llms-full.txt for the full text.",
+  "max_cursor_offset": 1000000,
+  "default_row_limit": 200,
+  "max_row_limit": 10000,
+  "default_page_size": 100,
+  "protected_tables": [
+    "mrsm_pipes",
+    "mrsm_plugins",
+    "mrsm_tokens",
+    "mrsm_users"
+  ],
+  "read_only_starts": [
+    "desc",
+    "describe",
+    "explain",
+    "select",
+    "show",
+    "table",
+    "values",
+    "with"
+  ],
+  "mutating_keywords": [
+    "alter",
+    "analyze",
+    "attach",
+    "backup",
+    "begin",
+    "bulk",
+    "call",
+    "checkpoint",
+    "cluster",
+    "comment",
+    "commit",
+    "copy",
+    "create",
+    "deallocate",
+    "delete",
+    "detach",
+    "discard",
+    "do",
+    "drop",
+    "dumpfile",
+    "exec",
+    "execute",
+    "export",
+    "grant",
+    "import",
+    "insert",
+    "into",
+    "kill",
+    "listen",
+    "load",
+    "lock",
+    "merge",
+    "notify",
+    "opendatasource",
+    "openquery",
+    "openrowset",
+    "outfile",
+    "pragma",
+    "prepare",
+    "refresh",
+    "reindex",
+    "rename",
+    "replace",
+    "reset",
+    "restore",
+    "revoke",
+    "rollback",
+    "savepoint",
+    "set",
+    "shutdown",
+    "start",
+    "truncate",
+    "unlock",
+    "update",
+    "upsert",
+    "vacuum"
+  ],
+  "mutating_functions": [
+    "dblink",
+    "dblink_connect",
+    "dblink_connect_u",
+    "dblink_exec",
+    "fsync",
+    "lo_export",
+    "lo_import",
+    "lo_unlink",
+    "load_extension",
+    "load_file",
+    "nextval",
+    "pg_cancel_backend",
+    "pg_create_logical_replication_slot",
+    "pg_create_physical_replication_slot",
+    "pg_create_restore_point",
+    "pg_drop_replication_slot",
+    "pg_logical_slot_get_changes",
+    "pg_logical_slot_peek_changes",
+    "pg_ls_dir",
+    "pg_promote",
+    "pg_read_binary_file",
+    "pg_read_file",
+    "pg_reload_conf",
+    "pg_rotate_logfile",
+    "pg_stat_file",
+    "pg_switch_wal",
+    "pg_terminate_backend",
+    "readfile",
+    "setval",
+    "writefile"
+  ],
+  "mutating_word_prefixes": [
+    "xp_",
+    "sp_",
+    "dbms_",
+    "utl_"
+  ],
+  "tools": [
+    {
+      "name": "list_pipes",
+      "description": "List registered Meerschaum pipes and their keys, tags, index columns, and dtypes. Start here to discover what data is available. Results are paginated — pass the returned `next_cursor` back as `cursor` to continue.",
+      "title": "List pipes",
+      "scopes": [
+        "pipes:read"
+      ],
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "connector_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only include pipes with these connector keys. Omit for all."
+          },
+          "metric_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only include pipes with these metric keys. Omit for all."
+          },
+          "location_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only include pipes with these location keys. Use 'None' to match a null location."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only include pipes carrying at least one of these tags."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor from a previous call's `next_cursor`. Omit to start from the beginning."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "pipes"
+        ],
+        "properties": {
+          "pipes": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "count": {
+            "type": "integer",
+            "description": "Pipes in this page."
+          },
+          "total": {
+            "type": "integer",
+            "description": "Pipes matching the filters."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "get_pipe_attributes",
+      "description": "Return a pipe's full attributes: its parameters dict (columns, dtypes, tags, fetch definition, verify settings) as registered on the instance.",
+      "title": "Get pipe attributes",
+      "scopes": [
+        "pipes:read"
+      ],
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          }
+        }
+      },
+      "output_schema": null
+    },
+    {
+      "name": "get_pipe_stats",
+      "description": "Return a pipe's shape in one call: whether its table exists, its rowcount, its newest and oldest datetime values (sync time), its verification bound time, and the column types as they actually exist in the database. Prefer this over several separate lookups.",
+      "title": "Get pipe stats",
+      "scopes": [
+        "pipes:read"
+      ],
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          },
+          "begin": {
+            "type": "string",
+            "description": "Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound."
+          },
+          "end": {
+            "type": "string",
+            "description": "Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound."
+          },
+          "params": {
+            "type": "object",
+            "description": "Additional WHERE filters, e.g. {\"station\": \"KGMU\"}. A list means IN, a leading '_' negates, and null means IS NULL."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "exists": {
+            "type": "boolean"
+          },
+          "rowcount": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "newest_sync_time": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "oldest_sync_time": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "bound_time": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "columns_types": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "target": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_pipe_data",
+      "description": "Read rows from a pipe. Narrow the result with `begin`/`end` (the datetime axis) and `params` (a WHERE filter) — on a datetime-axis pipe a time window is much cheaper than paging. Set `backtrack_minutes` to read the most recent rows relative to the pipe's sync time without knowing its bounds. Pass the returned `next_cursor` back as `cursor` for the next page.",
+      "title": "Get pipe data",
+      "scopes": [
+        "pipes:read"
+      ],
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          },
+          "begin": {
+            "type": "string",
+            "description": "Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound."
+          },
+          "end": {
+            "type": "string",
+            "description": "Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound."
+          },
+          "params": {
+            "type": "object",
+            "description": "Additional WHERE filters, e.g. {\"station\": \"KGMU\"}. A list means IN, a leading '_' negates, and null means IS NULL."
+          },
+          "select_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only return these columns. Omit for all."
+          },
+          "omit_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Return every column except these."
+          },
+          "backtrack_minutes": {
+            "type": "integer",
+            "description": "Read the rows within this many minutes before the pipe's newest sync time. Mutually exclusive with `begin`/`end`."
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "description": "Sort direction on the datetime axis. Defaults to 'asc'."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum rows per page (default 200)."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor from a previous call's `next_cursor`. Omit to start from the beginning."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "rows"
+        ],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "register_pipe",
+      "description": "Create and register a new pipe (the programmatic equivalent of 'bootstrap pipe'). Declare its index columns (`datetime` drives incremental sync, `id`/`primary` give uniqueness) and optional dtypes and tags. For a SQL-fetch pipe, set `parameters.fetch.definition` to the source query.",
+      "title": "Register pipe",
+      "scopes": [
+        "pipes:write"
+      ],
+      "read_only": false,
+      "destructive": false,
+      "idempotent": true,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          },
+          "columns": {
+            "type": "object",
+            "description": "Index columns by role, e.g. {\"datetime\": \"ts\", \"id\": \"station\", \"primary\": \"id\"}."
+          },
+          "dtypes": {
+            "type": "object",
+            "description": "Explicit column dtypes, e.g. {\"val\": \"float64\", \"attrs\": \"json\"}."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags for grouping and selecting this pipe."
+          },
+          "parameters": {
+            "type": "object",
+            "description": "The full parameters dict, merged with `columns`/`dtypes`/`tags`. Common keys: `fetch.definition` (source SQL), `fetch.backtrack_minutes`, `upsert`, `autotime`, `autoincrement`, `verify.chunk_minutes`."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_pipe",
+      "description": "Edit a registered pipe's parameters (columns, dtypes, tags, fetch definition, verify settings). By default the supplied parameters are deep-merged into the existing ones; set `replace` to true to overwrite the whole parameters dict.",
+      "title": "Edit pipe",
+      "scopes": [
+        "pipes:write"
+      ],
+      "read_only": false,
+      "destructive": false,
+      "idempotent": true,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key",
+          "parameters"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          },
+          "parameters": {
+            "type": "object",
+            "description": "Parameters to merge into (or replace) the pipe's parameters."
+          },
+          "replace": {
+            "type": "boolean",
+            "description": "Overwrite every parameter instead of deep-merging. Defaults to false.",
+            "default": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "sync_pipe",
+      "description": "Sync a pipe: fetch new data from its source connector and store it on its instance. This is the normal incremental ingest path. Use `sync_documents` instead to insert rows you already have.",
+      "title": "Sync pipe",
+      "scopes": [
+        "pipes:write"
+      ],
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          },
+          "begin": {
+            "type": "string",
+            "description": "Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound."
+          },
+          "end": {
+            "type": "string",
+            "description": "Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "sync_documents",
+      "description": "Insert or update rows in a pipe from a list of records you supply. No source connector is consulted — Meerschaum filters duplicates and upserts according to the pipe's configuration.",
+      "title": "Sync documents",
+      "scopes": [
+        "pipes:write"
+      ],
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key",
+          "documents"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          },
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Rows as dicts, e.g. [{\"ts\": \"2024-01-01\", \"station\": \"KGMU\", \"val\": 1.1}]."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "verify_pipe",
+      "description": "Re-sync a pipe's historical range in chunks, refetching any chunk whose local rowcount disagrees with its source. Use this to fill gaps after an outage.",
+      "title": "Verify pipe",
+      "scopes": [
+        "pipes:write"
+      ],
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          },
+          "begin": {
+            "type": "string",
+            "description": "Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound."
+          },
+          "end": {
+            "type": "string",
+            "description": "Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "deduplicate_pipe",
+      "description": "Find and remove duplicate rows in a pipe by re-syncing the affected chunks. Rows are deleted and rewritten, so scope it with `begin`/`end`/`params` when you can.",
+      "title": "Deduplicate pipe",
+      "scopes": [
+        "pipes:write",
+        "pipes:delete"
+      ],
+      "read_only": false,
+      "destructive": true,
+      "idempotent": false,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          },
+          "begin": {
+            "type": "string",
+            "description": "Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound."
+          },
+          "end": {
+            "type": "string",
+            "description": "Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound."
+          },
+          "params": {
+            "type": "object",
+            "description": "Additional WHERE filters, e.g. {\"station\": \"KGMU\"}. A list means IN, a leading '_' negates, and null means IS NULL."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_pipe",
+      "description": "Delete rows from a pipe's table within an optional datetime range and filter, keeping the table and the pipe's registration. Deleted rows are not recoverable — pass `begin`/`end`/`params` to scope it, and note that omitting all three deletes every row.",
+      "title": "Clear pipe rows",
+      "scopes": [
+        "pipes:delete"
+      ],
+      "read_only": false,
+      "destructive": true,
+      "idempotent": false,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          },
+          "begin": {
+            "type": "string",
+            "description": "Inclusive lower bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no lower bound."
+          },
+          "end": {
+            "type": "string",
+            "description": "Exclusive upper bound on the datetime axis (ISO 8601), or an integer as a string for integer-axis pipes. Omit for no upper bound."
+          },
+          "params": {
+            "type": "object",
+            "description": "Additional WHERE filters, e.g. {\"station\": \"KGMU\"}. A list means IN, a leading '_' negates, and null means IS NULL."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "drop_pipe",
+      "description": "Drop a pipe's target table while keeping its registration, so it can be re-synced from its source. All stored rows are lost.",
+      "title": "Drop pipe table",
+      "scopes": [
+        "pipes:drop"
+      ],
+      "read_only": false,
+      "destructive": true,
+      "idempotent": true,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "delete_pipe",
+      "description": "Delete a pipe entirely: drop its target table and remove its registration and parameters. This is irreversible and cannot be re-synced afterwards.",
+      "title": "Delete pipe",
+      "scopes": [
+        "pipes:delete"
+      ],
+      "read_only": false,
+      "destructive": true,
+      "idempotent": true,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "metric_key"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "The pipe's data source, e.g. 'sql:main' or 'plugin:noaa'."
+          },
+          "metric_key": {
+            "type": "string",
+            "description": "The pipe's metric key, e.g. 'weather'."
+          },
+          "location_key": {
+            "type": "string",
+            "description": "The pipe's location key. Omit (or pass 'None') for a null location."
+          },
+          "instance_keys": {
+            "type": "string",
+            "description": "Where the pipe's metadata and data are stored, e.g. 'sql:main'. Omit for the server's default instance."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "read_sql",
+      "description": "Run a read-only SQL query (or read a whole table by name) through a SQL connector and return the rows. Only single read-only statements are accepted: anything that writes, or more than one statement, is refused. Read the `mrsm://connectors` resource for the available connector keys.",
+      "title": "Read SQL",
+      "scopes": [
+        "sql:read"
+      ],
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "open_world": false,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "connector_keys",
+          "query"
+        ],
+        "properties": {
+          "connector_keys": {
+            "type": "string",
+            "description": "SQL connector keys, e.g. 'sql:main'."
+          },
+          "query": {
+            "type": "string",
+            "description": "A single read-only SQL statement, or a table name."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum rows per page (default 200)."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor from a previous call's `next_cursor`. Omit to start from the beginning."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "rows"
+        ],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "execute_action",
+      "description": "Run any Meerschaum CLI action, for anything without a dedicated tool. The `mrsm://actions` resource lists the available action names. This grants broad control over the Meerschaum instance and its host, so prefer a dedicated tool when one exists. Actions which execute arbitrary code are blocked by the server's denylist.",
+      "title": "Execute action",
+      "scopes": [
+        "actions:execute"
+      ],
+      "read_only": false,
+      "destructive": true,
+      "idempotent": false,
+      "open_world": true,
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "The action to run, e.g. 'sync pipes' or 'show pipes'. The first word is the action; the rest become subactions."
+          },
+          "kwargs": {
+            "type": "object",
+            "description": "Keyword arguments for the action, e.g. {\"connector_keys\": [\"sql:main\"], \"yes\": true}."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "resources": [
+    {
+      "name": "meerschaum_pipes",
+      "description": "Every registered pipe on the default instance, with its keys, tags, index columns, and dtypes. Use the `list_pipes` tool instead when you need filtering or paging.",
+      "title": "Registered pipes",
+      "uri": "mrsm://pipes",
+      "uri_template": null,
+      "mime_type": "application/json",
+      "scopes": [
+        "pipes:read"
+      ]
+    },
+    {
+      "name": "meerschaum_pipe",
+      "description": "A single pipe's attributes. Address a null location key as 'None', e.g. mrsm://pipes/sql:main/weather/None.",
+      "title": "Pipe attributes",
+      "uri": null,
+      "uri_template": "mrsm://pipes/{connector_keys}/{metric_key}/{location_key}",
+      "mime_type": "application/json",
+      "scopes": [
+        "pipes:read"
+      ]
+    },
+    {
+      "name": "meerschaum_actions",
+      "description": "The names of every available Meerschaum action, for use with the `execute_action` tool. Actions blocked by this server's denylist are marked.",
+      "title": "Available actions",
+      "uri": "mrsm://actions",
+      "uri_template": null,
+      "mime_type": "application/json",
+      "scopes": [
+        "actions:execute"
+      ]
+    },
+    {
+      "name": "meerschaum_connectors",
+      "description": "The keys (type:label) of the connectors configured on this instance, e.g. 'sql:main'. Credentials are never included.",
+      "title": "Configured connectors",
+      "uri": "mrsm://connectors",
+      "uri_template": null,
+      "mime_type": "application/json",
+      "scopes": [
+        "connectors:read"
+      ]
+    },
+    {
+      "name": "meerschaum_docs",
+      "description": "How to use this MCP server: Meerschaum's data model, the tools available here, and the OAuth2 scope each one requires. Read this first if a tool's own description is not enough. Served locally — no network access required.",
+      "title": "Meerschaum MCP reference",
+      "uri": "mrsm://docs",
+      "uri_template": null,
+      "mime_type": "text/markdown",
+      "scopes": []
+    }
+  ],
+  "prompts": [
+    {
+      "name": "bootstrap_pipe",
+      "description": "Walk through designing and registering a new pipe for a described data source, choosing index columns and dtypes before writing anything.",
+      "title": "Bootstrap a pipe",
+      "arguments": [
+        {
+          "name": "source",
+          "description": "The data source to ingest, e.g. 'the orders table in sql:warehouse' or 'the NOAA weather API'.",
+          "required": true
+        },
+        {
+          "name": "instance_keys",
+          "description": "Where to store the pipe, e.g. 'sql:main'. Optional.",
+          "required": false
+        }
+      ],
+      "scopes": [
+        "pipes:write"
+      ]
+    },
+    {
+      "name": "diagnose_sync_failure",
+      "description": "Systematically diagnose why a pipe is not syncing, or is syncing the wrong rows, working from its configuration and current state rather than guesses.",
+      "title": "Diagnose a sync failure",
+      "arguments": [
+        {
+          "name": "connector_keys",
+          "description": "The pipe's connector keys, e.g. 'sql:main'.",
+          "required": true
+        },
+        {
+          "name": "metric_key",
+          "description": "The pipe's metric key, e.g. 'weather'.",
+          "required": true
+        },
+        {
+          "name": "location_key",
+          "description": "The pipe's location key. Omit for a null location.",
+          "required": false
+        },
+        {
+          "name": "symptom",
+          "description": "What you are seeing, e.g. 'no new rows since Tuesday' or 'duplicate rows'.",
+          "required": false
+        }
+      ],
+      "scopes": [
+        "pipes:read"
+      ]
+    },
+    {
+      "name": "explain_pipe",
+      "description": "Explain what a pipe contains and how it is configured, in terms someone unfamiliar with the instance can follow.",
+      "title": "Explain a pipe",
+      "arguments": [
+        {
+          "name": "connector_keys",
+          "description": "The pipe's connector keys, e.g. 'sql:main'.",
+          "required": true
+        },
+        {
+          "name": "metric_key",
+          "description": "The pipe's metric key, e.g. 'weather'.",
+          "required": true
+        },
+        {
+          "name": "location_key",
+          "description": "The pipe's location key. Omit for a null location.",
+          "required": false
+        }
+      ],
+      "scopes": [
+        "pipes:read"
+      ]
+    }
+  ]
+}

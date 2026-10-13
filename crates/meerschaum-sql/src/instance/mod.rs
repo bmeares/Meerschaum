@@ -13,6 +13,7 @@
 
 pub mod data;
 pub mod fetch;
+pub mod geopackage;
 pub mod indices;
 pub mod inplace;
 pub mod maintenance;

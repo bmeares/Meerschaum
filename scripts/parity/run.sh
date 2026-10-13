@@ -15,7 +15,11 @@
 #     with its own directory as sys.path[0], exactly like `python GENERATOR.py`.
 #
 # Environment (defaults keep the reference's v4 venvs apart from the working tree's test_root):
-#   MRSM_ROOT_DIR     default .venv-ref/mrsm_root
+#   MRSM_ROOT_DIR     default: a fresh temporary root per run, removed afterwards (a persistent
+#                     root leaks v4 caches between runs, e.g. the instance-metadata pickle that
+#                     makes `get_tables()` skip building `conn.metadata`)
+#   MRSM_VENVS_DIR    default .venv-ref/mrsm_root/venvs when the root is temporary, so the
+#                     reference's own v4 venvs are built once and stay apart from test_root
 #   MRSM_PLUGINS_DIR  default tests/plugins
 #   MRSM_REF_VERSION  version to assert (default 4.1.4)
 #   UV_PYTHON         forced to the reference interpreter (v4's `uv venv` calls omit --python)
@@ -43,7 +47,13 @@ if [ ! -x "$ref_py" ]; then
   exit 2
 fi
 
-export MRSM_ROOT_DIR="${MRSM_ROOT_DIR:-$VENV/mrsm_root}"
+if [ -z "${MRSM_ROOT_DIR:-}" ]; then
+  tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/mrsm-parity-root.XXXXXX")"
+  trap 'rm -rf "$tmp_root"' EXIT
+  export MRSM_ROOT_DIR="$tmp_root"
+  export MRSM_VENVS_DIR="${MRSM_VENVS_DIR:-$VENV/mrsm_root/venvs}"
+  mkdir -p "$MRSM_VENVS_DIR"
+fi
 export MRSM_PLUGINS_DIR="${MRSM_PLUGINS_DIR:-$REPO/tests/plugins}"
 # Generators that guard against a stale import (e.g. asserting meerschaum comes from the repo)
 # should accept the reference when this is set; its value is the reference version.
@@ -54,7 +64,8 @@ export UV_PYTHON="$ref_py"
 mkdir -p "$MRSM_ROOT_DIR"
 
 cd "$REPO"
-exec "$ref_py" -s -E - "$gen" "$VERSION" "$VENV" "$@" <<'PY'
+# Not `exec`: the EXIT trap must still remove a temporary root.
+"$ref_py" -s -E - "$gen" "$VERSION" "$VENV" "$@" <<'PY'
 import importlib.abc, importlib.util, os, re, runpy, sys
 
 gen, expected, venv, *args = sys.argv[1:]

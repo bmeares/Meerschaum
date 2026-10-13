@@ -42,8 +42,10 @@ Dependencies point down only. No cycles; `meerschaum-core` is a leaf. Verify wit
    ▼       ▼
   server ─▶ api ─▶ connector ─▶ kernel ─▶ core
   valkey ─▶ api        ▲
-  sql ────────────────┘            (sql, valkey, api, server, engine* all sit on connector)
-  engine, jobs, compose ─▶ core    (engine will gain connector once SyncExecutor is wired)
+  sql ────────────────┘            (sql, valkey, api, server, engine all sit on connector)
+  engine ─▶ connector              (SQLite-backed tests use sql as a dev-dependency)
+  jobs, compose ─▶ core
+  worker ─▶ connector              (Python worker pool + adapter; used by engine/jobs/server/cli)
   web, plugin                      (stubs; web will depend on server, plugin on kernel + core)
 ```
 
@@ -56,9 +58,10 @@ Dependencies point down only. No cycles; `meerschaum-core` is a leaf. Verify wit
 | `meerschaum-api` | connector, core, kernel |
 | `meerschaum-valkey` | api (wire helpers only, no default features), connector, core, kernel |
 | `meerschaum-server` | api, connector, core, kernel |
-| `meerschaum-engine` | core |
+| `meerschaum-engine` | connector, core, kernel (dev: sql) |
 | `meerschaum-jobs` | core |
 | `meerschaum-compose` | core |
+| `meerschaum-worker` | connector, core, kernel |
 | `meerschaum-cli` | compose, core (sql, engine, jobs, server are added as their actions are wired) |
 | `meerschaum-py` | cli, core, kernel, sql |
 | `meerschaum-web`, `meerschaum-plugin` | not started |

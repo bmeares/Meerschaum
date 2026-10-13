@@ -41,6 +41,7 @@ fn sa_quote(name: &str, flavor: Flavor) -> String {
     }
     match flavor.driver_family() {
         DriverFamily::Mysql => format!("`{}`", name.replace('`', "``")),
+        DriverFamily::Mssql => format!("[{}]", name.replace(']', "]]")),
         _ => format!("\"{}\"", name.replace('"', "\"\"")),
     }
 }
@@ -62,20 +63,58 @@ fn sa_index_name(table: &str, column: &str, schema: Option<&str>) -> String {
 
 /// The `CREATE TABLE` / `CREATE INDEX` statements `get_tables(create=True)` emits for one
 /// instance table, in order. `schema` is the instance schema (`self.schema`).
+///
+/// DuckDB and Oracle key the ids on sequences (`_sequence_flavors`): the `CREATE SEQUENCE` that
+/// `create_all` issues (with `checkfirst`) precedes the table, made idempotent
+/// (`IF NOT EXISTS` on DuckDB, an `ORA-00955` guard on Oracle).
 pub fn instance_table_ddl(table: &str, flavor: Flavor, schema: Option<&str>) -> Vec<String> {
     let schema = if flavor.no_schema() { None } else { schema };
     let family = flavor.driver_family();
     let json = flavor.is_json_flavor();
-    let params_type = if json { "JSONB" } else { "TEXT" };
-    let (id_type, id_suffix) = match family {
-        DriverFamily::Postgres => ("SERIAL", ""),
-        DriverFamily::Mysql => ("INTEGER", " AUTO_INCREMENT"),
-        _ => ("INTEGER", ""),
+    let params_type = if json {
+        "JSONB"
+    } else {
+        match flavor {
+            Flavor::Mssql => "VARCHAR(max)",
+            Flavor::Oracle => "CLOB",
+            _ => "TEXT",
+        }
     };
-    let dt_type = match family {
-        DriverFamily::Postgres => "TIMESTAMP WITHOUT TIME ZONE",
+    let id_col = |name: &str| -> String {
+        match (family, flavor) {
+            (DriverFamily::Postgres, _) => format!("{name} SERIAL NOT NULL"),
+            (DriverFamily::Mysql, _) => format!("{name} INTEGER NOT NULL AUTO_INCREMENT"),
+            (_, Flavor::Mssql) => format!("{name} INTEGER NOT NULL IDENTITY"),
+            (_, Flavor::Duckdb) => {
+                format!("{name} INTEGER DEFAULT nextval('{name}_seq') NOT NULL")
+            }
+            (_, Flavor::Oracle) => format!("{name} INTEGER DEFAULT {name}_seq.nextval NOT NULL"),
+            _ => format!("{name} INTEGER NOT NULL"),
+        }
+    };
+    let sequence = |name: &str| -> Option<String> {
+        match flavor {
+            Flavor::Duckdb => Some(format!("CREATE SEQUENCE IF NOT EXISTS {name}_seq")),
+            Flavor::Oracle => Some(format!(
+                "BEGIN EXECUTE IMMEDIATE 'CREATE SEQUENCE {name}_seq'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;"
+            )),
+            _ => None,
+        }
+    };
+    let varchar = |n: u32| -> String {
+        if flavor == Flavor::Oracle {
+            format!("VARCHAR2({n} CHAR)")
+        } else {
+            format!("VARCHAR({n})")
+        }
+    };
+    let dt_type = match (family, flavor) {
+        (DriverFamily::Postgres, _) | (_, Flavor::Duckdb) => "TIMESTAMP WITHOUT TIME ZONE",
+        (_, Flavor::Oracle) => "DATE",
         _ => "DATETIME",
     };
+    // MSSQL spells out nullable columns.
+    let null = if flavor == Flavor::Mssql { " NULL" } else { "" };
     let t = |name: &str| sa_table(name, schema, flavor);
     let q = |name: &str| sa_quote(name, flavor);
     // MSSQL skips index names (`_skip_index_names_flavors`).
@@ -88,12 +127,15 @@ pub fn instance_table_ddl(table: &str, flavor: Flavor, schema: Option<&str>) -> 
             q(col)
         )
     };
+    let v256 = varchar(256);
     match table {
         "mrsm_pipes" => {
-            let mut out = vec![format!(
-                "\nCREATE TABLE {} (\n\tpipe_id {id_type} NOT NULL{id_suffix}, \n\tconnector_keys VARCHAR(256) NOT NULL, \n\tmetric_key VARCHAR(256) NOT NULL, \n\tlocation_key VARCHAR(256), \n\tparameters {params_type}, \n\tPRIMARY KEY (pipe_id)\n)\n\n",
-                t("mrsm_pipes")
-            )];
+            let mut out: Vec<String> = sequence("pipe_id").into_iter().collect();
+            out.push(format!(
+                "\nCREATE TABLE {} (\n\t{}, \n\tconnector_keys {v256} NOT NULL, \n\tmetric_key {v256} NOT NULL, \n\tlocation_key {v256}{null}, \n\tparameters {params_type}{null}, \n\tPRIMARY KEY (pipe_id)\n)\n\n",
+                t("mrsm_pipes"),
+                id_col("pipe_id"),
+            ));
             if json {
                 out.push(format!(
                     "CREATE INDEX ix_mrsm_pipes_parameters_tags ON {} USING gin ((parameters['tags']))",
@@ -109,7 +151,7 @@ pub fn instance_table_ddl(table: &str, flavor: Flavor, schema: Option<&str>) -> 
         }
         "mrsm_temp_tables" => {
             let mut out = vec![format!(
-                "\nCREATE TABLE {} (\n\tdate_created {dt_type} NOT NULL, \n\t{} VARCHAR(256) NOT NULL, \n\tready_to_drop {dt_type}\n)\n\n",
+                "\nCREATE TABLE {} (\n\tdate_created {dt_type} NOT NULL, \n\t{} {v256} NOT NULL, \n\tready_to_drop {dt_type}{null}\n)\n\n",
                 t("mrsm_temp_tables"),
                 q("table")
             )];
@@ -120,10 +162,13 @@ pub fn instance_table_ddl(table: &str, flavor: Flavor, schema: Option<&str>) -> 
             out
         }
         "mrsm_users" => {
-            let mut out = vec![format!(
-                "\nCREATE TABLE {} (\n\tuser_id {id_type} NOT NULL{id_suffix}, \n\tusername VARCHAR(256) NOT NULL, \n\tpassword_hash VARCHAR(1024), \n\temail VARCHAR(256), \n\tuser_type VARCHAR(256), \n\tattributes {params_type}, \n\tPRIMARY KEY (user_id)\n)\n\n",
-                t("mrsm_users")
-            )];
+            let mut out: Vec<String> = sequence("user_id").into_iter().collect();
+            out.push(format!(
+                "\nCREATE TABLE {} (\n\t{}, \n\tusername {v256} NOT NULL, \n\tpassword_hash {}{null}, \n\temail {v256}{null}, \n\tuser_type {v256}{null}, \n\tattributes {params_type}{null}, \n\tPRIMARY KEY (user_id)\n)\n\n",
+                t("mrsm_users"),
+                id_col("user_id"),
+                varchar(1024),
+            ));
             if index_names {
                 out.push(ix("username"));
             }
@@ -138,10 +183,12 @@ pub fn instance_table_ddl(table: &str, flavor: Flavor, schema: Option<&str>) -> 
                     t("mrsm_users")
                 )
             };
-            let mut out = vec![format!(
-                "\nCREATE TABLE {} (\n\tplugin_id {id_type} NOT NULL{id_suffix}, \n\tplugin_name VARCHAR(256) NOT NULL, \n\tuser_id INTEGER NOT NULL, \n\tversion VARCHAR(256), \n\tattributes {params_type}, \n\tPRIMARY KEY (plugin_id){fk}\n)\n\n",
-                t("mrsm_plugins")
-            )];
+            let mut out: Vec<String> = sequence("plugin_id").into_iter().collect();
+            out.push(format!(
+                "\nCREATE TABLE {} (\n\t{}, \n\tplugin_name {v256} NOT NULL, \n\tuser_id INTEGER NOT NULL, \n\tversion {v256}{null}, \n\tattributes {params_type}{null}, \n\tPRIMARY KEY (plugin_id){fk}\n)\n\n",
+                t("mrsm_plugins"),
+                id_col("plugin_id"),
+            ));
             if index_names {
                 out.push(ix("plugin_name"));
             }
@@ -402,5 +449,63 @@ mod tests {
         assert_eq!(sa_quote("table", Flavor::Mysql), "`table`");
         assert_eq!(sa_quote("mrsm_pipes", Flavor::Postgresql), "mrsm_pipes");
         assert_eq!(sa_quote("MySchema", Flavor::Postgresql), "\"MySchema\"");
+    }
+
+    /// The DDL SQLAlchemy compiles for the MSSQL, DuckDB and Oracle dialects (v4.1.4,
+    /// `CreateTable(table).compile(dialect=conn.engine.dialect)`), whitespace-normalized.
+    #[test]
+    fn native_flavor_ddl() {
+        let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let ddl = |table: &str, flavor: Flavor, schema: Option<&str>| {
+            instance_table_ddl(table, flavor, schema)
+                .iter()
+                .map(|s| norm(s))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ddl("mrsm_pipes", Flavor::Mssql, Some("dbo")),
+            vec![norm(
+                "CREATE TABLE dbo.mrsm_pipes ( pipe_id INTEGER NOT NULL IDENTITY, connector_keys VARCHAR(256) NOT NULL, metric_key VARCHAR(256) NOT NULL, location_key VARCHAR(256) NULL, parameters VARCHAR(max) NULL, PRIMARY KEY (pipe_id) )"
+            )]
+        );
+        assert_eq!(
+            ddl("mrsm_temp_tables", Flavor::Mssql, Some("dbo")),
+            vec![
+                norm(
+                    "CREATE TABLE dbo.mrsm_temp_tables ( date_created DATETIME NOT NULL, [table] VARCHAR(256) NOT NULL, ready_to_drop DATETIME NULL )"
+                ),
+                "CREATE INDEX ix_dbo_mrsm_temp_tables_date_created ON dbo.mrsm_temp_tables (date_created)".to_string(),
+            ]
+        );
+        assert_eq!(
+            ddl("mrsm_users", Flavor::Duckdb, None),
+            vec![
+                "CREATE SEQUENCE IF NOT EXISTS user_id_seq".to_string(),
+                norm(
+                    "CREATE TABLE mrsm_users ( user_id INTEGER DEFAULT nextval('user_id_seq') NOT NULL, username VARCHAR(256) NOT NULL, password_hash VARCHAR(1024), email VARCHAR(256), user_type VARCHAR(256), attributes TEXT, PRIMARY KEY (user_id) )"
+                ),
+                "CREATE INDEX ix_mrsm_users_username ON mrsm_users (username)".to_string(),
+            ]
+        );
+        assert_eq!(
+            ddl("mrsm_temp_tables", Flavor::Duckdb, None)[0],
+            norm(
+                "CREATE TABLE mrsm_temp_tables ( date_created TIMESTAMP WITHOUT TIME ZONE NOT NULL, \"table\" VARCHAR(256) NOT NULL, ready_to_drop TIMESTAMP WITHOUT TIME ZONE )"
+            )
+        );
+        let oracle = ddl("mrsm_plugins", Flavor::Oracle, None);
+        assert!(oracle[0].contains("CREATE SEQUENCE plugin_id_seq"));
+        assert_eq!(
+            oracle[1],
+            norm(
+                "CREATE TABLE mrsm_plugins ( plugin_id INTEGER DEFAULT plugin_id_seq.nextval NOT NULL, plugin_name VARCHAR2(256 CHAR) NOT NULL, user_id INTEGER NOT NULL, version VARCHAR2(256 CHAR), attributes CLOB, PRIMARY KEY (plugin_id), FOREIGN KEY(user_id) REFERENCES mrsm_users (user_id) )"
+            )
+        );
+        assert_eq!(
+            ddl("mrsm_temp_tables", Flavor::Oracle, None)[0],
+            norm(
+                "CREATE TABLE mrsm_temp_tables ( date_created DATE NOT NULL, \"table\" VARCHAR2(256 CHAR) NOT NULL, ready_to_drop DATE )"
+            )
+        );
     }
 }

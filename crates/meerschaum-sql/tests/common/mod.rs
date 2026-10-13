@@ -25,7 +25,17 @@ pub const FLAVOR_ENVS: &[(&str, &str)] = &[
     ("postgis", "MRSM_TEST_POSTGIS_URI"),
     ("mysql", "MRSM_TEST_MYSQL_URI"),
     ("mariadb", "MRSM_TEST_MARIADB_URI"),
+    ("mssql", "MRSM_TEST_MSSQL_URI"),
+    ("oracle", "MRSM_TEST_ORACLE_URI"),
+    // File-based flavors: a directory for temporary databases (empty: the system temp dir).
+    ("duckdb", "MRSM_TEST_DUCKDB_PATH"),
+    ("geopackage", "MRSM_TEST_GPKG_DIR"),
 ];
+
+/// Whether `flavor` stores its databases as files in a directory read from its env var.
+fn is_file_flavor(flavor: &str) -> bool {
+    matches!(flavor, "duckdb" | "geopackage")
+}
 
 /// A connected instance for one flavor plus a unique key prefix for this test.
 pub struct Ctx {
@@ -39,6 +49,10 @@ impl Drop for Ctx {
     fn drop(&mut self) {
         if let Some(p) = &self.sqlite_path {
             let _ = std::fs::remove_file(p);
+            // DuckDB's write-ahead log.
+            let mut wal = p.clone().into_os_string();
+            wal.push(".wal");
+            let _ = std::fs::remove_file(wal);
         }
     }
 }
@@ -77,6 +91,28 @@ pub async fn ctx(flavor: &'static str, test: &str) -> Option<Ctx> {
         eprintln!("Skipping {flavor}: set {env}.");
         return None;
     };
+    if is_file_flavor(flavor) {
+        let dir = if uri.is_empty() {
+            std::env::temp_dir()
+        } else {
+            std::path::PathBuf::from(&uri)
+        };
+        let ext = if flavor == "duckdb" { "duckdb" } else { "gpkg" };
+        let path = dir.join(format!(
+            "_mrsm_rs_{test}_{}.{ext}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let uri = format!("{flavor}:///{}", path.display());
+        let conn = SqlConnector::from_uri(&format!("rs_test_{flavor}"), &uri)
+            .await
+            .expect("file database connects");
+        return Some(Ctx {
+            flavor,
+            conn,
+            prefix,
+            sqlite_path: Some(path),
+        });
+    }
     let spec = ConnectionSpec::from_uri(&uri, Some(&format!("rs_test_{flavor}")), None)
         .expect("valid URI");
     let conn = SqlConnector::connect(&format!("rs_test_{flavor}"), spec)
@@ -127,6 +163,25 @@ macro_rules! flavor_tests {
             #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
             async fn mariadb() {
                 run("mariadb").await
+            }
+            #[cfg(feature = "mssql")]
+            #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+            async fn mssql() {
+                run("mssql").await
+            }
+            #[cfg(feature = "oracle")]
+            #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+            async fn oracle() {
+                run("oracle").await
+            }
+            #[cfg(feature = "duckdb")]
+            #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+            async fn duckdb() {
+                run("duckdb").await
+            }
+            #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+            async fn geopackage() {
+                run("geopackage").await
             }
         }
     };
@@ -211,6 +266,26 @@ impl Ctx {
     /// Whether the flavor is in the PostgreSQL family.
     pub fn is_pg(&self) -> bool {
         matches!(self.flavor, "postgresql" | "timescaledb" | "postgis")
+    }
+
+    /// Whether the flavor is MSSQL.
+    pub fn is_mssql(&self) -> bool {
+        self.flavor == "mssql"
+    }
+
+    /// Whether the flavor is Oracle.
+    pub fn is_oracle(&self) -> bool {
+        self.flavor == "oracle"
+    }
+
+    /// Whether the flavor is DuckDB.
+    pub fn is_duckdb(&self) -> bool {
+        self.flavor == "duckdb"
+    }
+
+    /// Whether the flavor is SQLite or GeoPackage.
+    pub fn is_sqlite(&self) -> bool {
+        matches!(self.flavor, "sqlite" | "geopackage")
     }
 
     /// Whether the flavor is MySQL / MariaDB.

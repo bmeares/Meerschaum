@@ -10,6 +10,9 @@ description = "Meerschaum v5: engine crate (see docs/design/v5.0.0.md)"
 
 [dependencies]
 meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { workspace = true }
@@ -19,7 +22,11 @@ uuid = { workspace = true }
 tokio = { workspace = true }
 # Crate-private: the definition hash (§5.4).
 sha2 = "0.10"
+# Crate-private: the machine-local lease fallback (interprocess file locks, §5.8).
+fs4 = "0.13"
 
 [dev-dependencies]
 proptest = "1"
+# SQLite-backed end-to-end tests (dev-only: the engine runs against the connector traits).
+meerschaum-sql = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

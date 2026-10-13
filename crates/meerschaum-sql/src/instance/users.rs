@@ -8,6 +8,7 @@ use meerschaum_core::{Map, SuccessTuple, Value};
 
 use crate::driver::params::{placeholder, placeholders};
 use crate::driver::{SqlParam, SqlValue};
+use crate::flavor::Flavor;
 
 use super::{SqlConnector, be, frame_docs, kv_str};
 
@@ -108,6 +109,11 @@ impl SqlConnector {
             ("user_id", id_param(&user_id)),
             ("username", SqlParam::Text(user.username.clone())),
         ];
+        // PARITY deviation: v4 (`_users.py:163`) also sets `user_id` on MSSQL, where it is an
+        // `IDENTITY` column ("Cannot update identity column"), so every edit failed there.
+        if self.flavor == Flavor::Mssql {
+            sets.remove(0);
+        }
         if !user.password.is_empty() {
             let mut u = user.clone();
             match u.get_password_hash() {

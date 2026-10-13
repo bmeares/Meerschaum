@@ -19,41 +19,62 @@
 //! | [`runs`] | §5.8 | Run history rows and the internal `mrsm:engine_*` pipes |
 //! | [`stream`] | §5.6 | Micro-batching triggers for stream sources |
 //! | [`viz`] | §5.9 | The static ASCII Gantt chart and DAG listing |
+//! | [`registry`] | §4.4, D11 | [`ConnectorRegistry`]: how the engine reaches connectors and plugin seams |
+//! | [`sync`] | §5.4, R1 | The native `Pipe.sync()` flow over the connector traits |
+//! | [`native`] | §5.5, D11 | [`NativeExecutor`]: the [`SyncExecutor`] that runs planned nodes, ledger first |
+//! | [`instance_state`] | §5.8, R5, R13 | [`InstanceState`]: engine state in the `mrsm:engine_*` pipes |
+//! | [`leases`] | §5.8 | Instance leases with the machine-local file-lock fallback |
+//! | [`engine`] | §5.2, §5.5, §5.7 | [`Engine`]: `run`, `plan`, event subscription, continuous mode |
 //!
-//! The real `Pipe::sync` (a [`SyncExecutor`]), the instance-backed [`StateSource`] and
-//! [`LeaseSource`], continuous mode and chunk pipelining arrive in later waves.
+//! Chunk pipelining (`--chunk-pipelining`, R6) is accepted and ignored.
 
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod axis;
+pub mod engine;
 pub mod events;
 pub mod executor;
 pub mod graph;
+pub mod instance_state;
+pub mod leases;
 pub mod ledger;
+pub mod native;
 pub mod node;
 pub mod plan;
+pub mod registry;
 pub mod runs;
 pub mod schedule;
 pub mod selection;
 pub mod state;
 pub mod stream;
+pub mod sync;
 pub mod viz;
 
 pub use axis::{Axis, AxisKind, Interval};
+pub use engine::{
+    Engine, EngineConfig, EventGranularity, LapEvent, LapSummary, LoopOptions, LoopResult,
+    NodeOutcome, PlannedRun, RunOptions, RunResult,
+};
 pub use events::{Event, EventKind, EventSink};
 pub use executor::{
-    ExecuteContext, ExecutorOptions, LeaseSource, Limits, RetryPolicy, SyncExecutor, SyncRequest,
-    execute,
+    ExecuteContext, ExecutorOptions, LeaseSource, Limits, Priority, RetryPolicy, SyncExecutor,
+    SyncRequest, execute,
 };
 pub use graph::{Edge, EdgeOptions, Graph, GraphError, GraphOptions, GraphWarning, Node};
+pub use instance_state::InstanceState;
+pub use leases::{FileLeases, InstanceLeases};
 pub use ledger::{EdgeCursor, LedgerEntry, definition_hash};
+pub use native::{FaultInjector, NativeConfig, NativeExecutor, NodeSyncOptions};
 pub use node::{PipeRecord, PipeRef};
 pub use plan::{Action, Begin, Bounds, Plan, PlanOptions, PlannedNode, Span, plan};
+pub use registry::{ConnectorRegistry, PluginSync, StaticRegistry, SyncHooks};
 pub use runs::{NodeRow, NodeStatus, RunRecord, RunRow};
 pub use schedule::{DurationSource, EwmaDurations, Schedule};
 pub use selection::{Depth, KeyFilter, Pipeline, Selection, Subgraph, Targets};
 pub use state::{MemoryState, StateError, StateSource, StateWriter};
+pub use stream::StopToken;
+pub use sync::{SyncArgs, SyncBegin};
 
 /// Re-exported from `meerschaum-core`: a sync bound on a datetime or integer axis.
 pub use meerschaum_core::success::{Bound, SyncResult};

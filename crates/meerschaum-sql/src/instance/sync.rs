@@ -31,7 +31,8 @@ use crate::queries::update::{UpdateQueriesArgs, get_update_queries};
 
 use super::data::{PipeState, columns_map};
 use super::values::{
-    ColumnEncoding, csv_row, encode_copy_field, encode_param, numeric_precision_scale,
+    ColumnEncoding, csv_row, encode_copy_field, encode_json_cell, encode_param,
+    numeric_precision_scale,
 };
 use super::{SqlConnector, be};
 
@@ -421,13 +422,19 @@ impl SqlConnector {
         let mut msg = String::new();
         if unseen_df.height() > 0 {
             let dtype = self.get_to_sql_dtype(&sp, &unseen_df, &state, true);
+            let identity_insert = flavor == Flavor::Mssql
+                && autoincrement
+                && primary_key
+                    .as_ref()
+                    .is_some_and(|pk| unseen_df.contains(pk));
             let (ok, m) = self
-                .to_sql(
+                .to_sql_inner(
                     &unseen_df,
                     &sp.target,
                     schema.as_deref(),
                     &dtype,
                     opts.chunksize,
+                    identity_insert,
                 )
                 .await;
             success = ok;
@@ -794,6 +801,16 @@ impl SqlConnector {
             partition_by_column = None;
         }
 
+        // MSSQL partitions through a function + scheme created before the table; its clustered
+        // index is placed on the scheme.
+        let (partition_scheme_name, partition_creation_queries) =
+            if partition_by_column.is_some() && flavor == Flavor::Mssql {
+                let (name, queries) = self.mssql_partition_creation(sp, df);
+                (Some(name), queries)
+            } else {
+                (None, Vec::new())
+            };
+
         let build = |chunk: Option<String>| -> crate::Result<Vec<String>> {
             let opts = CreateTableOptions {
                 schema: schema.clone(),
@@ -814,7 +831,7 @@ impl SqlConnector {
                 hypertable_chunk_interval: chunk,
                 partition_by_column: partition_by_column.clone(),
                 partition_bounds: partition_bounds.clone(),
-                partition_scheme_name: None,
+                partition_scheme_name: partition_scheme_name.clone(),
                 parse_dtypes: true,
             };
             let mut queries = get_create_table_queries(
@@ -823,6 +840,11 @@ impl SqlConnector {
                 flavor,
                 &opts,
             )?;
+            if !partition_creation_queries.is_empty() {
+                let mut q = partition_creation_queries.clone();
+                q.extend(queries);
+                queries = q;
+            }
             if let Some(s) = schema.as_deref().filter(|s| !s.is_empty()) {
                 let mut q = get_create_schema_if_not_exists_queries(Some(s), flavor)?;
                 q.extend(queries);
@@ -846,6 +868,9 @@ impl SqlConnector {
                 "Could not register an `integer_now` function for {}; its columnstore policy will fail on every run.",
                 sp.pipe()
             );
+        }
+        if success && flavor == Flavor::Geopackage {
+            return self.init_geopackage_pipe(sp, &new_dtypes).await;
         }
         if success {
             SuccessTuple::ok("Success")
@@ -1213,6 +1238,22 @@ impl SqlConnector {
         dtype: &IndexMap<String, String>,
         chunksize: Option<i64>,
     ) -> (bool, String) {
+        self.to_sql_inner(df, name, schema, dtype, chunksize, false)
+            .await
+    }
+
+    /// [`Self::to_sql`], optionally wrapped in `SET IDENTITY_INSERT ... ON` / `OFF` on the same
+    /// connection and transaction (MSSQL autoincrement pipes given explicit keys,
+    /// `_pipes.py:2201`).
+    pub(crate) async fn to_sql_inner(
+        &self,
+        df: &Frame,
+        name: &str,
+        schema: Option<&str>,
+        dtype: &IndexMap<String, String>,
+        chunksize: Option<i64>,
+        identity_insert: bool,
+    ) -> (bool, String) {
         let flavor = self.flavor;
         let schema = schema.or(self.schema());
         let truncated = truncate_item_name(name, flavor);
@@ -1281,6 +1322,26 @@ impl SqlConnector {
             };
         }
 
+        if flavor == Flavor::Mssql && self.settings.bulk_insert {
+            if let Some(statements) = mssql_insert_json_statements(
+                &table_name,
+                &cols,
+                &columns,
+                &encodings,
+                dtype,
+                &numeric_cols,
+                n,
+                match chunksize {
+                    Some(-1) => Some(self.settings.chunksize),
+                    other => other,
+                },
+            ) {
+                return self
+                    .exec_insert_statements(statements, &table_name, identity_insert)
+                    .await;
+            }
+        }
+
         let default_chunksize = self.settings.chunksize;
         let mut chunk = match chunksize {
             Some(-1) => Some(default_chunksize),
@@ -1323,8 +1384,27 @@ impl SqlConnector {
             ));
             start = end;
         }
+        self.exec_insert_statements(statements, &table_name, identity_insert)
+            .await
+    }
+
+    /// Run `to_sql`'s insert statements in one transaction, optionally between
+    /// `SET IDENTITY_INSERT ... ON` and `OFF`.
+    async fn exec_insert_statements(
+        &self,
+        mut statements: Vec<(String, Vec<SqlParam>)>,
+        table_name: &str,
+        identity_insert: bool,
+    ) -> (bool, String) {
         if let Some((sql, _)) = statements.first() {
             self.log(sql);
+        }
+        if identity_insert {
+            statements.insert(
+                0,
+                (format!("SET IDENTITY_INSERT {table_name} ON"), Vec::new()),
+            );
+            statements.push((format!("SET IDENTITY_INSERT {table_name} OFF"), Vec::new()));
         }
         match self.driver().exec_many_with(&statements).await {
             Ok(results) if results.iter().all(Option::is_some) => (true, String::new()),
@@ -1332,4 +1412,82 @@ impl SqlConnector {
             Err(e) => (false, e.to_string()),
         }
     }
+}
+
+/// `mssql_insert_json` (`_sql.py:1192`), the MSSQL bulk path: one
+/// `INSERT ... SELECT ... FROM OPENJSON(@P1) WITH (...)` per chunk of rows, the rows bound as a
+/// single JSON document. `None` when a frame column has no declared type (the row-batch
+/// `INSERT` path handles it instead).
+#[allow(clippy::too_many_arguments)]
+fn mssql_insert_json_statements(
+    table_name: &str,
+    cols: &[String],
+    columns: &[Vec<KValue>],
+    encodings: &[ColumnEncoding],
+    dtype: &IndexMap<String, String>,
+    numeric_cols: &[String],
+    n: usize,
+    chunksize: Option<i64>,
+) -> Option<Vec<(String, Vec<SqlParam>)>> {
+    let flavor = Flavor::Mssql;
+    // `cols_pd_types` -> `cols_db_types` (`_sql.py:885-897`).
+    let cols_types: IndexMap<String, String> = dtype
+        .iter()
+        .map(|(col, typ)| {
+            let mut pd = get_pd_type_from_db_type(typ, true);
+            if cols.contains(col)
+                && (typ.to_lowercase().contains("numeric") || numeric_cols.contains(col))
+            {
+                if let Some((p, s)) =
+                    numeric_precision_scale(typ).filter(|(p, s)| *p != 0 && *s != 0)
+                {
+                    pd = format!("numeric[{p},{s}]");
+                }
+            }
+            (col.clone(), get_db_type_from_pd_type(&pd, Some(flavor)))
+        })
+        .collect();
+    if cols.iter().any(|c| !cols_types.contains_key(c)) {
+        return None;
+    }
+    let col_list = cols
+        .iter()
+        .map(|c| format!("[{c}]"))
+        .collect::<Vec<_>>()
+        .join(",\n    ");
+    let with_clause = cols_types
+        .iter()
+        .map(|(c, t)| format!("[{c}] {t} '$.\"{c}\"'"))
+        .collect::<Vec<_>>()
+        .join(",\n    ");
+    let sql = format!(
+        "INSERT INTO {table_name} (\n    {col_list}\n)\nSELECT\n    {col_list}\nFROM OPENJSON({})\nWITH (\n    {with_clause}\n);",
+        crate::driver::params::placeholder(flavor, 1)
+    );
+    let rows_per_chunk = chunksize
+        .filter(|c| *c > 0)
+        .map(|c| c as usize)
+        .unwrap_or(n)
+        .max(1);
+    let mut statements = Vec::new();
+    let mut start = 0;
+    while start < n {
+        let end = (start + rows_per_chunk).min(n);
+        let docs: Vec<serde_json::Value> = (start..end)
+            .map(|i| {
+                let mut doc = serde_json::Map::with_capacity(cols.len());
+                for (j, enc) in encodings.iter().enumerate() {
+                    doc.insert(
+                        cols[j].clone(),
+                        encode_json_cell(&columns[j][i], flavor, enc),
+                    );
+                }
+                serde_json::Value::Object(doc)
+            })
+            .collect();
+        let json = serde_json::to_string(&docs).ok()?;
+        statements.push((sql.clone(), vec![SqlParam::Text(json)]));
+        start = end;
+    }
+    Some(statements)
 }

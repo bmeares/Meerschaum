@@ -616,6 +616,54 @@ def test_every_gated_feature_is_bound():
 
 
 @requires_core
+def test_every_gated_class_is_bound():
+    unbound = [c for c in _gate.GATED_CLASSES if not hasattr(core.load(), c)]
+    assert not unbound, unbound
+
+
+def test_rust_method_runs_python_for_stubs_and_python_mode(gate):
+    """`rust_method` never asks objects without `_rust_method` (duck typing) or in `python` mode."""
+    from types import SimpleNamespace
+    calls = []
+    obj = SimpleNamespace(_rust_method=lambda name: calls.append(name) or (lambda: name))
+    gate.set_mode('python')
+    assert gate.rust_method(obj, 'sync_pipe') is None
+    assert gate.rust_method(SimpleNamespace(), 'sync_pipe') is None
+    assert calls == []
+    gate.set_mode('rust')
+    assert gate.rust_method(SimpleNamespace(), 'sync_pipe') is None
+    assert gate.rust_method(obj, 'sync_pipe')() == 'sync_pipe'
+    assert calls == ['sync_pipe']
+
+
+def test_class_features_are_case_insensitive(gate):
+    gate.set_mode('rust:sqlconnector')
+    assert gate.use_rust('SqlConnector')
+    assert not gate.use_rust('enforce_dtypes')
+
+
+@requires_core
+def test_sql_connector_routing(gate, tmp_path):
+    """`SQLConnector._rust_method` builds one `_core.SqlConnector` per connector and process."""
+    import meerschaum as mrsm
+    gate.set_mode('rust')
+    conn = mrsm.get_connector(
+        'sql', 'gate_' + uuid.uuid4().hex, flavor='sqlite', database=str(tmp_path / 'g.db'),
+    )
+    method = conn._rust_method('pipe_exists')
+    assert method is not None
+    assert conn.__dict__['_rust_connector'] is method.__self__
+    assert conn._rust_method('read') is None  # D16: user SQL stays SQLAlchemy
+    assert '_rust_connector' not in conn.__getstate__()
+    memory = mrsm.get_connector('sql', 'gate_mem_' + uuid.uuid4().hex, flavor='sqlite',
+                                database=':memory:')
+    assert memory._rust_method('pipe_exists') is None
+    gate.set_mode('python')
+    from meerschaum._core._gate import rust_method
+    assert rust_method(conn, 'pipe_exists') is None
+
+
+@requires_core
 def test_rust_mode_matches_python(gate):
     """Every gated feature returns the same values and pandas dtypes in both modes."""
     pd = pytest.importorskip('pandas')

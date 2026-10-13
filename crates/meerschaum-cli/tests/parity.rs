@@ -678,22 +678,32 @@ fn dispatch_skeleton() {
         dispatch::entry(&s(&["show", "arguments", "-c", "sql:main"]), &mut rt),
         SuccessTuple::success()
     );
+    // Instance actions are native; keep this test off real instances (`sql:main` is a server).
     assert_eq!(
-        dispatch::entry(&s(&["sync", "pipes", "-c", "sql:main"]), &mut rt),
-        SuccessTuple::fail("action `sync pipes` is not implemented in Rust yet")
+        dispatch::entry(&s(&["install", "plugins", "noaa"]), &mut rt),
+        SuccessTuple::fail("action `install plugins` is not implemented in Rust yet")
     );
     assert_eq!(
-        dispatch::entry(&s(&["show", "pipe"]), &mut rt),
-        SuccessTuple::fail("action `show pipes` is not implemented in Rust yet")
+        dispatch::entry(&s(&["show", "pipe", "-i", "sql:memory"]), &mut rt),
+        SuccessTuple::ok("No pipes to show.")
     );
     // Unknown actions run through `sh` (`bash -c 'foo bar'`); the test host exits 0.
     assert_eq!(
         dispatch::entry(&s(&["foo", "bar"]), &mut rt),
         SuccessTuple::success()
     );
-    assert_eq!(
-        dispatch::entry(&s(&["sync", "pipes", "-d"]), &mut rt),
-        SuccessTuple::fail("action `start jobs` is not implemented in Rust yet")
+    // `-d` becomes `start jobs`; the test host has no input, so the job is not created.
+    let started = dispatch::entry(&s(&["install", "plugins", "noaa", "-d"]), &mut rt);
+    assert!(
+        !started.success && started.message.starts_with("Failed to start job"),
+        "{started:?}"
+    );
+    assert!(
+        !tmp.path().join("jobs").exists()
+            || std::fs::read_dir(tmp.path().join("jobs"))
+                .unwrap()
+                .next()
+                .is_none()
     );
     assert_eq!(
         dispatch::entry(&s(&["show", "pipes", "-e", "api:main"]), &mut rt),
@@ -702,7 +712,10 @@ fn dispatch_skeleton() {
     let SuccessTuple {
         success: ok,
         message: msg,
-    } = dispatch::entry(&s(&["show", "version", "+", "sync", "pipes"]), &mut rt);
+    } = dispatch::entry(
+        &s(&["show", "version", "+", "install", "plugins", "x"]),
+        &mut rt,
+    );
     assert!(!ok && msg.contains("Failed pipeline after 1 step"), "{msg}");
     let SuccessTuple {
         success: ok,
@@ -714,9 +727,9 @@ fn dispatch_skeleton() {
         "Invalid arguments:\nsync --begin xyz\n    'xyz' is not a valid datetime format."
     );
 
-    assert_eq!(dispatch::main(&s(&["sync", "pipes"]), &mut rt), 1);
+    assert_eq!(dispatch::main(&s(&["install", "plugins", "x"]), &mut rt), 1);
     assert_eq!(
-        dispatch::main(&s(&["sync", "pipes", "--nopretty"]), &mut rt),
+        dispatch::main(&s(&["install", "plugins", "x", "--nopretty"]), &mut rt),
         0
     );
     assert_eq!(dispatch::main(&s(&["show", "version"]), &mut rt), 0);

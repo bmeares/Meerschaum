@@ -137,7 +137,12 @@ pub fn show_actions(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         sort_options: true,
         ..options_args(args)
     };
-    let actions = listed_actions();
+    let mut actions = listed_actions();
+    if rt.in_shell {
+        // PARITY: the shell adds its commands to v4's global `actions` dict
+        // (`shell_attrs['_actions']` is that dict), so `show actions` lists them there.
+        actions.extend(crate::shell::SHELL_COMMANDS.iter().map(|s| s.to_string()));
+    }
     let text = rt.with_formatter(|f| f.print_options(&actions, &opts));
     rt.print(&text);
     Ok(SuccessTuple::success())
@@ -304,9 +309,11 @@ pub fn plugin_names(dirs: &[PathBuf]) -> Vec<String> {
 
 /// `show plugins` (installed plugins only; `all` and `<username>` need a repository).
 pub fn show_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    // `parse_repo_keys(repository)` raises for non-API repositories.
+    crate::native::show::repo_keys(args, rt)?;
     let action = words(args, "action");
     if !(action.is_empty() || action == [""]) {
-        return Ok(not_implemented("show plugins"));
+        return crate::native::show::show_plugins_repo(args, rt);
     }
     let nopretty = flag(args, "nopretty");
     let repository = string(args, "repository");

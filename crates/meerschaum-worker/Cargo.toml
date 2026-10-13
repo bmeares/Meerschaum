@@ -1,0 +1,31 @@
+[package]
+name = "meerschaum-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Meerschaum v5: the Python worker pool, its RPC protocol, the PythonConnector adapter and plugin manifests"
+
+[dependencies]
+meerschaum-core = { workspace = true }
+meerschaum-kernel = { workspace = true }
+meerschaum-connector = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+arrow = { workspace = true }
+# Crate-private: MessagePack values (control messages) and source-tree fingerprints.
+rmpv = "1"
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+meerschaum-sql = { workspace = true }
+tempfile = "3"

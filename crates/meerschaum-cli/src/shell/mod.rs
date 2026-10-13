@@ -1,8 +1,8 @@
 //! The interactive Meerschaum shell, ported from `meerschaum/_internal/shell/` onto `reedline`.
 //!
-//! Kept from v4:
 //! - the banner (`shell.<charset>.intro` plus the right-aligned version, colored with
-//!   `shell.ansi.intro.rich.style`) and the close message;
+//!   `shell.ansi.intro.rich.style`), the cached update messages ([`updates`]) and the close
+//!   message;
 //! - the prompt (`shell.<charset>.prompt` with `{username}`, `{instance}`, `{compose}` and
 //!   `{executor_keys}`; every literal character colored with `shell.ansi.prompt`, the values
 //!   truncated to a quarter of the console width, including v4's truncation of colored values);
@@ -13,20 +13,25 @@
 //! - the `instance`, `repo`, `executor`, `debug`, `daemon`, `help`, `exit` commands and `clear`;
 //! - history in `$MRSM_ROOT_DIR/.mrsm_history`, read and appended in prompt_toolkit's
 //!   `FileHistory` format (`shell.max_history` entries kept in memory);
-//! - tab completion of actions, subactions, flags, flag choices, config keys and connector keys.
+//! - the prompt_toolkit session ([`editor`]): the completion menu while typing with v4's
+//!   candidates ([`completer`]), Tab / Shift-Tab / arrow cycling, `ValidAutoSuggest` ghost text,
+//!   the bottom toolbar ([`toolbar`]), reverse-i-search, Ctrl-C / Ctrl-D;
+//! - the version update check thread ([`updates`]).
 //!
-//! Deferred: the bottom toolbar, the version update check, the CLI daemon, and plugin
-//! completers.
+//! The CLI daemon (`daemon`, `system.experimental.cli_daemon`) does not exist in v5: actions
+//! run natively in the `mrsm` process, so there is no Python process to keep warm. The `daemon`
+//! command keeps v4's toggle and message and says so when it is turned on; the toolbar keeps
+//! showing the instance (v4 shows `daemon` there while the mode is on).
+
+pub mod completer;
+pub mod editor;
+pub mod toolbar;
+pub mod updates;
 
 use std::io::Write;
 use std::path::PathBuf;
 
 use meerschaum_core::value::Value;
-use reedline::{
-    ColumnarMenu, Completer, CompletionResult, DefaultHinter, Emacs, FileBackedHistory, History,
-    HistoryItem, KeyCode, KeyModifiers, MenuBuilder, Prompt, PromptEditMode, PromptHistorySearch,
-    Reedline, ReedlineEvent, ReedlineMenu, Signal, Span, Suggestion, default_emacs_keybindings,
-};
 
 use crate::actions::{self, CORE_ACTIONS};
 use crate::builtin;
@@ -37,8 +42,7 @@ use crate::spec;
 use crate::sysargs::{parse_dict_to_sysargs, split_chained_sysargs, split_pipeline_sysargs};
 use crate::value::{ArgsMap, PyValue};
 
-/// The shell's own commands (v4 adds them to the actions registry).
-pub const SHELL_COMMANDS: &[&str] = &["instance", "repo", "executor", "debug", "daemon"];
+pub use completer::SHELL_COMMANDS;
 
 /// The values the prompt shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,7 +253,8 @@ pub struct ShellState {
     pub executor_keys: String,
     /// `debug` mode.
     pub debug: bool,
-    /// `daemon` mode (the CLI daemon is not ported; the flag is kept for `daemon on/off`).
+    /// `daemon` mode (`system.experimental.cli_daemon`; v5 has no CLI daemon, see the module
+    /// docs).
     pub daemon: bool,
 }
 
@@ -257,6 +262,9 @@ impl ShellState {
     /// The defaults from the config registry.
     pub fn new(rt: &mut Runtime<'_>, instance: Option<&str>) -> ShellState {
         let config = rt.config();
+        let cli_daemon = config
+            .get(&["system", "experimental", "cli_daemon"])
+            .is_some_and(|v| v.truthy());
         let instance_default = config
             .get(&["meerschaum", "instance"])
             .map(|v| v.py_str())
@@ -270,7 +278,7 @@ impl ShellState {
             repo_keys: repo,
             executor_keys: executor_keys_from_context(rt.env),
             debug: false,
-            daemon: false,
+            daemon: cli_daemon,
         }
     }
 }
@@ -431,6 +439,7 @@ pub fn shell_command(
             SuccessTuple::success()
         }
         "daemon" => {
+            let was = state.daemon;
             state.daemon = toggle(state.daemon, action, rt);
             info(
                 rt,
@@ -439,6 +448,14 @@ pub fn shell_command(
                     if state.daemon { "on" } else { "off" }
                 ),
             );
+            if state.daemon && !was {
+                // v5 decision: there is no CLI daemon to route through (see the module docs).
+                info(
+                    rt,
+                    "The CLI daemon is not used in Meerschaum v5: actions run natively in this \
+                     process.",
+                );
+            }
             SuccessTuple::success()
         }
         _ => SuccessTuple::success(),
@@ -804,213 +821,80 @@ pub fn append_history(path: &std::path::Path, entry: &str) {
     }
 }
 
-/// The completion candidates (`ShellCompleter`).
-pub struct ShellCompleter {
-    /// The `do_*` names: actions and shell commands.
-    pub commands: Vec<String>,
-    /// Every option string.
-    pub flags: Vec<String>,
-    /// Option string -> `choices`.
-    pub choices: Vec<(String, Vec<String>)>,
-    /// `type:label` for every configured connector.
-    pub connectors: Vec<String>,
-    /// The top-level config keys.
-    pub config_keys: Vec<String>,
-}
-
-/// The flags whose value is a connector (`_check_complete_keys`'s `trigger_args`).
-const CONNECTOR_FLAGS: &[&str] = &[
-    "-c",
-    "--connector-keys",
-    "-r",
-    "--repository",
-    "-i",
-    "--instance",
-    "--mrsm-instance",
-];
-
-impl ShellCompleter {
-    /// Build the candidates from the actions table, the argument spec and the config.
-    pub fn new(rt: &mut Runtime<'_>) -> ShellCompleter {
-        let mut commands: Vec<String> = CORE_ACTIONS.iter().map(|a| a.name.to_string()).collect();
-        commands.extend(SHELL_COMMANDS.iter().map(|s| s.to_string()));
-        commands.extend(["help", "exit", "pass"].iter().map(|s| s.to_string()));
-        commands.sort();
-        commands.dedup();
-        let flags: Vec<String> = spec::ARGUMENTS
-            .iter()
-            .flat_map(|a| a.option_strings.iter().map(|s| s.to_string()))
-            .collect();
-        let choices: Vec<(String, Vec<String>)> = spec::ARGUMENTS
-            .iter()
-            .filter_map(|a| a.choices.map(|c| (a, c)))
-            .flat_map(|(a, c)| {
-                a.option_strings
-                    .iter()
-                    .map(move |o| (o.to_string(), c.iter().map(|s| s.to_string()).collect()))
-            })
-            .collect();
-        let mut connectors = Vec::new();
-        if let Some(Value::Map(types)) = rt.config().get(&["meerschaum", "connectors"]) {
-            for (typ, labels) in types {
-                if let Value::Map(labels) = labels {
-                    for label in labels.keys() {
-                        if label != "default" {
-                            connectors.push(format!("{typ}:{label}"));
-                        }
-                    }
-                }
-            }
+/// The completion data for the session (`ShellCompleter` reads v4's live config; the shell
+/// refreshes this before every prompt).
+pub fn completion_data(state: &ShellState, rt: &mut Runtime<'_>) -> completer::CompletionData {
+    let config_keys = builtin::possible_config_keys(rt);
+    let config = rt.config();
+    let connectors =
+        completer::connectors_from_config(config.get(&["meerschaum", "connectors"]).as_ref());
+    let plugins_dirs = config.paths().plugins_dirs.clone();
+    let plugin_names = builtin::plugin_names(&plugins_dirs);
+    let ctx = crate::native::jobs::jobs_context(rt);
+    let jobs = move |executor_keys: &str| -> Vec<completer::JobEntry> {
+        if executor_keys != "local" {
+            return Vec::new();
         }
-        connectors.sort();
-        let config_keys = builtin::possible_config_keys(rt);
-        ShellCompleter {
-            commands,
-            flags,
-            choices,
-            connectors,
-            config_keys,
-        }
-    }
-
-    /// The candidates for the text before the cursor, and how many characters they replace.
-    pub fn candidates(&self, line: &str) -> (Vec<String>, usize) {
-        let segment = line.rsplit('+').next().unwrap_or("");
-        let ends_with_space = segment.ends_with(' ') || segment.ends_with('\t');
-        let tokens: Vec<&str> = segment.split_whitespace().collect();
-        let current = if ends_with_space {
-            ""
-        } else {
-            tokens.last().copied().unwrap_or("")
-        };
-        let previous: Vec<&str> = if ends_with_space {
-            tokens.clone()
-        } else {
-            tokens[..tokens.len().saturating_sub(1)].to_vec()
-        };
-        let filter = |items: &[String]| -> Vec<String> {
-            items
-                .iter()
-                .filter(|c| c.starts_with(current) && c.as_str() != current)
-                .cloned()
-                .collect()
-        };
-        // Flag values: `--flag <choice>` and connector keys.
-        if let Some(prev) = previous.last()
-            && prev.starts_with('-')
-        {
-            if let Some((_, c)) = self.choices.iter().find(|(f, _)| f == prev) {
-                return (filter(c), current.chars().count());
-            }
-            if CONNECTOR_FLAGS.contains(prev) {
-                return (filter(&self.connectors), current.chars().count());
-            }
-        }
-        if current.starts_with('-') {
-            let mut flags = filter(&self.flags);
-            flags.sort();
-            flags.dedup();
-            return (flags, current.chars().count());
-        }
-        let words: Vec<&str> = previous
-            .iter()
-            .copied()
-            .filter(|w| !w.starts_with('-'))
-            .collect();
-        match words.as_slice() {
-            [] => (filter(&self.commands), current.chars().count()),
-            [action] => {
-                let action = if *action == "help" { "" } else { action };
-                let options: Vec<String> = if action.is_empty() {
-                    self.commands.clone()
-                } else if action == "compose" {
-                    meerschaum_compose::subactions::complete_compose(&[])
-                } else if SHELL_COMMANDS.contains(&action)
-                    && action != "debug"
-                    && action != "daemon"
-                {
-                    self.connectors.clone()
-                } else {
-                    let mut subs: Vec<String> = actions::get_subactions(CORE_ACTIONS, action)
-                        .iter()
-                        .map(|s| s.name.to_string())
-                        .collect();
-                    subs.sort();
-                    subs
-                };
-                (filter(&options), current.chars().count())
-            }
-            [action, sub, ..] => {
-                let options: Vec<String> = match (*action, *sub) {
-                    ("show" | "edit", "config") => self.config_keys.clone(),
-                    ("show", "connectors" | "connector") => self.connectors.clone(),
-                    ("help", a) => actions::get_subactions(CORE_ACTIONS, a)
-                        .iter()
-                        .map(|s| s.name.to_string())
-                        .collect(),
-                    _ => Vec::new(),
-                };
-                (filter(&options), current.chars().count())
-            }
-        }
-    }
-}
-
-impl Completer for ShellCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
-        let before = &line[..pos.min(line.len())];
-        let (candidates, replace_chars) = self.candidates(before);
-        let start_char = before.chars().count().saturating_sub(replace_chars);
-        let start = before
-            .char_indices()
-            .nth(start_char)
-            .map(|(i, _)| i)
-            .unwrap_or(before.len());
-        let suggestions: Vec<Suggestion> = candidates
+        meerschaum_jobs::get_jobs(&ctx, false)
             .into_iter()
-            .map(|value| Suggestion {
-                value,
-                span: Span::new(start, pos),
-                append_whitespace: true,
-                ..Suggestion::default()
+            .map(|(name, mut job)| completer::JobEntry {
+                name,
+                status: match job.status() {
+                    meerschaum_jobs::Status::Running => "running",
+                    meerschaum_jobs::Status::Paused => "paused",
+                    meerschaum_jobs::Status::Stopped => "stopped",
+                }
+                .to_string(),
+                restart: job.restarts(),
             })
-            .collect();
-        CompletionResult::fresh(suggestions)
+            .collect()
+    };
+    completer::CompletionData {
+        connectors,
+        // Data plugins need the plugin manifest (`fetch` / `sync` per plugin); see the seam
+        // in `completer`.
+        data_plugins: Vec::new(),
+        plugin_names,
+        config_keys,
+        executor_keys: remove_ansi(&state.executor_keys),
+        jobs: Some(std::sync::Arc::new(jobs)),
+        ..completer::CompletionData::default()
     }
 }
 
-/// The prompt for `reedline`: the rendered v4 prompt, no indicator.
-pub struct ShellPrompt {
-    /// The rendered prompt (it may contain ANSI escapes and a leading newline).
-    pub text: String,
-}
-
-impl Prompt for ShellPrompt {
-    fn render_prompt_left(&self) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed(&self.text)
-    }
-
-    fn render_prompt_right(&self) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed("")
-    }
-
-    fn render_prompt_indicator(&self, _mode: PromptEditMode) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed("")
-    }
-
-    fn render_prompt_multiline_indicator(&self) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed("... ")
-    }
-
-    fn render_prompt_history_search_indicator(
-        &self,
-        search: PromptHistorySearch,
-    ) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Owned(format!("(search: {}) ", search.term))
-    }
-
-    fn get_prompt_color(&self) -> reedline::Color {
-        reedline::Color::Default
+/// The toolbar values for the session (`bottom_toolbar()`'s inputs).
+pub fn toolbar_model(state: &ShellState, rt: &mut Runtime<'_>) -> toolbar::ToolbarModel {
+    let settings = rt.settings();
+    let compose = env_project_name(rt.env);
+    let instance = remove_ansi(&state.instance_keys);
+    let connected = rt.native.as_ref().is_some_and(|n| {
+        let (typ, label) = instance
+            .split_once(':')
+            .unwrap_or((instance.as_str(), "main"));
+        n.active().iter().any(|(t, l)| t == typ && l == label)
+    });
+    let config = rt.config();
+    let get = |keys: &[&str]| config.get(keys).map(|v| v.py_str()).unwrap_or_default();
+    let charset = if settings.unicode { "unicode" } else { "ascii" };
+    toolbar::ToolbarModel {
+        enabled: config
+            .get(&["shell", "bottom_toolbar", "enabled"])
+            .is_some_and(|v| v.truthy()),
+        ansi: settings.ansi,
+        unicode: settings.unicode,
+        instance,
+        repo: remove_ansi(&state.repo_keys),
+        executor: remove_ansi(&state.executor_keys),
+        compose,
+        connected,
+        instance_style: get(&["shell", "ansi", "instance", "rich", "style"]),
+        repo_style: get(&["shell", "ansi", "repo", "rich", "style"]),
+        executor_style: get(&["shell", "ansi", "executor", "rich", "style"]),
+        compose_style: get(&["shell", "ansi", "compose", "rich", "style"]),
+        connected_style: get(&["formatting", "connected", "ansi", "rich", "style"]),
+        disconnected_style: get(&["formatting", "disconnected", "ansi", "rich", "style"]),
+        connected_icon: get(&["formatting", "connected", charset, "icon"]),
+        disconnected_icon: get(&["formatting", "disconnected", charset, "icon"]),
     }
 }
 
@@ -1024,20 +908,46 @@ pub fn current_prompt(state: &ShellState, rt: &mut Runtime<'_>) -> String {
     })
 }
 
+/// The banner (`self.intro`): the intro plus the update messages.
+pub fn intro_with_updates(rt: &mut Runtime<'_>) -> String {
+    let intro = rt.with_formatter(|f| shell_intro(f, f.settings.ansi, crate::VERSION));
+    let settings = rt.settings();
+    let charset = if settings.unicode { "unicode" } else { "ascii" };
+    let config = rt.config();
+    let intro_sgr = config
+        .get(&["shell", "ansi", "intro", "rich", "style"])
+        .map(|v| v.py_str())
+        .and_then(|s| crate::format::rich::style::Style::parse(&s).ok())
+        .map(|s| s.ansi_codes())
+        .unwrap_or_default();
+    format!(
+        "{intro}{}{}",
+        updates::update_message(config, charset, settings.ansi, crate::VERSION, &intro_sgr),
+        updates::plugins_update_message(config, settings.ansi),
+    )
+}
+
 /// `get_shell(sysargs, mrsm_instance=instance).cmdloop()`.
 ///
 /// `sysargs` (e.g. `-i sql:local` from `mrsm -i sql:local`) replace the banner and run as the
 /// first line; `instance` is the session's instance (v4 passes it only through `entry`, not for
 /// `mrsm --shell`).
 pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
+    rt.in_shell = true;
     let mut state = ShellState::new(rt, instance);
     let noninteractive = crate::env::noninteractive(rt.env);
+    let interactive = !noninteractive && std::io::IsTerminal::is_terminal(&std::io::stdin());
+    // `Shell.__init__` builds the intro (with the cached update messages), then starts the
+    // version check thread.
+    let intro = intro_with_updates(rt);
+    if interactive {
+        let _ = updates::run_version_check_thread(rt.config());
+    }
 
     // `preloop`: clear the screen; sysargs replace the intro and run as the first command.
     clear_screen(rt, false);
     let flags: Vec<String> = sysargs.to_vec();
     if flags.is_empty() {
-        let intro = rt.with_formatter(|f| shell_intro(f, f.settings.ansi, crate::VERSION));
         rt.print(&format!("{intro}\n"));
     } else if precmd(&flags.join(" "), &mut state, rt) == Control::Exit {
         close(rt);
@@ -1052,7 +962,7 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
         .unwrap_or(1000)
         .max(1) as usize;
 
-    if noninteractive || !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+    if !interactive {
         // Read commands line by line without line editing (pipes, `MRSM_NONINTERACTIVE`).
         loop {
             let prompt = current_prompt(&state, rt);
@@ -1067,48 +977,72 @@ pub fn run(sysargs: &[String], instance: Option<&str>, rt: &mut Runtime<'_>) {
         return;
     }
 
-    let mut history = FileBackedHistory::new(max_history).unwrap_or_default();
-    for entry in load_history(&history_path) {
-        let _ = history.save(HistoryItem::from_command_line(entry));
+    let mut history = load_history(&history_path);
+    let dates = rt.dates.clone();
+    let shared: editor::SharedRef = std::sync::Arc::new(std::sync::Mutex::new(
+        editor::Shared::new(completion_data(&state, rt), dates),
+    ));
+    let mut editor = reedline::Reedline::create()
+        .with_history(Box::new(
+            reedline::FileBackedHistory::new(max_history).unwrap_or_default(),
+        ))
+        .with_edit_mode(Box::new(editor::ShellEditMode::new(shared.clone())))
+        .with_hinter(Box::new(editor::ShellHinter {
+            shared: shared.clone(),
+        }))
+        .with_highlighter(Box::new(editor::ShellHighlighter {
+            shared: shared.clone(),
+        }))
+        .with_quick_completions(true)
+        .with_partial_completions(false)
+        .with_ansi_colors(true)
+        .use_bracketed_paste(true);
+    for menu in editor::HookMenu::all(&shared) {
+        editor = editor.with_menu(menu);
     }
-    let completer = ShellCompleter::new(rt);
-    let menu = Box::new(ColumnarMenu::default().with_name("completion_menu"));
-    let mut keybindings = default_emacs_keybindings();
-    keybindings.add_binding(
-        KeyModifiers::NONE,
-        KeyCode::Tab,
-        ReedlineEvent::UntilFound(vec![
-            ReedlineEvent::Menu("completion_menu".into()),
-            ReedlineEvent::MenuNext,
-        ]),
-    );
-    let ansi = rt.settings().ansi;
-    let mut editor = Reedline::create()
-        .with_history(Box::new(history))
-        .with_completer(Box::new(completer))
-        .with_menu(ReedlineMenu::EngineCompleter(menu))
-        .with_edit_mode(Box::new(Emacs::new(keybindings)))
-        .with_hinter(Box::new(DefaultHinter::default()))
-        .with_ansi_colors(ansi);
     loop {
-        let prompt = ShellPrompt {
-            text: current_prompt(&state, rt),
+        let prompt_text = current_prompt(&state, rt);
+        let data = completion_data(&state, rt);
+        let toolbar = toolbar_model(&state, rt);
+        {
+            let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+            s.data = data;
+            s.toolbar = toolbar;
+            s.prompt = prompt_text;
+            s.history = history.clone();
+            s.begin_line();
+        }
+        let prompt = editor::ShellPrompt {
+            shared: shared.clone(),
         };
         match editor.read_line(&prompt) {
-            Ok(Signal::Success(line)) => {
-                if !line.trim().is_empty() {
+            Ok(reedline::Signal::Success(line)) => {
+                // `Buffer.append_to_history`: any non-empty text, unless it repeats the last
+                // entry.
+                if !line.is_empty() && history.last() != Some(&line) {
                     append_history(&history_path, &line);
-                } else {
+                    history.push(line.clone());
+                    if history.len() > max_history {
+                        history.remove(0);
+                    }
+                }
+                if line.trim().is_empty() {
                     clear_screen(rt, state.debug);
                 }
                 if precmd(&line, &mut state, rt) == Control::Exit {
                     break;
                 }
             }
-            Ok(Signal::CtrlC) => {
+            Ok(reedline::Signal::CtrlC) => {
+                // `KeyboardInterrupt`: print `^C` and run `pass` (which clears the screen).
                 rt.print("^C\n");
+                let _ = precmd("pass", &mut state, rt);
             }
-            Ok(Signal::CtrlD) => break,
+            Ok(reedline::Signal::CtrlD) => {
+                // `EOFError`: `cmd` runs the line `EOF`.
+                let _ = precmd("EOF", &mut state, rt);
+                break;
+            }
             Ok(_) => {}
             Err(e) => {
                 rt.eprint(&format!("{e}\n"));

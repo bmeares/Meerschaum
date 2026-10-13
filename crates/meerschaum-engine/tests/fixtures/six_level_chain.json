@@ -56,7 +56,7 @@
       {"node": "sql:main|sql:main|parcels_joined|None", "action": "skip", "bounds": null, "provisional": true,
        "reason_contains": ["sql:main/parcels_clean unchanged since its cursor"]},
       {"node": "sql:main|sql:main|zoning_overlay|None", "action": "incremental",
-       "bounds": {"begin": null, "end": null}, "chunks": [],
+       "bounds": {"begin": null, "end": null}, "chunks": [], "provisional": true,
        "consumes": [{"parent_ref": "sql:main|sql:main|parcels_joined|None", "state_instance": "sql:main", "seq": 4}],
        "reason_contains": ["no cursor on the edge from sql:main/parcels_joined (first engine run)", "full re-sync"]},
       {"node": "sql:main|sql:main|districts|None", "action": "backfill",

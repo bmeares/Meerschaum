@@ -125,6 +125,8 @@ pub struct ServerConfig {
     pub root_dir: PathBuf,
     /// Deprecation notices collected while resolving the config (logged at startup).
     pub notices: Vec<String>,
+    /// `api:mcp` (the MCP server at `/mcp`, §7.2).
+    pub mcp: crate::mcp::McpConfig,
 }
 
 fn get<'a>(map: &'a Map, keys: &[&str]) -> Option<&'a Value> {
@@ -373,6 +375,7 @@ impl ServerConfig {
             static_path: None,
             root_dir: PathBuf::from("."),
             notices,
+            mcp: crate::mcp::McpConfig::from_map(cfg),
         }
     }
 

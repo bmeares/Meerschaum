@@ -259,6 +259,11 @@ pub struct PlanOptions {
     pub resumed_from: Option<String>,
     /// Above this many chunks a range is listed as one chunk (the sync chunks it itself).
     pub max_chunks: usize,
+    /// Widen the cap past each parent's watermark by one unit (one minute on a datetime axis,
+    /// 1 on an integer axis), as Python's `get_chunk_bounds` widens its end, so a child also
+    /// syncs the rows at exactly its parents' watermark. `false` keeps the strict half-open
+    /// cap `[.., min(parent watermarks))` the golden fixtures were written with.
+    pub inclusive_cap: bool,
 }
 
 impl Default for PlanOptions {
@@ -272,6 +277,7 @@ impl Default for PlanOptions {
             completed: BTreeSet::new(),
             resumed_from: None,
             max_chunks: 10_000,
+            inclusive_cap: false,
         }
     }
 }
@@ -343,6 +349,15 @@ impl Plan {
                 n.reason = format!("{}; declined", n.reason);
             }
         }
+    }
+}
+
+/// One unit past a watermark for [`PlanOptions::inclusive_cap`]: a minute on a datetime axis
+/// (`get_chunk_bounds`: `end += timedelta(minutes=1)`), 1 on an integer axis.
+fn cap_unit(axis: &Axis) -> i64 {
+    match axis.kind {
+        AxisKind::Datetime => 60_000_000,
+        _ => 1,
     }
 }
 
@@ -468,7 +483,13 @@ pub async fn plan<S: StateSource>(
     let mut nodes = Vec::with_capacity(sub.order.len());
     for r in &sub.order {
         let n = plan_node(graph, sub, r, &parents, state, options).await;
-        parents.insert(r.clone(), ParentState::from_action(n.action));
+        // A provisional node is re-planned when its parents finish and may run then even
+        // if it is planned `skip` now, so its children are provisional too.
+        let as_parent = match ParentState::from_action(n.action) {
+            ParentState::Idle if n.provisional && n.action == Action::Skip => ParentState::WillRun,
+            s => s,
+        };
+        parents.insert(r.clone(), as_parent);
         nodes.push(n);
     }
     Plan {
@@ -730,7 +751,11 @@ pub async fn plan_node<S: StateSource>(
             .as_ref()
             .and_then(|w| map_watermark(w, &parent.axis, axis, &e.options));
         if let Some(c) = mapped_wm {
-            caps.push(c);
+            caps.push(if options.inclusive_cap {
+                c.saturating_add(cap_unit(axis))
+            } else {
+                c
+            });
         }
         let mut eval = EdgeEval {
             label: label(e),

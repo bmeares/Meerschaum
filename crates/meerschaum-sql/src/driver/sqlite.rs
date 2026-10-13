@@ -36,9 +36,22 @@ pub(crate) fn connect_options(spec: &ConnectionSpec) -> Result<SqliteConnectOpti
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Delete))
 }
 
+/// The pool options: on `geopackage`, every connection gets the GeoPackage SQL functions the
+/// R-tree triggers call.
+pub(crate) fn pool_options(spec: &ConnectionSpec) -> SqlitePoolOptions {
+    let pool = SqlitePoolOptions::new().max_connections(spec.max_connections());
+    if spec.flavor == crate::flavor::Flavor::Geopackage {
+        pool.after_connect(|conn, _meta| {
+            Box::pin(async move { super::gpkg_functions::register(conn).await })
+        })
+    } else {
+        pool
+    }
+}
+
 pub(crate) async fn connect(spec: &ConnectionSpec) -> Result<SqlitePool> {
     let opts = connect_options(spec)?;
-    let mut pool = SqlitePoolOptions::new().max_connections(spec.max_connections());
+    let mut pool = pool_options(spec);
     if spec.max_connections() == 1 {
         // Keep the single in-memory connection (and therefore the database) alive.
         pool = pool

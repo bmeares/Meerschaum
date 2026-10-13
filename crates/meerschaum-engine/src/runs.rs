@@ -68,6 +68,9 @@ pub struct RunRow {
     pub resumed_from: Option<String>,
     /// The lease holder / job name.
     pub holder: String,
+    /// The selection as JSON (targets and depths), so `--resume` can re-plan it.
+    #[serde(default)]
+    pub selection: Option<String>,
 }
 
 /// One row of `mrsm:engine_nodes` (datetime `started`, ids `run_id`, `pipe_ref`).
@@ -254,7 +257,7 @@ impl EnginePipe {
                     "dtypes": {"run_id": "string", "started": "datetime", "finished": "datetime",
                                "success": "bool", "message": "string", "targets": "json",
                                "workers": "int", "num_nodes": "int", "resumed_from": "string",
-                               "holder": "string"},
+                               "holder": "string", "selection": "string"},
                     "upsert": true}"#
             }
             EnginePipe::Nodes => {
