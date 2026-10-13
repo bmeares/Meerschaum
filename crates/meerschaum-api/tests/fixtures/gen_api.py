@@ -682,7 +682,11 @@ def main_record(port: int):
         conn._job_metadata_cache = {}
         return conn.get_job_metadata('fixture-job').get('status')
 
-    job_sysargs = ['show', 'version', '--loop', '--min-seconds', '3600']
+    ### A long-running job WITHOUT a restart flag (`--loop`, `-s`, ... set `restart: true`): the v4
+    ### API server re-checks restartable jobs every second and, under load, relaunches one in the
+    ### window between its process dying and `stop_job` writing the stop time, which added a
+    ### second run's output to the recording on the CI runner.
+    job_sysargs = ['show', 'version', '+', 'sh', 'sleep 3600']
     step('create_job', lambda: conn.create_job('fixture-job', job_sysargs, properties={'tags': ['x']}))
     ### Unrecorded: wait for the first iteration's output so the logs are the same every run.
     wait_for(lambda: 'Meerschaum v' in (conn.get_logs('fixture-job') or ''))

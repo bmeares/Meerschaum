@@ -762,7 +762,7 @@ async fn run_step(ctx: &mut Ctx, name: &str) -> Result<J, ()> {
             tuple(
                 conn.create_job(
                     "fixture-job",
-                    &["show", "version", "--loop", "--min-seconds", "3600"].map(String::from),
+                    &["show", "version", "+", "sh", "sleep 3600"].map(String::from),
                     Some(props),
                 )
                 .await,

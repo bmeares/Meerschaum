@@ -2232,7 +2232,7 @@
       "requests": [
         {
           "body": {
-            "text": "{\"sysargs\": [\"show\", \"version\", \"--loop\", \"--min-seconds\", \"3600\"], \"properties\": {\"tags\": [\"x\"]}}"
+            "text": "{\"sysargs\": [\"show\", \"version\", \"+\", \"sh\", \"sleep 3600\"], \"properties\": {\"tags\": [\"x\"]}}"
           },
           "content_type": "application/json",
           "has_auth": true,
@@ -2241,7 +2241,7 @@
           },
           "method": "POST",
           "response": {
-            "text": "[true,\"Started Job(\\\"fixture-job\\\", \\\"show version --loop --min-seconds 3600\\\").\"]"
+            "text": "[true,\"Started Job(\\\"fixture-job\\\", \\\"show version + sh 'sleep 3600'\\\").\"]"
           },
           "status": 200,
           "url": "/jobs/fixture-job"
@@ -2249,7 +2249,7 @@
       ],
       "result": [
         true,
-        "Started Job(\"fixture-job\", \"show version --loop --min-seconds 3600\")."
+        "Started Job(\"fixture-job\", \"show version + sh 'sleep 3600'\")."
       ],
       "step": "create_job",
       "websockets": []
@@ -2284,7 +2284,7 @@
           "headers": {},
           "method": "POST",
           "response": {
-            "text": "[true,\"Stopped Job(\\\"fixture-job\\\", \\\"show version --loop --min-seconds 3600\\\").\"]"
+            "text": "[true,\"Job(\\\"fixture-job\\\", \\\"show version + sh 'sleep 3600'\\\") is not running.\"]"
           },
           "status": 200,
           "url": "/jobs/fixture-job/stop"
@@ -2292,7 +2292,7 @@
       ],
       "result": [
         true,
-        "Stopped Job(\"fixture-job\", \"show version --loop --min-seconds 3600\")."
+        "Job(\"fixture-job\", \"show version + sh 'sleep 3600'\") is not running."
       ],
       "step": "stop_job",
       "websockets": []
@@ -2303,8 +2303,8 @@
       "result": {
         "lines": 5,
         "result": [
-          true,
-          "Success"
+          false,
+          "Failed pipeline after 1 step.\n\nCompleted 1 step in 0.05 seconds:\n\n    show version\n      (0.05 seconds)\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    Success\n\nFailed to complete step:\n\n    sh 'sleep 3600'\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    Returned exit code: 127\n\n\n    --------------------------\n| 1 step in 0.05 seconds |\n    --------------------------"
         ]
       },
       "step": "monitor_logs",
@@ -2329,7 +2329,7 @@
             ],
             [
               "recv",
-              "2000-01-01 00:00 | \u001b[95m \ud83d\udcac Meerschaum v4.1.4\u001b[0m\n"
+              "2000-01-01 00:00 | bash: line 1: sleep 3600: command not found\n"
             ],
             [
               "recv",
@@ -2341,7 +2341,7 @@
             ],
             [
               "recv",
-              "[true,\"Success\"]"
+              "[false,\"Failed pipeline after 1 step.\\n\\nCompleted 1 step in 0.05 seconds:\\n\\n    show version\\n      (0.05 seconds)\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Success\\n\\nFailed to complete step:\\n\\n    sh 'sleep 3600'\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Returned exit code: 127\\n\\n\\n    --------------------------\\n| 1 step in 0.05 seconds |\\n    --------------------------\"]"
             ],
             [
               "close",
@@ -2362,7 +2362,7 @@
           "headers": {},
           "method": "GET",
           "response": {
-            "text": "{\"fixture-job\":{\"sysargs\":[\"show\",\"version\",\"--loop\",\"--min-seconds\",\"3600\"],\"result\":[true,\"Success\"],\"restart\":true,\"status\":\"stopped\",\"daemon\":{\"status\":\"stopped\",\"pid\":null,\"properties\":{\"tags\":[\"x\"],\"env\":{},\"restart\":true,\"label\":\"\",\"result\":[true,\"Success\"],\"process\":{\"began\":\"2000-01-01T00:00:00.000000\",\"ended\":\"2000-01-01T00:00:00.000000\"}}}}}"
+            "text": "{\"fixture-job\":{\"sysargs\":[\"show\",\"version\",\"+\",\"sh\",\"sleep 3600\"],\"result\":[false,\"Failed pipeline after 1 step.\\n\\nCompleted 1 step in 0.05 seconds:\\n\\n    show version\\n      (0.05 seconds)\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Success\\n\\nFailed to complete step:\\n\\n    sh 'sleep 3600'\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Returned exit code: 127\\n\\n\\n    --------------------------\\n| 1 step in 0.05 seconds |\\n    --------------------------\"],\"restart\":false,\"status\":\"stopped\",\"daemon\":{\"status\":\"stopped\",\"pid\":null,\"properties\":{\"tags\":[\"x\"],\"env\":{},\"label\":\"\",\"result\":[false,\"Failed pipeline after 1 step.\\n\\nCompleted 1 step in 0.05 seconds:\\n\\n    show version\\n      (0.05 seconds)\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Success\\n\\nFailed to complete step:\\n\\n    sh 'sleep 3600'\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Returned exit code: 127\\n\\n\\n    --------------------------\\n| 1 step in 0.05 seconds |\\n    --------------------------\"],\"process\":{\"began\":\"2000-01-01T00:00:00.000000\",\"ended\":\"2000-01-01T00:00:00.000000\"}}}}}"
           },
           "status": 200,
           "url": "/jobs"
@@ -2384,7 +2384,7 @@
           "headers": {},
           "method": "GET",
           "response": {
-            "text": "{\"sysargs\":[\"show\",\"version\",\"--loop\",\"--min-seconds\",\"3600\"],\"result\":[true,\"Success\"],\"restart\":true,\"status\":\"stopped\",\"daemon\":{\"status\":\"stopped\",\"pid\":null,\"properties\":{\"tags\":[\"x\"],\"env\":{},\"restart\":true,\"label\":\"\",\"result\":[true,\"Success\"],\"process\":{\"began\":\"2000-01-01T00:00:00.000000\",\"ended\":\"2000-01-01T00:00:00.000000\"}}}}"
+            "text": "{\"sysargs\":[\"show\",\"version\",\"+\",\"sh\",\"sleep 3600\"],\"result\":[false,\"Failed pipeline after 1 step.\\n\\nCompleted 1 step in 0.05 seconds:\\n\\n    show version\\n      (0.05 seconds)\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Success\\n\\nFailed to complete step:\\n\\n    sh 'sleep 3600'\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Returned exit code: 127\\n\\n\\n    --------------------------\\n| 1 step in 0.05 seconds |\\n    --------------------------\"],\"restart\":false,\"status\":\"stopped\",\"daemon\":{\"status\":\"stopped\",\"pid\":null,\"properties\":{\"tags\":[\"x\"],\"env\":{},\"label\":\"\",\"result\":[false,\"Failed pipeline after 1 step.\\n\\nCompleted 1 step in 0.05 seconds:\\n\\n    show version\\n      (0.05 seconds)\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Success\\n\\nFailed to complete step:\\n\\n    sh 'sleep 3600'\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Returned exit code: 127\\n\\n\\n    --------------------------\\n| 1 step in 0.05 seconds |\\n    --------------------------\"],\"process\":{\"began\":\"2000-01-01T00:00:00.000000\",\"ended\":\"2000-01-01T00:00:00.000000\"}}}}"
           },
           "status": 200,
           "url": "/jobs/fixture-job"
@@ -2410,7 +2410,7 @@
           "headers": {},
           "method": "GET",
           "response": {
-            "text": "\"\\n2000-01-01 00:00 | \\u001b[95m \ud83d\udcac Meerschaum v4.1.4\\u001b[0m\\n2000-01-01 00:00 | \\n2000-01-01 00:00 | \\u001b[95m \ud83d\udcac Meerschaum v4.1.4\\u001b[0m\\n2000-01-01 00:00 | \""
+            "text": "\"\\n2000-01-01 00:00 | \\u001b[95m \ud83d\udcac Meerschaum v4.1.4\\u001b[0m\\n2000-01-01 00:00 | \\n2000-01-01 00:00 | bash: line 1: sleep 3600: command not found\\n2000-01-01 00:00 | \""
           },
           "status": 200,
           "url": "/logs/fixture-job"
@@ -2430,13 +2430,13 @@
           "headers": {},
           "method": "GET",
           "response": {
-            "text": "\"2000-01-01T00:00:00.000000Z\""
+            "text": "null"
           },
           "status": 200,
           "url": "/jobs/fixture-job/stop_time"
         }
       ],
-      "result": true,
+      "result": false,
       "step": "get_job_stop_time",
       "websockets": []
     },
