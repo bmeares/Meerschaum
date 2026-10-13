@@ -762,7 +762,11 @@ async fn run_step(ctx: &mut Ctx, name: &str) -> Result<J, ()> {
             tuple(
                 conn.create_job(
                     "fixture-job",
-                    &["show", "version", "+", "sh", "sleep 3600"].map(String::from),
+                    &[
+                        "python",
+                        "print('ready', flush=True); import time; time.sleep(3600)",
+                    ]
+                    .map(String::from),
                     Some(props),
                 )
                 .await,
@@ -868,7 +872,7 @@ async fn wait_for_job(conn: &APIConnector, step: &str) {
             "create_job" => conn
                 .get_logs("fixture-job")
                 .await
-                .is_ok_and(|l| l.contains("Meerschaum v")),
+                .is_ok_and(|l| l.lines().any(|line| line.ends_with("| ready"))),
             "stop_job" => {
                 conn.clear_job_metadata_cache();
                 conn.get_job_status("fixture-job")

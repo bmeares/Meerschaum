@@ -205,6 +205,8 @@ _DT_RE = re.compile(
 )
 _JWT_RE = re.compile(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+')
 _DURATION_RE = re.compile(r'It took .+? to sync')
+### Measured durations in pipeline summaries (`Completed 1 step in 0.05 seconds`, `(0.05 seconds)`).
+_SECONDS_RE = re.compile(r'\b\d+\.\d+ seconds\b')
 _BOUNDARY_RE = re.compile(r'boundary=([0-9A-Za-z_-]+)')
 
 
@@ -230,6 +232,7 @@ def scrub_text(text):
     text = _JWT_RE.sub('<jwt>', text)
     text = _DT_RE.sub(_fix_dt, text)
     text = _DURATION_RE.sub('It took <t> to sync', text)
+    text = _SECONDS_RE.sub('<t> seconds', text)
     return text
 
 
@@ -682,14 +685,22 @@ def main_record(port: int):
         conn._job_metadata_cache = {}
         return conn.get_job_metadata('fixture-job').get('status')
 
-    ### A long-running job WITHOUT a restart flag (`--loop`, `-s`, ... set `restart: true`): the v4
-    ### API server re-checks restartable jobs every second and, under load, relaunches one in the
-    ### window between its process dying and `stop_job` writing the stop time, which added a
-    ### second run's output to the recording on the CI runner.
-    job_sysargs = ['show', 'version', '+', 'sh', 'sleep 3600']
+    ### A long-running job with neither a restart flag nor a `+` chain. `--loop`/`-s`/... force
+    ### `restart: true`, and the v4 API server re-checks restartable jobs every second: under load
+    ### it relaunched the job between its process dying and `stop_job` writing the stop time,
+    ### adding a second run's output to the recording. A `+` chain's result embeds measured
+    ### durations whose width also sizes the summary's rules. The job must print something: with
+    ### no output, `monitor_logs` on the stopped job never returns. `sh` won't do (it reparses its
+    ### words, so `bash -c` loses `-c` to the connector flag), but `python` takes the code as one
+    ### word and its stopped result is a fixed `Python interpreter returned -2.`
+    job_sysargs = ['python', "print('ready', flush=True); import time; time.sleep(3600)"]
     step('create_job', lambda: conn.create_job('fixture-job', job_sysargs, properties={'tags': ['x']}))
-    ### Unrecorded: wait for the first iteration's output so the logs are the same every run.
-    wait_for(lambda: 'Meerschaum v' in (conn.get_logs('fixture-job') or ''))
+    ### Unrecorded: wait for the job's output so the logs are the same every run.
+    ### (The log also echoes the code, so match the printed line itself.)
+    wait_for(lambda: any(
+        line.endswith('| ready')
+        for line in (conn.get_logs('fixture-job') or '').splitlines()
+    ))
     time.sleep(2)
     step('get_job_exists', lambda: conn.get_job_exists('fixture-job'))
     step('stop_job', lambda: conn.stop_job('fixture-job'))

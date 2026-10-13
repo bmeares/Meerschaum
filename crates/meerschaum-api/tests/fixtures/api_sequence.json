@@ -2232,7 +2232,7 @@
       "requests": [
         {
           "body": {
-            "text": "{\"sysargs\": [\"show\", \"version\", \"+\", \"sh\", \"sleep 3600\"], \"properties\": {\"tags\": [\"x\"]}}"
+            "text": "{\"sysargs\": [\"python\", \"print('ready', flush=True); import time; time.sleep(3600)\"], \"properties\": {\"tags\": [\"x\"]}}"
           },
           "content_type": "application/json",
           "has_auth": true,
@@ -2241,7 +2241,7 @@
           },
           "method": "POST",
           "response": {
-            "text": "[true,\"Started Job(\\\"fixture-job\\\", \\\"show version + sh 'sleep 3600'\\\").\"]"
+            "text": "[true,\"Started Job(\\\"fixture-job\\\", \\\"python 'print('\\\"'\\\"'ready'\\\"'\\\"', flush=True); import time; time.sleep(3600)'\\\").\"]"
           },
           "status": 200,
           "url": "/jobs/fixture-job"
@@ -2249,7 +2249,7 @@
       ],
       "result": [
         true,
-        "Started Job(\"fixture-job\", \"show version + sh 'sleep 3600'\")."
+        "Started Job(\"fixture-job\", \"python 'print('\"'\"'ready'\"'\"', flush=True); import time; time.sleep(3600)'\")."
       ],
       "step": "create_job",
       "websockets": []
@@ -2284,7 +2284,7 @@
           "headers": {},
           "method": "POST",
           "response": {
-            "text": "[true,\"Job(\\\"fixture-job\\\", \\\"show version + sh 'sleep 3600'\\\") is not running.\"]"
+            "text": "[true,\"Stopped Job(\\\"fixture-job\\\", \\\"python 'print('\\\"'\\\"'ready'\\\"'\\\"', flush=True); import time; time.sleep(3600)'\\\").\"]"
           },
           "status": 200,
           "url": "/jobs/fixture-job/stop"
@@ -2292,7 +2292,7 @@
       ],
       "result": [
         true,
-        "Job(\"fixture-job\", \"show version + sh 'sleep 3600'\") is not running."
+        "Stopped Job(\"fixture-job\", \"python 'print('\"'\"'ready'\"'\"', flush=True); import time; time.sleep(3600)'\")."
       ],
       "step": "stop_job",
       "websockets": []
@@ -2301,10 +2301,10 @@
       "error": null,
       "requests": [],
       "result": {
-        "lines": 5,
+        "lines": 8,
         "result": [
           false,
-          "Failed pipeline after 1 step.\n\nCompleted 1 step in 0.05 seconds:\n\n    show version\n      (0.05 seconds)\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    Success\n\nFailed to complete step:\n\n    sh 'sleep 3600'\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    Returned exit code: 127\n\n\n    --------------------------\n| 1 step in 0.05 seconds |\n    --------------------------"
+          "Python interpreter returned -2."
         ]
       },
       "step": "monitor_logs",
@@ -2321,15 +2321,27 @@
             ],
             [
               "recv",
-              "2000-01-01 00:00 | \u001b[95m \ud83d\udcac Meerschaum v4.1.4\u001b[0m\n"
+              "2000-01-01 00:00 | Warning: Input is not a terminal (fd=0).\n"
             ],
             [
               "recv",
-              "2000-01-01 00:00 | \n"
+              "2000-01-01 00:00 | >>> import meerschaum as mrsm\n"
             ],
             [
               "recv",
-              "2000-01-01 00:00 | bash: line 1: sleep 3600: command not found\n"
+              "2000-01-01 00:00 | >>> print('ready', flush=True)\n"
+            ],
+            [
+              "recv",
+              "2000-01-01 00:00 |  import time\n"
+            ],
+            [
+              "recv",
+              "2000-01-01 00:00 |  time.sleep(3600)\n"
+            ],
+            [
+              "recv",
+              "2000-01-01 00:00 | ready\n"
             ],
             [
               "recv",
@@ -2341,7 +2353,7 @@
             ],
             [
               "recv",
-              "[false,\"Failed pipeline after 1 step.\\n\\nCompleted 1 step in 0.05 seconds:\\n\\n    show version\\n      (0.05 seconds)\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Success\\n\\nFailed to complete step:\\n\\n    sh 'sleep 3600'\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Returned exit code: 127\\n\\n\\n    --------------------------\\n| 1 step in 0.05 seconds |\\n    --------------------------\"]"
+              "[false,\"Python interpreter returned -2.\"]"
             ],
             [
               "close",
@@ -2362,7 +2374,7 @@
           "headers": {},
           "method": "GET",
           "response": {
-            "text": "{\"fixture-job\":{\"sysargs\":[\"show\",\"version\",\"+\",\"sh\",\"sleep 3600\"],\"result\":[false,\"Failed pipeline after 1 step.\\n\\nCompleted 1 step in 0.05 seconds:\\n\\n    show version\\n      (0.05 seconds)\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Success\\n\\nFailed to complete step:\\n\\n    sh 'sleep 3600'\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Returned exit code: 127\\n\\n\\n    --------------------------\\n| 1 step in 0.05 seconds |\\n    --------------------------\"],\"restart\":false,\"status\":\"stopped\",\"daemon\":{\"status\":\"stopped\",\"pid\":null,\"properties\":{\"tags\":[\"x\"],\"env\":{},\"label\":\"\",\"result\":[false,\"Failed pipeline after 1 step.\\n\\nCompleted 1 step in 0.05 seconds:\\n\\n    show version\\n      (0.05 seconds)\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Success\\n\\nFailed to complete step:\\n\\n    sh 'sleep 3600'\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Returned exit code: 127\\n\\n\\n    --------------------------\\n| 1 step in 0.05 seconds |\\n    --------------------------\"],\"process\":{\"began\":\"2000-01-01T00:00:00.000000\",\"ended\":\"2000-01-01T00:00:00.000000\"}}}}}"
+            "text": "{\"fixture-job\":{\"sysargs\":[\"python\",\"print('ready', flush=True); import time; time.sleep(3600)\"],\"result\":[false,\"Python interpreter returned -2.\"],\"restart\":false,\"status\":\"stopped\",\"daemon\":{\"status\":\"stopped\",\"pid\":null,\"properties\":{\"tags\":[\"x\"],\"env\":{},\"label\":\"\",\"result\":[false,\"Python interpreter returned -2.\"],\"process\":{\"began\":\"2000-01-01T00:00:00.000000\",\"ended\":\"2000-01-01T00:00:00.000000\"}}}}}"
           },
           "status": 200,
           "url": "/jobs"
@@ -2384,7 +2396,7 @@
           "headers": {},
           "method": "GET",
           "response": {
-            "text": "{\"sysargs\":[\"show\",\"version\",\"+\",\"sh\",\"sleep 3600\"],\"result\":[false,\"Failed pipeline after 1 step.\\n\\nCompleted 1 step in 0.05 seconds:\\n\\n    show version\\n      (0.05 seconds)\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Success\\n\\nFailed to complete step:\\n\\n    sh 'sleep 3600'\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Returned exit code: 127\\n\\n\\n    --------------------------\\n| 1 step in 0.05 seconds |\\n    --------------------------\"],\"restart\":false,\"status\":\"stopped\",\"daemon\":{\"status\":\"stopped\",\"pid\":null,\"properties\":{\"tags\":[\"x\"],\"env\":{},\"label\":\"\",\"result\":[false,\"Failed pipeline after 1 step.\\n\\nCompleted 1 step in 0.05 seconds:\\n\\n    show version\\n      (0.05 seconds)\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Success\\n\\nFailed to complete step:\\n\\n    sh 'sleep 3600'\\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\\n    Returned exit code: 127\\n\\n\\n    --------------------------\\n| 1 step in 0.05 seconds |\\n    --------------------------\"],\"process\":{\"began\":\"2000-01-01T00:00:00.000000\",\"ended\":\"2000-01-01T00:00:00.000000\"}}}}"
+            "text": "{\"sysargs\":[\"python\",\"print('ready', flush=True); import time; time.sleep(3600)\"],\"result\":[false,\"Python interpreter returned -2.\"],\"restart\":false,\"status\":\"stopped\",\"daemon\":{\"status\":\"stopped\",\"pid\":null,\"properties\":{\"tags\":[\"x\"],\"env\":{},\"label\":\"\",\"result\":[false,\"Python interpreter returned -2.\"],\"process\":{\"began\":\"2000-01-01T00:00:00.000000\",\"ended\":\"2000-01-01T00:00:00.000000\"}}}}"
           },
           "status": 200,
           "url": "/jobs/fixture-job"
@@ -2410,7 +2422,7 @@
           "headers": {},
           "method": "GET",
           "response": {
-            "text": "\"\\n2000-01-01 00:00 | \\u001b[95m \ud83d\udcac Meerschaum v4.1.4\\u001b[0m\\n2000-01-01 00:00 | \\n2000-01-01 00:00 | bash: line 1: sleep 3600: command not found\\n2000-01-01 00:00 | \""
+            "text": "\"\\n2000-01-01 00:00 | Warning: Input is not a terminal (fd=0).\\n2000-01-01 00:00 | >>> import meerschaum as mrsm\\n2000-01-01 00:00 | >>> print('ready', flush=True)\\n2000-01-01 00:00 |  import time\\n2000-01-01 00:00 |  time.sleep(3600)\\n2000-01-01 00:00 | ready\\n2000-01-01 00:00 | \""
           },
           "status": 200,
           "url": "/logs/fixture-job"
@@ -2430,13 +2442,13 @@
           "headers": {},
           "method": "GET",
           "response": {
-            "text": "null"
+            "text": "\"2000-01-01T00:00:00.000000Z\""
           },
           "status": 200,
           "url": "/jobs/fixture-job/stop_time"
         }
       ],
-      "result": false,
+      "result": true,
       "step": "get_job_stop_time",
       "websockets": []
     },
