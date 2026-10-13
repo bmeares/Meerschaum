@@ -117,6 +117,9 @@ def _cache_value(
 
     with self._cache_locks[cache_key]:
         in_memory_key = _get_in_memory_key(cache_key)
+        if cache_key == 'attributes' and '_core_pipe' in self.__dict__:
+            from ._live_parameters import adopt_attributes
+            value = adopt_attributes(self, value)
         self.__dict__[in_memory_key] = value
         if memory_only:
             return
@@ -148,6 +151,9 @@ def _get_cached_value(
 
         value = self._read_cache_key(cache_key, debug=debug)
         if value is not None:
+            if cache_key == 'attributes' and '_core_pipe' in self.__dict__:
+                from ._live_parameters import adopt_attributes
+                value = adopt_attributes(self, value)
             self.__dict__[in_memory_key] = value
         return value
 

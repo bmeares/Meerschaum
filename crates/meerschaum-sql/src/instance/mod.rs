@@ -12,6 +12,7 @@
 //! `mrsm_temp_tables` tables keep v4's names and column layout, so a v4.1 instance is read as is.
 
 pub mod data;
+pub mod env_provider;
 pub mod fetch;
 pub mod geopackage;
 pub mod indices;
@@ -29,11 +30,11 @@ pub mod users;
 pub mod values;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use indexmap::IndexMap;
-use meerschaum_connector::{ConnectorError, ConnectorResult};
+use meerschaum_connector::{ConnectorError, ConnectorResult, InstanceProvider};
 use meerschaum_core::pipe::PipeDefaults;
 use meerschaum_core::{Config, Pipe, static_config};
 use meerschaum_kernel::Frame;
@@ -206,6 +207,8 @@ pub struct SqlConnector {
     /// The configuration the instance methods read.
     pub settings: InstanceSettings,
     state: Mutex<State>,
+    /// Connectors for `{{ Pipe(..., instance='sql:other') }}` references to other instances.
+    provider: Mutex<Option<Arc<dyn InstanceProvider>>>,
 }
 
 impl std::fmt::Debug for SqlConnector {
@@ -275,6 +278,7 @@ impl SqlConnector {
             internal_schema,
             settings,
             state: Mutex::new(State::default()),
+            provider: Mutex::new(None),
         })
     }
 
@@ -311,6 +315,7 @@ impl SqlConnector {
             internal_schema,
             settings,
             state: Mutex::new(State::default()),
+            provider: Mutex::new(None),
         })
     }
 
@@ -376,6 +381,45 @@ impl SqlConnector {
             self.settings.pipe_defaults.clone(),
             self.settings.backtrack_minutes,
         ))
+    }
+
+    /// Set the connectors cross-instance `{{ Pipe() }}` references resolve against.
+    pub fn set_instance_provider(&self, provider: Arc<dyn InstanceProvider>) {
+        *self.provider.lock().unwrap_or_else(|e| e.into_inner()) = Some(provider);
+    }
+
+    /// `pipe` with its parameters resolved against the registered state of every pipe it
+    /// references (`{{ Pipe() }}` templates, `reference(s)`), on this instance or the one the
+    /// reference names. The raw parameters (what persistence writes) are untouched.
+    ///
+    /// Called at the entry points the engine and the façade use (`InstanceConnector` methods,
+    /// `fetch`, `get_pipe_metadef`, the `facade` wrappers); a pipe without cross-pipe templates
+    /// is returned as is. Warnings (unreachable instance, failed template) go to `tracing`.
+    pub async fn prepare_pipe(&self, pipe: &Pipe) -> Pipe {
+        if !meerschaum_connector::template::needs_instance_resolution(pipe) {
+            return pipe.clone();
+        }
+        let provider = self
+            .provider
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let fallback = crate::instance::env_provider::EnvSqlProvider::shared();
+        let provider: &dyn InstanceProvider = match &provider {
+            Some(p) => p.as_ref(),
+            None => fallback.as_ref(),
+        };
+        let (out, warnings) = meerschaum_connector::resolve_pipe(
+            pipe,
+            self,
+            Some(provider),
+            &self.settings.pipe_defaults,
+        )
+        .await;
+        for w in warnings {
+            tracing::warn!("{w}");
+        }
+        out
     }
 
     /// `self.get_pipe_schema(pipe)`.

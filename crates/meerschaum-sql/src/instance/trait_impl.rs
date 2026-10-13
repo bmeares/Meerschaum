@@ -112,19 +112,28 @@ impl InstanceConnector for SqlConnector {
         SqlConnector::fetch_pipes_keys(self, query).await
     }
 
+    fn pipe_table_reference(&self, pipe: &Pipe) -> Option<String> {
+        let sp = self.sql_pipe(pipe).ok()?;
+        Some(self.pipe_table_name(&sp))
+    }
+
     async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool> {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::pipe_exists(self, pipe).await
     }
 
     async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::drop_pipe(self, pipe).await
     }
 
     async fn drop_pipe_indices(&self, pipe: &Pipe) -> SuccessTuple {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::drop_pipe_indices(self, pipe, None).await
     }
 
     async fn create_pipe_indices(&self, pipe: &Pipe) -> SuccessTuple {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::create_pipe_indices(self, pipe, None).await
     }
 
@@ -133,6 +142,7 @@ impl InstanceConnector for SqlConnector {
     }
 
     async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::clear_pipe(self, pipe, query).await
     }
 
@@ -141,6 +151,7 @@ impl InstanceConnector for SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_data(self, pipe, query).await
     }
 
@@ -149,6 +160,7 @@ impl InstanceConnector for SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Vec<IndexMap<String, meerschaum_kernel::Value>>> {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_docs(self, pipe, query).await
     }
 
@@ -158,6 +170,7 @@ impl InstanceConnector for SqlConnector {
         backtrack_minutes: i64,
         query: &DataQuery,
     ) -> ConnectorResult<Option<Frame>> {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_backtrack_data(self, pipe, Some(backtrack_minutes), query).await
     }
 
@@ -167,6 +180,7 @@ impl InstanceConnector for SqlConnector {
         params: Option<&Map>,
         newest: bool,
     ) -> ConnectorResult<Option<DateBound>> {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_sync_time(self, pipe, params, newest, false).await
     }
 
@@ -175,6 +189,7 @@ impl InstanceConnector for SqlConnector {
         pipe: &Pipe,
         query: &DataQuery,
     ) -> ConnectorResult<Option<i64>> {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_rowcount(self, pipe, query).await
     }
 
@@ -182,6 +197,7 @@ impl InstanceConnector for SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, String>> {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::get_pipe_columns_types(self, pipe).await
     }
 
@@ -189,6 +205,7 @@ impl InstanceConnector for SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, Vec<ColumnIndexInfo>>> {
+        let pipe = &self.prepare_pipe(pipe).await;
         Ok(SqlConnector::get_pipe_columns_indices(self, pipe)
             .await?
             .into_iter()
@@ -207,6 +224,7 @@ impl InstanceConnector for SqlConnector {
     }
 
     async fn get_pipe_index_names(&self, pipe: &Pipe) -> ConnectorResult<Map> {
+        let pipe = &self.prepare_pipe(pipe).await;
         Ok(SqlConnector::get_pipe_index_names(self, pipe)?
             .into_iter()
             .map(|(k, v)| (k, Value::Str(v)))
@@ -214,26 +232,32 @@ impl InstanceConnector for SqlConnector {
     }
 
     async fn deduplicate_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::deduplicate_pipe(self, pipe, query).await
     }
 
     async fn get_pipe_size(&self, pipe: &Pipe) -> ConnectorResult<Option<i64>> {
+        let pipe = &self.prepare_pipe(pipe).await;
         Ok(SqlConnector::get_pipe_size(self, pipe).await)
     }
 
     async fn compress_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::compress_pipe(self, pipe, false).await
     }
 
     async fn decompress_pipe(&self, pipe: &Pipe, no_policy: bool) -> SuccessTuple {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::decompress_pipe(self, pipe, no_policy).await
     }
 
     async fn vacuum_pipe(&self, pipe: &Pipe, full: bool) -> SuccessTuple {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::vacuum_pipe(self, pipe, full).await
     }
 
     async fn analyze_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::analyze_pipe(self, pipe).await
     }
 
@@ -251,6 +275,7 @@ impl InstanceConnector for SqlConnector {
     }
 
     async fn partition_pipe(&self, pipe: &Pipe, chunk_minutes: Option<i64>) -> SuccessTuple {
+        let pipe = &self.prepare_pipe(pipe).await;
         SqlConnector::partition_pipe(self, pipe, chunk_minutes).await
     }
 

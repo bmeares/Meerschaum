@@ -72,6 +72,17 @@ pub async fn serve_with_mcp(
     state: AppState,
     mcp: std::sync::Arc<mcp::McpServer>,
 ) -> std::io::Result<()> {
+    serve_with_mcp_and_console(state, mcp, None).await
+}
+
+/// [`serve_with_mcp`] with an optional console router (`/dash/*`, built by `meerschaum-web`)
+/// merged into the application. `meerschaum-web` depends on this crate, so the CLI composes
+/// the two and passes the console in here.
+pub async fn serve_with_mcp_and_console(
+    state: AppState,
+    mcp: std::sync::Arc<mcp::McpServer>,
+    console: Option<axum::Router>,
+) -> std::io::Result<()> {
     if let Some(federation) = mcp.federation.clone() {
         tokio::spawn(async move {
             let _ = federation.refresh().await;
@@ -81,7 +92,8 @@ pub async fn serve_with_mcp(
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(
         listener,
-        app_with_mcp(state, mcp).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        app_with_mcp_and_console(state, mcp, console)
+            .into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .await
 }
@@ -90,4 +102,18 @@ pub async fn serve_with_mcp(
 /// The console must not install a fallback or a wildcard under `/dash`.
 pub fn app_with_console(state: AppState, console: axum::Router) -> axum::Router {
     app(state).merge(console)
+}
+
+/// [`app_with_mcp`] plus an optional console router (exact `/dash/*` routes; the console must
+/// not install a fallback, which would shadow the API host proxy).
+pub fn app_with_mcp_and_console(
+    state: AppState,
+    mcp: std::sync::Arc<mcp::McpServer>,
+    console: Option<axum::Router>,
+) -> axum::Router {
+    let app = app_with_mcp(state, mcp);
+    match console {
+        Some(console) => app.merge(console),
+        None => app,
+    }
 }

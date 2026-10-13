@@ -390,7 +390,7 @@ pub async fn hydrate(conn: &Arc<dyn InstanceConnector>, pipe: &mut Pipe) -> Resu
         .await
         .map_err(|e| ApiError::exception("Failed to load a pipe's attributes", e))?;
     if let Some(params) = parameters_of(&attrs) {
-        let merged = meerschaum_core::value::apply_patch_maps(&params, pipe.parameters());
+        let merged = meerschaum_core::value::apply_patch_maps(&params, pipe.raw_parameters());
         pipe.set_parameters(merged);
     }
     Ok(())
@@ -427,7 +427,10 @@ pub async fn pipe_attributes(
         "location_key".into(),
         pipe.location_key().map(String::from).into(),
     );
-    local.insert("parameters".into(), Value::Map(pipe.parameters().clone()));
+    local.insert(
+        "parameters".into(),
+        Value::Map(pipe.raw_parameters().clone()),
+    );
     Ok(meerschaum_core::value::apply_patch_maps(
         &instance_attrs,
         &local,

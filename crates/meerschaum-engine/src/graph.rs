@@ -922,6 +922,39 @@ mod tests {
     }
 
     #[test]
+    fn implicit_edge_and_hash_use_raw_parameters() {
+        let g = Graph::build(
+            [
+                rec("parent", "{}"),
+                rec(
+                    "child",
+                    r#"{"sql": "SELECT * FROM {{ Pipe('sql:main', 'parent') }}"}"#,
+                ),
+            ],
+            &GraphOptions::default(),
+        );
+        assert_eq!(g.edges().len(), 1);
+        assert!(g.edges()[0].sources.template);
+        let node = g.nodes().find(|n| n.pipe_ref == r("child")).unwrap();
+        let before = node.definition_hash.clone();
+        // Resolving the pipe's parameters (cached snapshot) must not change the stored text or
+        // the hash computed from it.
+        let mut pipe = node.pipe.clone();
+        let resolver = meerschaum_core::template::InMemoryResolver::default();
+        let _ = pipe.resolve_parameters_with(&resolver, None);
+        assert!(
+            pipe.raw_parameters()["sql"]
+                .as_str()
+                .unwrap()
+                .contains("{{ Pipe(")
+        );
+        assert_eq!(
+            crate::ledger::definition_hash(pipe.raw_parameters()),
+            before
+        );
+    }
+
+    #[test]
     fn internal_pipes_are_excluded() {
         let g = Graph::build(
             [PipeRecord::new("sql:main", "mrsm", "engine_ledger", None)],

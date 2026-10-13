@@ -16,6 +16,7 @@ use crate::builtin::{self, ActionError, ActionResult};
 use crate::env;
 use crate::format::{FormatSettings, Formatter, OptionsArgs, TupleArgs};
 use crate::help;
+use crate::native;
 use crate::parse::parse_arguments;
 use crate::schema;
 use crate::shlex;
@@ -589,6 +590,18 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
     }
     if args.get("daemon").is_some_and(PyValue::is_truthy) && action[0] != "stack" {
         action.splice(0..0, ["start".to_string(), "jobs".to_string()]);
+    }
+    if let Ok(manifest) = crate::python::manifest(rt)
+        && !args.get("daemon").is_some_and(PyValue::is_truthy)
+        && let Ok(natives) = native::session(rt).native_plugins(rt.config())
+        && let Some((plugin, name)) =
+            crate::native_plugins::action_owner(&action, &manifest, &natives)
+    {
+        // Native (C-ABI) plugin actions run in-process; they shadow Python plugin actions.
+        env::apply_env_arguments(&mut args, rt.env);
+        args.insert("action".into(), PyValue::str_list(&action));
+        return crate::native_plugins::run_action(&plugin, &name, &args, &natives)
+            .unwrap_or_else(|e| SuccessTuple::fail(format!("{}: {}", e.class, e.message)));
     }
     if let Ok(manifest) = crate::python::manifest(rt)
         && crate::python::action_name(&action, &manifest).is_some()

@@ -28,6 +28,7 @@ pub mod env;
 pub mod format;
 pub mod help;
 pub mod native;
+pub mod native_plugins;
 pub mod parse;
 pub mod pyjson;
 pub mod pyliteral;

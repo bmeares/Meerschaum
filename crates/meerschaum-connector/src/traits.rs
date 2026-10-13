@@ -424,6 +424,13 @@ pub trait InstanceConnector: Connector {
     /// returned as the string `"None"` in place of nulls.
     async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys>;
 
+    /// `{{ Pipe(...) }}` without an attribute chain: the table a template for this pipe expands to
+    /// on this instance (`sql_item_name` on SQL instances). `None` means `pipe.target`.
+    fn pipe_table_reference(&self, pipe: &Pipe) -> Option<String> {
+        let _ = pipe;
+        None
+    }
+
     /// Check whether a pipe's target table exists.
     async fn pipe_exists(&self, pipe: &Pipe) -> ConnectorResult<bool>;
 

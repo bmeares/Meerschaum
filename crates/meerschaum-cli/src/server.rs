@@ -91,7 +91,7 @@ pub fn start_mcp(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
 fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     let config = ServerConfig::from_config(rt.config(), &flags(args)?);
     let session = native::session(rt);
-    let manifest = session.manifest(rt.config())?;
+    let plugin_manifest = session.manifest(rt.config())?;
     let instance = session.instance(&config.instance_keys, rt.config())?;
     let mut options = ConfigOptions::from_process();
     options.env.retain(|(key, _)| key != "MRSM_ROOT_DIR");
@@ -103,7 +103,7 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         options,
         snapshot: rt.config().snapshot(),
         session: session.clone(),
-        plugin_actions: manifest
+        plugin_actions: plugin_manifest
             .plugins
             .values()
             .flat_map(|plugin| plugin.actions.iter().map(|action| action.name.clone()))
@@ -128,6 +128,7 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
         )))
         .build()
         .map_err(io_error)?;
+    let host_proxy = state.host.clone();
     let mcp = Arc::new(McpServer::for_state(&state).with_backend(backend));
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     if let Some(workers) = native::int(args, "workers") {
@@ -141,6 +142,25 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     }
     let server_runtime = builder.enable_all().build().map_err(io_error)?;
     let result = server_runtime.block_on(async {
+        let console = if stdio {
+            None
+        } else {
+            // The host's registry (plugin pages with mode/route) is fetched once it is running.
+            let registry = match &host_proxy {
+                Some(host) if supervisor.is_needed() => host_registry(host, &state).await,
+                _ => None,
+            };
+            // Native plugin routes (no host process) are merged with the console's routes.
+            let natives = session.native_plugins(rt.config())?;
+            let (routes, notices) = crate::native_plugins::routes(&state, &natives);
+            for notice in notices {
+                rt.eprint(&format!("{notice}\n"));
+            }
+            Some(match console(&state, &plugin_manifest, registry, rt)? {
+                Some(console) => console.merge(routes),
+                None => routes,
+            })
+        };
         let watcher = spawn_manifest_watcher(
             Arc::new(FileManifest(manifest_path)), supervisor.clone(), mcp.federation.clone(),
             Duration::from_secs(1),
@@ -160,7 +180,7 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
             }
         } else {
             tokio::select! {
-                result = meerschaum_server::serve_with_mcp(state, mcp) => result.map(|()| SuccessTuple::success()).map_err(io_error),
+                result = meerschaum_server::serve_with_mcp_and_console(state, mcp, console) => result.map(|()| SuccessTuple::success()).map_err(io_error),
                 result = shutdown_signal() => result.map(|()| SuccessTuple::success()).map_err(io_error),
             }
         };
@@ -171,6 +191,78 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     // Tokio stdin uses a blocking reader which may still await input after Ctrl-C.
     server_runtime.shutdown_timeout(Duration::from_millis(100));
     result
+}
+
+/// The `/dash` console router (v4 served it unless `--no-dash`), sharing the server's instance,
+/// secret and config. `None` with `--no-dash`. Plugin Dash apps and pages stay with the API host.
+pub fn console(
+    state: &AppState,
+    manifest: &meerschaum_worker::manifest::Manifest,
+    registry: Option<serde_json::Value>,
+    rt: &mut Runtime<'_>,
+) -> Result<Option<axum::Router>, ActionError> {
+    if state.config.no_dash {
+        return Ok(None);
+    }
+    let mut web = meerschaum_web::WebConfig::for_state(state);
+    // PARITY: `--no-webterm` (also implied by `--no-auth`) removes the terminal page.
+    if !state.config.no_webterm {
+        web.webterm = Some("/webterm".into());
+    }
+    let natives = native::session(rt).native_plugins(rt.config())?;
+    web.pages = crate::native_plugins::pages(manifest, &natives);
+    let from_host = registry
+        .as_ref()
+        .is_some_and(|r| web.apply_host_registry(r).is_ok());
+    if !from_host {
+        // No running host registry: fall back to the manifest's Python plugin pages.
+        for plugin in manifest
+            .plugins
+            .values()
+            .filter(|p| !natives.contains(&p.name))
+        {
+            if !plugin.dash_plugins.is_empty() {
+                web.dash_plugins.push(plugin.name.clone());
+            }
+            for page in &plugin.web_pages {
+                web.legacy_pages
+                    .insert(page.path.clone(), plugin.name.clone());
+            }
+        }
+    }
+    match meerschaum_web::router(state.clone(), web.clone()) {
+        Ok(router) => Ok(Some(router)),
+        Err(error) => {
+            // A plugin page colliding with the console namespace must not take the console down.
+            rt.eprint(&format!("Plugin console pages are disabled: {error}\n"));
+            web.dash_plugins.clear();
+            web.legacy_pages.clear();
+            web.pages.clear();
+            meerschaum_web::router(state.clone(), web)
+                .map(Some)
+                .map_err(io_error)
+        }
+    }
+}
+
+/// `GET /_mrsm/host/registry` from the running API host, with the server's internal token.
+async fn host_registry(
+    host: &meerschaum_server::proxy::HostProxy,
+    state: &AppState,
+) -> Option<serde_json::Value> {
+    let token = meerschaum_server::mcp::federation::internal_token(state.secret(), None);
+    let request = axum::http::Request::get(meerschaum_server::mcp::federation::REGISTRY_PATH)
+        .header("authorization", format!("Bearer {token}"))
+        .body(axum::body::Body::empty())
+        .ok()?;
+    let response = host.forward(request).await;
+    if !response.status().is_success() {
+        return None;
+    }
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 async fn shutdown_signal() -> std::io::Result<()> {

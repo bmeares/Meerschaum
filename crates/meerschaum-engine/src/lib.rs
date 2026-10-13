@@ -44,6 +44,7 @@ pub mod native;
 pub mod node;
 pub mod plan;
 pub mod python;
+pub mod read;
 pub mod registry;
 pub mod runs;
 pub mod schedule;
@@ -70,6 +71,10 @@ pub use ledger::{EdgeCursor, LedgerEntry, definition_hash};
 pub use native::{FaultInjector, NativeConfig, NativeExecutor, NodeSyncOptions};
 pub use node::{PipeRecord, PipeRef};
 pub use plan::{Action, Begin, Bounds, Plan, PlanOptions, PlannedNode, Span, plan};
+pub use read::{
+    DirtyRange, EdgeView, EngineReader, GanttBar, NodeView, PipelineView, RunDetail, RunFilter,
+    RunStatus, RunSummary,
+};
 pub use registry::{ConnectorRegistry, PluginSync, StaticRegistry, SyncHooks};
 pub use runs::{NodeRow, NodeStatus, RunRecord, RunRow};
 pub use schedule::{DurationSource, EwmaDurations, Schedule};

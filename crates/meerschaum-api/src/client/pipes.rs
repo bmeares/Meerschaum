@@ -220,9 +220,12 @@ impl APIConnector {
 
     /// `pipe.get_parameters()`: the instance's parameters patched with the in-memory ones,
     /// refreshed from `/attributes` every 600 s (temporary pipes use the in-memory ones).
+    ///
+    /// Returns the RAW (unresolved) parameters: this is metadata forwarded to the server, so
+    /// `{{ ... }}` templates must survive. Use [`Self::pipe_resolved_parameters`] to execute.
     pub async fn pipe_parameters(&self, pipe: &Pipe) -> Map {
         if pipe.temporary {
-            return pipe.parameters().clone();
+            return pipe.raw_parameters().clone();
         }
         let cached = self.cache_entry(pipe).attributes;
         let remote = match cached {
@@ -239,11 +242,20 @@ impl APIConnector {
                 }
                 Err(e) => {
                     tracing::warn!("Failed to load attributes for {pipe}: {e}");
-                    return pipe.parameters().clone();
+                    return pipe.raw_parameters().clone();
                 }
             },
         };
-        meerschaum_core::value::apply_patch_maps(&remote, pipe.parameters())
+        meerschaum_core::value::apply_patch_maps(&remote, pipe.raw_parameters())
+    }
+
+    /// [`Self::pipe_parameters`] with templates and config symlinks resolved, for execution
+    /// (dtype contexts, `static` / `autotime` flags).
+    pub async fn pipe_resolved_parameters(&self, pipe: &Pipe) -> Map {
+        let raw = self.pipe_parameters(pipe).await;
+        let mut merged = pipe.clone();
+        merged.set_parameters(raw);
+        merged.parameters().clone()
     }
 
     /// `pipe.exists()`: `True` results are cached for 60 s.
@@ -288,7 +300,7 @@ impl APIConnector {
 
     /// `pipe.dtypes` (`Pipe.get_dtypes(infer=True)`) through the client-side caches.
     pub async fn pipe_dtypes(&self, pipe: &Pipe) -> ConnectorResult<IndexMap<String, String>> {
-        let parameters = self.pipe_parameters(pipe).await;
+        let parameters = self.pipe_resolved_parameters(pipe).await;
         let remote = if self.pipe_exists_cached(pipe).await? {
             self.pipe_columns_types_cached(pipe, &parameters)
                 .await?
@@ -324,7 +336,7 @@ impl APIConnector {
         let r_url = Self::pipe_r_url(pipe) + "/register";
         let opts = RequestOptions {
             query: vec![self.instance_query(pipe, "instance_keys")],
-            body: Body::Json(py_json(&Value::Map(pipe.parameters().clone()))),
+            body: Body::Json(py_json(&Value::Map(pipe.raw_parameters().clone()))),
             ..Default::default()
         };
         let response = match self.post(&r_url, opts).await {
@@ -424,7 +436,7 @@ impl APIConnector {
         if !opts.extra.contains_key("check_existing") && !opts.check_existing {
             query.push(("check_existing".into(), QueryValue::bool(false)));
         }
-        let parameters = self.pipe_parameters(pipe).await;
+        let parameters = self.pipe_resolved_parameters(pipe).await;
         let mut merged = pipe.clone();
         merged.set_parameters(parameters);
         let columns = merged.columns();
@@ -621,7 +633,7 @@ impl APIConnector {
             .filter(|(_, t)| !meerschaum_core::dtypes::are_dtypes_equal(t, "datetime"))
             .map(|(c, _)| c.clone())
             .collect();
-        let parameters = self.pipe_parameters(pipe).await;
+        let parameters = self.pipe_resolved_parameters(pipe).await;
         let mut merged = pipe.clone();
         merged.set_parameters(parameters.clone());
         let tz_aware = meerschaum_kernel::enforce::pipe_is_tz_aware(

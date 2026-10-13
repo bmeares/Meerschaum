@@ -32,12 +32,48 @@ def app_route_paths(app) -> List[str]:
     return paths
 
 
+def web_page_registry() -> List[Dict[str, Any]]:
+    """
+    Return every `@web_page` with its mode: `html` (page contract, served at `route`) or `dash`
+    (legacy layout, served by the plugin's Dash app at `/dash/<plugin>/...`).
+    """
+    from meerschaum.plugins import _plugin_endpoints_to_pages
+    from meerschaum.api.host.dash import get_page_contract_pages, plugin_path
+
+    html_pages = get_page_contract_pages()
+    out = []
+    for page_group, pages in list(_plugin_endpoints_to_pages.items()):
+        for page_str, page in list(pages.items()):
+            contract = html_pages.get(page_str, None)
+            plugin_name = contract['plugin'] if contract else page_group
+            entry = {
+                'path': page_str,
+                'page_group': page_group,
+                'page_key': page.get('page_key', None),
+                'login_required': bool(page.get('login_required', True)),
+                'skip_navbar': bool(page.get('skip_navbar', False)),
+                'dark_theme': bool(page.get('dark_theme', True)),
+                'function': getattr(page.get('function'), '__name__', None),
+                'mode': 'html' if contract else 'dash',
+            }
+            if contract:
+                entry['route'] = contract['route']
+            else:
+                entry['route'] = plugin_path(plugin_name, page_str)
+            out.append(entry)
+    return out
+
+
 def registry_document(app) -> Dict[str, Any]:
     """
     Return the plugin registry the Rust server federates.
     """
     from meerschaum.mcp._registry import get_plugin_registry
-    return {**get_plugin_registry(), 'routes': app_route_paths(app)}
+    return {
+        **get_plugin_registry(),
+        'routes': app_route_paths(app),
+        'web_pages': web_page_registry(),
+    }
 
 
 def register(app) -> None:

@@ -4,15 +4,17 @@
 pub mod abi;
 pub mod discovery;
 pub mod host;
+pub mod registry;
 pub mod sdk;
 pub use arrow;
 pub use host::{LoadedPlugin, NativeConnector};
 pub use meerschaum_kernel::Frame;
+pub use registry::NativePlugins;
 pub use sdk::{Plugin, Reply, Request};
 pub use serde_json;
 
 /// Worker manifest format version (independent of the native ABI version).
-pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
+pub const MANIFEST_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

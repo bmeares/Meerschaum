@@ -326,6 +326,20 @@ async fn manifest_is_built_cached_and_rebuilt_when_stale() {
         "{:?}",
         hooks.web_pages
     );
+    let top = hooks
+        .web_pages
+        .iter()
+        .find(|p| p.path.ends_with("wk/top"))
+        .unwrap();
+    assert_eq!(top.mode, "dash");
+    assert_eq!(top.route.as_deref(), Some("/dash/wk_hooks/wk/top"));
+    let html = hooks
+        .web_pages
+        .iter()
+        .find(|p| p.path.ends_with("wk/html"))
+        .unwrap();
+    assert_eq!(html.mode, "html");
+    assert_eq!(html.route.as_deref(), Some("/_pages/wk/html"));
     assert_eq!(hooks.mcp_tools.len(), 1);
     assert_eq!(hooks.mcp_tools[0].name, "wk_tool");
     assert_eq!(hooks.mcp_tools[0].scopes, vec!["pipes:read"]);

@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use meerschaum_core::SuccessTuple;
-use meerschaum_worker::manifest::Manifest;
+use meerschaum_worker::manifest::{Manifest, PluginManifest};
 use meerschaum_worker::protocol::Msg;
 use meerschaum_worker::worker::CallOptions;
 use rmpv::Value as Wire;
@@ -275,16 +275,28 @@ pub fn arguments(
     manifest: &Manifest,
     rt: &mut Runtime<'_>,
 ) -> Result<(), ActionError> {
+    let session = session(rt);
+    // Native plugins declare their flags in the manifest; the Python worker never sees them.
+    let natives = session.native_plugins(rt.config())?;
+    let native_plugins: Vec<&PluginManifest> = manifest
+        .plugins
+        .values()
+        .filter(|p| natives.contains(&p.name))
+        .collect();
+    if !native_plugins.is_empty() {
+        let sysargs = native::words(args, "sysargs");
+        crate::native_plugins::arguments(args, &native_plugins, &sysargs);
+    }
     let destinations: Vec<_> = manifest
         .plugins
         .values()
+        .filter(|p| !natives.contains(&p.name))
         .flat_map(|p| &p.arguments)
         .filter_map(|a| a.dest.as_ref())
         .collect();
     if destinations.is_empty() {
         return Ok(());
     }
-    let session = session(rt);
     let pool = session.pool(rt.config());
     let sysargs = native::words(args, "sysargs");
     let reply = session

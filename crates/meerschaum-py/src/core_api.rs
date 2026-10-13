@@ -32,7 +32,11 @@ fn registry() -> PyResult<&'static Config> {
         .map_err(|e| PyRuntimeError::new_err(e.clone()))
 }
 
-fn emit_warnings(py: Python<'_>, warnings: Vec<String>, stacklevel: i64) -> PyResult<()> {
+pub(crate) fn emit_warnings(
+    py: Python<'_>,
+    warnings: Vec<String>,
+    stacklevel: i64,
+) -> PyResult<()> {
     if warnings.is_empty() {
         return Ok(());
     }
@@ -192,10 +196,10 @@ pub fn get_config<'py>(
 // {{ Pipe() }} templating
 
 /// A template resolver that answers from live Python `Pipe` objects.
-struct PyResolver<'py> {
-    py: Python<'py>,
-    defaults: PipeDefaults,
-    self_pipe: Option<(Pipe, Bound<'py, PyAny>)>,
+pub(crate) struct PyResolver<'py> {
+    pub(crate) py: Python<'py>,
+    pub(crate) defaults: PipeDefaults,
+    pub(crate) self_pipe: Option<(Pipe, Bound<'py, PyAny>)>,
 }
 
 impl<'py> PyResolver<'py> {
@@ -277,6 +281,20 @@ impl TemplateResolver for PyResolver<'_> {
             .and_then(|v| v.as_map().cloned())
             .unwrap_or_default()
     }
+}
+
+/// The pipe-constructor defaults, with the instance from the Python config.
+pub(crate) fn py_defaults(py: Python<'_>) -> PyResult<PipeDefaults> {
+    let mut defaults = PipeDefaults::default();
+    if let Ok(instance) = py
+        .import("meerschaum.config")?
+        .getattr("get_config")?
+        .call1(("meerschaum", "instance"))
+        .and_then(|v| v.str())
+    {
+        defaults.instance_keys = instance.to_str()?.to_string();
+    }
+    Ok(defaults)
 }
 
 /// `replace_pipes_syntax(text, _pipe=None)`.

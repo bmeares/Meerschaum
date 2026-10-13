@@ -255,3 +255,25 @@ v4 does, and the test now asserts that behavior.
 See `../meerschaum-py/PERF.md` for before/after 1M-row SQLite/PostGIS measurements. Large sync
 and read steps beat Python in the final run, but millisecond-scale SQLite sync-time and
 row-count calls remain slower: the every-step performance acceptance target is not yet met.
+
+## Cross-pipe templates (wave 6)
+
+`{{ Pipe(...) }}` references to *other* registered pipes resolve through
+`meerschaum_connector::template` (`prepare_resolver` / `resolve_pipe`): the referenced pipes
+(transitively, including `reference(s)`) are fetched asynchronously from their own instance, frozen
+into a `SnapshotResolver`, and `Pipe::resolve_parameters_with` runs core's synchronous resolution on
+that snapshot. A bare `{{ Pipe(...) }}` expands to `InstanceConnector::pipe_table_reference`
+(`sql_item_name` with the instance schema on SQL instances, `pipe.target` elsewhere).
+`SqlConnector::prepare_pipe` is the entry point; it runs in the `InstanceConnector` methods, `fetch`,
+`sync`/`sync_pipe_result`/`sync_pipe_inplace` and the `facade` readers, and is a no-op for pipes
+without `{{` or `reference(s)`. References naming another instance use
+`SqlConnector::set_instance_provider`, defaulting to `MRSM_SQL_<LABEL>` URIs (`EnvSqlProvider`).
+Raw parameters stay the persisted form (`register_pipe`, `edit_pipe`); resolved ones are for
+execution. Limitation: `sync_pipe_mut` / `sync_pipe_mut_cached` (`&mut Pipe`) skip the resolver
+because their in-memory parameter mutations would discard the snapshot.
+`instance::plugins::version_ge` forwards to `meerschaum_core::version::version_ge`.
+
+Internal (`mrsm`) string keys longer than 255 characters on MySQL / MariaDB / MSSQL fail with a
+clear message instead of a driver error. A DuckDB internal upsert batch that repeats a key keeps
+the last row; null keys are still rejected. `tests/w6b_templates.rs` covers all of this
+(`w6b_` table prefix); the cross-implementation scenario gained a templated in-place child.

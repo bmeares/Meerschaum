@@ -265,3 +265,46 @@ async fn leases_live() {
     let conn = ValkeyConnector::with_backend("lease", Map::new(), Arc::new(backend));
     check_leases(&conn).await;
 }
+
+#[tokio::test]
+async fn register_and_edit_persist_raw_templates() {
+    let conn = ValkeyConnector::in_memory("raw");
+    let build = |extra: Option<(&str, Value)>| {
+        let mut params = attrs(&[
+            ("target", Value::Str("{{ self.metric }}_tbl".into())),
+            (
+                "sql",
+                Value::Str("SELECT * FROM {{ Pipe('valkey:raw', 'other') }}".into()),
+            ),
+        ]);
+        if let Some((k, v)) = extra {
+            params.insert(k.into(), v);
+        }
+        Pipe::builder("valkey:raw", "weather")
+            .parameters(params)
+            .build()
+            .unwrap()
+    };
+    let pipe = build(None);
+    // Execution sees the resolved target; persistence must keep the template text.
+    assert_eq!(
+        pipe.parameters()["target"],
+        Value::Str("weather_tbl".into())
+    );
+    assert!(conn.register_pipe(&pipe).await.success);
+    let stored = conn.get_pipe_parameters(&pipe).await.unwrap().unwrap();
+    assert_eq!(stored["target"], Value::Str("{{ self.metric }}_tbl".into()));
+    assert_eq!(
+        stored["sql"],
+        Value::Str("SELECT * FROM {{ Pipe('valkey:raw', 'other') }}".into())
+    );
+
+    let edited = build(Some(("tags", Value::List(vec![Value::Str("a".into())]))));
+    assert!(conn.edit_pipe(&edited).await.success);
+    let attrs = conn.get_pipe_attributes(&pipe).await.unwrap();
+    let Some(Value::Map(stored)) = attrs.get("parameters") else {
+        panic!("no parameters");
+    };
+    assert_eq!(stored["target"], Value::Str("{{ self.metric }}_tbl".into()));
+    assert!(stored.contains_key("tags"));
+}

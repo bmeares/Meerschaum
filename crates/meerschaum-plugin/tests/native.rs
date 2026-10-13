@@ -219,3 +219,46 @@ fn discovery_precedence_cache_and_invalidation() {
         unsafe { discovery::cached_manifest(&dirs, &cache) }.unwrap()
     );
 }
+
+#[test]
+fn registry_loads_lazily_and_exposes_routes_pages_hooks() {
+    use meerschaum_plugin::NativePlugins;
+    let root = tempfile::tempdir().unwrap();
+    let plugins = root.path().join("plugins");
+    let tree = plugins.join("native_demo");
+    std::fs::create_dir_all(&tree).unwrap();
+    std::fs::write(
+        tree.join("plugin.toml"),
+        include_str!("../examples/plugin.toml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        artifact("native_demo"),
+        tree.join(discovery::library_name("native_demo")),
+    )
+    .unwrap();
+    let cache = root.path().join("cache/native.json");
+    let natives = NativePlugins::open(std::slice::from_ref(&plugins), &cache).unwrap();
+    assert_eq!(natives.names(), vec!["native_demo".to_string()]);
+    assert!(natives.has_data_function("native_demo", "fetch"));
+    assert!(natives.is_instance_type("native_demo"));
+    assert!(!natives.is_instance_type("missing"));
+    assert_eq!(
+        natives.hooks(false),
+        vec![("native_demo".to_string(), vec!["before".to_string()])]
+    );
+    assert!(natives.source("native_demo").unwrap().is_ok());
+    assert!(natives.source("missing").is_none());
+    let plugin = natives.plugin("native_demo").unwrap();
+    let routes = plugin.call_json("routes", json!({})).unwrap();
+    assert_eq!(routes[0]["path"], "/native-demo/ping");
+    let page = plugin
+        .call_json("page", json!({"username": "ada"}))
+        .unwrap();
+    assert!(page["html"].as_str().unwrap().contains("ada"));
+    assert!(natives.plugin("missing").is_err());
+    // A directory without native plugins is an empty set and writes no cache.
+    let empty =
+        NativePlugins::open(&[root.path().join("nothing")], &root.path().join("c.json")).unwrap();
+    assert!(empty.is_empty() && empty.names().is_empty());
+}

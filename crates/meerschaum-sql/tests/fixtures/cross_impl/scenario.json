@@ -323,6 +323,24 @@
         null,
         null
       ]
+    },
+    {
+      "connector_keys": "sql:xi",
+      "metric_key": "templated",
+      "location_key": null,
+      "inplace": true,
+      "parameters": {
+        "columns": {
+          "datetime": "dt",
+          "id": "id"
+        },
+        "target": "xi_{{ self.metric }}_out",
+        "sql": "SELECT {{ Pipe('xi', 'basic').columns['datetime'] }} AS dt, id, val * 2 AS val2 FROM {{ Pipe('xi', 'basic') }}"
+      },
+      "phases": [
+        null,
+        null
+      ]
     }
   ]
 }

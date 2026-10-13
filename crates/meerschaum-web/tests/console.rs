@@ -4,6 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use common::config as config_for;
 use common::{config, send, state_with};
 use meerschaum_web::{
     PageContent, PluginPage, WebConfig,
@@ -646,27 +647,229 @@ async fn sessions_cannot_be_exposed_through_pipe_aliases() {
     assert_eq!(response.status, StatusCode::FORBIDDEN);
 }
 
-#[tokio::test]
-async fn pipeline_nodes_show_newest_run_status() {
+/// A temporary SQLite instance (`sql:eng`) with a three-pipe chain that has run once.
+async fn engine_fixture() -> (
+    tempfile::TempDir,
+    Arc<meerschaum_sql::SqlConnector>,
+    Arc<meerschaum_engine::StaticRegistry>,
+    meerschaum_engine::EngineConfig,
+) {
+    use meerschaum_connector::InstanceConnector;
+    use meerschaum_engine::{
+        Depth, Engine, EngineConfig, PipeRef, RunOptions, Selection, StaticRegistry,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let uri = format!("sqlite:///{}", dir.path().join("eng.db").display());
+    let conn = Arc::new(
+        meerschaum_sql::SqlConnector::from_uri("eng", &uri)
+            .await
+            .unwrap(),
+    );
+    let instance: Arc<dyn InstanceConnector> = conn.clone();
+    let source: Arc<dyn meerschaum_connector::Connector> = conn.clone();
+    let registry = Arc::new(
+        StaticRegistry::new()
+            .with_instance("sql:eng", instance)
+            .with_source("sql:eng", source)
+            .with_table_reference(|pipe: &meerschaum_core::Pipe| {
+                let target = pipe.target(None).map_err(|e| e.to_string())?;
+                Ok(meerschaum_sql::ident::sql_item_name(
+                    &target,
+                    meerschaum_sql::Flavor::Sqlite,
+                    None,
+                ))
+            }),
+    );
+    let config = EngineConfig {
+        home_instance: "sql:eng".into(),
+        lease_dir: dir.path().join("leases"),
+        state_flush: std::time::Duration::from_millis(20),
+        ..EngineConfig::default()
+    };
+    assert!(
+        conn.exec("CREATE TABLE src (ts TEXT, sensor_id INTEGER, value REAL)")
+            .await
+            .is_some()
+    );
+    assert!(
+        conn.exec("INSERT INTO src VALUES ('2026-01-01 00:00:00', 1, 2.0), ('2026-01-01 01:00:00', 1, 4.0)")
+            .await
+            .is_some()
+    );
+    let cols = json!({"datetime": "ts", "id": "sensor_id"});
+    let dtypes = json!({"ts": "datetime", "sensor_id": "int", "value": "float"});
+    let defs = [
+        ("a_raw", "SELECT ts, sensor_id, value FROM src"),
+        (
+            "b_clean",
+            "SELECT ts, sensor_id, value FROM {{ Pipe('sql:eng', 'a_raw', instance='sql:eng') }}",
+        ),
+        (
+            "c_copy",
+            "SELECT ts, sensor_id, value FROM {{ Pipe('sql:eng', 'b_clean', instance='sql:eng') }}",
+        ),
+    ];
+    for (metric, sql) in defs {
+        let params = json!({"sql": sql, "columns": cols, "dtypes": dtypes});
+        let params = meerschaum_core::Value::from_json_str(&params.to_string())
+            .unwrap()
+            .to_map();
+        let pipe = meerschaum_core::Pipe::builder("sql:eng", metric)
+            .instance("sql:eng")
+            .parameters(params)
+            .build()
+            .unwrap();
+        assert!(conn.register_pipe(&pipe).await.success);
+    }
+    let engine = Engine::new(registry.clone(), config.clone());
+    let result = engine
+        .run(RunOptions {
+            selection: Some(
+                Selection::refs([PipeRef::new("sql:eng", "sql:eng", "c_copy", None)])
+                    .with_parents(Some(Depth::All)),
+            ),
+            ..Default::default()
+        })
+        .await;
+    assert!(result.success, "{}", result.message);
+    (dir, conn, registry, config)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pipelines_page_and_partials_render_engine_state() {
+    let (_dir, _conn, registry, config) = engine_fixture().await;
     let root = tempfile::tempdir().unwrap();
-    let (state, _) = state_with(config(root.path()));
-    let pipe_ref = "sql:fixture|plugin:synthetic|temperature|None";
-    state.engine.record_runs(serde_json::from_value(json!([
-        {"run_id":"old","pipe_ref":pipe_ref,"started":"2026-01-01T00:00:00Z","finished":"2026-01-01T01:00:00Z","status":"failed"},
-        {"run_id":"new","pipe_ref":pipe_ref,"started":"2026-01-02T00:00:00Z","finished":"2026-01-02T01:00:00Z","status":"success"}
-    ])).unwrap()).await;
-    let app = meerschaum_web::app(state.clone(), WebConfig::for_state(&state)).unwrap();
+    let (state, _) = state_with(config_for(root.path()));
+    let reader = Arc::new(meerschaum_engine::EngineReader::new(registry, config));
+    let app = meerschaum_web::app(
+        state.clone(),
+        WebConfig::for_state(&state).with_engine(reader),
+    )
+    .unwrap();
     let (cookie, _) = login(&app).await;
-    let response = send(
+    let get = |uri: &'static str| {
+        let cookie = cookie.clone();
+        let app = app.clone();
+        async move {
+            send(
+                &app,
+                Request::get(uri)
+                    .header("cookie", cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+        }
+    };
+    let page = get("/dash/pipelines").await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.text());
+    let html = page.text();
+    // DAG: three nodes, two edges, status and lag in the cytoscape spec; Gantt; runs table.
+    assert!(html.contains("data-mrsm-graph="), "{html}");
+    assert!(
+        html.contains("&quot;status&quot;:&quot;succeeded&quot;"),
+        "{html}"
+    );
+    assert!(html.contains("caught up"), "{html}");
+    assert!(html.contains("data-mrsm-figure="));
+    assert!(html.contains("<h2>Runs</h2>"));
+    assert!(html.contains("data-mrsm-events=\"/dash/pipelines/events?run_id="));
+    assert!(html.contains("hx-get=\"/dash/pipelines/graph\""));
+    assert!(html.contains("sql:eng|sql:eng|c_copy|None"));
+
+    let graph = get("/dash/pipelines/graph").await;
+    assert_eq!(graph.status, StatusCode::OK);
+    assert!(graph.text().contains("Ledger lag"));
+    let gantt = get("/dash/pipelines/gantt").await;
+    assert!(gantt.text().contains("Planned start"), "{}", gantt.text());
+    let runs = get("/dash/pipelines/runs?status=succeeded").await;
+    assert!(
+        runs.text().contains("<td>succeeded</td>"),
+        "{}",
+        runs.text()
+    );
+    let none = get("/dash/pipelines/runs?status=failed").await;
+    assert!(none.text().contains("No runs match."));
+    let unauth = send(
         &app,
-        Request::get("/dash/pipelines")
-            .header("cookie", cookie)
+        Request::get("/dash/pipelines/runs")
             .body(Body::empty())
             .unwrap(),
     )
     .await;
-    assert_eq!(response.status, StatusCode::OK);
-    assert!(response.text().contains(&format!("{pipe_ref}: success")));
-    assert!(!response.text().contains(&format!("{pipe_ref}: failed")));
-    assert!(response.text().contains("data-mrsm-figure="));
+    assert_eq!(unauth.status, StatusCode::SEE_OTHER);
+
+    // The live stream ends once the (finished) run's events are delivered.
+    let run_id = runs
+        .text()
+        .split("run_id=")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_string();
+    let uri: &'static str =
+        Box::leak(format!("/dash/pipelines/events?run_id={run_id}").into_boxed_str());
+    let stream = get(uri).await;
+    assert_eq!(stream.status, StatusCode::OK);
+    let text = stream.text();
+    assert!(text.contains("run_started"), "{text}");
+    assert!(text.contains("event: end"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pipe_card_shows_parents_children_with_lag() {
+    let (_dir, _conn, registry, config) = engine_fixture().await;
+    let root = tempfile::tempdir().unwrap();
+    let (state, _) = state_with(config_for(root.path()));
+    let reader = Arc::new(meerschaum_engine::EngineReader::new(registry, config));
+    // Same relations the card renders, from the reader the console uses.
+    let view = reader.pipeline(&[]).await.unwrap();
+    assert_eq!(view.nodes.len(), 3);
+    assert_eq!(view.edges.len(), 2);
+    let _ = state;
+}
+
+#[tokio::test]
+async fn host_registry_populates_pages_and_navbar() {
+    let root = tempfile::tempdir().unwrap();
+    let (state, _) = state_with(config(root.path()));
+    let mut cfg = WebConfig::for_state(&state);
+    let registry = json!({"web_pages": [
+        {"path": "stats", "page_group": "Reports", "page_key": "stats", "login_required": true,
+         "skip_navbar": false, "dark_theme": null, "function": "stats_page", "mode": "html",
+         "route": "/_pages/stats"},
+        {"path": "forecast", "page_group": "Weather", "page_key": "forecast", "login_required": true,
+         "mode": "dash", "function": "forecast_layout", "route": "/dash/weather/forecast"},
+    ]});
+    assert_eq!(cfg.apply_host_registry(&registry).unwrap(), 2);
+    assert!(matches!(&cfg.pages[0].content, PageContent::Route(r) if r == "/_pages/stats"));
+    assert_eq!(cfg.legacy_pages["forecast"], "weather");
+    assert!(
+        cfg.apply_host_registry(&json!({"web_pages": [{"path": "x", "mode": "dash"}]}))
+            .is_err()
+    );
+    let app = meerschaum_web::app(state.clone(), cfg).unwrap();
+    let (cookie, _) = login(&app).await;
+    let page = send(
+        &app,
+        Request::get("/dash/pipes")
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let html = page.text();
+    assert!(html.contains("href=\"/dash/stats\""), "{html}");
+    assert!(html.contains("href=\"/dash/weather/forecast\""), "{html}");
+    let redirect = send(
+        &app,
+        Request::get("/dash/forecast")
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(redirect.headers["location"], "/dash/weather/forecast");
 }

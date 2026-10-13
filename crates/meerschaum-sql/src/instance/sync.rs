@@ -125,6 +125,40 @@ fn current_timestamp(unit: meerschaum_core::dtypes::PrecisionUnit, as_int: bool)
     ))
 }
 
+/// The longest internal key value (characters) MySQL / MariaDB / MSSQL can index: internal
+/// (`mrsm`) string keys are stored as `VARCHAR(255)` / `NVARCHAR(255)`.
+pub const INTERNAL_KEY_MAX_CHARS: usize = 255;
+
+/// A failure message when an internal pipe's key column holds a string longer than
+/// [`INTERNAL_KEY_MAX_CHARS`] on a flavor that bounds internal keys (the database would
+/// otherwise reject or silently truncate it).
+fn internal_key_length_error(sp: &SqlPipe, flavor: Flavor, df: &Frame) -> Option<String> {
+    if sp.pipe().connector_keys() != "mrsm"
+        || !matches!(flavor, Flavor::Mysql | Flavor::Mariadb | Flavor::Mssql)
+    {
+        return None;
+    }
+    let limit = |v: &KValue| -> usize {
+        match flavor {
+            // NVARCHAR counts UTF-16 code units.
+            Flavor::Mssql => v.py_str().encode_utf16().count(),
+            _ => v.py_str().chars().count(),
+        }
+    };
+    for column in columns_map(sp).values() {
+        let Ok(data) = df.data(column) else { continue };
+        for v in data.values() {
+            if matches!(v, KValue::Str(_)) && limit(&v) > INTERNAL_KEY_MAX_CHARS {
+                return Some(format!(
+                    "The internal key '{column}' of {} exceeds {INTERNAL_KEY_MAX_CHARS} characters, which {flavor} cannot index.",
+                    sp.pipe()
+                ));
+            }
+        }
+    }
+    None
+}
+
 impl SqlConnector {
     /// `Pipe.sync(df)` essentials over this instance: enforce the pipe's dtypes on the input
     /// (a frame, documents or a dict of lists), add the autotime column, persist newly detected
@@ -162,6 +196,9 @@ impl SqlConnector {
                 pipe.set_parameters(params);
             }
         }
+        // Cross-pipe `{{ Pipe() }}` templates resolve against registered state (raw parameters,
+        // what `edit_pipe` persists, keep the templates).
+        *pipe = self.prepare_pipe(pipe).await;
         let sp = self.sql_pipe(pipe)?;
         let state = self.pipe_state(&sp).await;
         let ctx = self.dtypes_ctx(&sp, &state);
@@ -256,7 +293,7 @@ impl SqlConnector {
                 .map(|m| m.iter().map(|(k, v)| (k.clone(), v.py_str())).collect()),
             ..Default::default()
         };
-        let mut pipe = pipe.clone();
+        let mut pipe = self.prepare_pipe(pipe).await;
         self.sync_pipe_impl(&mut pipe, df, opts, internal).await
     }
 
@@ -297,6 +334,9 @@ impl SqlConnector {
         let flavor = self.flavor;
         let sp0 = self.sql_pipe(pipe)?;
         let schema = self.get_pipe_schema(&sp0);
+        if let Some(message) = internal_key_length_error(&sp0, flavor, &df) {
+            return Ok(SyncResult::new(false, message));
+        }
 
         if !pipe.temporary && self.get_pipe_id(pipe).await?.is_none() {
             let reg = self.register_pipe(pipe).await;
@@ -639,6 +679,35 @@ impl SqlConnector {
         if keys.is_empty() || keys.iter().any(|k| !df.contains(k)) {
             return Ok(None);
         }
+        let key_names = keys.clone();
+        // DuckDB has no staged upsert template, so a batch repeating a key is collapsed to its
+        // last row (applying the rows in order would leave the last one) instead of being
+        // rejected. Null keys still cannot be upserted.
+        let deduped;
+        let df = if self.flavor == Flavor::Duckdb && df.height() > 1 {
+            let key_values: Vec<Vec<KValue>> = key_names
+                .iter()
+                .map(|k| df.data(k).expect("key column").values())
+                .collect();
+            if key_values.iter().any(|v| v.iter().any(|x| x.is_na())) {
+                return Ok(None);
+            }
+            let mut last: IndexMap<Vec<String>, usize> = IndexMap::new();
+            for row in 0..df.height() {
+                let key: Vec<String> = key_values.iter().map(|v| v[row].py_str()).collect();
+                last.insert(key, row);
+            }
+            if last.len() == df.height() {
+                df
+            } else {
+                let mut rows: Vec<usize> = last.into_values().collect();
+                rows.sort_unstable();
+                deduped = df.take(&rows);
+                &deduped
+            }
+        } else {
+            df
+        };
         let columns: Vec<Vec<KValue>> = cols
             .iter()
             .map(|c| df.data(c).expect("column").values())
@@ -800,9 +869,7 @@ impl SqlConnector {
             if flavor == Flavor::Duckdb {
                 // v4 skips DuckDB indices and has no staged upsert template. Do not silently
                 // turn an invalid internal upsert into a plain insert or an empty update.
-                return Err(be(
-                    "Internal DuckDB upserts require unique non-null keys in each batch.",
-                ));
+                return Err(be("Internal DuckDB upserts require non-null keys."));
             }
         }
         let temp_target = self.get_temporary_target(

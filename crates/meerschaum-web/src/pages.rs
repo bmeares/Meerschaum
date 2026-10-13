@@ -150,6 +150,10 @@ async fn pipes(state: &WebState, data: &Json, query: &Query) -> WebResult<String
     if keys.is_empty() {
         content.push_str("<p>No pipes found.</p>");
     }
+    let view = match &state.config.engine {
+        Some(reader) => reader.pipeline(&[]).await.ok(),
+        None => None,
+    };
     for keys in keys {
         let Some(keys) = keys.as_array().filter(|v| v.len() >= 3) else {
             continue;
@@ -173,13 +177,21 @@ async fn pipes(state: &WebState, data: &Json, query: &Query) -> WebResult<String
             ("Parameters", parameters),
             ("Columns", &parameters["columns"]),
             ("Dtypes", &parameters["dtypes"]),
-            ("Parents", &parameters["parents"]),
-            ("Children", &parameters["children"]),
         ] {
             content.push_str(&format!(
                 "<details><summary>{title}</summary><pre>{}</pre></details>",
                 pretty(value)
             ));
+        }
+        // Parents / Children tabs with ledger lag per edge (§8.2).
+        if let Some(view) = &view {
+            let node = meerschaum_engine::PipeRef::new(
+                &state.server.config.instance_keys,
+                ck,
+                mk,
+                Some(lk).filter(|l| *l != "None"),
+            );
+            content.push_str(&crate::pipelines::relations_html(view, &node));
         }
         for (title, suffix) in [("Row count", "rowcount"), ("Sync time", "sync_time")] {
             let value = get_json(state, data, &format!("{target}/{suffix}")).await;
@@ -580,117 +592,9 @@ pub(crate) async fn logs(
         .into_response()
 }
 
-async fn pipelines(state: &WebState, data: &Json, query: &Query) -> WebResult<String> {
-    let run_id = query.str_or("run_id", "");
-    let runs = get_json(
-        state,
-        data,
-        &if run_id.is_empty() {
-            "/engine/runs?limit=100".into()
-        } else {
-            format!("/engine/runs?limit=100&run_id={}", encode(&run_id))
-        },
-    )
-    .await?;
-    let mut nodes = BTreeMap::new();
-    let mut traces = Vec::new();
-    let mut edges = BTreeMap::new();
-    let keys = get_json(state, data, "/pipes/keys").await?;
-    if let Some(keys) = keys.as_array() {
-        for key in keys {
-            let Some(key) = key.as_array().filter(|k| k.len() >= 3) else {
-                continue;
-            };
-            let ck = key[0].as_str().unwrap_or("");
-            if ck == "mrsm" {
-                continue;
-            }
-            let handle = state
-                .server
-                .get_pipe(
-                    ck,
-                    key[1].as_str().unwrap_or(""),
-                    key[2].as_str(),
-                    None,
-                    true,
-                )
-                .await
-                .map_err(IntoResponse::into_response)?;
-            let pipe = &handle.pipe;
-            let id = pipe.pipe_ref();
-            nodes
-                .entry(id.clone())
-                .or_insert_with(|| json!({"data":{"id":id,"label":pipe.to_string()}}));
-            let parents = pipe
-                .parents(&state.server.config.pipe_defaults)
-                .map_err(|_| {
-                    (StatusCode::UNPROCESSABLE_ENTITY, "Invalid parent reference").into_response()
-                })?;
-            let children = pipe
-                .children(&state.server.config.pipe_defaults)
-                .map_err(|_| {
-                    (StatusCode::UNPROCESSABLE_ENTITY, "Invalid child reference").into_response()
-                })?;
-            for (parent, child) in parents
-                .into_iter()
-                .flatten()
-                .map(|p| (p, pipe.clone()))
-                .chain(children.into_iter().flatten().map(|c| (pipe.clone(), c)))
-            {
-                let source = parent.pipe_ref();
-                let target = child.pipe_ref();
-                nodes
-                    .entry(source.clone())
-                    .or_insert_with(|| json!({"data":{"id":source,"label":parent.to_string()}}));
-                nodes
-                    .entry(target.clone())
-                    .or_insert_with(|| json!({"data":{"id":target,"label":child.to_string()}}));
-                edges.insert((source.clone(), target.clone()), json!({"data":{"source":source,"target":target,"label":"Ledger lag unavailable"}}));
-            }
-        }
-    }
-    let mut latest = std::collections::HashSet::new();
-    if let Some(runs) = runs.as_array() {
-        for run in runs {
-            let name = run["pipe_ref"]
-                .as_str()
-                .or(run["run_id"].as_str())
-                .unwrap_or("run");
-            // The API returns newest runs first; older history must not replace node status.
-            if latest.insert(name.to_string()) {
-                nodes.insert(name.to_string(), json!({"data":{"id":name,"label":format!("{}: {}", name, run["status"].as_str().unwrap_or("unknown"))}}));
-            }
-            for (label, start_key, end_key) in [
-                ("Actual", "started", "finished"),
-                ("Planned", "planned_started", "planned_finished"),
-            ] {
-                let Some(start) = run[start_key]
-                    .as_str()
-                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                else {
-                    continue;
-                };
-                let Some(end) = run[end_key]
-                    .as_str()
-                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                else {
-                    continue;
-                };
-                traces.push(json!({"type":"bar","orientation":"h","name":format!("{name} {label}"),"y":[name],"base":[start.to_rfc3339()],"x":[(end-start).num_milliseconds()]}));
-            }
-        }
-    }
-    let figure = json!({"data":traces,"layout":{"title":"Run timing","xaxis":{"type":"date"},"barmode":"overlay"}});
-    let graph: Vec<_> = nodes.into_values().chain(edges.into_values()).collect();
-    Ok(format!(
-        "<form method=\"get\"><label>Run ID <input name=\"run_id\" value=\"{}\"></label><button>Filter runs</button></form><h2>Pipeline dependencies</h2><div data-mrsm-graph=\"{}\" role=\"img\" aria-label=\"Pipeline dependencies and run status\"></div><h2>Timeline</h2><div data-mrsm-figure=\"{}\" role=\"img\" aria-label=\"Planned and actual run timing\"></div><h2>Runs</h2>{}",
-        escape(&run_id),
-        escape(&json!({"elements":graph}).to_string()),
-        escape(&figure.to_string()),
-        table(&runs)
-    ))
+async fn pipelines(state: &WebState, _data: &Json, query: &Query) -> WebResult<String> {
+    crate::pipelines::page_content(state, query).await
 }
-
 async fn plugins(state: &WebState, data: &Json, query: &Query) -> WebResult<String> {
     let search = query.str_or("search_term", "");
     let plugins = get_json(

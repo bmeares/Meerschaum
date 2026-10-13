@@ -135,7 +135,7 @@ done
 | 26 | (review, `get_pipe_data(order=None)`) | rows sorted ascending | the binding mapped `order=None` to `'asc'` | `facade::get_pipe_data_and_state(..., no_order)`: no `ORDER BY` and no sort, as v4 |
 | 27 | (review, jobs) | `block_on` would hang in a forked child (v4 job daemons fork) | a forked child inherits the Tokio runtime object but none of its threads, and the parent's pool sockets | the runtime is keyed by PID (a child builds its own; the parent's is leaked, not dropped) and `SQLConnector._rust_method` rebuilds `_core.SqlConnector` when `os.getpid()` changed |
 | 28 | (perf, all PostgreSQL tests) | small calls 3-4x slower than v4 (`get_sync_time` 13.8 ms vs 3.3 ms) | every Rust data method re-read the table state (`table_exists` + a columns-types catalog query), where v4 reads the pipe's cached `get_columns_types()` | the bindings pass `pipe.get_columns_types()` (v4's own 60 s cache) into `facade::pipe_state_cached`; see `PERF.md` |
-| 29 | (design §4.4, not a test) | `pipe.parameters['tags'] = [...]` then `pipe.edit()` does **not** persist, in both modes | v4.1.4's `parameters` property returns a resolved copy (`pipe.parameters is pipe.parameters` is `False`); attribute setters (`pipe.tags = ...`) write `_attributes['parameters']` | Unchanged (parity). The live-dict proxy of §4.4 belongs to the `Pipe` façade switch-over, not to this wave; `tests/test_facade_sql.py::test_attribute_aliases_persist` pins the setter path |
+| 29 | (design §4.4, not a test) | `pipe.parameters['tags'] = [...]` then `pipe.edit()` does **not** persist, in both modes | v4.1.4's `parameters` property returns a resolved copy (`pipe.parameters is pipe.parameters` is `False`); attribute setters (`pipe.tags = ...`) write `_attributes['parameters']` | Unchanged in `python` mode (parity). Resolved in wave 6 for `rust` mode (row 30); `tests/test_facade_sql.py::test_attribute_aliases_persist` pins the setter path |
 
 Not routed (stay v4 Python on purpose): `read`, `exec`, `value`, `to_sql`, `.engine`,
 `get_tables()` (D16); `sync_pipe_inplace` (it reaches the routed methods through `self`);
@@ -204,3 +204,56 @@ cached sync-state/read-options changes, raw SQLite document reads, and UTC sync-
 Python environment failed fixture/dependency setup; the count above is the complete rerun
 with the documented test environment. Large SQLite/PostGIS benchmark results and the
 remaining millisecond-scale performance gaps are recorded in `PERF.md`.
+
+## Wave 6: live `Pipe.parameters` (design §4.4)
+
+| # | Test(s) | Symptom | Root cause | Resolution |
+|---|---|---|---|---|
+| 30 | `tests/test_live_parameters.py` | `pipe.parameters['fetch']['backtrack_minutes'] = 5` then `pipe.edit()` did not persist (row 29) | v4's `parameters` property returns a resolved deep copy | Under `MRSM_CORE=rust` (feature name `pipe`, so `rust:pipe` works) the property returns `meerschaum/core/Pipe/_live_parameters.py::LiveDict`: a real `dict` subclass holding the **resolved** values (references, `{{ Pipe() }}`, `MRSM{}`, as v4 reads them) whose mutators (`__setitem__`, `__delitem__`, `update`, `pop`, `popitem`, `setdefault`, `clear`, `|=`) write through to the **raw** parameters; nested dicts and lists are live (`LiveList` replays `append`/`extend`/`insert`/`sort`/... on the raw list). Only touched keys are written, so a template that was merely read stays a template in the raw map; a write under an inherited (reference) key creates the key in the raw map only. Every write drops the resolved-parameters memo. `isinstance(dict)`, `json.dumps`, `**`, `deepcopy` and `pickle` give plain dicts. The `parameters` setter unwraps live views. `python` mode is unchanged (still a copy; pinned by `test_python_mode_parameters_are_a_copy`). |
+
+## Wave 6b: `_core.Pipe` behind `meerschaum.Pipe` (design §4.4)
+
+New pyclass `meerschaum._core.Pipe` (`src/pipe_api.rs`, wrapping `meerschaum_core::Pipe`). It maps
+constructor arguments only and never touches an instance. Surface: `connector_keys`, `metric_key`,
+`location_key`, `instance_keys`; `raw_parameters` (copy), `set_raw_parameters`,
+`update_raw_parameters`, `get_path` / `set_path` / `del_path` (keys and list indices, negative
+indices, missing dicts created on `set_path`); `resolved_parameters(pipe=None)` (core
+`resolve_parameters_with`; with the Python `Pipe` it uses `PyResolver`, the Python-side resolver
+callback for cross-pipe templates); `target(sql_flavor=None)`; `__eq__` / `__hash__` by keys;
+`__str__` / `__repr__` (core `Display`, no ANSI); `__getstate__` / `__setstate__` / `__reduce__`.
+
+Under `MRSM_CORE=rust` (feature `pipe`) `meerschaum.Pipe`:
+
+- creates `self._core_pipe` in `__init__` once the instance keys are known; `connector_keys`,
+  `metric_key`, `location_key`, `instance_keys` (and `metric` / `location`) read it;
+- uses `_live_parameters.Attrs` as `_attributes`: assigning `'parameters'` adopts the value as a
+  `RawDict` whose nested dicts and lists (`RawDict` / `RawList`) push the whole raw map into
+  `_core_pipe` after every mutation (and drop the resolved-parameters memo). Every path that wrote
+  `_attributes['parameters']` (init, the `parameters` setter, `update_parameters`, `columns` /
+  `tags` / `upsert` / ... setters, direct nested writes by connectors) therefore reaches Rust.
+  `_cache_value` / `_get_cached_value` re-adopt a replaced `'attributes'` dict (a metadata load from
+  the instance or the disk cache), so Rust holds the loaded raw parameters too;
+- `LiveDict` / `LiveList` (the resolved `pipe.parameters` view) write through to that Rust-owned raw
+  map (`_raw_node()` resolves to the `RawDict` tree).
+
+`python` mode is untouched. Tests: `tests/test_core_pipe.py` (7, rust-only), the existing
+`tests/test_live_parameters.py` (adjusted setter assertion).
+
+| # | Deviation | Reason |
+|---|---|---|
+| 31 | v4 stored the dict passed as `parameters=` by reference (later edits of the caller's dict were visible through the pipe); rust mode copies it into the Rust-owned map | the raw map is owned by `_core.Pipe`; the live `pipe.parameters` view is the supported way to mutate |
+| 32 | Python keeps reading the raw parameters from a Python-side `RawDict` mirror; Rust is written on every change (and verified equal by `test_every_raw_parameter_write_reaches_rust`), not read back on each access | `get_parameters` / `_symlinks` / reference resolution are v4 Python and read `_attributes['parameters']` on hot paths; converting from Rust on each read would cost a clone per access. Moving reads over comes with the Rust resolution of `get_parameters` |
+| 33 | `get_parameters()` resolution (references, `{{ Pipe() }}` with `_symlinks` capture used by `edit()`) is still v4 Python; `_core.Pipe.resolved_parameters(pipe)` exists and is tested on self templates only | the Python `_symlinks` bookkeeping and reference caching have no Rust counterpart yet |
+| 34 | `Pipe.target`, `__eq__`, `__hash__`, `__str__` (ANSI styling) stay on the Python implementations (they read the keys from Rust); `_core.Pipe.target/__eq__/__hash__/__str__` are bound but not routed | `target` warns and writes back through Python state; `__eq__` must stay duck-typed; ANSI `pipe_repr` is a Python formatter |
+
+Known gaps: `pipe.columns` / `dtypes` return plain copies (assignment works, in-place mutation of the
+returned dict does not); `pipe.tags` returns the live list in `rust` mode. The resolved view is a
+snapshot at read time. Whole-map pushes are O(size of parameters) per mutation.
+
+Results (sqlite, ignores as above plus `--ignore=tests/api_host`, release extension rebuilt with
+`scripts/rust/build_py.sh`): `rust` **623 passed, 3 skipped, 3 deselected** (134 s); `python`
+**613 passed, 16 skipped** (286 s; the skips are rust-only tests); crate tests
+`crates/meerschaum-py/tests/test_core.py` 132 passed, 1 xfailed; `cargo test -p meerschaum-py` all
+passing; `cargo clippy -p meerschaum-py --all-targets --no-deps -- -D warnings` clean (without
+`--no-deps` it stops on an unrelated warning in `meerschaum-cli/src/native_plugins.rs:114`, another
+task's file).

@@ -60,6 +60,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, Union, List, InstanceConnector
 from meerschaum.utils.formatting._pipes import pipe_repr
 from meerschaum.config import get_config
+from meerschaum._core import _gate as _core_gate
 
 
 class Pipe:
@@ -385,12 +386,20 @@ class Pipe:
         )
         self.debug = debug
 
-        self._attributes: Dict[str, Any] = {
+        _rust_pipe = _core_gate.use_rust('pipe')
+        _initial_attributes: Dict[str, Any] = {
             'connector_keys': self._connector_keys,
             'metric_key': self._metric_key,
             'location_key': self._location_key,
             'parameters': {},
         }
+        if _rust_pipe:
+            from ._live_parameters import Attrs
+            ### Keys and raw parameters live in a `_core.Pipe` (created below, once the instance
+            ### keys are known); `Attrs` pushes every change of the raw parameters into it.
+            self._attributes = Attrs(self, _initial_attributes)
+        else:
+            self._attributes: Dict[str, Any] = _initial_attributes
 
         ### only set parameters if values are provided
         if isinstance(parameters, dict):
@@ -485,6 +494,17 @@ class Pipe:
         if self._instance_keys == 'sql:memory':
             self.cache = False
 
+        if _rust_pipe:
+            from meerschaum import _core
+            ### Constructing never touches the instance: this only maps the arguments.
+            self._core_pipe = _core.Pipe(
+                self._connector_keys,
+                self._metric_key,
+                self._location_key,
+                self._instance_keys,
+                self._attributes['parameters'],
+            )
+
         self._cache_locks = collections.defaultdict(lambda: threading.RLock())
         self._attributes_lock = threading.RLock()
 
@@ -505,28 +525,30 @@ class Pipe:
         """
         Return the pipe's metric key.
         """
-        return self._metric_key
+        core = self.__dict__.get('_core_pipe', None)
+        return self._metric_key if core is None else core.metric_key
 
     @property
     def metric(self) -> str:
         """
         Return the pipe's metric key.
         """
-        return self._metric_key
+        return self.metric_key
 
     @property
     def location_key(self) -> Union[str, None]:
         """
         Return the pipe's location key.
         """
-        return self._location_key
+        core = self.__dict__.get('_core_pipe', None)
+        return self._location_key if core is None else core.location_key
 
     @property
     def location(self) -> Union[str, None]:
         """
         Return the pipe's location key.
         """
-        return self._location_key
+        return self.location_key
 
     @property
     def meta(self):
@@ -555,7 +577,8 @@ class Pipe:
         """
         Return the pipe's instance keys.
         """
-        return self._instance_keys
+        core = self.__dict__.get('_core_pipe', None)
+        return self._instance_keys if core is None else core.instance_keys
 
     @property
     def instance(self) -> Union[InstanceConnector, str]:
@@ -586,7 +609,8 @@ class Pipe:
         """
         Return the pipe's connector keys.
         """
-        return self._connector_keys
+        core = self.__dict__.get('_core_pipe', None)
+        return self._connector_keys if core is None else core.connector_keys
 
     @property
     def connector_key(self) -> str:

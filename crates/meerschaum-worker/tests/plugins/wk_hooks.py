@@ -83,6 +83,11 @@ def wk_top():
     return None
 
 
+@web_page('wk/html')
+def wk_html():
+    return '<p>page contract</p>'
+
+
 try:
     from meerschaum.mcp import tool, resource
 

@@ -769,7 +769,7 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
     // Checked after construction because `target` may be set in `parameters`.
     check_protected_target(&pipe)?;
     // `Pipe.register()`: an empty parameters dict registers the default index columns.
-    if pipe.parameters().is_empty() {
+    if pipe.raw_parameters().is_empty() {
         let cols = pipe.columns();
         let cols = if cols.is_empty() {
             map_of([("datetime", Value::Null), ("id", Value::Null)])
@@ -801,7 +801,7 @@ async fn edit_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
         pipe.set_parameters(parameters);
     } else {
         // `pipe.update_parameters(parameters, persist=True)`: deep-merge, then `edit()`.
-        let merged = meerschaum_core::value::apply_patch_maps(pipe.parameters(), &parameters);
+        let merged = meerschaum_core::value::apply_patch_maps(pipe.raw_parameters(), &parameters);
         pipe.set_parameters(merged);
     }
     let res = conn.edit_pipe(&pipe, false).await;

@@ -16,10 +16,12 @@
 
 pub mod models;
 pub mod pipe_ops;
+pub mod template;
 pub mod traits;
 
 pub use async_trait::async_trait;
 pub use models::TokenModel;
+pub use template::{InstanceProvider, SnapshotResolver, resolve_pipe};
 pub use traits::{
     ColumnIndexInfo, Connector, ConnectorError, ConnectorResult, DataQuery, DateBound,
     InstanceConnector, PipeId, PipeKeysEntry, PipesKeys, PipesKeysQuery, PluginRecord, SyncOptions,

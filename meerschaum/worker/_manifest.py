@@ -217,7 +217,29 @@ def build_manifest(debug: bool = False) -> Dict[str, Any]:
             plugin_name = _plugin_of(func)
             if plugin_name not in manifest_plugins:
                 continue
+            ### The mode is only known by calling the function once (as v4 and the API host do):
+            ### a `str` / `(html, status)` result is the page contract, anything else a Dash layout.
+            mode = 'dash'
+            try:
+                if isinstance(func(), (str, tuple)):
+                    mode = 'html'
+            except Exception:
+                pass
+            if mode == 'html':
+                route_rest = page_path.lstrip('/')
+                if route_rest == 'dash' or route_rest.startswith('dash/'):
+                    route_rest = route_rest[len('dash'):].lstrip('/')
+                route = ('/_pages/' + route_rest).rstrip('/') or '/_pages'
+            else:
+                route_rest = page_path.lstrip('/')
+                if route_rest == 'dash' or route_rest.startswith('dash/'):
+                    route_rest = route_rest[len('dash'):].lstrip('/')
+                if route_rest == plugin_name or route_rest.startswith(plugin_name + '/'):
+                    route_rest = route_rest[len(plugin_name):].lstrip('/')
+                route = f"/dash/{plugin_name}/{route_rest}".rstrip('/')
             manifest_plugins[plugin_name]['web_pages'].append({
+                'mode': mode,
+                'route': route,
                 'path': page_path,
                 'page_group': page_group,
                 'page_key': page_info.get('page_key', None),

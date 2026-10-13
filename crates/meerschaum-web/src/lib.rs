@@ -1,6 +1,7 @@
 //! Server-rendered `/dash` console. Compose with `app`; plugin Dash apps remain unmatched.
 #![deny(unsafe_code)]
 mod pages;
+mod pipelines;
 pub mod sessions;
 
 use askama::Template;
@@ -46,8 +47,75 @@ pub struct WebConfig {
     /// Map old relative page paths to owning plugin names.
     pub legacy_pages: BTreeMap<String, String>,
     pub dash_plugins: Vec<String>,
+    /// Read access to engine state for the pipelines page; `None` disables the page.
+    pub engine: Option<Arc<meerschaum_engine::EngineReader>>,
 }
 impl WebConfig {
+    /// Merge the Python host's page manifest (`GET /_mrsm/host/registry`, its `web_pages[]`).
+    ///
+    /// `mode: "html"` entries become page-contract pages served as `PageContent::Route(route)`
+    /// (the host returns an HTML fragment at `/_pages/<path>`, the console wraps it in its
+    /// chrome and forwards the `Cookie` header). `mode: "dash"` entries are legacy Dash pages
+    /// owned by a plugin's app: the console links to `/dash/<plugin>/<path>` and redirects the
+    /// old `/dash/<path>`. The plugin name comes from the entry's `plugin` field, else from a
+    /// `/dash/<plugin>/...` route. Entries that name no usable plugin are skipped with an error.
+    pub fn apply_host_registry(&mut self, registry: &Json) -> Result<usize, String> {
+        let mut applied = 0;
+        let Some(entries) = registry["web_pages"].as_array() else {
+            return Ok(0);
+        };
+        for entry in entries {
+            let path = entry["path"].as_str().unwrap_or("").trim_matches('/');
+            if path.is_empty() {
+                return Err("Host page entry without a path".into());
+            }
+            let group = entry["page_group"].as_str().unwrap_or("").to_string();
+            match entry["mode"].as_str().unwrap_or("html") {
+                "dash" => {
+                    let plugin = entry["plugin"]
+                        .as_str()
+                        .map(str::to_string)
+                        .or_else(|| {
+                            entry["route"]
+                                .as_str()?
+                                .strip_prefix("/dash/")?
+                                .split('/')
+                                .next()
+                                .map(str::to_string)
+                        })
+                        .filter(|p| !p.is_empty());
+                    let Some(plugin) = plugin else {
+                        return Err(format!("Dash page '{path}' does not name its plugin"));
+                    };
+                    if !self.dash_plugins.contains(&plugin) {
+                        self.dash_plugins.push(plugin.clone());
+                    }
+                    self.legacy_pages.insert(path.to_string(), plugin);
+                }
+                _ => {
+                    let Some(route) = entry["route"].as_str() else {
+                        return Err(format!("Page '{path}' has no route"));
+                    };
+                    self.pages.push(PluginPage {
+                        path: path.to_string(),
+                        page_group: group,
+                        login_required: entry["login_required"].as_bool().unwrap_or(true),
+                        skip_navbar: entry["skip_navbar"].as_bool().unwrap_or(false),
+                        dark_theme: entry["dark_theme"].as_bool(),
+                        content: PageContent::Route(route.to_string()),
+                    });
+                }
+            }
+            applied += 1;
+        }
+        Ok(applied)
+    }
+    /// Read engine state through `reader` (the default reads the server's own instance).
+    pub fn with_engine(mut self, reader: Arc<meerschaum_engine::EngineReader>) -> Self {
+        self.engine = Some(reader);
+        self
+    }
+
     /// Prefer the configured cache connector over the instance fallback.
     pub fn with_cache(mut self, cache: &meerschaum_valkey::ValkeyConnector) -> Self {
         self.sessions = Arc::new(sessions::ValkeySessions(cache.backend().clone()));
@@ -62,8 +130,23 @@ impl WebConfig {
             pages: vec![],
             legacy_pages: BTreeMap::new(),
             dash_plugins: vec![],
+            engine: Some(engine_reader(state)),
         }
     }
+}
+/// An engine reader over the server's own instance (runs, ledger and cursors live there).
+fn engine_reader(state: &AppState) -> Arc<meerschaum_engine::EngineReader> {
+    let keys = state.config.instance_keys.clone();
+    let registry = meerschaum_engine::StaticRegistry::new().with_instance(&keys, state.instance());
+    let config = meerschaum_engine::EngineConfig {
+        defaults: state.config.pipe_defaults.clone(),
+        home_instance: keys,
+        ..Default::default()
+    };
+    Arc::new(meerschaum_engine::EngineReader::new(
+        Arc::new(registry),
+        config,
+    ))
 }
 #[derive(Clone)]
 pub(crate) struct WebState {
@@ -114,6 +197,10 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
         router = router.route(&format!("/dash{page}"), get(pages::page));
     }
     router = router
+        .route("/dash/pipelines/graph", get(pipelines::partial))
+        .route("/dash/pipelines/gantt", get(pipelines::partial))
+        .route("/dash/pipelines/runs", get(pipelines::partial))
+        .route("/dash/pipelines/events", get(pipelines::events))
         .route("/dash/login", get(login_page).post(login))
         .route(
             "/dash/register",

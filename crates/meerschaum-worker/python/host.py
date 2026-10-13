@@ -95,7 +95,7 @@ original_manifest = _ops.HANDLERS['build_manifest']
 def manifest(conn, call_id, args, frames):
     value, result_frames = original_manifest(conn, call_id, args, frames)
     from meerschaum.actions import get_completer
-    value['schema_version'] = 2
+    value['schema_version'] = 3
     for plugin in value.get('plugins', {}).values():
         for action in plugin.get('actions', []):
             action['has_completer'] = get_completer(action['name']) is not None

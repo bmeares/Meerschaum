@@ -84,12 +84,12 @@ pub fn python_dtype_name(kernel_dtype: &str, configured: Option<&str>) -> String
 /// registered, non-temporary pipe, else the in-memory ones.
 async fn refreshed_parameters(conn: &ValkeyConnector, pipe: &Pipe) -> ConnectorResult<Map> {
     if pipe.temporary {
-        return Ok(pipe.parameters().clone());
+        return Ok(pipe.raw_parameters().clone());
     }
     Ok(conn
         .get_pipe_parameters(pipe)
         .await?
-        .unwrap_or_else(|| pipe.parameters().clone()))
+        .unwrap_or_else(|| pipe.raw_parameters().clone()))
 }
 
 /// The `DataQuery` for a `filter_existing` backtrack request.
@@ -143,7 +143,7 @@ impl ValkeyConnector {
             pipe.metric_key(),
             pipe.location_key(),
         );
-        let parameters_str = dumps_parameters(pipe.parameters());
+        let parameters_str = dumps_parameters(pipe.raw_parameters());
         let result: ConnectorResult<Option<SuccessTuple>> = async {
             if self.get(&pipe_key).await?.is_some() {
                 return Ok(Some(SuccessTuple::fail(format!(
@@ -232,7 +232,10 @@ impl ValkeyConnector {
             pipe.metric_key(),
             pipe.location_key(),
         );
-        match self.set(&key, &dumps_parameters(pipe.parameters())).await {
+        match self
+            .set(&key, &dumps_parameters(pipe.raw_parameters()))
+            .await
+        {
             Ok(()) => SuccessTuple::success(),
             Err(e) => SuccessTuple::fail(e.to_string()),
         }
@@ -296,7 +299,7 @@ impl ValkeyConnector {
         // PARITY: v4 resets `valkey.dtypes` in the *in-memory* parameters and persists them all
         // (`_pipes.py`, `drop_pipe`). A pipe built without `valkey` in memory falls back to the
         // persisted parameters so the reset is not silently skipped.
-        let mut parameters = pipe.parameters().clone();
+        let mut parameters = pipe.raw_parameters().clone();
         if !parameters.contains_key("valkey") && !pipe.temporary {
             if let Ok(Some(persisted)) = self.get_pipe_parameters(pipe).await {
                 if persisted.contains_key("valkey") {

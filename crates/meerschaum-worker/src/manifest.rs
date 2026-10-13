@@ -25,7 +25,7 @@ use crate::protocol::{Msg, wire_to_json};
 use crate::worker::CallOptions;
 
 /// The manifest schema version.
-pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
+pub const MANIFEST_SCHEMA_VERSION: u32 = 3;
 
 /// The manifest file name under the cache directory.
 pub const MANIFEST_FILE_NAME: &str = "plugins_manifest.json";
@@ -114,6 +114,16 @@ pub struct WebPageManifest {
     pub dark_theme: bool,
     /// The layout function's name.
     pub function: Option<String>,
+    /// `html` (page contract) or `dash` (legacy Dash layout).
+    #[serde(default = "default_web_page_mode")]
+    pub mode: String,
+    /// The host route serving the page (`/_pages/<path>` or `/dash/<plugin>/<path>`).
+    #[serde(default)]
+    pub route: Option<String>,
+}
+
+fn default_web_page_mode() -> String {
+    "dash".to_string()
 }
 
 /// An MCP tool registered with `meerschaum.mcp.tool(...)`.

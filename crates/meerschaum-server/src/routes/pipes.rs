@@ -420,7 +420,7 @@ async fn get_pipes(ctx: Ctx) -> ApiResult {
                         false,
                     )
                     .await?;
-                Value::Map(h.pipe.parameters().clone())
+                Value::Map(h.pipe.raw_parameters().clone())
             }
         };
         let attrs = json!({

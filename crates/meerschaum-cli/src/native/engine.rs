@@ -10,13 +10,21 @@ use super::super::{Instance, Session};
 use crate::builtin::ActionError;
 use crate::dispatch::Runtime;
 
+/// The registries of one engine: the Python adapter (listen / callback controls) and the
+/// registry the engine resolves connectors through (native plugins before the adapter).
+pub(super) struct EngineRegistry {
+    pub python: Arc<meerschaum_engine::python::PythonRegistry>,
+    pub registry: Arc<dyn meerschaum_engine::ConnectorRegistry>,
+    pub config: EngineConfig,
+}
+
 pub(super) fn registry(
     config_ref: &meerschaum_core::config::Config,
     session: &Session,
     inst: &Instance,
     pipes: &[SelectedPipe],
     inplace: bool,
-) -> Result<(Arc<meerschaum_engine::python::PythonRegistry>, EngineConfig), ActionError> {
+) -> Result<EngineRegistry, ActionError> {
     let mut native = StaticRegistry::new().with_instance(&inst.keys(), inst.conn());
     if inplace
         && config_ref
@@ -66,13 +74,22 @@ pub(super) fn registry(
     });
     let mut config = EngineConfig::from_config(config_ref, Some(&config_ref.paths().root_dir));
     config.home_instance = inst.keys();
-    let registry = meerschaum_engine::python::PythonRegistry::new(
+    let python = meerschaum_engine::python::PythonRegistry::new(
         Arc::new(native),
         session.pool(config_ref),
-        session.manifest(config_ref)?,
+        session.python_manifest(config_ref)?,
         config.clone(),
     );
-    Ok((registry, config))
+    let registry = crate::native_plugins::NativeRegistry::new(
+        session.native_plugins(config_ref)?,
+        config_ref,
+        python.clone(),
+    );
+    Ok(EngineRegistry {
+        python,
+        registry,
+        config,
+    })
 }
 
 /// PARITY: v4 returns the SQL in-place sync message directly (without a chunk envelope).
@@ -173,12 +190,16 @@ pub(super) fn build(
     listen: bool,
     stream_kwargs: Option<meerschaum_core::Map>,
 ) -> Result<Engine, ActionError> {
-    let (registry, config) = registry(rt.config(), session, inst, pipes, inplace)?;
+    let EngineRegistry {
+        python,
+        registry,
+        config,
+    } = registry(rt.config(), session, inst, pipes, inplace)?;
     if listen {
-        registry.enable_legacy_streams();
+        python.enable_legacy_streams();
     }
     if let Some(kwargs) = stream_kwargs {
-        registry.set_stream_kwargs(kwargs);
+        python.set_stream_kwargs(kwargs);
     }
     Ok(Engine::new(registry, config))
 }

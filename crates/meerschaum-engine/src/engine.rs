@@ -531,6 +531,40 @@ fn record_from_entry(
     rec
 }
 
+/// Read every registered pipe of `instance` as graph records (batch `fetch_pipes_keys`).
+pub(crate) async fn fetch_records(
+    registry: &dyn ConnectorRegistry,
+    defaults: &PipeDefaults,
+    instance: &str,
+    query: &PipesKeysQuery,
+) -> Result<Vec<PipeRecord>, String> {
+    let conn = registry.instance(instance)?;
+    let keys = conn
+        .fetch_pipes_keys(query)
+        .await
+        .map_err(|e| format!("Failed to read pipes from '{instance}': {e}"))?;
+    let entries: Vec<&PipeKeysEntry> = match &keys {
+        PipesKeys::List(v) => v.iter().collect(),
+        PipesKeys::Dict(m) => m.values().collect(),
+    };
+    let mut out = Vec::with_capacity(entries.len());
+    for e in entries {
+        let mut rec = record_from_entry(instance, e, registry);
+        if !matches!(e.extra, Some(Value::Map(_))) {
+            // The list form carries no parameters: read them per pipe.
+            if let Ok(pipe) = rec.to_pipe(defaults) {
+                if let Ok(attrs) = conn.get_pipe_attributes(&pipe).await {
+                    if let Some(Value::Map(p)) = attrs.get("parameters") {
+                        rec.parameters = p.clone();
+                    }
+                }
+            }
+        }
+        out.push(rec);
+    }
+    Ok(out)
+}
+
 impl Engine {
     /// An engine over `registry`.
     pub fn new(registry: Arc<dyn ConnectorRegistry>, config: EngineConfig) -> Engine {
@@ -595,31 +629,13 @@ impl Engine {
         instance: &str,
         query: &PipesKeysQuery,
     ) -> Result<Vec<PipeRecord>, String> {
-        let conn = self.registry.instance(instance)?;
-        let keys = conn
-            .fetch_pipes_keys(query)
-            .await
-            .map_err(|e| format!("Failed to read pipes from '{instance}': {e}"))?;
-        let entries: Vec<&PipeKeysEntry> = match &keys {
-            PipesKeys::List(v) => v.iter().collect(),
-            PipesKeys::Dict(m) => m.values().collect(),
-        };
-        let mut out = Vec::with_capacity(entries.len());
-        for e in entries {
-            let mut rec = record_from_entry(instance, e, self.registry.as_ref());
-            if !matches!(e.extra, Some(Value::Map(_))) {
-                // The list form carries no parameters: read them per pipe.
-                if let Ok(pipe) = rec.to_pipe(&self.config.defaults) {
-                    if let Ok(attrs) = conn.get_pipe_attributes(&pipe).await {
-                        if let Some(Value::Map(p)) = attrs.get("parameters") {
-                            rec.parameters = p.clone();
-                        }
-                    }
-                }
-            }
-            out.push(rec);
-        }
-        Ok(out)
+        fetch_records(
+            self.registry.as_ref(),
+            &self.config.defaults,
+            instance,
+            query,
+        )
+        .await
     }
 
     fn instances(&self, opts: &RunOptions) -> Vec<String> {

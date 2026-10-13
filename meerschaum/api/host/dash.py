@@ -321,6 +321,113 @@ def collect_plugin_pages(debug: bool = False) -> Dict[str, Dict[str, Dict[str, A
     return out
 
 
+PAGE_ROUTE_PREFIX: str = '/_pages'
+
+
+def page_route(page_str: str) -> str:
+    """
+    Return the host route serving a page-contract `@web_page` (§8.3): `/dash/foo/bar` is served at
+    `/_pages/foo/bar`. The prefix avoids `/dash` and `/_mrsm`, which the console refuses to proxy.
+    """
+    rest = page_str.lstrip('/')
+    if rest == 'dash' or rest.startswith('dash/'):
+        rest = rest[len('dash'):].lstrip('/')
+    return f"{PAGE_ROUTE_PREFIX}/{rest}".rstrip('/') or PAGE_ROUTE_PREFIX
+
+
+def _normalize_page_result(result: Any):
+    """
+    Return `(html, status)` for a page-contract result (`str` or `(html, status)`).
+    """
+    if isinstance(result, tuple):
+        html = result[0] if result else ''
+        status = int(result[1]) if len(result) > 1 and result[1] is not None else 200
+        return ('' if html is None else str(html)), status
+    return str(result), 200
+
+
+_contract_pages: Dict[str, Dict[str, Any]] = {}
+
+
+def get_page_contract_pages(debug: bool = False) -> Dict[str, Dict[str, Any]]:
+    """
+    Return the page-contract pages found when the routes were mounted (computed once).
+    """
+    if not _contract_pages:
+        _contract_pages.update(collect_page_contract_pages(debug=debug))
+    return _contract_pages
+
+
+def collect_page_contract_pages(debug: bool = False) -> Dict[str, Dict[str, Any]]:
+    """
+    Return the page-contract `@web_page` registrations by page path.
+    A function is in page-contract mode when it returns a `str` or a `(html, status)` tuple; as
+    in v4, each function is called once at startup to find out, and again on every request.
+    """
+    from meerschaum.plugins import _plugin_endpoints_to_pages, _get_parent_plugin
+    out: Dict[str, Dict[str, Any]] = {}
+    for page_group, pages_dicts in list(_plugin_endpoints_to_pages.items()):
+        for page_str, page_dict in list(pages_dicts.items()):
+            function = page_dict['function']
+            try:
+                result = function()
+            except Exception:
+                continue
+            if not isinstance(result, (str, tuple)):
+                continue
+            out[page_str] = {
+                **{k: v for k, v in page_dict.items() if k != 'function'},
+                'function': function,
+                'page_group': page_group,
+                'plugin': _get_parent_plugin(function=function) or page_group,
+                'route': page_route(page_str),
+            }
+    return out
+
+
+def mount_page_contract_routes(fastapi_app, debug: bool = False) -> List[str]:
+    """
+    Serve every page-contract `@web_page` at its `/_pages/...` route, returning an HTML fragment
+    that the Rust console wraps in its chrome. Requests to pages with `login_required` need an
+    active `mrsm-session-id` session (the console forwards the cookie).
+
+    Returns
+    -------
+    The page paths served.
+    """
+    from starlette.responses import HTMLResponse, Response
+    from starlette.concurrency import run_in_threadpool
+    from meerschaum.api import no_auth
+
+    pages = get_page_contract_pages(debug=debug)
+    served = []
+    for page_str, page in pages.items():
+        function = page['function']
+        login_required = bool(page.get('login_required', True))
+
+        def _make(function=function, login_required=login_required):
+            async def _serve(request):
+                if login_required and not no_auth:
+                    from meerschaum.api.dash.sessions import (
+                        get_session_id_from_request, is_session_active,
+                    )
+                    session_id = get_session_id_from_request(request)
+                    if not session_id or not await run_in_threadpool(is_session_active, session_id):
+                        return Response(status_code=401)
+                try:
+                    result = await run_in_threadpool(function)
+                except Exception:
+                    traceback.print_exc()
+                    return Response(status_code=500)
+                html, status = _normalize_page_result(result)
+                return HTMLResponse(html, status_code=status)
+            return _serve
+
+        fastapi_app.add_route(page['route'], _make(), methods=['GET'], include_in_schema=False)
+        served.append(page_str)
+    return served
+
+
 def mount_dash_apps(fastapi_app, debug: bool = False) -> List[str]:
     """
     Create, initialize and mount each plugin's Dash app at `/dash/<plugin>/`.

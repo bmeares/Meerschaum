@@ -69,6 +69,7 @@ impl SqlConnector {
         if remote {
             return self.get_sync_time(pipe, params, newest, remote).await;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         let sp = self.sql_pipe(pipe)?;
         let state = self.pipe_state_cached(&sp, cached).await;
         Ok(self.sync_time(&sp, &state, params, newest).await)
@@ -85,6 +86,7 @@ impl SqlConnector {
         if query.remote {
             return self.get_pipe_rowcount(pipe, query).await;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         let sp = self.sql_pipe(pipe)?;
         let state = self.pipe_state_cached(&sp, cached).await;
         let Some(sql) = self.get_pipe_rowcount_query(&sp, &state, query)? else {
@@ -147,6 +149,7 @@ impl SqlConnector {
         no_order: bool,
         cached: Option<IndexMap<String, String>>,
     ) -> ConnectorResult<(Option<Frame>, PipeState)> {
+        let pipe = &self.prepare_pipe(pipe).await;
         let sp = self.sql_pipe(pipe)?;
         let state = self.pipe_state_cached(&sp, cached).await;
         if !state.exists {

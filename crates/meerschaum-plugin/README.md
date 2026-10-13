@@ -130,3 +130,24 @@ target-triple selection and installation belong to the installer. Server routes/
 not exposed by this SDK yet. Continuous `subscribe` and lazy streaming need a reader/sink SDK
 beyond the current eager frame API. The future wasm contract is sketched in
 `wit/plugin.wit` (not compiled); it replaces native Arrow pointers with Arrow IPC bytes.
+
+## Hosting (wave 6)
+
+`NativePlugins::open(dirs, cache)` is the process-level entry for hosts: it discovers native
+plugins, reads or rebuilds the cached manifest without loading code on a fingerprint hit, and
+loads each library lazily (`plugin(name)`, `connector(type, label, config)`, `source(name)`,
+`hooks(post)`). The CLI merges its manifest into the Python manifest (a native plugin shadows
+a Python plugin of the same name), dispatches native actions in-process, resolves native
+connectors and `sync()` for the engine, and runs native sync hooks.
+
+Server extensions use additive JSON methods through `LoadedPlugin::call_json`:
+
+- `routes` (no context) returns `[{"method", "path", "public"?}]`; the manifest entry must list
+  at least one name in `api_plugins` so the host knows to ask. `route` receives
+  `{method, path, query, body, user}` and returns `{status, content_type, body}`. Routes need
+  the server's credentials unless `"public": true` or the server runs `--no-auth`; paths under
+  `/dash`, `/webterm`, or a core route group are rejected.
+- Console pages are the manifest's `web_pages` entries; `page` receives
+  `{path, function, query, username}` and returns `{html, status?}` (a trusted fragment).
+
+Request and response bodies of routes are UTF-8 text.

@@ -189,6 +189,57 @@ fn api_serves_health_and_mcp_on_an_isolated_sqlite_instance() {
 }
 
 #[test]
+fn api_serves_the_dash_console_unless_no_dash() {
+    for no_dash in [false, true] {
+        let sandbox = Sandbox::new();
+        let socket = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        assert_ne!(port, 8989);
+        drop(socket);
+        let mut args = vec![
+            "start".to_string(),
+            "api".into(),
+            "-i".into(),
+            "sql:local".into(),
+            "--host".into(),
+            "127.0.0.1".into(),
+            "-p".into(),
+            port.to_string(),
+            "-w".into(),
+            "2".into(),
+        ];
+        if no_dash {
+            args.push("--nodash".into());
+        }
+        let mut child = ChildGuard(sandbox.command().args(&args).spawn().unwrap());
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            assert!(
+                child.0.try_wait().unwrap().is_none(),
+                "server exited before listening"
+            );
+            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "server did not listen");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let login = request(port, "GET", "/dash/login", "");
+        if no_dash {
+            assert!(!login.starts_with("HTTP/1.1 200"), "{login}");
+        } else {
+            assert!(login.starts_with("HTTP/1.1 200"), "{login}");
+            let dash = request(port, "GET", "/dash", "");
+            assert!(dash.starts_with("HTTP/1.1 303"), "{dash}");
+            assert!(dash.contains("location: /dash/login"), "{dash}");
+        }
+        let index = request(port, "GET", "/", "");
+        let target = if no_dash { "/docs" } else { "/dash" };
+        assert!(index.contains(&format!("location: {target}")), "{index}");
+    }
+}
+
+#[test]
 #[cfg(unix)]
 fn api_host_proxies_plugin_routes_and_federates_mcp_tools() {
     let sandbox = Sandbox::new();

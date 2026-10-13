@@ -99,6 +99,7 @@ def build_app(load_plugins: bool = True, debug: bool = False):
     ### The internal routes come first so a plugin cannot shadow them.
     _internal.register(app)
     run_api_plugins(app, debug=debug)
+    host_dash.mount_page_contract_routes(app, debug=debug)
     host_dash.mount_dash_apps(app, debug=debug)
 
     _built['app'] = app

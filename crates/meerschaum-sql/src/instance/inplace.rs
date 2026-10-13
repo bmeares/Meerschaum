@@ -136,6 +136,7 @@ impl SqlConnector {
         check_existing: bool,
     ) -> SuccessTuple {
         let flavor = self.flavor;
+        let pipe = &self.prepare_pipe(pipe).await;
         let sp = match self.sql_pipe(pipe) {
             Ok(sp) => sp,
             Err(e) => return SuccessTuple::fail(e.to_string()),

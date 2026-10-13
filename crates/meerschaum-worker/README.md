@@ -214,7 +214,7 @@ registers `host_action` (plugin dispatch with native Pipe.sync callbacks), `core
 and completion replies contain `result`, `stdout`, and `stderr`; other worker diagnostics go to
 stderr so MCP stdio stays clean. Interactive `python` is launched by the CLI directly.
 
-Manifest schema version 2 adds `actions[].has_completer`. An empty plugin tree is fingerprinted
+Manifest schema version 2 adds `actions[].has_completer`; version 3 adds `web_pages[].mode` (`html` or `dash`, found by calling the page function once like v4) and `web_pages[].route`. An empty plugin tree is fingerprinted
 and cached entirely in Rust, including when no Python interpreter is installed.
 
 Nested calls from native callback processing have a bounded reserve in the same pool, so a

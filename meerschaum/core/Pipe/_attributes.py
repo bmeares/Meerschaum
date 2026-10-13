@@ -202,8 +202,17 @@ def get_parameters(
 def parameters(self) -> Optional[Dict[str, Any]]:
     """
     Return the parameters dictionary of the pipe.
+
+    Under `MRSM_CORE=rust` the dictionary is a live view (design §4.4): reads are resolved
+    as before, and mutations (including nested ones) write through to the raw parameters,
+    so `pipe.parameters['fetch']['backtrack_minutes'] = 5` followed by `pipe.edit()` persists.
     """
-    return self.get_parameters(debug=self.debug)
+    resolved = self.get_parameters(debug=self.debug)
+    from meerschaum._core import _gate
+    if not _gate.use_rust('pipe'):
+        return resolved
+    from ._live_parameters import live_view
+    return live_view(self, resolved)
 
 
 @parameters.setter
@@ -212,7 +221,8 @@ def parameters(self, _parameters: Dict[str, Any]) -> None:
     Set the parameters dictionary of the in-memory pipe.
     Call `meerschaum.Pipe.edit()` to persist changes.
     """
-    self._attributes['parameters'] = _parameters
+    from ._live_parameters import plain
+    self._attributes['parameters'] = plain(_parameters)
 
 
 @property

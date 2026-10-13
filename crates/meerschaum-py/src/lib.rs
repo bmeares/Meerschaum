@@ -30,6 +30,7 @@ pub mod core_api;
 pub mod ffi_import;
 pub mod kernel_api;
 pub mod pandas_bridge;
+pub mod pipe_api;
 pub mod pipe_bridge;
 #[cfg(feature = "polars")]
 pub mod polars_bridge;
@@ -78,6 +79,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(core_api::replace_pipes_syntax, m)?)?;
     m.add_function(wrap_pyfunction!(core_api::hash_password, m)?)?;
     m.add_function(wrap_pyfunction!(core_api::verify_password, m)?)?;
+
+    m.add_class::<pipe_api::PyPipe>()?;
 
     // meerschaum-sql (instance connector)
     m.add_class::<sql_api::PySqlConnector>()?;

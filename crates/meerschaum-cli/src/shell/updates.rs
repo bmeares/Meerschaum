@@ -237,7 +237,7 @@ pub fn run_version_check_thread(config: &Config) -> Option<std::thread::JoinHand
 
 /// `packaging.version.parse(remote) > packaging.version.parse(current)`.
 fn newer(remote: &str, current: &str) -> bool {
-    !meerschaum_sql::instance::plugins::version_ge(current, remote)
+    !meerschaum_core::version::version_ge(current, remote)
 }
 
 /// `get_remote_version_from_cache()`.

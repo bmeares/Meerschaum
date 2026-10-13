@@ -757,7 +757,7 @@ impl meerschaum_worker::callback::CallbackHandler for ActionCallbacks {
                     hydrated: true,
                 };
                 engine::registry(&config, &session, &inst, &[selected], true)
-                    .map(|(registry, _)| registry)
+                    .map(|bundle| bundle.python)
             })
         })
         .await;

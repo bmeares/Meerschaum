@@ -137,6 +137,21 @@ impl LoadedPlugin {
             config,
         })
     }
+    /// A JSON-only call of an extension method (`routes`, `route`, `pages`, `page`, ...):
+    /// `context` goes in, the reply's JSON value comes out.
+    pub fn call_json(&self, method: &str, context: Value) -> Result<Value> {
+        self.invoke(
+            &Request {
+                method: method.into(),
+                connector_type: String::new(),
+                label: String::new(),
+                config: Value::Null,
+                context,
+            },
+            None,
+        )
+        .map(|reply| reply.value)
+    }
     pub fn action(&self, name: &str, kwargs: Value) -> Result<SuccessTuple> {
         let reply = self.invoke(
             &Request {
@@ -262,7 +277,7 @@ impl NativeConnector {
     }
 }
 fn pipe_context(pipe: &Pipe) -> Value {
-    json!({"pipe": {"keys":pipe.keys(), "parameters":pipe.parameters(), "temporary":pipe.temporary}})
+    json!({"pipe": {"keys":pipe.keys(), "parameters":pipe.raw_parameters(), "temporary":pipe.temporary}})
 }
 fn query_context(pipe: &Pipe, q: &DataQuery) -> Value {
     let mut v = pipe_context(pipe);

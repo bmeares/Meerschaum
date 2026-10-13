@@ -17,6 +17,7 @@ use meerschaum_connector::InstanceConnector;
 use meerschaum_core::config::Config;
 use meerschaum_core::value::{Map, Value, apply_patch_maps};
 use meerschaum_core::{pyfmt, static_config};
+use meerschaum_plugin::NativePlugins;
 use meerschaum_sql::SqlConnector;
 use meerschaum_sql::flavor::Flavor;
 use meerschaum_sql::instance::InstanceSettings;
@@ -69,6 +70,8 @@ pub struct Session {
     instances: Arc<Mutex<HashMap<String, Instance>>>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
     manifest: Arc<Mutex<Option<Arc<Manifest>>>>,
+    python_manifest: Arc<Mutex<Option<Arc<Manifest>>>>,
+    natives: Arc<Mutex<Option<Arc<NativePlugins>>>>,
 }
 
 impl Default for Session {
@@ -89,6 +92,8 @@ impl Session {
             instances: Arc::new(Mutex::new(HashMap::new())),
             pool: Arc::new(Mutex::new(None)),
             manifest: Arc::new(Mutex::new(None)),
+            python_manifest: Arc::new(Mutex::new(None)),
+            natives: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -105,8 +110,36 @@ impl Session {
             .clone()
     }
 
-    /// Refresh the fingerprinted manifest without starting Python for an empty plugin tree.
+    /// Refresh the fingerprinted manifest (Python plugins merged with native plugins) without
+    /// starting Python for an empty plugin tree.
     pub fn manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+        let python = self.python_manifest_refresh(config)?;
+        let paths = config.paths();
+        let natives = match NativePlugins::open(
+            &paths.plugins_dirs,
+            &crate::native_plugins::cache_path(&paths.root_dir),
+        ) {
+            Ok(natives) => natives,
+            Err(error) => {
+                // A broken native plugin must not disable the Python plugins.
+                let mut manifest = (*python).clone();
+                manifest
+                    .load_errors
+                    .insert("native plugins".into(), error.to_string());
+                *self.natives.lock().expect("natives") = Some(Arc::new(NativePlugins::empty()));
+                let manifest = Arc::new(manifest);
+                *self.manifest.lock().expect("manifest") = Some(manifest.clone());
+                return Ok(manifest);
+            }
+        };
+        let natives = Arc::new(natives);
+        let manifest = Arc::new(crate::native_plugins::merge(&python, &natives));
+        *self.natives.lock().expect("natives") = Some(natives);
+        *self.manifest.lock().expect("manifest") = Some(manifest.clone());
+        Ok(manifest)
+    }
+
+    fn python_manifest_refresh(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
         let paths = config.paths();
         let pool = self.pool(config);
         let (manifest, _) = self
@@ -117,8 +150,36 @@ impl Session {
             ))
             .map_err(|e| ActionError::new("WorkerError", e.to_string()))?;
         let manifest = Arc::new(manifest);
-        *self.manifest.lock().expect("manifest") = Some(manifest.clone());
+        *self.python_manifest.lock().expect("python manifest") = Some(manifest.clone());
         Ok(manifest)
+    }
+
+    /// The Python-only manifest (what the Python worker adapters may claim).
+    pub fn python_manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+        if let Some(manifest) = self
+            .python_manifest
+            .lock()
+            .expect("python manifest")
+            .clone()
+        {
+            return Ok(manifest);
+        }
+        self.manifest(config)?;
+        self.python_manifest_refresh(config)
+    }
+
+    /// The native plugins (discovered with the manifest).
+    pub fn native_plugins(&self, config: &Config) -> Result<Arc<NativePlugins>, ActionError> {
+        if let Some(natives) = self.natives.lock().expect("natives").clone() {
+            return Ok(natives);
+        }
+        self.manifest(config)?;
+        Ok(self
+            .natives
+            .lock()
+            .expect("natives")
+            .clone()
+            .unwrap_or_else(|| Arc::new(NativePlugins::empty())))
     }
 
     /// Shut down pooled children before dropping the Tokio runtime.
@@ -183,6 +244,19 @@ impl Session {
                 Instance::Other(Arc::new(c))
             }
             _ => {
+                let natives = self.native_plugins(config)?;
+                let attributes = connector_attributes(config, &typ, &label);
+                if let Some(connector) =
+                    crate::native_plugins::instance_connector(&natives, keys, &attributes)
+                {
+                    let connector = connector.map_err(|e| ActionError::new("ImportError", e))?;
+                    let inst = Instance::Other(connector);
+                    self.instances
+                        .lock()
+                        .expect("instances")
+                        .insert(full, inst.clone());
+                    return Ok(inst);
+                }
                 let connector = self
                     .block_on(meerschaum_worker::PythonConnector::connect(
                         keys,
@@ -241,8 +315,13 @@ impl Session {
         let spec = ConnectionSpec::from_attributes(&ca)
             .map_err(|e| ActionError::new("ValueError", e.to_string()))?;
         let settings = InstanceSettings::from_config(spec.flavor, config);
-        self.block_on(SqlConnector::connect_with(label, spec, settings))
-            .map_err(|e| ActionError::new("OperationalError", e.to_string()))
+        let conn = self
+            .block_on(SqlConnector::connect_with(label, spec, settings))
+            .map_err(|e| ActionError::new("OperationalError", e.to_string()))?;
+        // Cross-instance `{{ Pipe(..., instance='sql:other') }}` references resolve against the
+        // configured connectors, not only `MRSM_SQL_<LABEL>` environment variables.
+        conn.set_instance_provider(Arc::new(ConfiguredSqlProvider::new(config)));
+        Ok(conn)
     }
 }
 
@@ -313,4 +392,108 @@ fn sql_attributes(label: &str, attrs: &Map) -> Result<ConnectorAttributes, Actio
         }
     }
     Ok(ca)
+}
+
+/// Builds `sql:<label>` connectors from the configured `meerschaum:connectors:sql` section
+/// (falling back to `MRSM_SQL_<LABEL>` variables), lazily and once per label.
+pub struct ConfiguredSqlProvider {
+    sql: Map,
+    sqlite_path: String,
+    cache: Mutex<HashMap<String, Arc<SqlConnector>>>,
+}
+
+impl ConfiguredSqlProvider {
+    /// A provider over the connectors in `config`.
+    pub fn new(config: &Config) -> Self {
+        Self {
+            sql: config
+                .get(&["meerschaum", "connectors", "sql"])
+                .map(|v| v.to_map())
+                .unwrap_or_default(),
+            sqlite_path: config
+                .paths()
+                .path("SQLITE_DB_PATH")
+                .to_string_lossy()
+                .into_owned(),
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn build(&self, label: &str) -> Option<SqlConnector> {
+        let section = |key: &str| self.sql.get(key).map(|v| v.to_map()).unwrap_or_default();
+        let specific = section(label);
+        if specific.is_empty() {
+            return None;
+        }
+        let mut attrs = apply_patch_maps(&section("default"), &specific);
+        let flavor = attrs.get("flavor").map(pyfmt::py_str).unwrap_or_default();
+        if matches!(flavor.as_str(), "sqlite" | "geopackage") {
+            attrs = specific;
+            let db = attrs.get("database").map(pyfmt::py_str);
+            if db.as_deref() == Some("{SQLITE_DB_PATH}") || (label == "local" && db.is_none()) {
+                attrs.insert("database".into(), Value::Str(self.sqlite_path.clone()));
+            }
+        }
+        let ca = sql_attributes(label, &attrs).ok()?;
+        let spec = ConnectionSpec::from_attributes(&ca).ok()?;
+        let settings = InstanceSettings::defaults(spec.flavor);
+        SqlConnector::connect_lazy(label, spec, settings).ok()
+    }
+}
+
+impl meerschaum_connector::InstanceProvider for ConfiguredSqlProvider {
+    fn instance(&self, keys: &str) -> Option<Arc<dyn InstanceConnector>> {
+        let label = keys.strip_prefix("sql:")?;
+        {
+            let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(conn) = cache.get(label) {
+                return Some(conn.clone() as Arc<dyn InstanceConnector>);
+            }
+        }
+        match self.build(label) {
+            Some(conn) => {
+                let conn = Arc::new(conn);
+                self.cache
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(label.to_string(), conn.clone());
+                Some(conn as Arc<dyn InstanceConnector>)
+            }
+            None => meerschaum_sql::instance::env_provider::EnvSqlProvider::shared().instance(keys),
+        }
+    }
+}
+
+#[cfg(test)]
+mod provider_tests {
+    use super::*;
+    use meerschaum_connector::InstanceProvider;
+    use meerschaum_core::config::ConfigOptions;
+
+    #[test]
+    fn provider_resolves_configured_connectors() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = tempfile::tempdir().unwrap();
+        let config = Config::new(ConfigOptions::with_env(vec![
+            ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+            (
+                "MRSM_PLUGINS_DIR".into(),
+                plugins.path().display().to_string(),
+            ),
+        ]))
+        .unwrap();
+        let provider = ConfiguredSqlProvider::new(&config);
+        // `sql:local` is a configured SQLite connector in the default config.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _guard = rt.enter();
+        let conn = provider
+            .instance("sql:local")
+            .expect("configured connector");
+        assert_eq!(conn.connector_keys(), "sql:local");
+        assert!(provider.instance("sql:not_configured_anywhere").is_none());
+        assert!(provider.instance("api:local").is_none());
+    }
 }

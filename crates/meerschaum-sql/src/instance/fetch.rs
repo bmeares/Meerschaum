@@ -53,7 +53,8 @@ pub fn metadef_bound(b: Option<&DateBound>) -> Bound {
 }
 
 impl SqlConnector {
-    /// `get_pipe_metadef(pipe, params, begin, end, check_existing)`.
+    /// `get_pipe_metadef(pipe, params, begin, end, check_existing)`. Uses the pipe's parameters as
+    /// resolved so far; [`SqlConnector::prepare_pipe`] first for cross-pipe templates.
     pub fn get_pipe_metadef(
         &self,
         pipe: &Pipe,
@@ -73,7 +74,9 @@ impl SqlConnector {
     /// `fetch(pipe, begin, end, check_existing)`: execute the pipe's SQL definition on this
     /// (source) connector and return the rows.
     pub async fn fetch(&self, pipe: &Pipe, args: &FetchArgs) -> ConnectorResult<Option<Frame>> {
-        let Some(meta_def) = self.get_pipe_metadef(pipe, args)? else {
+        // Resolve cross-pipe templates (`{{ Pipe() }}` in the SQL definition) first.
+        let pipe = self.prepare_pipe(pipe).await;
+        let Some(meta_def) = self.get_pipe_metadef(&pipe, args)? else {
             return Err(be(format!(
                 "Could not determine a SQL definition for {pipe}.\n    Set the key `query` in `pipe.parameters` to a valid SQL query."
             )));

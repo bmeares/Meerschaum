@@ -9,51 +9,10 @@ use crate::driver::params::{placeholder, placeholders};
 use super::users::parse_attributes;
 use super::{SqlConnector, be, frame_docs, kv_str};
 
-/// A release segment of a version string compared like `packaging.version` for the common
-/// `N[.N]*[suffix]` forms (`1.2.3`, `1.2.3rc1`, `1.2.3.dev0`).
-fn version_key(v: &str) -> (Vec<i64>, i64, i64) {
-    let v = v.trim().trim_start_matches(['v', 'V']);
-    let split = v
-        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .unwrap_or(v.len());
-    let (release_str, rest) = v.split_at(split);
-    let mut release: Vec<i64> = release_str
-        .split('.')
-        .filter(|p| !p.is_empty())
-        .map(|p| p.parse().unwrap_or(0))
-        .collect();
-    while release.last() == Some(&0) && release.len() > 1 {
-        release.pop();
-    }
-    let rest = rest.trim_start_matches(['.', '-', '_']).to_lowercase();
-    // dev < a < b < rc < final < post
-    let (phase, num) = if rest.is_empty() {
-        (4, 0)
-    } else {
-        let tag: String = rest
-            .chars()
-            .take_while(|c| c.is_ascii_alphabetic())
-            .collect();
-        let num: i64 = rest[tag.len()..]
-            .trim_start_matches(['.', '-', '_'])
-            .parse()
-            .unwrap_or(0);
-        let phase = match tag.as_str() {
-            "dev" => 0,
-            "a" | "alpha" => 1,
-            "b" | "beta" => 2,
-            "rc" | "c" | "pre" | "preview" => 3,
-            "post" | "rev" | "r" => 5,
-            _ => 4,
-        };
-        (phase, num)
-    };
-    (release, phase, num)
-}
-
-/// `packaging.version.parse(a) >= packaging.version.parse(b)`.
+/// `packaging.version.parse(a) >= packaging.version.parse(b)`; a forwarding wrapper over
+/// [`meerschaum_core::version::version_ge`] (invalid versions compare false).
 pub fn version_ge(a: &str, b: &str) -> bool {
-    version_key(a) >= version_key(b)
+    meerschaum_core::version::version_ge(a, b)
 }
 
 impl SqlConnector {

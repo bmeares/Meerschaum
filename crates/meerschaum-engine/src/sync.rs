@@ -27,7 +27,7 @@ use meerschaum_connector::{
 };
 use meerschaum_core::pipe::{ChunkInterval, PipeDefaults};
 use meerschaum_core::success::SyncResult;
-use meerschaum_core::template::{TemplateResolver, replace_in_parameters};
+use meerschaum_core::template::TemplateResolver;
 use meerschaum_core::value::apply_patch_maps;
 use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_kernel::Frame;
@@ -186,16 +186,21 @@ fn has_templates(v: &Value) -> bool {
 }
 
 /// `pipe.parameters` (the property): `{{ Pipe(...) }}` templates resolved.
+///
+/// The raw (stored) parameters stay untouched so later persistence (`edit_pipe`) never writes
+/// resolved text; the resolved snapshot is cached with `resolve_parameters_with` using the
+/// engine's registry-backed resolver, so lazy fallback cannot consume a reference first.
 pub fn resolve_parameters(env: &SyncEnv<'_>, pipe: &Pipe) -> (Pipe, Vec<String>) {
-    let mut warnings = Vec::new();
-    if !has_templates(&Value::Map(pipe.raw_parameters().clone())) {
-        return (pipe.clone(), warnings);
+    let raw = Value::Map(pipe.raw_parameters().clone());
+    if !has_templates(&raw) && !raw.to_json_string().contains("MRSM{") {
+        return (pipe.clone(), Vec::new());
     }
     let resolver = EngineResolver { env };
-    let resolved =
-        replace_in_parameters(pipe.raw_parameters(), Some(pipe), &resolver, &mut warnings);
     let mut out = pipe.clone();
-    out.set_parameters(resolved);
+    let config = meerschaum_core::config::Config::from_env().ok();
+    let warnings = out
+        .resolve_parameters_with(&resolver, config.as_ref())
+        .unwrap_or_else(|e| vec![e.to_string()]);
     (out, warnings)
 }
 
