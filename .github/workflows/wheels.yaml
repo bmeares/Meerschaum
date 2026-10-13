@@ -1,0 +1,152 @@
+name: wheels
+
+# Builds the two Meerschaum 5 distributions (docs/design/v5.0.0.md D8, D9, §12) on GitHub-hosted
+# runners and smoke-tests them in fresh virtual environments:
+#   - `meerschaum`      the maturin mixed project at the repository root (pyproject.toml): the
+#                       Python package plus the `meerschaum._core` extension, one `cp311-abi3`
+#                       wheel per platform;
+#   - `meerschaum-cli`  the `mrsm` binary wheel (crates/meerschaum-cli/pyproject.toml).
+# Nothing here publishes anything: the wheels are workflow artifacts. Never `self-hosted`: the
+# self-hosted runner is reserved for rust.yaml / pytest.yaml (docs/design/v5-build.md).
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v5*'
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+      - 'crates/**/pyproject.toml'
+      - '.github/workflows/wheels.yaml'
+      - 'scripts/check_packaging.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    name: packaging metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Cargo version, pyproject pins and extras agree
+        run: python scripts/check_packaging.py
+
+  build:
+    name: build (${{ matrix.os }})
+    needs: metadata
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            manylinux: '2_28'
+          - os: macos-latest
+            manylinux: 'off'
+          - os: windows-latest
+            manylinux: 'off'
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+
+      - name: Build the meerschaum wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --locked --out dist
+
+      - name: Build the meerschaum-cli wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --locked --out dist -m crates/meerschaum-cli/Cargo.toml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: build (sdist)
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - name: Build the meerschaum sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  smoke:
+    name: smoke (${{ matrix.os }}, py${{ matrix.python }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        python: [ '3.11', '3.14' ]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # No checkout: the wheels are tested in isolation, not against the source tree.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: dist
+      - name: Install both wheels into a fresh venv
+        run: |
+          ls -l dist
+          python -m venv "$RUNNER_TEMP/venv"
+          if [ -d "$RUNNER_TEMP/venv/Scripts" ]; then bindir=Scripts; else bindir=bin; fi
+          echo "VENV_BIN=$RUNNER_TEMP/venv/$bindir" >> "$GITHUB_ENV"
+          # `meerschaum` depends on `meerschaum-cli` at the same version: resolve it from dist/.
+          "$RUNNER_TEMP/venv/$bindir/python" -m pip install --no-index --find-links dist meerschaum
+          "$RUNNER_TEMP/venv/$bindir/python" -m pip list
+      - name: Import the package and the extension
+        run: |
+          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+          cd "$RUNNER_TEMP"
+          "$VENV_BIN/python" -c "
+          import meerschaum, meerschaum._core as core
+          assert core.AVAILABLE, core.LOAD_ERROR
+          print('meerschaum', meerschaum.__version__, 'core', core.__version__, core.EXTENSION_PATH)
+          "
+      - name: mrsm show version
+        run: |
+          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+          cd "$RUNNER_TEMP"
+          "$VENV_BIN/mrsm" --version
+          "$VENV_BIN/mrsm" show version
+      - name: Base wheel has no Python dependencies
+        run: |
+          "$VENV_BIN/python" -m pip list --format=freeze | sed 's/==.*//' | sort > "$RUNNER_TEMP/installed.txt"
+          cat "$RUNNER_TEMP/installed.txt"
+          # pip/setuptools/wheel (ensurepip) are not Meerschaum's; anything else is a leak.
+          extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum|meerschaum-cli)$' "$RUNNER_TEMP/installed.txt" || true)"
+          if [ -n "$extra" ]; then echo "unexpected dependencies: $extra" >&2; exit 1; fi

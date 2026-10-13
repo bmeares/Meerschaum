@@ -191,47 +191,8 @@ impl ConnectorRegistry for PythonRegistry {
     }
 }
 
-fn bound_value(bound: &DateBound) -> Value {
-    match bound {
-        DateBound::Int(i) => Value::Int(*i),
-        DateBound::Datetime(_) => Value::Str(bound.isoformat()),
-    }
-}
-
 fn kwargs(args: &SyncArgs) -> Map {
-    let mut map = args.extra.clone();
-    map.insert(
-        "begin".into(),
-        match &args.begin {
-            SyncBegin::Default => Value::Str(String::new()),
-            SyncBegin::Unbounded => Value::Null,
-            SyncBegin::At(b) => bound_value(b),
-        },
-    );
-    map.insert(
-        "end".into(),
-        args.end.as_ref().map(bound_value).unwrap_or(Value::Null),
-    );
-    map.insert(
-        "params".into(),
-        args.params.clone().map(Value::Map).unwrap_or(Value::Null),
-    );
-    map.insert("check_existing".into(), Value::Bool(args.check_existing));
-    map.insert("enforce".into(), Value::Bool(args.enforce_dtypes));
-    map.insert("force".into(), Value::Bool(args.force));
-    if args.workers.is_some() || !map.contains_key("workers") {
-        map.insert(
-            "workers".into(),
-            args.workers.map(Value::Int).unwrap_or(Value::Null),
-        );
-    }
-    map.insert(
-        "chunksize".into(),
-        args.chunksize.map(Value::Int).unwrap_or(Value::Null),
-    );
-    map.insert("retries".into(), Value::Int(args.retries.into()));
-    map.insert("min_seconds".into(), Value::Float(args.min_seconds));
-    map
+    crate::sync::sync_kwargs(args)
 }
 
 struct PythonSync(PythonConnector);

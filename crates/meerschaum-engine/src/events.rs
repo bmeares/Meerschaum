@@ -3,7 +3,8 @@
 //! Every transition emits one [`Event`]: `run_started`, `node_planned`, `node_started`,
 //! `chunk_started`, `chunk_finished`, `node_finished{SyncResult}`, `node_failed{error,
 //! traceback}`, `node_skipped{reason}`, `node_rebuild_pending`, `watermark_advanced`,
-//! `stream_flushed{rows, bytes, trigger}`, `stream_restarted{error}`, `run_finished`.
+//! `stream_flushed{rows, bytes, trigger}`, `children_triggered{run_id, nodes, held, flushes}`,
+//! `stream_restarted{error}`, `run_finished`.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,6 +16,17 @@ use serde::{Deserialize, Serialize};
 use crate::node::PipeRef;
 use crate::plan::Action;
 use crate::stream::FlushTrigger;
+
+/// Which kind of chunk a `chunk_started` / `chunk_finished` event describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChunkSource {
+    /// A planned window (a chunk of the plan, or a dirty range).
+    #[default]
+    Window,
+    /// A piece of the fetched data, in fetch order.
+    Fetch,
+}
 
 /// What happened.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,22 +58,62 @@ pub enum EventKind {
         attempt: u32,
     },
     /// A chunk's sync began (emitted by the [`crate::SyncExecutor`]).
+    ///
+    /// Chunk events come in two [`ChunkSource`]s: `window` chunks are the planner's bounded
+    /// windows (one per planned chunk or dirty range) and `fetch` chunks are the pieces a
+    /// source's frame is synced in (SQL fetch chunks, `--chunksize`), numbered in **fetch
+    /// order** across the whole node sync. Consumers that only knew `chunk`, `begin` and `end`
+    /// keep working; the fields after `end` are additive and default when absent.
     ChunkStarted {
-        /// Chunk index within the node's chunk list.
+        /// Chunk index within the node's chunk list (`window`) or the node's fetch order
+        /// (`fetch`), starting at 0.
         chunk: usize,
-        /// Lower bound.
+        /// Lower bound (a `fetch` chunk: the smallest datetime value in the chunk).
         begin: Option<Bound>,
-        /// Upper bound.
+        /// Upper bound (a `fetch` chunk: the largest datetime value in the chunk).
         end: Option<Bound>,
+        /// Which kind of chunk.
+        #[serde(default)]
+        source: ChunkSource,
+        /// Rows in the chunk, when known up front (`fetch` chunks).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rows: Option<u64>,
+        /// Number of chunks in the list, when known up front (`window` chunks).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        total: Option<usize>,
     },
     /// A chunk's sync ended.
     ChunkFinished {
-        /// Chunk index.
+        /// Chunk index (matches the `chunk_started` event).
         chunk: usize,
         /// Whether it succeeded.
         success: bool,
         /// The message.
         message: String,
+        /// Which kind of chunk.
+        #[serde(default)]
+        source: ChunkSource,
+        /// Rows in the chunk (the rows handed to the sync, before diffing).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rows: Option<u64>,
+        /// Rows inserted by this chunk.
+        #[serde(default)]
+        inserted: u64,
+        /// Rows updated by this chunk.
+        #[serde(default)]
+        updated: u64,
+        /// Rows upserted by this chunk.
+        #[serde(default)]
+        upserted: u64,
+        /// Lower bound (as in `chunk_started`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        begin: Option<Bound>,
+        /// Upper bound (as in `chunk_started`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<Bound>,
+        /// How long the chunk took, in milliseconds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
     },
     /// A node's sync succeeded.
     NodeFinished {
@@ -105,6 +157,19 @@ pub enum EventKind {
         /// Which trigger fired.
         trigger: FlushTrigger,
     },
+    /// A stream source's flush triggered a run over its descendants (§5.6 "Downstream
+    /// triggering"). The run itself has its own `run_id` and events.
+    ChildrenTriggered {
+        /// The triggered run.
+        run_id: String,
+        /// Descendants the run covers (held-back ones excluded).
+        nodes: usize,
+        /// Descendants left out because their `min_seconds` had not elapsed; they run on a
+        /// later trigger.
+        held: usize,
+        /// Flushes folded into this trigger (flushes that arrived while a run was pending).
+        flushes: u64,
+    },
     /// A stream source's worker restarted.
     StreamRestarted {
         /// The error that stopped it.
@@ -134,6 +199,7 @@ impl EventKind {
             EventKind::NodeRebuildPending { .. } => "node_rebuild_pending",
             EventKind::WatermarkAdvanced { .. } => "watermark_advanced",
             EventKind::StreamFlushed { .. } => "stream_flushed",
+            EventKind::ChildrenTriggered { .. } => "children_triggered",
             EventKind::StreamRestarted { .. } => "stream_restarted",
             EventKind::RunFinished { .. } => "run_finished",
         }

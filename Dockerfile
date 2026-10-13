@@ -1,20 +1,21 @@
-### Meerschaum images (docs/design/v5-build.md).
+### Meerschaum images (docs/design/v5-build.md, docs/design/v5.0.0.md §12.1).
+###
+### Every image installs the two maturin wheels built from this tree: `meerschaum` (the Python
+### package + the `meerschaum._core` extension) and `meerschaum-cli` (the `mrsm` binary).
 ###
 ### Targets:
-###   (default) `docker build .`           v4 image, unchanged: Fedora 44 + the `dep_group` requirements
-###                                        (`--build-arg dep_group=minimal|api|full`, default `full`).
-###   --target full                        the default image plus the native `mrsm` binary (and the
-###                                        `meerschaum._core` extension once scripts/rust/build_py.sh exists).
-###   --target slim                        a Fedora 44 rootfs (dnf --installroot) with python3, the base
-###                                        `meerschaum` wheel (no extras) and the native `mrsm` binary.
-###                                        Size gate: < 200 MB.
+###   (default) `docker build .`           Fedora 44 + `meerschaum[<extras>]`; `--build-arg dep_group=`
+###                                        selects the extras: `full` (default: `[full]`), `api`
+###                                        (`[api,sql,pandas]`) or `minimal` (the base wheel, no extras).
+###   --target full                        the same image (kept so `buildx.sh` can name the target).
+###   --target slim                        a Fedora 44 rootfs (dnf --installroot) with python3 and the
+###                                        two wheels, no extras. Size gate: < 200 MB.
 ###   --target rust-builder / py-builder / slim-rootfs   build stages only.
 ###
-### The `full` and `slim` targets compile the Cargo workspace; the default target never does, so the
-### v4 build keeps working while the crates are scaffolds. Requires BuildKit (`docker buildx build`).
+### Requires BuildKit (`docker buildx build`). The Cargo workspace is compiled once (rust-builder).
 
 ### ---------------------------------------------------------------------------------------------
-### rust-builder: `cargo build --release -p meerschaum-cli` (+ the PyO3 `_core` if build_py.sh exists).
+### rust-builder: `maturin build --release` for the `meerschaum` and `meerschaum-cli` wheels.
 ### Fedora 44 (not rust:1-slim) so the binary and extension link against the same glibc and Python
 ### as the Fedora 44 runtimes. rust-toolchain.toml is honored through rustup.
 FROM fedora:44 AS rust-builder
@@ -24,12 +25,18 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH \
     CARGO_TERM_COLOR=never \
     CARGO_INCREMENTAL=0 \
-    CARGO_PROFILE_RELEASE_STRIP=symbols
+    CARGO_PROFILE_RELEASE_STRIP=symbols \
+    CARGO_PROFILE_RELEASE_LTO=thin \
+    CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+### The last two are image-only size tuning for the slim size gate (§12.1: `slim` < 200 MB): measured
+### 224 MB with the workspace's default release profile, 186 MB with these. The PyPI wheels
+### (wheels.yaml) keep the default profile.
 
 RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
       gcc gcc-c++ make pkgconf-pkg-config \
-      python3 python3-pip git curl \
+      python3 python3-pip git curl patchelf \
   && dnf clean all \
+  && python3 -m pip install --no-cache-dir 'maturin>=1.9,<2.0' \
   && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
      | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
 
@@ -40,49 +47,31 @@ RUN rustup toolchain install && rustc --version
 COPY Cargo.toml Cargo.lock ./
 COPY .cargo ./.cargo
 COPY crates ./crates
-### `target/` and the registry live in BuildKit cache mounts, so this layer only holds /out.
-RUN --mount=type=cache,id=mrsm-v5-cargo-registry,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=mrsm-v5-cargo-target,target=/src/target,sharing=locked \
-    cargo build --release --locked -p meerschaum-cli \
-  && install -D -m 0755 target/release/mrsm /out/bin/mrsm \
-  && mkdir -p /out/core
-
-### Optional: the `meerschaum._core` extension, built by scripts/rust/build_py.sh into meerschaum/_core/.
-### Whatever compiled extension it leaves under meerschaum/ is copied to /out/core with its path.
-COPY scripts/rust ./scripts/rust
-COPY pyproject.toml setup.py setup.cfg README.md LICENSE NOTICE MANIFEST.in ./
+COPY pyproject.toml README.md LICENSE NOTICE ./
 COPY meerschaum ./meerschaum
+### `target/` and the registry live in BuildKit cache mounts, so this layer only holds /out/wheels.
+### `meerschaum/_core/_core*.so` from a developer's tree is excluded by the pyproject (and by
+### .dockerignore), so the wheel always carries the freshly compiled extension.
 RUN --mount=type=cache,id=mrsm-v5-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=mrsm-v5-cargo-target,target=/src/target,sharing=locked \
-    if [ -x scripts/rust/build_py.sh ]; then \
-      python3 -m pip install --no-cache-dir 'maturin>=1.9,<2.0' \
-      && scripts/rust/build_py.sh \
-      && find meerschaum \( -name '_core*.so' -o -name '_core*.pyd' \) -exec cp --parents {} /out/core/ \; ; \
-    else \
-      echo "scripts/rust/build_py.sh not present: skipping meerschaum._core"; \
-    fi \
-  && find /out -type f -exec ls -l {} \;
+    maturin build --release --locked -o /out/wheels \
+  && maturin build --release --locked -m crates/meerschaum-cli/Cargo.toml -o /out/wheels \
+  && ls -l /out/wheels
 
 
 ### ---------------------------------------------------------------------------------------------
-### py-builder: the base `meerschaum` wheel with no extras, installed into /install for `slim`.
+### py-builder: the two wheels with no extras, installed into /install for `slim`.
 FROM fedora:44 AS py-builder
 
 RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip && dnf clean all
-WORKDIR /src
-COPY pyproject.toml setup.py setup.cfg README.md LICENSE NOTICE MANIFEST.in ./
-COPY meerschaum ./meerschaum
-RUN --mount=type=bind,from=rust-builder,source=/out/core,target=/core \
-    python3 -m pip wheel --no-deps --no-cache-dir -w /wheels . \
-  && python3 -m pip install --no-deps --no-cache-dir --no-compile --prefix=/install /wheels/meerschaum-*.whl \
-  && rm -f /install/bin/mrsm \
-  && site="$(find /install -type d -path '*/site-packages/meerschaum' | head -n 1)" \
-  && test -n "$site" \
-  && if [ -d /core/meerschaum ]; then cp -a /core/meerschaum/. "$site"/; fi
+RUN --mount=type=bind,from=rust-builder,source=/out/wheels,target=/wheels \
+    python3 -m pip install --no-index --find-links /wheels --no-cache-dir --no-compile \
+      --prefix=/install meerschaum \
+  && ls -l /install/bin
 
 
 ### ---------------------------------------------------------------------------------------------
-### runtime: the v4 image (unchanged). Also the base of `full` and the default target.
+### runtime: Fedora 44 + `meerschaum[<extras>]`. Also the base of `full` and the default target.
 FROM fedora:44 AS runtime
 
 ARG dep_group=full \
@@ -111,18 +100,19 @@ RUN /scripts/image_setup.sh
 USER $MRSM_UID:$MRSM_GID
 WORKDIR $MRSM_WORK_DIR
 
-### Layer 2: Install Python packages.
-### Only rebuilds cache if dependencies have changed.
-COPY --chown=$MRSM_USER:$MRSM_USER requirements $MRSM_HOME/requirements
-RUN python -m pip install --user --no-cache-dir \
-  -r $MRSM_HOME/requirements/$MRSM_DEP_GROUP.txt && \
-  rm -rf $MRSM_HOME/requirements
-
-### Layer 3: Install Meerschaum.
-### Recache this every build.
-COPY --chown=$MRSM_USER:$MRSM_USER pyproject.toml setup.py README.md $MRSM_SRC/
-COPY --chown=$MRSM_USER:$MRSM_USER meerschaum $MRSM_SRC/meerschaum
-RUN python -m pip install --user --no-cache-dir $MRSM_SRC && rm -rf $MRSM_SRC
+### Layer 2: Install Meerschaum and its extras (`dep_group` -> extras, §12.1) from the wheels.
+### The extras' dependencies come from PyPI; the two Meerschaum wheels come from rust-builder.
+RUN --mount=type=bind,from=rust-builder,source=/out/wheels,target=/wheels \
+    --mount=type=cache,target=/home/meerschaum/.cache/pip,uid=$MRSM_UID,gid=$MRSM_GID \
+    case "$MRSM_DEP_GROUP" in \
+      minimal) extras="" ;; \
+      api)     extras="[api,sql,pandas]" ;; \
+      *)       extras="[full]" ;; \
+    esac \
+  && wheel="$(ls /wheels/meerschaum-[0-9]*.whl)" \
+  && python -m pip install --user --find-links /wheels "$wheel$extras"
+### NOTE: install the wheel by path. `meerschaum[full]` by name would let pip pick the newest
+### *stable* release on PyPI over this pre-release build.
 
 ### Start up Meerschaum to bootstrap its environment.
 RUN cd $MRSM_WORK_DIR && [ "$MRSM_DEP_GROUP" != "minimal" ] && \
@@ -135,16 +125,8 @@ ENTRYPOINT ["python", "-m", "meerschaum"]
 
 
 ### ---------------------------------------------------------------------------------------------
-### full: the v4 image plus the native binary. `mrsm` on PATH resolves to the binary
-### (/usr/local/bin precedes ~/.local/bin); the entrypoint stays `python -m meerschaum`.
+### full: the runtime image under the name `buildx.sh` builds for the `full` tag.
 FROM runtime AS full
-
-COPY --from=rust-builder /out/bin/mrsm /usr/local/bin/mrsm
-RUN --mount=type=bind,from=rust-builder,source=/out/core,target=/tmp/mrsm-core \
-    if [ -d /tmp/mrsm-core/meerschaum ]; then \
-      site="$(python -c 'import importlib.util as u; print(u.find_spec("meerschaum").submodule_search_locations[0])')" \
-      && cp -a /tmp/mrsm-core/meerschaum/. "$site"/; \
-    fi
 
 
 ### ---------------------------------------------------------------------------------------------
@@ -168,11 +150,10 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
   && echo "$mrsm_user:x:$mrsm_uid:$mrsm_gid::/home/$mrsm_user:/bin/bash" >> /rootfs/etc/passwd \
   && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user" "/rootfs$mrsm_root_dir"
 COPY --from=py-builder /install/ /rootfs/usr/local/
-COPY --from=rust-builder /out/bin/mrsm /rootfs/usr/local/bin/mrsm
 
 
 ### ---------------------------------------------------------------------------------------------
-### slim: python3, the base wheel (no extras) and the native binary on the slim-rootfs. Size gate: < 200 MB.
+### slim: python3 and the two wheels (no extras) on the slim-rootfs. Size gate: < 200 MB.
 FROM scratch AS slim
 
 ARG mrsm_user=meerschaum \
@@ -201,5 +182,5 @@ ENTRYPOINT ["mrsm"]
 
 
 ### ---------------------------------------------------------------------------------------------
-### The last stage is what `docker build .` produces: the unchanged v4 image.
+### The last stage is what `docker build .` produces: the runtime image.
 FROM runtime AS default

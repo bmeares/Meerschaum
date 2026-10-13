@@ -76,12 +76,23 @@ mutations, escaping, expiry, Valkey payload compatibility, and SQLite sharing wi
 stub. An installed Chromium is used for a headless Plotly page-contract smoke test; no browser
 is downloaded. Temporary SQLite files, browser profiles and plugin directories are isolated.
 
+## Route-group gating
+
+Like v4 (`_console_pages_allowed`), the console's own pages, actions and partials are served only
+when `api.permissions.routes.allowlist` allows the `dash` group; otherwise they answer 404. The login
+page, logout, assets and plugin pages stay. `--no-dash` serves no console and (host config) no plugin
+pages or Dash apps.
+
+## Browser tests
+
+`MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console` (Playwright, real `mrsm start api`).
+
 ## Remaining milestone work
 
 This is not yet the full b3 parity gate. The pipeline view has dependency edges, run status, a filtered runs table,
 and timing bars, but needs ledger lag and a read-side engine events stream.
 The current server only accepts events (POST); it has no events subscription endpoint.
-Plugin management supports search, metadata, install and delete; archive uploads remain.
+Plugin management supports search, metadata, install, delete and archive upload (`POST /dash/plugins/upload`, CSRF-checked, forwarded to `POST /plugins/{name}` with the session user's credentials and the API's size limit, `ARCHIVE_MAX_BYTES`).
 User and token forms delegate writes to the API. Settings exposes password changes. The terminal
 is a configured link, not a PTY implementation. Page-contract callbacks are ordinary plugin
 HTTP routes; manifest auto-discovery and dynamic native plugin handlers need the plugin/host

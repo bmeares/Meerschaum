@@ -842,8 +842,15 @@ async fn host_registry_populates_pages_and_navbar() {
          "route": "/_pages/stats"},
         {"path": "forecast", "page_group": "Weather", "page_key": "forecast", "login_required": true,
          "mode": "dash", "function": "forecast_layout", "route": "/dash/weather/forecast"},
+        // The host reports v4's registered paths (`/dash/<path>`).
+        {"path": "/dash/outlook", "page_group": "Weather", "page_key": "outlook", "login_required": true,
+         "mode": "dash", "function": "outlook_layout", "route": "/dash/weather/outlook"},
+        {"path": "/dash/summary", "page_group": "Reports", "page_key": "summary", "login_required": true,
+         "mode": "html", "function": "summary_page", "route": "/_pages/summary"},
     ]});
-    assert_eq!(cfg.apply_host_registry(&registry).unwrap(), 2);
+    assert_eq!(cfg.apply_host_registry(&registry).unwrap(), 4);
+    assert_eq!(cfg.legacy_pages["outlook"], "weather");
+    assert!(cfg.pages.iter().any(|p| p.path == "summary"));
     assert!(matches!(&cfg.pages[0].content, PageContent::Route(r) if r == "/_pages/stats"));
     assert_eq!(cfg.legacy_pages["forecast"], "weather");
     assert!(
@@ -872,4 +879,318 @@ async fn host_registry_populates_pages_and_navbar() {
     )
     .await;
     assert_eq!(redirect.headers["location"], "/dash/weather/forecast");
+}
+
+/// `api:permissions:routes:allowlist` without `dash` hides the console's own pages exactly like
+/// v4's `_console_pages_allowed`: the login page, assets and plugin pages are still served.
+#[tokio::test]
+async fn dash_route_group_gates_console_pages_only() {
+    let root = tempfile::tempdir().unwrap();
+    let mut server_config = config(root.path());
+    server_config.routes_allowlist = vec!["pipes".into(), "version".into()];
+    let (state, _) = state_with(server_config);
+    let mut cfg = WebConfig::for_state(&state);
+    cfg.dash_plugins.push("weather".into());
+    cfg.legacy_pages.insert("forecast".into(), "weather".into());
+    cfg.pages.push(PluginPage {
+        path: "report".into(),
+        page_group: "Reports".into(),
+        login_required: false,
+        skip_navbar: false,
+        dark_theme: None,
+        content: PageContent::Html("<h2>Report</h2>".into()),
+    });
+    let app = meerschaum_web::app(state.clone(), cfg).unwrap();
+    for path in [
+        "/dash",
+        "/dash/",
+        "/dash/dashboard",
+        "/dash/pipes",
+        "/dash/jobs",
+        "/dash/plugins",
+        "/dash/users",
+        "/dash/tokens",
+        "/dash/settings",
+        "/dash/pipelines",
+        "/dash/pipelines/events",
+        "/dash/register",
+        "/dash/job-logs/anything",
+    ] {
+        let response = send(&app, Request::get(path).body(Body::empty()).unwrap()).await;
+        assert_eq!(response.status, StatusCode::NOT_FOUND, "{path} is hidden");
+    }
+    for path in ["/dash/action", "/dash/plugins/upload"] {
+        let response = send(&app, Request::post(path).body(Body::empty()).unwrap()).await;
+        assert_eq!(
+            response.status,
+            StatusCode::NOT_FOUND,
+            "POST {path} is hidden"
+        );
+    }
+    // The login page and assets stay; the navbar of a plugin page has no core links.
+    let login_page = send(
+        &app,
+        Request::get("/dash/login").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(login_page.status, StatusCode::OK);
+    assert!(!login_page.text().contains("href=\"/dash/pipes\""));
+    let asset = send(
+        &app,
+        Request::get("/dash/assets/console.js")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(asset.status, StatusCode::OK);
+    let report = send(
+        &app,
+        Request::get("/dash/report").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(report.status, StatusCode::OK);
+    assert!(report.text().contains("Report"));
+    assert!(!report.text().contains("href=\"/dash/jobs\""));
+    let redirect = send(
+        &app,
+        Request::get("/dash/forecast").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(redirect.headers["location"], "/dash/weather/forecast");
+    // A wildcard allowlist (the default) serves everything.
+    let root = tempfile::tempdir().unwrap();
+    let (state, _) = state_with(config(root.path()));
+    let app = meerschaum_web::app(state.clone(), WebConfig::for_state(&state)).unwrap();
+    let (cookie, _) = login(&app).await;
+    let response = send(
+        &app,
+        Request::get("/dash/pipes")
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK);
+}
+
+fn multipart_body(boundary: &str, fields: &[(&str, &str)], archive: Option<&[u8]>) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (name, value) in fields {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    if let Some(archive) = archive {
+        body.extend_from_slice(
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"archive\"; filename=\"x.tar.gz\"\r\nContent-Type: application/gzip\r\n\r\n")
+                .as_bytes(),
+        );
+        body.extend_from_slice(archive);
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    body
+}
+
+fn upload_request(cookie: &str, boundary: &str, body: Vec<u8>) -> Request<Body> {
+    Request::post("/dash/plugins/upload")
+        .header("cookie", cookie)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap()
+}
+
+/// The console's archive upload registers the plugin through `POST /plugins/{name}` with the
+/// session user's credentials and stores the archive; it enforces CSRF, the registration
+/// permission, ownership and the same size limit as the API route.
+#[tokio::test]
+async fn plugin_archive_upload_uses_the_api_route() {
+    let root = tempfile::tempdir().unwrap();
+    let mut server_config = config(root.path());
+    server_config.registration_plugins = true;
+    let (state, _) = state_with(server_config.clone());
+    let app = meerschaum_web::app(state.clone(), WebConfig::for_state(&state)).unwrap();
+    let (cookie, csrf) = login(&app).await;
+    let page = send(
+        &app,
+        Request::get("/dash/plugins")
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert!(page.text().contains("action=\"/dash/plugins/upload\""));
+    assert!(page.text().contains("enctype=\"multipart/form-data\""));
+
+    let archive: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+    let fields = [
+        ("csrf", csrf.as_str()),
+        ("name", "w7demo"),
+        ("version", "1.2.3"),
+        ("description", "A demo"),
+    ];
+    let response = send(
+        &app,
+        upload_request(&cookie, "XB", multipart_body("XB", &fields, Some(&archive))),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert!(
+        response.text().contains("Success") || response.text().contains("w7demo"),
+        "{}",
+        response.text()
+    );
+    let stored = std::fs::read(server_config.plugins_archives_path.join("w7demo.tar.gz")).unwrap();
+    assert_eq!(stored, archive);
+    let downloaded = send(
+        &app,
+        Request::get("/plugins/w7demo").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(downloaded.status, StatusCode::OK);
+    assert_eq!(downloaded.body.as_ref(), archive.as_slice());
+
+    // A wrong CSRF token, a bad name and a missing archive are refused.
+    let bad_csrf = [("csrf", "wrong"), ("name", "w7demo")];
+    let response = send(
+        &app,
+        upload_request(
+            &cookie,
+            "XB",
+            multipart_body("XB", &bad_csrf, Some(&archive)),
+        ),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::FORBIDDEN);
+    let bad_name = [("csrf", csrf.as_str()), ("name", "../evil")];
+    let response = send(
+        &app,
+        upload_request(
+            &cookie,
+            "XB",
+            multipart_body("XB", &bad_name, Some(&archive)),
+        ),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    let no_archive = [("csrf", csrf.as_str()), ("name", "w7other")];
+    let response = send(
+        &app,
+        upload_request(&cookie, "XB", multipart_body("XB", &no_archive, None)),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        !server_config
+            .plugins_archives_path
+            .join("w7other.tar.gz")
+            .exists()
+    );
+
+    // Without a session the upload redirects to the login page.
+    let response = send(
+        &app,
+        Request::post("/dash/plugins/upload")
+            .header("content-type", "multipart/form-data; boundary=XB")
+            .body(Body::from(multipart_body("XB", &fields, Some(&archive))))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::SEE_OTHER);
+
+    // The API route's `registration.plugins` permission applies to console uploads.
+    let root = tempfile::tempdir().unwrap();
+    let mut closed = config(root.path());
+    closed.registration_plugins = false;
+    let (state, _) = state_with(closed.clone());
+    let app = meerschaum_web::app(state.clone(), WebConfig::for_state(&state)).unwrap();
+    let (cookie, csrf) = login(&app).await;
+    let fields = [("csrf", csrf.as_str()), ("name", "w7demo")];
+    let response = send(
+        &app,
+        upload_request(&cookie, "XB", multipart_body("XB", &fields, Some(&archive))),
+    )
+    .await;
+    assert!(
+        response
+            .text()
+            .contains("has not allowed plugin registration"),
+        "{}",
+        response.text()
+    );
+    assert!(!closed.plugins_archives_path.join("w7demo.tar.gz").exists());
+}
+
+/// Archives above the API route's limit are rejected by the console form and by the API alike,
+/// and nothing is stored; one below the old 2 MiB axum default is accepted.
+#[tokio::test]
+async fn plugin_archive_upload_enforces_the_api_size_limit() {
+    let root = tempfile::tempdir().unwrap();
+    let mut server_config = config(root.path());
+    server_config.registration_plugins = true;
+    let (state, _) = state_with(server_config.clone());
+    let app = meerschaum_web::app(state.clone(), WebConfig::for_state(&state)).unwrap();
+    let (cookie, csrf) = login(&app).await;
+    let limit = meerschaum_server::routes::plugins::ARCHIVE_MAX_BYTES;
+
+    let big = vec![7u8; 3 * 1024 * 1024];
+    let fields = [("csrf", csrf.as_str()), ("name", "w7big")];
+    let response = send(
+        &app,
+        upload_request(&cookie, "XB", multipart_body("XB", &fields, Some(&big))),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "3 MiB is accepted");
+    assert_eq!(
+        std::fs::metadata(server_config.plugins_archives_path.join("w7big.tar.gz"))
+            .unwrap()
+            .len(),
+        big.len() as u64
+    );
+
+    let too_big = vec![1u8; limit + 1];
+    let fields = [("csrf", csrf.as_str()), ("name", "w7huge")];
+    let response = send(
+        &app,
+        upload_request(&cookie, "XB", multipart_body("XB", &fields, Some(&too_big))),
+    )
+    .await;
+    assert_eq!(
+        response.status,
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "{}",
+        response.text()
+    );
+    assert!(
+        !server_config
+            .plugins_archives_path
+            .join("w7huge.tar.gz")
+            .exists()
+    );
+
+    // The API route itself refuses the same body (it reports the missing `archive` field, like
+    // a body that fails to parse does in v4's `File(...)` parameter).
+    let token = common::login(&app, "admin", "pass", None).await;
+    let response = send(
+        &app,
+        Request::post("/plugins/w7huge")
+            .header("authorization", token)
+            .header("content-type", "multipart/form-data; boundary=XB")
+            .body(Body::from(multipart_body("XB", &[], Some(&too_big))))
+            .unwrap(),
+    )
+    .await;
+    assert!(response.status.is_client_error(), "{}", response.status);
+    assert!(
+        !server_config
+            .plugins_archives_path
+            .join("w7huge.tar.gz")
+            .exists()
+    );
 }

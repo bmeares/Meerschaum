@@ -40,6 +40,19 @@ The hinter tracks the prompt's screen row like reedline's painter (measured once
 cursor position query, then scrolled by the same rule) and applies prompt_toolkit's float placement
 (`FloatContainer._draw_float`) and menu scrolling (`Window` scroll offsets, `ScrollbarMargin`).
 
+### Venv accounting (`src/native/venvs.rs`, D20)
+
+`attempt_import` and `pip_install` record who requested each package in
+`venvs/<name>/.mrsm_requests.json` (schema in `meerschaum/utils/venv/_requests.py`). `show venvs`
+lists each venv's path, size on disk and packages with versions and requesters. `prune venvs`
+(v5-only; `--dry` lists, asks unless `-y`/`-f`/`--noask`) removes packages whose recorded
+requesters are all uninstalled plugins and that nothing needed depends on (`Requires-Dist`),
+through `uninstall packages --venv`. Packages with no ledger entry, `pip`/`setuptools`/`wheel`/`uv`/
+`PyYAML`, anything requested by `meerschaum` and anything in an installed plugin's `required` list
+are kept. `upgrade` prints the same plan afterwards. `prune` is in `actions::V5_ONLY_ACTIONS`: it
+resolves and completes subactions, but `show actions` and the top-level completion list keep v4's
+contents for the parity fixtures.
+
 ### The CLI daemon
 
 v5 has no CLI daemon: `mrsm` dispatches actions directly and pools any Python workers within

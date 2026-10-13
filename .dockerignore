@@ -15,3 +15,5 @@ portable/
 .github/
 target/
 .venv-ref/
+meerschaum/_core/_core*.so
+meerschaum/_core/_core*.pyd

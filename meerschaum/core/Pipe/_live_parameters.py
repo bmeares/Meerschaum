@@ -29,6 +29,7 @@ from typing import Any
 
 __all__ = [
     'LiveDict', 'LiveList', 'live_view', 'plain', 'RawDict', 'RawList', 'Attrs', 'adopt_attributes',
+    'new_raw_root',
 ]
 
 _MISSING = object()
@@ -244,59 +245,180 @@ class LiveList(_Node, list):
 # ---------------------------------------------------------------------------------------------
 # Raw parameters owned by `_core.Pipe`
 
-def _raw_wrap(parent: Any, key: Any, value: Any) -> Any:
+_MISSING_PATH = object()
+
+
+def _raw_wrap(core: Any, path: tuple, value: Any, gen: int) -> Any:
     if isinstance(value, dict):
-        return RawDict(value, _parent=parent, _key=key)
+        node = RawDict(_core=core, _path=path)
+        node._load(value, gen)
+        return node
     if isinstance(value, list):
-        return RawList(value, _parent=parent, _key=key)
+        node = RawList(_core=core, _path=path)
+        node._load(value, gen)
+        return node
     return value
 
 
 class _RawNode(_Plainable):
-    _owner: Any
-    _parent: Any
-    _key: Any
+    """
+    A read-through cache of one node of the raw parameters, which live in `_core.Pipe`.
 
-    def _notify(self) -> None:
-        node = self
-        while node._parent is not None:
-            node = node._parent
-        node._sync()
+    The node knows its path in the Rust map. Every write goes to Rust (`set_path` / `del_path`)
+    first; every read compares the node's generation to the core's mutation counter and reloads
+    the node from Rust when they differ, so a node reflects writes made through any other view
+    (and through `Pipe.update_parameters`, the setters, a metadata load...). Reloading keeps the
+    identity of child containers whose path still holds a container of the same kind.
 
-    def _sync(self) -> None:
-        """Root only: drop the resolution memo and push the raw map into `_core.Pipe`."""
-        pipe = self._owner
-        for key in _MEMO_KEYS:
-            pipe.__dict__.pop(key, None)
-        pipe.__dict__.pop('_target', None)
-        core = pipe.__dict__.get('_core_pipe', None)
-        if core is not None:
-            core.set_raw_parameters(plain(self))
+    Nodes are addressed by path: a list index shifts when elements are inserted before it.
+    """
+
+    _core: Any
+    _path: tuple
+    _gen: int
+
+    def _fresh(self) -> None:
+        core = self._core
+        if self._gen != core.generation:
+            self._reload()
+
+    def _reload(self) -> None:
+        core = self._core
+        try:
+            gen, value = core.snapshot(self._path)
+        except KeyError:
+            ### The node was removed or replaced by another kind: it is detached, keep its data.
+            self._gen = core.generation
+            return
+        self._load(value, gen)
+
+    def _sync_gen(self) -> None:
+        self._gen = self._core.generation
 
 
 class RawDict(_RawNode, dict):
-    """A raw parameters dict whose every mutation, nested ones included, reaches `_core.Pipe`."""
+    """A raw parameters dict: reads come from `_core.Pipe`, every mutation goes to it."""
 
-    def __init__(self, data: Any = (), *, _owner: Any = None, _parent: Any = None, _key: Any = None):
+    def __init__(self, data: Any = (), *, _core: Any = None, _path: tuple = (), _gen: int = 0):
         dict.__init__(self)
-        self._owner = _owner
-        self._parent = _parent
-        self._key = _key
-        for k, v in dict(data).items():
-            dict.__setitem__(self, k, _raw_wrap(self, k, plain(v)))
+        self._core = _core
+        self._path = tuple(_path)
+        self._gen = _gen
+        if data:
+            for k, v in dict(data).items():
+                dict.__setitem__(self, k, plain(v))
 
+    def _load(self, value: Any, gen: int) -> None:
+        old = dict(dict.items(self))
+        dict.clear(self)
+        core = self._core
+        base = self._path
+        for k, v in value.items():
+            child = old.get(k)
+            if isinstance(v, dict) and isinstance(child, RawDict) and child._path == base + (k,):
+                child._load(v, gen)
+                dict.__setitem__(self, k, child)
+            elif isinstance(v, list) and isinstance(child, RawList) and child._path == base + (k,):
+                child._load(v, gen)
+                dict.__setitem__(self, k, child)
+            else:
+                dict.__setitem__(self, k, _raw_wrap(core, base + (k,), v, gen))
+        self._gen = gen
+
+    # -- reads --------------------------------------------------------------------------------
+    def __getitem__(self, key: Any) -> Any:
+        self._fresh()
+        return dict.__getitem__(self, key)
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self._fresh()
+        return dict.get(self, key, default)
+
+    def __contains__(self, key: Any) -> bool:
+        self._fresh()
+        return dict.__contains__(self, key)
+
+    def __iter__(self) -> Any:
+        self._fresh()
+        return dict.__iter__(self)
+
+    def __reversed__(self) -> Any:
+        self._fresh()
+        return dict.__reversed__(self)
+
+    def __len__(self) -> int:
+        self._fresh()
+        return dict.__len__(self)
+
+    def keys(self) -> Any:
+        self._fresh()
+        return dict.keys(self)
+
+    def values(self) -> Any:
+        self._fresh()
+        return dict.values(self)
+
+    def items(self) -> Any:
+        self._fresh()
+        return dict.items(self)
+
+    def __eq__(self, other: Any) -> bool:
+        self._fresh()
+        return dict.__eq__(self, other)
+
+    def __ne__(self, other: Any) -> bool:
+        self._fresh()
+        return dict.__ne__(self, other)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        self._fresh()
+        return dict.__repr__(self)
+
+    def __or__(self, other: Any) -> dict:
+        self._fresh()
+        return dict(self) | other
+
+    def __ror__(self, other: Any) -> dict:
+        self._fresh()
+        return other | dict(self)
+
+    def copy(self) -> dict:
+        self._fresh()
+        return dict(dict.items(self))
+
+    # -- writes -------------------------------------------------------------------------------
     def __setitem__(self, key: Any, value: Any) -> None:
-        dict.__setitem__(self, key, _raw_wrap(self, key, plain(value)))
-        self._notify()
+        self._fresh()
+        value = plain(value)
+        core = self._core
+        core.set_path(self._path + (key,), value)
+        self._gen = core.generation
+        dict.__setitem__(self, key, _raw_wrap(core, self._path + (key,), value, self._gen))
 
     def __delitem__(self, key: Any) -> None:
+        self._fresh()
+        if not dict.__contains__(self, key):
+            raise KeyError(key)
+        core = self._core
+        core.del_path(self._path + (key,))
+        self._gen = core.generation
         dict.__delitem__(self, key)
-        self._notify()
+
+    def _replace_all(self, data: dict) -> None:
+        core = self._core
+        if self._path:
+            core.set_path(self._path, data)
+        else:
+            core.set_raw_parameters(data)
+        self._load(data, core.generation)
 
     def update(self, *args: Any, **kwargs: Any) -> None:
-        for k, v in dict(*args, **kwargs).items():
-            dict.__setitem__(self, k, _raw_wrap(self, k, plain(v)))
-        self._notify()
+        self._fresh()
+        merged = plain(self)
+        merged.update(plain(dict(*args, **kwargs)))
+        self._replace_all(merged)
 
     def __ior__(self, other: Any) -> 'RawDict':
         self.update(other)
@@ -312,112 +434,186 @@ class RawDict(_RawNode, dict):
             if default:
                 return default[0]
             raise KeyError(key)
-        value = plain(dict.pop(self, key))
-        self._notify()
+        value = plain(dict.__getitem__(self, key))
+        del self[key]
         return value
 
     def popitem(self) -> Any:
-        key = next(reversed(self))
+        self._fresh()
+        if not dict.__len__(self):
+            raise KeyError('popitem(): dictionary is empty')
+        key = next(reversed(dict.keys(self)))
         return key, self.pop(key)
 
     def clear(self) -> None:
-        dict.clear(self)
-        self._notify()
-
-    def copy(self) -> dict:
-        return dict(self)
+        self._fresh()
+        self._replace_all({})
 
 
 class RawList(_RawNode, list):
-    """A raw parameters list whose mutations reach `_core.Pipe`."""
+    """A raw parameters list: reads come from `_core.Pipe`, every mutation goes to it."""
 
-    def __init__(self, data: Any = (), *, _owner: Any = None, _parent: Any = None, _key: Any = None):
+    def __init__(self, data: Any = (), *, _core: Any = None, _path: tuple = (), _gen: int = 0):
         list.__init__(self)
-        self._owner = _owner
-        self._parent = _parent
-        self._key = _key
-        list.extend(self, (_raw_wrap(self, i, plain(v)) for i, v in enumerate(data)))
+        self._core = _core
+        self._path = tuple(_path)
+        self._gen = _gen
+        if data:
+            list.extend(self, (plain(v) for v in data))
 
-    def _after(self) -> None:
-        for i, v in enumerate(self):
-            if not isinstance(v, (RawDict, RawList)) or v._parent is not self or v._key != i:
-                list.__setitem__(self, i, _raw_wrap(self, i, plain(v)))
-        self._notify()
+    def _load(self, value: Any, gen: int) -> None:
+        old = list(list.__iter__(self))
+        list.clear(self)
+        core = self._core
+        base = self._path
+        for i, v in enumerate(value):
+            child = old[i] if i < len(old) else None
+            if isinstance(v, dict) and isinstance(child, RawDict) and child._path == base + (i,):
+                child._load(v, gen)
+                list.append(self, child)
+            elif isinstance(v, list) and isinstance(child, RawList) and child._path == base + (i,):
+                child._load(v, gen)
+                list.append(self, child)
+            else:
+                list.append(self, _raw_wrap(core, base + (i,), v, gen))
+        self._gen = gen
+
+    # -- reads --------------------------------------------------------------------------------
+    def __getitem__(self, index: Any) -> Any:
+        self._fresh()
+        return list.__getitem__(self, index)
+
+    def __iter__(self) -> Any:
+        self._fresh()
+        return list.__iter__(self)
+
+    def __reversed__(self) -> Any:
+        self._fresh()
+        return list.__reversed__(self)
+
+    def __len__(self) -> int:
+        self._fresh()
+        return list.__len__(self)
+
+    def __contains__(self, item: Any) -> bool:
+        self._fresh()
+        return list.__contains__(self, item)
+
+    def index(self, *args: Any) -> int:
+        self._fresh()
+        return list.index(self, *args)
+
+    def count(self, item: Any) -> int:
+        self._fresh()
+        return list.count(self, item)
+
+    def __eq__(self, other: Any) -> bool:
+        self._fresh()
+        return list.__eq__(self, other)
+
+    def __ne__(self, other: Any) -> bool:
+        self._fresh()
+        return list.__ne__(self, other)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        self._fresh()
+        return list.__repr__(self)
+
+    def __add__(self, other: Any) -> list:
+        self._fresh()
+        return list(list.__iter__(self)) + list(other)
+
+    def __radd__(self, other: Any) -> list:
+        self._fresh()
+        return list(other) + list(list.__iter__(self))
+
+    def __mul__(self, n: int) -> list:
+        self._fresh()
+        return list(list.__iter__(self)) * n
+
+    __rmul__ = __mul__
+
+    def copy(self) -> list:
+        self._fresh()
+        return list(list.__iter__(self))
+
+    # -- writes -------------------------------------------------------------------------------
+    def _apply(self, name: str, *args: Any) -> Any:
+        """Replay a `list` method on a plain copy, store the result in Rust, reload the node."""
+        self._fresh()
+        items = plain(list(list.__iter__(self)))
+        result = getattr(list, name)(items, *(plain(a) for a in args))
+        core = self._core
+        core.set_path(self._path, items)
+        self._load(items, core.generation)
+        return plain(result)
 
     def append(self, item: Any) -> None:
-        list.append(self, item)
-        self._after()
+        self._apply('append', item)
 
     def extend(self, items: Any) -> None:
-        list.extend(self, items)
-        self._after()
+        self._apply('extend', list(items))
 
     def insert(self, index: int, item: Any) -> None:
-        list.insert(self, index, item)
-        self._after()
+        self._apply('insert', index, item)
 
     def remove(self, item: Any) -> None:
-        list.remove(self, item)
-        self._after()
+        self._apply('remove', item)
 
     def pop(self, index: int = -1) -> Any:
-        value = plain(list.pop(self, index))
-        self._after()
-        return value
+        return self._apply('pop', index)
 
     def clear(self) -> None:
-        list.clear(self)
-        self._after()
+        self._apply('clear')
 
     def reverse(self) -> None:
-        list.reverse(self)
-        self._after()
+        self._apply('reverse')
 
     def sort(self, *, key: Any = None, reverse: bool = False) -> None:
-        list.sort(self, key=key, reverse=reverse)
-        self._after()
+        self._fresh()
+        items = plain(list(list.__iter__(self)))
+        items.sort(key=key, reverse=reverse)
+        core = self._core
+        core.set_path(self._path, items)
+        self._load(items, core.generation)
 
     def __setitem__(self, index: Any, value: Any) -> None:
-        list.__setitem__(self, index, value)
-        self._after()
+        self._apply('__setitem__', index, value)
 
     def __delitem__(self, index: Any) -> None:
-        list.__delitem__(self, index)
-        self._after()
+        self._apply('__delitem__', index)
 
     def __iadd__(self, items: Any) -> 'RawList':
         self.extend(items)
         return self
 
     def __imul__(self, n: int) -> 'RawList':
-        list.__imul__(self, n)
-        self._after()
+        self._apply('__imul__', n)
         return self
-
-    def copy(self) -> list:
-        return list(self)
 
 
 class Attrs(_Plainable, dict):
     """
-    `Pipe._attributes` under `MRSM_CORE=rust`: assigning `'parameters'` adopts the value as the
-    `RawDict` backed by the pipe's `_core.Pipe`.
+    `Pipe._attributes` under `MRSM_CORE=rust`. The `'parameters'` entry is always the pipe's one
+    root `RawDict`; assigning it stores the value in `_core.Pipe` (the root, a read-through
+    view of the Rust map, keeps its identity).
     """
 
-    def __init__(self, pipe: Any, data: Any = ()):
+    def __init__(self, pipe: Any, data: Any = (), root: Any = None):
         dict.__init__(self)
         self._pipe = pipe
+        self._root = root
         for k, v in dict(data).items():
             self[k] = v
 
     def __setitem__(self, key: Any, value: Any) -> None:
         if key == 'parameters':
-            if isinstance(value, RawDict) and value._owner is self._pipe and value._parent is None:
-                pass
-            else:
-                value = RawDict(plain(value) if isinstance(value, dict) else {}, _owner=self._pipe)
-            dict.__setitem__(self, key, value)
-            value._sync()
+            root = self._root
+            if value is not root:
+                root._replace_all(plain(value) if isinstance(value, dict) else {})
+            dict.__setitem__(self, key, root)
             return
         dict.__setitem__(self, key, value)
 
@@ -431,7 +627,7 @@ class Attrs(_Plainable, dict):
         return dict.__getitem__(self, key)
 
     def copy(self) -> dict:
-        return dict(self)
+        return dict(dict.items(self))
 
 
 def adopt_attributes(pipe: Any, attributes: Any) -> Any:
@@ -440,4 +636,11 @@ def adopt_attributes(pipe: Any, attributes: Any) -> Any:
         return attributes
     if not isinstance(attributes, dict):
         return attributes
-    return Attrs(pipe, attributes)
+    return Attrs(pipe, attributes, pipe._raw_root)
+
+
+def new_raw_root(core: Any) -> RawDict:
+    """The root `RawDict` over `core` (a `_core.Pipe`), loaded from its current raw parameters."""
+    root = RawDict(_core=core)
+    root._reload()
+    return root

@@ -2692,6 +2692,7 @@ dependencies = [
  "meerschaum-core",
  "meerschaum-kernel",
  "meerschaum-sql",
+ "meerschaum-valkey",
  "meerschaum-worker",
  "proptest",
  "serde",

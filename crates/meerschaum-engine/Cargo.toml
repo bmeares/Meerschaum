@@ -30,4 +30,6 @@ fs4 = "0.13"
 proptest = "1"
 # SQLite-backed end-to-end tests (dev-only: the engine runs against the connector traits).
 meerschaum-sql = { workspace = true }
+# Lease and stream tests against a disposable Valkey (`MRSM_TEST_VALKEY_URI`).
+meerschaum-valkey = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

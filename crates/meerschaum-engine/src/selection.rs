@@ -297,6 +297,26 @@ impl Subgraph {
             .map(|&i| &self.edges[i])
     }
 
+    /// The subgraph without `remove` (a hold-back, see `RunOptions::hold`). Edges to and from
+    /// removed nodes disappear with them.
+    pub fn without(&self, graph: &Graph, remove: &BTreeSet<PipeRef>) -> Subgraph {
+        let order: Vec<PipeRef> = self
+            .order
+            .iter()
+            .filter(|r| !remove.contains(*r))
+            .cloned()
+            .collect();
+        let targets = self
+            .targets
+            .iter()
+            .filter(|r| !remove.contains(*r))
+            .cloned()
+            .collect();
+        let mut sub = Subgraph::new(graph, order, targets, self.flat);
+        sub.warnings = self.warnings.clone();
+        sub
+    }
+
     /// Every in-selection descendant of a node.
     pub fn descendants(&self, pipe_ref: &PipeRef) -> BTreeSet<PipeRef> {
         let mut out = BTreeSet::new();

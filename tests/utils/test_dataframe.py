@@ -336,7 +336,10 @@ def test_filter_unseen_df_polars_preserves_source_order(monkeypatch):
 
     monkeypatch.setattr(dataframe, '_filter_unseen_df_with_polars', capture_native_result)
     result = dataframe.filter_unseen_df(old_df, new_df)
-    assert native_results[0] is not None
+    from meerschaum._core import _gate
+    if not _gate.use_rust('filter_unseen_df'):
+        # Under MRSM_CORE=rust the Rust kernel replaces the Polars helper entirely (D12).
+        assert native_results[0] is not None
     assert result['id'].tolist() == [3, 2]
 
 

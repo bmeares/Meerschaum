@@ -14,7 +14,22 @@ Both require `X-Mrsm-Host-Token` (see `_auth.decode_internal_token`). The Rust s
 proxies `/_mrsm/` from clients.
 """
 
-from meerschaum.utils.typing import Any, Dict, List
+from meerschaum.utils.typing import Any, Dict, List, Optional
+
+
+def internal_token_from(request) -> Optional[str]:
+    """
+    Return the internal token of a request: the `X-Mrsm-Host-Token` header, else a bearer
+    `Authorization` header (the console's registry fetch sends the same signed token that way).
+    The token is validated by `decode_internal_token` either way.
+    """
+    from meerschaum.api.host import TOKEN_HEADER
+    token = request.headers.get(TOKEN_HEADER)
+    if token:
+        return token
+    authorization = request.headers.get('authorization', '')
+    scheme, _, credentials = authorization.partition(' ')
+    return credentials.strip() if scheme.lower() == 'bearer' and credentials else None
 
 
 def app_route_paths(app) -> List[str]:
@@ -37,15 +52,25 @@ def web_page_registry() -> List[Dict[str, Any]]:
     Return every `@web_page` with its mode: `html` (page contract, served at `route`) or `dash`
     (legacy layout, served by the plugin's Dash app at `/dash/<plugin>/...`).
     """
-    from meerschaum.plugins import _plugin_endpoints_to_pages
+    from meerschaum.plugins import _plugin_endpoints_to_pages, _get_parent_plugin
+    from meerschaum.api.host import dash_enabled
     from meerschaum.api.host.dash import get_page_contract_pages, plugin_path
+
+    if not dash_enabled():
+        return []
 
     html_pages = get_page_contract_pages()
     out = []
     for page_group, pages in list(_plugin_endpoints_to_pages.items()):
         for page_str, page in list(pages.items()):
             contract = html_pages.get(page_str, None)
-            plugin_name = contract['plugin'] if contract else page_group
+            ### The owning plugin is the one that defined the function; `page_group` is a label
+            ### the plugin may choose freely (it defaults to the plugin's name).
+            plugin_name = (
+                contract['plugin']
+                if contract
+                else (_get_parent_plugin(function=page.get('function')) or page_group)
+            )
             entry = {
                 'path': page_str,
                 'page_group': page_group,
@@ -54,6 +79,7 @@ def web_page_registry() -> List[Dict[str, Any]]:
                 'skip_navbar': bool(page.get('skip_navbar', False)),
                 'dark_theme': bool(page.get('dark_theme', True)),
                 'function': getattr(page.get('function'), '__name__', None),
+                'plugin': plugin_name,
                 'mode': 'html' if contract else 'dash',
             }
             if contract:
@@ -91,13 +117,13 @@ def register(app) -> None:
 
     @app.get(REGISTRY_PATH, include_in_schema=False)
     async def _host_registry(request: fastapi.Request):
-        if decode_internal_token(request.headers.get(TOKEN_HEADER)) is None:
+        if decode_internal_token(internal_token_from(request)) is None:
             return _forbidden()
         return JSONResponse(content=registry_document(app))
 
     @app.post(MCP_PATH, include_in_schema=False)
     async def _host_mcp(request: fastapi.Request):
-        claims = decode_internal_token(request.headers.get(TOKEN_HEADER))
+        claims = decode_internal_token(internal_token_from(request))
         if claims is None:
             return _forbidden()
         from meerschaum.mcp import handle_payload, jsonrpc_error

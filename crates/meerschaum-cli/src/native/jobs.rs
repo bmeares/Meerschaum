@@ -16,6 +16,7 @@ use meerschaum_core::static_config;
 use meerschaum_core::value::Value;
 use meerschaum_jobs::config::{JobPaths, JobsConfig};
 use meerschaum_jobs::executor::get_filtered_jobs;
+use meerschaum_jobs::scheduler::RootScheduler;
 use meerschaum_jobs::{
     Job, JobOptions, JobsContext, Launcher, MonitorControl, MonitorOptions, Status,
 };
@@ -1139,7 +1140,26 @@ pub fn run_schedule(
     install_stop_handler(&super::session(rt));
     let stop = stop_requested_flag();
     let start = Instant::now();
-    let mut pending = None;
+    // A job process (`MRSM_DAEMON_ID` is the job name) keeps its schedule per root: a restart
+    // resumes the recorded next fire time instead of re-anchoring the cadence. Foreground runs
+    // have no job name and keep nothing.
+    let job = (rt.env)(&meerschaum_core::static_config().environment.daemon_id)
+        .filter(|name| !name.is_empty());
+    let scheduler = job
+        .as_ref()
+        .map(|_| RootScheduler::for_root(&rt.config().paths().root_dir));
+    let mut pending = match (&scheduler, &job) {
+        (Some(scheduler), Some(job)) => scheduler
+            .next_fire(job, schedule, now)
+            .ok()
+            .flatten()
+            .filter(|next| {
+                scheduler
+                    .state(job)
+                    .is_some_and(|s| s.next_fire == Some(*next))
+            }),
+        _ => None,
+    };
     let mut finished = false;
     while !stop.load(Ordering::SeqCst) {
         let Some(next) = pending.take().or_else(|| trigger.next()) else {
@@ -1155,6 +1175,13 @@ pub fn run_schedule(
             break;
         }
         let _ = action(rt);
+        if !finished && pending.is_none() {
+            pending = trigger.next();
+        }
+        if let (Some(scheduler), Some(job)) = (&scheduler, &job) {
+            let fired = chrono::Utc::now().fixed_offset();
+            let _ = scheduler.record_fire(job, schedule, fired, pending);
+        }
         if finished {
             break;
         }

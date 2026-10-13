@@ -18,11 +18,14 @@ fingerprints and caches the result under the root directory.
 
 from __future__ import annotations
 
+import ast
 import inspect
+import pathlib
+import re
 import traceback
 from typing import Any, Dict, List, Optional
 
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 3
 DATA_FUNCTIONS = ('fetch', 'sync', 'register', 'setup', 'subscribe')
 
 
@@ -42,6 +45,81 @@ def _plugin_of(func: Any) -> Optional[str]:
         return _get_parent_plugin(function=func)
     except Exception:
         return None
+
+
+def _normalize(name: str) -> str:
+    base = re.split(r'[\[=<>,!~; @]', str(name).strip(), maxsplit=1)[0]
+    return re.sub(r'[-_.]+', '-', base).lower()
+
+
+def _plugin_source_files(path: Optional[str]) -> List[pathlib.Path]:
+    if not path:
+        return []
+    file_path = pathlib.Path(path)
+    if file_path.name == '__init__.py':
+        return sorted(file_path.parent.rglob('*.py'))
+    return [file_path] if file_path.suffix == '.py' else []
+
+
+def find_undeclared_default_venv_imports(
+    path: Optional[str],
+    required: List[str],
+) -> List[str]:
+    """
+    Statically scan a plugin's source for `attempt_import('x')` calls into the shared `mrsm`
+    venv (no `venv=`) for a package that is neither in the plugin's `required` list nor declared
+    by Meerschaum's extras (`meerschaum.utils.packages.all_packages`) (design D20, §12.1).
+    Return one warning per package. Dynamic calls (non-literal names) are not detected.
+    """
+    from meerschaum.utils.packages import all_packages, _import_to_install_name
+
+    declared = {_normalize(r) for r in required}
+    found: Dict[str, str] = {}
+    for source_file in _plugin_source_files(path):
+        try:
+            tree = ast.parse(source_file.read_text(encoding='utf-8'), filename=str(source_file))
+        except (OSError, SyntaxError, ValueError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            func_name = (
+                func.id if isinstance(func, ast.Name)
+                else func.attr if isinstance(func, ast.Attribute)
+                else None
+            )
+            if func_name != 'attempt_import':
+                continue
+            venv_keywords = [kw for kw in node.keywords if kw.arg == 'venv']
+            if venv_keywords:
+                value = venv_keywords[0].value
+                if not (isinstance(value, ast.Constant) and value.value == 'mrsm'):
+                    continue
+            if any(kw.arg is None for kw in node.keywords):
+                continue
+            for arg in node.args:
+                if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
+                    continue
+                import_name = arg.value.split('.')[0]
+                if import_name in ('meerschaum', 'plugins') or import_name in found:
+                    continue
+                candidates = {
+                    _normalize(import_name),
+                    _normalize(_import_to_install_name(import_name)),
+                }
+                if candidates & declared or import_name in all_packages:
+                    continue
+                found[import_name] = f"{source_file.name}:{node.lineno}"
+    return [
+        (
+            f"Plugin calls attempt_import('{name}') in the shared 'mrsm' venv at {where}, "
+            f"but '{name}' is not in its `required` list and is not provided by a Meerschaum "
+            f"extra. Add '{_import_to_install_name(name)}' to `required`, "
+            f"or pass `venv='<plugin name>'` to attempt_import()."
+        )
+        for name, where in found.items()
+    ]
 
 
 def _jsonable(value: Any) -> Any:
@@ -93,6 +171,7 @@ def _empty_plugin(name: str) -> Dict[str, Any]:
         'mcp_prompts': [],
         'connectors': [],
         'import_error': None,
+        'venv_warnings': [],
     }
 
 
@@ -156,6 +235,15 @@ def build_manifest(debug: bool = False) -> Dict[str, Any]:
         info['path'] = getattr(module, '__file__', None)
         required = getattr(module, 'required', [])
         info['required'] = [str(r) for r in required] if isinstance(required, (list, tuple)) else []
+        try:
+            info['venv_warnings'] = find_undeclared_default_venv_imports(
+                info['path'], info['required'],
+            )
+            for message in info['venv_warnings']:
+                from meerschaum.utils.warnings import warn
+                warn(f"[{name}] {message}", stack=False, color=False)
+        except Exception:
+            pass
         info['data_functions'] = [
             fn_name
             for fn_name in DATA_FUNCTIONS

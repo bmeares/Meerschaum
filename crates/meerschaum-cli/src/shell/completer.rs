@@ -201,7 +201,12 @@ impl Default for CompletionData {
 /// The sorted `do_` names for an action registry (actions, shell commands, `help`, `exit`,
 /// `pass`).
 pub fn default_do_names(actions: &[ActionDef]) -> Vec<String> {
-    let mut names: Vec<String> = actions.iter().map(|a| a.name.to_string()).collect();
+    // v5-only actions stay out of the top-level list so the v4 completion fixtures hold.
+    let mut names: Vec<String> = actions
+        .iter()
+        .filter(|a| !crate::actions::V5_ONLY_ACTIONS.contains(&a.name))
+        .map(|a| a.name.to_string())
+        .collect();
     names.extend(SHELL_METHODS.iter().map(|s| s.to_string()));
     names.sort();
     names.dedup();

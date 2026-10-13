@@ -148,3 +148,85 @@ def test_python_pipe_pickle_equality_and_core_agree():
     assert pipe._core_pipe == clone._core_pipe
     import copy
     assert copy.deepcopy(pipe) == pipe
+
+
+# ---------------------------------------------------------------------------------------------
+# Wave 7 (task K): `_core.Pipe` is the only store; the Python views are read-through caches.
+
+def test_raw_views_read_from_rust():
+    pipe = mrsm.Pipe('plugin:x', 'views', parameters={'a': {'b': 1}, 'l': [{'k': 1}]}, instance='sql:main')
+    raw = pipe._attributes['parameters']
+    a = raw['a']
+    lst = raw['l']
+    ### Writes made straight into Rust are visible through every held view.
+    pipe._core_pipe.set_path(['a', 'b'], 2)
+    pipe._core_pipe.set_path(['a', 'c'], {'d': 3})
+    pipe._core_pipe.set_path(['l', 0, 'k'], 9)
+    assert a['b'] == 2 and a['c'] == {'d': 3} and lst[0]['k'] == 9
+    assert raw['a'] is a and raw['l'] is lst
+    ### And the other direction, with identity of nested containers kept across reads.
+    a['b'] = 5
+    a['c']['d'] = 6
+    lst.append({'k': 2})
+    assert pipe._core_pipe.get_path(['a', 'b']) == 5
+    assert pipe._core_pipe.get_path(['a', 'c', 'd']) == 6
+    assert pipe._core_pipe.get_path(['l', 1, 'k']) == 2
+    assert raw['a'] is a and raw['a']['c'] is a['c']
+    del a['c']
+    assert 'c' not in a and 'c' not in pipe._core_pipe.raw_parameters['a']
+    assert pipe._attributes['parameters'] is raw
+
+
+def test_raw_views_stay_dict_and_list_duck_types():
+    import copy
+    import json
+    pipe = mrsm.Pipe('plugin:x', 'duck', parameters={'a': {'b': [1, 2]}}, instance='sql:main')
+    raw = pipe._attributes['parameters']
+    assert isinstance(raw, dict) and isinstance(raw['a']['b'], list)
+    assert json.loads(json.dumps(raw)) == {'a': {'b': [1, 2]}}
+    assert {**raw} == {'a': {'b': [1, 2]}} and dict(raw) == {'a': {'b': [1, 2]}}
+    assert type(copy.deepcopy(raw)) is dict and type(copy.deepcopy(raw['a']['b'])) is list
+    assert pickle.loads(pickle.dumps(raw)) == {'a': {'b': [1, 2]}}
+    pipe._core_pipe.set_path(['a', 'b'], [3])
+    assert json.dumps(raw) == '{"a": {"b": [3]}}'
+    assert list(raw['a']['b']) == [3] and len(raw['a']['b']) == 1
+
+
+def test_resolved_memo_follows_rust_generation():
+    pipe = mrsm.Pipe('plugin:x', 'memo', parameters={'columns': {'id': 'id'}}, instance='sql:main')
+    assert pipe.columns == {'id': 'id'}
+    generation = pipe._core_pipe.generation
+    pipe._core_pipe.set_path(['columns', 'id'], 'z')
+    assert pipe._core_pipe.generation > generation
+    assert pipe.columns == {'id': 'z'}
+
+
+def test_target_str_eq_hash_use_rust():
+    from meerschaum.utils.formatting._pipes import pipe_repr
+    pipe = mrsm.Pipe('plugin:x', 'tg', 'loc', instance='sql:main', parameters={'target_name': 'custom_t'})
+    assert pipe.target == 'custom_t'
+    assert pipe._core_pipe.target(None, pipe.get_parameters()) == 'custom_t'
+    plain_pipe = mrsm.Pipe('plugin:x', 'tg2', instance='sql:main')
+    assert plain_pipe.target == 'plugin_x_tg2'
+    assert str(pipe) == pipe_repr(pipe, ansi=False)
+    other = mrsm.Pipe('plugin:x', 'tg', 'loc', instance='sql:main')
+    assert pipe == other and hash(pipe) == hash(other) and pipe != plain_pipe
+    assert {pipe: 1}[other] == 1
+    assert pipe != 'plugin:x'
+
+
+def test_cross_pipe_template_reresolves_on_every_access(conn):
+    parent = mrsm.Pipe('plugin:p', 'par', instance=conn, columns={'datetime': 'dt'})
+    assert parent.register()[0]
+    child = mrsm.Pipe(
+        'plugin:p', 'child', instance=conn,
+        parameters={'note': "{{ Pipe('plugin:p', 'par', instance='" + str(conn) + "').columns['datetime'] }}"},
+    )
+    assert child.get_parameters()['note'] == 'dt'
+    ### v4 keeps the memoized text; rust re-resolves because the template reads another pipe.
+    parent.columns = {'datetime': 'ts'}
+    assert parent.edit()[0]
+    assert child.get_parameters()['note'] == 'ts'
+    ### The raw parameters never take the resolved text.
+    assert '{{' in child._attributes['parameters']['note']
+    parent.delete()

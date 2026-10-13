@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 
 use axum::Router;
-use axum::extract::{FromRequest, Multipart, Path, Request};
+use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Path, Request};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::{get, post};
 use meerschaum_connector::PluginRecord;
 use meerschaum_core::{Map, Value};
 use serde_json::json;
@@ -18,12 +18,19 @@ use crate::error::{ApiError, ApiResult};
 use crate::json::{from_core, ok_json, tuple, tuple_response};
 use crate::state::AppState;
 
+/// The largest plugin archive accepted by `POST /plugins/{name}` (and by the console's upload form,
+/// which forwards to it). v4 (Starlette) has no limit; axum's default of 2 MiB would reject real
+/// plugin archives, so the limit is raised to a bound that still protects the server's memory.
+pub const ARCHIVE_MAX_BYTES: usize = 128 * 1024 * 1024;
+
 /// Register the `plugins` route group.
 pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
     app.route("/plugins", get(get_plugins))
         .route(
             "/plugins/{name}",
-            get(get_plugin).post(register_plugin).delete(delete_plugin),
+            get(get_plugin)
+                .delete(delete_plugin)
+                .merge(post(register_plugin).layer(DefaultBodyLimit::max(ARCHIVE_MAX_BYTES))),
         )
         .route("/plugins/{name}/attributes", get(get_plugin_attributes))
         .route("/plugins/{name}/version", get(get_plugin_version))

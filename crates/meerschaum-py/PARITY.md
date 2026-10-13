@@ -74,7 +74,7 @@ the state and the Python dictionary becomes a proxy (design §4.4).
 | 8 | `test_sync_polars_dataframe` | dtypes differed for a Polars frame with a `json` column of plain strings (Arrow-backed vs `datetime64[us, UTC]`) | v4's `_enforce_dtypes_with_polars` gives up when a declared `json` column of a **Polars** frame is not an `arrow.json` extension and takes the object path; the kernel treats a Polars `String` like a pandas `string` column (which v4 does enforce natively) and goes native | Boundary: for Polars inputs, a declared `json` column that is still native forces the object-path output. Open (kernel): the kernel cannot see the frame's origin; recorded as a known divergence of `enforce_dtypes_with_path` |
 | 9 | `test_sync_polars_dataframe` (`get_data(as_polars=True, as_iterator=True)`) | an all-null chunk's `payload` column was `Null`, not `Extension('arrow.json')` | v4's `to_polars(json_cols=..., geometry_cols_types_srids=...)` types declared JSON / geometry columns even when every value is null; the kernel infers the extension from the first valid value | Boundary: `frame_to_polars` takes the declared dtypes and casts all-null declared columns to the extension |
 | 10 | `test_sync_bytes_inplace` | `df['bytes_col'][2]` was `<NA>` (`binary[pyarrow]`), v4 has `None` (`object`) | In v4's object path, `bytes` / `json` / `uuid` / `numeric` columns are cast value by value and the final `astype` loop only casts columns whose current dtype is **not** `are_dtypes_equal` to the target (`object` ≡ `binary`) | Boundary hint rule for the object path: special columns stay `object`; other typed columns keep the input dtype when it is `are_dtypes_equal` to `to_pandas_dtype(typ)` (so `int32[pyarrow]` stays for `int`) |
-| 11 | `tests/utils/test_dataframe.py::test_filter_unseen_df_polars_preserves_source_order` | `IndexError` on `native_results[0]` | The test monkeypatches v4's private `_filter_unseen_df_with_polars` and `_POLARS_FILTER_MIN_ROWS` and asserts the private helper was called; the Rust binding never calls v4 internals (D12) | **Deselected under rust.** The behavior it protects (source order, duplicate null rows) is covered by `test_filter_unseen_df_polars_parity`, which passes. Open: the test should assert on the result only (needs a change in `tests/`, outside this crate) |
+| 11 | `tests/utils/test_dataframe.py::test_filter_unseen_df_polars_preserves_source_order` | `IndexError` on `native_results[0]` | The test monkeypatches v4's private `_filter_unseen_df_with_polars` and `_POLARS_FILTER_MIN_ROWS` and asserts the private helper was called; the Rust binding never calls v4 internals (D12) | **Resolved (wave 7):** the private-helper assertion runs only when the Python path is active; the result assertion runs in both modes. No deselect needed |
 | 12 | (performance, all tests) | `get_config` cost 78 µs/call vs 17 µs in Python | Each call converted the whole config dictionary | Boundary: convert only the first key and `_symlinks` when the path is already loaded. Still ~64 µs vs ~17 µs per call (converting the requested top-level subtree, e.g. `system`, dominates). **Open**: goes away when the registry owns the state (5.0) |
 | 13 | `test_rust_mode_falls_through_when_symbol_missing` (`crates/meerschaum-py/tests/test_core.py`) | asserted that some gated symbol is unbound | every gated feature is bound now | Test rewritten: delete one symbol with `monkeypatch` to prove the fall-through; added `test_every_gated_feature_is_bound` and `test_rust_mode_matches_python` |
 | 14 | `test_deduplicate_without_instance_method`, `test_filter_existing_all_new`, `test_mixed_timezone_aware_and_naive`, `test_no_null_indices` (regressions of fix 10) | downstream `TypeError: Cannot use .astype to convert from timezone-naive dtype to timezone-aware dtype` | Fix 10 kept the input dtype for `are_dtypes_equal` targets, but `datetime64[us]` is "equal" to `datetime64[us, UTC]` and v4 coerces datetime columns explicitly | Boundary: datetime targets always take `to_pandas_dtype(typ)` |
@@ -125,7 +125,7 @@ done
 
 | # | Test(s) | Symptom | Root cause | Resolution |
 |---|---|---|---|---|
-| 19 | `tests/test_pipe_attributes.py::test_sql_attribute_errors_are_not_unregistered`, `::test_sql_no_row_is_still_empty` | under rust, the mocked `exec` is never called (no `RuntimeError`; a real row instead of `{}`) | both tests monkeypatch `SQLConnector.exec` (SQLAlchemy) to fake the metadata query; the routed `get_pipe_attributes` reads through the Rust driver | **Deselected under rust.** The behavior they protect (a failed metadata read raises instead of reporting "unregistered") is covered with a real failure by `tests/test_facade_sql.py::test_attribute_read_errors_propagate` (Rust errors surface as `RuntimeError`) |
+| 19 | `tests/test_pipe_attributes.py::test_sql_attribute_errors_are_not_unregistered`, `::test_sql_no_row_is_still_empty` | under rust, the mocked `exec` is never called (no `RuntimeError`; a real row instead of `{}`) | both tests monkeypatch `SQLConnector.exec` (SQLAlchemy) to fake the metadata query; the routed `get_pipe_attributes` reads through the Rust driver | **Skipped under rust (wave 7, `python_sql_only` marker; no deselect needed).** The behavior they protect (a failed metadata read raises instead of reporting "unregistered") is covered with a real failure by `tests/test_facade_sql.py::test_attribute_read_errors_propagate` (Rust errors surface as `RuntimeError`) |
 | 20 | `tests/test_index_queries.py::test_postgresql_upsert_creates_one_unique_constraint` (and every test calling a v4 SQL function with a stub `self`) | **python mode**: `AttributeError: 'SimpleNamespace' object has no attribute '_rust_method'` | the first guards called `self._rust_method(...)`; tests (and plugins) call these functions with `SimpleNamespace` stand-ins for the connector | Guards call `_gate.rust_method(self, name)`, which returns `None` in `python` mode before touching `self`, and for objects without `_rust_method` (duck typing, §4.4). Regression test `tests/test_facade_sql.py::test_stub_self_runs_python`, `test_core.py::test_rust_method_runs_python_for_stubs_and_python_mode` |
 | 21 | `tests/test_partition.py::test_repartition_roundtrip[postgis]` | `pipe.parameters['verify']['chunk_minutes']` kept the old width after `partition_pipe` | v4's `partition_pipe` calls `pipe.update_parameters({'verify': {'chunk_minutes': n}})` on the Python pipe; Rust persisted the new width to `mrsm_pipes` but cannot mutate the Python object | Wave 5: `partition_pipe_with_parameters` returns the parameter patch and the binding applies it in memory (`persist=False`), including changes preceding a later repartition failure. The existing Python guard still performs its redundant registered-parameter refresh. |
 | 22 | (review, `sync_pipe`) | the Python pipe's in-memory `autoincrement` / numeric `dtypes` and its caches went stale after a Rust sync | v4's `sync_pipe` mutates the Python pipe (`update_parameters`, `pipe.dtypes = ...`) and clears `_columns_types` / `_columns_indices` | `facade::sync_pipe_mut` returns the mutated core pipe; the binding patches the changed top-level parameters into the Python pipe (`persist=False`, Rust persisted them) and the guard clears `_exists`, `_columns_types(_timestamp)`, `_columns_indices(_timestamp)` |
@@ -257,3 +257,87 @@ Results (sqlite, ignores as above plus `--ignore=tests/api_host`, release extens
 passing; `cargo clippy -p meerschaum-py --all-targets --no-deps -- -D warnings` clean (without
 `--no-deps` it stops on an unrelated warning in `meerschaum-cli/src/native_plugins.rs:114`, another
 task's file).
+
+## Wave 7 (task K): `_core.Pipe` is the only parameter store
+
+`pipe._attributes['parameters']` under `MRSM_CORE=rust` is no longer a Python mirror pushed into Rust
+after every change. `meerschaum/core/Pipe/_live_parameters.py::RawDict` / `RawList` are
+**read-through caches** of one node of the Rust raw map, addressed by path:
+
+- every write goes to `_core.Pipe` first (`set_path` / `del_path` / `set_raw_parameters`);
+- every read compares the node's generation with `_core.Pipe.generation` (a mutation counter bumped
+  by each Rust-side change) and reloads the node with `snapshot(path)` when they differ, so a held
+  view observes writes made through other views, `update_parameters`, the setters, a metadata load
+  or `_core_pipe.set_path` directly. Reloading keeps the identity of child containers whose path
+  still holds a container of the same kind (so `pipe._attributes['parameters']['columns']` stays the
+  same object across reads and writes);
+- the root view is one object per pipe (`pipe._raw_root`); assigning `_attributes['parameters']`
+  stores the value in Rust and keeps the root;
+- the views stay `dict` / `list` subclasses (`isinstance`, `json.dumps`, `**`, `dict()`, `deepcopy`,
+  pickle give plain containers), as v4 code and corpora rely on them;
+- the resolved-parameters memo of `get_parameters` is keyed on the Rust generation, not on the
+  identity of a Python dict. Parameters that contain a cross-pipe `{{ Pipe(...) }}` template are
+  **not** memoized and re-resolve on every access (see row 36).
+
+| # | Deviation / change | Reason |
+|---|---|---|
+| 35 | Rows 32 and 34 are closed: reads come from Rust; `Pipe.target` computes the name with the Rust rules (`_core.Pipe.target(flavor, resolved_params)`, `target_legacy()`), `__eq__` / `__hash__` use the core (`__eq__` still duck typed: only another façade pipe with a `_core_pipe` is compared in Rust), `__str__` / non-ANSI `__repr__` use the core `Display` (`str(pipe)` 490 us -> 1.3 us) | single store; the Python `target` keeps its side effects (warning on truncation, write-back of a non-default `target_name`, memoization rules) because they act on façade state |
+| 36 | Parameters with a cross-pipe `{{ Pipe(...) }}` template re-resolve on every access | v4.1.4 memoizes `get_parameters` by raw identity, which keeps a referenced pipe's old `columns` forever; re-resolving matches the "per access" rule of the task and is the fresher behavior. Cost: pipes with such templates pay the Python resolution per access (plain pipes keep the memo) |
+| 37 | A held `RawDict` / `RawList` addresses its node by **path**: after `lst.insert(0, x)` a view of the old first element now addresses the new first element | v4 held the Python object; unavoidable when Rust owns the data. Dict keys are stable, so nothing changes for the usual `pipe.parameters['a']['b'] = ...` |
+| 38 | `SqlConnector.sync_pipe` receives the **raw** parameters (`ParamsView::Raw`); `meerschaum_sql::SqlConnector::sync_pipe_mut_cached` resolves cross-pipe templates through the instance on every call (`prepare_pipe`), syncs the resolved copy and applies only the changed raw top-level keys (`autoincrement`, numeric / special `dtypes`) to the caller's pipe | wave 6 handed the binding Python-resolved parameters, so the resolver never ran and the templates were a snapshot taken by Python |
+
+Hot-path cost, rust mode (release extension, `sql:memory` pipe with 2 columns, 3 dtypes; median of
+min-of-5, microseconds; baseline = wave 6): `pipe.columns` 85 -> 108 (python mode 42), `pipe.dtypes`
+737 -> 726, `pipe.tags` 85 -> 82, `get_parameters()` 78 -> 64, `str(pipe)` 1500 -> 1.3,
+`hash(pipe)` 3.3 -> 1.2, a nested write through `pipe.parameters[...]` 948 -> 1368 (a write reloads the
+touched path from Rust before the next read). Everything is inside the 2x budget.
+
+Tests: `tests/test_core_pipe.py` (+5: views read from Rust, dict/list duck typing, memo follows the
+generation, target / str / eq / hash, cross-pipe template re-resolution),
+`crates/meerschaum-sql/tests/w6b_templates.rs::sync_pipe_mut_resolves_templates` (all flavors).
+
+### D14 runway: full suite under `MRSM_CORE=rust`
+
+`PYTHONPATH=$(pwd) MRSM_CORE=rust MRSM_TEST_FLAVORS=<flavor> python -m pytest tests/` with the
+ignores `tests/test_jobs.py`, `test_mcp.py`, `test_listen_shutdown.py`, `test_api_config.py`,
+`tests/api_host` and `tests/console` (task J's), `MRSM_PLUGINS_DIR=./tests/plugins`, a scratch
+`MRSM_ROOT_DIR`. See the report below for the per-flavor results. The only failures on every flavor are
+the three tests that monkeypatch Python internals (rows 11 and 19): `test_pipe_attributes.py::
+test_sql_attribute_errors_are_not_unregistered`, `::test_sql_no_row_is_still_empty` and
+`utils/test_dataframe.py::test_filter_unseen_df_polars_preserves_source_order`. Running with
+`MRSM_PLUGINS_DIR` pointing at an empty directory makes `test_maintenance.py`, `test_verify.py`,
+`test_sync_engine` and `test_worker.py` fail (the `stress` test plugin is missing): that is a harness
+mistake, not a façade failure.
+
+Results (wave 7, release extension rebuilt, 636 passed per flavor; python mode on sqlite 621 passed,
+21 skipped): `rust` on sqlite, postgis, timescaledb, mariadb, mysql and mssql each ended with the same
+3 failures above and nothing else (`3 failed, 636 passed, 3 skipped` on the six server and file flavors).
+
+### D14 removal plan (what goes away with the Python core, and what replaces it)
+
+| Python module(s) | Replaced by (façade call) | State |
+|---|---|---|
+| `connectors/sql/_pipes.py`, `_users.py`, `_plugins.py`, `_compress.py`, `_maintenance.py`, `_partition.py` (all `_rust_method` guards) | `_core.SqlConnector.<same name>` (all bound) | Bound and exercised by the whole suite. Delete the Python bodies, keep the guard-free delegations |
+| `connectors/sql/_pipes.py::sync_pipe_inplace`, `get_add_columns_queries`, `get_alter_columns_queries`, `get_to_sql_dtype`, `create_pipe_table_from_df` | `SqlConnector.sync_pipe_inplace` is Rust (`meerschaum_sql`), not yet bound in `_core` | **Needs a binding** before deletion |
+| `connectors/sql/_sql.py` (`read`, `exec`, `value`, `to_sql`), `_create_engine.py`, `_uri.py`, `tables` | stay (D16: SQLAlchemy for user SQL); `_uri.py` could use the Rust URI parser | stays |
+| `connectors/sql/_fetch.py` (`fetch`, `get_pipe_metadef`) | `meerschaum_sql::instance::fetch` via the engine; no `_core` binding | **Needs a binding** |
+| `core/Pipe/_attributes.py` (`get_parameters`, `parameters`, `columns`, `dtypes`, `indices`, `get_precision`, `update_parameters`, `target`) | `_core.Pipe` keys / raw parameters / `target` (bound); resolution of references, `{{ Pipe() }}` and `_symlinks` is still Python (`get_parameters`), `_core.Pipe.resolved_parameters` covers self templates and config only | Needs Rust reference resolution with `_symlinks` capture and a PyResolver for cross-pipe templates in `get_parameters` |
+| `core/Pipe/_cache.py`, `_edit.py`, `_register.py`, `_delete.py`, `_drop.py`, `_clear.py`, `_index.py`, `_copy.py`, `_show.py`, `_bootstrap.py` | thin: instance calls (bound) plus Python-side caches and interactive prompts | Caches move into Rust with the engine; prompts stay SDK |
+| `core/Pipe/_sync.py`, `_fetch.py`, `_verify.py`, `_deduplicate.py`, `_data.py`, `_dtypes.py`, `_compress.py`, `_maintenance.py` | `meerschaum-engine` / `meerschaum-worker` (sync, verify, fetch, filter_existing, get_chunk_bounds) and the kernel; `Pipe.sync` has no `_core` binding yet | **Biggest gap**: engine entry points (`sync`, `verify`, `fetch`, `get_data` iterators) must be bound before these go |
+| `utils/dataframe.py`, `utils/dtypes/__init__.py`, `utils/dtypes/sql.py` (the guarded helpers) | `_core.enforce_dtypes`, `filter_unseen_df`, `query_df`, `get_*_cols`, `are_dtypes_equal`, `to_pandas_dtype`, `is_dtype_numeric`, `get_geometry_type_srid`, `get_pd_type_from_db_type` (bound) | Bound; the unguarded rest of the modules (`parse_df_datetimes`, `to_polars`, `serialize_*`, ...) stays as SDK |
+| `utils/sql.py` (query builders, `build_where`, `clean`, `dateadd_str`, `sql_item_name`, ...) | `meerschaum_sql::queries` / `where_clause` / `ident`; `sql_item_name`, `get_create_table_query` helpers are not bound | **Needs bindings** for plugin-visible helpers (`sql_item_name`, `build_where`), the rest is removed |
+| `utils/pipes.py::replace_pipes_syntax`, `core/User/_User.py` hashing, `config/__init__.py::get_config` | `_core.replace_pipes_syntax`, `hash_password` / `verify_password`, `get_config` (bound) | Bound; `config` registry must become the owner of the Python `config` dict (PARITY "get_config") |
+| `utils/daemon/`, `jobs/` executors, `actions/*`, `api/routes/*`, `api/dash/callbacks/*` | `meerschaum-jobs`, `meerschaum-cli` actions, `meerschaum-api` / `-server` (other waves) | Out of this task's scope |
+
+Tests that still exercise only the Python path (they would have to be rewritten against the façade
+or deleted): `tests/test_pipe_attributes.py::test_sql_attribute_errors_are_not_unregistered` and
+`::test_sql_no_row_is_still_empty` (monkeypatch `SQLConnector.exec`),
+`tests/utils/test_dataframe.py::test_filter_unseen_df_polars_preserves_source_order` (patches a private
+helper); the tests that import Python SQL internals directly (`tests/test_index_queries.py`,
+`test_partition.py`, `test_maintenance.py`, `test_deduplicate.py`, `test_pipes_dtypes.py`,
+`test_filter_existing.py`, `test_sql.py`, `tests/utils/test_sql.py`, `tests/utils/test_dataframe.py`:
+`meerschaum.connectors.sql._pipes` / `_partition` / `_maintenance` / `_compress`, `meerschaum.utils.sql`)
+and run the Python query builders or stub-`self` calls; the python-mode-only assertions in
+`tests/test_live_parameters.py` (`test_python_mode_parameters_are_a_copy`); and every test that goes
+through `Pipe.sync` / `verify` / `fetch` / `get_data` logic that is still Python (they pass under
+`rust` because the instance calls are Rust, but the sync algorithm itself is the Python one).

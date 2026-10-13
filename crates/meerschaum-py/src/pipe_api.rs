@@ -9,6 +9,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use meerschaum_core::{Map, Pipe, Value};
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyValueError};
@@ -84,11 +85,20 @@ fn child_mut<'a>(parent: &'a mut Value, step: &Step, create: bool) -> PyResult<&
 #[pyclass(name = "Pipe", module = "meerschaum._core")]
 pub struct PyPipe {
     inner: Mutex<Pipe>,
+    /// Bumped by every mutation of the raw parameters. The façade's read caches (the raw
+    /// parameter views, the resolved-parameters memo) compare it instead of holding a second
+    /// copy of the truth.
+    generation: AtomicU64,
 }
 
 impl PyPipe {
     fn lock(&self) -> std::sync::MutexGuard<'_, Pipe> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Record a mutation of the raw parameters.
+    fn bump(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
     }
 }
 
@@ -129,6 +139,7 @@ impl PyPipe {
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self {
             inner: Mutex::new(pipe),
+            generation: AtomicU64::new(1),
         })
     }
 
@@ -163,13 +174,41 @@ impl PyPipe {
     fn set_raw_parameters(&self, parameters: &Bound<'_, PyAny>) -> PyResult<()> {
         let map = map_arg(Some(parameters))?;
         self.lock().set_parameters(map);
+        self.bump();
         Ok(())
+    }
+
+    /// The mutation counter of the raw parameters (starts at 1).
+    #[getter]
+    fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    /// `(generation, value)` of the raw value at `path` (the whole map for an empty path),
+    /// read under one lock so the pair is consistent. `KeyError` if absent.
+    fn snapshot<'py>(
+        &self,
+        py: Python<'py>,
+        path: &Bound<'py, PyAny>,
+    ) -> PyResult<(u64, Bound<'py, PyAny>)> {
+        let path = steps(path)?;
+        let pipe = self.lock();
+        let generation = self.generation.load(Ordering::Acquire);
+        if path.is_empty() {
+            let value = core_to_py(py, &Value::Map(pipe.raw_parameters().clone()))?;
+            return Ok((generation, value));
+        }
+        match get_in(pipe.raw_parameters(), &path) {
+            Some(v) => Ok((generation, core_to_py(py, v)?)),
+            None => Err(PyKeyError::new_err("path not found")),
+        }
     }
 
     /// Deep-merge a patch into the raw parameters (`update_parameters(persist=False)`).
     fn update_raw_parameters(&self, patch: &Bound<'_, PyAny>) -> PyResult<()> {
         let map = map_arg(Some(patch))?;
         self.lock().update_parameters(map);
+        self.bump();
         Ok(())
     }
 
@@ -220,6 +259,7 @@ impl PyPipe {
         if let Value::Map(m) = root {
             pipe.set_parameters(m);
         }
+        self.bump();
         Ok(())
     }
 
@@ -256,6 +296,7 @@ impl PyPipe {
         if let Value::Map(m) = root {
             pipe.set_parameters(m);
         }
+        self.bump();
         Ok(())
     }
 
@@ -292,12 +333,26 @@ impl PyPipe {
         core_to_py(py, &Value::Map(core.parameters().clone()))
     }
 
-    /// `pipe.target` for the given SQL flavor (no side effects).
-    #[pyo3(signature = (sql_flavor=None))]
-    fn target(&self, sql_flavor: Option<&str>) -> PyResult<String> {
-        self.lock()
-            .target(sql_flavor)
+    /// `pipe.target` for the given SQL flavor (no side effects). With `parameters` the name is
+    /// computed from that (already resolved) map instead of the core's own resolution, so a
+    /// caller that resolved cross-pipe templates itself gets them honored.
+    #[pyo3(signature = (sql_flavor=None, parameters=None))]
+    fn target(
+        &self,
+        sql_flavor: Option<&str>,
+        parameters: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<String> {
+        let mut pipe = self.lock().clone();
+        if let Some(p) = parameters.filter(|p| !p.is_none()) {
+            pipe.set_parameters(map_arg(Some(p))?);
+        }
+        pipe.target(sql_flavor)
             .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    /// `pipe._target_legacy()`: the keys joined with underscores.
+    fn target_legacy(&self) -> String {
+        self.lock().target_legacy()
     }
 
     /// `str(pipe)` without ANSI styling.
@@ -334,6 +389,7 @@ impl PyPipe {
         let pipe = Pipe::from_state(&map, &py_defaults(py)?)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         *self.lock() = pipe;
+        self.bump();
         Ok(())
     }
 

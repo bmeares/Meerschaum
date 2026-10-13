@@ -50,6 +50,9 @@ pub fn merge(python: &Manifest, native: &NativePlugins) -> Manifest {
     let parsed: Manifest = match serde_json::from_value(raw) {
         Ok(manifest) => manifest,
         Err(error) => {
+            eprintln!(
+                "Warning: Skipping native plugins: their manifest could not be read: {error}"
+            );
             merged
                 .load_errors
                 .insert("native plugins".into(), error.to_string());
@@ -510,7 +513,11 @@ impl ConnectorRegistry for NativeRegistry {
         args: &SyncArgs,
     ) -> Result<Option<Arc<dyn Connector>>, String> {
         match self.source_connector(keys) {
-            Some(result) => Ok(Some(Arc::new(result?))),
+            Some(result) => {
+                // The same fetch kwargs a Python plugin's `fetch(pipe, **kw)` receives.
+                let kwargs = meerschaum_engine::sync::sync_kwargs(args);
+                Ok(Some(Arc::new(result?.with_fetch_kwargs(&kwargs))))
+            }
             None => self.inner.source_for_sync(keys, args),
         }
     }

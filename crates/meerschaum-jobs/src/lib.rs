@@ -19,7 +19,8 @@
 //! - [`job`]: `Job` and `monitor_logs`;
 //! - [`executor`] / [`systemd`]: the executor interface (`local`, `systemd`, `api:` stubs);
 //! - [`rotating`], [`stdin`], [`properties`]: the file formats;
-//! - [`schedule`]: the `-s` grammar; [`laps`]: the lap loop.
+//! - [`schedule`]: the `-s` grammar; [`laps`]: the lap loop; [`scheduler`]: per-root schedule
+//!   and debounce state.
 //!
 //! Behavior follows the Python implementation (v4.1.4); preserved quirks are marked `// PARITY:`.
 
@@ -36,6 +37,7 @@ pub mod properties;
 pub mod pytime;
 pub mod rotating;
 pub mod schedule;
+pub mod scheduler;
 pub mod shlex;
 pub mod stdin;
 pub mod supervisor;
@@ -48,4 +50,5 @@ pub use job::{Job, JobOptions, MonitorControl, MonitorOptions};
 pub use laps::{LoopControl, LoopRunner, SleepFrom};
 pub use rotating::RotatingFile;
 pub use schedule::{Trigger, parse_schedule};
+pub use scheduler::{RootScheduler, ScheduleState};
 pub use supervisor::Launcher;

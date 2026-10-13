@@ -80,6 +80,17 @@ pytz) are pinned in `scripts/parity/requirements.txt` to the versions the commit
 with. Change a pin only together with regenerating every fixture. `.venv-ref/` takes about 750 MB, is
 git-ignored, and persists on the runner.
 
+## Python packaging (D8, D9, D20)
+
+There is no `setup.py`, `setup.cfg` or `MANIFEST.in` any more. Two distributions are built with maturin:
+
+| Distribution | Source | Contents |
+|---|---|---|
+| `meerschaum` | root `pyproject.toml` (maturin mixed project, `abi3-py311`, module `meerschaum._core._core`) | The Python SDK and façade plus the Rust extension. `dependencies` is only `meerschaum-cli` (same version); every heavier package is an extra (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `cli-tools`, `gui`, `full`). |
+| `meerschaum-cli` | `crates/meerschaum-cli/pyproject.toml` (`bindings = "bin"`) | The native `mrsm` binary, no Python dependencies. |
+
+`scripts/check_packaging.py` verifies that the Cargo workspace version, the `meerschaum-cli==X` pin and the extras in `pyproject.toml` agree with `meerschaum/utils/packages/_packages.py`. `.github/workflows/wheels.yaml` builds both wheels on GitHub-hosted runners only (Linux, macOS, Windows) and smoke-tests them in a fresh venv. `scripts/rust/build_py.sh` still builds the in-tree extension for development. The Docker `slim` image installs the base wheel only (about 186 MB, under the 200 MB gate); the default image installs `meerschaum[full]`.
+
 ## Docker targets and the size gate (§12.1)
 
 | `docker buildx build ...` | Image | Contents |

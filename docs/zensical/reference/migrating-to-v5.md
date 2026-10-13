@@ -1,8 +1,8 @@
 # ⬆️ Migrating to v5
 
-!!! warning "Draft, written before implementation"
+!!! warning "Pre-release guide"
 
-    This guide was drafted alongside the [v5.0.0 design spec](https://github.com/bmeares/Meerschaum/blob/v5/docs/design/v5.0.0.md) so that the people implementing v5 keep existing users in mind. Anything marked **⚠️ TBC** may change before 5.0.0 ships. Report anything that breaks against a pre-release as a GitHub issue tagged `v5-compat`.
+    This guide follows the [v5.0.0 design spec](https://github.com/bmeares/Meerschaum/blob/v5/docs/design/v5.0.0.md) and has been checked against the pre-release builds (the console, plugin-owned Dash apps, the native plugin loader, venv accounting and the Syncing Engine are implemented). Anything marked **⚠️ TBC** may still change before 5.0.0 ships, and a few engine entry points are not wired yet (see [The Syncing Engine](#the-syncing-engine)). Report anything that breaks against a pre-release as a GitHub issue tagged `v5-compat`.
 
 Meerschaum v5 is a rewrite of the core, the CLI, jobs, compose, the HTTP API, the MCP server and the web console in **Rust**. The `meerschaum` Python package stays, as the plugin SDK and as a thin façade over the Rust core, so **most pipes, plugins, compose projects, jobs and scripts keep working without changes**. This page lists what you need to check, grouped by who you are.
 
@@ -32,9 +32,9 @@ v4.1.x stays installable and receives security fixes until 5.1.0 ships. There is
 
 ## 📦 Installing and running
 
-- **Python 3.11 or newer.** 3.10 reaches end of life in October 2026 and is not supported by the v5 wheels.
+- **Python 3.11 or newer** (only needed when you use Python plugins, the Python API or an extra). 3.10 reaches end of life in October 2026 and is not supported by the v5 wheels.
 - **`pip install meerschaum` still works** and now also installs `meerschaum-cli`, a binary wheel containing the native `mrsm` executable. `python -m meerschaum ...` still works and dispatches to the same code.
-- **The base wheel has no dependencies.** v4.1 installed about 110 packages into the shared `mrsm` venv on first run (pandas, dask, SQLAlchemy, three PostgreSQL drivers, Dash and its component libraries, rich, FastAPI, and so on). v5's `meerschaum` wheel contains the Rust core and the Python SDK and pulls in nothing else. Everything heavier is an extra, imported only when used:
+- **The base wheel has no third-party dependencies.** It depends only on `meerschaum-cli` (the same-version binary wheel). Build tooling is maturin; `setup.py` is gone, so build from source with `pip install .` (maturin backend) or `maturin build`. v4.1 installed about 110 packages into the shared `mrsm` venv on first run (pandas, dask, SQLAlchemy, three PostgreSQL drivers, Dash and its component libraries, rich, FastAPI, and so on). v5's `meerschaum` wheel contains the Rust core and the Python SDK and pulls in nothing else but the CLI binary. Everything heavier is an extra, imported only when used:
 
     | Extra | Installs | You need it when |
     |---|---|---|
@@ -46,6 +46,7 @@ v4.1.x stays installable and receives security fixes until 5.1.0 ships. There is
     | `meerschaum[api]` | FastAPI, uvicorn, a2wsgi, python-multipart, PyJWT | Any installed plugin uses `@api_plugin`, `@web_page` or registers an MCP tool |
     | `meerschaum[dash]` | Dash, a2wsgi | Any installed plugin uses `@dash_plugin` |
     | `meerschaum[shell]` | ptpython | You use `mrsm python` |
+    | `meerschaum[gui]` | pywebview | You use `mrsm start gui` |
     | `meerschaum[cli-tools]` | pgcli, mycli, litecli, gadwall | You use `mrsm sql` to open a database shell |
     | `meerschaum[full]` | `pandas`, `polars`, `geo`, `sql`, `api`, `dash`, `shell` | You want today's behavior |
 
@@ -70,9 +71,9 @@ Everything under `MRSM_ROOT_DIR/config/` is read unchanged. Three things to know
           login: {max: 10, window_seconds: 60}
     ```
 
-- **New:** `system.engine.*` keys for the [Syncing Engine](#the-syncing-engine) (`python_workers`, `limits.connectors`, `auto_rebuild`, `debounce_seconds`, `run_history_days`, `chunk_pipelining`). All have defaults; you do not need to set any of them.
+- **New:** `system.engine.*` keys for the [Syncing Engine](#the-syncing-engine) (`workers`, `python_workers`, `limits.connectors`, `limits.instances`, `auto_rebuild`, `implicit_edges`, `inclusive_cap`, `flat_ledger`, `events`, `state_flush_ms`, `run_history_days`, `debounce_seconds`, `chunk_pipelining`). All have defaults; you do not need to set any of them. The full table is in [Engine State](/reference/pipelines/state/#settings).
 
-Run `mrsm show config` on v5 against a v4.1 root directory to see the resolved config with deprecations annotated. ⚠️ TBC: exact key names.
+Run `mrsm show config` on v5 against a v4.1 root directory to see the resolved config.
 
 ## 🏃 Jobs and the CLI
 
@@ -84,7 +85,7 @@ Core actions behave the same and take the same flags. `mrsm --help` is diffed ag
 |---|---|
 | `--engine laps` | Gone. `--loop` is the only long-running mode and reproduces lap behavior (below). |
 | `mrsm install plugin compose` | A no-op with a notice. Compose has been built in since 4.0. |
-| `MRSM_CORE=python` or any "use the Python core" switch | Does not exist. There is one core. |
+| `MRSM_CORE=python` or any "use the Python core" switch | Does not exist in 5.0. There is one core. (Pre-release builds still ship the Python core for the parity phase, behind the development-only `MRSM_CORE` gate: unset or `python` runs the Python code, `rust` prefers the Rust core. Do not depend on it. The gate and the Python core are deleted before 5.0.0.) |
 
 **`--loop --min-seconds N` behaves exactly as laps did** for a flat selection: every selected pipe syncs, then the process sleeps `N` seconds after the lap ends, exactly as v4 does. Jobs like these need no change:
 
@@ -102,11 +103,14 @@ v5 understands the pipe graph (`parents`, `children` and `{{ Pipe() }}` referenc
 ```bash
 mrsm sync pipes -c sql:main -m daily_rollup --parents     # ancestors first, in dependency order
 mrsm sync pipes -c sql:main -m raw_events --children       # then everything downstream
-mrsm plan pipes -t reports                                 # dry run, prints the plan
-mrsm show runs --last 10                                   # run history and Gantt charts
+mrsm sync pipes -t reports --parents --resume <run_id>    # re-run only what failed or never ran
 ```
 
-A bare `sync pipes` without `--parents` or `--children` keeps v4 semantics: no capping of a child at its parents' watermark, no rebuilds, no ledger-driven backfills. Two behaviors are new **inside engine runs only** (`--parents`, `--children`, `mrsm.Pipeline`, and `--loop` with a selection that has edges):
+!!! warning "Not wired yet"
+
+    `--parents`, `--children`, `--resume`, `--loop` and `--listen` run on the engine today, and the web console's `/dash/pipelines` page reads its run history. `mrsm plan pipes` (dry run), `mrsm show graph`, `mrsm show runs`, `pipe.sync(parents=, children=)` and `mrsm.Pipeline` are specified but not yet available in this build. Run history is stored on your instance (the `mrsm_engine_runs` and `mrsm_engine_nodes` tables).
+
+The full guide, with real output, is [Pipelines](/reference/pipelines/). A bare `sync pipes` without `--parents` or `--children` keeps v4 semantics: no capping of a child at its parents' watermark, no rebuilds, no ledger-driven backfills. Two behaviors are new **inside engine runs only** (`--parents`, `--children`, `mrsm.Pipeline`, and `--loop` with a selection that has edges):
 
 - A child is never synced past the minimum of its parents' sync times.
 - Changing a pipe's definition (its `sql`, `fetch` config or `dtypes`) marks it for **rebuild** (clear, then full sync). Interactively you are asked; in a job the pipe is marked `rebuild_pending`, descendants keep running on the stale data, and a warning is logged on every run until someone confirms with `--yes` or sets `system.engine.auto_rebuild: true`. Rebuilds never block a job.
@@ -178,7 +182,17 @@ In v5 the `mrsm` venv starts out holding only the extras you installed. To keep 
 
 2. **`attempt_import(...)` keeps its signature and its `venv='mrsm'` default**, because a DataFrame or Dash component created in one plugin's venv and handed to another has to come from the same library copy. Pass `venv='<plugin>'` for packages only your plugin uses, exactly as today.
 
-3. **Prune.** `mrsm show venvs` lists every venv, its size and which plugin requested each package. `mrsm prune venvs --dry` shows what no installed plugin or extra still needs; without `--dry` it removes them. v5 never deletes packages on upgrade by itself.
+3. **Prune.** Every install `attempt_import` performs is attributed: the requester (a plugin, or `meerschaum` for an extra or core install) is recorded in `venvs/<name>/.mrsm_requests.json`. `mrsm show venvs` lists every venv, its size and each package with its requester:
+
+    ```text
+    mrsm
+        Path: .../venvs/mrsm
+        Size: 5.7 MB
+        Packages: 1
+          - pip 26.2.1  [unattributed]
+    ```
+
+    `mrsm prune venvs --dry` shows what nothing still needs; `mrsm prune venvs mrsm -y` removes it. A package is kept if Meerschaum requested it, if an installed plugin requested it or lists it in `required`, or if a kept package depends on it. **Packages with no recorded requester are never removed.** `mrsm upgrade` prints what a prune would remove, and v5 never deletes packages by itself.
 
 4. **Pin what matters.** With `dash`, `pandas` and friends no longer pinned by Meerschaum, add lower bounds in `required` for anything your plugin is sensitive to.
 
@@ -237,7 +251,7 @@ api:
 
 ## 🎛️ Web pages and Dash plugins
 
-The console is now rendered by Rust at the same `/dash` paths, with the same page set plus a new `pipelines` page. **Meerschaum no longer runs a Dash app of its own.** There are two ways for a plugin to add pages.
+The console is now rendered by Rust at the same `/dash` paths, with the same page set plus a new [`pipelines` page](/reference/pipelines/visualization/#in-the-web-console). It starts with `mrsm start api` like before, and the `api.permissions.routes.allowlist` route groups hide console pages as in v4. **Meerschaum no longer runs a Dash app of its own.** There are two ways for a plugin to add pages.
 
 ### Option A: keep your Dash pages (legacy mode)
 
@@ -289,8 +303,12 @@ Side by side, a page with a dropdown that re-draws a chart:
 
     ```python
     from meerschaum.plugins import web_page, api_plugin
-    from meerschaum.api.pages import figure, escape   # ⚠️ TBC: helper names
+        from html import escape
     import plotly.graph_objects as go
+
+    def figure(fig) -> str:
+        """The page contract: a div carrying the Plotly figure JSON."""
+        return f'<div data-mrsm-figure="{escape(fig.to_json(), quote=True)}"></div>'
 
     def counts_figure(site):
         df = counts_pipe.get_data(params={'site': site} if site != 'all' else None)
@@ -319,40 +337,39 @@ Side by side, a page with a dropdown that re-draws a chart:
 
 Notes on the contract:
 
-- The figure code did not change. Only the transport did: `dcc.Graph(figure=fig)` became `figure(fig)`, which emits a `div` carrying `fig.to_json()`. The console renders every such `div` on load and after each HTMX swap.
+- The figure code did not change. Only the transport did: `dcc.Graph(figure=fig)` became a `div` with a `data-mrsm-figure` attribute carrying `fig.to_json()` (the `figure()` helper above is three lines; a helper in the SDK is ⚠️ TBC). The console renders every such `div` on load and after each HTMX swap.
 - **Maps:** `<div data-mrsm-map='...'>` renders GeoJSON or a layer spec with the vendored MapLibre GL JS. This is the replacement for dash-leaflet.
 - **Tables:** return HTML tables; the console adds sorting. Editable grids are your concern.
 - **Login and session.** `login_required=True` is enforced by the console before your function runs. ⚠️ TBC: the function may accept `request`, `username` and `session` keyword arguments, filtered by signature like other plugin entry points.
 - **Theme.** The `mrsm-theme-*` CSS classes keep their names. Style against them and your fragment matches the console in both themes.
 - **No CDN.** Plotly.js, MapLibre GL JS and HTMX are vendored by the console. Don't add `<script src="https://cdn...">` tags; they will be blocked by the console's content security policy and would not work on offline deployments anyway.
 
-A page written this way moves to Rust without touching its chart, because the Rust `plotly` crate emits the same figure JSON (see [Rust plugins](#rust-plugins)).
+A function that returns a string (or a `(html, status)` pair) is a page-contract page; one that returns a Dash layout is a legacy Dash page. The manifest records which, by calling the function once at install time. A page written this way moves to Rust without touching its chart, because the Rust `plotly` crate emits the same figure JSON (see [Rust plugins](#rust-plugins)).
 
 ## 🦀 Rust plugins
 
 New in v5. A Rust plugin is a `cdylib` built with the `meerschaum-plugin` crate, installed into `MRSM_PLUGINS_DIR` as `<name>/plugin.toml` plus the shared library. It can implement `fetch`, `sync`, `register`, `setup`, `subscribe`, actions, a connector, HTTP `routes` and console `pages`. Data crosses the boundary as Arrow record batches.
 
 ```rust
-use meerschaum_plugin::prelude::*;
-use plotly::{Plot, Scatter};
+use meerschaum_plugin::{Frame, Plugin, Request, Result};
 
-#[mrsm::fetch]
-fn fetch(pipe: &PipeContext, begin: Option<Bound>, end: Option<Bound>) -> Result<impl RecordBatchStream> {
-    // ...
+#[derive(Default)]
+struct Acme;
+
+impl Plugin for Acme {
+    const NAME: &'static str = "acme";
+    const VERSION: &'static str = "1.0.0";
+    fn manifest(&self) -> meerschaum_plugin::serde_json::Value { /* actions, pages, hooks */ todo!() }
+    fn fetch(&self, request: &Request) -> Result<Option<Frame>> {
+        // return an Arrow-backed Frame
+        todo!()
+    }
 }
 
-#[mrsm::page(path = "counts", group = "Reports", login_required = true)]
-fn counts(ctx: &PageContext) -> Result<Html> {
-    let df = ctx.pipe("sql:main", "counts", None).get_data(Default::default())?;
-    let mut plot = Plot::new();
-    plot.add_trace(Scatter::new(df.column("ts")?, df.column("count")?));
-    Ok(Html::fragment(figure(&plot)))      // same figure JSON a Python plugin would emit
-}
-
-mrsm::export_plugin!(name = "acme", version = env!("CARGO_PKG_VERSION"));
+meerschaum_plugin::export_plugin!(Acme);
 ```
 
-A plugin directory may contain both a Rust library and a Python module; the Rust entry points take precedence. Python plugins can depend on Rust plugins and vice versa through `required`. The Rust plugin guide (⚠️ written during the beta series) covers the build, the repository's per-target artifacts and `cargo build` fallback.
+A plugin directory may contain both a Rust library and a Python module; the Rust entry points take precedence. Python plugins can depend on Rust plugins and vice versa through `required`. The [Rust plugin guide](/reference/plugins/rust-plugins/) covers the layout, the manifest, the C ABI, building and loading an example, and what is not available yet. A native plugin's console pages return the same HTML fragments and Plotly figure JSON as a Python page-contract page.
 
 ## 🚢 Deployment
 
@@ -367,7 +384,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 
 1. **Try v5 in a copy.** `MRSM_ROOT_DIR=/tmp/v5-root mrsm ...` against the same instance. v5 writes no new files into an instance until an engine run happens, and engine state lives in internal `mrsm_engine_*` tables under `_mrsm_internal`.
 2. **Lint your compose files:** `mrsm compose explain` now warns about unresolved `{{ Pipe() }}` references, `dtype:` typos (for `dtypes:`) and string-typed `tags`. It never changes behavior.
-3. **Dry-run the engine:** `mrsm plan pipes -t <tag>` prints what an engine run would do without moving data.
+3. **Dry-run the engine:** `mrsm plan pipes -t <tag>` prints what an engine run would do without moving data (⚠️ TBC: not wired in this build; use `sync pipes --parents` on a copy meanwhile).
 4. **Import every plugin:** `mrsm show plugins` on v5 imports each plugin and reports `ImportError`s from removed internals, with the replacement named in the message.
 5. **Diff `mrsm --help`** against 4.1 if you script around the CLI. Any difference is a bug; please report it.
 6. **Start the API and open the console.** If you have `@api_plugin` or `@dash_plugin` plugins, confirm the API host started (`mrsm show jobs` ⚠️ TBC) and walk through each plugin page. Old Dash URLs should redirect.

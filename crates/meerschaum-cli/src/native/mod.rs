@@ -18,6 +18,7 @@ pub mod session;
 pub mod show;
 pub mod sync;
 pub mod users;
+pub mod venvs;
 pub mod verify;
 
 use meerschaum_core::value::{Map, Value};
@@ -46,6 +47,11 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_show_sizes" => show::show_sizes(args, rt),
         "_show_partitions" => show::show_partitions(args, rt),
         "_show_tags" => show::show_tags(args, rt),
+        "_show_venvs" => venvs::show_venvs(args, rt),
+        "_prune_venvs" => venvs::prune_venvs(args, rt),
+        "_upgrade_meerschaum" | "_upgrade_packages" | "_upgrade_plugins" => {
+            venvs::upgrade(function, args, rt)
+        }
         "_show_jobs" => jobs::show_jobs(args, rt),
         "_show_logs" | "_attach_logs" => jobs::show_logs(args, rt),
         "_register_pipes" => manage::register_pipes(args, rt),

@@ -1216,6 +1216,7 @@ def pip_install(
     if success:
         with _locks['_is_installed_first_check']:
             _is_installed_first_check.clear()
+        _update_request_ledger(_packages, venv, _uninstall)
 
     msg = (
         "Successfully " + ('un' if _uninstall else '') + "installed packages." if success 
@@ -1612,13 +1613,16 @@ def attempt_import(
                     check_update = check_update,
                     color = color,
                     debug = debug
-                ) and warn:
-                    warn_function(
-                        f"Failed to install '{install_name}'.",
-                        ImportWarning,
-                        stacklevel = 3,
-                        color = False,
-                    )
+                ):
+                    if warn:
+                        warn_function(
+                            f"Failed to install '{install_name}'.",
+                            ImportWarning,
+                            stacklevel = 3,
+                            color = False,
+                        )
+                else:
+                    _record_import_request(install_name, venv)
             elif warn:
                 ### Raise a warning if we can't find the package and install = False.
                 warn_function(
@@ -1634,6 +1638,9 @@ def attempt_import(
                     color = False,
                 )
 
+        elif found_module:
+            _record_import_request(install_name, venv, only_plugins=True)
+
         ### Do the import. Will be lazy if lazy=True.
         m = do_import(
             name, debug=debug, warn=warn, venv=venv, color=color,
@@ -1645,6 +1652,47 @@ def attempt_import(
     if len(modules) == 1:
         return modules[0]
     return modules
+
+
+def _update_request_ledger(install_names: List[str], venv: Optional[str], uninstall: bool) -> None:
+    """
+    Keep `venvs/<venv>/.mrsm_requests.json` in step with a successful `pip_install()` (D20):
+    record the caller (a plugin, else `meerschaum`) for installs, forget uninstalled packages.
+    """
+    if venv is None:
+        return
+    try:
+        from meerschaum.utils.venv import _requests
+        if uninstall:
+            _requests.forget_requests(venv, install_names)
+            return
+        requester = _requests.get_requester()
+        for install_name in install_names:
+            if install_name.startswith(('-', '/', '.')) or '://' in install_name:
+                continue
+            _requests.record_request(venv, install_name, requester)
+    except Exception:
+        pass
+
+
+def _record_import_request(
+    install_name: str,
+    venv: Optional[str],
+    only_plugins: bool = False,
+) -> None:
+    """
+    Record in `venvs/<venv>/.mrsm_requests.json` who asked for `install_name` (D20).
+    With `only_plugins`, requests by Meerschaum itself are not recorded
+    (used for packages that are already installed).
+    """
+    try:
+        from meerschaum.utils.venv._requests import record_request, get_requester, CORE_REQUESTER
+        requester = get_requester()
+        if only_plugins and requester == CORE_REQUESTER:
+            return
+        record_request(venv, install_name, requester)
+    except Exception:
+        pass
 
 
 def lazy_import(

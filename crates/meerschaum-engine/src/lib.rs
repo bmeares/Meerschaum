@@ -59,7 +59,7 @@ pub use engine::{
     Engine, EngineConfig, EventGranularity, LapEvent, LapSummary, LoopOptions, LoopResult,
     NodeOutcome, PlannedRun, RunOptions, RunResult,
 };
-pub use events::{Event, EventKind, EventSink};
+pub use events::{ChunkSource, Event, EventKind, EventSink};
 pub use executor::{
     ExecuteContext, ExecutorOptions, LeaseSource, Limits, Priority, RetryPolicy, SyncExecutor,
     SyncRequest, execute,

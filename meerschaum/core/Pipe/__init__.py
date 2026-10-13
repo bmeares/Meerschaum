@@ -386,6 +386,19 @@ class Pipe:
         )
         self.debug = debug
 
+        _mrsm_instance = mrsm_instance if mrsm_instance is not None else (instance or instance_keys)
+        if _mrsm_instance is None:
+            _mrsm_instance = get_config('meerschaum', 'instance', patch=True)
+
+        if not isinstance(_mrsm_instance, str):
+            self._instance_connector = _mrsm_instance
+            self._instance_keys = str(_mrsm_instance)
+        else:
+            self._instance_keys = _mrsm_instance
+
+        if self._instance_keys == 'sql:memory':
+            self.cache = False
+
         _rust_pipe = _core_gate.use_rust('pipe')
         _initial_attributes: Dict[str, Any] = {
             'connector_keys': self._connector_keys,
@@ -394,10 +407,19 @@ class Pipe:
             'parameters': {},
         }
         if _rust_pipe:
-            from ._live_parameters import Attrs
-            ### Keys and raw parameters live in a `_core.Pipe` (created below, once the instance
-            ### keys are known); `Attrs` pushes every change of the raw parameters into it.
-            self._attributes = Attrs(self, _initial_attributes)
+            from meerschaum import _core
+            from ._live_parameters import Attrs, new_raw_root
+            ### Keys and raw parameters live in a `_core.Pipe`; `_raw_root` is a read-through
+            ### view of its raw map. Constructing never touches the instance.
+            self._core_pipe = _core.Pipe(
+                self._connector_keys,
+                self._metric_key,
+                self._location_key,
+                self._instance_keys,
+                None,
+            )
+            self._raw_root = new_raw_root(self._core_pipe)
+            self._attributes = Attrs(self, _initial_attributes, self._raw_root)
         else:
             self._attributes: Dict[str, Any] = _initial_attributes
 
@@ -477,33 +499,6 @@ class Pipe:
 
         if isinstance(compress, (bool, dict)):
             self._attributes['parameters']['compress'] = compress
-
-        ### NOTE: The parameters dictionary is {} by default.
-        ###       A Pipe may be registered without parameters, then edited,
-        ###       or a Pipe may be registered with parameters set in-memory first.
-        _mrsm_instance = mrsm_instance if mrsm_instance is not None else (instance or instance_keys)
-        if _mrsm_instance is None:
-            _mrsm_instance = get_config('meerschaum', 'instance', patch=True)
-
-        if not isinstance(_mrsm_instance, str):
-            self._instance_connector = _mrsm_instance
-            self._instance_keys = str(_mrsm_instance)
-        else:
-            self._instance_keys = _mrsm_instance
-
-        if self._instance_keys == 'sql:memory':
-            self.cache = False
-
-        if _rust_pipe:
-            from meerschaum import _core
-            ### Constructing never touches the instance: this only maps the arguments.
-            self._core_pipe = _core.Pipe(
-                self._connector_keys,
-                self._metric_key,
-                self._location_key,
-                self._instance_keys,
-                self._attributes['parameters'],
-            )
 
         self._cache_locks = collections.defaultdict(lambda: threading.RLock())
         self._attributes_lock = threading.RLock()
@@ -640,9 +635,18 @@ class Pipe:
         return self._connector
 
     def __str__(self, ansi: bool=False):
+        core = self.__dict__.get('_core_pipe', None)
+        if core is not None and not ansi:
+            return core.__str__()
         return pipe_repr(self, ansi=ansi)
 
     def __eq__(self, other):
+        core = self.__dict__.get('_core_pipe', None)
+        if core is not None:
+            ### Duck typed: only another façade pipe backed by `_core.Pipe` compares in Rust.
+            other_core = getattr(other, '__dict__', {}).get('_core_pipe', None)
+            if other_core is not None:
+                return isinstance(self, type(other)) and core == other_core
         try:
             return (
                 isinstance(self, type(other))
@@ -655,6 +659,9 @@ class Pipe:
             return False
 
     def __hash__(self):
+        core = self.__dict__.get('_core_pipe', None)
+        if core is not None:
+            return hash(core)
         ### Using an esoteric separator to avoid collisions.
         sep = "[\"']"
         return hash(
@@ -668,6 +675,9 @@ class Pipe:
         if not hasattr(sys, 'ps1'):
             ansi = False
 
+        core = self.__dict__.get('_core_pipe', None)
+        if core is not None and not ansi and not kw:
+            return core.__str__()
         return pipe_repr(self, ansi=ansi, **kw)
 
     def __pt_repr__(self):

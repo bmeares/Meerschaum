@@ -36,7 +36,10 @@ On macOS use `libnative_demo.dylib`; on Windows install as `libnative_demo.dll` 
 parses the OS path-list in `MRSM_PLUGINS_DIR`, without an implicit user-home fallback. Earlier
 directories win; entries inside each directory are sorted. A directory containing both
 `plugin.toml` and Python files is native. The caller must exclude discovered native names
-from Python discovery. Missing libraries and invalid descriptors return errors.
+from Python discovery. An invalid plugin (bad descriptor, missing or unloadable library, metadata mismatch) is skipped with a
+`Warning: Skipping invalid native plugin at '<dir>': <reason>` on stderr and the rest keep loading
+(PARITY: v4 warns about a broken Python plugin and loads the others); `discover_report` and
+`cached_manifest_report` return the skipped plugins as data.
 
 ## ABI v1 and ownership
 

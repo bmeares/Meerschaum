@@ -107,7 +107,8 @@ impl meerschaum_engine::PluginSync for Inplace {
         use meerschaum_engine::sync::{determine_begin, sync_pipe};
         use meerschaum_kernel::enforce::PipeInput;
         use meerschaum_sql::instance::fetch::{FetchArgs, metadef_bound};
-        let Some(observer) = observer else {
+        // A progress-only observer (chunk events) must not divert the direct in-place sync.
+        let Some(observer) = observer.filter(|o| o.records_deltas()) else {
             return self.sync(pipe, args).await;
         };
         // Commit exactly the snapshot recorded by the ledger. Re-running an in-place

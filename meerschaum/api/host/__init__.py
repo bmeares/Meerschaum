@@ -42,6 +42,9 @@ __all__ = (
     'build_app',
     'run',
     'is_host_mode',
+    'get_host_config',
+    'dash_enabled',
+    'webterm_enabled',
     'HOST_ENV',
     'HOST_CONFIG_ENV',
 )
@@ -52,6 +55,42 @@ def is_host_mode() -> bool:
     Return whether this process is the API host (`MRSM_API_HOST` is set).
     """
     return os.environ.get(HOST_ENV, '').lower() not in ('', '0', 'false')
+
+
+def get_host_config() -> dict:
+    """
+    Return the host's configuration (`MRSM_API_HOST_CONFIG`, a JSON object the Rust server fills
+    from its own flags: `mrsm_instance`, `no_auth`, `production`, `private`, `debug`, `no_dash`,
+    `no_webterm`).
+    """
+    import json
+    try:
+        config = json.loads(os.environ.get(HOST_CONFIG_ENV, '') or '{}')
+    except ValueError:
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
+def dash_enabled() -> bool:
+    """
+    Return whether the host serves plugin pages (page-contract routes and plugin-owned Dash apps).
+    As in v4, `--no-dash` serves none of them; the default is to serve them.
+    """
+    return not get_host_config().get('no_dash', False)
+
+
+def webterm_enabled() -> bool:
+    """
+    Return whether the host serves the web terminal (`/webterm/{session_id}`). As in v4, it needs
+    the console (no `--no-dash`) and no `--no-webterm` / `--no-auth`; unlike the pages, it is off
+    unless the configuration says `no_webterm: false`, because it starts the terminal process.
+    """
+    config = get_host_config()
+    return (
+        dash_enabled()
+        and config.get('no_webterm', True) is False
+        and not config.get('no_auth', False)
+    )
 
 
 def build_app(load_plugins: bool = True, debug: bool = False):

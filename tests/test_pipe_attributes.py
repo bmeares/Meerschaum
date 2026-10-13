@@ -9,6 +9,7 @@ import json
 
 import pytest
 import meerschaum as mrsm
+from meerschaum._core import _gate
 
 
 def test_import_uses_working_tree():
@@ -102,6 +103,15 @@ def test_refresh_discards_target_and_freshness(registered_pipe, monkeypatch):
     assert pipe.target == 'registered_target'
 
 
+# These fake SQLAlchemy's `exec`, which the Rust metadata read never calls; the Rust path is
+# covered with a real failure by `tests/test_facade_sql.py::test_attribute_read_errors_propagate`.
+python_sql_only = pytest.mark.skipif(
+    _gate.mode() == _gate.RUST,
+    reason="mocks SQLAlchemy exec; see test_facade_sql.py for the Rust path",
+)
+
+
+@python_sql_only
 def test_sql_attribute_errors_are_not_unregistered(registered_pipe, monkeypatch):
     pipe = registered_pipe
     assert pipe.id is not None
@@ -165,6 +175,7 @@ def test_api_metadata_failure_retries(monkeypatch, failure):
     assert calls == [{'instance': 'sql:explicit'}] * 2
 
 
+@python_sql_only
 def test_sql_no_row_is_still_empty(registered_pipe, monkeypatch):
     pipe = registered_pipe
     assert pipe.id is not None

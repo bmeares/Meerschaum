@@ -172,7 +172,10 @@ The supervisor restarts the worker with exponential backoff when it exits or `sy
 plugin: `version`, `path`, `required`, `data_functions`, `actions` (with docstrings, `daemon` and
 subactions), `arguments` (`add_plugin_argument`), `pre_sync_hooks`, `post_sync_hooks`,
 `api_plugins`, `dash_plugins`, `web_pages`, `mcp_tools`, `mcp_resources`, `mcp_prompts`,
-`connectors`, `import_error` and `fingerprint`; at the top level, `connector_types` and the plugin
+`connectors`, `import_error`, `venv_warnings` (static findings: a plugin calls `attempt_import('x')`
+in the shared `mrsm` venv for a package that is neither in `required` nor declared by a Meerschaum
+extra; D20) and `fingerprint`. Schema version 3 on both sides; `nargs`, `const`, `default`,
+`choices` and `metavar` of an argument are optional; at the top level, `connector_types` and the plugin
 lists the server's `HostManifest` reads (`api_plugins`, `dash_plugins`, `web_pages`, `mcp_tools`).
 
 The cache is `<root>/cache/plugins_manifest.json`. `ensure_manifest` hashes each plugin source tree

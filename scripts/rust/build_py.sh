@@ -3,7 +3,8 @@
 #
 # Builds the PyO3 extension (crates/meerschaum-py) with maturin and places it in the working
 # tree at meerschaum/_core/_core.abi3.so, where `meerschaum._core` loads it from. Nothing is
-# installed into any environment; the root pyproject.toml (setuptools) is not involved.
+# installed into any environment; the root pyproject.toml (the release maturin project) is not
+# involved: this builds from crates/meerschaum-py/pyproject.toml.
 #
 #   --release    Optimized build (default). Small .so (~70 MB), slow first build.
 #   --debug      Unoptimized build, stripped of symbols (unstripped it is ~1 GB of debuginfo).
@@ -51,10 +52,11 @@ if ! command -v "$PYTHON" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Remove stale builds (e.g. a non-abi3 `_core.cpython-3XX-*.so`) so only the new one can load.
-"$REPO/scripts/rust/clean_py.sh" --quiet
-
-args=(develop --skip-install --manifest-path crates/meerschaum-py/Cargo.toml)
+# Build a wheel into a scratch directory first, so the extension already in the tree keeps
+# working (for pytest runs in progress) during the slow compile; it is swapped in at the end.
+wheel_dir="$REPO/target/build_py_wheel"
+rm -rf "$wheel_dir"
+args=(build --manifest-path crates/meerschaum-py/Cargo.toml --auditwheel skip --out "$wheel_dir")
 if [ "$profile" = "release" ]; then
   args+=(--release)
 else
@@ -66,12 +68,35 @@ features="pyo3/abi3-py311,extension-module"
 if [ "$polars" -eq 1 ]; then
   features="$features,polars"
 fi
-args+=(--features "$features")
+args+=(--features "$features" -i "$(command -v "$PYTHON")")
 
 echo "==> maturin ${args[*]} ${extra[*]:-}"
-# `--skip-install` builds in place for the mixed layout (python-source = repository root) and
-# never touches an environment. Unset VIRTUAL_ENV so an active venv is not inspected.
+# Unset VIRTUAL_ENV so an active venv is not inspected.
 env -u VIRTUAL_ENV PYO3_PYTHON="$(command -v "$PYTHON")" maturin "${args[@]}" "${extra[@]}"
+
+shopt -s nullglob
+wheels=("$wheel_dir"/*.whl)
+shopt -u nullglob
+if [ "${#wheels[@]}" -ne 1 ]; then
+  echo "build_py.sh: expected one wheel in $wheel_dir, found ${#wheels[@]}." >&2
+  exit 1
+fi
+"$PYTHON" -c '
+import sys, zipfile
+wheel, dest = sys.argv[1:]
+with zipfile.ZipFile(wheel) as zf:
+    names = [n for n in zf.namelist()
+             if n.startswith("meerschaum/_core/_core") and n.endswith((".so", ".pyd"))]
+    if len(names) != 1:
+        sys.exit(f"build_py.sh: expected one extension in {wheel}, found {names}")
+    zf.extract(names[0], dest)
+' "${wheels[0]}" "$wheel_dir/x"
+
+# Remove stale builds (e.g. a non-abi3 `_core.cpython-3XX-*.so`) so only the new one can load,
+# then move the new one in (same filesystem, so the swap is a rename).
+"$REPO/scripts/rust/clean_py.sh" --quiet
+mv "$wheel_dir"/x/meerschaum/_core/_core* meerschaum/_core/
+rm -rf "$wheel_dir"
 
 shopt -s nullglob
 built=(meerschaum/_core/_core*.so meerschaum/_core/_core*.pyd)

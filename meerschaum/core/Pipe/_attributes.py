@@ -129,7 +129,19 @@ def get_parameters(
     ### Only memoize the top-level entry (not nested reference resolution, which threads `_visited`
     ### for cycle detection) and only the default symlink-resolving, non-refreshing call.
     can_memoize = is_top_level and not refresh
-    if can_memoize and self.__dict__.get('_resolved_parameters_raw', None) is raw_parameters:
+    ### Under `MRSM_CORE=rust` the raw parameters live in `_core.Pipe`, whose mutation counter is
+    ### the memo key (the Python view objects keep their identity across mutations).
+    core = self.__dict__.get('_core_pipe', None)
+    memo_key = raw_parameters if core is None else core.generation
+    memo_hit = (
+        self.__dict__.get('_resolved_parameters_raw', None) is raw_parameters
+        if core is None
+        else (
+            '_resolved_parameters' in self.__dict__
+            and self.__dict__.get('_resolved_parameters_raw', None) == memo_key
+        )
+    )
+    if can_memoize and memo_hit:
         self._symlinks = self.__dict__.get('_resolved_parameters_symlinks', {})
         ### Return a copy so callers that mutate the result (e.g. `infer_dtypes(persist=True)`)
         ### don't corrupt the memo.
@@ -187,10 +199,15 @@ def get_parameters(
 
     resolved_parameters = search_and_substitute_config(recursive_replace(parameters, tuple()))
 
+    ### Cross-pipe `{{ Pipe() }}` templates read other pipes' state, so they re-resolve on every
+    ### access under `rust` (a deliberate refinement of v4's memo, which keeps them stale).
+    if core is not None and '{{ Pipe(' in repr(raw_parameters).replace('{{Pipe(', '{{ Pipe('):
+        can_memoize = False
+
     if can_memoize:
         ### Hold a reference to the raw dict so its identity can't be reused by a freed object,
         ### and stash the symlinks captured above alongside the resolved result.
-        self.__dict__['_resolved_parameters_raw'] = raw_parameters
+        self.__dict__['_resolved_parameters_raw'] = memo_key
         self.__dict__['_resolved_parameters'] = resolved_parameters
         self.__dict__['_resolved_parameters_symlinks'] = self._symlinks
         return deepcopy(resolved_parameters)
@@ -230,7 +247,7 @@ def columns(self) -> Union[Dict[str, str], None]:
     """
     Return the `columns` dictionary defined in `meerschaum.Pipe.parameters`.
     """
-    cols = self.parameters.get('columns', {})
+    cols = self.get_parameters(debug=self.debug).get('columns', {})
     if not isinstance(cols, dict):
         return {}
     return {col_ix: col for col_ix, col in cols.items() if col and col_ix}
@@ -469,7 +486,7 @@ def upsert(self) -> bool:
     """
     Return whether `upsert` is set for the pipe.
     """
-    return self.parameters.get('upsert', False)
+    return self.get_parameters(debug=self.debug).get('upsert', False)
 
 
 @upsert.setter
@@ -485,7 +502,7 @@ def static(self) -> bool:
     """
     Return whether `static` is set for the pipe.
     """
-    return self.parameters.get('static', False)
+    return self.get_parameters(debug=self.debug).get('static', False)
 
 
 @static.setter
@@ -502,7 +519,7 @@ def autoincrement(self) -> bool:
     """
     Return the `autoincrement` parameter for the pipe.
     """
-    return self.parameters.get('autoincrement', False)
+    return self.get_parameters(debug=self.debug).get('autoincrement', False)
 
 
 @autoincrement.setter
@@ -518,7 +535,7 @@ def autotime(self) -> bool:
     """
     Return the `autotime` parameter for the pipe.
     """
-    return self.parameters.get('autotime', False)
+    return self.get_parameters(debug=self.debug).get('autotime', False)
 
 
 @autotime.setter
@@ -558,7 +575,7 @@ def enforce(self) -> bool:
     """
     Return the `enforce` parameter for the pipe.
     """
-    return self.parameters.get('enforce', True)
+    return self.get_parameters(debug=self.debug).get('enforce', True)
 
 
 @enforce.setter
@@ -574,7 +591,7 @@ def null_indices(self) -> bool:
     """
     Return the `null_indices` parameter for the pipe.
     """
-    return self.parameters.get('null_indices', True)
+    return self.get_parameters(debug=self.debug).get('null_indices', True)
 
 
 @null_indices.setter
@@ -590,7 +607,7 @@ def mixed_numerics(self) -> bool:
     """
     Return the `mixed_numerics` parameter for the pipe.
     """
-    return self.parameters.get('mixed_numerics', True)
+    return self.get_parameters(debug=self.debug).get('mixed_numerics', True)
 
 
 @mixed_numerics.setter
@@ -1092,20 +1109,29 @@ def target(self) -> str:
         self.__dict__['_target'] = target_val
         return target_val
 
+    core = self.__dict__.get('_core_pipe', None)
     default_target = self._target_legacy()
     default_targets = {default_target}
-    potential_keys = ('target_name', 'target_table', 'target_table_name')
-    _target = None
-    for k in potential_keys:
-        if k in params:
-            _target = params[k]
-            break
+    if core is not None:
+        ### The Rust name rules (`target_name` / `target_table` / ... keys, the legacy default),
+        ### over the parameters resolved here (so cross-pipe templates are honored).
+        _target = core.target(None, dict(params))
+    else:
+        potential_keys = ('target_name', 'target_table', 'target_table_name')
+        _target = None
+        for k in potential_keys:
+            if k in params:
+                _target = params[k]
+                break
 
-    _target = _target or default_target
+        _target = _target or default_target
 
     if self.instance_connector.type == 'sql':
-        from meerschaum.utils.sql import truncate_item_name
-        truncated_target = truncate_item_name(_target, self.instance_connector.flavor)
+        if core is not None:
+            truncated_target = core.target(self.instance_connector.flavor, dict(params))
+        else:
+            from meerschaum.utils.sql import truncate_item_name
+            truncated_target = truncate_item_name(_target, self.instance_connector.flavor)
         default_targets.add(truncated_target)
         warned_target = self.__dict__.get('_warned_target', False)
         if truncated_target != _target and not warned_target:
@@ -1132,6 +1158,9 @@ def _target_legacy(self) -> str:
     The old method of determining a pipe's table name by joining the keys with underscores.
     **NOTE:** Converts the `':'` in the `connector_keys` to an `'_'`.
     """
+    core = self.__dict__.get('_core_pipe', None)
+    if core is not None:
+        return core.target_legacy()
     name = f"{self.connector_keys.replace(':', '_')}_{self.metric_key}"
     if self.location_key is not None:
         name += f"_{self.location_key}"

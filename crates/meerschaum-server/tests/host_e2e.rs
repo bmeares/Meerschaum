@@ -197,7 +197,9 @@ async fn python_host_end_to_end() {
 
     // The server and the host share the root, so the same secret file (created by the server).
     let mut cfg = ServerConfig::for_root("sql:local", &root);
-    cfg.no_dash = true;
+    // The test serves the API router only (no console); `--no-dash` would also switch off the
+    // host's plugin Dash apps, which this test exercises. No terminal process either.
+    cfg.no_webterm = true;
     let instance = Arc::new(common::MemoryInstance::new("local"));
     instance.seed_user("admin", "pass", Some("admin"));
     instance.seed_user("reader", "pass", None);

@@ -26,12 +26,28 @@ impl NativePlugins {
     /// Discover native plugins and read or rebuild the manifest cached at `cache`.
     /// A cache hit loads no code. Directories without native plugins yield an empty set.
     pub fn open(directories: &[PathBuf], cache: &Path) -> Result<Self> {
-        let candidates = discovery::discover(directories)?;
+        let discovery::Discovery {
+            mut candidates,
+            skipped,
+        } = discovery::discover_report(directories);
+        for item in &skipped {
+            eprintln!("Warning: {}", item.message());
+        }
         if candidates.is_empty() {
             return Ok(Self::empty());
         }
         // SAFETY: the configured plugin directories are trusted (see the module documentation).
-        let manifest = unsafe { discovery::cached_manifest(directories, cache) }?;
+        // Load-time failures were not visible to `discover_report`; warn about those here.
+        let (manifest, load_skipped) =
+            unsafe { discovery::cached_manifest_report(directories, cache) }?;
+        let known = skipped.len();
+        for item in load_skipped.iter().skip(known) {
+            eprintln!("Warning: {}", item.message());
+        }
+        candidates.retain(|c| manifest["plugins"].get(&c.name).is_some());
+        if candidates.is_empty() {
+            return Ok(Self::empty());
+        }
         Ok(Self {
             candidates,
             manifest,

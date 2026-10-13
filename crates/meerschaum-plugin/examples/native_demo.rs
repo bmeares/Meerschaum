@@ -21,13 +21,15 @@ impl Plugin for Demo {
           "plugins":{"native_demo":{"name":"native_demo","version":"1.0.0","data_functions":["fetch","sync"],"actions":[{"name":"hello","doc":"Return a synthetic greeting."},{"name":"panic","doc":"Exercise panic containment."}],"arguments":[{"option_strings":["--native-demo"],"action":"store_true","help":"Enable demo."}],"pre_sync_hooks":["before"],"post_sync_hooks":["after"],"connectors":["native_demo"],"api_plugins":["routes"],"web_pages":[{"path":"/dash/native-demo","page_group":"Native demo","page_key":"native-demo","login_required":true,"function":"page","mode":"html"}]}},
           "connector_types":{"native_demo":{"type":"native_demo","plugin":"native_demo","class_name":"Demo","is_instance":true,"is_thread_safe":false,"methods":["fetch","sync_pipe","get_pipe_data"]}},"pre_sync_hooks":["before"],"post_sync_hooks":["after"]})
     }
-    fn fetch(&self, _: &Request) -> Result<Option<Frame>> {
+    fn fetch(&self, request: &Request) -> Result<Option<Frame>> {
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
-        let batch = RecordBatch::try_new(
-            schema,
-            vec![Arc::new(Int64Array::from(vec![Some(1), None, Some(3)]))],
-        )
-        .map_err(|e| Error::Message(e.to_string()))?;
+        // `context.kwargs.rows` (a sync's extra keyword arguments) sets the row count.
+        let ids = match request.context["kwargs"]["rows"].as_i64() {
+            Some(rows) => (1..=rows).map(Some).collect(),
+            None => vec![Some(1), None, Some(3)],
+        };
+        let batch = RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(ids))])
+            .map_err(|e| Error::Message(e.to_string()))?;
         Ok(Some(
             Frame::from_record_batch(&batch).map_err(|e| Error::Message(e.to_string()))?,
         ))

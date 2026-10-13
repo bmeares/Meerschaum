@@ -1,8 +1,9 @@
 name: buildx
 
 # Builds the Docker images with scripts/docker/buildx.sh (docs/design/v5-build.md):
-#   minimal (v4 default target), full (`--target full`: v4 full + the native `mrsm`), and slim
-#   (`--target slim`), then runs the §12.1 size gate (slim < 200 MB, full < 900 MB).
+#   minimal and full (the default target with `meerschaum` and `meerschaum[full]` installed from the
+#   maturin wheels, plus the native `mrsm`), and slim (`--target slim`: the base wheels only),
+#   then runs the §12.1 size gate (slim < 200 MB, full < 900 MB).
 #
 # The size gate starts in `warn` mode: `full` is ~1.9 GB until the v5 dependency cuts (D20) land,
 # so enforcing it now would fail every run. Switch the default to `enforce` once `full` fits;
@@ -16,7 +17,7 @@ on:
         type: boolean
         default: false
       v4_only:
-        description: 'Build only the v4 images (default target per dep group; no Rust, no slim).'
+        description: 'Build only the default-target images per dep group (no slim).'
         type: boolean
         default: false
       size_gate:

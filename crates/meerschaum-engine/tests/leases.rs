@@ -5,9 +5,8 @@
 //! [`InstanceLeases`] the engine uses and holds it until told to let go. While it is held, the
 //! parent's engine run must not sync the pipe; once released, it must.
 //!
-//! The SQLite instance answers `NotImplemented` for `acquire_pipe_lease` today, so this
-//! exercises the machine-local file-lock fallback; when the instance implements the pair, the
-//! same test covers the instance's lease table.
+//! The SQLite instance implements the lease pair (its lease table), so this exercises the
+//! instance's leases at engine-run level; `leases_backends.rs` covers PostgreSQL and Valkey.
 
 mod common;
 

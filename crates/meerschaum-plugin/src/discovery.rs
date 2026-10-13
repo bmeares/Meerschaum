@@ -26,55 +26,117 @@ struct Descriptor {
 pub fn library_name(name: &str) -> String {
     format!("lib{name}.{}", std::env::consts::DLL_EXTENSION)
 }
+/// A plugin directory that was skipped, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Skipped {
+    pub directory: PathBuf,
+    pub reason: String,
+}
+
+impl Skipped {
+    /// The warning text printed for this plugin.
+    pub fn message(&self) -> String {
+        format!(
+            "Skipping invalid native plugin at '{}': {}",
+            self.directory.display(),
+            self.reason
+        )
+    }
+}
+
+/// The result of scanning the plugin directories: the usable plugins and the ones skipped.
+#[derive(Debug, Clone, Default)]
+pub struct Discovery {
+    pub candidates: Vec<Candidate>,
+    pub skipped: Vec<Skipped>,
+}
+
+fn warn_skipped(skipped: &[Skipped]) {
+    for item in skipped {
+        eprintln!("Warning: {}", item.message());
+    }
+}
+
+fn read_candidate(directory: &Path, seen: &HashSet<String>) -> Result<Option<Candidate>> {
+    let descriptor = directory.join("plugin.toml");
+    if !descriptor.is_file() {
+        return Ok(None);
+    }
+    let desc: Descriptor =
+        toml::from_str(&std::fs::read_to_string(&descriptor).map_err(error)?).map_err(error)?;
+    if desc.name.is_empty()
+        || !desc
+            .name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        || desc.version.is_empty()
+    {
+        return Err(error("invalid native plugin descriptor"));
+    }
+    if seen.contains(&desc.name) {
+        return Ok(None);
+    }
+    let library = directory.join(library_name(&desc.name));
+    if !library.is_file() {
+        return Err(error(format!("missing native library for {}", desc.name)));
+    }
+    let fingerprint = fingerprint(directory)?;
+    Ok(Some(Candidate {
+        name: desc.name,
+        version: desc.version,
+        directory: directory.to_path_buf(),
+        library,
+        fingerprint,
+    }))
+}
+
+/// Scan the directories. An invalid plugin is recorded in `skipped` and the scan continues
+/// (PARITY: v4 warns about a broken Python plugin and loads the rest).
 /// No implicit home/config fallback. Callers supply configured directories in priority order.
-pub fn discover(directories: &[PathBuf]) -> Result<Vec<Candidate>> {
+pub fn discover_report(directories: &[PathBuf]) -> Discovery {
     let mut seen = HashSet::new();
-    let mut found = Vec::new();
+    let mut found = Discovery::default();
     for root in directories {
         if !root.exists() {
             continue;
         }
-        let mut entries = std::fs::read_dir(root)
-            .map_err(error)?
-            .collect::<std::io::Result<Vec<_>>>()
-            .map_err(error)?;
-        entries.sort_by_key(|e| e.file_name());
+        let entries =
+            match std::fs::read_dir(root).and_then(|rd| rd.collect::<std::io::Result<Vec<_>>>()) {
+                Ok(mut entries) => {
+                    entries.sort_by_key(|e| e.file_name());
+                    entries
+                }
+                Err(e) => {
+                    found.skipped.push(Skipped {
+                        directory: root.clone(),
+                        reason: e.to_string(),
+                    });
+                    continue;
+                }
+            };
         for entry in entries {
             let directory = entry.path();
-            let descriptor = directory.join("plugin.toml");
-            if !descriptor.is_file() {
-                continue;
+            match read_candidate(&directory, &seen) {
+                Ok(Some(candidate)) => {
+                    seen.insert(candidate.name.clone());
+                    found.candidates.push(candidate);
+                }
+                Ok(None) => {}
+                Err(e) => found.skipped.push(Skipped {
+                    directory,
+                    reason: e.to_string(),
+                }),
             }
-            let desc: Descriptor =
-                toml::from_str(&std::fs::read_to_string(&descriptor).map_err(error)?)
-                    .map_err(error)?;
-            if desc.name.is_empty()
-                || !desc
-                    .name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-                || desc.version.is_empty()
-            {
-                return Err(error("invalid native plugin descriptor"));
-            }
-            if !seen.insert(desc.name.clone()) {
-                continue;
-            }
-            let library = directory.join(library_name(&desc.name));
-            if !library.is_file() {
-                return Err(error(format!("missing native library for {}", desc.name)));
-            }
-            let fingerprint = fingerprint(&directory)?;
-            found.push(Candidate {
-                name: desc.name,
-                version: desc.version,
-                directory,
-                library,
-                fingerprint,
-            });
         }
     }
-    Ok(found)
+    found
+}
+
+/// Like [`discover_report`], printing a warning for every skipped plugin.
+pub fn discover(directories: &[PathBuf]) -> Result<Vec<Candidate>> {
+    let found = discover_report(directories);
+    warn_skipped(&found.skipped);
+    Ok(found.candidates)
 }
 /// Parse the OS path-list form of MRSM_PLUGINS_DIR, without resolving defaults.
 pub fn environment_directories() -> Vec<PathBuf> {
@@ -143,7 +205,24 @@ pub fn fingerprint(root: &Path) -> Result<String> {
 /// # Safety
 /// Every discovered library must satisfy `LoadedPlugin::load`'s trust requirements.
 pub unsafe fn cached_manifest(directories: &[PathBuf], cache: &Path) -> Result<Value> {
-    let candidates = discover(directories)?;
+    // SAFETY: forwarded trust requirement from this function's caller.
+    let (manifest, skipped) = unsafe { cached_manifest_report(directories, cache) }?;
+    warn_skipped(&skipped);
+    Ok(manifest)
+}
+
+/// Like [`cached_manifest`], returning the skipped plugins (invalid descriptor, missing or
+/// unloadable library) instead of printing them. Skipped plugins are absent from the manifest.
+/// # Safety
+/// Every discovered library must satisfy `LoadedPlugin::load`'s trust requirements.
+pub unsafe fn cached_manifest_report(
+    directories: &[PathBuf],
+    cache: &Path,
+) -> Result<(Value, Vec<Skipped>)> {
+    let Discovery {
+        candidates,
+        mut skipped,
+    } = discover_report(directories);
     // Same byte grammar as the Python-worker host manifest fingerprint.
     let mut hash = Sha256::new();
     hash.update(crate::MANIFEST_SCHEMA_VERSION.to_le_bytes());
@@ -156,16 +235,29 @@ pub unsafe fn cached_manifest(directories: &[PathBuf], cache: &Path) -> Result<V
     if let Ok(bytes) = std::fs::read(cache) {
         if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
             if v["fingerprint"] == key && validate_manifest(&v).is_ok() {
-                return Ok(v);
+                return Ok((v, skipped));
             }
         }
     }
     let mut result = json!({"schema_version":crate::MANIFEST_SCHEMA_VERSION,"meerschaum_version":env!("CARGO_PKG_VERSION"),"python_version":"","python_executable":null,"fingerprint":key,"plugins":{},"connector_types":{},"pre_sync_hooks":[],"post_sync_hooks":[],"load_errors":{}});
     for candidate in candidates {
         // SAFETY: forwarded trust requirement from this function's caller.
-        let plugin = unsafe { LoadedPlugin::load(&candidate.library) }?;
+        let plugin = match unsafe { LoadedPlugin::load(&candidate.library) } {
+            Ok(plugin) => plugin,
+            Err(e) => {
+                skipped.push(Skipped {
+                    directory: candidate.directory,
+                    reason: e.to_string(),
+                });
+                continue;
+            }
+        };
         if plugin.name != candidate.name || plugin.version != candidate.version {
-            return Err(error("descriptor and exported metadata differ"));
+            skipped.push(Skipped {
+                directory: candidate.directory,
+                reason: "descriptor and exported metadata differ".to_owned(),
+            });
+            continue;
         }
         let mut entry = plugin.manifest["plugins"][&plugin.name].clone();
         entry["fingerprint"] = json!(candidate.fingerprint);
@@ -201,5 +293,5 @@ pub unsafe fn cached_manifest(directories: &[PathBuf], cache: &Path) -> Result<V
         let _ = std::fs::remove_file(&temp);
     }
     renamed?;
-    Ok(result)
+    Ok((result, skipped))
 }

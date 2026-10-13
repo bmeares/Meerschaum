@@ -250,19 +250,7 @@ async fn host_registry(
     host: &meerschaum_server::proxy::HostProxy,
     state: &AppState,
 ) -> Option<serde_json::Value> {
-    let token = meerschaum_server::mcp::federation::internal_token(state.secret(), None);
-    let request = axum::http::Request::get(meerschaum_server::mcp::federation::REGISTRY_PATH)
-        .header("authorization", format!("Bearer {token}"))
-        .body(axum::body::Body::empty())
-        .ok()?;
-    let response = host.forward(request).await;
-    if !response.status().is_success() {
-        return None;
-    }
-    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
-        .await
-        .ok()?;
-    serde_json::from_slice(&bytes).ok()
+    host.registry(state.secret()).await
 }
 
 async fn shutdown_signal() -> std::io::Result<()> {

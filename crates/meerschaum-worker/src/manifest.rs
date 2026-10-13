@@ -74,16 +74,19 @@ pub struct ArgumentManifest {
     /// The action class (`_StoreAction`, `_StoreTrueAction`, ...).
     pub action: String,
     /// `nargs`.
+    #[serde(default)]
     pub nargs: serde_json::Value,
     /// `const`.
-    #[serde(rename = "const")]
+    #[serde(rename = "const", default)]
     pub const_value: serde_json::Value,
     /// `default`.
+    #[serde(default)]
     pub default: serde_json::Value,
     /// `type.__name__`.
     #[serde(rename = "type")]
     pub type_name: Option<String>,
     /// `choices`.
+    #[serde(default)]
     pub choices: serde_json::Value,
     /// `required`.
     #[serde(default)]
@@ -91,6 +94,7 @@ pub struct ArgumentManifest {
     /// `help`.
     pub help: Option<String>,
     /// `metavar`.
+    #[serde(default)]
     pub metavar: serde_json::Value,
 }
 
@@ -257,6 +261,9 @@ pub struct PluginManifest {
     pub connectors: Vec<String>,
     /// The import error, if the plugin failed to import.
     pub import_error: Option<String>,
+    /// Static `attempt_import` findings: default-venv imports of undeclared packages (D20).
+    #[serde(default)]
+    pub venv_warnings: Vec<String>,
     /// The fingerprint of this plugin's source tree.
     #[serde(default)]
     pub fingerprint: Option<String>,

@@ -3,6 +3,8 @@
 //! registry, and helpers to register pipes and read their tables in a comparable form.
 #![allow(dead_code)]
 
+pub mod mqtt;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;

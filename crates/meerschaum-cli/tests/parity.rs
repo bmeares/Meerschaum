@@ -444,7 +444,11 @@ fn actions_registry_matches_python() {
         .keys()
         .map(|s| s.as_str())
         .collect();
-    let rs_names: BTreeSet<&str> = CORE_ACTIONS.iter().map(|a| a.name).collect();
+    let rs_names: BTreeSet<&str> = CORE_ACTIONS
+        .iter()
+        .map(|a| a.name)
+        .filter(|name| !actions::V5_ONLY_ACTIONS.contains(name))
+        .collect();
     if py_names != rs_names {
         failures.push(format!(
             "action order/set: python={py_names:?} rust={rs_names:?}"

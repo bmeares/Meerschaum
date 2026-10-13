@@ -57,6 +57,7 @@
         "mcp_prompts": {"type": "array", "items": {"$ref": "#/$defs/mcp_prompt"}},
         "connectors": {"$ref": "#/$defs/names"},
         "import_error": {"$ref": "#/$defs/nullable_string"},
+        "venv_warnings": {"description": "Static attempt_import findings (D20).", "type": "array", "items": {"type": "string"}},
         "fingerprint": {
           "description": "SHA-256 over the plugin tree's relative paths, sizes and mtimes (excluding __pycache__ and .pyc).",
           "$ref": "#/$defs/nullable_string"

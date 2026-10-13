@@ -23,8 +23,8 @@ use meerschaum_kernel::enforce::PipeInput;
 use meerschaum_kernel::value::Value as KValue;
 
 use crate::axis::{Axis, AxisKind};
-use crate::events::EventKind;
-use crate::executor::{SyncExecutor, SyncRequest};
+use crate::events::{ChunkSource, EventKind};
+use crate::executor::{NodeEvents, SyncExecutor, SyncRequest};
 use crate::graph::Graph;
 use crate::ledger::ledger_intervals;
 use crate::node::PipeRef;
@@ -236,6 +236,74 @@ impl DeltaObserver for FaultsOnly<'_> {
     }
 }
 
+/// Turns the fetched-chunk callbacks of a sync into `chunk_started` / `chunk_finished` events
+/// (source `fetch`, §5.7), numbered in fetch order across the node's whole sync, and forwards
+/// everything else to the wrapped observer (ledger writer, crash injection).
+struct FetchProgress<'a> {
+    inner: Option<&'a dyn DeltaObserver>,
+    events: &'a NodeEvents,
+    next: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl DeltaObserver for FetchProgress<'_> {
+    async fn before_commit(&self, pipe: &Pipe, delta: &Frame) -> Result<(), String> {
+        match self.inner {
+            Some(o) => o.before_commit(pipe, delta).await,
+            None => Ok(()),
+        }
+    }
+
+    async fn after_commit(&self, pipe: &Pipe, result: &SyncResult) -> Result<(), String> {
+        match self.inner {
+            Some(o) => o.after_commit(pipe, result).await,
+            None => Ok(()),
+        }
+    }
+
+    fn records_deltas(&self) -> bool {
+        self.inner.is_some_and(|o| o.records_deltas())
+    }
+
+    fn chunk_started(&self, chunk: &crate::sync::FetchChunk) {
+        let index = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.events.emit(EventKind::ChunkStarted {
+            chunk: index,
+            begin: chunk.begin,
+            end: chunk.end,
+            source: ChunkSource::Fetch,
+            rows: Some(chunk.rows),
+            total: None,
+        });
+    }
+
+    fn chunk_finished(
+        &self,
+        chunk: &crate::sync::FetchChunk,
+        result: &SyncResult,
+        elapsed: std::time::Duration,
+    ) {
+        // `chunk_started` took the index, so this chunk is the last one handed out.
+        let index = self
+            .next
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .saturating_sub(1);
+        self.events.emit(EventKind::ChunkFinished {
+            chunk: index,
+            success: result.success,
+            message: result.message.clone(),
+            source: ChunkSource::Fetch,
+            rows: Some(chunk.rows),
+            inserted: result.inserted,
+            updated: result.updated,
+            upserted: result.upserted,
+            begin: chunk.begin,
+            end: chunk.end,
+            duration_ms: Some(elapsed.as_millis() as u64),
+        });
+    }
+}
+
 /// The native node runner.
 pub struct NativeExecutor<S> {
     registry: Arc<dyn ConnectorRegistry>,
@@ -326,6 +394,7 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
         input: Option<PipeInput>,
         args: &SyncArgs,
         ledger: Option<&LedgerWriter<'_, S>>,
+        events: Option<&NodeEvents>,
     ) -> SyncResult {
         let faults_only = match (ledger, self.faults.as_deref()) {
             (None, Some(f)) => Some(FaultsOnly {
@@ -338,6 +407,15 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
             (Some(l), _) => Some(l),
             (None, Some(f)) => Some(f),
             (None, None) => None,
+        };
+        let progress = events.map(|e| FetchProgress {
+            inner: observer,
+            events: e,
+            next: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let observer: Option<&dyn DeltaObserver> = match progress.as_ref() {
+            Some(p) => Some(p),
+            None => observer,
         };
         let env = self.env();
         let hooks = if args.extra.get("skip_hooks").is_some_and(Value::truthy) {
@@ -381,7 +459,14 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
         let mut args = self.base_args();
         args.check_existing = check_existing;
         let mut result = self
-            .sync_window(&node.pipe, pipe_ref, Some(input), &args, ledger.as_ref())
+            .sync_window(
+                &node.pipe,
+                pipe_ref,
+                Some(input),
+                &args,
+                ledger.as_ref(),
+                None,
+            )
             .await;
         if let Some(l) = &ledger {
             result.changed_intervals = l.take_written();
@@ -505,24 +590,45 @@ impl<S: StateWriter + 'static> SyncExecutor for NativeExecutor<S> {
         let chunked = windows.len() > 1 || !request.chunks.is_empty();
         let mut results = Vec::with_capacity(windows.len());
         for (i, args) in windows.iter().enumerate() {
+            let window_begin = match &args.begin {
+                SyncBegin::At(b) => crate::sync::date_bound_to_bound(b),
+                _ => None,
+            };
+            let window_end = args.end.as_ref().and_then(crate::sync::date_bound_to_bound);
             if chunked {
                 request.events.emit(EventKind::ChunkStarted {
                     chunk: i,
-                    begin: match &args.begin {
-                        SyncBegin::At(b) => crate::sync::date_bound_to_bound(b),
-                        _ => None,
-                    },
-                    end: args.end.as_ref().and_then(crate::sync::date_bound_to_bound),
+                    begin: window_begin,
+                    end: window_end,
+                    source: ChunkSource::Window,
+                    rows: None,
+                    total: Some(windows.len()),
                 });
             }
+            let window_started = std::time::Instant::now();
             let r = self
-                .sync_window(&pipe, pipe_ref, None, args, ledger.as_ref())
+                .sync_window(
+                    &pipe,
+                    pipe_ref,
+                    None,
+                    args,
+                    ledger.as_ref(),
+                    Some(&request.events),
+                )
                 .await;
             if chunked {
                 request.events.emit(EventKind::ChunkFinished {
                     chunk: i,
                     success: r.success,
                     message: r.message.clone(),
+                    source: ChunkSource::Window,
+                    rows: None,
+                    inserted: r.inserted,
+                    updated: r.updated,
+                    upserted: r.upserted,
+                    begin: window_begin,
+                    end: window_end,
+                    duration_ms: Some(window_started.elapsed().as_millis() as u64),
                 });
             }
             let failed = !r.success;

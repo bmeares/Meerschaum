@@ -118,6 +118,37 @@ pub trait DeltaObserver: Send + Sync {
         let _ = (pipe, result);
         Ok(())
     }
+
+    /// Whether this observer records the delta of a commit (a ledger writer, crash injection).
+    /// A progress-only observer returns `false`, so that a sync which would otherwise bypass the
+    /// observer entirely (the SQL in-place `INSERT ... SELECT`, which has no delta frame) keeps
+    /// its direct path and v4's messages and table layout.
+    fn records_deltas(&self) -> bool {
+        true
+    }
+
+    /// A fetched chunk is about to sync (in fetch order). Progress only: must not block.
+    fn chunk_started(&self, chunk: &FetchChunk) {
+        let _ = chunk;
+    }
+
+    /// A fetched chunk finished syncing (successfully or not).
+    fn chunk_finished(&self, chunk: &FetchChunk, result: &SyncResult, elapsed: Duration) {
+        let _ = (chunk, result, elapsed);
+    }
+}
+
+/// One piece of a fetched frame that is synced separately (SQL fetch chunks, `--chunksize`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FetchChunk {
+    /// Position within this fetch, starting at 0.
+    pub index: usize,
+    /// Rows in the chunk.
+    pub rows: u64,
+    /// The smallest datetime-axis value in the chunk, if the pipe has a datetime column.
+    pub begin: Option<meerschaum_core::success::Bound>,
+    /// The largest datetime-axis value in the chunk.
+    pub end: Option<meerschaum_core::success::Bound>,
 }
 
 /// What the native flow needs besides the pipe: connectors and configuration.
@@ -716,6 +747,56 @@ async fn sync_inner(
     result
 }
 
+/// The keyword arguments a plugin receives for a sync, exactly as `Pipe.sync(**kw)` passes them
+/// to a Python plugin's `fetch(pipe, **kw)` / `sync(pipe, **kw)`: the sync's `extra` (CLI and
+/// plugin-specific flags) plus `begin`, `end`, `params`, `check_existing`, `enforce`, `force`,
+/// `workers`, `chunksize`, `retries` and `min_seconds`. Registries that hand a native (C ABI)
+/// plugin source its fetch context build it from this map in
+/// [`ConnectorRegistry::source_for_sync`], so native and Python plugins see the same kwargs.
+pub fn sync_kwargs(args: &SyncArgs) -> Map {
+    let mut map = args.extra.clone();
+    map.insert(
+        "begin".into(),
+        match &args.begin {
+            SyncBegin::Default => Value::Str(String::new()),
+            SyncBegin::Unbounded => Value::Null,
+            SyncBegin::At(b) => bound_value(b),
+        },
+    );
+    map.insert(
+        "end".into(),
+        args.end.as_ref().map(bound_value).unwrap_or(Value::Null),
+    );
+    map.insert(
+        "params".into(),
+        args.params.clone().map(Value::Map).unwrap_or(Value::Null),
+    );
+    map.insert("check_existing".into(), Value::Bool(args.check_existing));
+    map.insert("enforce".into(), Value::Bool(args.enforce_dtypes));
+    map.insert("force".into(), Value::Bool(args.force));
+    if args.workers.is_some() || !map.contains_key("workers") {
+        map.insert(
+            "workers".into(),
+            args.workers.map(Value::Int).unwrap_or(Value::Null),
+        );
+    }
+    map.insert(
+        "chunksize".into(),
+        args.chunksize.map(Value::Int).unwrap_or(Value::Null),
+    );
+    map.insert("retries".into(), Value::Int(args.retries.into()));
+    map.insert("min_seconds".into(), Value::Float(args.min_seconds));
+    map
+}
+
+/// A bound as a plugin kwarg: an integer, or an ISO 8601 string.
+pub fn bound_value(bound: &DateBound) -> Value {
+    match bound {
+        DateBound::Int(i) => Value::Int(*i),
+        DateBound::Datetime(_) => Value::Str(bound.isoformat()),
+    }
+}
+
 /// A connector bound as an engine bound (UTC).
 pub fn date_bound_to_bound(b: &DateBound) -> Option<meerschaum_core::success::Bound> {
     use meerschaum_core::success::Bound;
@@ -742,6 +823,19 @@ async fn sync_fetched_chunks(
         let chunk = df.take(&(start..(start + size).min(df.height())).collect::<Vec<_>>());
         let label = fetched_chunk_label(&chunk, pipe.column("datetime").as_deref());
         let rows = chunk.height();
+        let info = {
+            let (begin, end) = fetched_chunk_bounds(&chunk, pipe.column("datetime").as_deref());
+            FetchChunk {
+                index: results.len(),
+                rows: rows as u64,
+                begin,
+                end,
+            }
+        };
+        if let Some(o) = observer {
+            o.chunk_started(&info);
+        }
+        let chunk_start = Instant::now();
         let result = Box::pin(sync_inner(
             env,
             pipe,
@@ -750,6 +844,9 @@ async fn sync_fetched_chunks(
             observer,
         ))
         .await;
+        if let Some(o) = observer {
+            o.chunk_finished(&info, &result, chunk_start.elapsed());
+        }
         let message = if results.is_empty() {
             let msg = format!("\n{label}\n{}", result.message);
             if !result.success {
@@ -795,6 +892,39 @@ async fn sync_fetched_chunks(
         messages.trim()
     );
     aggregate
+}
+
+/// The smallest and largest datetime-axis values of a chunk, as engine bounds.
+fn fetched_chunk_bounds(
+    df: &Frame,
+    dt: Option<&str>,
+) -> (
+    Option<meerschaum_core::success::Bound>,
+    Option<meerschaum_core::success::Bound>,
+) {
+    use meerschaum_core::success::Bound;
+    let Some(column) = dt.and_then(|c| df.column(c)) else {
+        return (None, None);
+    };
+    let values = column.data.values();
+    let mut present = values.iter().filter(|v| !v.is_na()).collect::<Vec<_>>();
+    present.sort_by(|a, b| pipe_ops::compare_values(a, b));
+    let to_bound = |v: &KValue| match v {
+        KValue::Datetime(d) => Some(Bound::Datetime(DateTime::from_naive_utc_and_offset(
+            d.utc, Utc,
+        ))),
+        KValue::Date(d) => d
+            .and_hms_opt(0, 0, 0)
+            .map(|n| Bound::Datetime(DateTime::from_naive_utc_and_offset(n, Utc))),
+        KValue::Int(i) => Some(Bound::Int(*i)),
+        // A fetch result before dtype enforcement (SQLite text, ISO strings from a plugin).
+        KValue::Str(text) => DateBound::parse(text).and_then(|b| date_bound_to_bound(&b)),
+        _ => None,
+    };
+    (
+        present.first().and_then(|v| to_bound(v)),
+        present.last().and_then(|v| to_bound(v)),
+    )
 }
 
 fn fetched_chunk_label(df: &Frame, dt: Option<&str>) -> String {

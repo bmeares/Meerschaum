@@ -108,6 +108,12 @@ impl SqlConnector {
     }
 
     /// Sync using table metadata already cached by the caller. Schema changes refresh it.
+    ///
+    /// Cross-pipe `{{ Pipe() }}` templates resolve through [`prepare_pipe`](SqlConnector::prepare_pipe)
+    /// on every call (never from a snapshot the caller built). The sync runs on the resolved
+    /// copy; only the *raw* top-level parameters it changed (`autoincrement`, numeric `dtypes`,
+    /// new special `dtypes`) are applied to the caller's `pipe`, so templates are never replaced
+    /// by their resolved text.
     pub async fn sync_pipe_mut_cached(
         &self,
         pipe: &mut Pipe,
@@ -115,8 +121,10 @@ impl SqlConnector {
         opts: &SyncOptions,
         cached: Option<IndexMap<String, String>>,
     ) -> SyncResult {
+        let mut resolved = self.prepare_pipe(pipe).await;
+        let before = resolved.raw_parameters().clone();
         let cached_state = match cached.filter(|c| !c.is_empty()) {
-            Some(c) => match self.sql_pipe(pipe) {
+            Some(c) => match self.sql_pipe(&resolved) {
                 Ok(sp) => Some(self.pipe_state_cached(&sp, Some(c)).await),
                 Err(e) => return SyncResult::new(false, e.to_string()),
             },
@@ -131,7 +139,17 @@ impl SqlConnector {
                 .map(|m| m.iter().map(|(k, v)| (k.clone(), v.py_str())).collect()),
             ..Default::default()
         };
-        self.sync_pipe_impl(pipe, df, opts, internal).await
+        let result = self.sync_pipe_impl(&mut resolved, df, opts, internal).await;
+        let patch: Map = resolved
+            .raw_parameters()
+            .iter()
+            .filter(|(k, v)| before.get(*k) != Some(*v))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        if !patch.is_empty() {
+            pipe.update_parameters(patch);
+        }
+        result
     }
 
     /// [`get_pipe_data`](SqlConnector::get_pipe_data), also returning the table state the read

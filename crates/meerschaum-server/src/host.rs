@@ -165,7 +165,7 @@ impl PythonHostLauncher {
     }
 
     /// A launcher for a server: the host serves the same root and instance with the same
-    /// `--no-auth`, `--production`, `--private` and `--debug` flags (`MRSM_API_HOST_CONFIG`,
+    /// `--no-auth`, `--production`, `--private`, `--no-dash`, `--no-webterm` and `--debug` flags (`MRSM_API_HOST_CONFIG`,
     /// read by `meerschaum.api` in host mode).
     pub fn for_config(cfg: &crate::config::ServerConfig, python: PathBuf) -> PythonHostLauncher {
         let host_config = serde_json::json!({
@@ -174,6 +174,9 @@ impl PythonHostLauncher {
             "production": cfg.production,
             "private": cfg.private,
             "debug": cfg.debug,
+            // The host serves plugin pages and the terminal only as v4's console would.
+            "no_dash": cfg.no_dash,
+            "no_webterm": cfg.no_webterm || cfg.no_dash,
         });
         PythonHostLauncher {
             python,
@@ -186,6 +189,9 @@ impl PythonHostLauncher {
     }
 }
 
+/// How long a terminating host may take to exit before it is killed.
+const TERMINATE_GRACE: Duration = Duration::from_secs(10);
+
 struct ChildProcess(tokio::process::Child);
 
 #[async_trait]
@@ -194,6 +200,24 @@ impl HostProcess for ChildProcess {
         Ok(self.0.wait().await?.code())
     }
     async fn kill(&mut self) -> std::io::Result<()> {
+        // SIGTERM first so the host runs its shutdown events (it stops the terminal process and
+        // its tmux session); SIGKILL only when it does not exit within the grace period.
+        #[cfg(unix)]
+        if let Some(pid) = self.0.id() {
+            let _ = tokio::process::Command::new("kill")
+                .arg("-TERM")
+                .arg(pid.to_string())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+            if tokio::time::timeout(TERMINATE_GRACE, self.0.wait())
+                .await
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
         self.0.kill().await
     }
 }
@@ -246,6 +270,8 @@ pub struct HostSupervisor {
     /// The manifest last applied.
     manifest: std::sync::Mutex<HostManifest>,
     restart: Notify,
+    /// Set once the supervised process is gone after a shutdown request.
+    terminated: tokio::sync::watch::Sender<bool>,
 }
 
 impl std::fmt::Debug for HostSupervisor {
@@ -306,6 +332,7 @@ impl HostSupervisor {
             needed: AtomicBool::new(manifest.needs_host()),
             manifest: std::sync::Mutex::new(manifest.clone()),
             restart: Notify::new(),
+            terminated: tokio::sync::watch::channel(false).0,
         })
     }
 
@@ -395,6 +422,7 @@ impl HostSupervisor {
             };
             if matches!(event, Event::Stop) || self.stopping.load(Ordering::SeqCst) {
                 let _ = proc.kill().await;
+                self.terminated.send_replace(true);
                 return;
             }
             match event {
@@ -405,6 +433,7 @@ impl HostSupervisor {
                         tracing::info!("No installed plugin needs the API host; stopped it.");
                         *self.started.lock().await = false;
                         let _ = std::fs::remove_file(&self.socket);
+                        self.terminated.send_replace(true);
                         return;
                     }
                     tracing::info!("The plugin manifest changed; restarting the API host.");
@@ -414,7 +443,10 @@ impl HostSupervisor {
                     tracing::warn!("The API host exited ({status:?}); restarting in {backoff:?}.");
                     tokio::select! {
                         _ = tokio::time::sleep(backoff) => {}
-                        _ = self.stop.notified() => return,
+                        _ = self.stop.notified() => {
+                            self.terminated.send_replace(true);
+                            return;
+                        }
                     }
                     backoff = (backoff * 2).min(self.opts.backoff_max);
                 }
@@ -430,7 +462,10 @@ impl HostSupervisor {
                         tracing::warn!("Failed to restart the API host: {e}");
                         tokio::select! {
                             _ = tokio::time::sleep(backoff) => {}
-                            _ = self.stop.notified() => return,
+                            _ = self.stop.notified() => {
+                                self.terminated.send_replace(true);
+                                return;
+                            }
                         }
                         backoff = (backoff * 2).min(self.opts.backoff_max);
                     }
@@ -445,10 +480,20 @@ impl HostSupervisor {
         }
     }
 
-    /// Stop supervising and terminate the host.
+    /// Stop supervising and terminate the host, waiting (up to the termination grace period)
+    /// for it to exit so that its own shutdown work (the terminal process) completes.
     pub async fn shutdown(&self) {
+        let running = *self.started.lock().await;
         self.stopping.store(true, Ordering::SeqCst);
         self.stop.notify_waiters();
+        if running {
+            let mut terminated = self.terminated.subscribe();
+            let _ = tokio::time::timeout(
+                TERMINATE_GRACE + Duration::from_secs(5),
+                terminated.wait_for(|done| *done),
+            )
+            .await;
+        }
         let _ = std::fs::remove_file(&self.socket);
     }
 }
@@ -522,5 +567,59 @@ mod tests {
         assert!(long.as_os_str().len() < 108, "{long:?}");
         assert_eq!(long, default_socket_path(&long_root));
         assert!(long.ends_with("host.sock"));
+    }
+
+    fn host_config(cfg: &crate::config::ServerConfig) -> serde_json::Value {
+        let launcher = PythonHostLauncher::for_config(cfg, PathBuf::from("python3"));
+        let (_, config) = launcher
+            .env
+            .iter()
+            .find(|(k, _)| k == "MRSM_API_HOST_CONFIG")
+            .expect("host config");
+        serde_json::from_str(config).unwrap()
+    }
+
+    #[test]
+    fn host_config_carries_the_console_flags() {
+        let root = tempfile::tempdir().unwrap();
+        let mut cfg = crate::config::ServerConfig::for_root("sql:main", root.path());
+        let config = host_config(&cfg);
+        assert_eq!(config["no_dash"], false);
+        assert_eq!(config["no_webterm"], false);
+        cfg.no_webterm = true;
+        let config = host_config(&cfg);
+        assert_eq!(config["no_dash"], false);
+        assert_eq!(config["no_webterm"], true);
+        // `--no-dash` implies no terminal either.
+        cfg.no_webterm = false;
+        cfg.no_dash = true;
+        let config = host_config(&cfg);
+        assert_eq!(config["no_dash"], true);
+        assert_eq!(config["no_webterm"], true);
+    }
+
+    /// A launched process that ignores nothing: it exits on SIGTERM, so shutdown returns promptly
+    /// without the SIGKILL fallback.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn child_is_terminated_with_sigterm_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("terminated");
+        let script = format!(
+            "trap 'touch {}; exit 0' TERM; while true; do sleep 0.05; done",
+            marker.display()
+        );
+        let child = tokio::process::Command::new("sh")
+            .args(["-c", &script])
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut process = ChildProcess(child);
+        // Let the shell install its trap.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let started = std::time::Instant::now();
+        process.kill().await.unwrap();
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(marker.exists(), "the host did not receive SIGTERM");
     }
 }

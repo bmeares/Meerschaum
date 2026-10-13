@@ -183,6 +183,71 @@ flavor_tests!(template_attribute_chains_and_fetch, |c: Ctx| async move {
     c.delete(&parent).await;
 });
 
+// Task K: `sync_pipe_mut` / `sync_pipe_mut_cached` resolve cross-pipe templates through the
+// instance on every call (the façade hands them the RAW parameters), write to the resolved table
+// and leave the caller's raw parameters holding the templates.
+flavor_tests!(sync_pipe_mut_resolves_templates, |c: Ctx| async move {
+    use meerschaum_connector::SyncOptions;
+    let ck = short();
+    let parent = seed_parent(&c, &ck).await;
+    let inst = c.conn.keys();
+    let p = format!("Pipe('{ck}', 'par', instance='{inst}')");
+    let mut child = pipe_on(
+        &c.conn,
+        &inst,
+        &format!("{ck}mut"),
+        &serde_json::json!({
+            "columns": {"datetime": "dt", "id": "id"},
+            "target": format!("{{{{ {p}.target }}}}_mut"),
+        })
+        .to_string(),
+    );
+    assert!(child.raw_parameters()["target"].py_str().contains("{{"));
+    let frame = || {
+        meerschaum_kernel::Frame::from_object_columns(vec![
+            ("dt".into(), vec![ndt(2024, 1, 1, 0, 0)]),
+            ("id".into(), vec![i(7)]),
+            ("val".into(), vec![i(70)]),
+        ])
+        .unwrap()
+    };
+    let opts = SyncOptions {
+        check_existing: false,
+        ..Default::default()
+    };
+    let res = c.conn.sync_pipe_mut(&mut child, frame(), &opts).await;
+    assert!(res.success, "{}", res.message);
+    // Raw parameters keep the template; the rows are in the resolved table.
+    assert!(child.raw_parameters()["target"].py_str().contains("{{"));
+    let resolved_table = format!("{ck}_par_mut");
+    let rows = c
+        .conn
+        .read(&format!(
+            "SELECT COUNT(*) AS n FROM {}",
+            meerschaum_sql::ident::sql_item_name(&resolved_table, c.conn.flavor(), None)
+        ))
+        .await
+        .unwrap();
+    let n = meerschaum_connector::pipe_ops::frame_to_docs(&rows)[0]["n"].clone();
+    assert_eq!(as_int(&n), Some(1));
+    // Same for the cached variant.
+    let res = c
+        .conn
+        .sync_pipe_mut_cached(&mut child, frame(), &opts, None)
+        .await;
+    assert!(res.success, "{}", res.message);
+    assert!(child.raw_parameters()["target"].py_str().contains("{{"));
+    let _ = c
+        .conn
+        .driver()
+        .exec(&format!(
+            "DROP TABLE {}",
+            meerschaum_sql::ident::sql_item_name(&resolved_table, c.conn.flavor(), None)
+        ))
+        .await;
+    c.delete(&parent).await;
+});
+
 use meerschaum_core::Value as KValueCore;
 
 struct Static(HashMap<String, Arc<dyn InstanceConnector>>);

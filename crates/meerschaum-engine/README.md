@@ -100,7 +100,13 @@ for all of a node's edges (after the sync succeeds); `tests/state_cost.rs` measu
 | `tests/golden.rs` | The planner golden fixtures (`tests/fixtures/*.json`). |
 | `tests/v4_sync.rs` | A six-level chain and a diamond on SQLite over three phases of source changes, `--parents` and flat `-w 1`, against tables recorded from v4.1 (`tests/fixtures/v4_sync/`). |
 | `tests/crash.rs` | Crashes between ledger write and data commit, and between data commit and cursor advance; `--resume`. |
-| `tests/leases.rs` | Lease contention across two processes on one SQLite instance. |
+| `tests/leases.rs` | Lease contention across two processes on one SQLite instance (engine run level). |
+| `tests/leases_backends.rs` | Lease contention across processes through `InstanceLeases` on SQLite, PostgreSQL-family (`MRSM_TEST_POSTGIS_URI`, schema `w7_engine`) and Valkey (`MRSM_TEST_VALKEY_URI`), including a killed holder that blocks only until its TTL. |
+| `tests/stream_children.rs` | A stream flush triggers the stream's children, rate-limited by the child's `min_seconds`, coalescing flushes. |
+| `tests/mqtt_stream.rs` | QoS 1 persistent-session redelivery and a crash mid-flush against a disposable Mosquitto (`MRSM_TEST_MQTT_URI`), through the `subscribe` path and the v4-pattern adapter path. |
+| `tests/chunk_events.rs` | Per-chunk progress events in fetch order (rows, bounds, timing). |
+| `tests/source_kwargs.rs` | `source_for_sync` receives the sync kwargs (begin, end, params, chunk settings, extras). |
+| `tests/templates.rs` | `{{ Pipe(...) }}` resolution in graph, flat and bare syncs; stored parameters stay raw. |
 | `tests/continuous.rs` | Lap-compatible `--loop --min-seconds`, `-l _negation`, `-w 1` order, v4's error cooldown, a supervised in-memory stream under `--listen`. |
 | `tests/state_cost.rs` | The engine-state write path. |
 | `tests/bare_sync.rs` | A bare `pipe.sync()` (R1). |
@@ -126,6 +132,25 @@ the worker pool's bounded callback reserve, including with `python_workers: 1`. 
 ordinary batch sync overrides otherwise remain batch sources. `set_stream_kwargs()` carries
 CLI flags and plugin arguments into either stream entry point.
 
-Per-root schedule/debounce and stream-flush triggering of graph children remain open. Lease
-renewal failure now aborts an in-flight node sync; a regression test checks that it does not
+Lease renewal failure aborts an in-flight node sync; a regression test checks that it does not
 continue to the commit after losing its lease.
+
+## Continuous mode and streams
+
+- **Child triggering.** In `--listen` / `--loop`, every `stream_flushed` of a supervised
+  `subscribe` stream marks the stream dirty; between laps the loop runs an ordinary engine run
+  over `stream + descendants` (the stream is `observe`, the children read the ledger entries the
+  flush wrote). A node runs at most once per `parameters['min_seconds']`, else
+  `system.engine.debounce_seconds`, else the loop's `--min-seconds`; nodes still inside their
+  window are held back with their descendants (`RunOptions::hold`) and run on a later trigger.
+  Flushes that arrive while a trigger run executes or is held are coalesced. Each trigger emits
+  `children_triggered{run_id, nodes, held, flushes}`. A v4-pattern (`LegacyStream`) worker does
+  not report flushes to the engine, so its children run on the lap cadence only.
+- **Chunk events (§5.7).** `chunk_started` / `chunk_finished` carry `source`
+  (`window` for planned windows, `fetch` for pieces of a fetched frame in **fetch order**),
+  `rows`, `begin`, `end`, `inserted` / `updated` / `upserted` and `duration_ms`. All fields after
+  `end` / `message` are additive and default when absent.
+- **Source kwargs.** `ConnectorRegistry::source_for_sync(keys, args)` gets the full `SyncArgs`;
+  `meerschaum_engine::sync::sync_kwargs(args)` is the map Python plugins receive (`extra` plus
+  `begin`, `end`, `params`, `check_existing`, `enforce`, `force`, `workers`, `chunksize`,
+  `retries`, `min_seconds`). Registries building native plugin sources use it.

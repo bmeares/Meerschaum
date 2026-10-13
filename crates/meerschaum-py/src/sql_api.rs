@@ -823,8 +823,10 @@ impl PySqlConnector {
             return success_to_py(py, &meerschaum_core::SuccessTuple::fail(msg));
         };
         let ctx = PyCtx::new(py)?;
-        let mut p = core_pipe(pipe, ParamsView::Resolved)?;
-        let before = p.parameters().clone();
+        // The raw parameters: `sync_pipe_mut_cached` resolves the templates through the instance
+        // on every call and returns only the raw keys the sync changed.
+        let mut p = core_pipe(pipe, ParamsView::Raw)?;
+        let before = p.raw_parameters().clone();
         let frame = {
             let _t = crate::trace::Stage::new("sql: sync_pipe df -> frame");
             frame_from_py(&ctx, df, ColumnMode::Full)?.frame
@@ -851,7 +853,7 @@ impl PySqlConnector {
                 (res, p)
             })
         };
-        let patch = changed_keys(&before, p.parameters());
+        let patch = changed_keys(&before, p.raw_parameters());
         if !patch.is_empty() {
             // v4 mutates the Python pipe (`pipe.update_parameters(...)`); Rust already
             // persisted the change, so only the in-memory raw parameters are patched here.

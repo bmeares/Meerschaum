@@ -8,10 +8,10 @@ use askama::Template;
 use axum::{
     Router,
     body::Body,
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::{HeaderMap, Method, StatusCode, header},
     response::{Html, IntoResponse, Redirect, Response},
-    routing::{get, post},
+    routing::{any, get, post},
 };
 use meerschaum_core::Map;
 use meerschaum_server::{AppState, auth};
@@ -65,8 +65,10 @@ impl WebConfig {
             return Ok(0);
         };
         for entry in entries {
+            // v4 registers pages as `/dash/<path>`; the console's paths are relative to `/dash`.
             let path = entry["path"].as_str().unwrap_or("").trim_matches('/');
-            if path.is_empty() {
+            let path = path.strip_prefix("dash/").unwrap_or(path);
+            if path.is_empty() || path == "dash" {
                 return Err("Host page entry without a path".into());
             }
             let group = entry["page_group"].as_str().unwrap_or("").to_string();
@@ -180,35 +182,76 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
         config,
     };
     let mut router = Router::new();
-    for page in [
-        "",
-        "/",
-        "/dashboard",
-        "/pipes",
-        "/jobs",
-        "/plugins",
-        "/users",
-        "/tokens",
-        "/settings",
-        "/password-reset",
-        "/pipelines",
-        "/webterm",
-    ] {
-        router = router.route(&format!("/dash{page}"), get(pages::page));
+    // PARITY: v4 serves the console's own pages (`dashboard`, `pipes`, `jobs`, `plugins`, `users`,
+    // `tokens`, `register`) only when the `dash` route group is allowed by
+    // `api:permissions:routes:allowlist` (`dash/callbacks/dashboard.py::_console_pages_allowed`).
+    // The login page, the assets and the pages registered by plugins are always served; the v5
+    // pages (`settings`, `pipelines`, `webterm`, the actions and partials) follow the group.
+    let console_pages = state.server.config.route_group_is_allowed("dash");
+    if console_pages {
+        for page in [
+            "",
+            "/",
+            "/dashboard",
+            "/pipes",
+            "/jobs",
+            "/plugins",
+            "/users",
+            "/tokens",
+            "/settings",
+            "/password-reset",
+            "/pipelines",
+            "/webterm",
+        ] {
+            router = router.route(&format!("/dash{page}"), get(pages::page));
+        }
+        router = router
+            .route("/dash/pipelines/graph", get(pipelines::partial))
+            .route("/dash/pipelines/gantt", get(pipelines::partial))
+            .route("/dash/pipelines/runs", get(pipelines::partial))
+            .route("/dash/pipelines/events", get(pipelines::events))
+            .route(
+                "/dash/register",
+                get(pages::register_page).post(pages::register),
+            )
+            .route("/dash/action", post(pages::action))
+            .route(
+                "/dash/plugins/upload",
+                post(pages::upload_plugin).layer(DefaultBodyLimit::max(
+                    meerschaum_server::routes::plugins::ARCHIVE_MAX_BYTES,
+                )),
+            )
+            .route("/dash/job-logs/{name}", get(pages::logs));
+    } else {
+        // Hidden exactly like v4's page-not-found: a 404, never a fall-through to the API host.
+        for page in [
+            "",
+            "/",
+            "/dashboard",
+            "/pipes",
+            "/jobs",
+            "/plugins",
+            "/plugins/upload",
+            "/users",
+            "/tokens",
+            "/settings",
+            "/password-reset",
+            "/pipelines",
+            "/pipelines/graph",
+            "/pipelines/gantt",
+            "/pipelines/runs",
+            "/pipelines/events",
+            "/webterm",
+            "/register",
+            "/action",
+            "/job-logs/{name}",
+        ] {
+            router = router.route(&format!("/dash{page}"), any(hidden_page));
+        }
     }
     router = router
-        .route("/dash/pipelines/graph", get(pipelines::partial))
-        .route("/dash/pipelines/gantt", get(pipelines::partial))
-        .route("/dash/pipelines/runs", get(pipelines::partial))
-        .route("/dash/pipelines/events", get(pipelines::events))
         .route("/dash/login", get(login_page).post(login))
-        .route(
-            "/dash/register",
-            get(pages::register_page).post(pages::register),
-        )
-        .route("/dash/logout", post(logout))
-        .route("/dash/action", post(pages::action))
-        .route("/dash/job-logs/{name}", get(pages::logs));
+        .route("/dash/logout", post(logout));
     for name in [
         "console.js",
         "console.css",
@@ -282,6 +325,9 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
         router = router.route(&format!("/dash/{path}"), get(legacy));
     }
     Ok(router.with_state(state))
+}
+async fn hidden_page() -> Response {
+    StatusCode::NOT_FOUND.into_response()
 }
 fn validate_path(path: &str, reserved: &[&str], dash: &[String]) -> Result<(), String> {
     let first = path.split('/').next().unwrap_or("");
@@ -405,6 +451,29 @@ pub(crate) async fn api(
     body: String,
     form: bool,
 ) -> Response {
+    api_bytes(
+        state,
+        data,
+        method,
+        uri,
+        body.into_bytes(),
+        if form {
+            "application/x-www-form-urlencoded"
+        } else {
+            "application/json"
+        },
+    )
+    .await
+}
+/// [`api`] with a raw body and content type (multipart uploads).
+pub(crate) async fn api_bytes(
+    state: &WebState,
+    data: &Json,
+    method: Method,
+    uri: &str,
+    body: Vec<u8>,
+    content_type: &str,
+) -> Response {
     let headers = match api_headers(state, data).await {
         Ok(h) => h,
         Err(r) => return r.into_response(),
@@ -420,13 +489,7 @@ pub(crate) async fn api(
     *request.headers_mut() = headers;
     request.headers_mut().insert(
         header::CONTENT_TYPE,
-        if form {
-            "application/x-www-form-urlencoded"
-        } else {
-            "application/json"
-        }
-        .parse()
-        .expect("content type"),
+        content_type.parse().expect("content type"),
     );
     state
         .api
@@ -466,20 +529,25 @@ pub(crate) fn render_options(
     let mut response = if headers.get("hx-request").is_some_and(|h| h == "true") {
         Html(format!("<h1>{}</h1>{content}", escape(title))).into_response()
     } else {
-        let mut links: Vec<_> = [
-            "dashboard",
-            "pipes",
-            "jobs",
-            "plugins",
-            "users",
-            "tokens",
-            "settings",
-            "pipelines",
-        ]
-        .into_iter()
-        .map(|p| (format!("/dash/{p}"), p.into()))
-        .collect();
-        if state.config.webterm.is_some() {
+        let console_pages = state.server.config.route_group_is_allowed("dash");
+        let mut links: Vec<(String, String)> = if console_pages {
+            [
+                "dashboard",
+                "pipes",
+                "jobs",
+                "plugins",
+                "users",
+                "tokens",
+                "settings",
+                "pipelines",
+            ]
+            .into_iter()
+            .map(|p| (format!("/dash/{p}"), p.into()))
+            .collect()
+        } else {
+            Vec::new()
+        };
+        if console_pages && state.config.webterm.is_some() {
             links.push(("/dash/webterm".into(), "Terminal".into()));
         }
         for page in &state.config.pages {

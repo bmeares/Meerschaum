@@ -28,6 +28,12 @@ nav = [
       {"🔤 Data Types" = "reference/pipes/dtypes.md"},
       {"🧹 Maintenance" = "reference/pipes/maintenance.md"},
     ]},
+    {"🕸️ Pipelines" = [
+      "reference/pipelines/index.md",
+      {"🗃️ Engine State" = "reference/pipelines/state.md"},
+      {"♾️ Continuous Mode" = "reference/pipelines/continuous.md"},
+      {"📊 Visualization" = "reference/pipelines/visualization.md"},
+    ]},
     {"🔌 Connectors" = [
       "reference/connectors/index.md",
       {"🗂️ SQL Connectors" = "reference/connectors/sql-connectors.md"},
@@ -56,6 +62,7 @@ nav = [
       "reference/plugins/index.md",
       {"✍️ Writing Your Own" = "reference/plugins/writing-plugins.md"},
       {"🤔 Types of Plugins" = "reference/plugins/types-of-plugins.md"},
+      {"🦀 Rust Plugins" = "reference/plugins/rust-plugins.md"},
       {"🚀 Repositories" = "reference/plugins/repositories.md"},
     ]},
     {"🌳 Environment Variables" = "reference/environment.md"},

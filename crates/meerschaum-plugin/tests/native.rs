@@ -262,3 +262,94 @@ fn registry_loads_lazily_and_exposes_routes_pages_hooks() {
         NativePlugins::open(&[root.path().join("nothing")], &root.path().join("c.json")).unwrap();
     assert!(empty.is_empty() && empty.names().is_empty());
 }
+
+#[test]
+fn broken_plugins_are_skipped_and_the_rest_load() {
+    use meerschaum_plugin::NativePlugins;
+    let root = tempfile::tempdir().unwrap();
+    let plugins = root.path().join("plugins");
+    // Sorts before the good plugin: a bad descriptor must not abort the scan.
+    let bad_descriptor = plugins.join("a_bad_descriptor");
+    std::fs::create_dir_all(&bad_descriptor).unwrap();
+    std::fs::write(bad_descriptor.join("plugin.toml"), "name = [not toml").unwrap();
+    let no_library = plugins.join("b_no_library");
+    std::fs::create_dir_all(&no_library).unwrap();
+    std::fs::write(
+        no_library.join("plugin.toml"),
+        "name = \"no_library\"\nversion = \"1.0.0\"\n",
+    )
+    .unwrap();
+    let corrupt = plugins.join("c_corrupt");
+    std::fs::create_dir_all(&corrupt).unwrap();
+    std::fs::write(
+        corrupt.join("plugin.toml"),
+        "name = \"corrupt\"\nversion = \"1.0.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        corrupt.join(discovery::library_name("corrupt")),
+        "not a library",
+    )
+    .unwrap();
+    let good = plugins.join("native_demo");
+    std::fs::create_dir_all(&good).unwrap();
+    std::fs::write(
+        good.join("plugin.toml"),
+        include_str!("../examples/plugin.toml"),
+    )
+    .unwrap();
+    std::fs::copy(
+        artifact("native_demo"),
+        good.join(discovery::library_name("native_demo")),
+    )
+    .unwrap();
+    let dirs = vec![plugins];
+    let report = discovery::discover_report(&dirs);
+    assert_eq!(report.candidates.len(), 2);
+    assert_eq!(report.skipped.len(), 1 + 1);
+    assert!(report.skipped[0].directory.ends_with("a_bad_descriptor"));
+    assert!(report.skipped[1].reason.contains("missing native library"));
+    let cache = root.path().join("cache/manifest.json");
+    // SAFETY: only the trusted SDK example is loadable; the corrupt library fails to load.
+    let (manifest, skipped) = unsafe { discovery::cached_manifest_report(&dirs, &cache) }.unwrap();
+    assert_eq!(skipped.len(), 3);
+    assert!(skipped[2].directory.ends_with("c_corrupt"));
+    assert!(manifest["plugins"].get("native_demo").is_some());
+    assert!(manifest["plugins"].get("corrupt").is_none());
+    let natives = NativePlugins::open(&dirs, &cache).unwrap();
+    assert_eq!(natives.names(), vec!["native_demo".to_string()]);
+}
+
+#[tokio::test]
+async fn fetch_kwargs_reach_the_plugin_without_begin_end_params() {
+    // SAFETY: the integration test builds this SDK-owned plugin from the repository.
+    let plugin = unsafe { LoadedPlugin::load(artifact("native_demo")) }.unwrap();
+    let pipe = Pipe::builder("plugin:native_demo", "kwargs")
+        .instance("native_demo:kwargs_memory")
+        .build()
+        .unwrap();
+    let mut kwargs = meerschaum_core::Map::new();
+    kwargs.insert("rows".into(), meerschaum_core::Value::Int(5));
+    kwargs.insert("begin".into(), meerschaum_core::Value::Str("x".into()));
+    kwargs.insert("params".into(), meerschaum_core::Value::Null);
+    let source = plugin
+        .source(json!({"synthetic": true}))
+        .with_fetch_kwargs(&kwargs);
+    let data = source
+        .fetch(&pipe, &DataQuery::default())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(data.height(), 5);
+    // Without kwargs the plugin keeps its default three rows.
+    let plain = plugin.source(json!({"synthetic": true}));
+    assert_eq!(
+        plain
+            .fetch(&pipe, &DataQuery::default())
+            .await
+            .unwrap()
+            .unwrap()
+            .height(),
+        3
+    );
+}

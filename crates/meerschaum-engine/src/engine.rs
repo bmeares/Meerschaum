@@ -27,6 +27,8 @@ use meerschaum_core::{Config, Map, Pipe, Value};
 use meerschaum_kernel::enforce::PipeInput;
 use tokio::sync::broadcast;
 
+mod triggers;
+
 use crate::events::{Event, EventKind, EventRow, EventSink};
 use crate::executor::{ExecuteContext, ExecutorOptions, Limits, Priority, execute};
 use crate::graph::{Graph, GraphOptions};
@@ -121,6 +123,10 @@ pub struct EngineConfig {
     pub default_duration: Duration,
     /// `system.engine.chunk_pipelining` (R6; accepted, not implemented).
     pub chunk_pipelining: bool,
+    /// `system.engine.debounce_seconds`: the minimum time between two triggered runs of a
+    /// child of a stream source when the child sets no `min_seconds` of its own (`None`: use
+    /// the loop's `--min-seconds`). See `docs/design/v5.0.0.md` §5.10.
+    pub debounce_seconds: Option<f64>,
 }
 
 impl Default for EngineConfig {
@@ -148,6 +154,7 @@ impl Default for EngineConfig {
             ewma_alpha: 0.3,
             default_duration: Duration::from_secs(30),
             chunk_pipelining: false,
+            debounce_seconds: None,
         }
     }
 }
@@ -206,6 +213,10 @@ impl EngineConfig {
                 .map(|r| r.join("cache").join("engine_leases"))
                 .unwrap_or(d.lease_dir),
             chunk_pipelining: flag(&["system", "engine", "chunk_pipelining"], false),
+            debounce_seconds: get(&["system", "engine", "debounce_seconds"])
+                .as_ref()
+                .and_then(|v| v.as_f64())
+                .filter(|s| *s >= 0.0),
             ..d
         }
     }
@@ -241,6 +252,10 @@ pub struct RunOptions {
     pub run_id: Option<String>,
     /// Nodes to leave out of a flat selection (stream sources handled by continuous mode).
     pub exclude: BTreeSet<PipeRef>,
+    /// Nodes held back from this run, with every descendant of theirs (any selection): used by
+    /// the stream triggers to honor a child's `min_seconds`. Unlike `exclude`, a held node is
+    /// removed after the selection is resolved, so its in-selection parents still run.
+    pub hold: BTreeSet<PipeRef>,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -727,9 +742,16 @@ impl Engine {
                 default_backtrack_minutes: self.config.default_backtrack_minutes as f64,
             },
         );
-        let sub = Pipeline::new(selection.clone())
+        let mut sub = Pipeline::new(selection.clone())
             .resolve(&graph)
             .map_err(|e| e.to_string())?;
+        if !opts.hold.is_empty() {
+            let mut remove = opts.hold.clone();
+            for h in &opts.hold {
+                remove.extend(sub.descendants(h));
+            }
+            sub = sub.without(&graph, &remove);
+        }
         self.state
             .register_pipes(graph.nodes().map(|n| (n.pipe_ref.clone(), n.pipe.clone())));
         Ok((Arc::new(graph), sub, selection))
@@ -1036,6 +1058,7 @@ impl Engine {
         let mut last: Option<RunResult> = None;
         let mut opts = opts;
         let mut streams: Option<tokio::task::JoinSet<()>> = None;
+        let mut triggers: Option<triggers::Triggers> = None;
         let mut lap = 0u64;
         loop {
             if stop.is_stopped() {
@@ -1043,12 +1066,25 @@ impl Engine {
             }
             if streams.is_none() && (loop_opts.listen || loop_opts.run_loop) {
                 if let Ok((graph, sub, _)) = self.resolve(&opts).await {
-                    let (set, excluded) = self.spawn_streams(&graph, &sub, &stop, &opts.sync);
+                    let hub = triggers::TriggerHub::new();
+                    let (set, excluded, emitter) =
+                        self.spawn_streams(&graph, &sub, &stop, &opts.sync, &hub);
                     if !excluded.is_empty() {
-                        opts.exclude.extend(excluded);
+                        opts.exclude.extend(excluded.clone());
+                        triggers = Some(triggers::Triggers::new(
+                            hub,
+                            graph.clone(),
+                            sub,
+                            opts.clone(),
+                            min_seconds,
+                            emitter,
+                        ));
                     }
                     streams = Some(set);
                 }
+            }
+            if let Some(t) = triggers.as_mut() {
+                self.run_triggers(t).await;
             }
             lap += 1;
             let result = self.run_inner(opts.clone(), Some(on_lap.clone())).await;
@@ -1063,7 +1099,14 @@ impl Engine {
                     seconds: cooldown,
                     message,
                 });
-                if stop.sleep(Duration::from_secs_f64(cooldown.max(0.0))).await {
+                if self
+                    .wait_with_triggers(
+                        triggers.as_mut(),
+                        &stop,
+                        Some(Duration::from_secs_f64(cooldown.max(0.0))),
+                    )
+                    .await
+                {
                     last = Some(result);
                     break;
                 }
@@ -1091,14 +1134,22 @@ impl Engine {
                         if min_seconds.abs() != 1.0 { "s" } else { "" }
                     ),
                 });
-                if stop.sleep(Duration::from_secs_f64(min_seconds)).await {
+                if self
+                    .wait_with_triggers(
+                        triggers.as_mut(),
+                        &stop,
+                        Some(Duration::from_secs_f64(min_seconds)),
+                    )
+                    .await
+                {
                     break;
                 }
             }
         }
         if let Some(mut set) = streams {
             if loop_opts.listen && !loop_opts.run_loop {
-                stop.stopped().await;
+                self.wait_with_triggers(triggers.as_mut(), &stop, None)
+                    .await;
             }
             stop.stop();
             while set.join_next().await.is_some() {}
@@ -1114,7 +1165,12 @@ impl Engine {
         sub: &Subgraph,
         stop: &StopToken,
         sync: &NodeSyncOptions,
-    ) -> (tokio::task::JoinSet<()>, BTreeSet<PipeRef>) {
+        hub: &Arc<triggers::TriggerHub>,
+    ) -> (
+        tokio::task::JoinSet<()>,
+        BTreeSet<PipeRef>,
+        crate::events::Emitter,
+    ) {
         let mut set = tokio::task::JoinSet::new();
         let mut owned = BTreeSet::new();
         let native_config = NativeConfig {
@@ -1128,16 +1184,24 @@ impl Engine {
             skip_check_existing: !sync.check_existing,
             ..Default::default()
         };
-        let executor = Arc::new(NativeExecutor::new(
+        let mut native = NativeExecutor::new(
             self.registry.clone(),
             graph.clone(),
             self.state.clone(),
             native_config,
             false,
-        ));
+        );
+        // Crash injection reaches stream flushes too (§14).
+        if let Some(f) = &self.faults {
+            native = native.with_faults(f.clone());
+        }
+        let executor = Arc::new(native);
         let emitter = crate::events::Emitter::new(
             &crate::runs::new_run_id(),
-            Arc::new(BroadcastSink(self.events.clone())),
+            Arc::new(triggers::FlushTap {
+                hub: hub.clone(),
+                broadcast: self.events.clone(),
+            }),
         );
         for r in &sub.order {
             let Some(node) = graph.node(r) else { continue };
@@ -1207,7 +1271,7 @@ impl Engine {
                 });
             }
         }
-        (set, owned)
+        (set, owned, emitter)
     }
 }
 
@@ -1217,15 +1281,6 @@ fn py_number(x: f64) -> Value {
         Value::Int(x as i64)
     } else {
         Value::Float(x)
-    }
-}
-
-/// Events for stream tasks (outside any run).
-struct BroadcastSink(broadcast::Sender<Event>);
-
-impl EventSink for BroadcastSink {
-    fn emit(&self, event: Event) {
-        let _ = self.0.send(event);
     }
 }
 

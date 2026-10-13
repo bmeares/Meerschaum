@@ -196,7 +196,7 @@ def test_pipe_sync_is_forwarded_to_the_host():
 def test_build_manifest_includes_test_plugins():
     from meerschaum.worker._manifest import build_manifest
     manifest = build_manifest()
-    assert manifest['schema_version'] == 1
+    assert manifest['schema_version'] == 3
     assert 'stress' in manifest['plugins']
     stress = manifest['plugins']['stress']
     assert stress['version'] == '0.4.0'

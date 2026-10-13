@@ -562,6 +562,19 @@ Show the registered users in a Meerschaum instance (default is the current insta
 Print the available virtual environments in the current MRSM_ROOT_DIR.
 "##
         }
+        "_prune_venvs" => {
+            r##"
+Remove packages from virtual environments that no installed plugin needs.
+
+A package is kept if `meerschaum` requested it, if an installed plugin requested it
+or lists it in `required`, or if a kept package depends on it. Packages with no recorded
+requester are never removed. Use `--dry` to only list what would be removed.
+
+Examples:
+    - `prune venvs --dry`
+    - `prune venvs mrsm -y`
+"##
+        }
         "_show_version" => {
             r##"
 Show the Meerschaum doc string.
@@ -1178,6 +1191,19 @@ Example:
 
     Options:
         `upgrade [meerschaum, packages, plugins]`"##
+        }
+        "prune" => {
+            r##"
+Prune virtual environments of packages no installed plugin needs.
+
+Command:
+    `prune {option}`
+
+Example:
+    `prune venvs --dry`
+
+    Options:
+        `prune [venvs]`"##
         }
         "vacuum" => {
             r##"

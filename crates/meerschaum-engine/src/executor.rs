@@ -1025,6 +1025,9 @@ impl SyncExecutor for FakeExecutor {
                 chunk: i,
                 begin: chunk.begin,
                 end: chunk.end,
+                source: crate::events::ChunkSource::Window,
+                rows: None,
+                total: Some(request.chunks.len()),
             });
         }
         self.calls
@@ -1035,11 +1038,19 @@ impl SyncExecutor for FakeExecutor {
         self.peak.fetch_max(now, Ordering::SeqCst);
         tokio::time::sleep(step.delay).await;
         self.running.fetch_sub(1, Ordering::SeqCst);
-        for (i, _) in request.chunks.iter().enumerate() {
+        for (i, chunk) in request.chunks.iter().enumerate() {
             request.events.emit(EventKind::ChunkFinished {
                 chunk: i,
                 success: step.result.success,
                 message: step.result.message.clone(),
+                source: crate::events::ChunkSource::Window,
+                rows: None,
+                inserted: 0,
+                updated: 0,
+                upserted: 0,
+                begin: chunk.begin,
+                end: chunk.end,
+                duration_ms: Some(step.delay.as_millis() as u64),
             });
         }
         if step.result.success {

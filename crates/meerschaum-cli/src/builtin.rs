@@ -128,6 +128,7 @@ pub fn listed_actions() -> Vec<String> {
         .iter()
         .map(|a| a.name.to_string())
         .filter(|a| !HIDDEN_COMMANDS.contains(&a.as_str()))
+        .filter(|a| !crate::actions::V5_ONLY_ACTIONS.contains(&a.as_str()))
         .collect()
 }
 

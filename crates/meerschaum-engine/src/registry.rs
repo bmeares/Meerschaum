@@ -128,6 +128,7 @@ pub struct StaticRegistry {
     chunksizes: HashMap<String, usize>,
     plugin_syncs: HashMap<String, Arc<dyn PluginSync>>,
     streams: HashMap<String, Arc<dyn StreamSource>>,
+    legacy_streams: HashMap<String, Arc<dyn LegacyStream>>,
     hooks: Option<Arc<dyn SyncHooks>>,
     table_refs: Option<TableRefFn>,
 }
@@ -177,6 +178,12 @@ impl StaticRegistry {
         self
     }
 
+    /// Register a v4-pattern streaming connector.
+    pub fn with_legacy_stream(mut self, keys: &str, source: Arc<dyn LegacyStream>) -> Self {
+        self.legacy_streams.insert(keys.to_string(), source);
+        self
+    }
+
     /// Register sync hooks.
     pub fn with_hooks(mut self, hooks: Arc<dyn SyncHooks>) -> Self {
         self.hooks = Some(hooks);
@@ -221,6 +228,10 @@ impl ConnectorRegistry for StaticRegistry {
 
     fn stream_source(&self, keys: &str) -> Option<Arc<dyn StreamSource>> {
         self.streams.get(keys).cloned()
+    }
+
+    fn legacy_stream(&self, keys: &str) -> Option<Arc<dyn LegacyStream>> {
+        self.legacy_streams.get(keys).cloned()
     }
 
     fn hooks(&self) -> Option<Arc<dyn SyncHooks>> {

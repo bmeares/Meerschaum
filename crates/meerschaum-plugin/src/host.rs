@@ -116,6 +116,7 @@ impl LoadedPlugin {
             connector_type: "plugin".into(),
             label: self.name.clone(),
             config,
+            fetch_kwargs: Value::Null,
         }
     }
     pub fn connector(
@@ -135,6 +136,7 @@ impl LoadedPlugin {
             connector_type: connector_type.into(),
             label: label.into(),
             config,
+            fetch_kwargs: Value::Null,
         })
     }
     /// A JSON-only call of an extension method (`routes`, `route`, `pages`, `page`, ...):
@@ -230,8 +232,24 @@ pub struct NativeConnector {
     connector_type: String,
     label: String,
     config: Value,
+    fetch_kwargs: Value,
 }
 impl NativeConnector {
+    /// Extra keyword arguments for `fetch`, delivered to the plugin as `context.kwargs`: the
+    /// sync's CLI and plugin flags and its `check_existing`, `enforce`, `workers`, ... settings,
+    /// as a Python plugin's `fetch(pipe, **kw)` receives them. `begin`, `end` and `params`
+    /// travel in `context.query` instead and are dropped here (as `PythonConnector` does).
+    pub fn with_fetch_kwargs(mut self, kwargs: &Map) -> Self {
+        let mut value = serde_json::to_value(kwargs).unwrap_or(Value::Null);
+        if let Some(object) = value.as_object_mut() {
+            for key in ["begin", "end", "params"] {
+                object.remove(key);
+            }
+        }
+        self.fetch_kwargs = value;
+        self
+    }
+
     pub fn is_instance(&self) -> bool {
         self.plugin.manifest["connector_types"][&self.connector_type]["is_instance"]
             .as_bool()
@@ -308,7 +326,11 @@ impl Connector for NativeConnector {
         self.value("test_connection", json!({}))
     }
     async fn fetch(&self, pipe: &Pipe, q: &DataQuery) -> ConnectorResult<Option<Frame>> {
-        Ok(self.call("fetch", query_context(pipe, q), None)?.data)
+        let mut context = query_context(pipe, q);
+        if self.fetch_kwargs.as_object().is_some_and(|o| !o.is_empty()) {
+            context["kwargs"] = self.fetch_kwargs.clone();
+        }
+        Ok(self.call("fetch", context, None)?.data)
     }
 }
 #[async_trait]

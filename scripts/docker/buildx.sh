@@ -8,10 +8,10 @@
 # Images are loaded into the local daemon unless --push is given.
 #
 #   --push      push to the registry instead of loading locally.
-#   --v4-only   build exactly what v4 built: every dep group on the default target, no Rust, no slim.
+#   --v4-only   build every dep group on the default target only (no `slim`).
 #
 # Pre-release versions (dev, rc, aN, bN) only get version-qualified tags, never `latest`/`full`/`slim`.
-# Pushing the Rust targets requires a 5.x version, so publishing 4.x from this branch needs --v4-only.
+# Pushing requires a 5.x version (the wheels' version, from the Cargo workspace).
 # When $GITHUB_OUTPUT is set, writes `slim_image` and `full_image` (the version-qualified tags).
 # Experimental features must be enabled and docker buildx must be installed (see scripts/setup.sh).
 set -euo pipefail
@@ -32,7 +32,8 @@ for arg in "$@"; do
 done
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
-mrsm_version=$($PYTHON_BIN -m meerschaum -V | sed 's/Meerschaum v//g')
+### The wheels' version: the Cargo workspace version in PEP 440 form (scripts/check_packaging.py).
+mrsm_version=$($PYTHON_BIN scripts/check_packaging.py --version)
 mrsm_uid=$(id -u)
 mrsm_gid=$(id -g)
 
@@ -41,8 +42,8 @@ case "$mrsm_version" in
   *dev*|*rc*|*a[0-9]*|*b[0-9]*) prerelease=1 ;;
 esac
 
-if [ -z "$v4_only" ] && [ "$push" = "--push" ] && [ "${mrsm_version%%.*}" -lt 5 ]; then
-  echo "buildx.sh: refusing to push the Rust targets for version $mrsm_version; use --v4-only." >&2
+if [ "$push" = "--push" ] && [ "${mrsm_version%%.*}" -lt 5 ]; then
+  echo "buildx.sh: refusing to push version $mrsm_version (the wheels are 5.x)." >&2
   exit 1
 fi
 

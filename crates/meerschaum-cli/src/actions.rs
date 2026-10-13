@@ -46,6 +46,11 @@ impl ActionDef {
     }
 }
 
+/// Actions that exist only in v5. They resolve, have help and complete like any core action, but
+/// `show actions` and the unknown-action help table keep v4's listing (the parity fixtures are
+/// recorded from v4), and the registry parity test ignores them.
+pub const V5_ONLY_ACTIONS: &[&str] = &["prune"];
+
 const fn sub(name: &'static str, function: &'static str) -> SubactionDef {
     SubactionDef {
         name,
@@ -169,6 +174,8 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
         ],
     ),
     action("vacuum", &[sub("pipes", "_vacuum_pipes")]),
+    // v5 only (D20): not in v4's registry.
+    action("prune", &[sub("venvs", "_prune_venvs")]),
     action(
         "show",
         &[

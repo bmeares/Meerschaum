@@ -129,6 +129,33 @@ impl HostProxy {
         &self.socket
     }
 
+    /// The host's plugin registry (`GET /_mrsm/host/registry`: MCP tools, routes and `web_pages`
+    /// for the console), fetched with an internal token signed by `secret`. This starts the host
+    /// when it is supervised and needed. `None` when the host is not needed or does not answer.
+    pub async fn registry(&self, secret: &[u8]) -> Option<serde_json::Value> {
+        if !self.is_active() {
+            return None;
+        }
+        let request = Request::builder()
+            .method(axum::http::Method::GET)
+            .uri(crate::mcp::federation::REGISTRY_PATH)
+            .header("host", "localhost")
+            .header(
+                crate::mcp::federation::TOKEN_HEADER,
+                crate::mcp::federation::internal_token(secret, None),
+            )
+            .body(Body::empty())
+            .ok()?;
+        let response = self.forward(request).await;
+        if !response.status().is_success() {
+            return None;
+        }
+        let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+            .await
+            .ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
     /// Forward a request to the host and return its response.
     pub async fn forward(&self, mut req: Request) -> Response {
         if let Some(sup) = &self.supervisor {

@@ -94,6 +94,11 @@ pub(crate) async fn page(State(state): State<WebState>, req: Request) -> Respons
                 .as_deref()
                 .filter(|s| s.starts_with('/') && !s.starts_with("//"))
             {
+                // The API host serves the v4 terminal route `/webterm/{session_id}`.
+                Some("/webterm") => format!(
+                    "<a href=\"/webterm/{}\">Open web terminal</a>",
+                    escape(&cookie(headers).unwrap_or_default())
+                ),
                 Some(url) => format!("<a href=\"{}\">Open web terminal</a>", escape(url)),
                 None => "<p>Web terminal is not configured.</p>".into(),
             },
@@ -414,22 +419,118 @@ pub(crate) async fn action(
         _ => return StatusCode::BAD_REQUEST.into_response(),
     };
     let response = api(&state, &data, method, &uri, payload, form_body).await;
+    action_result(&state, &headers, &data, response).await
+}
+/// Render an API response as the console's "Action result" page, keeping its status.
+async fn action_result(
+    state: &WebState,
+    headers: &HeaderMap,
+    data: &Json,
+    response: Response,
+) -> Response {
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
         .await
         .unwrap_or_default();
     let mut response = render(
-        &state,
-        &headers,
+        state,
+        headers,
         "Action result",
         &format!(
             "<p role=\"status\">{}</p><a href=\"/dash\">Return to dashboard</a>",
             escape(&String::from_utf8_lossy(&bytes))
         ),
-        &data,
+        data,
     );
     *response.status_mut() = status;
     response
+}
+fn valid_plugin_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+/// `POST /dash/plugins/upload`: register a plugin from an uploaded archive (the console's form
+/// for `register plugin`). The session's user is the API caller, so authentication, ownership
+/// checks, the `registration.plugins` permission and the archive size limit are those of
+/// `POST /plugins/{name}`, which this forwards to.
+pub(crate) async fn upload_plugin(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    mut multipart: axum::extract::Multipart,
+) -> Response {
+    let data = match session(&state, &headers).await {
+        Ok(d) => d,
+        Err(r) => return r.into_response(),
+    };
+    let mut fields: Vec<(String, String)> = Vec::new();
+    let mut archive: Option<axum::body::Bytes> = None;
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(field)) => field,
+            Ok(None) => break,
+            Err(e) => return (e.status(), "Invalid or oversized upload").into_response(),
+        };
+        let name = field.name().unwrap_or("").to_string();
+        if name == "archive" {
+            match field.bytes().await {
+                Ok(bytes) => archive = Some(bytes),
+                Err(e) => return (e.status(), "Invalid or oversized upload").into_response(),
+            }
+        } else {
+            match field.text().await {
+                Ok(text) => fields.push((name, text)),
+                Err(e) => return (e.status(), "Invalid upload field").into_response(),
+            }
+        }
+    }
+    if !csrf_ok(&headers, &data, &fields) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let name = form_get(&fields, "name").unwrap_or("").trim().to_string();
+    if !valid_plugin_name(&name) {
+        return (StatusCode::BAD_REQUEST, "Invalid plugin name").into_response();
+    }
+    let Some(archive) = archive.filter(|a| !a.is_empty()) else {
+        return (StatusCode::UNPROCESSABLE_ENTITY, "Missing plugin archive").into_response();
+    };
+    let mut uri = format!("/plugins/{}", encode(&name));
+    let mut query: Vec<String> = Vec::new();
+    if let Some(version) = form_get(&fields, "version").filter(|v| !v.is_empty()) {
+        query.push(format!("version={}", encode(version)));
+    }
+    if let Some(description) = form_get(&fields, "description").filter(|v| !v.is_empty()) {
+        query.push(format!(
+            "attributes={}",
+            encode(&json!({"description": description}).to_string())
+        ));
+    }
+    if !query.is_empty() {
+        uri.push('?');
+        uri.push_str(&query.join("&"));
+    }
+    let boundary = format!("mrsm-{}", uuid::Uuid::new_v4().simple());
+    let mut body: Vec<u8> = Vec::with_capacity(archive.len() + 256);
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"archive\"; filename=\"{name}.tar.gz\"\r\nContent-Type: application/gzip\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(&archive);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let response = api_bytes(
+        &state,
+        &data,
+        Method::POST,
+        &uri,
+        body,
+        &format!("multipart/form-data; boundary={boundary}"),
+    )
+    .await;
+    action_result(&state, &headers, &data, response).await
 }
 fn valid_pipe_target(target: &str) -> bool {
     target.starts_with("/pipes/")
@@ -607,6 +708,10 @@ async fn plugins(state: &WebState, data: &Json, query: &Query) -> WebResult<Stri
         "<form method=\"get\"><label>Search plugins <input name=\"search_term\" value=\"{}\"></label><button>Search</button></form>",
         escape(&search)
     );
+    content.push_str(&format!(
+        "<form method=\"post\" action=\"/dash/plugins/upload\" enctype=\"multipart/form-data\">{}<label>Plugin name <input name=\"name\" required pattern=\"[A-Za-z0-9_\\-]+\"></label><label>Version <input name=\"version\"></label><label>Description <input name=\"description\"></label><label>Archive (.tar.gz) <input type=\"file\" name=\"archive\" accept=\".gz,.tgz,application/gzip\" required></label><button>Upload plugin</button></form>",
+        hidden("csrf", data["csrf"].as_str().unwrap_or(""))
+    ));
     if let Some(plugins) = plugins.as_array() {
         for name in plugins.iter().filter_map(Json::as_str) {
             content.push_str(&format!("<article><h2>{}</h2>", escape(name)));
