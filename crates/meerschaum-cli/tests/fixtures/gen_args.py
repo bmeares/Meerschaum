@@ -108,6 +108,18 @@ def _fixed_dateutil_parse(timestr, parserinfo=None, **kwargs):
 
 
 _dateutil_parser.parse = _fixed_dateutil_parse
+### `attempt_import` may hand v4's parser a different (lazy) handle on `dateutil.parser`, so the
+### module-level patch above does not reach it. Every handle shares `DEFAULTPARSER`, so pin the
+### default there too (otherwise partial dates like `12:30` fill in the real current date).
+_default_parser = _dateutil_parser.DEFAULTPARSER
+_original_default_parse = _default_parser.parse
+
+
+def _fixed_default_parse(timestr, default=None, *args, **kwargs):
+    return _original_default_parse(timestr, FIXED_LOCAL_DEFAULT if default is None else default, *args, **kwargs)
+
+
+_default_parser.parse = _fixed_default_parse
 _dateutil_parser.DEFAULTPARSER.info._year = FIXED_LOCAL_YEAR
 _dateutil_parser.DEFAULTPARSER.info._century = FIXED_LOCAL_YEAR // 100 * 100
 
