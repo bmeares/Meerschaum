@@ -71,6 +71,11 @@ GATED_FEATURES = {
     'verify_pipe': 'meerschaum.core.Pipe._verify',
 }
 
+#: Gated features whose guarded function has another name (`Pipe.verify` is `verify_pipe`).
+GATED_FUNCTION_NAMES = {
+    'verify_pipe': 'verify',
+}
+
 #: Classes bound in `meerschaum._core` whose methods replace a v4 class's methods, mapped to the
 #: module defining the guarded class. The method guards call `rust_method(self, name)`, which asks
 #: the Python object for its Rust counterpart (built once per object, see

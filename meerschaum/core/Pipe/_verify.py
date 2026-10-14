@@ -13,7 +13,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import SuccessTuple, Any, Optional, Union, Tuple, Dict
 from meerschaum.utils.warnings import warn, info
 from meerschaum._internal.static import STATIC_CONFIG
-from meerschaum._core._gate import rust_impl
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 ### `Pipe.sync()` keywords the Rust verification honors (`_core.verify_pipe`).
 _RUST_VERIFY_SYNC_KWARGS = frozenset({'chunksize', 'check_existing'})
@@ -154,7 +154,7 @@ def verify(
     -------
     A SuccessTuple indicating whether the pipe was successfully resynced.
     """
-    if (_rust := rust_impl('verify_pipe')) is not None:
+    if (_rust := _rust_impl('verify_pipe')) is not None:
         _connectors = _rust_verify_connectors(self, debug=debug, kwargs=kwargs)
         if _connectors is not None:
             _result = _rust(

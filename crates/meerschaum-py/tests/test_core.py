@@ -591,7 +591,8 @@ def test_every_gated_function_has_a_guard():
     import importlib
     import inspect
     for feature, module_name in _gate.GATED_FEATURES.items():
-        func = getattr(importlib.import_module(module_name), feature)
+        func_name = _gate.GATED_FUNCTION_NAMES.get(feature, feature)
+        func = getattr(importlib.import_module(module_name), func_name)
         source = inspect.getsource(func)
         assert f"_rust_impl('{feature}')" in source, f"{module_name}.{feature} has no guard"
 
