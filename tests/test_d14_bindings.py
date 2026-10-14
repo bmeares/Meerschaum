@@ -16,8 +16,8 @@ from meerschaum._core import _gate
 
 try:
     from meerschaum import _core
-    _core.load()
-    HAS_CORE = True
+    ### NOTE: `load()` returns `None` (it does not raise) when the extension is not built.
+    HAS_CORE = _core.load() is not None
 except Exception:
     HAS_CORE = False
 
