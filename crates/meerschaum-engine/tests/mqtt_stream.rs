@@ -237,11 +237,10 @@ async fn legacy_adapter_survives_a_crash_mid_callback() {
 
     // The v4 plugin's callback: `pipe.sync(df)` through the native path, then (in paho) the
     // automatic PUBACK when the callback returns.
-    let make_legacy = |engine: Arc<Engine>, crash: Option<Arc<AtomicBool>>| {
+    let make_legacy = |crash: Option<Arc<AtomicBool>>| {
         let landing = landing.clone();
         let calls = Arc::new(AtomicUsize::new(0));
-        let callback: mqtt::Callback = Arc::new(move |doc, dup| {
-            let engine = engine.clone();
+        let callback: mqtt::Callback = Arc::new(move |sink, doc, dup| {
             let landing = landing.clone();
             let crash = crash.clone();
             let calls = calls.clone();
@@ -252,8 +251,9 @@ async fn legacy_adapter_survives_a_crash_mid_callback() {
                     ..Default::default()
                 };
                 let _ = dup;
-                let res = engine
-                    .sync_pipe(&landing, Some(PipeInput::Docs(vec![doc])), &args)
+                // Through the engine's legacy sink: ledger first, a `callback` flush.
+                let res = sink
+                    .sync(&landing, Some(PipeInput::Docs(vec![doc])), &args)
                     .await;
                 if res.success && calls.fetch_add(1, Ordering::SeqCst) == 0 {
                     if let Some(flag) = &crash {
@@ -274,9 +274,7 @@ async fn legacy_adapter_survives_a_crash_mid_callback() {
     };
 
     let crashed = Arc::new(AtomicBool::new(false));
-    // The callbacks sync through their own bare engine (the native path, R1).
-    let bootstrap = Arc::new(Engine::new(env.registry.clone(), env.config()));
-    let legacy = make_legacy(bootstrap, Some(crashed.clone()));
+    let legacy = make_legacy(Some(crashed.clone()));
     let registry =
         Arc::new(StaticRegistry::clone(&env.registry).with_legacy_stream(CONNECTOR, legacy));
     let engine = Arc::new(Engine::new(registry, env.config()));
@@ -289,8 +287,7 @@ async fn legacy_adapter_survives_a_crash_mid_callback() {
     let _ = first.await;
     assert_eq!(landing_rows(&env).await.len(), 1);
 
-    let bootstrap = Arc::new(Engine::new(env.registry.clone(), env.config()));
-    let legacy = make_legacy(bootstrap, None);
+    let legacy = make_legacy(None);
     let registry =
         Arc::new(StaticRegistry::clone(&env.registry).with_legacy_stream(CONNECTOR, legacy));
     let engine = Arc::new(Engine::new(registry, env.config()));

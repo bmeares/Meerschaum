@@ -19,6 +19,19 @@ import meerschaum as mrsm
 from meerschaum.utils.warnings import warn, dprint
 
 
+#: Bumped by every hard `_invalidate_cache()` (edit, delete, verify, `refresh=True`) and by
+#: `register()` in this process. Under `MRSM_CORE=rust` it keys the memo of parameters holding a
+#: cross-pipe `{{ Pipe() }}` template (see `get_parameters`, which also keys it on the Rust
+#: instance's metadata writes): a metadata write to any pipe here makes them re-resolve on the
+#: next access. A sync's soft invalidations do not count (data never changes a template).
+_INVALIDATION_EPOCH = [0]
+
+
+def _bump_invalidation_epoch() -> None:
+    """Mark every pipe's cross-pipe template resolution as stale (see `_INVALIDATION_EPOCH`)."""
+    _INVALIDATION_EPOCH[0] += 1
+
+
 def _get_in_memory_key(cache_key: str) -> str:
     """
     Return the in-memory version of a cache key.
@@ -184,6 +197,8 @@ def _invalidate_cache(
 
     if not hard:
         return True, "Success"
+
+    _bump_invalidation_epoch()
 
     ### `_get_cache_keys()` below only lists what's on disk / in Valkey, so it cannot
     ### enumerate these in-memory keys; clear them explicitly.

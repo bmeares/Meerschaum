@@ -60,5 +60,7 @@ def delete(
     if result[0]:
         self._invalidate_cache(hard=True, debug=debug)
         self._clear_cache_key('_id', debug=debug)
+        from meerschaum.core.Pipeline._engine import forget_engine_state
+        forget_engine_state(self, 'delete_pipe')
 
     return result

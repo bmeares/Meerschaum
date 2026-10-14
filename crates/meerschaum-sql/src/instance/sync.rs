@@ -16,7 +16,7 @@ use meerschaum_kernel::enforce::{PipeInput, pipe_enforce_dtypes};
 use meerschaum_kernel::value::Value as KValue;
 
 use crate::driver::SqlParam;
-use crate::driver::params::{max_bind_params, placeholders};
+use crate::driver::params::{max_bind_params, typed_placeholder};
 use crate::dtypes::get_db_type_from_pd_type;
 use crate::flavor::{DriverFamily, Flavor};
 use crate::ident::{sql_item_name, truncate_item_name};
@@ -727,6 +727,19 @@ impl SqlConnector {
             }
         }
         let f = self.flavor;
+        // The column types type the bound text cells on PostgreSQL (`typed_placeholder`). The
+        // state predates a table this sync just created, so read the table when it lacks any.
+        let fresh_types;
+        let cols_types = if f.driver_family() == DriverFamily::Postgres
+            && cols.iter().any(|c| !state.cols_types.contains_key(c))
+        {
+            fresh_types = self
+                .get_table_cols_types(&sp.target, self.get_pipe_schema(sp).as_deref())
+                .await;
+            &fresh_types
+        } else {
+            &state.cols_types
+        };
         let q = |c: &str| sql_item_name(c, f, None);
         let quoted: Vec<String> = cols.iter().map(|c| q(c)).collect();
         let key_sql = keys.iter().map(|k| q(k)).collect::<Vec<_>>().join(", ");
@@ -745,8 +758,14 @@ impl SqlConnector {
                         .and_then(|t| numeric_precision_scale(t))
                         .map(|(p, s)| (Some(p), Some(s))),
                 };
-                params.push(encode_param(&columns[i][row], f, &enc));
-                cells.push(crate::driver::params::placeholder(f, params.len()));
+                let param = encode_param(&columns[i][row], f, &enc);
+                cells.push(crate::driver::params::typed_placeholder(
+                    f,
+                    params.len() + 1,
+                    &param,
+                    cols_types.get(col).map(String::as_str).unwrap_or(""),
+                ));
+                params.push(param);
             }
             values.push(format!("({})", cells.join(", ")));
             selects.push(format!(
@@ -1753,11 +1772,18 @@ impl SqlConnector {
             let mut groups = Vec::with_capacity(end - start);
             #[allow(clippy::needless_range_loop)]
             for i in start..end {
-                let base = params.len() + 1;
+                let mut cells = Vec::with_capacity(cols.len());
                 for (j, enc) in encodings.iter().enumerate() {
-                    params.push(encode_param(&columns[j][i], flavor, enc));
+                    let param = encode_param(&columns[j][i], flavor, enc);
+                    cells.push(typed_placeholder(
+                        flavor,
+                        params.len() + 1,
+                        &param,
+                        dtype.get(&cols[j]).map(String::as_str).unwrap_or(""),
+                    ));
+                    params.push(param);
                 }
-                groups.push(format!("({})", placeholders(flavor, base, cols.len())));
+                groups.push(format!("({})", cells.join(", ")));
             }
             let sql = format!(
                 "INSERT INTO {table_name} ({}) VALUES {}",

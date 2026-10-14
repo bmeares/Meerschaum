@@ -1135,6 +1135,10 @@ def pip_install(
         if _uninstall and '-y' not in _args and not use_uv_pip:
             _args.append('-y')
 
+        ### `uv pip uninstall` has no `-y` (it never prompts) and rejects it.
+        if _uninstall and use_uv_pip:
+            _args = [arg for arg in _args if arg not in ('-y', '--yes')]
+
         if '--no-warn-conflicts' not in _args and not _uninstall and not use_uv_pip:
             _args.append('--no-warn-conflicts')
 

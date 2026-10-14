@@ -66,3 +66,23 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 clap = { version = "4", features = ["derive", "env", "string"] }
 pyo3 = { version = "0.25", features = ["abi3-py311", "extension-module"] }
+
+# Release profile, shared by the PyPI wheels (wheels.yaml), the Docker images and
+# `scripts/rust/build_py.sh --release`. Measured for the `mrsm` binary on the same tree (40-core
+# host; CPU-s is user time of `cargo build`, sync_1M is the native `mrsm sync pipes` of 1M rows
+# into SQLite, median of 15 runs):
+#
+#   profile                         binary    CPU-s   wall    sync_1M
+#   default (cgu 16, no LTO)        83.4 MB   3826    236 s   10.9 s
+#   lto = "thin"                    81.3 MB   3212    237 s   10.8 s
+#   lto = "thin", cgu = 1           65.3 MB   2765    460 s   10.5 s   <- this profile
+#   lto = "fat",  cgu = 1           58.5 MB   2209    688 s   10.8 s (2-9% slower on the small cases)
+#   thin, cgu = 1, opt-level = "s"  51.4 MB   1730    313 s   13.2 s (+20%: rejected)
+#
+# `mrsm --version` and `import meerschaum._core` start-up are unchanged (9.5 vs 10.2 ms). The wall
+# time doubles only on a many-core machine (the biggest crates then compile serially); the CPU time,
+# which is what a 4-vCPU CI runner pays, drops by 28%. The largest rustc peaks at ~6 GB (fat: 5 GB).
+# The smaller binaries are what let the `slim` image fit 200 MB (docs/design/v5.0.0.md §12.1).
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -264,6 +264,14 @@ fn changed_keys(before: &Map, after: &Map) -> Map {
         .collect()
 }
 
+/// `pipe_metadata_epoch()`: the number of pipe metadata writes (`register_pipe`, `edit_pipe`,
+/// `delete_pipe`, a sync's dtype edits) this process has made through any `_core.SqlConnector`.
+/// `Pipe.get_parameters` keys its memo of cross-pipe `{{ Pipe() }}` templates on it.
+#[pyfunction]
+pub fn pipe_metadata_epoch() -> u64 {
+    meerschaum_sql::instance::pipes::pipe_metadata_epoch()
+}
+
 /// The `sql:<label>` instance connector.
 #[pyclass(frozen, name = "SqlConnector", module = "meerschaum._core")]
 pub struct PySqlConnector {
@@ -526,7 +534,7 @@ impl PySqlConnector {
         remote: bool,
         _kw: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let ctx = PyCtx::new(py)?;
+        let ctx = PyCtx::scalars(py)?;
         let p = core_pipe(pipe, ParamsView::Resolved)?;
         let params = params_map(params)?;
         let cached = cached_columns_types(pipe);
@@ -551,7 +559,7 @@ impl PySqlConnector {
         remote: bool,
         _kw: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Option<i64>> {
-        let ctx = PyCtx::new(py)?;
+        let ctx = PyCtx::scalars(py)?;
         let p = core_pipe(pipe, ParamsView::Resolved)?;
         let mut q = data_query(&ctx, None, None, begin, end, params, None, None)?;
         q.remote = remote;
@@ -586,7 +594,7 @@ impl PySqlConnector {
         params: Option<&Bound<'py, PyAny>>,
         _kw: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let ctx = PyCtx::new(py)?;
+        let ctx = PyCtx::scalars(py)?;
         let p = core_pipe(pipe, ParamsView::Resolved)?;
         let q = data_query(&ctx, None, None, begin, end, params, None, None)?;
         let c = self.conn();
@@ -604,7 +612,7 @@ impl PySqlConnector {
         params: Option<&Bound<'py, PyAny>>,
         _kw: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let ctx = PyCtx::new(py)?;
+        let ctx = PyCtx::scalars(py)?;
         let p = core_pipe(pipe, ParamsView::Resolved)?;
         let q = data_query(&ctx, None, None, begin, end, params, None, None)?;
         let c = self.conn();
@@ -769,7 +777,7 @@ impl PySqlConnector {
         _kw: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<String> {
         let _ = sort_datetimes;
-        let ctx = PyCtx::new(py)?;
+        let ctx = PyCtx::scalars(py)?;
         let begin_default = begin
             .and_then(|b| b.downcast::<pyo3::types::PyString>().ok())
             .is_some_and(|s| s.to_str().map(|s| s.is_empty()).unwrap_or(false));

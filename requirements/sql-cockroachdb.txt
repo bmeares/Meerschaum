@@ -1,0 +1,1 @@
+sqlalchemy-cockroachdb>=2.0.0

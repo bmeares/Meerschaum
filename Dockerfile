@@ -4,33 +4,38 @@
 ### package + the `meerschaum._core` extension) and `meerschaum-cli` (the `mrsm` binary).
 ###
 ### Targets:
-###   (default) `docker build .`           Fedora 44 + `meerschaum[<extras>]`; `--build-arg dep_group=`
-###                                        selects the extras: `full` (default: `[full]`), `api`
+###   (default) `docker build .`           the `full` image; `--build-arg dep_group=` selects the
+###                                        extras: `full` (default: `[full]`), `api`
 ###                                        (`[api,sql,pandas]`) or `minimal` (the base wheel, no extras).
 ###   --target full                        the same image (kept so `buildx.sh` can name the target).
-###   --target slim                        a Fedora 44 rootfs (dnf --installroot) with python3 and the
-###                                        two wheels, no extras. Size gate: < 200 MB.
-###   --target rust-builder / py-builder / slim-rootfs   build stages only.
+###                                        Size gate: < 900 MB.
+###   --target slim                        the two wheels, no extras. Size gate: < 200 MB.
+###   --target rust-builder / py-slim / py-full / slim-rootfs / full-rootfs   build stages only.
 ###
-### Requires BuildKit (`docker buildx build`). The Cargo workspace is compiled once (rust-builder).
+### Both images are assembled the same way, so neither carries a package manager or a toolchain:
+###   1. `rust-builder` compiles the two wheels once (BuildKit cache mounts keep `target/`).
+###   2. `py-slim` / `py-full` `pip install` the wheels (and the extras, for `full`) into a prefix
+###      with `--no-compile`, then `scripts/docker/trim_install.sh` drops tests, headers, byte code
+###      and debug symbols (the `[full]` extras are ~890 MB untrimmed).
+###   3. `slim-rootfs` / `full-rootfs` are Fedora 44 root filesystems made with `dnf --installroot`
+###      (python3 and its libraries only; no dnf, rpm tooling, compilers or pip) with the prefix
+###      copied into /usr/local.
+###   4. `slim` / `full` are `FROM scratch` + that rootfs.
+###
+### Requires BuildKit (`docker buildx build`).
 
 ### ---------------------------------------------------------------------------------------------
 ### rust-builder: `maturin build --release` for the `meerschaum` and `meerschaum-cli` wheels.
 ### Fedora 44 (not rust:1-slim) so the binary and extension link against the same glibc and Python
-### as the Fedora 44 runtimes. rust-toolchain.toml is honored through rustup.
+### as the Fedora 44 runtimes. rust-toolchain.toml is honored through rustup. The release profile
+### is the workspace's (Cargo.toml `[profile.release]`), the same as the PyPI wheels'.
 FROM fedora:44 AS rust-builder
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
     CARGO_TERM_COLOR=never \
-    CARGO_INCREMENTAL=0 \
-    CARGO_PROFILE_RELEASE_STRIP=symbols \
-    CARGO_PROFILE_RELEASE_LTO=thin \
-    CARGO_PROFILE_RELEASE_OPT_LEVEL=s
-### The last two are image-only size tuning for the slim size gate (§12.1: `slim` < 200 MB): measured
-### 224 MB with the workspace's default release profile, 186 MB with these. The PyPI wheels
-### (wheels.yaml) keep the default profile.
+    CARGO_INCREMENTAL=0
 
 RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
       gcc gcc-c++ make pkgconf-pkg-config \
@@ -60,79 +65,57 @@ RUN --mount=type=cache,id=mrsm-v5-cargo-registry,target=/usr/local/cargo/registr
 
 
 ### ---------------------------------------------------------------------------------------------
-### py-builder: the two wheels with no extras, installed into /install for `slim`.
-FROM fedora:44 AS py-builder
+### py-slim: the two wheels with no extras, installed into /install.
+FROM fedora:44 AS py-slim
 
-RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip && dnf clean all
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip binutils findutils \
+  && dnf clean all
 RUN --mount=type=bind,from=rust-builder,source=/out/wheels,target=/wheels \
+    --mount=type=bind,source=scripts/docker/trim_install.sh,target=/trim_install.sh \
     python3 -m pip install --no-index --find-links /wheels --no-cache-dir --no-compile \
-      --prefix=/install meerschaum \
+      --root-user-action=ignore --prefix=/install meerschaum \
+  && /trim_install.sh /install \
   && ls -l /install/bin
 
 
 ### ---------------------------------------------------------------------------------------------
-### runtime: Fedora 44 + `meerschaum[<extras>]`. Also the base of `full` and the default target.
-FROM fedora:44 AS runtime
-
-ARG dep_group=full \
-    mrsm_user=meerschaum \
-    mrsm_root_dir=/meerschaum \
-    mrsm_uid=1000 \
-    mrsm_gid=1000
-
-ENV MRSM_USER=$mrsm_user \
-    MRSM_DEP_GROUP=$dep_group \
-    MRSM_UID=$mrsm_uid \
-    MRSM_GID=$mrsm_gid \
-    MRSM_ROOT_DIR=$mrsm_root_dir \
-    MRSM_WORK_DIR=$mrsm_root_dir \
-    MRSM_RUNTIME=docker \
-    MRSM_HOME=/home/meerschaum \
-    MRSM_SRC=/home/meerschaum/src \
-    PATH=$PATH:/home/meerschaum/.local/bin
-
-### Layer 1: Install static dependencies.
-### Should not rebuild cache unless the base Python image has changed.
-COPY scripts/docker/image_setup.sh scripts/drivers.sh scripts/docker/dev.sh scripts/docker/sleep_forever.sh /scripts/
-RUN /scripts/image_setup.sh
-
-### From this point on, run as a non-privileged user for security.
-USER $MRSM_UID:$MRSM_GID
-WORKDIR $MRSM_WORK_DIR
-
-### Layer 2: Install Meerschaum and its extras (`dep_group` -> extras, §12.1) from the wheels.
+### py-full: the wheels and the extras selected by `dep_group` (`full`, `api`, `minimal`).
 ### The extras' dependencies come from PyPI; the two Meerschaum wheels come from rust-builder.
+### `--ignore-installed` so a package already provided by the builder's own Python is still
+### installed into the prefix that is copied to the final image.
+### `PyYAML` is not an extra: the Python facade's `meerschaum.utils.yaml` still imports it at the
+### first config or pipe operation (D20 moves that into `_core`), and without it the facade would
+### try to `pip install` it at run time. Baked in here until the facade stops needing it.
+FROM fedora:44 AS py-full
+
+ARG dep_group=full
+
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs python3 python3-pip binutils findutils \
+  && dnf clean all
 RUN --mount=type=bind,from=rust-builder,source=/out/wheels,target=/wheels \
-    --mount=type=cache,target=/home/meerschaum/.cache/pip,uid=$MRSM_UID,gid=$MRSM_GID \
-    case "$MRSM_DEP_GROUP" in \
+    --mount=type=bind,source=scripts/docker/trim_install.sh,target=/trim_install.sh \
+    case "$dep_group" in \
       minimal) extras="" ;; \
       api)     extras="[api,sql,pandas]" ;; \
       *)       extras="[full]" ;; \
     esac \
   && wheel="$(ls /wheels/meerschaum-[0-9]*.whl)" \
-  && python -m pip install --user --find-links /wheels "$wheel$extras"
-### NOTE: install the wheel by path. `meerschaum[full]` by name would let pip pick the newest
-### *stable* release on PyPI over this pre-release build.
-
-### Start up Meerschaum to bootstrap its environment.
-RUN cd $MRSM_WORK_DIR && [ "$MRSM_DEP_GROUP" != "minimal" ] && \
-  MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum show version && \
-  MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum upgrade packages _internal -y || \
-  MRSM_VENVS_DIR=$MRSM_HOME/venvs python -m meerschaum --version
-
-VOLUME $MRSM_ROOT_DIR
-ENTRYPOINT ["python", "-m", "meerschaum"]
-
-
-### ---------------------------------------------------------------------------------------------
-### full: the runtime image under the name `buildx.sh` builds for the `full` tag.
-FROM runtime AS full
+  && python3 -m pip install --find-links /wheels --no-cache-dir --no-compile --ignore-installed \
+      --root-user-action=ignore --prefix=/install "$wheel$extras" PyYAML \
+  && /trim_install.sh /install \
+  && ls -l /install/bin
 
 
 ### ---------------------------------------------------------------------------------------------
 ### slim-rootfs: a Fedora 44 root filesystem with only python3 and its runtime libraries, installed
 ### with `dnf --installroot` so the image carries no dnf, rpm tooling, compilers or pip. The rpm
-### database is kept so image scanners still see the package list.
+### database is kept so image scanners still see the package list. The CA trust *sources*
+### (`update-ca-trust` input; the extracted bundles stay), the Java/EDK2 trust stores, the
+### OpenSSL FIPS provider module (never loaded outside FIPS mode) and the `posix/` and `right/`
+### copies of the zoneinfo tree, the Fedora repository GPG keys, `pydoc_data` (the `help()` topics)
+### and the interpreter's `config-3*` (embedding) directory are removed: ~8 MB that the `slim`
+### budget needs. `slim` also drops `ldconfig`, which only `ctypes.util.find_library`
+### calls (it returns None without it).
 FROM fedora:44 AS slim-rootfs
 
 ARG mrsm_user=meerschaum \
@@ -145,11 +128,17 @@ RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
       python3 bash coreutils-single ca-certificates tzdata \
   && dnf --installroot=/rootfs --use-host-config clean all \
   && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/var/lib/dnf /rootfs/usr/share/locale/* \
+  && rm -rf /rootfs/usr/share/pki/ca-trust-source /rootfs/usr/share/zoneinfo/right \
+            /rootfs/usr/share/zoneinfo/posix /rootfs/etc/pki/ca-trust/extracted/java \
+            /rootfs/etc/pki/ca-trust/extracted/edk2 /rootfs/usr/lib64/ossl-modules/fips.so \
+            /rootfs/usr/lib64/python3*/pydoc_data /rootfs/usr/lib64/python3*/config-3* \
+            /rootfs/usr/share/pki/rpm-gpg /rootfs/etc/pki/rpm-gpg \
   && find /rootfs/usr/lib64/python3* -name '*.opt-[12].pyc' -delete \
+  && rm -f /rootfs/usr/bin/ldconfig \
   && echo "$mrsm_user:x:$mrsm_gid:" >> /rootfs/etc/group \
   && echo "$mrsm_user:x:$mrsm_uid:$mrsm_gid::/home/$mrsm_user:/bin/bash" >> /rootfs/etc/passwd \
   && install -d -o "$mrsm_uid" -g "$mrsm_gid" "/rootfs/home/$mrsm_user" "/rootfs$mrsm_root_dir"
-COPY --from=py-builder /install/ /rootfs/usr/local/
+COPY --from=py-slim /install/ /rootfs/usr/local/
 
 
 ### ---------------------------------------------------------------------------------------------
@@ -182,5 +171,77 @@ ENTRYPOINT ["mrsm"]
 
 
 ### ---------------------------------------------------------------------------------------------
-### The last stage is what `docker build .` produces: the runtime image.
-FROM runtime AS default
+### full-rootfs: the slim rootfs plus `libstdc++` (numpy, pyarrow, pandas and the other compiled
+### extras link it dynamically), `pip` (plugins and `attempt_import` install their requirements into
+### `mrsm` venvs with the interpreter's pip), the few interactive tools the image has always shipped (tmux for
+### `mrsm` sessions, less, htop, openssl, `python` -> python3), the user's dotfiles, and the
+### trimmed `py-full` prefix in /usr/local.
+FROM fedora:44 AS full-rootfs
+
+ARG mrsm_user=meerschaum \
+    mrsm_root_dir=/meerschaum \
+    mrsm_uid=1000 \
+    mrsm_gid=1000
+
+RUN dnf install -y --installroot=/rootfs --use-host-config --releasever=44 \
+      --setopt=install_weak_deps=False --nodocs \
+      python3 python-unversioned-command bash coreutils-single ca-certificates tzdata \
+      libstdc++ python3-pip ncurses tmux less htop openssl \
+  && dnf --installroot=/rootfs --use-host-config clean all \
+  && rm -rf /rootfs/var/cache/* /rootfs/var/log/* /rootfs/var/lib/dnf /rootfs/usr/share/locale/* \
+  && rm -rf /rootfs/usr/share/pki/ca-trust-source /rootfs/usr/share/zoneinfo/right \
+            /rootfs/usr/share/zoneinfo/posix /rootfs/etc/pki/ca-trust/extracted/java \
+            /rootfs/etc/pki/ca-trust/extracted/edk2 /rootfs/usr/lib64/ossl-modules/fips.so \
+            /rootfs/usr/lib64/python3*/pydoc_data /rootfs/usr/lib64/python3*/config-3* \
+            /rootfs/usr/share/pki/rpm-gpg /rootfs/etc/pki/rpm-gpg \
+  && find /rootfs/usr/lib64/python3* -name '*.opt-[12].pyc' -delete \
+  && echo "$mrsm_user:x:$mrsm_gid:" >> /rootfs/etc/group \
+  && echo "$mrsm_user:x:$mrsm_uid:$mrsm_gid::/home/$mrsm_user:/bin/bash" >> /rootfs/etc/passwd \
+  && install -d -o "$mrsm_uid" -g "$mrsm_gid" \
+      "/rootfs/home/$mrsm_user" "/rootfs/home/$mrsm_user/.cache" "/rootfs/home/$mrsm_user/.cache/pycache" \
+      "/rootfs$mrsm_root_dir"
+COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/bashrc /rootfs/home/$mrsm_user/.bashrc
+COPY --chown=$mrsm_uid:$mrsm_gid scripts/docker/tmux.conf /rootfs/home/$mrsm_user/.tmux.conf
+COPY --from=py-full /install/ /rootfs/usr/local/
+
+
+### ---------------------------------------------------------------------------------------------
+### full: the wheels and their extras (`dep_group`) on the full-rootfs. Size gate: < 900 MB.
+###
+### The packages are installed without byte code (it is ~125 MB for `[full]`). Python compiles
+### each module on first import and caches the result under $PYTHONPYCACHEPREFIX (user-owned, so
+### the root-owned site-packages stays read-only); mount a volume there to keep the cache across
+### containers.
+FROM scratch AS full
+
+ARG dep_group=full \
+    mrsm_user=meerschaum \
+    mrsm_root_dir=/meerschaum \
+    mrsm_uid=1000 \
+    mrsm_gid=1000
+
+ENV MRSM_USER=$mrsm_user \
+    MRSM_DEP_GROUP=$dep_group \
+    MRSM_UID=$mrsm_uid \
+    MRSM_GID=$mrsm_gid \
+    MRSM_ROOT_DIR=$mrsm_root_dir \
+    MRSM_WORK_DIR=$mrsm_root_dir \
+    MRSM_RUNTIME=docker \
+    MRSM_HOME=/home/meerschaum \
+    MRSM_SRC=/home/meerschaum/src \
+    HOME=/home/meerschaum \
+    PATH=/usr/local/bin:/usr/bin:/home/meerschaum/.local/bin \
+    PYTHONPYCACHEPREFIX=/home/meerschaum/.cache/pycache \
+    LANG=C.UTF-8
+
+COPY --from=full-rootfs /rootfs/ /
+
+USER $MRSM_UID:$MRSM_GID
+WORKDIR $MRSM_WORK_DIR
+VOLUME $MRSM_ROOT_DIR
+ENTRYPOINT ["mrsm"]
+
+
+### ---------------------------------------------------------------------------------------------
+### The last stage is what `docker build .` produces: the `full` image.
+FROM full AS default

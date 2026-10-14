@@ -215,7 +215,12 @@ fn unreachable(instance: &str, e: impl std::fmt::Display) -> StateError {
 }
 
 /// Rows of `mrsm:engine_nodes` as documents.
-pub fn node_doc(row: &NodeRow) -> Doc {
+///
+/// `started` is the pipe's datetime (and partition) column, so a node that never started is
+/// stored with the run's start (`run_started`): a NULL partition key has no partition and
+/// defeats the `(started, run_id, pipe_ref)` upsert key. [`node_from_doc`] reads it back as
+/// `None` for a node with no attempt and no finish.
+pub fn node_doc(row: &NodeRow, run_started: DateTime<Utc>) -> Doc {
     [
         ("run_id", kv_str(&row.run_id)),
         ("pipe_ref", kv_str(row.pipe_ref.as_str())),
@@ -234,7 +239,7 @@ pub fn node_doc(row: &NodeRow) -> Doc {
         ("end", kv_json(row.end.as_ref())),
         ("num_chunks", KValue::Int(row.num_chunks as i64)),
         ("attempts", KValue::Int(row.attempts as i64)),
-        ("started", kv_opt_dt(row.started)),
+        ("started", kv_dt(row.started.unwrap_or(run_started))),
         ("finished", kv_opt_dt(row.finished)),
         ("duration_seconds", kv_float(row.duration_seconds)),
         ("inserted", KValue::Int(row.inserted as i64)),
@@ -267,6 +272,11 @@ pub fn node_from_doc(doc: &Doc) -> Option<NodeRow> {
     row.attempts = doc_int(doc, "attempts").unwrap_or(0).max(0) as u32;
     row.started = doc_dt(doc, "started");
     row.finished = doc_dt(doc, "finished");
+    // (Only when the row was read with those columns: history reads select a subset.)
+    if doc.contains_key("attempts") && row.attempts == 0 && row.finished.is_none() {
+        // Stored with the run's start (see `node_doc`): the node never started.
+        row.started = None;
+    }
     row.duration_seconds = doc_float(doc, "duration_seconds");
     row.inserted = doc_int(doc, "inserted").unwrap_or(0).max(0) as u64;
     row.updated = doc_int(doc, "updated").unwrap_or(0).max(0) as u64;
@@ -898,7 +908,10 @@ impl StateWriter for InstanceState {
         self.write_rows(
             &self.home,
             EnginePipe::Nodes,
-            run.nodes.iter().map(node_doc).collect(),
+            run.nodes
+                .iter()
+                .map(|n| node_doc(n, run.run.started))
+                .collect(),
         )
         .await
     }
@@ -935,7 +948,7 @@ mod tests {
         row.begin = Some(Bound::Int(3));
         row.inserted = 7;
         row.duration_seconds = Some(1.5);
-        let back = node_from_doc(&node_doc(&row)).unwrap();
+        let back = node_from_doc(&node_doc(&row, Utc::now())).unwrap();
         assert_eq!(back, row);
     }
 }

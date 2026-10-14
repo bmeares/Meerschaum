@@ -137,7 +137,8 @@ impl InstanceConnector for ValkeyConnector {
     }
 
     async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
-        ValkeyConnector::delete_pipe(self, pipe).await
+        let res = ValkeyConnector::delete_pipe(self, pipe).await;
+        forget_engine_state_after(self, pipe, res).await
     }
 
     async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
@@ -151,7 +152,8 @@ impl InstanceConnector for ValkeyConnector {
     }
 
     async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
-        ValkeyConnector::drop_pipe(self, pipe).await
+        let res = ValkeyConnector::drop_pipe(self, pipe).await;
+        forget_engine_state_after(self, pipe, res).await
     }
 
     async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
@@ -159,7 +161,11 @@ impl InstanceConnector for ValkeyConnector {
     }
 
     async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
-        ValkeyConnector::clear_pipe(self, pipe, query).await
+        let res = ValkeyConnector::clear_pipe(self, pipe, query).await;
+        if !meerschaum_connector::pipe_ops::is_full_clear(query) {
+            return res;
+        }
+        forget_engine_state_after(self, pipe, res).await
     }
 
     async fn get_pipe_data(
@@ -277,4 +283,21 @@ impl InstanceConnector for ValkeyConnector {
     async fn delete_plugin(&self, plugin: &PluginRecord) -> SuccessTuple {
         self.valkey_delete_plugin(plugin).await
     }
+}
+
+/// After a successful drop, delete or full clear, forget the pipe's Syncing Engine state
+/// (ledger, cursors, definition hash; `pipe_ops::forget_engine_state`) so a pipe recreated
+/// under the same keys starts fresh, as in v4. Best effort: `res` is returned unchanged.
+async fn forget_engine_state_after(
+    conn: &ValkeyConnector,
+    pipe: &Pipe,
+    res: SuccessTuple,
+) -> SuccessTuple {
+    if res.success {
+        let forgotten = meerschaum_connector::pipe_ops::forget_engine_state(conn, pipe).await;
+        if !forgotten.success {
+            tracing::warn!("{}", forgotten.message);
+        }
+    }
+    res
 }

@@ -83,4 +83,7 @@ def register(
         return indices_success, indices_msg
 
     with Venv(get_connector_plugin(self.instance_connector)):
-        return self.instance_connector.register_pipe(self, debug=debug, **kw)
+        result = self.instance_connector.register_pipe(self, debug=debug, **kw)
+    from meerschaum.core.Pipe._cache import _bump_invalidation_epoch
+    _bump_invalidation_epoch()
+    return result

@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 use meerschaum_connector::async_trait;
 use meerschaum_core::Pipe;
 use meerschaum_engine::stream::{
-    AckToken, LegacyStream, StopToken, StreamMessage, StreamSender, StreamSource,
+    AckToken, LegacySink, LegacyStream, StopToken, StreamMessage, StreamSender, StreamSource,
 };
 use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -322,8 +322,11 @@ impl StreamSource for MqttSource {
 
 /// What a v4-pattern plugin's `on_message` callback does with a message: sync it (through the
 /// native path) and return `true` when it committed.
-pub type Callback =
-    Arc<dyn Fn(IndexMap<String, KValue>, bool) -> futures_like::BoxFut + Send + Sync>;
+pub type Callback = Arc<
+    dyn Fn(Arc<dyn LegacySink>, IndexMap<String, KValue>, bool) -> futures_like::BoxFut
+        + Send
+        + Sync,
+>;
 
 /// A tiny boxed future alias (no `futures` dependency in the tests).
 pub mod futures_like {
@@ -348,7 +351,12 @@ pub struct MqttLegacy {
 
 #[async_trait]
 impl LegacyStream for MqttLegacy {
-    async fn run(&self, _pipe: &Pipe, stop: StopToken) -> Result<(), String> {
+    async fn run(
+        &self,
+        _pipe: &Pipe,
+        sink: Arc<dyn LegacySink>,
+        stop: StopToken,
+    ) -> Result<(), String> {
         let (mut r, mut w) = connect(&self.addr, &self.client_id, false).await;
         send_subscribe(&mut w, &self.topic).await;
         loop {
@@ -356,7 +364,7 @@ impl LegacyStream for MqttLegacy {
                 _ = stop.stopped() => return Ok(()),
                 p = read_packet(&mut r) => match p {
                     Some(Packet::Publish { payload, pid: Some(pid), dup, .. }) => {
-                        let committed = (self.callback)(doc_of(&payload), dup).await;
+                        let committed = (self.callback)(sink.clone(), doc_of(&payload), dup).await;
                         if committed {
                             w.write_all(&packet(0x40, &pid.to_be_bytes()))
                                 .await

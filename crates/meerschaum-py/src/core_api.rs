@@ -8,7 +8,9 @@
 //! into the Rust registry, runs the Rust lookup (file reads, default fallback, `MRSM{}` symlink
 //! substitution, writing missing files), writes back only the top-level keys the lookup changed,
 //! and returns the dictionary's own object when the keys were already loaded (so callers that
-//! mutate the result keep working). See `PARITY.md`.
+//! mutate the result keep working). A read-only lookup of keys that are already loaded (and hold no
+//! `MRSM{` symlink to substitute) skips the registry and walks the dictionary ([`fast_lookup`],
+//! PARITY row 12). See `PARITY.md`.
 
 use std::sync::OnceLock;
 
@@ -17,8 +19,10 @@ use meerschaum_core::pipe::PipeDefaults;
 use meerschaum_core::template::TemplateResolver;
 use meerschaum_core::{Map, Pipe, Value};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyString, PyTuple};
+use pyo3::sync::GILOnceCell;
+use pyo3::types::{PyDict, PyFloat, PyInt, PyList, PyModule, PyString, PyTuple};
 
 use crate::convert::{core_to_py, py_to_core};
 
@@ -73,6 +77,116 @@ fn map_has_path(map: &Map, keys: &[String]) -> bool {
     true
 }
 
+/// The `meerschaum.config` module (imported once; `importlib.reload` mutates it in place).
+fn config_module(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
+    static MODULE: GILOnceCell<Py<PyModule>> = GILOnceCell::new();
+    MODULE
+        .get_or_try_init(py, || Ok(py.import("meerschaum.config")?.unbind()))
+        .map(|m| m.bind(py))
+}
+
+/// Whether `obj` (a config subtree) holds an `MRSM{` symlink anywhere, as v4's
+/// `'MRSM{' in json.dumps(config[keys[0]])` decides. `None` when the subtree holds an object
+/// that is not plain config data (the full lookup decides what to do with it).
+fn holds_symlink(obj: &Bound<'_, PyAny>, depth: usize) -> Option<bool> {
+    const MARKER: &str = "MRSM{";
+    if depth > 64 {
+        return None;
+    }
+    if let Ok(s) = obj.downcast::<PyString>() {
+        return Some(s.to_str().ok()?.contains(MARKER));
+    }
+    if let Ok(d) = obj.downcast_exact::<PyDict>() {
+        for (k, v) in d.iter() {
+            match k.downcast::<PyString>() {
+                Ok(ks) => {
+                    if ks.to_str().ok()?.contains(MARKER) {
+                        return Some(true);
+                    }
+                }
+                // `json.dumps` writes int / float / bool / None keys without the marker.
+                Err(_) if k.is_none() || k.is_instance_of::<PyInt>() => {}
+                Err(_) if k.is_instance_of::<PyFloat>() => {}
+                Err(_) => return None,
+            }
+            if holds_symlink(&v, depth + 1)? {
+                return Some(true);
+            }
+        }
+        return Some(false);
+    }
+    if let Ok(l) = obj.downcast_exact::<PyList>() {
+        for v in l.iter() {
+            if holds_symlink(&v, depth + 1)? {
+                return Some(true);
+            }
+        }
+        return Some(false);
+    }
+    if let Ok(t) = obj.downcast_exact::<PyTuple>() {
+        for v in t.iter() {
+            if holds_symlink(&v, depth + 1)? {
+                return Some(true);
+            }
+        }
+        return Some(false);
+    }
+    if obj.is_none() || obj.is_instance_of::<PyInt>() || obj.is_instance_of::<PyFloat>() {
+        // `bool` is an `int` subclass.
+        return Some(false);
+    }
+    None
+}
+
+/// The read-only fast path (PARITY row 12): when every key is already loaded in the Python
+/// `config` dictionary and (with `substitute`) the first key's subtree holds no `MRSM{`
+/// symlink, the full lookup would only walk the dictionary and return its own object (no
+/// substitution, no file reads, no defaults, no writes, no warnings, no `sync_files`), so the
+/// walk is done here directly. Nothing is cached: every call inspects the live dictionary,
+/// so `set_config`, `replace_config`, `write_config`, environment patches and callers that
+/// mutate the returned dicts are seen immediately. `None` falls through to the full lookup.
+fn fast_lookup<'py>(
+    py_config: &Bound<'py, PyAny>,
+    keys: &Bound<'py, PyTuple>,
+    substitute: bool,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let Ok(dict) = py_config.downcast_exact::<PyDict>() else {
+        return Ok(None);
+    };
+    let n = keys.len();
+    if n == 0 {
+        return Ok(None);
+    }
+    let first = keys.get_item(0)?;
+    let Ok(first_str) = first.downcast_exact::<PyString>() else {
+        return Ok(None);
+    };
+    if first_str.to_str()? == meerschaum_core::static_config().config.symlinks_key {
+        return Ok(None);
+    }
+    let Some(top) = dict.get_item(first_str)? else {
+        return Ok(None);
+    };
+    if substitute && holds_symlink(&top, 0) != Some(false) {
+        return Ok(None);
+    }
+    let mut current = top;
+    for i in 1..n {
+        let key = keys.get_item(i)?;
+        if !key.is_exact_instance_of::<PyString>() {
+            return Ok(None);
+        }
+        let Ok(d) = current.downcast_exact::<PyDict>() else {
+            return Ok(None);
+        };
+        match d.get_item(&key)? {
+            Some(next) => current = next,
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(current))
+}
+
 /// `get_config(*keys, patch=True, substitute=True, sync_files=True, write_missing=True,
 /// as_tuple=False, warn=True, debug=False)`.
 #[pyfunction]
@@ -93,8 +207,18 @@ pub fn get_config<'py>(
     debug: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     let _ = debug;
-    let module = py.import("meerschaum.config")?;
-    let py_config = module.getattr("config")?;
+    let module = config_module(py)?;
+    let py_config = module.getattr(intern!(py, "config"))?;
+    if let Some(found) = fast_lookup(&py_config, keys, substitute)? {
+        return if as_tuple {
+            Ok(
+                PyTuple::new(py, [true.into_pyobject(py)?.to_owned().into_any(), found])?
+                    .into_any(),
+            )
+        } else {
+            Ok(found)
+        };
+    }
     if keys.is_empty() {
         // `_config()` returns the dictionary itself.
         return if as_tuple {
@@ -200,14 +324,95 @@ pub(crate) struct PyResolver<'py> {
     pub(crate) py: Python<'py>,
     pub(crate) defaults: PipeDefaults,
     pub(crate) self_pipe: Option<(Pipe, Bound<'py, PyAny>)>,
+    /// The Python pipes built for referenced pipes during this resolution. A template asks for
+    /// a referenced pipe's table name and then for its raw parameters (and attribute chains for
+    /// more); reusing one Python `Pipe` per reference loads its attributes from the instance
+    /// once, as v4's single `Pipe(...)` per template does. Shared with the resolutions nested
+    /// in this one (see [`BuiltScope`]).
+    pub(crate) built: BuiltScope,
+}
+
+type BuiltPipes = std::rc::Rc<std::cell::RefCell<Vec<(Pipe, Py<PyAny>)>>>;
+
+thread_local! {
+    static ACTIVE_BUILT: std::cell::RefCell<Option<BuiltPipes>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The Python pipes a top-level template resolution built, shared with every resolution nested
+/// in it on this thread.
+///
+/// Resolving `{{ Pipe('a', 'b') }}` asks the referenced Python pipe for its `.target`, which
+/// resolves that pipe's own templates through another `_core` call while the outer one is still
+/// running. Without sharing, every level of a derived chain built (and loaded from the instance)
+/// the pipes below it again: v4 loads each referenced pipe once per top-level resolution.
+pub(crate) struct BuiltScope {
+    built: BuiltPipes,
+    outermost: bool,
+}
+
+impl Default for BuiltScope {
+    fn default() -> Self {
+        ACTIVE_BUILT.with(|active| {
+            let mut active = active.borrow_mut();
+            match active.as_ref() {
+                Some(built) => BuiltScope {
+                    built: built.clone(),
+                    outermost: false,
+                },
+                None => {
+                    let built = BuiltPipes::default();
+                    *active = Some(built.clone());
+                    BuiltScope {
+                        built,
+                        outermost: true,
+                    }
+                }
+            }
+        })
+    }
+}
+
+impl Drop for BuiltScope {
+    fn drop(&mut self) {
+        if self.outermost {
+            ACTIVE_BUILT.with(|active| *active.borrow_mut() = None);
+        }
+    }
 }
 
 impl<'py> PyResolver<'py> {
     /// The Python `Pipe` for a core pipe (the `_pipe` object itself for `self`).
     fn py_pipe(&self, pipe: &Pipe) -> PyResult<Bound<'py, PyAny>> {
+        self.py_pipe_as(pipe, false)
+    }
+
+    /// [`py_pipe`](Self::py_pipe); with `by_keys`, a pipe already built for the same keys is
+    /// reused whatever parameters `pipe` carries.
+    ///
+    /// The template core hands `table_reference` / `attribute` the referenced pipe with its
+    /// parameters already resolved, but the Python `Pipe` answers `.target` and attribute
+    /// chains from its own (memoized) resolution. A `Pipe(..., parameters=resolved)` would load
+    /// its metadata from the instance a second time. PARITY: v4 reads the attribute from the
+    /// one `Pipe(...)` the template built.
+    fn py_pipe_as(&self, pipe: &Pipe, by_keys: bool) -> PyResult<Bound<'py, PyAny>> {
         if let Some((core, obj)) = &self.self_pipe {
             if core == pipe {
                 return Ok(obj.clone());
+            }
+        }
+        {
+            let built = self.built.built.borrow();
+            let exact = built
+                .iter()
+                .find(|(core, _)| core == pipe && core.parameters() == pipe.parameters());
+            let found = exact.or_else(|| {
+                by_keys
+                    .then(|| built.iter().find(|(core, _)| core == pipe))
+                    .flatten()
+            });
+            if let Some((_, obj)) = found {
+                return Ok(obj.bind(self.py).clone());
             }
         }
         let mrsm = self.py.import("meerschaum")?;
@@ -219,19 +424,24 @@ impl<'py> PyResolver<'py> {
                 core_to_py(self.py, &Value::Map(pipe.parameters().clone()))?,
             )?;
         }
-        mrsm.getattr("Pipe")?.call(
+        let obj = mrsm.getattr("Pipe")?.call(
             (
                 pipe.connector_keys(),
                 pipe.metric_key(),
                 pipe.location_key(),
             ),
             Some(&kwargs),
-        )
+        )?;
+        self.built
+            .built
+            .borrow_mut()
+            .push((pipe.clone(), obj.clone().unbind()));
+        Ok(obj)
     }
 
     fn table_reference_py(&self, pipe: &Pipe) -> PyResult<String> {
         let py = self.py;
-        let obj = self.py_pipe(pipe)?;
+        let obj = self.py_pipe_as(pipe, true)?;
         let target: String = obj.getattr("target")?.extract()?;
         let conn = obj.getattr("instance_connector")?;
         let conn_type: String = conn.getattr("type")?.extract()?;
@@ -265,7 +475,7 @@ impl TemplateResolver for PyResolver<'_> {
     }
 
     fn attribute(&self, pipe: &Pipe, name: &str) -> Result<Value, String> {
-        let obj = self.py_pipe(pipe).map_err(py_err_text)?;
+        let obj = self.py_pipe_as(pipe, true).map_err(py_err_text)?;
         let value = obj.getattr(name).map_err(py_err_text)?;
         py_to_core(&value).map_err(py_err_text)
     }
@@ -347,6 +557,7 @@ pub fn replace_pipes_syntax<'py>(
         py,
         defaults,
         self_pipe,
+        built: Default::default(),
     };
     let self_core = resolver.self_pipe.as_ref().map(|(p, _)| p.clone());
     let replaced =

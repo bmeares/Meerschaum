@@ -24,8 +24,10 @@ use crate::pool::WorkerPool;
 use crate::protocol::{Msg, wire_to_json};
 use crate::worker::CallOptions;
 
-/// The manifest schema version.
-pub const MANIFEST_SCHEMA_VERSION: u32 = 3;
+/// The manifest schema version (`meerschaum/worker/_manifest.py`). 4: custom connector
+/// `methods` include methods imported into the class body, so cached version-3 manifests (which
+/// missed them) are rebuilt.
+pub const MANIFEST_SCHEMA_VERSION: u32 = 4;
 
 /// The manifest file name under the cache directory.
 pub const MANIFEST_FILE_NAME: &str = "plugins_manifest.json";

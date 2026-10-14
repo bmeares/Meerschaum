@@ -7,8 +7,7 @@
 # Sizes are the uncompressed image size from `docker image inspect` in decimal MB (10^6 bytes),
 # the same unit `docker images` prints. The images must already be loaded locally.
 #
-#   --warn-only    report and emit warnings, but always exit 0 (CI starts here because `full`
-#                  is ~1.9 GB until the v5 dependency cuts land).
+#   --warn-only    report and emit warnings, but always exit 0 (the default is to enforce).
 #   --slim-image   default bmeares/meerschaum:slim
 #   --full-image   default bmeares/meerschaum:full
 #   An image given as "" (e.g. --full-image "") is skipped.

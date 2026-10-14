@@ -237,6 +237,16 @@ pub trait SyncExecutor: Send + Sync + 'static {
     fn supports_chunk_pipelining(&self) -> bool {
         false
     }
+
+    /// Called after a node's sync succeeded (its data is committed) and before the executor
+    /// records the success, which advances its edge cursors and definition hash (graph runs;
+    /// the node's lease is already released). `Err` fails the attempt with the data committed
+    /// (crash injection, §14). The native executor forwards it to its
+    /// [`crate::FaultInjector`].
+    fn before_cursor_advance(&self, node: &PipeRef) -> Result<(), String> {
+        let _ = node;
+        Ok(())
+    }
 }
 
 /// Per-pipe leases (§5.8): an atomic acquire with a TTL, renewed while a node syncs.
@@ -878,10 +888,21 @@ fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
                 elapsed: t0.elapsed(),
             };
             let deadline = t0 + wait;
+            let mut errored = false;
             loop {
                 match leases.acquire(&request.pipe_ref, &holder, ttl).await {
                     Ok(true) => break,
                     Ok(false) if tokio::time::Instant::now() < deadline => {
+                        errored = false;
+                        tokio::time::sleep(poll).await;
+                    }
+                    // One error is retried after a poll: an instance's acquire can race a
+                    // lease expiring between its statements (a crashed holder's lease running
+                    // out, §14). Defense in depth only: the primary fix is in the instance
+                    // (`meerschaum-sql`'s acquire retries that window itself); a custom
+                    // instance may not. A persistent error still fails the node at once.
+                    Err(_) if !errored && tokio::time::Instant::now() < deadline => {
+                        errored = true;
                         tokio::time::sleep(poll).await;
                     }
                     Ok(false) => {
@@ -961,6 +982,7 @@ where
         if let Some(t) = sched.nodes.get(&n.pipe_ref) {
             row.planned_start_seconds = Some(t.earliest_start.as_secs_f64());
             row.slack_seconds = Some(t.slack.as_secs_f64());
+            row.planned_duration_seconds = Some(t.duration.as_secs_f64());
         }
         rows.insert(n.pipe_ref.clone(), row);
     }
@@ -1254,6 +1276,13 @@ where
                 if let Some(row) = d.rows.get_mut(&r) {
                     row.started.get_or_insert(started);
                 }
+                let result = match result.success {
+                    true => match ctx.executor.before_cursor_advance(&r) {
+                        Ok(()) => result,
+                        Err(e) => SyncResult::new(false, e),
+                    },
+                    false => result,
+                };
                 match (result.success, node) {
                     (true, Some(node)) => {
                         d.write_cursors(&node).await;
@@ -1285,6 +1314,18 @@ where
                 ..
             } => {
                 d.progress.finish(&r);
+                // Between the data commit and the cursor advance (§14 crash injection).
+                let result = match result.success {
+                    true => match ctx.executor.before_cursor_advance(&r) {
+                        Ok(()) => result,
+                        Err(e) => {
+                            let mut failed = SyncResult::new(false, e);
+                            failed.duration = result.duration;
+                            failed
+                        }
+                    },
+                    false => result,
+                };
                 let result = match (result.success, d.early.remove(&r)) {
                     (true, Some(prev)) => merge_results(prev, result),
                     (_, Some(prev)) => {
@@ -1364,7 +1405,7 @@ where
             message: message.clone(),
         },
     );
-    let record = RunRecord {
+    let mut record = RunRecord {
         run: RunRow {
             run_id: run_id.clone(),
             started,
@@ -1380,7 +1421,13 @@ where
         },
         nodes: d.rows.into_values().collect(),
     };
-    let _ = ctx.state.record_run(&record).await;
+    if let Err(e) = ctx.state.record_run(&record).await {
+        // The run happened; only its history is missing. Say so (it used to be silent).
+        tracing::warn!("Cannot record engine run {run_id}: {e}");
+        if let Some(message) = record.run.message.as_mut() {
+            message.push_str(&format!("\nwarning: cannot record the run: {e}"));
+        }
+    }
     record
 }
 

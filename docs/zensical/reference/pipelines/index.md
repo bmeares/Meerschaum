@@ -128,6 +128,9 @@ run.run_id                   # the ID in the run history
 run.outcomes                 # per node, in completion order: pipe_ref, pipe, result (inserted, updated, ...)
 run.plan                     # the Plan that was executed
 run.events()                 # the run's persisted events (run_started, node_finished, ...)
+
+# Live: every event as it happens, as a plain dict, on this thread.
+run = pipe.sync(children=True, on_event=lambda e: print(e['event'], e['pipe_ref']))
 ```
 
 All the usual `sync` options (`begin`, `end`, `workers`, `force`, `retries`, `check_existing`, `chunksize`, `params`, ...) apply to every node, with the engine's rules: roots take `begin` / `end` as given, every other node is clamped to them. `''` and `None` leave the window to the planner.
@@ -150,7 +153,7 @@ pipeline.pipes                   # every pipe the selection resolves to, in depe
 | `tags`, `connector_keys`, `metric_keys`, `location_keys` | Select the targets with the `-t`, `-c`, `-m`, `-l` filters (`_` negates) instead of listing pipes. |
 | `parents`, `children` | `True` or a number of generations. |
 
-`Pipeline.sync(**kwargs)` accepts the `sync` options above plus `yes=True` (confirm `rebuild` actions) and `resume='<run_id>'` (re-plan only the nodes that failed or never ran in that run).
+`Pipeline.sync(**kwargs)` accepts the `sync` options above plus `yes=True` (confirm `rebuild` actions), `resume='<run_id>'` (re-plan only the nodes that failed or never ran in that run) and `on_event=callable` (the [live event stream](/reference/pipelines/visualization/#live-events-in-python)).
 
 !!! note "How the Python API reaches the engine"
 
@@ -210,6 +213,12 @@ and the run history shows why the children ran:
 backfill  1 unconsumed ledger entry from sql:src/raw (seq 3); dirty ranges start before the tail (2024-01-01 06:00): backfill them on the chunk grid
 backfill  1 unconsumed ledger entry from sql:local/clean (seq 3); dirty ranges start before the tail (2024-01-01 00:00): backfill them on the chunk grid
 ```
+
+### Windows your plugin receives
+
+Ledger ranges are recorded on the epoch-aligned chunk grid (`verify.chunk_minutes`), and a child backfills them on its own chunk grid. So under `--parents`, `--children` or a `Pipeline`, a plugin's `fetch(pipe, begin, end)` can receive a window that starts at a chunk edge, earlier than v4's `sync time − backtrack`. A bare `pipe.sync()` and a flat `sync pipes` keep v4's window. If your plugin **clears its window and recomputes** it (for example `pipe.clear(begin=begin, end=end)` followed by a rebuild from its parents), it must be able to rebuild the whole window it is given, not only the most recent part.
+
+Dropping, deleting or fully clearing a pipe (`pipe.drop()`, `pipe.delete()`, `pipe.clear()` without bounds, and the matching actions) forgets its engine state: its ledger entries, the edge cursors it is part of and its definition hash. A pipe recreated under the same keys is planned like a new one. Run history is kept. (Edges whose cursor lives on another instance keep it there.)
 
 ### The capping rule
 

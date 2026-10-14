@@ -33,7 +33,19 @@ fn thousands(n: u64) -> String {
     out
 }
 
-/// Render a finished run as a static ASCII Gantt chart.
+/// A node's planned bar in seconds from the run start: `(start, end)`, when the node was
+/// planned to sync (CPM earliest start plus the planned duration, [`NodeRow`]).
+fn planned_span(n: &crate::runs::NodeRow) -> Option<(f64, f64)> {
+    let start = n.planned_start_seconds?;
+    let duration = n.planned_duration_seconds?;
+    (duration > 0.0).then_some((start, start + duration))
+}
+
+/// Render a finished run as a static ASCII Gantt chart: per node, the actual bar (`█`, with
+/// `░` before it and, for a success, after it), its duration, counts and status mark; below
+/// it the planned bar (`▒`: the CPM earliest start and the planned duration, the EWMA of the
+/// node's earlier runs or `system.engine.default_duration_seconds`). Both share one time
+/// axis, which spans the longer of the actual wall time and the planned makespan.
 pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) -> String {
     let width = width.max(10);
     let start = run.run.started;
@@ -43,6 +55,15 @@ pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) ->
         .or_else(|| run.nodes.iter().filter_map(|n| n.finished).max())
         .unwrap_or(start);
     let wall = (end - start).num_milliseconds().max(1) as f64 / 1000.0;
+    let planned_makespan = run
+        .nodes
+        .iter()
+        .filter_map(planned_span)
+        .map(|(_, e)| e)
+        .fold(None, |acc: Option<f64>, e| {
+            Some(acc.map_or(e, |a| a.max(e)))
+        });
+    let span = planned_makespan.map_or(wall, |p| p.max(wall));
     let mut out = String::new();
     let path = critical_path
         .iter()
@@ -57,6 +78,9 @@ pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) ->
         run.run.workers,
         fmt_duration(wall)
     );
+    if let Some(p) = planned_makespan {
+        let _ = write!(out, "  planned {}", fmt_duration(p));
+    }
     if !path.is_empty() {
         let _ = write!(out, "  critical path: {path}");
     }
@@ -67,16 +91,20 @@ pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) ->
         .map(|n| n.pipe_ref.parts().metric_key.chars().count())
         .max()
         .unwrap_or(4);
+    let cell_of = |secs: f64| -> usize {
+        ((secs.max(0.0) / span) * width as f64)
+            .round()
+            .min(width as f64) as usize
+    };
     let cell = |t: chrono::DateTime<chrono::Utc>| -> usize {
-        let secs = (t - start).num_milliseconds().max(0) as f64 / 1000.0;
-        ((secs / wall) * width as f64).round().min(width as f64) as usize
+        cell_of((t - start).num_milliseconds().max(0) as f64 / 1000.0)
     };
     for n in &run.nodes {
         let label = n.pipe_ref.parts().metric_key;
         let pad = label_w - label.chars().count();
         let (bar, dur, summary, mark) = match (n.status, n.started, n.finished) {
             (NodeStatus::Succeeded | NodeStatus::Failed, Some(s), Some(f)) => {
-                let (a, b) = (cell(s), cell(f).max(cell(s) + 1).min(width));
+                let (a, b) = (cell(s).min(width - 1), cell(f).max(cell(s) + 1).min(width));
                 let after = if n.status == NodeStatus::Succeeded {
                     "░".repeat(width - b)
                 } else {
@@ -141,6 +169,25 @@ pub fn render_gantt(run: &RunRecord, critical_path: &[PipeRef], width: usize) ->
             "{label}{}  {bar}  {dur:<6} {summary:<28} {mark}",
             " ".repeat(pad)
         );
+        if let Some((ps, pe)) = planned_span(n) {
+            let a = cell_of(ps).min(width - 1);
+            let b = cell_of(pe).max(a + 1).min(width);
+            let bar = format!(
+                "{}{}{}",
+                " ".repeat(a),
+                "▒".repeat(b - a),
+                " ".repeat(width - b)
+            );
+            let line = format!(
+                "{}  {bar}  {:<6} planned",
+                " ".repeat(label_w),
+                fmt_duration(pe - ps)
+            );
+            let _ = writeln!(out, "{}", line.trim_end());
+        }
+    }
+    if planned_makespan.is_some() {
+        out.push_str("█ actual  ▒ planned\n");
     }
     out
 }

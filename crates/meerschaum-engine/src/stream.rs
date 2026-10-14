@@ -24,8 +24,9 @@
 //! [`StreamSource`]; one that only has the v4 pattern (a `sync()` that subscribes and returns,
 //! with callbacks calling `pipe.sync()`) is a [`LegacyStream`]: its `run` starts the `sync()`
 //! in a worker, keeps the worker alive until `stop`, and forwards each callback `pipe.sync()`
-//! to the native sync path ([`crate::sync::sync_pipe`]). The engine supervises both the same
-//! way.
+//! through the engine's [`LegacySink`] (the native sync path with the ledger written first,
+//! reported as a `stream_flushed` with trigger [`FlushTrigger::Callback`]). The engine
+//! supervises both the same way, and both trigger the stream's children.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,6 +43,7 @@ use tokio::sync::{Notify, mpsc};
 
 use crate::events::{Emitter, EventKind};
 use crate::node::PipeRef;
+use crate::sync::SyncArgs;
 
 /// Which trigger caused a flush.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -57,6 +59,9 @@ pub enum FlushTrigger {
     MaxBytes,
     /// A graceful stop.
     Shutdown,
+    /// A v4-pattern connector's callback called `pipe.sync()` ([`LegacyStream`]): every such
+    /// sync is its own flush.
+    Callback,
 }
 
 /// The idle window setting.
@@ -316,12 +321,54 @@ pub trait StreamSource: Send + Sync {
     }
 }
 
+/// Where a [`LegacyStream`]'s callback syncs go.
+///
+/// The engine's implementation runs every `pipe.sync()` the connector's callbacks make through
+/// the native sync path with the dirty-range ledger written before the data commit (§5.4), and
+/// reports it as a `stream_flushed` event with trigger [`FlushTrigger::Callback`] (rows,
+/// begin/end, success), so stream progress, children triggering (§5.10 "Stream-flush
+/// triggering") and the ledger see v4-pattern connectors exactly like `subscribe` streams.
+/// A sync of a pipe outside the engine's graph is a bare `pipe.sync()` (R1) and reports nothing.
+#[async_trait]
+pub trait LegacySink: Send + Sync {
+    /// Sync `input` (`None`: fetch, as a v4 `pipe.sync()` without a DataFrame) into `pipe` and
+    /// return the result the plugin's callback receives.
+    async fn sync(&self, pipe: &Pipe, input: Option<PipeInput>, args: &SyncArgs) -> SyncResult;
+
+    /// The connector's own `sync(pipe)` is about to be called (each start or restart of the
+    /// stream). The engine runs the `@pre_sync_hook`s here, as v4's lap did before calling it.
+    async fn starting(&self, pipe: &Pipe) {
+        let _ = pipe;
+    }
+
+    /// The connector's `sync(pipe)` returned `result` (the worker stays alive for its
+    /// callbacks). The engine runs the `@post_sync_hook`s and reports the result as the pipe's
+    /// lap outcome (v4: `Finished syncing ...: Syncing ... in a background thread.`).
+    async fn returned(&self, pipe: &Pipe, result: SyncResult) {
+        let _ = (pipe, result);
+    }
+}
+
 /// A v4-pattern streaming connector: its `sync()` subscribes and returns immediately, and its
 /// callbacks call `pipe.sync()` (see the module docs).
 #[async_trait]
 pub trait LegacyStream: Send + Sync {
-    /// Start the connector and keep it alive until `stop`; `Err` when it dies.
-    async fn run(&self, pipe: &Pipe, stop: StopToken) -> Result<(), String>;
+    /// Start the connector and keep it alive until `stop`; `Err` when it dies. Every
+    /// `pipe.sync()` a callback makes must go through `sink` (that is how the engine sees the
+    /// connector's flushes).
+    async fn run(
+        &self,
+        pipe: &Pipe,
+        sink: Arc<dyn LegacySink>,
+        stop: StopToken,
+    ) -> Result<(), String>;
+
+    /// Whether `run` calls [`LegacySink::returned`] once the connector's `sync()` returns. The
+    /// first lap of `--listen` then waits (bounded) for that return and reports it like v4's
+    /// lap did. Implementations that never report return `false` (the default).
+    fn reports_return(&self) -> bool {
+        false
+    }
 }
 
 /// Commits one micro-batch: one sync of the buffered rows (the engine's implementation writes
@@ -447,6 +494,13 @@ pub async fn run_sink(
                     rows,
                     bytes,
                     trigger,
+                    success: true,
+                    begin: result.begin,
+                    end: result.end,
+                    inserted: result.inserted,
+                    updated: result.updated,
+                    upserted: result.upserted,
+                    message: String::new(),
                 },
             );
         }

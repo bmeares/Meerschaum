@@ -316,6 +316,7 @@ impl PyPipe {
                     py,
                     defaults: py_defaults(py)?,
                     self_pipe: Some((core.clone(), obj)),
+                    built: Default::default(),
                 };
                 core.resolve_parameters_with(&resolver, None)
                     .map_err(|e| PyValueError::new_err(e.to_string()))?

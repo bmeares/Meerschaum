@@ -405,6 +405,130 @@ fn build_internal_pipe(instance_keys: &str, metric: &str, kwargs: Map) -> Pipe {
     })
 }
 
+/// The parameters of the Syncing Engine's internal state pipe `mrsm:<metric_key>` (§5.8):
+/// `engine_state`, `engine_ledger`, `engine_cursors`, `engine_runs`, `engine_nodes` and
+/// `engine_events` (`None` for any other metric). The engine builds its state pipes from these;
+/// instance connectors use them to forget a dropped pipe's state ([`forget_engine_state`]).
+pub fn engine_state_parameters(metric_key: &str) -> Option<Map> {
+    let json = match metric_key {
+        "engine_state" => {
+            r#"{"columns": {"primary": "pipe_ref"},
+                    "dtypes": {"pipe_ref": "string", "definition_hash": "string", "updated": "datetime"},
+                    "upsert": true}"#
+        }
+        "engine_ledger" => {
+            r#"{"columns": {"datetime": "created", "pipe_ref": "pipe_ref", "seq": "seq"},
+                    "dtypes": {"created": "datetime", "pipe_ref": "string", "seq": "int",
+                               "begin": "json", "end": "json"}}"#
+        }
+        "engine_cursors" => {
+            r#"{"columns": {"parent_ref": "parent_ref", "child_ref": "child_ref"},
+                    "dtypes": {"parent_ref": "string", "child_ref": "string", "seq": "int",
+                               "parent_watermark_at_cursor": "json"},
+                    "upsert": true}"#
+        }
+        "engine_runs" => {
+            r#"{"columns": {"datetime": "started", "primary": "run_id"},
+                    "dtypes": {"run_id": "string", "started": "datetime", "finished": "datetime",
+                               "success": "bool", "message": "string", "targets": "json",
+                               "workers": "int", "num_nodes": "int", "resumed_from": "string",
+                               "holder": "string", "selection": "string"},
+                    "upsert": true}"#
+        }
+        "engine_nodes" => {
+            r#"{"columns": {"datetime": "started", "run_id": "run_id", "pipe_ref": "pipe_ref"},
+                    "dtypes": {"run_id": "string", "pipe_ref": "string", "action": "string",
+                               "status": "string", "reason": "string", "begin": "json",
+                               "end": "json", "num_chunks": "int", "attempts": "int",
+                               "started": "datetime", "finished": "datetime",
+                               "duration_seconds": "float", "inserted": "int", "updated": "int",
+                               "upserted": "int", "deleted": "int", "message": "string",
+                               "planned_start_seconds": "float", "slack_seconds": "float"},
+                    "upsert": true}"#
+        }
+        "engine_events" => {
+            r#"{"columns": {"datetime": "ts", "run_id": "run_id", "seq": "seq"},
+                    "dtypes": {"ts": "datetime", "run_id": "string", "seq": "int",
+                               "pipe_ref": "string", "event": "string", "payload": "json"}}"#
+        }
+        _ => return None,
+    };
+    let mut params = Value::from_json_str(json)
+        .expect("valid engine pipe parameters")
+        .to_map();
+    params.insert("target".into(), Value::Str(format!("mrsm_{metric_key}")));
+    params.insert("static".into(), Value::Bool(true));
+    Some(params)
+}
+
+/// The engine state pipe `mrsm:<metric_key>` on `instance_keys` (see
+/// [`engine_state_parameters`]).
+pub fn engine_state_pipe(instance_keys: &str, metric_key: &str) -> Option<Pipe> {
+    let parameters = engine_state_parameters(metric_key)?;
+    Pipe::builder("mrsm", metric_key)
+        .instance(instance_keys)
+        .parameters(parameters)
+        .kwarg("temporary", true)
+        .kwarg("static", true)
+        .kwarg("cache", false)
+        .build()
+        .ok()
+}
+
+/// Forget the Syncing Engine's state for `pipe` on its instance `conn`: the ledger entries it
+/// produced, the edge cursors in which it is the parent or the child, and its definition hash.
+/// Called when a pipe is dropped, deleted or fully cleared, so a pipe recreated under the same
+/// keys starts fresh, as it does in v4 (which has no engine state). Run history is kept.
+/// Engine tables that do not exist are skipped (an instance the engine never ran on pays only
+/// the existence checks). Failures are reported, never raised.
+pub async fn forget_engine_state<C: InstanceConnector + ?Sized>(
+    conn: &C,
+    pipe: &Pipe,
+) -> SuccessTuple {
+    if pipe.connector_keys() == "mrsm" {
+        return SuccessTuple::success();
+    }
+    let pipe_ref = pipe.pipe_ref();
+    let mut errors = Vec::new();
+    for (metric, column) in [
+        ("engine_ledger", "pipe_ref"),
+        ("engine_cursors", "parent_ref"),
+        ("engine_cursors", "child_ref"),
+        ("engine_state", "pipe_ref"),
+    ] {
+        let Some(state_pipe) = engine_state_pipe(pipe.instance_keys(), metric) else {
+            continue;
+        };
+        if !conn.pipe_exists(&state_pipe).await.unwrap_or(false) {
+            continue;
+        }
+        let mut params = Map::new();
+        params.insert(column.into(), Value::Str(pipe_ref.clone()));
+        let query = DataQuery {
+            params: Some(params),
+            ..Default::default()
+        };
+        let res = conn.clear_pipe(&state_pipe, &query).await;
+        if !res.success {
+            errors.push(format!("{metric} ({column}): {}", res.message));
+        }
+    }
+    if errors.is_empty() {
+        SuccessTuple::success()
+    } else {
+        SuccessTuple::fail(format!(
+            "Could not forget the engine state of {pipe}:\n{}",
+            errors.join("\n")
+        ))
+    }
+}
+
+/// Whether a `clear_pipe` query removes every row (no bounds, no filter): a full clear forgets
+/// the pipe's engine state like a drop does.
+pub fn is_full_clear(query: &DataQuery) -> bool {
+    query.begin.is_none() && query.end.is_none() && query.params.as_ref().is_none_or(Map::is_empty)
+}
+
 /// `InstanceConnector.get_users_pipe()`.
 pub fn users_pipe(instance_keys: &str) -> Pipe {
     build_internal_pipe(

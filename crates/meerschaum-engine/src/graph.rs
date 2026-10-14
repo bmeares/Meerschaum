@@ -705,6 +705,51 @@ impl Graph {
             .map(|&i| &self.edges[i])
     }
 
+    /// The nodes reachable from `targets` by walking up to `parents` generations of parent
+    /// edges and up to `children` generations of child edges (`None`: no traversal in that
+    /// direction), targets included. Ancestors are only walked upward and descendants only
+    /// downward (a parent's other children are not reached). Cycles are harmless here.
+    ///
+    /// Hosts use this to resolve only the connectors a selection can touch.
+    pub fn reach(
+        &self,
+        targets: impl IntoIterator<Item = PipeRef>,
+        parents: Option<crate::selection::Depth>,
+        children: Option<crate::selection::Depth>,
+    ) -> BTreeSet<PipeRef> {
+        let targets: Vec<PipeRef> = targets.into_iter().collect();
+        let mut out: BTreeSet<PipeRef> = targets.iter().cloned().collect();
+        for (depth, upward) in [(parents, true), (children, false)] {
+            let limit = match depth {
+                None => continue,
+                Some(crate::selection::Depth::All) => u32::MAX,
+                Some(crate::selection::Depth::N(n)) => n,
+            };
+            let mut seen: BTreeSet<PipeRef> = targets.iter().cloned().collect();
+            let mut frontier = targets.clone();
+            let mut level = 0;
+            while !frontier.is_empty() && level < limit {
+                level += 1;
+                let mut next = Vec::new();
+                for r in &frontier {
+                    let others: Vec<PipeRef> = if upward {
+                        self.parent_edges(r).map(|e| e.parent.clone()).collect()
+                    } else {
+                        self.child_edges(r).map(|e| e.child.clone()).collect()
+                    };
+                    for o in others {
+                        if seen.insert(o.clone()) {
+                            next.push(o);
+                        }
+                    }
+                }
+                out.extend(next.iter().cloned());
+                frontier = next;
+            }
+        }
+        out
+    }
+
     /// Warnings collected while building.
     pub fn warnings(&self) -> &[GraphWarning] {
         &self.warnings
@@ -961,5 +1006,49 @@ mod tests {
             &GraphOptions::default(),
         );
         assert!(g.is_empty());
+    }
+
+    #[test]
+    fn reach_walks_each_direction_to_its_depth() {
+        use crate::selection::Depth;
+        let r = |m: &str| PipeRef::new("sql:i", "sql:i", m, None);
+        let rec = |m: &str, parents: &[&str]| {
+            let mut rec = PipeRecord::new("sql:i", "sql:i", m, None);
+            let list: Vec<Value> = parents
+                .iter()
+                .map(|p| Value::Str(format!("Pipe('sql:i', '{p}', instance='sql:i')")))
+                .collect();
+            if !list.is_empty() {
+                rec.parameters.insert("parents".into(), Value::List(list));
+            }
+            rec
+        };
+        // a -> b -> c -> d, a -> x (a sibling branch), u unrelated.
+        let g = Graph::build(
+            [
+                rec("a", &[]),
+                rec("b", &["a"]),
+                rec("c", &["b"]),
+                rec("d", &["c"]),
+                rec("x", &["a"]),
+                rec("u", &[]),
+            ],
+            &GraphOptions::default(),
+        );
+        let set = |v: &[&str]| v.iter().map(|m| r(m)).collect::<BTreeSet<_>>();
+        assert_eq!(g.reach([r("c")], None, None), set(&["c"]));
+        assert_eq!(
+            g.reach([r("c")], Some(Depth::All), None),
+            set(&["a", "b", "c"])
+        );
+        assert_eq!(g.reach([r("c")], Some(Depth::N(1)), None), set(&["b", "c"]));
+        assert_eq!(
+            g.reach([r("b")], Some(Depth::All), Some(Depth::All)),
+            set(&["a", "b", "c", "d"])
+        );
+        assert_eq!(
+            g.reach([r("a")], None, Some(Depth::N(1))),
+            set(&["a", "b", "x"])
+        );
     }
 }

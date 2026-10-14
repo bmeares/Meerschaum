@@ -23,7 +23,7 @@ use meerschaum_kernel::enforce::PipeInput;
 use meerschaum_kernel::value::Value as KValue;
 
 use crate::axis::{Axis, AxisKind};
-use crate::events::{ChunkSource, EventKind};
+use crate::events::{ChunkSource, Emitter, EventKind};
 use crate::executor::{NodeEvents, SyncExecutor, SyncRequest};
 use crate::graph::Graph;
 use crate::ledger::ledger_intervals;
@@ -31,7 +31,7 @@ use crate::node::PipeRef;
 use crate::plan::{Action, Begin, Span};
 use crate::registry::ConnectorRegistry;
 use crate::state::StateWriter;
-use crate::stream::StreamFlush;
+use crate::stream::{FlushTrigger, LegacySink, StreamFlush};
 use crate::sync::{DeltaObserver, SyncArgs, SyncBegin, SyncEnv, sync_pipe};
 
 /// Test hooks that simulate a crash at the two points the write ordering protects.
@@ -43,9 +43,20 @@ pub trait FaultInjector: Send + Sync {
         Ok(())
     }
 
-    /// After the data commit, before the executor advances the node's cursors. `Err` fails
-    /// the node with its data committed.
+    /// After each data commit inside a node's sync (every window, chunk or stream flush),
+    /// before the sync returns. `Err` fails the sync with that commit kept; later windows of
+    /// the node do not run.
     fn after_data_commit(&self, node: &PipeRef) -> Result<(), String> {
+        let _ = node;
+        Ok(())
+    }
+
+    /// After the whole node synced successfully (every window committed, hooks run), right
+    /// before the executor advances the node's edge cursors and definition hash (graph runs;
+    /// in flat runs there is nothing to advance and it fires at the same point). `Err` fails
+    /// the node with all of its data committed and no cursor moved. Not called for stream
+    /// flushes, which advance no cursor.
+    fn before_cursor_advance(&self, node: &PipeRef) -> Result<(), String> {
         let _ = node;
         Ok(())
     }
@@ -426,20 +437,7 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
             Some(p) => Some(p),
             None => observer,
         };
-        let env = self.env();
-        let hooks = if args.extra.get("skip_hooks").is_some_and(Value::truthy) {
-            None
-        } else {
-            self.registry.hooks()
-        };
-        if let Some(h) = &hooks {
-            h.pre_sync(pipe, args).await;
-        }
-        let result = sync_pipe(&env, pipe, input, args, observer).await;
-        if let Some(h) = &hooks {
-            h.post_sync(pipe, args, &result).await;
-        }
-        result
+        self.sync_observed(pipe, input, args, observer).await
     }
 
     fn ledger_for(&self, pipe_ref: &PipeRef, axis: &Axis) -> Option<LedgerWriter<'_, S>> {
@@ -455,6 +453,8 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
     }
 
     /// Sync rows pushed by a stream source (one micro-batch), with the ledger written first.
+    /// The result's `begin` / `end` are the smallest and largest datetime-axis values of the
+    /// rows the flush changed (for `stream_flushed{begin, end}`).
     pub async fn sync_rows(
         &self,
         pipe_ref: &PipeRef,
@@ -464,23 +464,135 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
         let Some(node) = self.graph.node(pipe_ref) else {
             return SyncResult::new(false, format!("{} is not in the graph.", pipe_ref.label()));
         };
-        let ledger = self.ledger_for(pipe_ref, &node.axis);
         let mut args = self.base_args();
         args.check_existing = check_existing;
-        let mut result = self
-            .sync_window(
-                &node.pipe,
-                pipe_ref,
-                Some(input),
-                &args,
-                ledger.as_ref(),
-                None,
-            )
-            .await;
+        self.sync_flush(&node.pipe, pipe_ref, Some(input), &args, true)
+            .await
+    }
+
+    /// Sync one `pipe.sync()` a v4-pattern ([`crate::stream::LegacyStream`]) connector's
+    /// callback made, with the plugin's own arguments. A pipe in the graph gets the ledger
+    /// written before the commit (like a `subscribe` flush); any other pipe is a bare
+    /// `pipe.sync()` (R1). Neither runs the sync hooks: v4's `Pipe.sync()` does not.
+    pub async fn sync_callback(
+        &self,
+        pipe: &Pipe,
+        input: Option<PipeInput>,
+        args: &SyncArgs,
+    ) -> SyncResult {
+        let pipe_ref = PipeRef::from_pipe(pipe);
+        if self.graph.node(&pipe_ref).is_none() {
+            let env = SyncEnv {
+                known: None,
+                ..self.env()
+            };
+            return sync_pipe(&env, pipe, input, args, None).await;
+        }
+        self.sync_flush(pipe, &pipe_ref, input, args, false).await
+    }
+
+    /// One flush of a graph node: ledger first (when the node has children), crash injection,
+    /// and the changed rows' extent on the node's axis as the result's `begin` / `end`.
+    async fn sync_flush(
+        &self,
+        pipe: &Pipe,
+        pipe_ref: &PipeRef,
+        input: Option<PipeInput>,
+        args: &SyncArgs,
+        hooks: bool,
+    ) -> SyncResult {
+        let Some(node) = self.graph.node(pipe_ref) else {
+            return SyncResult::new(false, format!("{} is not in the graph.", pipe_ref.label()));
+        };
+        let ledger = self.ledger_for(pipe_ref, &node.axis);
+        let faults_only = match (&ledger, self.faults.as_deref()) {
+            (None, Some(f)) => Some(FaultsOnly {
+                pipe_ref: pipe_ref.clone(),
+                faults: f,
+            }),
+            _ => None,
+        };
+        let inner: Option<&dyn DeltaObserver> = match (&ledger, faults_only.as_ref()) {
+            (Some(l), _) => Some(l),
+            (None, Some(f)) => Some(f),
+            (None, None) => None,
+        };
+        let extent = Extent {
+            inner,
+            axis: &node.axis,
+            span: Mutex::new(None),
+        };
+        let mut result = if hooks {
+            self.sync_observed(pipe, input, args, Some(&extent)).await
+        } else {
+            sync_pipe(&self.env(), pipe, input, args, Some(&extent)).await
+        };
         if let Some(l) = &ledger {
             result.changed_intervals = l.take_written();
         }
+        if let Some((lo, hi)) = *extent.span.lock().unwrap_or_else(|e| e.into_inner()) {
+            result.begin = node.axis.bound(lo);
+            result.end = node.axis.bound(hi);
+        }
         result
+    }
+
+    /// A sync with the registry's hooks around it (unless `skip_hooks`).
+    async fn sync_observed(
+        &self,
+        pipe: &Pipe,
+        input: Option<PipeInput>,
+        args: &SyncArgs,
+        observer: Option<&dyn DeltaObserver>,
+    ) -> SyncResult {
+        let env = self.env();
+        let hooks = if args.extra.get("skip_hooks").is_some_and(Value::truthy) {
+            None
+        } else {
+            self.registry.hooks()
+        };
+        if let Some(h) = &hooks {
+            h.pre_sync(pipe, args).await;
+        }
+        let result = sync_pipe(&env, pipe, input, args, observer).await;
+        if let Some(h) = &hooks {
+            h.post_sync(pipe, args, &result).await;
+        }
+        result
+    }
+}
+
+/// Records the smallest and largest datetime-axis value of a sync's delta (the rows it
+/// changes) and forwards everything else to the wrapped observer (ledger writer, crash
+/// injection).
+struct Extent<'a> {
+    inner: Option<&'a dyn DeltaObserver>,
+    axis: &'a Axis,
+    span: Mutex<Option<(i64, i64)>>,
+}
+
+#[async_trait]
+impl DeltaObserver for Extent<'_> {
+    async fn before_commit(&self, pipe: &Pipe, delta: &Frame) -> Result<(), String> {
+        let positions = frame_positions(delta, self.axis);
+        if let (Some(lo), Some(hi)) = (positions.iter().min(), positions.iter().max()) {
+            let mut span = self.span.lock().unwrap_or_else(|e| e.into_inner());
+            *span = Some(match *span {
+                Some((a, b)) => (a.min(*lo), b.max(*hi)),
+                None => (*lo, *hi),
+            });
+        }
+        match self.inner {
+            Some(o) => o.before_commit(pipe, delta).await,
+            None => Ok(()),
+        }
+    }
+
+    async fn after_commit(&self, pipe: &Pipe, result: &SyncResult) -> Result<(), String> {
+        match self.inner {
+            Some(o) => o.after_commit(pipe, result).await,
+            None => Ok(()),
+        }
     }
 }
 
@@ -527,6 +639,13 @@ fn combine(pipe: &Pipe, results: Vec<SyncResult>) -> SyncResult {
 impl<S: StateWriter + 'static> SyncExecutor for NativeExecutor<S> {
     fn supports_chunk_pipelining(&self) -> bool {
         !self.flat
+    }
+
+    fn before_cursor_advance(&self, node: &PipeRef) -> Result<(), String> {
+        match &self.faults {
+            Some(f) => f.before_cursor_advance(node),
+            None => Ok(()),
+        }
     }
 
     async fn sync(&self, request: SyncRequest) -> SyncResult {
@@ -690,5 +809,131 @@ impl<S: StateWriter + 'static> StreamFlush for NativeFlush<S> {
         self.executor
             .sync_rows(&PipeRef::from_pipe(pipe), input, check_existing)
             .await
+    }
+}
+
+/// The engine's [`LegacySink`]: runs a v4-pattern connector's callback syncs through a
+/// [`NativeExecutor`] (ledger first) and reports each sync of a graph node as a
+/// `stream_flushed` event with trigger [`FlushTrigger::Callback`], which drives children
+/// triggering exactly like a `subscribe` flush.
+///
+/// It also runs the sync hooks around the connector's own `sync()` call and reports its
+/// return as the pipe's lap outcome ([`LegacySink::starting`] / [`LegacySink::returned`]), as
+/// v4's `sync pipes --listen` lap did.
+pub struct NativeLegacySink<S> {
+    executor: Arc<NativeExecutor<S>>,
+    emitter: Option<Emitter>,
+    outcomes: Option<tokio::sync::mpsc::UnboundedSender<crate::engine::NodeOutcome>>,
+    /// The arguments of the current `sync()` call (its hooks share one `sync_timestamp`).
+    calls: Mutex<HashMap<PipeRef, (SyncArgs, std::time::Instant)>>,
+}
+
+impl<S> NativeLegacySink<S> {
+    /// Report flushes through `emitter` (the stream tasks' emitter).
+    pub fn new(executor: Arc<NativeExecutor<S>>, emitter: Option<Emitter>) -> NativeLegacySink<S> {
+        NativeLegacySink {
+            executor,
+            emitter,
+            outcomes: None,
+            calls: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Also send each `sync()` return as a lap outcome.
+    pub fn with_outcomes(
+        mut self,
+        outcomes: tokio::sync::mpsc::UnboundedSender<crate::engine::NodeOutcome>,
+    ) -> Self {
+        self.outcomes = Some(outcomes);
+        self
+    }
+}
+
+impl<S: StateWriter + 'static> NativeLegacySink<S> {
+    fn hooks(&self, args: &SyncArgs) -> Option<Arc<dyn crate::registry::SyncHooks>> {
+        if args.extra.get("skip_hooks").is_some_and(Value::truthy) {
+            None
+        } else {
+            self.executor.registry.hooks()
+        }
+    }
+}
+
+/// Rows in a sync's input.
+fn input_rows(input: &PipeInput) -> u64 {
+    match input {
+        PipeInput::Frame(f) => f.height() as u64,
+        PipeInput::Docs(d) => d.len() as u64,
+        PipeInput::Columns(c) => c.values().map(Vec::len).max().unwrap_or(0) as u64,
+    }
+}
+
+#[async_trait]
+impl<S: StateWriter + 'static> LegacySink for NativeLegacySink<S> {
+    async fn sync(&self, pipe: &Pipe, input: Option<PipeInput>, args: &SyncArgs) -> SyncResult {
+        let pipe_ref = PipeRef::from_pipe(pipe);
+        let in_graph = self.executor.graph.node(&pipe_ref).is_some();
+        let rows = input.as_ref().map(input_rows);
+        let result = self.executor.sync_callback(pipe, input, args).await;
+        if let (true, Some(em)) = (in_graph, &self.emitter) {
+            em.emit(
+                Some(&pipe_ref),
+                EventKind::StreamFlushed {
+                    // `pipe.sync()` without a DataFrame fetched its rows itself.
+                    rows: rows.unwrap_or(result.inserted + result.updated + result.upserted),
+                    bytes: 0,
+                    trigger: FlushTrigger::Callback,
+                    success: result.success,
+                    begin: result.begin,
+                    end: result.end,
+                    inserted: result.inserted,
+                    updated: result.updated,
+                    upserted: result.upserted,
+                    message: result.message.clone(),
+                },
+            );
+        }
+        result
+    }
+
+    async fn starting(&self, pipe: &Pipe) {
+        let args = SyncArgs {
+            sync_timestamp: chrono::Utc::now(),
+            ..self.executor.base_args()
+        };
+        if let Some(h) = self.hooks(&args) {
+            h.pre_sync(pipe, &args).await;
+        }
+        self.calls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(PipeRef::from_pipe(pipe), (args, std::time::Instant::now()));
+    }
+
+    async fn returned(&self, pipe: &Pipe, mut result: SyncResult) {
+        let pipe_ref = PipeRef::from_pipe(pipe);
+        let call = self
+            .calls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&pipe_ref);
+        let (args, started) =
+            call.unwrap_or_else(|| (self.executor.base_args(), std::time::Instant::now()));
+        result.duration.get_or_insert(started.elapsed());
+        if let Some(h) = self.hooks(&args) {
+            h.post_sync(pipe, &args, &result).await;
+        }
+        if let Some(tx) = &self.outcomes {
+            let label = self
+                .executor
+                .graph
+                .node(&pipe_ref)
+                .map_or_else(|| pipe.to_string(), |n| n.pipe.to_string());
+            let _ = tx.send(crate::engine::NodeOutcome {
+                pipe_ref,
+                pipe: label,
+                result,
+            });
+        }
     }
 }

@@ -613,6 +613,50 @@ impl SqlConnector {
         self.driver.read_frame_with(sql, params).await
     }
 
+    /// [`read`](SqlConnector::read) for a catalog query (explicit result columns, text that
+    /// repeats): prepared once per pooled connection on PostgreSQL
+    /// (see [`SqlDriver::read_frame_catalog`]).
+    pub async fn read_catalog(&self, sql: &str) -> Result<Frame> {
+        self.log(sql);
+        self.driver.read_frame_catalog(sql).await
+    }
+
+    /// [`read_params`](SqlConnector::read_params) for a catalog query (see
+    /// [`read_catalog`](SqlConnector::read_catalog)).
+    pub async fn read_params_catalog(&self, sql: &str, params: &[SqlParam]) -> Result<Frame> {
+        self.log(sql);
+        self.driver.read_frame_with_catalog(sql, params).await
+    }
+
+    /// [`value`](SqlConnector::value) for a catalog query (see
+    /// [`read_catalog`](SqlConnector::read_catalog)).
+    pub async fn value_catalog(&self, sql: &str) -> Option<SqlValue> {
+        self.log(sql);
+        match self.driver.value_catalog(sql).await {
+            Ok(v) => v.filter(|v| !v.is_null()),
+            Err(e) => {
+                tracing::debug!("Failed to fetch value:\n{sql}\n{e}");
+                None
+            }
+        }
+    }
+
+    /// [`value_params`](SqlConnector::value_params) for a catalog query (see
+    /// [`read_catalog`](SqlConnector::read_catalog)).
+    pub async fn value_params_catalog(
+        &self,
+        sql: &str,
+        params: &[SqlParam],
+    ) -> ConnectorResult<Option<SqlValue>> {
+        self.log(sql);
+        Ok(self
+            .driver
+            .value_with_catalog(sql, params)
+            .await
+            .map_err(be)?
+            .filter(|v| !v.is_null()))
+    }
+
     /// `table_exists(table, self, schema)` (`utils/sql.py`).
     pub async fn table_exists(&self, table: &str, schema: Option<&str>) -> bool {
         let schema = if self.flavor.no_schema() {
@@ -621,7 +665,7 @@ impl SqlConnector {
             schema
         };
         let query = get_table_exists_query(table, self.flavor, schema);
-        self.value(&query).await.is_some()
+        self.value_catalog(&query).await.is_some()
     }
 
     /// `self.db_version`.

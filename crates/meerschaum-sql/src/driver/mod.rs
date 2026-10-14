@@ -399,10 +399,26 @@ impl SqlDriver {
     /// statement), so `sql` must be a single statement. The schema is fixed by the first batch
     /// (or by describing the statement when it returns no rows).
     pub async fn read_stream(&self, sql: &str, chunksize: usize) -> Result<RecordBatchStream> {
+        self.read_stream_as(sql, chunksize, false).await
+    }
+
+    /// Whether catalog statements are prepared once per connection on this driver: the
+    /// PostgreSQL family, where introspection queries over `information_schema` cost a few
+    /// milliseconds of planning each (see [`SqlDriver::read_frame_catalog`]).
+    fn catalog_persistent(&self) -> bool {
+        matches!(self.pool, Pool::Postgres(_))
+    }
+
+    async fn read_stream_as(
+        &self,
+        sql: &str,
+        chunksize: usize,
+        persistent: bool,
+    ) -> Result<RecordBatchStream> {
         let chunksize = chunksize.max(1);
         let sql = sql.to_string();
         on_native!(self.pool, p => p.read_stream(sql, chunksize).await);
-        on_pool!(self.pool, p, B => backend::read_stream::<B>(p, sql, chunksize).await)
+        on_pool!(self.pool, p, B => backend::read_stream::<B>(p, sql, chunksize, persistent).await)
     }
 
     /// Execute a query and collect all rows (in batches of [`DEFAULT_CHUNKSIZE`]).
@@ -435,7 +451,26 @@ impl SqlDriver {
 
     /// Read typed query results as a kernel frame.
     pub async fn read_frame(&self, sql: &str) -> Result<Frame> {
-        let stream = self.read_stream(sql, DEFAULT_CHUNKSIZE).await?;
+        self.read_frame_as(sql, false).await
+    }
+
+    /// [`read_frame`](SqlDriver::read_frame) for a catalog (introspection) query whose text
+    /// repeats: on PostgreSQL the statement is prepared once per pooled connection and its
+    /// plan reused.
+    ///
+    /// PARITY: v4's psycopg 3 prepares any statement a connection runs five times
+    /// (`prepare_threshold`), which is what keeps its repeated `information_schema` queries
+    /// cheap. Only queries with explicit result columns may use this (a cached `SELECT *` plan
+    /// fails once the table's columns change).
+    pub async fn read_frame_catalog(&self, sql: &str) -> Result<Frame> {
+        let persistent = self.catalog_persistent();
+        self.read_frame_as(sql, persistent).await
+    }
+
+    async fn read_frame_as(&self, sql: &str, persistent: bool) -> Result<Frame> {
+        let stream = self
+            .read_stream_as(sql, DEFAULT_CHUNKSIZE, persistent)
+            .await?;
         let schema = stream.schema();
         let batches = stream.collect_batches().await?;
         if batches.is_empty() {
@@ -476,9 +511,20 @@ impl SqlDriver {
     ///
     /// `Ok(None)` when the query returns no rows; `Ok(Some(SqlValue::Null))` for a `NULL`.
     pub async fn value(&self, sql: &str) -> Result<Option<SqlValue>> {
+        self.value_as(sql, false).await
+    }
+
+    /// [`value`](SqlDriver::value) for a catalog query (see
+    /// [`read_frame_catalog`](SqlDriver::read_frame_catalog)).
+    pub async fn value_catalog(&self, sql: &str) -> Result<Option<SqlValue>> {
+        let persistent = self.catalog_persistent();
+        self.value_as(sql, persistent).await
+    }
+
+    async fn value_as(&self, sql: &str, persistent: bool) -> Result<Option<SqlValue>> {
         let sql = sql.to_string();
         on_native!(self.pool, p => p.value_with(&sql, &[]).await);
-        on_pool!(self.pool, p, B => backend::value::<B>(&p, &sql).await)
+        on_pool!(self.pool, p, B => backend::value::<B>(&p, &sql, persistent).await)
     }
 
     /// Execute one statement with bound parameters, returning the rows affected.
@@ -501,22 +547,59 @@ impl SqlDriver {
 
     /// Run a query with bound parameters and collect the result as a kernel [`Frame`].
     pub async fn read_frame_with(&self, sql: &str, params: &[SqlParam]) -> Result<Frame> {
-        let batches = self.read_with(sql, params).await?;
+        let batches = self.read_with_as(sql, params, false).await?;
+        batches_to_frame(&batches)
+    }
+
+    /// [`read_frame_with`](SqlDriver::read_frame_with) for a catalog query (see
+    /// [`read_frame_catalog`](SqlDriver::read_frame_catalog)).
+    pub async fn read_frame_with_catalog(&self, sql: &str, params: &[SqlParam]) -> Result<Frame> {
+        let persistent = self.catalog_persistent();
+        let batches = self.read_with_as(sql, params, persistent).await?;
         batches_to_frame(&batches)
     }
 
     /// Run a query with bound parameters and collect its rows as record batches.
     pub async fn read_with(&self, sql: &str, params: &[SqlParam]) -> Result<Vec<RecordBatch>> {
+        self.read_with_as(sql, params, false).await
+    }
+
+    async fn read_with_as(
+        &self,
+        sql: &str,
+        params: &[SqlParam],
+        persistent: bool,
+    ) -> Result<Vec<RecordBatch>> {
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.read_with(&sql, &params).await);
-        on_pool!(self.pool, p, B => backend::read_with::<B>(&p, &sql, &params).await)
+        on_pool!(self.pool, p, B => backend::read_with::<B>(&p, &sql, &params, persistent).await)
     }
 
     /// The first column of the first row of a query with bound parameters.
     pub async fn value_with(&self, sql: &str, params: &[SqlParam]) -> Result<Option<SqlValue>> {
+        self.value_with_as(sql, params, false).await
+    }
+
+    /// [`value_with`](SqlDriver::value_with) for a catalog query (see
+    /// [`read_frame_catalog`](SqlDriver::read_frame_catalog)).
+    pub async fn value_with_catalog(
+        &self,
+        sql: &str,
+        params: &[SqlParam],
+    ) -> Result<Option<SqlValue>> {
+        let persistent = self.catalog_persistent();
+        self.value_with_as(sql, params, persistent).await
+    }
+
+    async fn value_with_as(
+        &self,
+        sql: &str,
+        params: &[SqlParam],
+        persistent: bool,
+    ) -> Result<Option<SqlValue>> {
         let (sql, params) = (sql.to_string(), params.to_vec());
         on_native!(self.pool, p => p.value_with(&sql, &params).await);
-        on_pool!(self.pool, p, B => backend::value_with::<B>(&p, &sql, &params).await)
+        on_pool!(self.pool, p, B => backend::value_with::<B>(&p, &sql, &params, persistent).await)
     }
 
     /// PostgreSQL `COPY ... FROM STDIN` with a pre-encoded payload, in its own transaction

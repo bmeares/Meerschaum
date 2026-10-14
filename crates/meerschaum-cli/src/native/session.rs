@@ -5,12 +5,23 @@
 //! Connectors are built from `meerschaum:connectors:<type>:default` patched with the label's
 //! section, which includes the `MRSM_SQL_<LABEL>` / `MRSM_API_<LABEL>` environment connectors
 //! (the config registry adds them when it is created).
+//!
+//! **Connectors built elsewhere.** A host that already holds connectors (the Python façade:
+//! `mrsm.get_connector('sql', 'x', flavor='sqlite', database=...)` builds connectors from
+//! attributes that are in no config file) registers them with [`Session::register_instance`] /
+//! [`Session::register_sql`]; a lookup by keys then returns the registered connector instead of
+//! reading the config. [`Session::with_runtime`] shares the host's Tokio runtime (connection pools
+//! are bound to the runtime that created them), [`Session::set_registered_only`] makes lookups of
+//! unregistered keys fail instead of connecting to configured connectors, and
+//! [`Session::set_python_worker`] turns off the Python worker (empty manifests, no child
+//! process). With nothing registered and the defaults, the config path is unchanged.
 
 use meerschaum_worker::manifest::{Manifest, ensure_manifest, manifest_path};
 use meerschaum_worker::{PoolConfig, WorkerPool};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::io::IsTerminal;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use meerschaum_connector::InstanceConnector;
@@ -63,11 +74,32 @@ impl Instance {
     }
 }
 
+/// The session's runtime: owned (the CLI) or a handle to the host's (the Python extension).
+enum SessionRuntime {
+    Owned(tokio::runtime::Runtime),
+    Shared(tokio::runtime::Handle),
+}
+
+impl SessionRuntime {
+    fn handle(&self) -> &tokio::runtime::Handle {
+        match self {
+            SessionRuntime::Owned(rt) => rt.handle(),
+            SessionRuntime::Shared(handle) => handle,
+        }
+    }
+}
+
 /// The Tokio runtime and the connectors built so far (`meerschaum.connectors.connectors`).
 #[derive(Clone)]
 pub struct Session {
-    rt: Arc<tokio::runtime::Runtime>,
+    rt: Arc<SessionRuntime>,
     instances: Arc<Mutex<HashMap<String, Instance>>>,
+    /// Keys whose connector was registered by the host (never rebuilt from config).
+    registered: Arc<Mutex<HashSet<String>>>,
+    /// Refuse to build connectors for keys nobody registered.
+    registered_only: Arc<AtomicBool>,
+    /// Whether the Python worker (and the plugin manifest it builds) may be used.
+    python_worker: Arc<AtomicBool>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
     manifest: Arc<Mutex<Option<Arc<Manifest>>>>,
     python_manifest: Arc<Mutex<Option<Arc<Manifest>>>>,
@@ -87,14 +119,80 @@ impl Session {
             .enable_all()
             .build()
             .expect("tokio runtime");
+        Self::from_runtime(SessionRuntime::Owned(rt))
+    }
+
+    /// A session on a runtime the caller owns (the Python extension's, which its connectors'
+    /// pools were built on). `handle` must belong to a multi-threaded runtime that outlives the
+    /// session; [`Session::block_on`] must not be called from inside that runtime.
+    pub fn with_runtime(handle: tokio::runtime::Handle) -> Session {
+        Self::from_runtime(SessionRuntime::Shared(handle))
+    }
+
+    fn from_runtime(rt: SessionRuntime) -> Session {
         Session {
             rt: Arc::new(rt),
             instances: Arc::new(Mutex::new(HashMap::new())),
+            registered: Arc::new(Mutex::new(HashSet::new())),
+            registered_only: Arc::new(AtomicBool::new(false)),
+            python_worker: Arc::new(AtomicBool::new(true)),
             pool: Arc::new(Mutex::new(None)),
             manifest: Arc::new(Mutex::new(None)),
             python_manifest: Arc::new(Mutex::new(None)),
             natives: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Register a connector the host built for `keys` (`type:label`; a bare type means the
+    /// default label). Later [`Session::instance`] lookups of those keys return it instead of
+    /// building one from the config; registering again replaces it. Returns the connector it
+    /// replaced (registered or built from config), if any.
+    pub fn register_instance(&self, keys: &str, instance: Instance) -> Option<Instance> {
+        let full = full_keys(keys);
+        self.registered
+            .lock()
+            .expect("registered")
+            .insert(full.clone());
+        self.instances
+            .lock()
+            .expect("instances")
+            .insert(full, instance)
+    }
+
+    /// [`Session::register_instance`] for a SQL connector.
+    pub fn register_sql(&self, keys: &str, conn: Arc<SqlConnector>) -> Option<Instance> {
+        self.register_instance(keys, Instance::Sql(conn))
+    }
+
+    /// Forget the connector for `keys` (registered or built); the next lookup builds it again.
+    pub fn unregister(&self, keys: &str) -> Option<Instance> {
+        let full = full_keys(keys);
+        self.registered.lock().expect("registered").remove(&full);
+        self.instances.lock().expect("instances").remove(&full)
+    }
+
+    /// Whether the host registered the connector for `keys`.
+    pub fn is_registered(&self, keys: &str) -> bool {
+        self.registered
+            .lock()
+            .expect("registered")
+            .contains(&full_keys(keys))
+    }
+
+    /// When `true`, [`Session::instance`] fails for keys nobody registered (and never reads
+    /// the config or starts a worker to build them). Off by default.
+    pub fn set_registered_only(&self, on: bool) {
+        self.registered_only.store(on, Ordering::SeqCst);
+    }
+
+    /// When `false`, the session never starts the Python worker: the plugin manifests are
+    /// empty and non-native connector types cannot be resolved. On by default.
+    pub fn set_python_worker(&self, on: bool) {
+        self.python_worker.store(on, Ordering::SeqCst);
+    }
+
+    fn worker_enabled(&self) -> bool {
+        self.python_worker.load(Ordering::SeqCst)
     }
 
     /// The single lazily-created Python pool shared by this process session.
@@ -113,6 +211,13 @@ impl Session {
     /// Refresh the fingerprinted manifest (Python plugins merged with native plugins) without
     /// starting Python for an empty plugin tree.
     pub fn manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+        if !self.worker_enabled() {
+            let empty = Arc::new(Manifest::default());
+            *self.python_manifest.lock().expect("python manifest") = Some(empty.clone());
+            *self.natives.lock().expect("natives") = Some(Arc::new(NativePlugins::empty()));
+            *self.manifest.lock().expect("manifest") = Some(empty.clone());
+            return Ok(empty);
+        }
         let python = self.python_manifest_refresh(config)?;
         let paths = config.paths();
         let natives = match NativePlugins::open(
@@ -140,6 +245,11 @@ impl Session {
     }
 
     fn python_manifest_refresh(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+        if !self.worker_enabled() {
+            let empty = Arc::new(Manifest::default());
+            *self.python_manifest.lock().expect("python manifest") = Some(empty.clone());
+            return Ok(empty);
+        }
         let paths = config.paths();
         let pool = self.pool(config);
         let (manifest, _) = self
@@ -192,7 +302,15 @@ impl Session {
 
     /// Run a future to completion.
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
-        self.rt.block_on(fut)
+        match self.rt.as_ref() {
+            SessionRuntime::Owned(rt) => rt.block_on(fut),
+            SessionRuntime::Shared(handle) => handle.block_on(fut),
+        }
+    }
+
+    /// The runtime handle (owned or shared).
+    pub fn handle(&self) -> tokio::runtime::Handle {
+        self.rt.handle().clone()
     }
 
     /// Spawn a background task on the runtime.
@@ -200,7 +318,7 @@ impl Session {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.rt.spawn(fut);
+        self.rt.handle().spawn(fut);
     }
 
     /// The labels of connectors built so far, by type (`show connectors`' "Active connectors").
@@ -228,6 +346,12 @@ impl Session {
         if let Some(i) = self.instances.lock().expect("instances").get(&full) {
             return Ok(i.clone());
         }
+        if self.registered_only.load(Ordering::SeqCst) {
+            return Err(ActionError::new(
+                "ConnectorNotRegistered",
+                format!("No connector was registered for '{full}'."),
+            ));
+        }
         let inst = match typ.as_str() {
             "sql" => Instance::Sql(Arc::new(self.sql_connector(&label, config)?)),
             "api" => {
@@ -242,6 +366,12 @@ impl Session {
                     .block_on(meerschaum_valkey::ValkeyConnector::connect(&label, attrs))
                     .map_err(|e| ActionError::new("ConnectionError", e.to_string()))?;
                 Instance::Other(Arc::new(c))
+            }
+            _ if !self.worker_enabled() => {
+                return Err(ActionError::new(
+                    "WorkerError",
+                    format!("Cannot build '{full}' without the Python worker."),
+                ));
             }
             _ => {
                 let natives = self.native_plugins(config)?;
@@ -323,6 +453,12 @@ impl Session {
         conn.set_instance_provider(Arc::new(ConfiguredSqlProvider::new(config)));
         Ok(conn)
     }
+}
+
+/// `type:label` with the default label filled in (the session's map key).
+fn full_keys(keys: &str) -> String {
+    let (typ, label) = split_keys(keys);
+    format!("{typ}:{label}")
 }
 
 /// Split `type:label` (the label defaults to `main`).
@@ -495,5 +631,116 @@ mod provider_tests {
         assert_eq!(conn.connector_keys(), "sql:local");
         assert!(provider.instance("sql:not_configured_anywhere").is_none());
         assert!(provider.instance("api:local").is_none());
+    }
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::*;
+    use meerschaum_core::config::ConfigOptions;
+
+    fn isolated_config() -> (tempfile::TempDir, tempfile::TempDir, Config) {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = tempfile::tempdir().unwrap();
+        let config = Config::new(ConfigOptions::with_env(vec![
+            ("MRSM_ROOT_DIR".into(), root.path().display().to_string()),
+            (
+                "MRSM_PLUGINS_DIR".into(),
+                plugins.path().display().to_string(),
+            ),
+        ]))
+        .unwrap();
+        (root, plugins, config)
+    }
+
+    fn adhoc_sqlite(session: &Session, dir: &std::path::Path, label: &str) -> Arc<SqlConnector> {
+        let attrs = ConnectorAttributes {
+            label: Some(label.into()),
+            flavor: Some(Flavor::Sqlite),
+            database: Some(dir.join(format!("{label}.db")).display().to_string()),
+            ..Default::default()
+        };
+        let spec = ConnectionSpec::from_attributes(&attrs).unwrap();
+        let settings = InstanceSettings::defaults(spec.flavor);
+        let _guard = session.handle().enter();
+        Arc::new(SqlConnector::connect_lazy(label, spec, settings).unwrap())
+    }
+
+    #[test]
+    fn registered_connector_wins_over_config() {
+        let (root, _plugins, config) = isolated_config();
+        let session = Session::new();
+        // Not in any config: a lookup fails until the host registers it.
+        assert!(session.instance("sql:w9q_adhoc", &config).is_err());
+        let conn = adhoc_sqlite(&session, root.path(), "w9q_adhoc");
+        assert!(
+            session
+                .register_sql("sql:w9q_adhoc", conn.clone())
+                .is_none()
+        );
+        assert!(session.is_registered("sql:w9q_adhoc"));
+        let inst = session.instance("sql:w9q_adhoc", &config).unwrap();
+        assert!(Arc::ptr_eq(inst.sql().unwrap(), &conn));
+        assert_eq!(inst.keys(), "sql:w9q_adhoc");
+
+        // A registered connector replaces one built from config for the same keys.
+        let built = session.instance("sql:local", &config).unwrap();
+        assert!(!session.is_registered("sql:local"));
+        let local = adhoc_sqlite(&session, root.path(), "local");
+        let replaced = session.register_sql("sql:local", local.clone()).unwrap();
+        assert!(Arc::ptr_eq(replaced.sql().unwrap(), built.sql().unwrap()));
+        let inst = session.instance("sql:local", &config).unwrap();
+        assert!(Arc::ptr_eq(inst.sql().unwrap(), &local));
+
+        // A bare type means the default label.
+        let main = adhoc_sqlite(&session, root.path(), "main");
+        session.register_sql("sql", main.clone());
+        let inst = session.instance("sql:main", &config).unwrap();
+        assert!(Arc::ptr_eq(inst.sql().unwrap(), &main));
+
+        // Unregistering falls back to the config path again.
+        session.unregister("sql:w9q_adhoc");
+        assert!(!session.is_registered("sql:w9q_adhoc"));
+        assert!(session.instance("sql:w9q_adhoc", &config).is_err());
+    }
+
+    #[test]
+    fn registered_only_never_reads_config() {
+        let (root, _plugins, config) = isolated_config();
+        let session = Session::new();
+        session.set_registered_only(true);
+        session.set_python_worker(false);
+        let err = session.instance("sql:local", &config).err().unwrap();
+        assert_eq!(err.class, "ConnectorNotRegistered");
+        assert!(session.instance("plugin:stress", &config).is_err());
+        let conn = adhoc_sqlite(&session, root.path(), "w9q_only");
+        session.register_sql("sql:w9q_only", conn.clone());
+        let inst = session.instance("sql:w9q_only", &config).unwrap();
+        assert!(Arc::ptr_eq(inst.sql().unwrap(), &conn));
+        // No worker: empty manifests, no child process.
+        let manifest = session.manifest(&config).unwrap();
+        assert!(manifest.plugins.is_empty());
+        assert!(session.python_manifest(&config).unwrap().plugins.is_empty());
+        assert!(session.pool.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn shared_runtime_runs_futures() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let session = Session::with_runtime(rt.handle().clone());
+        assert_eq!(session.block_on(async { 41 + 1 }), 42);
+        let (root, _plugins, config) = isolated_config();
+        let conn = adhoc_sqlite(&session, root.path(), "w9q_shared");
+        session.register_sql("sql:w9q_shared", conn);
+        let inst = session.instance("sql:w9q_shared", &config).unwrap();
+        let exists = session.block_on(async {
+            let pipe = meerschaum_core::Pipe::new("a", "b").unwrap();
+            inst.conn().pipe_exists(&pipe).await
+        });
+        assert!(matches!(exists, Ok(false)));
     }
 }

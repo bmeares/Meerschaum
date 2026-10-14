@@ -32,7 +32,8 @@ use crate::enforce::{
     EnforceError, PipeDtypesContext, PipeInput, apply_result, pandas_astype, pipe_enforce_dtypes,
     series_attempt_cast_to_geometry, series_coerce_timezone,
 };
-use crate::frame::{ColumnData, Frame, json_to_value};
+use crate::frame::{ColumnData, Frame, json_to_value, values_to_series};
+use crate::merge_dtype::{Kind, column_kind, merge_kind};
 use crate::serialize::compact_json_sorted;
 use crate::value::Value;
 use meerschaum_core::pyfmt::float_repr;
@@ -102,30 +103,89 @@ fn json_dumps_sorted(v: &Value) -> String {
 static NA_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)^(none|nan|na|nat|natz|<na>)$").expect("valid regex"));
 
-/// `normalize_nulls()`: null-like strings in string/object columns become `NA`.
-fn normalize_nulls(df: &Frame) -> Frame {
+/// A native string column with its null-like strings (`None`, `NaN`, `<NA>`, ...) nulled.
+fn normalize_string_series(s: &polars::prelude::Series) -> polars::prelude::Series {
+    use polars::prelude::{IntoSeries, NewChunkedArray, StringChunked};
+    let Ok(chunked) = s.str() else {
+        return s.clone();
+    };
+    if !chunked.into_iter().flatten().any(is_na_string) {
+        return s.clone();
+    }
+    StringChunked::from_iter_options(
+        s.name().clone(),
+        chunked.into_iter().map(|v| v.filter(|t| !is_na_string(t))),
+    )
+    .into_series()
+}
+
+/// `normalize_nulls()` of the delta rows, with the dtypes `merge` gives the columns: null-like
+/// strings in string/object columns become `NA`, and each column takes its merge dtype
+/// (`kinds`; see [`crate::merge_dtype`]): `object` columns that pandas infers as `int64`,
+/// `float64`, `bool`, `str` or `datetime64` become native, native columns whose merge is
+/// `object` become object columns.
+fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>) -> Frame {
+    use polars::prelude::DataType;
     let mut out = df.clone();
     for col in df.columns() {
-        let is_stringish = matches!(&col.data, ColumnData::Object(_))
-            || matches!(
-                col.data.polars_dtype(),
-                Some(polars::prelude::DataType::String)
-            );
-        if !is_stringish {
-            continue;
-        }
-        let values: Vec<Value> = col
-            .data
-            .values()
-            .into_iter()
-            .map(|v| match &v {
-                Value::Str(s) if is_na_string(s) => Value::NA,
-                _ => v,
-            })
-            .collect();
-        let _ = out.set(&col.name, ColumnData::Object(values));
+        let kind = kinds
+            .get(&col.name)
+            .cloned()
+            .unwrap_or_else(|| column_kind(&col.data));
+        let data = match &col.data {
+            ColumnData::Native(s) if matches!(s.dtype(), DataType::String) => {
+                if kind.is_object() {
+                    ColumnData::Object(
+                        col.data
+                            .values()
+                            .into_iter()
+                            .map(|v| match &v {
+                                Value::Str(t) if is_na_string(t) => Value::NA,
+                                _ => v,
+                            })
+                            .collect(),
+                    )
+                } else {
+                    ColumnData::Native(normalize_string_series(s))
+                }
+            }
+            ColumnData::Native(_) if kind.is_object() => ColumnData::Object(col.data.values()),
+            ColumnData::Native(_) => continue,
+            ColumnData::Object(values) => {
+                let values: Vec<Value> = values
+                    .iter()
+                    .map(|v| match v {
+                        Value::Str(s) if is_na_string(s) => Value::NA,
+                        _ => v.clone(),
+                    })
+                    .collect();
+                let native = (!kind.is_object())
+                    .then(|| polars_dtype_for_pandas(&kind.dtype))
+                    .flatten()
+                    .and_then(|dtype| values_to_series(&col.name, &values, &dtype));
+                match native {
+                    Some(series) => ColumnData::Native(series),
+                    None => ColumnData::Object(values),
+                }
+            }
+        };
+        let _ = out.set(&col.name, data);
     }
     out
+}
+
+/// The column `Series.apply(func)` returns for these values: pandas infers its dtype like
+/// `infer_objects()` (all-`int` results are `int64`, `str` results `str`, ...).
+fn applied_column(name: &str, values: Vec<Value>) -> ColumnData {
+    let kind = crate::merge_dtype::infer_objects(&values);
+    let native = (!kind.is_object())
+        .then(|| polars_dtype_for_pandas(&kind.dtype))
+        .flatten()
+        .and_then(|dtype| values_to_series(name, &values, &dtype));
+    match native {
+        Some(series) => ColumnData::Native(series),
+        None => ColumnData::Object(values),
+    }
 }
 
 fn row_keys(df: &Frame, cols: &[String]) -> Vec<Vec<Value>> {
@@ -615,7 +675,20 @@ pub fn filter_unseen_df(old: Option<&Frame>, new: &Frame, opts: &FilterUnseenOpt
     // delta rows of the new frame are normalized (`normalize(new).take(keep)`).
     let all_cols = new.names();
     let keep = anti_join_rows(&new, &old, &all_cols);
-    let normalized_delta = normalize_nulls(&new.take(&keep));
+    // The dtype of each result column is the dtype of `merge(new, old)` after `infer_objects()`
+    // (PARITY.md rows 17 and 18), decided on the whole columns, not on the delta rows.
+    let kinds: HashMap<String, Kind> = new
+        .columns()
+        .iter()
+        .filter_map(|c| {
+            let o = old.column(&c.name)?;
+            Some((
+                c.name.clone(),
+                merge_kind(&column_kind(&c.data), &column_kind(&o.data)),
+            ))
+        })
+        .collect();
+    let normalized_delta = normalize_delta(&new.take(&keep), &kinds);
     let mut delta = normalized_delta
         .select(&new_cols)
         .unwrap_or_else(|_| normalized_delta.clone());
@@ -635,7 +708,7 @@ pub fn filter_unseen_df(old: Option<&Frame>, new: &Frame, opts: &FilterUnseenOpt
             })
             .collect();
         if let Ok(values) = parsed {
-            let _ = delta.set(col, ColumnData::Object(values));
+            let _ = delta.set(col, applied_column(col, values));
         }
     }
     let delta_numeric = get_numeric_cols(&delta);
@@ -650,7 +723,7 @@ pub fn filter_unseen_df(old: Option<&Frame>, new: &Frame, opts: &FilterUnseenOpt
             .map(|v| attempt_cast_to_numeric(v, true, p, s))
             .collect();
         if let Ok(values) = casted {
-            let _ = delta.set(col, ColumnData::Object(values));
+            let _ = delta.set(col, applied_column(col, values));
         }
     }
     let delta_uuid = get_uuid_cols(&delta);
@@ -665,7 +738,7 @@ pub fn filter_unseen_df(old: Option<&Frame>, new: &Frame, opts: &FilterUnseenOpt
             .iter()
             .map(attempt_cast_to_uuid)
             .collect();
-        let _ = delta.set(col, ColumnData::Object(values));
+        let _ = delta.set(col, applied_column(col, values));
     }
     let delta_bytes = get_bytes_cols(&delta);
     for col in &bytes_cols {
@@ -679,7 +752,7 @@ pub fn filter_unseen_df(old: Option<&Frame>, new: &Frame, opts: &FilterUnseenOpt
             .iter()
             .map(attempt_cast_to_bytes)
             .collect();
-        let _ = delta.set(col, ColumnData::Object(values));
+        let _ = delta.set(col, applied_column(col, values));
     }
     let delta_geometry = get_geometry_cols(&delta);
     for col in &geometry_cols {

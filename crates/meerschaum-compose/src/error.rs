@@ -19,6 +19,9 @@ pub enum ErrorKind {
     Os,
     /// A YAML parsing error (`yaml.YAMLError`).
     Yaml,
+    /// A plain `Exception` (what `meerschaum.utils.warnings.error()` raises, e.g. an instance
+    /// connector that cannot be reached).
+    Exception,
 }
 
 impl ErrorKind {
@@ -32,6 +35,7 @@ impl ErrorKind {
             ErrorKind::Attribute => "AttributeError",
             ErrorKind::Os => "OSError",
             ErrorKind::Yaml => "YAMLError",
+            ErrorKind::Exception => "Exception",
         }
     }
 }

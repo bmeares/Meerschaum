@@ -1,0 +1,4 @@
+shapely>=2.0.7
+pyproj>=3.7.1
+geopandas>=1.0.1
+geoarrow-types>=0.3.0

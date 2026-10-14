@@ -52,3 +52,45 @@ async fn leases(ctx: Ctx) {
     );
 }
 flavor_tests!(lease_connections, leases);
+
+/// A lease that expires between the INSERT and the contention check (a crashed holder's lease
+/// running out while another process acquires) is taken over, never reported as an error.
+async fn lease_expires_between_statements(ctx: Ctx) {
+    let pipe = meerschaum_core::Pipe::builder(&ctx.prefix, "lease_window")
+        .build()
+        .unwrap();
+    let ttl = Duration::from_millis(300);
+    assert!(
+        ctx.conn
+            .acquire_pipe_lease(&pipe, "crashed", ttl)
+            .await
+            .unwrap()
+    );
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    // The UPDATE sees a live row and the INSERT conflicts; then the row expires before the
+    // contention check finds a live owner.
+    let after_conflict = || {
+        calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(500));
+    };
+    let taken = ctx
+        .conn
+        .acquire_pipe_lease_observed(&pipe, "restarted", Duration::from_secs(5), &after_conflict)
+        .await
+        .expect("an expired lease is taken over, not an error");
+    assert!(taken);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(
+        !ctx.conn
+            .acquire_pipe_lease(&pipe, "crashed", ttl)
+            .await
+            .unwrap()
+    );
+    assert!(
+        ctx.conn
+            .release_pipe_lease(&pipe, "restarted")
+            .await
+            .unwrap()
+    );
+}
+flavor_tests!(lease_expiry_window, lease_expires_between_statements);

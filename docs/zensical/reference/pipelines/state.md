@@ -113,6 +113,7 @@ All keys live under `system.engine` in your configuration (`mrsm edit config sys
 | `state_flush_ms` | `500` | In continuous mode, how often buffered ledger entries and events are flushed |
 | `run_history_days` | `30` | Retention for runs, nodes and events |
 | `debounce_seconds` | unset | Minimum time between triggered runs of a stream child (see [Continuous Mode](/reference/pipelines/continuous/)) |
+| `default_duration_seconds` | `30` | Expected duration of a node with no run history: its critical-path duration and the length of its planned Gantt bar (see [Visualization](/reference/pipelines/visualization/)) |
 | `chunk_pipelining` | `false` | Let a child pre-sync the chunks its running parents have committed (see [Pipelines](/reference/pipelines/#chunk-pipelining)); `--chunk-pipelining` turns it on for one run |
 
 ```yaml

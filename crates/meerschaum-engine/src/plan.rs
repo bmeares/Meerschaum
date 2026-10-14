@@ -526,6 +526,8 @@ struct EdgeEval {
     previous_watermark: Option<Bound>,
     /// The parent watermark moved since the cursor (with or without entries).
     watermark_advanced: bool,
+    /// The edge has no cursor yet (its first engine run).
+    no_cursor: bool,
 }
 
 impl EdgeEval {
@@ -543,11 +545,21 @@ impl EdgeEval {
                     format!("seq {first}–{last}")
                 };
                 let noun = if *count == 1 { "entry" } else { "entries" };
-                let mut text = format!(
-                    "{count} unconsumed ledger {noun} from {} ({seqs})",
-                    self.label
-                );
-                if self.watermark_advanced {
+                let mut text = if self.no_cursor {
+                    format!(
+                        "no cursor on the edge from {} (first engine run); {count} unconsumed \
+                         ledger {noun} ({seqs})",
+                        self.label
+                    )
+                } else {
+                    format!(
+                        "{count} unconsumed ledger {noun} from {} ({seqs})",
+                        self.label
+                    )
+                };
+                if self.no_cursor && self.watermark_advanced {
+                    text.push_str(&format!(", its watermark {wm} is ahead"));
+                } else if self.watermark_advanced {
                     text.push_str(&format!(
                         ", watermark advanced {} → {wm}",
                         fmt_opt(self.previous_watermark.as_ref())
@@ -764,11 +776,17 @@ pub async fn plan_node<S: StateSource>(
             parent_watermark: pwm,
             previous_watermark: None,
             watermark_advanced: false,
+            no_cursor: false,
         };
         let seq = match cursor {
             None => {
-                let latest = match state.latest_seq(&e.state_instance, &e.parent).await {
-                    Ok(s) => s,
+                eval.no_cursor = true;
+                // The parent's unconsumed ledger entries (including those it wrote earlier in
+                // this run) say what changed, exactly as they would with a cursor: late rows
+                // inside the child's synced range do not move the parent's watermark. Only a
+                // parent with no entries at all falls back to comparing watermarks.
+                let entries = match state.ledger_after(&e.state_instance, &e.parent, 0).await {
+                    Ok(entries) => entries,
                     Err(err) => {
                         return out.set(Action::UpstreamFailed, unreachable("the ledger", err));
                     }
@@ -783,8 +801,20 @@ pub async fn plan_node<S: StateSource>(
                         (Some(p), Some(o)) => p > o,
                     }
                 };
-                eval.signal = Signal::NoHistory { advanced };
-                latest.unwrap_or(0)
+                if let (Some(first), Some(last)) = (entries.first(), entries.last()) {
+                    eval.watermark_advanced = advanced;
+                    eval.signal = Signal::Dirty {
+                        count: entries.len(),
+                        first: first.seq,
+                        last: last.seq,
+                    };
+                    let dirty = dirty_intervals(&entries, &parent.axis);
+                    eval.dirty = map_to_child(&dirty, &parent.axis, axis, &e.options);
+                    last.seq
+                } else {
+                    eval.signal = Signal::NoHistory { advanced };
+                    0
+                }
             }
             Some(c) => {
                 eval.previous_watermark = c.parent_watermark_at_cursor;

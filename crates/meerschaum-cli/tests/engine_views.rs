@@ -246,10 +246,23 @@ fn graph_sync_ends_with_a_gantt_and_runs_are_listed() {
     assert!(table.contains("3/3"), "{table}");
     let last_one = env.ok(&["show", "runs", "--last", "1"]);
     assert!(last_one.contains(&run_id), "{last_one}");
+    // Planned bars with end times (a first run plans every node at the 30 s default).
+    assert!(out.contains("planned 1m30s"), "{out}");
+    assert_eq!(out.matches("30s    planned").count(), 3, "{out}");
     // `show run <id>` draws the same chart.
     let gantt = env.ok(&["show", "run", &run_id]);
     assert!(gantt.starts_with(&format!("run {run_id}")), "{gantt}");
     assert!(gantt.contains("critical path"), "{gantt}");
+    assert!(
+        gantt.contains("\u{2592}") && gantt.contains("planned"),
+        "{gantt}"
+    );
+    let detail = env.ok(&["show", "run", &run_id, "--nopretty"]);
+    let detail: serde_json::Value = serde_json::from_str(detail.trim()).unwrap();
+    for bar in detail["bars"].as_array().unwrap() {
+        assert!(bar["planned_end"].is_string(), "{bar}");
+        assert_eq!(bar["planned_duration_seconds"], 30.0, "{bar}");
+    }
     let missing = env.run(&["show", "run", "01NOPE"]);
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stdout).contains("No run '01NOPE'"));
@@ -295,4 +308,132 @@ fn v5_only_actions_stay_out_of_v4_listings() {
     let env = chain();
     let actions = env.ok(&["show", "actions", "--nopretty"]);
     assert!(!actions.lines().any(|l| l == "plan"), "{actions}");
+}
+
+/// A recorded run with fixed times: a chain with one failed branch and one skipped node.
+fn recorded_run() -> meerschaum_engine::RunRecord {
+    use chrono::{TimeDelta, TimeZone, Utc};
+    use meerschaum_engine::{Action, NodeRow, NodeStatus, PipeRef, RunRecord, RunRow};
+    let t0 = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    let at = |s: i64| t0 + TimeDelta::seconds(s);
+    let node = |metric: &str,
+                action: Action,
+                status: NodeStatus,
+                actual: Option<(i64, i64)>,
+                planned: (f64, f64, f64)| {
+        let pipe_ref = PipeRef::new("sql:local", "sql:local", metric, None);
+        let mut row = NodeRow::new("01JW9GANTT", &pipe_ref, action, "");
+        row.status = status;
+        if let Some((s, f)) = actual {
+            row.started = Some(at(s));
+            row.finished = Some(at(f));
+            if status == NodeStatus::Succeeded {
+                row.duration_seconds = Some((f - s) as f64);
+            }
+        }
+        row.planned_start_seconds = Some(planned.0);
+        row.planned_duration_seconds = Some(planned.1);
+        row.slack_seconds = Some(planned.2);
+        row
+    };
+    let mut raw = node(
+        "raw",
+        Action::Root,
+        NodeStatus::Succeeded,
+        Some((0, 40)),
+        (0.0, 30.0, 0.0),
+    );
+    raw.inserted = 12_301;
+    let mut clean = node(
+        "clean",
+        Action::Incremental,
+        NodeStatus::Succeeded,
+        Some((40, 90)),
+        (30.0, 45.0, 0.0),
+    );
+    clean.inserted = 12_290;
+    clean.updated = 11;
+    let mut geo = node(
+        "geo",
+        Action::Backfill,
+        NodeStatus::Failed,
+        Some((40, 49)),
+        (30.0, 20.0, 25.0),
+    );
+    geo.message = Some("connection reset\ntraceback".into());
+    let daily = node(
+        "daily",
+        Action::Skip,
+        NodeStatus::Skipped,
+        None,
+        (75.0, 0.0, 0.0),
+    );
+    RunRecord {
+        run: RunRow {
+            run_id: "01JW9GANTT".into(),
+            started: t0,
+            finished: Some(at(100)),
+            success: Some(false),
+            message: Some("1 failed".into()),
+            targets: vec![],
+            workers: 4,
+            num_nodes: 4,
+            resumed_from: None,
+            holder: "test".into(),
+            selection: None,
+        },
+        nodes: vec![raw, clean, geo, daily],
+    }
+}
+
+#[test]
+fn gantt_draws_planned_bars_with_end_times_under_the_actual_ones() {
+    let text = meerschaum_cli::native::engine_views::gantt(&recorded_run(), 100);
+    assert_eq!(text, GOLDEN_GANTT, "\n{text}");
+}
+
+const GOLDEN_GANTT: &str = r#"run 01JW9GANTT  4 nodes  4 workers  wall 1m40s  planned 1m15s  critical path: raw → clean
+raw    ██████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  40s    +12,301 ins                  ✔
+       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                        30s    planned
+clean  ░░░░░░░░░░░░░░░░░░░░░░███████████████████████████░░░░░  50s    +12,290 ins  ~11 upd         ✔
+                       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒               45s    planned
+geo    ░░░░░░░░░░░░░░░░░░░░░░████                              9s     error: connection reset      ✘
+                       ▒▒▒▒▒▒▒▒▒▒▒                             20s    planned
+daily  ·                                                              skip                         ○
+█ actual  ▒ planned
+"#;
+
+#[test]
+fn gantt_scales_to_a_planned_makespan_longer_than_the_run() {
+    use chrono::TimeDelta;
+    let mut run = recorded_run();
+    run.nodes.truncate(2);
+    // The run took 10 s; the plan expected 30 s + 45 s.
+    run.run.finished = Some(run.run.started + TimeDelta::seconds(10));
+    for (n, (s, f)) in run.nodes.iter_mut().zip([(0, 4), (4, 10)]) {
+        n.started = Some(run.run.started + TimeDelta::seconds(s));
+        n.finished = Some(run.run.started + TimeDelta::seconds(f));
+        n.duration_seconds = Some((f - s) as f64);
+    }
+    let text = meerschaum_cli::native::engine_views::gantt(&run, 60);
+    let golden = r#"run 01JW9GANTT  2 nodes  4 workers  wall 10s  planned 1m15s  critical path: raw → clean
+raw    █░░░░░░░░░░░░░  4s     +12,301 ins                  ✔
+       ▒▒▒▒▒▒          30s    planned
+clean  ░█░░░░░░░░░░░░  6s     +12,290 ins  ~11 upd         ✔
+             ▒▒▒▒▒▒▒▒  45s    planned
+█ actual  ▒ planned
+"#;
+    assert_eq!(text, golden, "\n{text}");
+}
+
+#[test]
+fn gantt_of_rows_without_a_plan_has_no_planned_bars() {
+    let mut run = recorded_run();
+    for n in &mut run.nodes {
+        n.planned_duration_seconds = None;
+    }
+    let text = meerschaum_cli::native::engine_views::gantt(&run, 100);
+    assert!(!text.contains('\u{2592}'), "{text}");
+    assert!(!text.contains("planned"), "{text}");
+    assert_eq!(text.lines().count(), 5, "{text}");
 }

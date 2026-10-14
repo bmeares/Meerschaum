@@ -194,11 +194,11 @@ impl SqlConnector {
             None
         };
         let df = match scoped {
-            Some(q) => match self.read(&q).await {
+            Some(q) => match self.read_catalog(&q).await {
                 Ok(df) if df.height() > 0 => Ok(df),
-                _ => self.read(&query).await,
+                _ => self.read_catalog(&query).await,
             },
-            None => self.read(&query).await,
+            None => self.read_catalog(&query).await,
         };
         let Ok(df) = df else {
             return IndexMap::new();
@@ -248,7 +248,7 @@ impl SqlConnector {
     ) -> IndexMap<String, Vec<IndexDoc>> {
         let ischema = introspection_schema(self.flavor, schema);
         let query = get_table_cols_indices_query(table, self.flavor, ischema.as_deref());
-        let Ok(df) = self.read(&query).await else {
+        let Ok(df) = self.read_catalog(&query).await else {
             return IndexMap::new();
         };
         let rows: Vec<ColumnIndexRow> = frame_docs(&df)

@@ -147,7 +147,12 @@ impl Env {
 
     /// The pipe's table in a comparable form (see [`Table`]).
     pub async fn table(&self, metric: &str) -> Table {
-        let pipe = Pipe::builder(INSTANCE, metric)
+        self.table_of(INSTANCE, metric).await
+    }
+
+    /// The table of the pipe `connector_keys / metric` on this instance (see [`Table`]).
+    pub async fn table_of(&self, connector_keys: &str, metric: &str) -> Table {
+        let pipe = Pipe::builder(connector_keys, metric)
             .instance(INSTANCE)
             .build()
             .expect("valid pipe");

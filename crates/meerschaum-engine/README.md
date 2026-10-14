@@ -21,6 +21,8 @@ let engine = Engine::new(registry, EngineConfig::from_config(&config, Some(&root
 
 // Live events (§5.7): one typed event per transition, for every run of this engine.
 let mut events = engine.subscribe();
+// ... or for one run, unbounded and in order: `RunOptions { on_event: Some(sink), .. }`
+// (an `Arc<dyn EventSink>`; the Python `Pipeline.sync(on_event=...)` uses it).
 
 // `mrsm sync pipes -m daily_rollup --parents` / `pipe.sync(parents=True)` / `Pipeline.run()`.
 let result = engine
@@ -94,13 +96,21 @@ engine.state().load_events(&run_id).await?;
   - `StreamSource` — `IS_STREAMING = True` connectors with `subscribe(pipe, sink)`; the engine
     supplies the micro-batching sink (`stream::run_sink`) and acknowledges after commit;
   - `LegacyStream` — the v4 pattern (a `sync()` that subscribes and returns, callbacks call
-    `pipe.sync()`): `run(pipe, stop)` keeps the worker alive and forwards each callback sync to
-    the native path; the engine supervises it like a `subscribe` stream;
+    `pipe.sync()`): `run(pipe, sink, stop)` keeps the worker alive and sends each callback sync
+    through `sink` (a `stream::LegacySink`); the engine's sink (`native::NativeLegacySink`)
+    writes the ledger before the commit and reports every sync of a graph node as a
+    `stream_flushed{trigger: callback}` flush, and supervises the worker like a `subscribe`
+    stream;
   - `is_python(keys)` — counts the node against `system.engine.python_workers`.
 - **Leases.** `InstanceConnector::acquire_pipe_lease` / `release_pipe_lease`. An instance that
   answers `NotImplemented` falls back to interprocess file locks under
-  `{root}/cache/engine_leases` with a one-time warning.
-- **Crash injection (tests).** `Engine::with_faults(Arc<dyn FaultInjector>)`.
+  `{root}/cache/engine_leases` with a one-time warning. A held lease is polled until
+  `lease_wait`; one acquire error is retried after a poll (an acquire can race a crashed
+  holder's lease expiring between its statements), a second consecutive one fails the node.
+- **Crash injection (tests).** `Engine::with_faults(Arc<dyn FaultInjector>)`: `after_ledger_write`
+  (before each data commit), `after_data_commit` (after each window's / flush's commit) and
+  `before_cursor_advance` (after the whole node committed, right before its cursors and
+  definition hash advance; `SyncExecutor::before_cursor_advance`).
 
 ## Engine state
 
@@ -112,6 +122,13 @@ Every durable row lives on an instance as a `temporary`, `static` internal pipe 
 the engine adds one ledger insert (before the data commit, parents only) and one cursor upsert
 for all of a node's edges (after the sync succeeds); `tests/state_cost.rs` measures this.
 
+Dropping, deleting or fully clearing a pipe forgets its state (its ledger entries, the cursors
+it is part of, its definition hash) on its own instance: the SQL and Valkey instance connectors
+call `meerschaum_connector::pipe_ops::forget_engine_state` after success, and the Python façade
+does the same for every `pipe.drop()` / `delete()` / `clear()` (`meerschaum/core/Pipeline/_engine.py`).
+The state pipes' parameters live in `pipe_ops::engine_state_parameters` (`EnginePipe::parameters`
+delegates to it). Cursors kept on another instance (cross-instance edges) are not forgotten.
+
 ## Tests
 
 | Test | What it covers |
@@ -119,6 +136,10 @@ for all of a node's edges (after the sync succeeds); `tests/state_cost.rs` measu
 | `tests/golden.rs` | The planner golden fixtures (`tests/fixtures/*.json`). |
 | `tests/v4_sync.rs` | A six-level chain and a diamond on SQLite over three phases of source changes, `--parents` and flat `-w 1`, against tables recorded from v4.1 (`tests/fixtures/v4_sync/`). |
 | `tests/crash.rs` | Crashes between ledger write and data commit, and between data commit and cursor advance; `--resume`. |
+| `tests/crash_restart.rs` | The same two points as real process deaths (a child process `exit`s inside the fault hook) followed by a restart, on SQLite and PostgreSQL-family (`MRSM_TEST_PG_URI`, schema `w9_engine`): the ledger holds the interrupted run's entry, no cursor moved, no run record, and the next run converges with every row exactly once. |
+| `tests/forget_state.rs` | Drop, delete and full clear forget a pipe's ledger, cursors and hash (partial clears keep them); a reset chain plans like a first run. |
+| `tests/pg_state.rs` | On PostgreSQL-family (`MRSM_TEST_POSTGIS_URI`, schema `w9s_state`), a second graph run sees the first run's history, hashes, cursors and watermarks. |
+| `tests/legacy_flush.rs` | A v4-pattern (`LegacyStream`) connector's callback syncs are `callback` flushes: events with rows and bounds, ledger entries, children triggered; syncs of pipes outside the graph stay bare. |
 | `tests/leases.rs` | Lease contention across two processes on one SQLite instance (engine run level). |
 | `tests/leases_backends.rs` | Lease contention across processes through `InstanceLeases` on SQLite, PostgreSQL-family (`MRSM_TEST_POSTGIS_URI`, schema `w7_engine`) and Valkey (`MRSM_TEST_VALKEY_URI`), including a killed holder that blocks only until its TTL. |
 | `tests/stream_children.rs` | A stream flush triggers the stream's children, rate-limited by the child's `min_seconds`, coalescing flushes. |
@@ -165,8 +186,19 @@ continue to the commit after losing its lease.
   `system.engine.debounce_seconds`, else the loop's `--min-seconds`; nodes still inside their
   window are held back with their descendants (`RunOptions::hold`) and run on a later trigger.
   Flushes that arrive while a trigger run executes or is held are coalesced. Each trigger emits
-  `children_triggered{run_id, nodes, held, flushes}`. A v4-pattern (`LegacyStream`) worker does
-  not report flushes to the engine, so its children run on the lap cadence only.
+  `children_triggered{run_id, nodes, held, flushes}`. A v4-pattern (`LegacyStream`) worker's
+  callback syncs are flushes too (trigger `callback`), so its children trigger the same way;
+  only committed flushes trigger.
+- **Flush events.** `stream_flushed` carries `rows`, `bytes`, `trigger` and (wave 9, additive)
+  `success`, `begin` / `end` (the smallest and largest datetime-axis value of the changed rows),
+  `inserted` / `updated` / `upserted` and `message`. `subscribe` streams only report committed
+  flushes; `callback` flushes report failures too (`bytes` is 0).
+- **Planned durations (Gantt).** The CPM schedule estimates each node with the EWMA of its
+  successful runs (same action, else any action), else `EngineConfig::default_duration`
+  (`system.engine.default_duration_seconds`, 30 s); a provisional `skip` is scheduled as an
+  `incremental`. `NodeRow::planned_duration_seconds` keeps the estimate in memory (it is not a
+  column of the static `mrsm:engine_nodes` schema); `EngineReader::run_detail` recomputes it
+  from the history before the run, so every `GanttBar` has a `planned_end`.
 - **Chunk events (§5.7).** `chunk_started` / `chunk_finished` carry `source`
   (`window` for planned windows, `fetch` for pieces of a fetched frame in **fetch order**),
   `rows`, `begin`, `end`, `inserted` / `updated` / `upserted` and `duration_ms`. All fields after

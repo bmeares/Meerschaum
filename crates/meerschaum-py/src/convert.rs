@@ -69,8 +69,16 @@ pub struct PyCtx<'py> {
 impl<'py> PyCtx<'py> {
     /// Resolve the standard-library classes, and pandas when it is importable.
     pub fn new(py: Python<'py>) -> PyResult<Self> {
+        Self::new_with(py, true)
+    }
+
+    fn new_with(py: Python<'py>, with_pandas: bool) -> PyResult<Self> {
         let datetime = py.import("datetime")?;
-        let pandas = import_optional(py, "pandas").ok();
+        let pandas = if with_pandas {
+            import_optional(py, "pandas").ok()
+        } else {
+            None
+        };
         let (na, nat, timestamp_cls) = match &pandas {
             Some(pd) => (
                 Some(pd.getattr("NA")?),
@@ -96,6 +104,31 @@ impl<'py> PyCtx<'py> {
             timestamp_cls,
             shapely: std::cell::OnceCell::new(),
         })
+    }
+
+    /// [`PyCtx::new`] for calls that convert scalars only (bounds in, a bound or a count out):
+    /// pandas is taken from `sys.modules` and never imported. When pandas is not imported, no
+    /// argument can be a pandas object, so the conversions are the same; this keeps the first
+    /// `get_rowcount()` / `get_sync_time()` of a process from paying for `import pandas`, which
+    /// v4's SQLAlchemy path never imports either.
+    pub fn scalars(py: Python<'py>) -> PyResult<Self> {
+        let mut ctx = Self::new_with(py, false)?;
+        if let Ok(Some(pd)) = py
+            .import("sys")
+            .and_then(|sys| sys.getattr("modules"))
+            .and_then(|m| m.call_method1("get", ("pandas",)))
+            .map(|pd| (!pd.is_none()).then_some(pd))
+        {
+            if let (Ok(na), Ok(nat), Ok(ts)) =
+                (pd.getattr("NA"), pd.getattr("NaT"), pd.getattr("Timestamp"))
+            {
+                ctx.na = Some(na);
+                ctx.nat = Some(nat);
+                ctx.timestamp_cls = Some(ts);
+                ctx.pandas = Some(pd);
+            }
+        }
+        Ok(ctx)
     }
 
     /// `pandas`, or an `ImportError`.

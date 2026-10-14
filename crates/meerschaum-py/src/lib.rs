@@ -40,6 +40,7 @@ pub mod runtime;
 pub mod sql_api;
 pub mod static_config;
 pub mod trace;
+pub mod verify_api;
 
 /// The `meerschaum._core._core` extension module.
 ///
@@ -98,10 +99,16 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(d14_api::get_chunk_interval, m)?)?;
     m.add_function(wrap_pyfunction!(d14_api::get_chunk_bounds, m)?)?;
 
+    // Pipe.verify() and the façade session (wave 9)
+    m.add_function(wrap_pyfunction!(verify_api::verify_pipe, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_api::register_connector, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_api::unregister_connector, m)?)?;
+
     m.add_class::<pipe_api::PyPipe>()?;
 
     // meerschaum-sql (instance connector)
     m.add_class::<sql_api::PySqlConnector>()?;
+    m.add_function(wrap_pyfunction!(sql_api::pipe_metadata_epoch, m)?)?;
 
     Ok(())
 }

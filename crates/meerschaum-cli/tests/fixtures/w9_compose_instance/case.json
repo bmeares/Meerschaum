@@ -1,0 +1,72 @@
+{
+  "registered": [
+    {
+      "metric": "alpha",
+      "location": null,
+      "parameters": {
+        "columns": {
+          "datetime": "ts",
+          "id": "sensor"
+        },
+        "target": "w9_alpha_tbl",
+        "tags": [
+          "w9proj"
+        ]
+      }
+    },
+    {
+      "metric": "beta",
+      "location": null,
+      "parameters": {
+        "columns": {
+          "datetime": "ts",
+          "id": "sensor"
+        },
+        "fetch": {
+          "backtrack_minutes": 10
+        },
+        "tags": [
+          "w9proj"
+        ]
+      }
+    },
+    {
+      "metric": "gamma",
+      "location": null,
+      "parameters": {
+        "columns": {
+          "datetime": "ts"
+        },
+        "upsert": true,
+        "tags": [
+          "w9proj"
+        ]
+      }
+    },
+    {
+      "metric": "theta",
+      "location": null,
+      "parameters": {
+        "columns": {
+          "datetime": "ts"
+        },
+        "tags": [
+          "w9proj"
+        ]
+      }
+    },
+    {
+      "metric": "kappa",
+      "location": null,
+      "parameters": {
+        "columns": {
+          "datetime": "ts"
+        },
+        "tags": [
+          "w9proj",
+          "w9other"
+        ]
+      }
+    }
+  ]
+}

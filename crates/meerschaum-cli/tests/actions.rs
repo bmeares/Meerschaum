@@ -25,6 +25,26 @@ impl Host for SharedHost {
     }
 }
 
+/// Point the Python workers these tests spawn at this repository. A worker inherits the test
+/// process's environment, and without `PYTHONPATH` the interpreter imports a stale installed
+/// Meerschaum (`~/.local`) that has no `meerschaum.worker` (and prints a traceback to stderr).
+fn use_repo_python() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let repo = repo.canonicalize().unwrap_or(repo);
+        let mut paths = vec![repo];
+        if let Some(existing) = std::env::var_os("PYTHONPATH") {
+            paths.extend(std::env::split_paths(&existing));
+        }
+        if let Ok(joined) = std::env::join_paths(paths) {
+            // SAFETY: the process environment is only written here, once, before any test of
+            // this binary spawns a worker (every test reaches it through `run`).
+            unsafe { std::env::set_var("PYTHONPATH", joined) };
+        }
+    });
+}
+
 fn config(root: &Path, writes: bool) -> Config {
     let mut opts = ConfigOptions::with_env(vec![
         ("MRSM_ROOT_DIR".into(), root.to_string_lossy().into_owned()),
@@ -44,6 +64,7 @@ fn run(
     env: fn(&str) -> Option<String>,
     host: &SharedHost,
 ) -> (SuccessTuple, String) {
+    use_repo_python();
     let mut out = Vec::new();
     let result = {
         let mut rt = Runtime::new(DateContext::system(), 80, &mut out, env);

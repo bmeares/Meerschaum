@@ -12,7 +12,9 @@ use meerschaum_worker::{
 };
 use tokio::sync::oneshot;
 
-use crate::stream::{AckToken, LegacyStream, StopToken, StreamMessage, StreamSender, StreamSource};
+use crate::stream::{
+    AckToken, LegacySink, LegacyStream, StopToken, StreamMessage, StreamSender, StreamSource,
+};
 use crate::{
     ConnectorRegistry, Engine, EngineConfig, PluginSync, SyncArgs, SyncBegin, SyncHooks, SyncResult,
 };
@@ -153,7 +155,7 @@ impl ConnectorRegistry for PythonRegistry {
         self.native.plugin_sync(keys)
     }
     fn stream_source(&self, keys: &str) -> Option<Arc<dyn StreamSource>> {
-        if self.info(keys).is_some_and(|i| i.has_subscribe) {
+        if self.info(keys).is_some_and(|i| subscribes(&i)) {
             return Some(Arc::new(self.stream(keys)));
         }
         self.native.stream_source(keys)
@@ -161,7 +163,7 @@ impl ConnectorRegistry for PythonRegistry {
     fn legacy_stream(&self, keys: &str) -> Option<Arc<dyn LegacyStream>> {
         if self.info(keys).is_some_and(|i| {
             i.has_sync
-                && !i.has_subscribe
+                && !subscribes(&i)
                 && (i.is_streaming || self.legacy_streams.load(Ordering::Relaxed))
         }) {
             return Some(Arc::new(self.stream(keys)));
@@ -189,6 +191,15 @@ impl ConnectorRegistry for PythonRegistry {
             self.native.table_reference(pipe)
         }
     }
+}
+
+/// Whether a Python connector is a v5 push source (`subscribe(pipe, sink)`, §5.6). A plugin
+/// module's `subscribe` function is one (its `is_streaming` comes from that function); a custom
+/// connector class must also declare `IS_STREAMING = True`, because v4-pattern classes often
+/// have an unrelated `subscribe` method of their own (an MQTT client's
+/// `subscribe(topic, callback)`), and those run through the v4 adapter instead.
+fn subscribes(info: &ConnectorInfo) -> bool {
+    info.has_subscribe && info.is_streaming
 }
 
 fn kwargs(args: &SyncArgs) -> Map {
@@ -462,7 +473,11 @@ impl PythonSource {
         stop: StopToken,
         mode: StreamMode,
         callbacks: Arc<dyn CallbackHandler>,
+        legacy: Option<&dyn LegacySink>,
     ) -> Result<(), String> {
+        if let Some(sink) = legacy {
+            sink.starting(pipe).await;
+        }
         // The engine owns restart policy; avoid nesting two independent supervisors.
         let (stream, mut events) = PythonStream::start(
             self.pool.clone(),
@@ -481,7 +496,14 @@ impl PythonSource {
                 _ = stop.stopped() => break Ok(()),
                 event = events.recv() => match event {
                     Some(StreamEvent::Exited { error }) => break Err(error),
-                    Some(StreamEvent::Returned(result)) if !result.success => break Err(result.message),
+                    Some(StreamEvent::Returned(result)) => {
+                        if let Some(sink) = legacy {
+                            sink.returned(pipe, result.clone().into()).await;
+                        }
+                        if !result.success {
+                            break Err(result.message);
+                        }
+                    }
                     Some(StreamEvent::Stopped) | None => break Err("Python stream stopped.".into()),
                     _ => {}
                 }
@@ -491,11 +513,54 @@ impl PythonSource {
         result
     }
 }
+/// A v4-pattern connector's callbacks: each forwarded `pipe.sync()` goes through the engine's
+/// [`LegacySink`] (ledger first, reported as a `callback` flush); other requests keep the
+/// native handler.
+struct LegacyCallbacks {
+    native: Arc<dyn CallbackHandler>,
+    sink: Arc<dyn LegacySink>,
+}
+#[async_trait]
+impl CallbackHandler for LegacyCallbacks {
+    async fn handle(&self, request: CallbackRequest) -> SuccessTuple {
+        if request.op != "sync" {
+            return self.native.handle(request).await;
+        }
+        let Some(pipe) = request.pipe else {
+            return SuccessTuple::fail("No pipe was provided to sync.");
+        };
+        let input = match request.chunk.map(|c| c.into_pipe_input()).transpose() {
+            Ok(input) => input,
+            Err(e) => return SuccessTuple::fail(e.to_string()),
+        };
+        let args = callback_args(&request.kwargs);
+        self.sink.sync(&pipe, input, &args).await.into()
+    }
+}
 #[async_trait]
 impl LegacyStream for PythonSource {
-    async fn run(&self, pipe: &Pipe, stop: StopToken) -> Result<(), String> {
-        self.run_stream(pipe, stop, StreamMode::V4Sync, self.callbacks.clone())
-            .await
+    async fn run(
+        &self,
+        pipe: &Pipe,
+        sink: Arc<dyn LegacySink>,
+        stop: StopToken,
+    ) -> Result<(), String> {
+        let callbacks = Arc::new(LegacyCallbacks {
+            native: self.callbacks.clone(),
+            sink: sink.clone(),
+        });
+        self.run_stream(
+            pipe,
+            stop,
+            StreamMode::V4Sync,
+            callbacks,
+            Some(sink.as_ref()),
+        )
+        .await
+    }
+
+    fn reports_return(&self) -> bool {
+        true
     }
 }
 #[async_trait]
@@ -513,7 +578,7 @@ impl StreamSource for PythonSource {
             next: self.next.clone(),
             stop: stop.clone(),
         });
-        self.run_stream(pipe, stop, StreamMode::Subscribe, callbacks)
+        self.run_stream(pipe, stop, StreamMode::Subscribe, callbacks, None)
             .await
     }
     async fn ack(&self, tokens: Vec<AckToken>) -> Result<(), String> {

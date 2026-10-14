@@ -267,6 +267,7 @@ fn do_subaction(ctx: &mut Ctx, subaction: &str) -> Result<SuccessTuple, ComposeE
     let project = init(ctx)?;
     let pc = ProjectConfig::new(ctx.host, &project)?;
     ctx.out.project = Some(project.clone());
+    ctx.instance.configure(ctx.host, &project);
     match selected {
         "up" => compose_up(ctx, &project, &pc, UpMode::from_args(ctx.args)),
         "run" => compose_up(
@@ -385,6 +386,17 @@ fn build_custom_connectors(ctx: &mut Ctx, project: &Project) -> Result<(), Compo
             .map_err(ComposeError::value)?;
     }
     Ok(())
+}
+
+/// `mrsm.get_pipes(tags=tags, instance=...)`, raising when the instance cannot be reached.
+fn get_pipes_or_raise(
+    ctx: &mut Ctx,
+    instance_keys: &str,
+    tags: &[String],
+) -> Result<Vec<Pipe>, ComposeError> {
+    ctx.instance
+        .try_get_pipes(instance_keys, tags)
+        .map_err(|e| ComposeError::new(ErrorKind::Exception, e))
 }
 
 fn tags_list(params: &Map) -> Vec<Value> {
@@ -540,7 +552,7 @@ fn compose_up(
 
     let mut remote_instance_pipes: IndexMap<String, Vec<Pipe>> = IndexMap::new();
     for inst in groups.keys() {
-        let remote = ctx.instance.get_pipes(inst, &tags);
+        let remote = get_pipes_or_raise(ctx, inst, &tags)?;
         remote_instance_pipes.insert(inst.clone(), remote);
     }
 
@@ -645,7 +657,7 @@ fn compose_up(
 
     // Untag the pipes which are tagged but no longer defined.
     for inst in groups.keys() {
-        let tagged = ctx.instance.get_pipes(inst, &tags);
+        let tagged = get_pipes_or_raise(ctx, inst, &tags)?;
         for mut tagged_pipe in tagged {
             if pipes.contains(&tagged_pipe) {
                 continue;
@@ -1098,7 +1110,7 @@ fn compose_explain(
     let tags = vec![project_name.clone()];
     let mut remote: IndexMap<String, Vec<Pipe>> = IndexMap::new();
     for inst in groups.keys() {
-        let r = ctx.instance.get_pipes(inst, &tags);
+        let r = get_pipes_or_raise(ctx, inst, &tags)?;
         remote.insert(inst.clone(), r);
     }
 

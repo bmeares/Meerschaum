@@ -7,25 +7,25 @@
 //! keeps the boundary one function per operation and the result shapes documented in one place
 //! (`meerschaum/core/Pipeline/`).
 //!
-//! The registry mirrors the CLI's (`meerschaum-cli/src/native/engine.rs`): native `sql:`,
-//! `api:` and `valkey:` connectors, then the Python worker pool and native plugins for every
-//! other connector. `sql:` connectors the Python process built ad hoc (not in any config
-//! registry) arrive as `connectors` attributes and are used in place of the configured ones.
+//! The registry is the CLI's (`meerschaum_cli::native::registry_with`, the single
+//! builder): native `sql:`, `api:` and `valkey:` connectors, then the Python worker pool and
+//! native plugins for every other connector. `sql:` connectors the Python process built ad hoc
+//! (not in any config registry) arrive as `connectors` attributes and are passed to it as
+//! overrides, used in place of the configured ones.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::{DateTime, Utc};
-use meerschaum_cli::native::Session;
 use meerschaum_cli::native::session::ConfiguredSqlProvider;
-use meerschaum_connector::{PipesKeys, PipesKeysQuery};
+use meerschaum_cli::native::{EngineRegistry, Instance, RegistryOptions, Session, registry_with};
 use meerschaum_core::config::Config;
 use meerschaum_core::success::Bound;
 use meerschaum_engine::read::{EngineReader, RunFilter, RunStatus};
 use meerschaum_engine::selection::KeyFilter;
 use meerschaum_engine::{
-    ConnectorRegistry, Depth, Engine, EngineConfig, NodeSyncOptions, PipeRef, RunOptions,
-    Selection, StaticRegistry,
+    ConnectorRegistry, Depth, Engine, EngineConfig, Event, EventSink, NodeSyncOptions, PipeRef,
+    RunOptions, RunResult, Selection,
 };
 use meerschaum_sql::SqlConnector;
 use meerschaum_sql::instance::InstanceSettings;
@@ -146,12 +146,6 @@ fn sql_attributes(
     Ok(out)
 }
 
-/// An instance connector and its concrete SQL connector, if it is one.
-type Resolved = (
-    Arc<dyn meerschaum_connector::InstanceConnector>,
-    Option<Arc<SqlConnector>>,
-);
-
 struct Built {
     engine: Engine,
     registry: Arc<dyn ConnectorRegistry>,
@@ -159,8 +153,10 @@ struct Built {
     instance_keys: String,
 }
 
-/// Build the engine for a request: the registry over the instance, every source connector the
-/// instance's pipes name, the Python worker pool and native plugins.
+/// Build the engine for a request through the CLI's registry builder
+/// (`meerschaum_cli::native::registry_with`): the instance, every source
+/// connector the instance's pipes name, the Python worker pool and native plugins, with the
+/// `sql:` connectors the Python process built itself in place of configured ones.
 fn build(session: &Session, request: &Json) -> PyResult<Built> {
     let config = config()?;
     let instance_keys = str_field(request, "instance")
@@ -168,7 +164,7 @@ fn build(session: &Session, request: &Json) -> PyResult<Built> {
         .to_string();
 
     // sql: connectors the Python process built itself.
-    let mut overrides: HashMap<String, Arc<SqlConnector>> = HashMap::new();
+    let mut overrides: HashMap<String, Instance> = HashMap::new();
     if let Some(Json::Object(connectors)) = request.get("connectors") {
         for (keys, attrs) in connectors {
             let Json::Object(attrs) = attrs else { continue };
@@ -181,92 +177,49 @@ fn build(session: &Session, request: &Json) -> PyResult<Built> {
                 .block_on(SqlConnector::connect_with(label, spec, settings))
                 .map_err(|e| runtime_err(format!("Cannot connect to '{keys}': {e}")))?;
             conn.set_instance_provider(Arc::new(ConfiguredSqlProvider::new(config)));
-            overrides.insert(keys.clone(), Arc::new(conn));
+            overrides.insert(keys.clone(), Instance::Sql(Arc::new(conn)));
         }
     }
-
-    let resolve = |keys: &str| -> Option<Resolved> {
-        if let Some(sql) = overrides.get(keys) {
-            return Some((sql.clone(), Some(sql.clone())));
-        }
-        let inst = session.instance(keys, config).ok()?;
-        let sql = inst.sql().cloned();
-        Some((inst.conn(), sql))
+    let home = match overrides.get(&instance_keys) {
+        Some(inst) => inst.clone(),
+        None => session.instance(&instance_keys, config).map_err(|e| {
+            runtime_err(format!(
+                "Cannot resolve the instance connector '{instance_keys}': {}",
+                e.message
+            ))
+        })?,
     };
-
-    let (home, _) = resolve(&instance_keys).ok_or_else(|| {
-        runtime_err(format!(
-            "Cannot resolve the instance connector '{instance_keys}'."
-        ))
-    })?;
-    let mut native = StaticRegistry::new().with_instance(&instance_keys, home.clone());
-
-    let mut sources: Vec<String> = Vec::new();
-    if let Some(Json::Array(targets)) = request.get("targets") {
-        for target in targets {
-            if let Some(ck) = target.get(0).and_then(Json::as_str) {
-                sources.push(ck.to_string());
-            }
-        }
+    // Only the pipes this request can reach have their connectors built. `--resume` re-plans a
+    // stored selection, so every ancestor and descendant of the targets is in reach.
+    let mut reach = selection(request, &instance_keys)?
+        .unwrap_or_else(|| Selection::filter(KeyFilter::default()));
+    if request.get("resume").is_some_and(|r| !r.is_null()) {
+        reach = reach
+            .with_parents(Some(Depth::All))
+            .with_children(Some(Depth::All));
     }
-    // Every registered source, so traversed parents and children resolve too.
-    if let Ok(keys) = session.block_on(home.fetch_pipes_keys(&PipesKeysQuery::default())) {
-        let entries = match keys {
-            PipesKeys::List(v) => v,
-            PipesKeys::Dict(m) => m.into_values().collect(),
-        };
-        sources.extend(entries.into_iter().map(|e| e.connector_keys));
-    }
-    sources.extend(overrides.keys().cloned());
-    sources.push(instance_keys.clone());
-    sources.sort();
-    sources.dedup();
-
-    let mut sql_instances: HashMap<String, Arc<SqlConnector>> = HashMap::new();
-    for keys in sources {
-        if !matches!(keys.split(':').next(), Some("sql" | "api" | "valkey")) {
-            continue;
-        }
-        if let Some((conn, sql)) = resolve(&keys) {
-            native = native
-                .with_instance(&keys, conn.clone())
-                .with_source(&keys, conn);
-            if let Some(sql) = sql {
-                native = native.with_fetch_chunksize(&keys, sql.settings.chunksize.max(1) as usize);
-                sql_instances.insert(keys, sql);
-            }
-        }
-    }
-    native = native.with_table_reference(move |pipe| {
-        if let Some(sql) = sql_instances.get(pipe.instance_keys()) {
-            let pipe = sql.sql_pipe(pipe).map_err(|e| e.to_string())?;
-            Ok(sql.pipe_table_name(&pipe))
-        } else {
-            pipe.target(None).map_err(|e| e.to_string())
-        }
-    });
-
-    let mut engine_config = EngineConfig::from_config(config, Some(&config.paths().root_dir));
-    engine_config.home_instance = instance_keys.clone();
-    let python = meerschaum_engine::python::PythonRegistry::new(
-        Arc::new(native),
-        session.pool(config),
-        session
-            .python_manifest(config)
-            .map_err(|e| runtime_err(e.message))?,
-        engine_config.clone(),
-    );
-    let registry: Arc<dyn ConnectorRegistry> = meerschaum_cli::native_plugins::NativeRegistry::new(
-        session
-            .native_plugins(config)
-            .map_err(|e| runtime_err(e.message))?,
-        config,
-        python,
-    );
-    Ok(Built {
-        engine: Engine::new(registry.clone(), engine_config.clone()),
+    let EngineRegistry {
         registry,
-        config: engine_config,
+        mut config,
+        ..
+    } = registry_with(
+        config,
+        session,
+        &home,
+        RegistryOptions {
+            selection: reach,
+            // PARITY: same-instance `sql:` pipes sync in place, as v4's `pipe.sync()` does,
+            // so a graph run keeps the definition's column types (see `registry`).
+            inplace: true,
+            overrides,
+        },
+    )
+    .map_err(|e| runtime_err(e.message))?;
+    config.home_instance = home.keys();
+    Ok(Built {
+        engine: Engine::new(registry.clone(), config.clone()),
+        registry,
+        config,
         instance_keys,
     })
 }
@@ -381,17 +334,104 @@ pub fn engine_plan(py: Python<'_>, request: &str) -> PyResult<String> {
     }))
 }
 
-/// `engine_run(request) -> json`: plan and execute one engine run.
+/// Delivers a run's events to the Python thread that called `engine_run`.
+struct EventChannel(std::sync::mpsc::Sender<Event>);
+
+impl EventSink for EventChannel {
+    fn emit(&self, event: Event) {
+        let _ = self.0.send(event);
+    }
+}
+
+/// How often the calling thread wakes up to check for signals (CTRL-C) while it waits.
+const SIGNAL_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Run `opts` on an engine thread and hand each event (as its JSON text) to `on_event` on the
+/// calling thread, between waits that release the GIL: the sync work never holds the GIL, and
+/// the callback runs in the thread that called `Pipeline.sync()`.
+///
+/// If `on_event` raises (the Python wrapper only lets `BaseException`s that are not
+/// `Exception`s through, such as `KeyboardInterrupt`) or a signal handler raises while waiting,
+/// the run is cancelled (its in-flight node syncs are dropped, as in a crash: the engine's
+/// write ordering keeps the instance consistent) and the exception propagates.
+fn run_with_events(
+    py: Python<'_>,
+    session: &Session,
+    engine: Engine,
+    mut opts: RunOptions,
+    on_event: PyObject,
+) -> PyResult<RunResult> {
+    let (tx, rx) = std::sync::mpsc::channel::<Event>();
+    // `allow_threads` needs a `Sync` receiver.
+    let rx = Mutex::new(rx);
+    opts.on_event = Some(Arc::new(EventChannel(tx)));
+    let (cancel, cancelled) = tokio::sync::oneshot::channel::<()>();
+    let worker = {
+        let session = session.clone();
+        std::thread::Builder::new()
+            .name("mrsm-engine-run".into())
+            .spawn(move || {
+                session.block_on(async move {
+                    tokio::select! {
+                        result = engine.run(opts) => Some(result),
+                        _ = cancelled => None,
+                    }
+                })
+            })
+            .map_err(|e| runtime_err(format!("Cannot start the engine run: {e}")))?
+    };
+    let mut raised: Option<PyErr> = None;
+    loop {
+        let next = py.allow_threads(|| {
+            rx.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .recv_timeout(SIGNAL_POLL)
+        });
+        match next {
+            Ok(event) => {
+                let text = to_json_string(&event)?;
+                if let Err(e) = on_event.call1(py, (text,)) {
+                    raised = Some(e);
+                    break;
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if let Err(e) = py.check_signals() {
+                    raised = Some(e);
+                    break;
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    if let Some(e) = raised {
+        let _ = cancel.send(());
+        let _ = py.allow_threads(|| worker.join());
+        return Err(e);
+    }
+    py.allow_threads(|| worker.join())
+        .map_err(|_| runtime_err("The engine run panicked."))?
+        .ok_or_else(|| runtime_err("The engine run was cancelled."))
+}
+
+/// `engine_run(request, on_event=None) -> json`: plan and execute one engine run.
+///
+/// `on_event`, when given, is called with each event's JSON text as it happens (see
+/// [`run_with_events`]); the Python façade decodes it (`meerschaum/core/Pipeline/_events.py`).
 ///
 /// Result: `{"success", "message", "run_id", "plan", "text", "outcomes": [...], "record",
 /// "critical_path", "warnings", "duration_seconds"}`.
 #[pyfunction]
-pub fn engine_run(py: Python<'_>, request: &str) -> PyResult<String> {
+#[pyo3(signature = (request, on_event=None))]
+pub fn engine_run(py: Python<'_>, request: &str, on_event: Option<PyObject>) -> PyResult<String> {
     let request = parse_request(request)?;
     let session = session();
     let built = build(&session, &request)?;
     let opts = run_options(&request, &built.instance_keys)?;
-    let result = py.allow_threads(|| session.block_on(built.engine.run(opts)));
+    let result = match on_event {
+        Some(callback) => run_with_events(py, &session, built.engine, opts, callback)?,
+        None => py.allow_threads(|| session.block_on(built.engine.run(opts))),
+    };
     let outcomes: Vec<Json> = result
         .outcomes
         .iter()

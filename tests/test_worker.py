@@ -194,9 +194,9 @@ def test_pipe_sync_is_forwarded_to_the_host():
 
 
 def test_build_manifest_includes_test_plugins():
-    from meerschaum.worker._manifest import build_manifest
+    from meerschaum.worker._manifest import MANIFEST_SCHEMA_VERSION, build_manifest
     manifest = build_manifest()
-    assert manifest['schema_version'] == 3
+    assert manifest['schema_version'] == MANIFEST_SCHEMA_VERSION == 4
     assert 'stress' in manifest['plugins']
     stress = manifest['plugins']['stress']
     assert stress['version'] == '0.4.0'
@@ -220,6 +220,41 @@ def _start_worker(tmpdir):
 
 
 @pytest.mark.skipif(not hasattr(socket, 'AF_UNIX'), reason="Unix sockets only")
+def test_connector_methods_include_imported_mixins():
+    """
+    Custom connector classes assembled with `from ._sync import sync` in the class body (the
+    mixin-via-import pattern) list those methods; Meerschaum's base-class methods do not count.
+    """
+    import types
+    from meerschaum.connectors import Connector
+    from meerschaum.worker._manifest import _connector_methods
+
+    mixin = types.ModuleType('w9_plugin_mixin')
+    exec(
+        "def sync(self, pipe, **kw):\n    return True, 'ok'\n"
+        "def subscribe(self, topic, callback):\n    pass\n"
+        "@staticmethod\ndef topics_of(pipe):\n    return []\n",
+        mixin.__dict__,
+    )
+
+    class W9Mixed(Connector):
+        sync = mixin.sync
+        subscribe = mixin.subscribe
+        topics_of = mixin.topics_of
+
+        def publish(self, topic, payload):
+            pass
+
+        @property
+        def port(self):
+            return 1883
+
+        def _private(self):
+            pass
+
+    assert _connector_methods(W9Mixed) == ['publish', 'subscribe', 'sync', 'topics_of']
+
+
 def test_worker_session_end_to_end():
     with tempfile.TemporaryDirectory() as tmpdir:
         proc, stream = _start_worker(tmpdir)

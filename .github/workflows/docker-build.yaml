@@ -5,9 +5,9 @@ name: buildx
 #   maturin wheels, plus the native `mrsm`), and slim (`--target slim`: the base wheels only),
 #   then runs the §12.1 size gate (slim < 200 MB, full < 900 MB).
 #
-# The size gate starts in `warn` mode: `full` is ~1.9 GB until the v5 dependency cuts (D20) land,
-# so enforcing it now would fail every run. Switch the default to `enforce` once `full` fits;
-# 5.0.0rc1 requires it (§13).
+# The size gate ENFORCES by default (5.0.0rc1 requires it, §13): the job fails when `slim`
+# exceeds 200 MB or `full` exceeds 900 MB (uncompressed, `docker image inspect`). `warn` only
+# reports (use it to look at a branch that is over budget); `skip` does not measure.
 
 on:
   workflow_dispatch:
@@ -21,10 +21,10 @@ on:
         type: boolean
         default: false
       size_gate:
-        description: 'Size gate mode (slim < 200 MB, full < 900 MB).'
+        description: 'Size gate mode (slim < 200 MB, full < 900 MB): enforce fails the run, warn only reports.'
         type: choice
-        options: [ warn, enforce, skip ]
-        default: warn
+        options: [ enforce, warn, skip ]
+        default: enforce
   # pull_request:
     # branches: main
   # push:
@@ -59,7 +59,8 @@ jobs:
       - name: Size gate
         if: ${{ !inputs.v4_only && inputs.size_gate != 'skip' }}
         env:
-          SIZE_GATE_MODE: ${{ inputs.size_gate }}
+          # `inputs` is empty on events other than workflow_dispatch: default to enforcing.
+          SIZE_GATE_MODE: ${{ inputs.size_gate || 'enforce' }}
           SLIM_IMAGE: ${{ steps.build.outputs.slim_image }}
           FULL_IMAGE: ${{ steps.build.outputs.full_image }}
         run: |

@@ -1,9 +1,9 @@
 //! `mrsm compose ...` wired to `meerschaum-compose` (`meerschaum/actions/compose.py`).
 //!
 //! The commands compose runs re-invoke this binary ([`MrsmRunner`]) under the project
-//! environment. Pipe registrations and jobs need an instance connector and the job supervisor,
-//! which the CLI does not link yet, so only `explain`, `init` and `up --dry` run; the other
-//! subactions return the not-implemented tuple.
+//! environment. Pipe registrations are read from the project's real instance connectors
+//! ([`ComposeInstance`]); jobs need the job supervisor, which compose does not link yet, so only
+//! `explain`, `init` and `up --dry` run natively and the other subactions go to the core action.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -11,13 +11,14 @@ use std::path::PathBuf;
 use meerschaum_compose::command::{CommandRunner, MrsmCommand};
 use meerschaum_compose::env::env_dict_to_strings;
 use meerschaum_compose::error::Message;
-use meerschaum_compose::ops::{InMemoryInstance, InMemoryJobs, Prompter};
+use meerschaum_compose::ops::{InMemoryJobs, Prompter};
 use meerschaum_compose::project::{Host, Session};
-use meerschaum_compose::subactions::{ComposeArgs, Services, compose};
+use meerschaum_compose::subactions::{ComposeArgs, ComposeOutput, Services, compose};
 use meerschaum_core::SuccessTuple;
 
 use crate::builtin::{ActionError, ActionResult};
 use crate::dispatch::{CommandSpec, Runtime};
+use crate::native::compose_instance::ComposeInstance;
 use crate::value::{ArgsMap, PyValue};
 
 /// Runs compose's commands by re-invoking `mrsm` (the current executable).
@@ -30,7 +31,9 @@ impl CommandRunner for MrsmRunner<'_, '_> {
         let program = std::env::current_exe()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| "mrsm".into());
-        let (env, env_clear) = match &command.env {
+        // An in-process command (`replace == false`) runs inside the subaction's project
+        // environment in Python, so the child gets that environment too.
+        let (env, env_clear) = match command.env.as_ref().or(command.inherited_env.as_ref()) {
             Some(env) => (env_dict_to_strings(env), true),
             None => (Vec::new(), false),
         };
@@ -83,6 +86,31 @@ fn path(args: &ArgsMap, key: &str) -> Option<PathBuf> {
     }
 }
 
+/// Run a natively served subaction (`explain`, `init`, `up --dry`) over the project's real
+/// instance connectors ([`ComposeInstance`]), with the commands going through `runner`. Jobs
+/// are not linked: the subactions served here never list them.
+pub fn compose_native(
+    host: &Host,
+    args: &ComposeArgs,
+    runner: &mut dyn CommandRunner,
+    prompter: &mut dyn Prompter,
+) -> ComposeOutput {
+    let mut session = Session::default();
+    let mut instance = ComposeInstance::new();
+    let mut jobs = InMemoryJobs::default();
+    compose(
+        host,
+        &mut session,
+        args,
+        Services {
+            runner,
+            instance: &mut instance,
+            jobs: &mut jobs,
+            prompter,
+        },
+    )
+}
+
 /// `compose(action, file, env_file, ...)`.
 pub fn compose_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let action: Vec<String> = args
@@ -127,24 +155,11 @@ pub fn compose_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let env = (rt.vars)().into_iter().collect();
     let host =
         Host::new(cwd, env).map_err(|e| ActionError::new(e.kind.python_name(), e.message))?;
-    let mut session = Session::default();
-    let mut instance = InMemoryInstance::default();
-    let mut jobs = InMemoryJobs::default();
     let output = {
         let shared = RefCell::new(&mut *rt);
         let mut runner = MrsmRunner { rt: &shared };
         let mut prompter = HostPrompter { rt: &shared };
-        compose(
-            &host,
-            &mut session,
-            &compose_args,
-            Services {
-                runner: &mut runner,
-                instance: &mut instance,
-                jobs: &mut jobs,
-                prompter: &mut prompter,
-            },
-        )
+        compose_native(&host, &compose_args, &mut runner, &mut prompter)
     };
     for m in &output.messages.items {
         match m {

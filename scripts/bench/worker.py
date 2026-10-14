@@ -6,6 +6,7 @@ the repository's `meerschaum` with `MRSM_CORE=rust`). Prints one `RESULT {json}`
     worker.py sync    <connector> <metric> <instance>
     worker.py filter_existing <connector> <metric> <instance> <rows>
     worker.py get_data <connector> <metric> <instance>
+    worker.py latency <connector> <metric> <instance> <iterations> <tmpl_connector> <tmpl_metric>
 
 Only the measured call is timed (`seconds`); imports and process startup are excluded.
 """
@@ -58,6 +59,8 @@ def main() -> int:
             'delta': len(delta), **info,
         })
         return 0
+    if op == 'latency':
+        return latency(pipe, info)
     if op == 'get_data':
         start = time.perf_counter()
         df = pipe.get_data()
@@ -66,6 +69,55 @@ def main() -> int:
         return 0
     print(f'unknown op {op}', file=sys.stderr)
     return 2
+
+
+def latency(pipe, info) -> int:
+    """
+    Per-call latency of the instance façade on a small synced pipe, in one process:
+
+    - `first_call`: the process's first `get_rowcount()` (the connector, its pools and the
+      pipe's metadata are built on the way), after the imports;
+    - `get_sync_time` / `get_rowcount` / `get_data`: warm calls on one `Pipe` (median of
+      `iterations`);
+    - `fresh_get_sync_time`: a new `Pipe` object per call (metadata fetched each time);
+    - `template_get_sync_time`: the leaf of the `{{ Pipe() }}` chain (its parameters resolve
+      templates that reference two other pipes), a new `Pipe` per call.
+    """
+    import statistics
+    import meerschaum as mrsm
+    iterations = int(sys.argv[5])
+    tmpl_connector, tmpl_metric = sys.argv[6:8]
+    instance = sys.argv[4]
+
+    start = time.perf_counter()
+    rows = pipe.get_rowcount()
+    first_call = time.perf_counter() - start
+
+    def median_call(fn):
+        for _ in range(3):
+            fn()
+        times = []
+        for _ in range(iterations):
+            t = time.perf_counter()
+            fn()
+            times.append(time.perf_counter() - t)
+        return statistics.median(times)
+
+    keys = (pipe.connector_keys, pipe.metric_key)
+    out = {
+        'first_call': first_call,
+        'get_sync_time': median_call(pipe.get_sync_time),
+        'get_rowcount': median_call(pipe.get_rowcount),
+        'get_data': median_call(pipe.get_data),
+        'fresh_get_sync_time': median_call(
+            lambda: mrsm.Pipe(*keys, instance=instance).get_sync_time()
+        ),
+        'template_get_sync_time': median_call(
+            lambda: mrsm.Pipe(tmpl_connector, tmpl_metric, instance=instance).get_sync_time()
+        ),
+    }
+    emit({'ok': rows is not None and rows > 0, 'rows': rows, 'calls': out, **info})
+    return 0
 
 
 def build_frame(rows: int):

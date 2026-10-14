@@ -4,6 +4,7 @@
 
 use chrono::{FixedOffset, NaiveDateTime, TimeZone};
 use meerschaum_connector::DateBound;
+use meerschaum_core::dtypes::value_is_null;
 use meerschaum_core::pyfmt::{JsonStyle, PyDateTime, float_repr, json_dumps};
 use meerschaum_kernel::serialize::{serialize_datetime, serialize_decimal};
 use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
@@ -228,11 +229,20 @@ pub fn encode_param(v: &KValue, flavor: Flavor, enc: &ColumnEncoding) -> SqlPara
             if flavor == Flavor::Oracle {
                 // OCI binds timestamps natively; text would depend on NLS_TIMESTAMP_FORMAT.
                 SqlParam::Timestamp(wall)
+            } else if family == DriverFamily::Postgres {
+                // PARITY: psycopg binds an aware `datetime` as `timestamptz` and a naive one as
+                // `timestamp`; text has no implicit cast to either (the column rejects it).
+                match &dt.tz {
+                    Some(_) => SqlParam::TimestampTz(dt.utc.and_utc()),
+                    None => SqlParam::Timestamp(dt.utc),
+                }
             } else {
                 SqlParam::Text(sa_datetime_text(&wall))
             }
         }
-        KValue::Date(d) if flavor == Flavor::Oracle => SqlParam::Date(*d),
+        KValue::Date(d) if flavor == Flavor::Oracle || family == DriverFamily::Postgres => {
+            SqlParam::Date(*d)
+        }
         KValue::Date(d) => SqlParam::Text(d.format("%Y-%m-%d").to_string()),
         KValue::Json(j) => match j {
             serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
@@ -311,10 +321,19 @@ pub fn encode_json_cell(v: &KValue, flavor: Flavor, enc: &ColumnEncoding) -> ser
 }
 
 /// Encode one cell for PostgreSQL `COPY ... CSV NULL '\N'` (`psql_insert_copy`): `None` is
-/// `\N`.
+/// `\N`, and so is every cell whose `str()` is null-like (`value_is_null`: `''`, `'None'`,
+/// `'nan'`, `'NA'`, `'NaT'`, `'<NA>'`, any case, and NaN floats), as v4 writes them.
 pub fn encode_copy_field(v: &KValue, enc: &ColumnEncoding) -> Option<String> {
+    use serde_json::Value as J;
     if v.is_na() {
         return None;
+    }
+    match v {
+        KValue::Str(s) if value_is_null(s) => return None,
+        KValue::Json(J::String(s)) if value_is_null(s) => return None,
+        KValue::Json(J::Null) => return None,
+        KValue::Float(f) if f.is_nan() => return None,
+        _ => {}
     }
     // NOTE: PostgreSQL doesn't support NUL chars in text, so they're removed from strings.
     let strip_nul = |s: String| s.replace('\0', "").replace("\\u0000", "");
@@ -412,6 +431,41 @@ mod tests {
         assert_eq!(format_bytes(Some(1536)), "1.5 kB");
         assert_eq!(format_bytes(None), "?");
         assert_eq!(format_bytes(Some(-2_500_000)), "-2.5 MB");
+    }
+
+    #[test]
+    fn copy_fields_write_null_like_values_as_null() {
+        let enc = ColumnEncoding {
+            name: "a".into(),
+            numeric: None,
+        };
+        for s in ["", "None", "nan", "NA", "NaT", "<NA>", "natz"] {
+            assert_eq!(
+                encode_copy_field(&KValue::Str(s.into()), &enc),
+                None,
+                "{s:?}"
+            );
+        }
+        assert_eq!(encode_copy_field(&KValue::Float(f64::NAN), &enc), None);
+        assert_eq!(
+            encode_copy_field(
+                &KValue::Json(serde_json::Value::String(String::new())),
+                &enc
+            ),
+            None
+        );
+        assert_eq!(
+            encode_copy_field(&KValue::Str(" ".into()), &enc),
+            Some(" ".to_string())
+        );
+        assert_eq!(
+            encode_copy_field(&KValue::Str("nana".into()), &enc),
+            Some("nana".to_string())
+        );
+        assert_eq!(
+            encode_copy_field(&KValue::Float(f64::INFINITY), &enc),
+            Some("inf".to_string())
+        );
     }
 
     #[test]

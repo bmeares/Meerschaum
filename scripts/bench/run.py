@@ -12,10 +12,11 @@ Implementations (columns of the report):
     v4py   v4.1.4, `pipe.sync()` etc. from Python, timed around the call (no interpreter startup)
     v4cli  v4.1.4, `python -m meerschaum sync pipes ...`, timed as a whole process
     v5py   this repository's `meerschaum` with MRSM_CORE=rust (release extension in meerschaum/_core)
+    v5pyp  this repository's `meerschaum` with MRSM_CORE=python (opt-in: `--impls ...,v5pyp`)
     v5cli  target/release/mrsm, timed as a whole process
 
-Cases (per backend: sqlite -> sqlite files, and postgis(5449) -> postgis, schema `w7_bench` in the
-disposable database `w7_bench` of the test container):
+Cases (per backend: sqlite -> sqlite files, and postgis(5449) -> postgis, schema `w7_bench`
+(`--pg-schema`) in the disposable database `w7_bench` of the test container):
 
     sync_{10k,100k,1M}   fresh destination, source SQL pipe (`sql:a_src` -> `sql:b_dest`)
     inc_{100k,1M}        destination already synced; 1% new source rows; time the re-sync
@@ -23,6 +24,12 @@ disposable database `w7_bench` of the test container):
     get_data_1M          Python only: `pipe.get_data()` of 1M rows
     chain_3              CLI only: `sync pipes -w 1` over raw -> mid -> leaf `{{ Pipe() }}` chain
     chain_3_engine       v5cli only: `sync pipes --parents` on the leaf of the same chain
+    lat_*                Python only (case `latency`): per-call latency on a 50-row pipe, one
+                         process per repeat: `lat_first_call` (the first `get_rowcount()` of
+                         the process), warm `lat_get_sync_time` / `lat_get_rowcount` /
+                         `lat_get_data` (median of `--latency-iterations` calls), and a new `Pipe`
+                         per call for `lat_fresh_get_sync_time` and for the `{{ Pipe() }}` chain
+                         leaf (`lat_template_get_sync_time`)
 
 Every run uses a fresh temporary MRSM_ROOT_DIR per implementation, an empty plugins dir, and
 only the `w7_bench` schema/database. One warm-up (a 10k sync) per implementation and backend,
@@ -107,7 +114,7 @@ class Db:
 
     def _psql(self, sql: str, tuples: bool = False) -> str:
         cmd = [
-            'psql', '-h', 'localhost', '-p', '5449', '-U', 'test', '-d', 'w7_bench',
+            'psql', '-h', 'localhost', '-p', '5449', '-U', 'test', '-d', defs.PG_DATABASE,
             '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-c', sql,
         ]
         if tuples:
@@ -185,9 +192,10 @@ class Impl:
             'PYTHONHASHSEED': '0',
         })
         env.update(defs.connector_env(self.backend, str(self.workdir)))
-        if self.name == 'v5py':
-            env['MRSM_CORE'] = 'rust'
+        if self.name in ('v5py', 'v5pyp'):
+            env['MRSM_CORE'] = 'rust' if self.name == 'v5py' else 'python'
             env['PYTHONPATH'] = str(self.snapshot / 'py' if self.snapshot else REPO)
+        env['MRSM_BENCH_PG_SCHEMA'] = defs.SCHEMA
         return env
 
     def py_cmd(self, *args: str) -> List[str]:
@@ -199,6 +207,8 @@ class Impl:
     def cli_cmd(self, *args: str) -> List[str]:
         if self.name == 'v4cli':
             return [str(REF_PY), '-s', '-E', '-m', 'meerschaum', *args]
+        if self.name == 'v5pyp':
+            raise ValueError('v5pyp has no CLI cases')
         return [str(self.mrsm_bin()), *args]
 
     def clear_cache(self) -> None:
@@ -265,9 +275,9 @@ class Bench:
         good = [r['seconds'] for r in runs if r.get('ok') and 'seconds' in r]
         entry = {
             'backend': backend, 'case': case, 'impl': impl,
-            'seconds': [round(s, 4) for s in good],
-            'median': round(statistics.median(good), 4) if good else None,
-            'min': round(min(good), 4) if good else None,
+            'seconds': [round(s, 6) for s in good],
+            'median': round(statistics.median(good), 6) if good else None,
+            'min': round(min(good), 6) if good else None,
             'failed': len(runs) - len(good),
         }
         errs = [r.get('error') or r.get('message') for r in runs if not r.get('ok')]
@@ -301,6 +311,8 @@ class Bench:
             db.exec(f'CREATE SCHEMA {defs.SCHEMA}')
         for lab in needed:
             db.create_rows(db.tbl(f'src_{lab}'), 0, defs.SIZES[lab], create=True)
+        if 'latency' in a.cases:
+            db.create_rows(db.tbl('src_small'), 0, defs.LATENCY_ROWS, create=True)
         for impl in impls:
             for lab in labels:
                 if 'inc' in a.cases:
@@ -310,7 +322,9 @@ class Bench:
         if not REF_PY.exists():
             raise SystemExit('The reference venv is required to register the benchmark pipes.')
         reg = Impl('v4py', wd, backend, self.snapshot)
-        out = reg.worker('setup', json.dumps(defs.pipe_definitions(backend, labels)))
+        out = reg.worker(
+            'setup', json.dumps(defs.pipe_definitions(backend, labels, impls=defs.ALL_IMPLS)),
+        )
         if not out.get('ok'):
             raise SystemExit(f'pipe registration failed: {out}')
 
@@ -330,6 +344,8 @@ class Bench:
                 self.case_get_data(db, impl)
             if not impl.is_py and 'chain' in a.cases:
                 self.case_chain(db, impl)
+            if impl.is_py and 'latency' in a.cases:
+                self.case_latency(db, impl)
         if 'chain' in a.cases and 'v5cli' in [i.name for i in impls]:
             self.case_chain(db, next(i for i in impls if i.name == 'v5cli'), engine=True)
 
@@ -438,6 +454,32 @@ class Bench:
                 runs.append(res)
         self.record(db.backend, 'get_data_1M', impl.name, runs)
 
+    def case_latency(self, db: Db, impl: Impl) -> None:
+        """Per-call latency on a small synced pipe: one fresh process per repeat."""
+        metric = defs.latency_metric(impl.name)
+        table = db.tbl(defs.target_name(metric))
+        self._reset(db, impl, metric)
+        seed = impl.sync_timed(defs.SRC_INSTANCE, metric)
+        if not seed.get('ok') or db.count(table) != defs.LATENCY_ROWS:
+            for call in LATENCY_CALLS:
+                self.record(db.backend, f'lat_{call}', impl.name,
+                            [{**seed, 'ok': False, 'error': 'seed failed'}])
+            return
+        _raw, _mid, leaf = defs.chain_metrics(impl.name)
+        runs: Dict[str, List[Dict[str, Any]]] = {call: [] for call in LATENCY_CALLS}
+        for _ in range(self.args.repeats):
+            res = impl.worker(
+                'latency', defs.SRC_INSTANCE, metric, defs.DEST_INSTANCE,
+                str(self.args.latency_iterations), defs.DEST_INSTANCE, leaf,
+            )
+            for call in LATENCY_CALLS:
+                if res.get('ok'):
+                    runs[call].append({'ok': True, 'seconds': res['calls'][call]})
+                else:
+                    runs[call].append(res)
+        for call in LATENCY_CALLS:
+            self.record(db.backend, f'lat_{call}', impl.name, runs[call])
+
     def case_chain(self, db: Db, impl: Impl, engine: bool = False) -> None:
         raw, mid, leaf = defs.chain_metrics(impl.name)
         tables = [db.tbl(t) for t in defs.chain_targets(impl.name)]
@@ -464,10 +506,14 @@ class Bench:
 
 # -- report -------------------------------------------------------------------------------------
 
+LATENCY_CALLS = (
+    'first_call', 'get_sync_time', 'get_rowcount', 'get_data', 'fresh_get_sync_time',
+    'template_get_sync_time',
+)
 CASE_ORDER = [
     'sync_10k', 'sync_100k', 'sync_1M', 'inc_100k', 'inc_1M',
     'filter_existing_100k', 'get_data_1M', 'chain_3', 'chain_3_engine',
-]
+] + [f'lat_{call}' for call in LATENCY_CALLS]
 PAIRS = [('v5py', 'v4py'), ('v5cli', 'v4cli')]
 REGRESSION_THRESHOLD = 1.10  # v5 slower than v4 by more than 10%
 
@@ -484,15 +530,20 @@ def render_markdown(meta: Dict[str, Any], results: List[Dict[str, Any]]) -> str:
         'wall time (startup included)',
         '- `x` columns: v5 time / v4 time for the same style (`py`, `cli`). Below 1.00 is faster; '
         f'**bold** marks a regression (> {int((REGRESSION_THRESHOLD - 1) * 100)}% slower)',
+        '- `v5pyp` (when run): the façade with `MRSM_CORE=python`, for reference only (no `x`); '
+        '`lat_*` cases are per call, in milliseconds',
         '',
     ]
     regressions = []
     for backend in meta['backends']:
         lines += [f'## {backend}', '']
-        lines += ['| case | v4py | v5py | x | v4cli | v5cli | x |', '|---|---|---|---|---|---|---|']
+        lines += [
+            '| case | v4py | v5pyp | v5py | x | v4cli | v5cli | x |',
+            '|---|---|---|---|---|---|---|---|',
+        ]
         by = {(r['case'], r['impl']): r for r in results if r['backend'] == backend}
         for case in CASE_ORDER:
-            if not any((case, i) in by for i in defs.IMPLS):
+            if not any((case, i) in by for i in defs.ALL_IMPLS):
                 continue
 
             def cell(impl):
@@ -501,6 +552,8 @@ def render_markdown(meta: Dict[str, Any], results: List[Dict[str, Any]]) -> str:
                     return 'n/a'
                 if r['median'] is None:
                     return 'FAILED'
+                if case.startswith('lat_'):
+                    return f'{r["median"] * 1000:.2f} ms'
                 return f'{r["median"]:.3f}'
 
             def ratio(v5, v4):
@@ -514,7 +567,8 @@ def render_markdown(meta: Dict[str, Any], results: List[Dict[str, Any]]) -> str:
                 return f'{x:.2f}'
 
             lines.append(
-                f'| {case} | {cell("v4py")} | {cell("v5py")} | {ratio("v5py", "v4py")} '
+                f'| {case} | {cell("v4py")} | {cell("v5pyp")} | {cell("v5py")} '
+                f'| {ratio("v5py", "v4py")} '
                 f'| {cell("v4cli")} | {cell("v5cli")} | {ratio("v5cli", "v4cli")} |'
             )
         lines.append('')
@@ -560,12 +614,16 @@ def main() -> int:
     p.add_argument('--sizes', default='10k,100k,1M')
     p.add_argument('--repeats', type=int, default=3)
     p.add_argument('--impls', default=','.join(defs.IMPLS))
-    p.add_argument('--cases', default='sync,inc,filter_existing,get_data,chain')
+    p.add_argument('--cases', default='sync,inc,filter_existing,get_data,chain,latency')
+    p.add_argument('--pg-schema', default=defs.SCHEMA,
+                   help='Schema of the postgis backend (in the w7_bench database).')
+    p.add_argument('--latency-iterations', type=int, default=200)
     p.add_argument('--workdir', default=None, help='Default: a fresh temporary directory.')
     p.add_argument('--keep', action='store_true', help='Keep the temporary work directory.')
     args = p.parse_args()
     for attr in ('backends', 'sizes', 'impls', 'cases'):
         setattr(args, attr, [s for s in getattr(args, attr).split(',') if s])
+    defs.SCHEMA = args.pg_schema
 
     workdir = Path(args.workdir or tempfile.mkdtemp(prefix='mrsm-bench-'))
     workdir.mkdir(parents=True, exist_ok=True)
@@ -585,7 +643,7 @@ def main() -> int:
     today = datetime.date.today().isoformat()
     meta = {
         'label': args.label, 'date': today, 'backends': args.backends, 'repeats': args.repeats,
-        'sizes': args.sizes, 'python': platform.python_version(),
+        'sizes': args.sizes, 'python': platform.python_version(), 'pg_schema': defs.SCHEMA,
         'os': f'{platform.system()} {platform.machine()}', 'cpus': os.cpu_count(),
         'notes': bench.notes, **version_info(),
     }

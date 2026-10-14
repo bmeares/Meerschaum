@@ -331,6 +331,7 @@ pub fn get_parameters<'py>(
             py,
             defaults: crate::core_api::py_defaults(py)?,
             self_pipe: Some((me.clone(), pipe.clone())),
+            built: Default::default(),
         },
         me: me.clone(),
     };

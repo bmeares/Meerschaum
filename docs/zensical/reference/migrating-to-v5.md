@@ -71,7 +71,7 @@ Everything under `MRSM_ROOT_DIR/config/` is read unchanged. Three things to know
           login: {max: 10, window_seconds: 60}
     ```
 
-- **New:** `system.engine.*` keys for the [Syncing Engine](#the-syncing-engine) (`workers`, `python_workers`, `limits.connectors`, `limits.instances`, `auto_rebuild`, `implicit_edges`, `inclusive_cap`, `flat_ledger`, `events`, `state_flush_ms`, `run_history_days`, `debounce_seconds`, `chunk_pipelining`). All have defaults; you do not need to set any of them. The full table is in [Engine State](/reference/pipelines/state/#settings).
+- **New:** `system.engine.*` keys for the [Syncing Engine](#the-syncing-engine) (`workers`, `python_workers`, `limits.connectors`, `limits.instances`, `auto_rebuild`, `implicit_edges`, `inclusive_cap`, `flat_ledger`, `events`, `state_flush_ms`, `run_history_days`, `debounce_seconds`, `chunk_pipelining`, `default_duration_seconds`). All have defaults; you do not need to set any of them. The full table is in [Engine State](/reference/pipelines/state/#settings).
 
 Run `mrsm show config` on v5 against a v4.1 root directory to see the resolved config.
 
@@ -95,6 +95,15 @@ mrsm sync pipes -t nightly -l _staging -s 'daily starting 02:00' -d
 ```
 
 **`--listen`** keeps working for streaming connectors written in the v4 style (a `sync()` that subscribes and returns while callbacks call `pipe.sync()`). The engine keeps the worker that ran `sync()` alive and supervises it with restarts. You do not need the old `--loop --min-seconds 144000000` workaround anymore; if a job still uses it, it continues to work.
+
+### Compose
+
+`mrsm compose explain`, `init` and `up --dry` read the project's real instance connectors, with the same precedence as v4: the project's `config:` block, with the `MRSM_SQL_<LABEL>` / `MRSM_API_<LABEL>` variables of the project environment layered over it, and the connectors the file itself defines winning for the attributes they set. Registered parameters are compared as stored, and `{{ Pipe() }}` references render to the quoted, schema-qualified table.
+
+- **`explain` does not create databases.** v4 creates the SQLite or GeoPackage file of a project-defined connector (with its `mrsm_*` tables and cache files) just by listing which pipes are registered. v5 treats a file instance whose file does not exist as having no registered pipes and never connects to it. The statuses are the same (every pipe is "Not registered"); the file appears when a pipe is registered.
+- **`up --dry` still registers.** As in v4, `--dry` only skips starting jobs: it registers missing pipes, updates changed parameters and removes the project tag from pipes the file no longer defines.
+- **An unreachable instance fails the subaction.** As in v4, listing the registered pipes raises (`Exception`) when the instance cannot be reached. The message carries the driver's own error text, which differs from SQLAlchemy's.
+- **Plugin-defined instance connectors** (a custom connector type from a project plugin) go through the Python worker like on any other native action. The parity tests cover `sql:` and `api:` instances.
 
 ### The Syncing Engine
 
@@ -149,6 +158,7 @@ What is different underneath, and when it matters:
 - **Plugins run in a worker process** when the host is the `mrsm` binary (CLI, jobs, server). The worker is a normal Python interpreter with the SDK loaded; `attempt_import(..., venv='myplugin')` and `Venv` activate venvs exactly as today. Module-level state in your plugin lives for the life of the worker, not of the command, which matches today's job behavior but not today's one-shot CLI behavior. Don't rely on module globals being fresh per action.
 - **`@post_sync_hook` and `@pre_sync_hook`** receive the same kwargs (`success_tuple`, `sync_timestamp`, `sync_complete_timestamp`, `sync_duration`, ...) and run in the worker after each native sync.
 - **Plugin manifests.** On install, setup and on any source change, Meerschaum records which decorators your plugin uses so that `--help`, tab completion and the server can start without importing Python. If your plugin registers actions or pages **conditionally** (for example, only in production), the manifest sees whatever your module registers at import time with the config present at install time. ⚠️ TBC: `mrsm reload plugins` rebuilds the manifest; the manifest is also rebuilt automatically when a plugin file changes.
+- **`fetch(begin, end)` windows in graph runs.** A bare `pipe.sync()` and a flat `sync pipes` pass the same `begin` / `end` as v4. Under `--parents`, `--children` or `mrsm.Pipeline`, a child can be asked to backfill chunk-aligned windows that start earlier than v4's `sync time − backtrack` (see [Windows your plugin receives](/reference/pipelines/#windows-your-plugin-receives)). A plugin that clears its window and recomputes it must be able to rebuild that whole window.
 - **Custom connectors** with `@make_connector` keep working, including `IS_INSTANCE = True` connectors implementing the instance interface. A new optional pair, `acquire_pipe_lease` / `release_pipe_lease`, lets the engine coordinate across processes; without it, leases fall back to machine-local file locks with a one-time warning.
 - **Streaming connectors.** The v4 pattern keeps working under `--listen` (see [Jobs](#jobs-and-the-cli)). The recommended v5 form is explicit and gets engine-managed micro-batching, acknowledgement after commit and supervision:
 

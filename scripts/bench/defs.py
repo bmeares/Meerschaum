@@ -8,16 +8,26 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
+import os
+
 SIZES = {'10k': 10_000, '100k': 100_000, '1M': 1_000_000}
 BASE_EPOCH = 1_704_067_200  # 2024-01-01T00:00:00Z
-SCHEMA = 'w7_bench'
+#: PostgreSQL schema and database of the `postgis` backend (disposable `w7_bench` database of the
+#: test container). `run.py --pg-schema` sets `MRSM_BENCH_PG_SCHEMA` for the driver and workers.
+SCHEMA = os.environ.get('MRSM_BENCH_PG_SCHEMA', 'w7_bench')
+PG_DATABASE = 'w7_bench'
+#: Rows of the small pipe of the per-call latency cases.
+LATENCY_ROWS = 50
 SRC_INSTANCE = 'sql:a_src'
 DEST_INSTANCE = 'sql:b_dest'
 
 #: Implementations: how a case is executed. `py` runs `worker.py` inside the implementation's
 #: interpreter (timed around the call); `cli` times the whole process, startup included.
 IMPLS = ('v4py', 'v4cli', 'v5py', 'v5cli')
-PY_IMPLS = ('v4py', 'v5py')
+PY_IMPLS = ('v4py', 'v5py', 'v5pyp')
+#: Every implementation `--impls` accepts: `v5pyp` is the repository's façade with
+#: `MRSM_CORE=python` (the parity-phase Python core), not part of the default set.
+ALL_IMPLS = IMPLS + ('v5pyp',)
 CLI_IMPLS = ('v4cli', 'v5cli')
 
 DTYPES = {'dt': 'datetime', 'id': 'int', 'value': 'float'}
@@ -44,6 +54,10 @@ def inc_metric(label: str, impl: str) -> str:
 
 def target_name(metric: str) -> str:
     return f'bench_{metric}'.lower()  # lowercase: PostgreSQL folds unquoted names
+
+
+def latency_metric(impl: str) -> str:
+    return f'lat_small_{impl}'
 
 
 def chain_metrics(impl: str) -> List[str]:
@@ -86,6 +100,7 @@ def pipe_definitions(backend: str, labels: List[str], impls=IMPLS) -> List[Dict[
     for impl in impls:
         add(SRC_INSTANCE, sync_metric('warmup', impl),
             f'SELECT * FROM {src_table("10k", backend)}')
+        add(SRC_INSTANCE, latency_metric(impl), f'SELECT * FROM {src_table("small", backend)}')
         for label in labels:
             add(SRC_INSTANCE, sync_metric(label, impl),
                 f'SELECT * FROM {src_table(label, backend)}')
@@ -114,7 +129,7 @@ def connector_env(backend: str, workdir: str) -> Dict[str, str]:
         base = {
             'flavor': 'postgis', 'host': 'localhost', 'port': 5449,
             'username': 'test', 'password': 'test1234',
-            'database': 'w7_bench', 'schema': SCHEMA,
+            'database': PG_DATABASE, 'schema': SCHEMA,
         }
         a, b = dict(base), dict(base)
     else:

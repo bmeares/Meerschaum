@@ -68,6 +68,7 @@ GATED_FEATURES = {
     'get_parameters': 'meerschaum.core.Pipe._attributes',
     'get_chunk_interval': 'meerschaum.core.Pipe._data',
     'get_chunk_bounds': 'meerschaum.core.Pipe._data',
+    'verify_pipe': 'meerschaum.core.Pipe._verify',
 }
 
 #: Classes bound in `meerschaum._core` whose methods replace a v4 class's methods, mapped to the

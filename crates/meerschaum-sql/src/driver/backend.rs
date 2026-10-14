@@ -110,11 +110,75 @@ fn make_batch<B: Backend>(
     )?)
 }
 
+/// The output schema of a statement that returned no rows, from `describe`.
+///
+/// `sqlx` describes through a named statement it caches on the connection. A table dropped and
+/// recreated (or altered) since an earlier describe of the same text leaves that statement
+/// stale, and PostgreSQL rejects it ("cached plan must not change result type"), which used to
+/// turn the empty read into a frame without columns. On failure the connection's statement
+/// cache is cleared and the statement described again on the same connection.
+async fn describe_schema<B: Backend>(pool: &Pool<B::DB>, sql: &str) -> SchemaRef
+where
+    for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
+    B::DB: HasStatementCache,
+{
+    let schema_of = |desc: &sqlx::Describe<B::DB>| {
+        let mut plans = B::plan(desc.columns());
+        let empty = vec![Vec::new(); plans.len()];
+        B::refine(&mut plans, &empty);
+        batch::resolve_decimal_scales(&mut plans, &[]);
+        batch::schema_for(&plans)
+    };
+    let Ok(mut conn) = pool.acquire().await else {
+        return SchemaRef::new(Schema::empty());
+    };
+    let marked = format!("{sql}{DESCRIBE_MARKER}");
+    if let Ok(desc) = (&mut *conn).describe(&marked).await {
+        return schema_of(&desc);
+    }
+    let _ = sqlx::Connection::clear_cached_statements(&mut *conn).await;
+    match (&mut *conn).describe(&marked).await {
+        Ok(desc) => schema_of(&desc),
+        Err(_) => SchemaRef::new(Schema::empty()),
+    }
+}
+
+/// The marker appended to statements prepared only to be described, so `sqlx`'s statement
+/// cache never hands their named statement to a real execution of the same text (which reuses a
+/// cached statement even when it asked for an unnamed one).
+pub(super) const DESCRIBE_MARKER: &str = "\n/* mrsm:describe */";
+
+/// PostgreSQL's `0A000` "cached plan must not change result type": a statement in `sqlx`'s
+/// per-connection cache whose result columns changed (`ALTER TABLE ... ADD`, a recreated table).
+fn is_stale_statement(e: &sqlx::Error) -> bool {
+    matches!(e, sqlx::Error::Database(db) if db.code().as_deref() == Some("0A000"))
+}
+
+/// Fetch every row on one pooled connection after clearing its statement cache: the retry of a
+/// statement that failed with [`is_stale_statement`], so the error never reaches the caller.
+async fn fetch_all_fresh<B: Backend>(
+    pool: &Pool<B::DB>,
+    sql: &str,
+    params: &[SqlParam],
+) -> Result<Vec<<B::DB as Database>::Row>>
+where
+    for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
+    for<'q> <B::DB as Database>::Arguments<'q>: IntoArguments<'q, B::DB>,
+    B::DB: HasStatementCache,
+{
+    let mut conn = pool.acquire().await?;
+    let _ = sqlx::Connection::clear_cached_statements(&mut *conn).await;
+    Ok(bound_as::<B>(sql, params, false)
+        .fetch_all(&mut *conn)
+        .await?)
+}
+
 /// Stream a query's rows as record batches.
 pub(crate) async fn read_stream<B: Backend>(
     pool: Pool<B::DB>,
     sql: String,
     chunksize: usize,
+    persistent: bool,
 ) -> Result<RecordBatchStream>
 where
     for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
@@ -152,7 +216,9 @@ where
         }
 
         {
-            let mut rows = sqlx::query::<B::DB>(&sql).persistent(false).fetch(&pool);
+            let mut rows = sqlx::query::<B::DB>(&sql)
+                .persistent(persistent)
+                .fetch(&pool);
             loop {
                 match rows.next().await {
                     Some(Ok(row)) => {
@@ -162,6 +228,24 @@ where
                             buf.clear();
                             let failed = item.is_err();
                             if !deliver(item, &mut schema_tx, &tx).await || failed {
+                                return;
+                            }
+                        }
+                    }
+                    Some(Err(e))
+                        if schema_tx.is_some() && buf.is_empty() && is_stale_statement(&e) =>
+                    {
+                        // Nothing was delivered yet: rerun the statement on a connection with a
+                        // cleared statement cache and deliver its rows below.
+                        match fetch_all_fresh::<B>(&pool, &sql, &[]).await {
+                            Ok(rows) => {
+                                buf = rows;
+                                break;
+                            }
+                            Err(err) => {
+                                if let Some(stx) = schema_tx.take() {
+                                    let _ = stx.send(Err(err));
+                                }
                                 return;
                             }
                         }
@@ -191,16 +275,7 @@ where
         }
         if let Some(stx) = schema_tx.take() {
             // No rows: describe the statement for its columns.
-            let schema = match (&pool).describe(&sql).await {
-                Ok(desc) => {
-                    let mut plans = B::plan(desc.columns());
-                    let empty = vec![Vec::new(); plans.len()];
-                    B::refine(&mut plans, &empty);
-                    batch::resolve_decimal_scales(&mut plans, &[]);
-                    batch::schema_for(&plans)
-                }
-                Err(_) => SchemaRef::new(Schema::empty()),
-            };
+            let schema = describe_schema::<B>(&pool, &sql).await;
             let _ = stx.send(Ok(schema));
         }
     });
@@ -226,17 +301,28 @@ where
 }
 
 /// The first column of the first row.
-pub(crate) async fn value<B: Backend>(pool: &Pool<B::DB>, sql: &str) -> Result<Option<SqlValue>>
+pub(crate) async fn value<B: Backend>(
+    pool: &Pool<B::DB>,
+    sql: &str,
+    persistent: bool,
+) -> Result<Option<SqlValue>>
 where
     for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
     for<'q> <B::DB as Database>::Arguments<'q>: IntoArguments<'q, B::DB>,
     B::DB: HasStatementCache,
 {
-    let Some(row) = sqlx::query::<B::DB>(sql)
-        .persistent(false)
+    let row = match sqlx::query::<B::DB>(sql)
+        .persistent(persistent)
         .fetch_optional(pool)
-        .await?
-    else {
+        .await
+    {
+        Err(e) if is_stale_statement(&e) => fetch_all_fresh::<B>(pool, sql, &[])
+            .await?
+            .into_iter()
+            .next(),
+        other => other?,
+    };
+    let Some(row) = row else {
         return Ok(None);
     };
     if row.columns().is_empty() {
@@ -253,7 +339,19 @@ fn bound<'q, B: Backend>(
 where
     B::DB: HasStatementCache,
 {
-    let mut q = sqlx::query::<B::DB>(sql).persistent(false);
+    bound_as::<B>(sql, params, false)
+}
+
+/// [`bound`], optionally as a statement prepared once per connection (`persistent`).
+fn bound_as<'q, B: Backend>(
+    sql: &'q str,
+    params: &[SqlParam],
+    persistent: bool,
+) -> sqlx::query::Query<'q, B::DB, <B::DB as Database>::Arguments<'q>>
+where
+    B::DB: HasStatementCache,
+{
+    let mut q = sqlx::query::<B::DB>(sql).persistent(persistent);
     for p in params {
         q = B::bind(q, p);
     }
@@ -280,24 +378,19 @@ pub(crate) async fn read_with<B: Backend>(
     pool: &Pool<B::DB>,
     sql: &str,
     params: &[SqlParam],
+    persistent: bool,
 ) -> Result<Vec<RecordBatch>>
 where
     for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
     for<'q> <B::DB as Database>::Arguments<'q>: IntoArguments<'q, B::DB>,
     B::DB: HasStatementCache,
 {
-    let rows = bound::<B>(sql, params).fetch_all(pool).await?;
+    let rows = match bound_as::<B>(sql, params, persistent).fetch_all(pool).await {
+        Err(e) if is_stale_statement(&e) => fetch_all_fresh::<B>(pool, sql, params).await?,
+        other => other?,
+    };
     if rows.is_empty() {
-        let schema = match pool.describe(sql).await {
-            Ok(desc) => {
-                let mut plans = B::plan(desc.columns());
-                let empty = vec![Vec::new(); plans.len()];
-                B::refine(&mut plans, &empty);
-                batch::resolve_decimal_scales(&mut plans, &[]);
-                batch::schema_for(&plans)
-            }
-            Err(_) => SchemaRef::new(Schema::empty()),
-        };
+        let schema = describe_schema::<B>(pool, sql).await;
         return Ok(vec![RecordBatch::new_empty(schema)]);
     }
     let mut state = None;
@@ -309,13 +402,24 @@ pub(crate) async fn value_with<B: Backend>(
     pool: &Pool<B::DB>,
     sql: &str,
     params: &[SqlParam],
+    persistent: bool,
 ) -> Result<Option<SqlValue>>
 where
     for<'c> &'c mut <B::DB as Database>::Connection: Executor<'c, Database = B::DB>,
     for<'q> <B::DB as Database>::Arguments<'q>: IntoArguments<'q, B::DB>,
     B::DB: HasStatementCache,
 {
-    let Some(row) = bound::<B>(sql, params).fetch_optional(pool).await? else {
+    let row = match bound_as::<B>(sql, params, persistent)
+        .fetch_optional(pool)
+        .await
+    {
+        Err(e) if is_stale_statement(&e) => fetch_all_fresh::<B>(pool, sql, params)
+            .await?
+            .into_iter()
+            .next(),
+        other => other?,
+    };
+    let Some(row) = row else {
         return Ok(None);
     };
     if row.columns().is_empty() {
@@ -399,7 +503,8 @@ macro_rules! tx_ops {
                     sqlx::Executor::fetch_all(&mut **tx, sqlx::query::<Db>(sql).persistent(false))
                         .await?;
                 if rows.is_empty() {
-                    let schema = match sqlx::Executor::describe(&mut **tx, sql).await {
+                    let marked = format!("{sql}{}", super::DESCRIBE_MARKER);
+                    let schema = match sqlx::Executor::describe(&mut **tx, &marked).await {
                         Ok(desc) => {
                             let mut plans = B::plan(desc.columns());
                             let empty = vec![Vec::new(); plans.len()];

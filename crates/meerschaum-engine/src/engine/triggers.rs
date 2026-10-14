@@ -64,7 +64,10 @@ pub(super) struct FlushTap {
 
 impl EventSink for FlushTap {
     fn emit(&self, event: Event) {
-        if let (EventKind::StreamFlushed { .. }, Some(r)) = (&event.kind, &event.pipe_ref) {
+        // Only committed flushes dirty the stream (a failed `callback` flush changed nothing).
+        if let (EventKind::StreamFlushed { success: true, .. }, Some(r)) =
+            (&event.kind, &event.pipe_ref)
+        {
             self.hub.record(r);
         }
         let _ = self.broadcast.send(event);
@@ -106,6 +109,15 @@ impl Triggers {
             dirty: BTreeMap::new(),
             last_run: HashMap::new(),
             next_due: None,
+        }
+    }
+
+    /// Note nodes a lap just synced, so a trigger run right after it still honors their
+    /// `min_seconds` (a lap of a `--children` selection also runs the streams' children).
+    pub(super) fn note_ran<'a>(&mut self, nodes: impl IntoIterator<Item = &'a PipeRef>) {
+        let now = Instant::now();
+        for node in nodes {
+            self.last_run.insert(node.clone(), now);
         }
     }
 
@@ -237,5 +249,45 @@ impl Engine {
                 _ = tokio::time::sleep_until(wake.unwrap_or(now)), if wake.is_some() => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stream::FlushTrigger;
+
+    fn flushed(success: bool) -> EventKind {
+        EventKind::StreamFlushed {
+            rows: 1,
+            bytes: 0,
+            trigger: FlushTrigger::Callback,
+            success,
+            begin: None,
+            end: None,
+            inserted: u64::from(success),
+            updated: 0,
+            upserted: 0,
+            message: String::new(),
+        }
+    }
+
+    #[test]
+    fn only_committed_flushes_dirty_a_stream() {
+        let hub = TriggerHub::new();
+        let (broadcast, _rx) = broadcast::channel(8);
+        let tap = Emitter::new(
+            "run",
+            Arc::new(FlushTap {
+                hub: hub.clone(),
+                broadcast,
+            }),
+        );
+        let r = PipeRef::from_string("sql:i|legacy:x|m|None");
+        tap.emit(Some(&r), flushed(false));
+        assert!(hub.take().is_empty());
+        tap.emit(Some(&r), flushed(true));
+        tap.emit(Some(&r), flushed(true));
+        assert_eq!(hub.take().get(&r), Some(&2));
     }
 }

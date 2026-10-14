@@ -27,6 +27,18 @@ use super::{SqlConnector, frame_docs, kv_int, kv_str};
 
 const TEMP_TABLE_ROOTS: [&str; 6] = ["backtrack", "new", "delta", "joined", "unseen", "update"];
 
+/// Sees the rows an in-place sync is about to write, before it writes them
+/// ([`SqlConnector::sync_pipe_inplace_observed`]): the engine records its dirty-range ledger
+/// here, so the commit that follows keeps v4's in-place semantics (the definition's column
+/// types, no frame round trip).
+#[meerschaum_connector::async_trait]
+pub trait InplaceObserver: Send + Sync {
+    /// `delta` has one row per row about to be inserted, updated or upserted, with only the
+    /// pipe's datetime column (no columns when the pipe has none). `Err` aborts the sync with
+    /// nothing merged.
+    async fn before_merge(&self, delta: &meerschaum_kernel::Frame) -> Result<(), String>;
+}
+
 /// `session_execute(session, query, with_results=True)`: run one statement in the transaction,
 /// rolling it back on failure. Returns the rows affected (`-1` for `CREATE TABLE ... AS` on SQLite,
 /// as `sqlite3` reports it).
@@ -135,6 +147,35 @@ impl SqlConnector {
         end: Bound,
         check_existing: bool,
     ) -> SuccessTuple {
+        self.sync_pipe_inplace_with(pipe, params, begin, end, check_existing, None)
+            .await
+    }
+
+    /// [`SqlConnector::sync_pipe_inplace`], handing `observer` the rows it is about to write
+    /// (their datetime column only) right before it writes them; an `Err` from the observer
+    /// aborts the sync with nothing merged. Costs one extra `SELECT` of that column.
+    pub async fn sync_pipe_inplace_observed(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+        begin: Bound,
+        end: Bound,
+        check_existing: bool,
+        observer: &dyn InplaceObserver,
+    ) -> SuccessTuple {
+        self.sync_pipe_inplace_with(pipe, params, begin, end, check_existing, Some(observer))
+            .await
+    }
+
+    async fn sync_pipe_inplace_with(
+        &self,
+        pipe: &Pipe,
+        params: Option<&Map>,
+        begin: Bound,
+        end: Bound,
+        check_existing: bool,
+        observer: Option<&dyn InplaceObserver>,
+    ) -> SuccessTuple {
         let flavor = self.flavor;
         let pipe = &self.prepare_pipe(pipe).await;
         let sp = match self.sql_pipe(pipe) {
@@ -211,6 +252,8 @@ impl SqlConnector {
         let autoincrement = sp.autoincrement();
         let dt_col = sp.column("datetime");
         let dt_col_name = dt_col.as_deref().map(|c| sql_item_name(c, flavor, None));
+        // What `observer` reads: the datetime column of the rows about to be written.
+        let observed_col = dt_col_name.clone().unwrap_or_else(|| "1".into());
         let dt_typ = dt_col.as_ref().map(|c| {
             state
                 .dtypes
@@ -267,6 +310,55 @@ impl SqlConnector {
                     queries = q;
                 }
             }
+            if let Some(o) = observer {
+                // Stage the definition's rows once, so the table is created from exactly the
+                // rows the observer saw (CREATE TABLE ... AS keeps the definition's types).
+                let staged = &temp_tables["new"];
+                let mut stage =
+                    get_create_schema_if_not_exists_queries(isch, flavor).unwrap_or_default();
+                match get_create_table_queries(
+                    &QueryOrDtypes::Query(metadef.clone()),
+                    staged,
+                    flavor,
+                    &CreateTableOptions {
+                        schema: internal_schema.clone(),
+                        ..Default::default()
+                    },
+                ) {
+                    Ok(q) => stage.extend(q),
+                    Err(e) => return SuccessTuple::fail(e.to_string()),
+                }
+                if !self.exec_queries_all(&stage, false, true).await {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(format!(
+                        "Could not stage new data for {pipe} from its SQL query definition."
+                    ));
+                }
+                let query = format!("SELECT {observed_col} FROM {}", names["new"]);
+                let observed = match self.driver().read_frame(&query).await {
+                    Ok(delta) => o.before_merge(&delta).await,
+                    Err(e) => Err(e.to_string()),
+                };
+                if let Err(e) = observed {
+                    clean_up(false).await;
+                    return SuccessTuple::fail(e);
+                }
+                queries = match get_create_table_queries(
+                    &QueryOrDtypes::Query(format!("SELECT * FROM {}", names["new"])),
+                    &target,
+                    flavor,
+                    &opts,
+                ) {
+                    Ok(q) => q,
+                    Err(e) => return SuccessTuple::fail(e.to_string()),
+                };
+                if let Some(s) = schema.as_deref().filter(|s| !s.is_empty()) {
+                    if let Ok(mut q) = get_create_schema_if_not_exists_queries(Some(s), flavor) {
+                        q.extend(queries);
+                        queries = q;
+                    }
+                }
+            }
             if !self.exec_queries_all(&queries, false, true).await {
                 clean_up(false).await;
                 return SuccessTuple::fail(format!(
@@ -313,6 +405,48 @@ impl SqlConnector {
                 }
                 clean_up(false).await;
                 return SuccessTuple::fail($msg);
+            }};
+        }
+        // Hand `observer` the rows about to be written (inside the transaction).
+        // On SQLite (one writer at a time) the observer's own writes would wait on this
+        // session's write lock, so the staged tables are committed first (v4's `sqlite3`
+        // autocommits that DDL anyway), the observer runs outside the session, and a new
+        // session performs the merge.
+        macro_rules! observe {
+            ($query:expr) => {{
+                if let Some(o) = observer {
+                    let query: String = $query;
+                    let read = if flavor.driver_family() == DriverFamily::Sqlite {
+                        if let Some(t) = tx.take() {
+                            if let Err(e) = t.commit().await {
+                                fail!(e.to_string());
+                            }
+                        }
+                        let read = self
+                            .driver()
+                            .read_frame(&query)
+                            .await
+                            .map_err(|e| e.to_string());
+                        tx = match self.driver().begin().await {
+                            Ok(t) => Some(t),
+                            Err(e) => fail!(e.to_string()),
+                        };
+                        read
+                    } else {
+                        match tx.as_mut() {
+                            Some(t) => t.read_frame(&query).await.map_err(|e| e.to_string()),
+                            None => Err("The session was rolled back.".to_string()),
+                        }
+                    };
+                    match read {
+                        Ok(delta) => {
+                            if let Err(e) = o.before_merge(&delta).await {
+                                fail!(e);
+                            }
+                        }
+                        Err(e) => fail!(e),
+                    }
+                }
             }};
         }
 
@@ -428,6 +562,7 @@ impl SqlConnector {
         }
 
         if !check_existing && !upsert {
+            observe!(format!("SELECT {observed_col} FROM {}", names["new"]));
             let insert_query = format!(
                 "INSERT INTO {pipe_name} ({new_cols_str})\nSELECT {new_cols_str}\nFROM {}{alias_as} {}",
                 names["new"], aliases["new"]
@@ -761,6 +896,14 @@ impl SqlConnector {
         args.db_version = db_version.as_deref();
         let apply_update_queries = get_update_queries(&args);
 
+        observe!(if upsert {
+            format!("SELECT {observed_col} FROM {}", names["update"])
+        } else {
+            format!(
+                "SELECT {observed_col} FROM {} UNION ALL SELECT {observed_col} FROM {}",
+                names["unseen"], names["update"]
+            )
+        });
         let mut unseen_count = 0;
         if !upsert {
             let apply_unseen_query = format!(

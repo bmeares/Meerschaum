@@ -8,8 +8,8 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
+use meerschaum_core::Map;
 use meerschaum_core::success::Bound;
-use meerschaum_core::{Map, Value};
 use serde::{Deserialize, Serialize};
 
 use crate::node::PipeRef;
@@ -114,6 +114,13 @@ pub struct NodeRow {
     pub planned_start_seconds: Option<f64>,
     /// CPM slack, seconds.
     pub slack_seconds: Option<f64>,
+    /// The planned duration in seconds (the estimate the CPM schedule used: the EWMA of the
+    /// node's earlier runs, else `system.engine.default_duration_seconds`). Planned end =
+    /// run start + `planned_start_seconds` + this. Not a column of `mrsm:engine_nodes`
+    /// (whose schema is static): [`crate::EngineReader::run_detail`] recomputes it from the
+    /// run history for stored runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_duration_seconds: Option<f64>,
 }
 
 impl NodeRow {
@@ -139,6 +146,7 @@ impl NodeRow {
             message: None,
             planned_start_seconds: None,
             slack_seconds: None,
+            planned_duration_seconds: None,
         }
     }
 }
@@ -233,56 +241,12 @@ impl EnginePipe {
         format!("mrsm_{}", self.metric_key())
     }
 
-    /// The pipe's parameters: `columns`, `dtypes`, `upsert`, `target`, `static`.
+    /// The pipe's parameters: `columns`, `dtypes`, `upsert`, `target`, `static`
+    /// ([`meerschaum_connector::pipe_ops::engine_state_parameters`], where instance connectors
+    /// also find them to forget a dropped pipe's state).
     pub fn parameters(&self) -> Map {
-        let json = match self {
-            EnginePipe::State => {
-                r#"{"columns": {"primary": "pipe_ref"},
-                    "dtypes": {"pipe_ref": "string", "definition_hash": "string", "updated": "datetime"},
-                    "upsert": true}"#
-            }
-            EnginePipe::Ledger => {
-                r#"{"columns": {"datetime": "created", "pipe_ref": "pipe_ref", "seq": "seq"},
-                    "dtypes": {"created": "datetime", "pipe_ref": "string", "seq": "int",
-                               "begin": "json", "end": "json"}}"#
-            }
-            EnginePipe::Cursors => {
-                r#"{"columns": {"parent_ref": "parent_ref", "child_ref": "child_ref"},
-                    "dtypes": {"parent_ref": "string", "child_ref": "string", "seq": "int",
-                               "parent_watermark_at_cursor": "json"},
-                    "upsert": true}"#
-            }
-            EnginePipe::Runs => {
-                r#"{"columns": {"datetime": "started", "primary": "run_id"},
-                    "dtypes": {"run_id": "string", "started": "datetime", "finished": "datetime",
-                               "success": "bool", "message": "string", "targets": "json",
-                               "workers": "int", "num_nodes": "int", "resumed_from": "string",
-                               "holder": "string", "selection": "string"},
-                    "upsert": true}"#
-            }
-            EnginePipe::Nodes => {
-                r#"{"columns": {"datetime": "started", "run_id": "run_id", "pipe_ref": "pipe_ref"},
-                    "dtypes": {"run_id": "string", "pipe_ref": "string", "action": "string",
-                               "status": "string", "reason": "string", "begin": "json",
-                               "end": "json", "num_chunks": "int", "attempts": "int",
-                               "started": "datetime", "finished": "datetime",
-                               "duration_seconds": "float", "inserted": "int", "updated": "int",
-                               "upserted": "int", "deleted": "int", "message": "string",
-                               "planned_start_seconds": "float", "slack_seconds": "float"},
-                    "upsert": true}"#
-            }
-            EnginePipe::Events => {
-                r#"{"columns": {"datetime": "ts", "run_id": "run_id", "seq": "seq"},
-                    "dtypes": {"ts": "datetime", "run_id": "string", "seq": "int",
-                               "pipe_ref": "string", "event": "string", "payload": "json"}}"#
-            }
-        };
-        let mut params = Value::from_json_str(json)
-            .expect("valid engine pipe parameters")
-            .to_map();
-        params.insert("target".into(), Value::Str(self.target()));
-        params.insert("static".into(), Value::Bool(true));
-        params
+        meerschaum_connector::pipe_ops::engine_state_parameters(self.metric_key())
+            .expect("every engine pipe has parameters")
     }
 }
 
@@ -307,7 +271,7 @@ mod tests {
     fn engine_pipes() {
         for p in EnginePipe::ALL {
             let params = p.parameters();
-            assert_eq!(params["target"], Value::Str(p.target()));
+            assert_eq!(params["target"], meerschaum_core::Value::Str(p.target()));
             assert!(params["columns"].is_map());
         }
         // The ledger's columns match the row struct's field names.

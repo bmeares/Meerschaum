@@ -105,7 +105,8 @@ impl InstanceConnector for SqlConnector {
     }
 
     async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
-        SqlConnector::delete_pipe(self, pipe).await
+        let res = SqlConnector::delete_pipe(self, pipe).await;
+        forget_engine_state_after(self, pipe, res).await
     }
 
     async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
@@ -125,7 +126,8 @@ impl InstanceConnector for SqlConnector {
 
     async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         let pipe = &self.prepare_pipe(pipe).await;
-        SqlConnector::drop_pipe(self, pipe).await
+        let res = SqlConnector::drop_pipe(self, pipe).await;
+        forget_engine_state_after(self, pipe, res).await
     }
 
     async fn drop_pipe_indices(&self, pipe: &Pipe) -> SuccessTuple {
@@ -144,7 +146,11 @@ impl InstanceConnector for SqlConnector {
 
     async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
         let pipe = &self.prepare_pipe(pipe).await;
-        SqlConnector::clear_pipe(self, pipe, query).await
+        let res = SqlConnector::clear_pipe(self, pipe, query).await;
+        if !meerschaum_connector::pipe_ops::is_full_clear(query) {
+            return res;
+        }
+        forget_engine_state_after(self, pipe, res).await
     }
 
     async fn get_pipe_data(
@@ -380,4 +386,21 @@ impl From<ConnectorError> for crate::SqlError {
     fn from(e: ConnectorError) -> Self {
         crate::SqlError::InvalidArgument(e.to_string())
     }
+}
+
+/// After a successful drop, delete or full clear, forget the pipe's Syncing Engine state
+/// (ledger, cursors, definition hash; `pipe_ops::forget_engine_state`) so a pipe recreated
+/// under the same keys starts fresh, as in v4. Best effort: `res` is returned unchanged.
+async fn forget_engine_state_after(
+    conn: &SqlConnector,
+    pipe: &Pipe,
+    res: SuccessTuple,
+) -> SuccessTuple {
+    if res.success {
+        let forgotten = meerschaum_connector::pipe_ops::forget_engine_state(conn, pipe).await;
+        if !forgotten.success {
+            tracing::warn!("{}", forgotten.message);
+        }
+    }
+    res
 }

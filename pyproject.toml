@@ -8,9 +8,10 @@
 #
 # Version: the single source of truth is `[workspace.package] version` in the root Cargo.toml
 # (maturin reads it from crates/meerschaum-py). `scripts/check_packaging.py` keeps the pinned
-# `meerschaum-cli` requirement, the extras below and `meerschaum/utils/packages/_packages.py`
-# in sync with it. While `meerschaum/config/_version.py` is still on the 4.x parity line, the
-# wheel version comes from Cargo and `meerschaum.__version__` is unchanged (see that script).
+# `meerschaum-cli` requirement, the extras below, `meerschaum/utils/packages/_packages.py`,
+# `requirements/<extra>.txt`, the extras table compiled into `mrsm`
+# (crates/meerschaum-cli/src/extras.rs) and `meerschaum/config/_version.py` in sync with it, and
+# with `--wheels DIST` checks the built wheels and the binary's `--version` (see that script).
 #
 # In-tree development builds do not use this file's build: `scripts/rust/build_py.sh` drops
 # `meerschaum/_core/_core.abi3.so` into the working tree (crates/meerschaum-py/pyproject.toml).

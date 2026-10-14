@@ -119,7 +119,8 @@ pub struct EngineConfig {
     pub holder: String,
     /// EWMA smoothing of durations.
     pub ewma_alpha: f64,
-    /// Expected duration of a pipe without history.
+    /// Expected duration of a node without history (`system.engine.default_duration_seconds`,
+    /// default 30): the planned length of its Gantt bar and its CPM duration.
     pub default_duration: Duration,
     /// `system.engine.chunk_pipelining` (R6; accepted, not implemented).
     pub chunk_pipelining: bool,
@@ -213,6 +214,11 @@ impl EngineConfig {
                 .map(|r| r.join("cache").join("engine_leases"))
                 .unwrap_or(d.lease_dir),
             chunk_pipelining: flag(&["system", "engine", "chunk_pipelining"], false),
+            default_duration: get(&["system", "engine", "default_duration_seconds"])
+                .as_ref()
+                .and_then(|v| v.as_f64())
+                .filter(|s| s.is_finite() && *s >= 0.0)
+                .map_or(d.default_duration, Duration::from_secs_f64),
             debounce_seconds: get(&["system", "engine", "debounce_seconds"])
                 .as_ref()
                 .and_then(|v| v.as_f64())
@@ -258,6 +264,10 @@ pub struct RunOptions {
     pub hold: BTreeSet<PipeRef>,
     /// `--chunk-pipelining` for this run (R6); `None` uses `system.engine.chunk_pipelining`.
     pub chunk_pipelining: Option<bool>,
+    /// Also deliver this run's events here (every event, in emission order, regardless of
+    /// `system.engine.events`), in addition to [`Engine::subscribe`]. The Python bindings use
+    /// it for `Pipeline.sync(on_event=...)`. `emit` must not block.
+    pub on_event: Option<Arc<dyn EventSink>>,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -464,6 +474,7 @@ struct RunSink {
     labels: HashMap<PipeRef, String>,
     outcomes: Mutex<Vec<NodeOutcome>>,
     on_lap: Option<Arc<dyn Fn(LapEvent) + Send + Sync>>,
+    on_event: Option<Arc<dyn EventSink>>,
 }
 
 impl EventSink for RunSink {
@@ -500,6 +511,9 @@ impl EventSink for RunSink {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .push(o);
+        }
+        if let Some(sink) = &self.on_event {
+            sink.emit(event.clone());
         }
         let _ = self.broadcast.send(event);
     }
@@ -549,8 +563,9 @@ fn record_from_entry(
     rec
 }
 
-/// Read every registered pipe of `instance` as graph records (batch `fetch_pipes_keys`).
-pub(crate) async fn fetch_records(
+/// Read every registered pipe of `instance` as graph records (batch `fetch_pipes_keys`; the
+/// list form reads each pipe's parameters). `registry` must resolve `instance`.
+pub async fn fetch_records(
     registry: &dyn ConnectorRegistry,
     defaults: &PipeDefaults,
     instance: &str,
@@ -898,6 +913,7 @@ impl Engine {
                 .collect(),
             outcomes: Mutex::new(Vec::new()),
             on_lap,
+            on_event: opts.on_event.clone(),
         });
 
         // Batched event persistence (`system.engine.state_flush_ms`).
@@ -1072,6 +1088,7 @@ impl Engine {
         let mut streams: Option<tokio::task::JoinSet<()>> = None;
         let mut triggers: Option<triggers::Triggers> = None;
         let mut lap = 0u64;
+        let mut legacy_outcomes: Vec<NodeOutcome> = Vec::new();
         // `parameters['schedule']` (§5.5): root nodes with a schedule only sync when due.
         let mut schedules = crate::cadence::PipeSchedules::default();
         let mut schedules_flat = true;
@@ -1098,8 +1115,12 @@ impl Engine {
             if streams.is_none() && (loop_opts.listen || loop_opts.run_loop) {
                 if let Ok((graph, sub, _)) = self.resolve(&opts).await {
                     let hub = triggers::TriggerHub::new();
-                    let (set, excluded, emitter) =
+                    let (set, excluded, emitter, starts) =
                         self.spawn_streams(&graph, &sub, &stop, &opts.sync, &hub);
+                    // PARITY: v4's `--listen` lap called each v4-pattern connector's `sync()`
+                    // (which subscribes and returns) and reported it like any pipe; the first
+                    // lap reports those returns the same way.
+                    legacy_outcomes = starts.collect(&stop, &on_lap).await;
                     if !excluded.is_empty() {
                         opts.exclude.extend(excluded.clone());
                         triggers = Some(triggers::Triggers::new(
@@ -1154,7 +1175,15 @@ impl Engine {
                 }
             }
             lap += 1;
-            let result = self.run_inner(lap_opts, Some(on_lap.clone())).await;
+            let mut result = self.run_inner(lap_opts, Some(on_lap.clone())).await;
+            if let Some(t) = triggers.as_mut() {
+                t.note_ran(result.outcomes.iter().map(|o| &o.pipe_ref));
+            }
+            if !legacy_outcomes.is_empty() && result.record.is_some() {
+                let mut outcomes = std::mem::take(&mut legacy_outcomes);
+                outcomes.append(&mut result.outcomes);
+                result.outcomes = outcomes;
+            }
             for r in &due_now {
                 schedules.ran(r, lap_now);
             }
@@ -1245,9 +1274,15 @@ impl Engine {
         tokio::task::JoinSet<()>,
         BTreeSet<PipeRef>,
         crate::events::Emitter,
+        LegacyStarts,
     ) {
         let mut set = tokio::task::JoinSet::new();
         let mut owned = BTreeSet::new();
+        let (starts_tx, starts_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut starts = LegacyStarts {
+            rx: starts_rx,
+            expected: 0,
+        };
         let native_config = NativeConfig {
             defaults: self.config.defaults.clone(),
             default_backtrack_minutes: self.config.default_backtrack_minutes,
@@ -1329,6 +1364,15 @@ impl Engine {
                 let pipe = node.pipe.clone();
                 let stop = stop.clone();
                 let emitter = emitter.clone();
+                // Every callback `pipe.sync()` is a flush: ledger first, `stream_flushed`
+                // (trigger `callback`), children triggering.
+                if legacy.reports_return() {
+                    starts.expected += 1;
+                }
+                let sink: Arc<dyn crate::stream::LegacySink> = Arc::new(
+                    crate::native::NativeLegacySink::new(executor.clone(), Some(emitter.clone()))
+                        .with_outcomes(starts_tx.clone()),
+                );
                 set.spawn(async move {
                     supervise(
                         &PipeRef::from_pipe(&pipe),
@@ -1336,7 +1380,8 @@ impl Engine {
                             let l = legacy.clone();
                             let p = pipe.clone();
                             let st = stop.clone();
-                            async move { l.run(&p, st).await }
+                            let sink = sink.clone();
+                            async move { l.run(&p, sink, st).await }
                         },
                         SuperviseOptions::default(),
                         Some(&emitter),
@@ -1346,7 +1391,41 @@ impl Engine {
                 });
             }
         }
-        (set, owned, emitter)
+        (set, owned, emitter, starts)
+    }
+}
+
+/// How long the first lap of `--listen` waits for v4-pattern connectors' `sync()` to return
+/// before it runs (a connector whose `sync()` blocks is reported as still starting).
+const LEGACY_START_WAIT: Duration = Duration::from_secs(30);
+
+/// The `sync()` returns of the v4-pattern streams the loop started, for its first lap.
+struct LegacyStarts {
+    rx: tokio::sync::mpsc::UnboundedReceiver<NodeOutcome>,
+    expected: usize,
+}
+
+impl LegacyStarts {
+    /// Wait (bounded by [`LEGACY_START_WAIT`] or `stop`) for every expected return, reporting
+    /// each as a `PipeFinished` lap event in arrival order.
+    async fn collect(
+        mut self,
+        stop: &StopToken,
+        on_lap: &Arc<dyn Fn(LapEvent) + Send + Sync>,
+    ) -> Vec<NodeOutcome> {
+        let mut out = Vec::new();
+        let deadline = tokio::time::Instant::now() + LEGACY_START_WAIT;
+        while out.len() < self.expected {
+            let next = tokio::select! {
+                _ = stop.stopped() => break,
+                _ = tokio::time::sleep_until(deadline) => break,
+                next = self.rx.recv() => next,
+            };
+            let Some(outcome) = next else { break };
+            on_lap(LapEvent::PipeFinished(outcome.clone()));
+            out.push(outcome);
+        }
+        out
     }
 }
 

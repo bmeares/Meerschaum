@@ -12,7 +12,8 @@
 //!   field tags on each column ([`frame::ColumnTags`]).
 //! - [`detect`]: dtype detection on frames (`get_json_cols`, `get_numeric_cols`, ...).
 //! - [`enforce`]: `enforce_dtypes` and the `Pipe.enforce_dtypes` call path.
-//! - [`diff`]: `filter_unseen_df` and the DataFrame part of `Pipe.filter_existing`.
+//! - [`diff`]: `filter_unseen_df` and the DataFrame part of `Pipe.filter_existing`;
+//!   [`merge_dtype`] decides the dtypes of its result the way pandas' `merge` does.
 //! - [`serialize`], [`geometry`]: JSON / UUID / numeric / bytes / date / datetime / geometry
 //!   (WKB with the CRS carried as GeoArrow metadata, D10).
 //! - [`query`]: `query_df` with the `params` grammar.
@@ -29,6 +30,7 @@ pub mod dtypes;
 pub mod enforce;
 pub mod frame;
 pub mod geometry;
+pub mod merge_dtype;
 pub mod query;
 pub mod serialize;
 pub mod value;

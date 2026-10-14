@@ -1,22 +1,27 @@
 //! The live-system operations compose needs: the instance connector (pipe registrations), the
-//! job supervisor, and the interactive prompt. Neither the Rust instance connectors nor the job
-//! supervisor are wired into compose yet, so subactions take them through these traits.
+//! job supervisor, and the interactive prompt. Subactions take them through these traits.
 //!
 //! The in-memory fakes reproduce the semantics the parity fixtures were recorded with (see
 //! `tests/fixtures/gen_compose.py`): a registry of pipes with parameters, `edit`/`delete` events,
-//! and a fixed set of jobs.
-//
-// TODO(core-merge): implement `InstanceOps` over the Rust instance connectors (`meerschaum-sql`,
-// `meerschaum-api`, `meerschaum-valkey`) and `JobOps` over `meerschaum-jobs` once their public
-// APIs land in `meerschaum-core`.
+//! and a fixed set of jobs. The CLI implements [`InstanceOps`] over the Rust instance connectors
+//! (`meerschaum_cli::native::compose_instance::ComposeInstance`); `JobOps` over
+//! `meerschaum-jobs` is still to do (the CLI serves only the subactions that never list jobs:
+//! `explain`, `init`, `up --dry`).
 
 use indexmap::IndexMap;
 use meerschaum_core::pipe::Pipe;
 use meerschaum_core::success::SuccessTuple;
 use meerschaum_core::value::{Map, Value};
 
+use crate::project::{Host, Project};
+
 /// Pipe registrations on instance connectors.
 pub trait InstanceOps {
+    /// Called once the project is loaded and before any other method: the project's
+    /// environment, root directory and `config:` block scope the instance connectors (Python
+    /// swaps the config and environment for the duration of a subaction). Fakes ignore it.
+    fn configure(&mut self, _host: &Host, _project: &Project) {}
+
     /// `mrsm.get_connector(keys, **attributes)` for a custom connector defined by the project
     /// (`build_custom_connectors`). The default accepts every connector.
     fn build_connector(&mut self, _keys: &str, _attributes: &Map) -> Result<(), String> {
@@ -26,6 +31,13 @@ pub trait InstanceOps {
     /// `mrsm.get_pipes(tags=tags, instance=instance_keys)`: the registered pipes on an instance
     /// which carry any of the tags, with their registered parameters.
     fn get_pipes(&mut self, instance_keys: &str, tags: &[String]) -> Vec<Pipe>;
+
+    /// [`InstanceOps::get_pipes`] for an instance that may fail: Python's `get_pipes` raises
+    /// (`error(str(e))`) when the instance cannot be reached, which fails the subaction. The
+    /// message is `str(exception)`. The default never fails.
+    fn try_get_pipes(&mut self, instance_keys: &str, tags: &[String]) -> Result<Vec<Pipe>, String> {
+        Ok(self.get_pipes(instance_keys, tags))
+    }
 
     /// The registered parameters of a pipe (`pipe.attributes['parameters']` from the instance),
     /// or `None` if the pipe is not registered.

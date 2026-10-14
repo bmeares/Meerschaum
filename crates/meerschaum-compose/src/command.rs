@@ -35,6 +35,12 @@ pub struct MrsmCommand {
     pub root_dir: Option<PathBuf>,
     /// The project's `config:` block when `replace` is set.
     pub config: Option<Map>,
+    /// The project environment (`get_env_dict()`) the subaction itself runs under. An in-process
+    /// command with `replace == false` inherits it in Python (the subaction already ran
+    /// `replace_env()`), so a runner that spawns a process for it must pass this environment.
+    /// `None` when `replace` is set (then `env` is the environment) or when the environment
+    /// cannot be applied.
+    pub inherited_env: Option<EnvDict>,
 }
 
 /// Runs [`MrsmCommand`]s.
@@ -125,6 +131,11 @@ pub fn build_command_with_env(
     // (`_replace`) or the subprocess inherits the environment the subaction already runs in.
     let replace = opts.replace || subprocess || opts.capture_output;
 
+    let inherited_env = if replace {
+        None
+    } else {
+        get_env_dict(config, process_env).ok()
+    };
     let (env, root_dir, cfg) = if replace {
         let env = get_env_dict(config, process_env)?;
         // PARITY: in-process commands apply the environment with `replace_env()`, which raises
@@ -150,6 +161,7 @@ pub fn build_command_with_env(
         env,
         root_dir,
         config: cfg,
+        inherited_env,
     })
 }
 

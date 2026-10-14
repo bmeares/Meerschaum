@@ -6,7 +6,7 @@ use meerschaum_core::pipe::{Pipe, PipeDefaults};
 use meerschaum_core::value::{Map, Value};
 
 use crate::error::{ComposeError, Messages};
-use crate::project::{Host, Project, get_project_name, py_type_name};
+use crate::project::{Host, Project, env_dict_as_process_env, get_project_name, py_type_name};
 
 /// The project's view of the config registry while a subaction runs: Python swaps the in-memory
 /// config for the project's `config:` block (`replace_config`), so lookups hit that block first
@@ -17,21 +17,45 @@ pub struct ProjectConfig {
 }
 
 impl ProjectConfig {
-    /// Build the project registry from the host's options and the project's `config:` block.
+    /// Build the project registry from the project's environment and `config:` block.
+    ///
+    /// Python runs a subaction inside `replace_config(block)` then `replace_env(env)`: the
+    /// config is the project's `config:` block, and applying the project environment (the host
+    /// environment plus `environment:`, `get_env_dict()`) patches `MRSM_PATCH` and the
+    /// `MRSM_<TYPE>_<LABEL>` connector variables on top of it, so the environment connectors win
+    /// over the file's. The root directory is the project's. When the project environment
+    /// cannot be applied (a non-string `environment:` value, an unusable root), the registry is
+    /// built from the host environment, as before.
     pub fn new(host: &Host, project: &Project) -> Result<ProjectConfig, ComposeError> {
-        let mut opts = meerschaum_core::config::ConfigOptions::with_env(
-            host.env
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-        );
-        opts.allow_writes = false;
-        if let Some(home) = host.env.get("HOME") {
-            opts.home = std::path::PathBuf::from(home);
-        }
-        let registry = meerschaum_core::Config::new(opts)
-            .map_err(|e| ComposeError::new(crate::error::ErrorKind::Os, e.to_string()))?;
-        registry.set_config(project.config_block());
+        let project_env: Option<Vec<(String, String)>> = project
+            .env_dict()
+            .and_then(|e| env_dict_as_process_env(&e))
+            .ok()
+            .map(|e| e.into_iter().collect());
+        let host_env: Vec<(String, String)> = host
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let build = |env: Vec<(String, String)>| -> Result<meerschaum_core::Config, ComposeError> {
+            let mut opts = meerschaum_core::config::ConfigOptions::with_env(env);
+            opts.allow_writes = false;
+            if let Some(home) = host.env.get("HOME") {
+                opts.home = std::path::PathBuf::from(home);
+            }
+            meerschaum_core::Config::new(opts)
+                .map_err(|e| ComposeError::new(crate::error::ErrorKind::Os, e.to_string()))
+        };
+        let (registry, env) = match project_env {
+            Some(env) => match build(env.clone()) {
+                Ok(registry) => (registry, env),
+                Err(_) => (build(host_env.clone())?, host_env),
+            },
+            None => (build(host_env.clone())?, host_env),
+        };
+        let block = project.config_block();
+        registry.set_config(block.clone());
+        apply_environment_layers(&registry, &env, &block);
         Ok(ProjectConfig { registry })
     }
 
@@ -57,6 +81,98 @@ impl ProjectConfig {
     pub fn pipe_defaults(&self) -> PipeDefaults {
         PipeDefaults::from_config(&self.registry)
     }
+}
+
+/// `apply_environment_patches(env)` (`MRSM_PATCH` only: `MRSM_CONFIG` is the project's own
+/// `config:` block) and `apply_environment_uris(env)` on top of the project's config.
+fn apply_environment_layers(
+    registry: &meerschaum_core::Config,
+    env: &[(String, String)],
+    block: &Map,
+) {
+    use meerschaum_core::config::{get_connector_env_vars, parse_connector_env_var};
+    use meerschaum_core::value::apply_patch_maps;
+
+    let lookup = |name: &str| env.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+    let patch_var = meerschaum_core::static_config().environment.patch.clone();
+    if let Some(raw) = lookup(&patch_var) {
+        // An unparseable patch is skipped (Python warns and continues).
+        if let Ok(patch) = meerschaum_core::pyfmt::string_to_dict(raw.trim_start()) {
+            registry.set_config(apply_patch_maps(&registry.snapshot(), &patch));
+        }
+    }
+    let mut applied_uri = false;
+    for var in get_connector_env_vars(env) {
+        let Some((typ, label)) = parse_connector_env_var(&var) else {
+            continue;
+        };
+        if typ.is_empty() || label.is_empty() {
+            continue;
+        }
+        let uri = lookup(&var).unwrap_or_default();
+        let attrs = if uri.trim_start().starts_with('{') && uri.trim_end().ends_with('}') {
+            Value::from_json_str(&uri).unwrap_or_else(|_| uri_attributes(&uri))
+        } else {
+            uri_attributes(&uri)
+        };
+        let base = {
+            let opts = GetOptions {
+                warn: false,
+                write_missing: false,
+                ..GetOptions::default()
+            };
+            let (_, value) = registry.get_with(&["meerschaum"], opts);
+            let _ = registry.take_warnings();
+            value.to_map()
+        };
+        let mut label_map = Map::new();
+        label_map.insert(label, attrs);
+        let mut typ_map = Map::new();
+        typ_map.insert(typ, Value::Map(label_map));
+        let mut connectors = Map::new();
+        connectors.insert("connectors".into(), Value::Map(typ_map));
+        let mut config = registry.snapshot();
+        config.insert(
+            "meerschaum".into(),
+            Value::Map(apply_patch_maps(&base, &connectors)),
+        );
+        // Python's `set_config` keeps only the `meerschaum` key here
+        // (`config/environment.py:166`); the project's other keys (symlink targets) stay, since
+        // dropping them only loses information.
+        registry.set_config(config);
+        applied_uri = true;
+    }
+    // PARITY: compose builds the connectors the file defines with `get_connector(keys,
+    // **attributes)`; keyword attributes override the config's, which include the environment
+    // connectors, so the file's attributes win for the keys it sets.
+    let file_connectors = block
+        .get("meerschaum")
+        .and_then(Value::as_map)
+        .and_then(|m| m.get("connectors"))
+        .and_then(Value::as_map);
+    if let (true, Some(file_connectors)) = (applied_uri, file_connectors) {
+        let opts = GetOptions {
+            warn: false,
+            write_missing: false,
+            ..GetOptions::default()
+        };
+        let (_, base) = registry.get_with(&["meerschaum"], opts);
+        let _ = registry.take_warnings();
+        let mut patch = Map::new();
+        patch.insert("connectors".into(), Value::Map(file_connectors.clone()));
+        let mut config = registry.snapshot();
+        config.insert(
+            "meerschaum".into(),
+            Value::Map(apply_patch_maps(&base.to_map(), &patch)),
+        );
+        registry.set_config(config);
+    }
+}
+
+fn uri_attributes(uri: &str) -> Value {
+    let mut m = Map::new();
+    m.insert("uri".into(), Value::Str(uri.to_string()));
+    Value::Map(m)
 }
 
 /// `get_defined_pipes(compose_config, as_meta=True)`: the keyword arguments for each pipe, with

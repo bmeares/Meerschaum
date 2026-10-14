@@ -27,6 +27,10 @@ pub trait DurationSource: Send + Sync {
 }
 
 /// EWMA duration estimates per `(pipe, action)`.
+///
+/// A node is estimated from its own history: the EWMA of its earlier successful syncs with the
+/// same action, else of all its earlier successful syncs (any action), else [`Self::default`]
+/// (`system.engine.default_duration_seconds`, 30 s).
 #[derive(Debug, Clone)]
 pub struct EwmaDurations {
     /// The smoothing factor in `(0, 1]` (weight of the newest observation).
@@ -34,6 +38,7 @@ pub struct EwmaDurations {
     /// The estimate for pipes without history.
     pub default: Duration,
     values: HashMap<(PipeRef, Action), f64>,
+    any_action: HashMap<PipeRef, f64>,
 }
 
 impl Default for EwmaDurations {
@@ -49,6 +54,16 @@ impl EwmaDurations {
             alpha: alpha.clamp(f64::EPSILON, 1.0),
             default,
             values: HashMap::new(),
+            any_action: HashMap::new(),
+        }
+    }
+
+    /// Where an estimate comes from: `history` (the node's own earlier runs) or `default`.
+    pub fn source(&self, node: &PipeRef, action: Action) -> &'static str {
+        if self.values.contains_key(&(node.clone(), action)) || self.any_action.contains_key(node) {
+            "history"
+        } else {
+            "default"
         }
     }
 
@@ -58,6 +73,10 @@ impl EwmaDurations {
         let alpha = self.alpha;
         self.values
             .entry((node.clone(), action))
+            .and_modify(|v| *v = alpha * x + (1.0 - alpha) * *v)
+            .or_insert(x);
+        self.any_action
+            .entry(node.clone())
             .and_modify(|v| *v = alpha * x + (1.0 - alpha) * *v)
             .or_insert(x);
     }
@@ -91,6 +110,7 @@ impl DurationSource for EwmaDurations {
         }
         self.values
             .get(&(node.clone(), action))
+            .or_else(|| self.any_action.get(node))
             .map_or(self.default, |s| Duration::from_secs_f64(*s))
     }
 }
@@ -125,13 +145,29 @@ pub struct Schedule {
     pub critical_path: Vec<PipeRef>,
 }
 
+/// The action a node is expected to run. A provisional `skip` (a child planned against state
+/// its running parents are about to change) is re-planned when they finish and usually syncs
+/// then, so it is scheduled as an `incremental`.
+fn expected_action(node: &crate::plan::PlannedNode) -> Action {
+    if node.provisional && node.action == Action::Skip {
+        Action::Incremental
+    } else {
+        node.action
+    }
+}
+
 /// Compute upward ranks and CPM times for a plan.
 pub fn schedule(plan: &Plan, durations: &dyn DurationSource) -> Schedule {
     let order: Vec<&PipeRef> = plan.nodes.iter().map(|n| &n.pipe_ref).collect();
     let dur: HashMap<&PipeRef, Duration> = plan
         .nodes
         .iter()
-        .map(|n| (&n.pipe_ref, durations.estimate(&n.pipe_ref, n.action)))
+        .map(|n| {
+            (
+                &n.pipe_ref,
+                durations.estimate(&n.pipe_ref, expected_action(n)),
+            )
+        })
         .collect();
     let mut parents: HashMap<&PipeRef, Vec<&PipeRef>> = HashMap::new();
     let mut children: HashMap<&PipeRef, Vec<&PipeRef>> = HashMap::new();
@@ -275,5 +311,42 @@ mod tests {
         assert_eq!(b.slack, Duration::from_secs(25));
         assert_eq!(s.nodes[&r("c")].slack, Duration::ZERO);
         assert_eq!(s.nodes[&r("a")].upward_rank, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn provisional_skips_are_scheduled_as_syncs() {
+        let r = |m: &str| PipeRef::new("i", "c", m, None);
+        let mut child = node("b", Action::Skip);
+        child.provisional = true;
+        let plan = Plan {
+            nodes: vec![node("a", Action::Root), child, node("c", Action::Skip)],
+            edges: vec![(r("a"), r("b"))],
+            flat: false,
+            warnings: vec![],
+        };
+        let s = schedule(&plan, &EwmaDurations::new(0.5, Duration::from_secs(10)));
+        assert_eq!(s.nodes[&r("b")].duration, Duration::from_secs(10));
+        assert_eq!(s.nodes[&r("c")].duration, Duration::ZERO);
+        assert_eq!(s.makespan, Duration::from_secs(20));
+    }
+
+    #[test]
+    fn estimates_fall_back_to_the_node_then_the_default() {
+        let r = |m: &str| PipeRef::new("i", "c", m, None);
+        let mut d = EwmaDurations::new(0.5, Duration::from_secs(30));
+        d.observe(&r("a"), Action::Incremental, Duration::from_secs(8));
+        assert_eq!(
+            d.estimate(&r("a"), Action::Incremental),
+            Duration::from_secs(8)
+        );
+        // Another action of the same node: the node's own history, not the default.
+        assert_eq!(
+            d.estimate(&r("a"), Action::Backfill),
+            Duration::from_secs(8)
+        );
+        assert_eq!(d.source(&r("a"), Action::Backfill), "history");
+        assert_eq!(d.estimate(&r("b"), Action::Root), Duration::from_secs(30));
+        assert_eq!(d.source(&r("b"), Action::Root), "default");
+        assert_eq!(d.estimate(&r("a"), Action::Skip), Duration::ZERO);
     }
 }

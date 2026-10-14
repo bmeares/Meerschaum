@@ -9,7 +9,7 @@ use crate::flavor::{DriverFamily, Flavor};
 /// A value bound to a query parameter.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SqlParam {
-    /// `NULL` (bound as a nullable text parameter).
+    /// `NULL` (bound as a nullable text parameter; untyped on PostgreSQL).
     Null,
     Bool(bool),
     Int(i64),
@@ -91,11 +91,73 @@ macro_rules! bind_param_impl {
     }};
 }
 
+/// A `NULL` bound with an unspecified type (OID 0), so PostgreSQL infers it from the context
+/// (the target column of an `INSERT`, the other operand of a comparison) as an untyped literal
+/// `NULL` would be. A `NULL` declared as `TEXT` is rejected by any non-text column ("column ...
+/// is of type timestamp with time zone but expression is of type text"); SQLAlchemy and
+/// psycopg send `None` untyped as well.
+struct PgUntypedNull;
+
+impl sqlx::Type<sqlx::Postgres> for PgUntypedNull {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        sqlx::postgres::PgTypeInfo::with_oid(sqlx::postgres::types::Oid(0))
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for PgUntypedNull {
+    fn encode_by_ref(
+        &self,
+        _buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        Ok(sqlx::encode::IsNull::Yes)
+    }
+}
+
 pub(crate) fn bind_pg<'q>(
     q: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
     p: &SqlParam,
 ) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
-    bind_param_impl!(q, p, json_native = true)
+    match p {
+        SqlParam::Null => q.bind(PgUntypedNull),
+        _ => bind_param_impl!(q, p, json_native = true),
+    }
+}
+
+/// The placeholder for one bound cell of a row `INSERT`, cast to the column's database type on
+/// PostgreSQL when the cell is bound as text (decimals, UUIDs, ...): PostgreSQL has no implicit
+/// cast from `text` to `numeric`, `uuid`, `date` or the timestamp types, while psycopg binds
+/// those Python values with their own types. Text-like, array, user-defined and spatial columns
+/// (PostGIS casts text implicitly) keep the bare placeholder; other flavors always do.
+pub fn typed_placeholder(flavor: Flavor, n: usize, param: &SqlParam, db_type: &str) -> String {
+    let ph = placeholder(flavor, n);
+    if flavor.driver_family() != DriverFamily::Postgres || !matches!(param, SqlParam::Text(_)) {
+        return ph;
+    }
+    let typ = db_type.trim();
+    let upper = typ.to_ascii_uppercase();
+    let passthrough = typ.is_empty()
+        || upper == "ARRAY"
+        || upper == "USER-DEFINED"
+        || [
+            "TEXT",
+            "CHAR",
+            "VARCHAR",
+            "CHARACTER",
+            "NAME",
+            "CITEXT",
+            "GEOMETRY",
+            "GEOGRAPHY",
+        ]
+        .iter()
+        .any(|p| upper.starts_with(p))
+        || !typ
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || " _(),".contains(c));
+    if passthrough {
+        ph
+    } else {
+        format!("CAST({ph} AS {typ})")
+    }
 }
 
 pub(crate) fn bind_mysql<'q>(

@@ -297,3 +297,42 @@ impl meerschaum_engine::sync::DeltaObserver for CallbackObserver {
         Ok(())
     }
 }
+
+/// A custom connector class with a v4 `sync()` and an unrelated `subscribe(topic, callback)`
+/// method (the public MQTT connector's shape) is a v4-pattern stream, not a `subscribe` source;
+/// only `IS_STREAMING = True` makes a class's `subscribe` the v5 push source.
+#[tokio::test]
+async fn custom_subscribe_methods_need_is_streaming() {
+    let env = env("wiring_custom_streams").await;
+    let manifest: Manifest = serde_json::from_value(serde_json::json!({
+        "schema_version": 4, "meerschaum_version": "test", "python_version": "test",
+        "plugins": {"mq": {"name": "mq", "data_functions": []}},
+        "connector_types": {
+            "mq": {"type": "mq", "plugin": "mq", "class_name": "MQ", "is_instance": false,
+                   "is_thread_safe": false, "is_streaming": false,
+                   "methods": ["publish", "subscribe", "sync"]},
+            "push": {"type": "push", "plugin": "mq", "class_name": "Push", "is_instance": false,
+                     "is_thread_safe": false, "is_streaming": true,
+                     "methods": ["subscribe"]}
+        }
+    }))
+    .unwrap();
+    let pool = WorkerPool::new(PoolConfig::default());
+    let registry = PythonRegistry::new(
+        env.registry.clone(),
+        pool.clone(),
+        Arc::new(manifest),
+        env.config(),
+    );
+    assert!(registry.stream_source("mq:test").is_none());
+    assert!(
+        registry.legacy_stream("mq:test").is_none(),
+        "only under --listen"
+    );
+    assert!(registry.plugin_sync("mq:test").is_some());
+    registry.enable_legacy_streams();
+    assert!(registry.legacy_stream("mq:test").is_some());
+    assert!(registry.stream_source("push:test").is_some());
+    assert!(registry.legacy_stream("push:test").is_none());
+    assert_eq!(pool.stats().spawned, 0);
+}

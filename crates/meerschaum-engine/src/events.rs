@@ -148,14 +148,40 @@ pub enum EventKind {
         /// After the sync.
         to: Option<Bound>,
     },
-    /// A stream source flushed a micro-batch (§5.6).
+    /// A stream source flushed a micro-batch (§5.6), or a v4-pattern (`LegacyStream`)
+    /// connector's callback called `pipe.sync()` (trigger `callback`).
+    ///
+    /// The fields after `trigger` are additive (wave 9) and default when absent.
     StreamFlushed {
-        /// Rows flushed.
+        /// Rows flushed (the rows handed to the sync, before diffing).
         rows: u64,
-        /// Bytes flushed.
+        /// Bytes flushed (`0` for `callback` flushes, whose size the engine never sees).
         bytes: u64,
         /// Which trigger fired.
         trigger: FlushTrigger,
+        /// Whether the flush committed. `subscribe` streams only report committed flushes
+        /// (a failed one keeps its rows for the next trigger); `callback` flushes report
+        /// failures too, because the plugin, not the engine, decides whether to retry.
+        #[serde(default = "default_true")]
+        success: bool,
+        /// The smallest datetime-axis value among the rows the flush changed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        begin: Option<Bound>,
+        /// The largest datetime-axis value among the rows the flush changed (inclusive).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<Bound>,
+        /// Rows inserted.
+        #[serde(default)]
+        inserted: u64,
+        /// Rows updated.
+        #[serde(default)]
+        updated: u64,
+        /// Rows upserted.
+        #[serde(default)]
+        upserted: u64,
+        /// The sync's message (`callback` flushes; empty otherwise).
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        message: String,
     },
     /// A stream source's flush triggered a run over its descendants (§5.6 "Downstream
     /// triggering"). The run itself has its own `run_id` and events.
@@ -204,6 +230,10 @@ impl EventKind {
             EventKind::RunFinished { .. } => "run_finished",
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// One event with its envelope.

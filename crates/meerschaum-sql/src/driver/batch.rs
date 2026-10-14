@@ -371,7 +371,8 @@ fn to_f64(c: &SqlValue) -> Conv<f64> {
         SqlValue::Int(i) => *i as f64,
         SqlValue::UInt(u) => *u as f64,
         SqlValue::Bool(b) => *b as i64 as f64,
-        SqlValue::Decimal(d) => d.to_f64().ok_or(())?,
+        // `float(Decimal)` rounds correctly; `rust_decimal`'s `to_f64` can be one ulp off.
+        SqlValue::Decimal(d) => d.to_string().parse().map_err(|_| ())?,
         SqlValue::Text(s) => s.trim().parse().map_err(|_| ())?,
         _ => return Err(()),
     }))
@@ -662,6 +663,21 @@ mod decimal_tests {
 mod tests {
     use super::*;
     use arrow::array::Array;
+
+    #[test]
+    fn decimal_to_f64_rounds_like_python_float() {
+        // `float(Decimal('0.78431372549019607843'))` is 0.7843137254901961.
+        let d: Decimal = "0.78431372549019607843".parse().unwrap();
+        assert_eq!(
+            to_f64(&SqlValue::Decimal(d)),
+            Ok(Some(0.784_313_725_490_196_1))
+        );
+        let d: Decimal = "1.26491106406735173280".parse().unwrap();
+        assert_eq!(
+            to_f64(&SqlValue::Decimal(d)),
+            Ok(Some(1.264_911_064_067_351_8))
+        );
+    }
 
     #[test]
     fn parses_timestamp_text() {

@@ -376,3 +376,124 @@ state, the w7 file shows 479 s / 38.8 s for it.) Cost per chunk is now flat (47 
 special-column detectors run on every chunk, and `sync_pipe` clears five cache keys on disk after
 each chunk. The Rust part (`filter existing` 5 ms, write ~18 ms for 1,000 rows) is serialized on
 the single SQLite writer, so the worker pool adds nothing on SQLite.
+
+## Wave 9: `get_config` fast path and `Pipe.verify` in Rust
+
+**`get_config` (PARITY row 12).** Wave 8 left `_core.get_config` at 30 to 120 µs a call on this
+host (~0.27 ms on the façade sync path with a larger loaded config), against 11 to 18 µs for v4's
+dictionary walk, with ~35 calls per synced chunk. Every call converted the first key's subtree and
+`_symlinks` to core values, ran the registry lookup, snapshotted the whole registry map and diffed
+it. `core_api.rs::fast_lookup` now answers the common case without the registry: when all keys are
+already loaded in the live `meerschaum.config.config` dict and the first key's subtree holds no
+`MRSM{` string (v4's own re-substitution test), the result is the dict's own object, found by
+walking it. Nothing is cached (each call rescans the live subtree), so no mutation path can be
+missed; `tests/test_w9_get_config.py` checks callers mutating returned dicts, `set_config`,
+`replace_config`, symlinks added after load, `substitute=False`, defaults, invalid keys and
+`write_config` + reload in both modes.
+
+Microbenchmark (`get_config(*keys)` 20,000 times after one warm-up call, release extension,
+fresh root; shared host, so ±30%):
+
+| keys | v4 path (`MRSM_CORE=python`) | rust before (w8) | rust after (w9) |
+|---|---|---|---|
+| `system:connectors:sql:chunksize` | 17.0 to 26.4 µs | 118.7 µs | 8.1 µs |
+| `pipes:attributes:local_cache_timeout_seconds` | 10.9 to 17.9 µs | 53.5 µs | 5.2 µs |
+| `meerschaum:instance` | 13.1 to 22.3 µs | 114.0 µs | 7.5 µs |
+| `system:experimental:inplace_sync` | 17.6 to 20.2 µs | 87.3 µs | 8.7 µs |
+| `pipes:dtypes:columns_types_cache_seconds` | 12.4 to 18.4 µs | 31.6 µs | 5.4 µs |
+
+The remaining cost is the Python wrapper (`rust_impl` lookup, keyword arguments) plus the subtree
+scan, which is proportional to the first key's subtree like v4's `json.dumps` check.
+
+**`Pipe.verify` (`_core.verify_pipe`).** Verification of an empty target against a SQLite source
+table (`fetch:definition`), timed around `pipe.verify()` in-process, two runs each
+(`scratchpad` script, not part of `scripts/bench`; seconds):
+
+| rows | source | v4.1.4 | v5 `MRSM_CORE=rust` |
+|---|---|---|---|
+| 10k | other SQLite file | 3.8 / 5.7 | 0.55 / 0.52 |
+| 10k | same file (in place) | 1.6 / 1.4 | 0.42 / 0.42 |
+| 100k | other SQLite file | 15.3 / 22.8 | 1.22 / 1.40 |
+| 100k | same file (in place) | 1.70 / 1.67 | 0.72 / 0.59 |
+
+(`MRSM_CORE=python` on the v5 tree, the parity oracle, took 10 to 27 s for the same cases; it is
+not a shipped path.)
+
+## Wave 9 (task U): server-flavor per-call latency
+
+**Finding.** Replaying a real deployment's seeded chain of 48 derived SQL pipes on PostgreSQL took
+about 106 s under `MRSM_CORE=rust` against about 15 s under v4.1.4 and python mode. The final
+`get_data` + `get_rowcount` dump took 41 s against 1.3 s. A synthetic chain reproduces it
+(`raw` -> `d0` -> ... -> `d7`, each `SELECT ... FROM {{ Pipe(<previous>) }}` with a `parents`
+entry; postgis, warm calls on the leaf `d7`, ms):
+
+| call | python mode | rust before | rust after |
+|---|---|---|---|
+| `get_rowcount()` | 1.8 | 107 | 1.5 |
+| `get_sync_time()` | 2.1 | 280 to 340 | 1.8 |
+| `get_data()` | 10.1 | 410 to 535 | 4.8 |
+| `get_columns_types()` | 0.09 | 58 | 0.06 |
+| dump (8 pipes: `get_data` + `get_rowcount`) | 650 to 730 | 3,246 | 590 |
+| incremental sync of the 8 pipes | 950 to 1,100 | 1,300 to 1,730 | 590 to 800 |
+
+With 24 pipes on timescaledb-ha, the dump took 1,610 ms in python mode and 1,440 to 1,520 ms in rust
+mode, and the incremental sync took 3,540 ms and 1,700 ms.
+
+**Root causes (none was connection, pool or runtime setup).** The Rust connector is built once
+per Python `SQLConnector`, and the pool and the Tokio runtime are reused. `tests/test_w9u_pool_reuse.py`
+now asserts this through `pg_stat_activity`.
+
+1. *Cross-pipe templates re-resolved on every access* (PARITY row 36). `pipe.parameters` is read
+   dozens of times per call (`.columns`, `.dtypes`, `.target`, `static`, ...). Each read resolved
+   `{{ Pipe() }}` again, which built the referenced Python `Pipe`, loaded its metadata from the
+   instance, and recursed down the chain. That was O(depth) round trips per access. Under rust the
+   memo now follows v4 (row 39). It is keyed on the `_core.Pipe` generation, the process's metadata
+   writes (Python hard invalidations and `register`, plus the Rust `pipe_metadata_epoch()`), and
+   the `local_cache_timeout_seconds` TTL.
+2. *Double metadata loads per resolution* (rows 40, 41). The resolver built one Python `Pipe` for
+   the raw parameters and another (with resolved parameters) for `.target`. Each nested `_core`
+   resolution also started with an empty cache. One `Pipe` per referenced pipe is now shared by
+   every nested resolution under the top-level one. A fresh template pipe went from 10.5 ms to
+   9.3 ms (v4: 10.6).
+3. *Catalog queries planned on every call.* sqlx ran introspection queries as unnamed statements,
+   so PostgreSQL planned the `information_schema` view joins every time: 3 to 5 ms for
+   `get_pipe_columns_indices`, 1.5 ms for `table_exists`. psycopg 3 (v4) prepares any statement
+   it runs five times. Catalog reads (`table_exists`, column types, column indices,
+   `get_pipe_id`, `get_pipe_attributes`) are now prepared once per pooled connection on the
+   PostgreSQL family (`SqlDriver::read_frame_catalog` and friends). Times went from 1.48 to 0.31 ms
+   for `get_pipe_attributes`, 1.76 to 0.33 ms for `pipe_exists` and 2.0 to 0.37 ms for
+   `get_pipe_id`, against 1.0 ms each for v4.
+4. *`import pandas` in the first call.* The scalar-only bindings built a full `PyCtx`
+   (`PyCtx::scalars` now). The first `get_rowcount()` of a process went from 420 ms to 105 ms
+   (v4: 370 ms).
+
+**Correctness fixes found on the way (meerschaum-sql).**
+
+- PostgreSQL parameter binding: `NULL` is bound untyped, datetimes and dates are bound natively,
+  and other text cells are cast to the column type (`typed_placeholder`). This fixes the small
+  internal upsert ("expression is of type text").
+- Stale prepared statements (SQLSTATE 0A000, "cached plan must not change result type") are
+  retried on a connection with a cleared statement cache. Describes of empty reads use their own
+  statement text. Tests: `crates/meerschaum-sql/tests/w9u_pg_params.rs`.
+
+**Per-flavor microbenchmark** (one pipe, 36 rows, fresh process, median of 15 calls, best of 3
+rounds, ms; python / rust):
+
+| call | postgis | timescaledb | mariadb | mysql | mssql (Python in both) |
+|---|---|---|---|---|---|
+| `get_rowcount` | 1.43 / 1.89 | 2.29 / 2.80 | 4.15 / 1.00 | 1.77 / 1.65 | 3.16 / 2.52 |
+| `get_sync_time` | 1.69 / 2.35 | 2.11 / 3.56 | 5.56 / 1.60 | 1.88 / 2.04 | 2.73 / 2.51 |
+| `get_data` | 7.88 / 4.45 | 8.46 / 5.95 | 8.11 / 4.57 | 8.23 / 4.27 | 8.34 / 6.26 |
+| `filter_existing` (5 rows) | 30.2 / 14.9 | 32.7 / 16.7 | 30.9 / 14.4 | 31.1 / 14.1 | 32.6 / 15.8 |
+| `sync` (5 rows) | 63.6 / 15.9 | 60.4 / 19.5 | 122 / 46.8 | 125 / 36.4 | 208 / 213 |
+| new `Pipe` + `get_sync_time` | 4.51 / 3.71 | 4.71 / 6.76 | 4.70 / 6.17 | 4.24 / 4.07 | 5.22 / 4.66 |
+
+Sub-3 ms medians on this shared host vary by about ±1 ms between runs. 300-call loops of the same
+calls (`get_sync_time`: postgis 1.98 / 1.76, timescaledb 1.93 / 1.80; `get_rowcount` fresh:
+mysql 4.79 / 4.07, mariadb 4.86 / 4.68) and the bench below put rust at or under python
+everywhere. MSSQL has no Rust driver in the façade (`_RUST_FLAVORS`), so both columns run Python.
+
+**Bench.** `scripts/bench/run.py` gained `--pg-schema`, the `v5pyp` implementation
+(`MRSM_CORE=python`) and the `latency` case (`lat_*`). Results are in
+`scripts/bench/results/2026-10-14-w9u-pg.{md,json}`. There are no regressions against v4.1.4 on
+postgis (sync, inc, filter_existing and latency) or on SQLite (latency).

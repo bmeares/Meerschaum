@@ -6,6 +6,10 @@ name: wheels
 #                       Python package plus the `meerschaum._core` extension, one `cp311-abi3`
 #                       wheel per platform;
 #   - `meerschaum-cli`  the `mrsm` binary wheel (crates/meerschaum-cli/pyproject.toml).
+# Plus one EXPERIMENTAL free-threaded wheel (R8, §12): `cp314t` on Linux, built from the same
+# source as a version-specific (non-abi3) wheel with `continue-on-error`, and smoke-tested by a
+# non-blocking job. It never gates a release: pyo3 0.25 ignores the `abi3` feature on a
+# free-threaded interpreter, and `_core` declares `gil_used = false`.
 # Nothing here publishes anything: the wheels are workflow artifacts. Never `self-hosted`: the
 # self-hosted runner is reserved for rust.yaml / pytest.yaml (docs/design/v5-build.md).
 
@@ -42,7 +46,7 @@ jobs:
         run: python scripts/check_packaging.py
 
   build:
-    name: build (${{ matrix.os }})
+    name: build (${{ matrix.os }}${{ matrix.freethreaded && ', cp314t, experimental' || '' }})
     needs: metadata
     runs-on: ${{ matrix.os }}
     strategy:
@@ -55,27 +59,48 @@ jobs:
             manylinux: 'off'
           - os: windows-latest
             manylinux: 'off'
+          # EXPERIMENTAL (R8): the free-threaded `cp314t` wheel. Non-blocking; only the
+          # `meerschaum` wheel is rebuilt (the `meerschaum-cli` wheel is `py3-none`).
+          - os: ubuntu-latest
+            manylinux: '2_28'
+            freethreaded: true
+    # A failed experimental entry must not fail the workflow (or the jobs that need `build`).
+    continue-on-error: ${{ matrix.freethreaded == true }}
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
 
       - name: Build the meerschaum wheel
         uses: PyO3/maturin-action@v1
         with:
           command: build
           manylinux: ${{ matrix.manylinux }}
-          args: --release --locked --out dist
+          # Free-threaded: an explicit interpreter, so maturin builds `cp314-cp314t` (the
+          # manylinux container ships /opt/python/cp314-cp314t). The default entries build the
+          # `cp311-abi3` wheel.
+          args: --release --locked --out dist ${{ matrix.freethreaded && '--interpreter python3.14t' || '' }}
 
       - name: Build the meerschaum-cli wheel
+        if: ${{ !matrix.freethreaded }}
         uses: PyO3/maturin-action@v1
         with:
           command: build
           manylinux: ${{ matrix.manylinux }}
           args: --release --locked --out dist -m crates/meerschaum-cli/Cargo.toml
 
+      # Wheel metadata, `_version.py` inside the wheel and `mrsm --version` agree with Cargo.
+      - name: Check the wheels agree on the version
+        if: ${{ !matrix.freethreaded }}
+        shell: bash
+        run: python scripts/check_packaging.py --wheels dist --require-cli-run
+
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.os }}${{ matrix.freethreaded && '-cp314t' || '' }}
           path: dist/*.whl
           if-no-files-found: error
 
@@ -150,3 +175,42 @@ jobs:
           # pip/setuptools/wheel (ensurepip) are not Meerschaum's; anything else is a leak.
           extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum|meerschaum-cli)$' "$RUNNER_TEMP/installed.txt" || true)"
           if [ -n "$extra" ]; then echo "unexpected dependencies: $extra" >&2; exit 1; fi
+
+  # EXPERIMENTAL (R8): install the free-threaded wheel next to the stable `meerschaum-cli` wheel
+  # on a free-threaded interpreter and check that importing `_core` keeps the GIL disabled.
+  smoke-freethreaded:
+    name: smoke (free-threaded, py3.14t)
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14t'
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-ubuntu-latest
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-ubuntu-latest-cp314t
+          path: dist-ft
+      - name: Install the free-threaded wheel (cp314t) and the CLI wheel
+        run: |
+          ls -l dist dist-ft
+          python -m venv "$RUNNER_TEMP/venv"
+          # The abi3 `meerschaum` wheel is deliberately not on the path: it would shadow cp314t.
+          rm -f dist/meerschaum-*.whl
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --no-index --find-links dist --find-links dist-ft meerschaum
+      - name: _core imports without re-enabling the GIL
+        run: |
+          export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"
+          mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/venv/bin/python" -X gil=0 -c "
+          import sys, meerschaum._core as core
+          assert core.AVAILABLE, core.LOAD_ERROR
+          assert not sys._is_gil_enabled(), 'importing _core re-enabled the GIL'
+          print('free-threaded OK', core.__version__, core.EXTENSION_PATH)
+          "

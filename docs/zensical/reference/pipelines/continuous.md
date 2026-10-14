@@ -43,7 +43,7 @@ Without `--listen`, a stream source is never run by `sync pipes --parents`: it g
 ### Two ways to write a stream connector
 
 - **`IS_STREAMING = True` with `subscribe(pipe, sink)`** (recommended). The engine owns the micro-batching, acknowledgement and restarts. See the [migration guide](/reference/migrating-to-v5/#plugin-authors) for the plugin side. Rust plugins use the same contract over Arrow streams.
-- **The v4 pattern**: a `sync()` that subscribes and returns immediately, while callbacks call `pipe.sync()`. Keep your existing plugin as is. Under `--listen` the engine keeps the worker that ran `sync()` alive and forwards each callback `pipe.sync()` to the native sync path, supervising it like a `subscribe` stream. (The old `--loop --min-seconds 144000000` workaround still works.)
+- **The v4 pattern**: a `sync()` that subscribes and returns immediately, while callbacks call `pipe.sync()`. Keep your existing plugin as is. Under `--listen` the engine keeps the worker that ran `sync()` alive and forwards each callback `pipe.sync()` to the native sync path, supervising it like a `subscribe` stream. Every such `pipe.sync()` counts as a **flush**: the engine writes its ledger entry before the commit and emits a `stream_flushed` event with trigger `callback`, so the stream's children are triggered exactly as for a `subscribe` stream (see below). A callback that syncs a pipe outside the selection's graph is an ordinary bare sync. (The old `--loop --min-seconds 144000000` workaround still works.)
 
 ### Micro-batching
 
@@ -64,7 +64,7 @@ stream:
 | `max_rows` | `5000` | Caps memory and transaction size |
 | `max_bytes` | 8 MB | Likewise |
 
-Each flush performs one sync, writes one combined ledger entry per affected time chunk *before* committing, and emits a `stream_flushed` event with the row count, byte count and trigger.
+Each flush performs one sync, writes one combined ledger entry per affected time chunk *before* committing, and emits a `stream_flushed` event with the row count, byte count, trigger, the smallest and largest datetime of the rows it changed (`begin`, `end`) and its `inserted` / `updated` / `upserted` counts. A v4-pattern connector's flushes have trigger `callback`, `bytes` 0 (the engine never sees the message size) and also report failures (`success: false` with the sync's `message`); a failed flush never triggers children.
 
 ### Acknowledge after commit
 

@@ -25,8 +25,33 @@ import re
 import traceback
 from typing import Any, Dict, List, Optional
 
-MANIFEST_SCHEMA_VERSION = 3
+#: 4: custom connector `methods` include methods imported into the class body (v4's
+#: mixin-via-import pattern, e.g. `from ._sync import sync`); older manifests missed them.
+MANIFEST_SCHEMA_VERSION = 4
 DATA_FUNCTIONS = ('fetch', 'sync', 'register', 'setup', 'subscribe')
+
+
+def _connector_methods(cls: Any) -> List[str]:
+    """
+    The public methods a custom connector class defines itself (or inherits from a plugin's
+    own base classes), not those of Meerschaum's base connectors.
+
+    A method counts when its name is in the `__dict__` of a class in the MRO that is not part
+    of Meerschaum, whatever module the function was written in: plugins commonly assemble a
+    connector with `from ._sync import sync` inside the class body (the pattern Meerschaum's
+    own connectors use), so the function's `__qualname__` does not name the class.
+    """
+    names = set()
+    for klass in inspect.getmro(cls):
+        module = getattr(klass, '__module__', '') or ''
+        if klass is object or module == 'meerschaum' or module.startswith('meerschaum.'):
+            continue
+        for name, member in vars(klass).items():
+            if name.startswith('_') or inspect.isclass(member) or isinstance(member, property):
+                continue
+            if callable(getattr(cls, name, None)):
+                names.add(name)
+    return sorted(names)
 
 
 def _doc(func: Any) -> Optional[str]:
@@ -391,12 +416,7 @@ def build_manifest(debug: bool = False) -> Dict[str, Any]:
             cls = connectors_module.types.get(typ, None)
             if cls is None:
                 continue
-            methods = sorted(
-                name
-                for name, member in inspect.getmembers(cls)
-                if not name.startswith('_') and callable(member)
-                and getattr(member, '__qualname__', '').split('.')[0] == cls.__name__
-            )
+            methods = _connector_methods(cls)
             connector_types[typ] = {
                 'type': typ,
                 'plugin': plugin_name,

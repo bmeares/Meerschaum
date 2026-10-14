@@ -213,9 +213,29 @@ impl<'a> Runtime<'a> {
     pub fn config(&mut self) -> &Config {
         self.config.get_or_insert_with(|| {
             Config::new(ConfigOptions::from_process()).unwrap_or_else(|e| {
-                if let meerschaum_core::config::ConfigError::DefaultRootRefused { .. } = e {
-                    eprintln!("{e}");
-                    std::process::exit(1);
+                use meerschaum_core::config::ConfigError;
+                match &e {
+                    ConfigError::DefaultRootRefused { .. } => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                    // PARITY: `config/_paths.py` prints this and exits 1 for a missing
+                    // `MRSM_ROOT_DIR` (and the other `MRSM_*` path variables).
+                    ConfigError::InvalidPath { var, path } => {
+                        match var.as_str() {
+                            "MRSM_ROOT_DIR" => eprintln!(
+                                "Invalid root directory '{path}' set for environment variable \
+                                 '{var}'.\nPlease enter a valid path for {var}."
+                            ),
+                            "MRSM_CONFIG_DIR" => eprintln!(
+                                "Invalid configuration directory '{path}' set for environment \
+                                 variable '{var}'\nPlease enter a valid path for {var}."
+                            ),
+                            _ => eprintln!("{e}\nPlease enter a valid path for {var}."),
+                        }
+                        std::process::exit(1);
+                    }
+                    _ => {}
                 }
                 let mut opts = ConfigOptions::from_process();
                 opts.allow_writes = false;

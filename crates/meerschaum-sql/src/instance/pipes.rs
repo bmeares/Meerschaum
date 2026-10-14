@@ -17,6 +17,25 @@ use crate::where_clause::negation_prefix;
 
 use super::{SqlConnector, be, frame_docs, kv_int, kv_str};
 
+/// Process-wide count of successful pipe metadata writes (`register_pipe`, `edit_pipe`,
+/// `delete_pipe`, including the edits a sync makes) by any [`SqlConnector`].
+static METADATA_WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The number of pipe metadata writes this process has made through any [`SqlConnector`].
+///
+/// The Python façade keys its memo of cross-pipe `{{ Pipe() }}` template resolutions on it,
+/// so a sync that persists new dtypes refreshes the pipes whose templates read them.
+pub fn pipe_metadata_epoch() -> u64 {
+    METADATA_WRITES.load(std::sync::atomic::Ordering::Acquire)
+}
+
+fn bump_metadata_epoch(res: SuccessTuple) -> SuccessTuple {
+    if res.success {
+        METADATA_WRITES.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
+    res
+}
+
 /// `separate_negation_values(vals)`.
 pub fn separate_negation_values(values: &[String]) -> (Vec<String>, Vec<String>) {
     let prefix = negation_prefix();
@@ -79,10 +98,10 @@ impl SqlConnector {
             // Persist the raw definition (templates unresolved), as v4 stores `pipe._attributes['parameters']`.
             self.json_param(pipe.raw_parameters()),
         ];
-        match self.exec_params(&query, &params).await {
+        bump_metadata_epoch(match self.exec_params(&query, &params).await {
             Some(_) => SuccessTuple::ok(format!("Successfully registered {pipe}.")),
             None => SuccessTuple::fail(format!("Failed to register {pipe}.")),
-        }
+        })
     }
 
     /// `get_pipe_id(pipe)`: the pipe's `pipe_id`, or `None` (always `None` for temporary pipes).
@@ -111,7 +130,7 @@ impl SqlConnector {
             placeholder(f, 1),
             placeholder(f, 2)
         );
-        let v = self.value_params(&query, &params).await?;
+        let v = self.value_params_catalog(&query, &params).await?;
         Ok(v.and_then(|v| v.as_i64()))
     }
 
@@ -126,7 +145,7 @@ impl SqlConnector {
             placeholder(self.flavor, 1)
         );
         let df = self
-            .read_params(&query, &[SqlParam::Int(id)])
+            .read_params_catalog(&query, &[SqlParam::Int(id)])
             .await
             .map_err(|e| {
                 be(format!(
@@ -192,10 +211,10 @@ impl SqlConnector {
             placeholder(f, 2)
         );
         let params = vec![self.json_param(&parameters), SqlParam::Int(id)];
-        match self.exec_params(&query, &params).await {
+        bump_metadata_epoch(match self.exec_params(&query, &params).await {
             Some(_) => SuccessTuple::ok(format!("Successfully edited {pipe}.")),
             None => SuccessTuple::fail(format!("Failed to edit {pipe}.")),
-        }
+        })
     }
 
     /// `delete_pipe(pipe)`: delete the pipe's registration (the table is dropped by
@@ -211,10 +230,10 @@ impl SqlConnector {
             "DELETE FROM {table} WHERE {table}.pipe_id = {}",
             placeholder(self.flavor, 1)
         );
-        match self.exec_params(&query, &[SqlParam::Int(id)]).await {
+        bump_metadata_epoch(match self.exec_params(&query, &[SqlParam::Int(id)]).await {
             Some(_) => SuccessTuple::ok("Success"),
             None => SuccessTuple::fail(format!("Failed to delete registration for {pipe}.")),
-        }
+        })
     }
 
     /// `fetch_pipes_keys(connector_keys, metric_keys, location_keys, tags, params)`: a mapping

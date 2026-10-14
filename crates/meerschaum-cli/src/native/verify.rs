@@ -55,17 +55,20 @@ pub fn coerce_bound(b: DateBound, aware: bool) -> DateBound {
     }
 }
 
-/// `get_sync_time(params, newest, remote)`.
+/// `get_sync_time(params, newest, remote)`. A remote sync time is asked of `source`
+/// (v4: `self.connector if remote else self.instance_connector`).
 pub fn sync_time(
     session: &Session,
     inst: &Instance,
+    source: &Instance,
     sp: &SelectedPipe,
     params: Option<&Map>,
     newest: bool,
     remote: bool,
 ) -> Option<DateBound> {
     // PARITY: v4 returns the sync time in the pipe's timezone (aware for UTC pipes).
-    let b = sync_time_raw(session, inst, sp, params, newest, remote)?;
+    let conn = if remote { source } else { inst };
+    let b = sync_time_raw(session, conn, sp, params, newest, remote)?;
     Some(coerce_bound(b, dt_is_aware(session, inst, sp)))
 }
 
@@ -94,7 +97,7 @@ fn sync_time_raw(
     }
 }
 
-/// `get_rowcount(begin, end, params, remote)`.
+/// `get_rowcount(begin, end, params, remote)`; `inst` is the source connector when `remote`.
 fn rowcount(
     session: &Session,
     inst: &Instance,
@@ -126,6 +129,24 @@ fn bump(b: DateBound) -> DateBound {
             tz: dt.tz,
         }),
     }
+}
+
+/// The connector remote sync times and row-counts are asked of: the pipe's `sql:` source
+/// connector (v4's `pipe.connector`), else the instance (no other source type answers them
+/// in v4; the instance query then fails without `fetch:definition`, like before).
+fn remote_instance(
+    rt: &mut Runtime<'_>,
+    session: &Session,
+    inst: &Instance,
+    sp: &SelectedPipe,
+) -> Instance {
+    let keys = sp.pipe.connector_keys();
+    if keys.split(':').next() != Some("sql") || keys == inst.keys() {
+        return inst.clone();
+    }
+    session
+        .instance(keys, rt.config())
+        .unwrap_or_else(|_| inst.clone())
 }
 
 /// `str(bound)` (`None` for an open bound).
@@ -201,9 +222,9 @@ fn bound_lt(a: &DateBound, b: &DateBound) -> bool {
 /// `Pipe.get_bound_time()`.
 fn get_bound_time(session: &Session, inst: &Instance, sp: &SelectedPipe) -> Option<DateBound> {
     let interval = get_bound_interval(sp)?;
-    let newest = sync_time(session, inst, sp, None, true, false)?;
+    let newest = sync_time(session, inst, inst, sp, None, true, false)?;
     let bound_time = subtract_interval(newest.clone(), interval);
-    let oldest = sync_time(session, inst, sp, None, false, false)?;
+    let oldest = sync_time(session, inst, inst, sp, None, false, false)?;
     let max_days = static_config().pipes.max_bound_time_days;
     let extreme = match (&newest, &oldest) {
         (DateBound::Datetime(n), DateBound::Datetime(o)) => {
@@ -440,8 +461,26 @@ pub fn verify_pipe(
     args: &ArgsMap,
     sync_args: &SyncArgs,
 ) -> SuccessTuple {
-    hydrate(rt, inst, sp);
     let va = VerifyArgs::from_args(args);
+    verify_pipe_with(rt, session, inst, sp, &va, sync_args)
+}
+
+/// `pipe.verify(begin, end, params, chunk_interval, bounded, deduplicate, workers, batchsize,
+/// skip_chunks_with_greater_rowcounts, check_rowcounts_only, **kwargs)` with the arguments
+/// already parsed: `va` holds the verify keywords, `sync_args` the bounds, `params` and the
+/// keywords each chunk's `pipe.sync()` receives. The façade (`_core.verify_pipe`) calls this
+/// with a [`Session`] holding the connectors the Python process built.
+pub fn verify_pipe_with(
+    rt: &mut Runtime<'_>,
+    session: &Session,
+    inst: &Instance,
+    sp: &mut SelectedPipe,
+    va: &VerifyArgs,
+    sync_args: &SyncArgs,
+) -> SuccessTuple {
+    hydrate(rt, inst, sp);
+    let source = remote_instance(rt, session, inst, sp);
+    let source = &source;
     let defaults = super::pipes::defaults(rt);
     let max_chunks_syncs = rt
         .config()
@@ -465,12 +504,12 @@ pub fn verify_pipe(
     if bounded && begin.is_none() {
         begin = bound_time
             .clone()
-            .or_else(|| sync_time(session, inst, sp, None, false, false))
-            .or_else(|| sync_time(session, inst, sp, None, false, true));
+            .or_else(|| sync_time(session, inst, source, sp, None, false, false))
+            .or_else(|| sync_time(session, inst, source, sp, None, false, true));
     }
     if bounded && end.is_none() {
-        end = sync_time(session, inst, sp, None, true, false)
-            .or_else(|| sync_time(session, inst, sp, None, true, true))
+        end = sync_time(session, inst, source, sp, None, true, false)
+            .or_else(|| sync_time(session, inst, source, sp, None, true, true))
             .map(bump);
     }
     let cannot_determine_bounds = bounded && begin.is_none() && end.is_none();
@@ -507,8 +546,8 @@ pub fn verify_pipe(
         Ok(c) => c,
         Err(e) => return SuccessTuple::fail(e.to_string()),
     };
-    let oldest = sync_time(session, inst, sp, None, false, false);
-    let newest = sync_time(session, inst, sp, None, true, false);
+    let oldest = sync_time(session, inst, source, sp, None, false, false);
+    let newest = sync_time(session, inst, source, sp, None, true, false);
     let chunk_bounds = match get_chunk_bounds(
         begin.clone(),
         end.clone(),
@@ -576,7 +615,7 @@ pub fn verify_pipe(
         let mut result = SuccessTuple::fail("Did not sync chunk.");
         if check_rowcounts {
             let existing = rowcount(session, inst, sp, bounds, None, false);
-            let remote = rowcount(session, inst, sp, bounds, None, true);
+            let remote = rowcount(session, source, sp, bounds, None, true);
             let ex = existing.unwrap_or(0);
             let checked = format!(
                 "checked {} row{} vs {} remote",

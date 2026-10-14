@@ -1,0 +1,20 @@
+### The instance cannot be reached.
+project_name: "w9bad"
+
+config:
+  meerschaum:
+    instance: "api:w9bad"
+    connectors:
+      api:
+        w9bad:
+          host: "127.0.0.1"
+          port: 1
+          protocol: "http"
+          username: "w9"
+          password: "w9"
+
+pipes:
+  - connector: "sql:w9v"
+    metric: "alpha"
+    columns:
+      datetime: "ts"

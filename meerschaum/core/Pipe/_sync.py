@@ -137,6 +137,13 @@ def sync(
         generations. Combine with `parents` for the whole connected slice.
         See `meerschaum.Pipeline` to plan the run first and read the run history.
 
+    on_event: Optional[Callable[[Dict[str, Any]], Any]], default None
+        Only with `parents` or `children`: called on this thread with every event of the engine
+        run as it happens (`run_started`, `node_started`, `chunk_finished`, `node_finished`,
+        ..., `run_finished`), each a `dict` with `event`, `run_id`, `seq`, `ts`, `pipe_ref` and
+        the event's own fields. An exception it raises is warned about and the run continues
+        (see `meerschaum.Pipeline.sync`).
+
     debug: bool, default False
         Verbosity toggle. Defaults to False.
 

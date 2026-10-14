@@ -4,11 +4,13 @@
 //! `meerschaum/actions/*.py` (v4.1.4) over the `InstanceConnector` trait and `meerschaum-jobs`.
 //!
 //! - [`session`]: the Tokio runtime and the instance / source connectors.
+//! - [`compose_instance`]: the instance connector `mrsm compose` reads pipe registrations from.
 //! - [`pipes`]: `get_pipes` and the pipe helpers the actions share.
 //! - [`sync`]: the sync seam (`Pipe.sync` for `sql:` source pipes; the engine replaces it).
 //! - [`show`], [`manage`], [`users`], [`maintenance`], [`jobs`]: the actions.
 //! - [`rich_json`]: `rich.json.JSON` (pipe attributes in `show pipes`).
 
+pub mod compose_instance;
 pub mod engine_views;
 pub mod jobs;
 pub mod maintenance;
@@ -33,8 +35,12 @@ use crate::value::{ArgsMap, PyValue};
 
 pub use session::{Instance, Session};
 /// The engine registry builder (native connectors, worker pool, native plugins), for hosts
-/// such as `meerschaum-py`: `meerschaum_cli::native::engine_registry(..)`.
-pub use sync::engine::{EngineRegistry, build as build_engine, registry as engine_registry};
+/// such as `meerschaum-py`: `meerschaum_cli::native::engine_registry(..)`, or
+/// `registry_with(.., RegistryOptions { overrides, .. })` with the host's own connectors.
+pub use sync::engine::{
+    EngineRegistry, RegistryOptions, build as build_engine, registry as engine_registry,
+    registry_with,
+};
 
 use crate::builtin::ActionResult;
 

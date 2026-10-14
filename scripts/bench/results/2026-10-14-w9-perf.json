@@ -1,0 +1,347 @@
+{
+  "meta": {
+    "label": "w9-perf",
+    "date": "2026-10-14",
+    "backends": [
+      "sqlite"
+    ],
+    "repeats": 2,
+    "sizes": [
+      "10k",
+      "100k",
+      "1M"
+    ],
+    "python": "3.14.8",
+    "os": "Linux x86_64",
+    "cpus": 40,
+    "notes": [],
+    "v4_version": "4.1.4",
+    "v5_version": "`mrsm` release build (Meerschaum v5.0.0-a1), fa\u00e7ade at c4425369 + working tree"
+  },
+  "results": [
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v4py",
+      "seconds": [
+        3.2832,
+        3.6216
+      ],
+      "median": 3.4524,
+      "min": 3.2832,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v4py",
+      "seconds": [
+        27.1089,
+        25.499
+      ],
+      "median": 26.304,
+      "min": 25.499,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v4py",
+      "seconds": [
+        381.9607,
+        392.4665
+      ],
+      "median": 387.2136,
+      "min": 381.9607,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v4py",
+      "seconds": [
+        20.792,
+        20.2908
+      ],
+      "median": 20.5414,
+      "min": 20.2908,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v4py",
+      "seconds": [
+        44.3471,
+        40.1688
+      ],
+      "median": 42.2579,
+      "min": 40.1688,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "filter_existing_100k",
+      "impl": "v4py",
+      "seconds": [
+        1.6136,
+        1.7705
+      ],
+      "median": 1.6921,
+      "min": 1.6136,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "get_data_1M",
+      "impl": "v4py",
+      "seconds": [
+        5.0172,
+        4.9358
+      ],
+      "median": 4.9765,
+      "min": 4.9358,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v4cli",
+      "seconds": [
+        4.1827,
+        4.1115
+      ],
+      "median": 4.1471,
+      "min": 4.1115,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v4cli",
+      "seconds": [
+        26.7975,
+        30.4237
+      ],
+      "median": 28.6106,
+      "min": 26.7975,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v4cli",
+      "seconds": [
+        395.2293,
+        273.6998
+      ],
+      "median": 334.4645,
+      "min": 273.6998,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v4cli",
+      "seconds": [
+        21.9035,
+        31.388
+      ],
+      "median": 26.6457,
+      "min": 21.9035,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v4cli",
+      "seconds": [
+        54.0478,
+        55.5876
+      ],
+      "median": 54.8177,
+      "min": 54.0478,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3",
+      "impl": "v4cli",
+      "seconds": [
+        19.7704,
+        16.3094
+      ],
+      "median": 18.0399,
+      "min": 16.3094,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v5py",
+      "seconds": [
+        1.0729,
+        0.9852
+      ],
+      "median": 1.029,
+      "min": 0.9852,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v5py",
+      "seconds": [
+        4.9123,
+        4.695
+      ],
+      "median": 4.8037,
+      "min": 4.695,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v5py",
+      "seconds": [
+        42.0195,
+        42.0184
+      ],
+      "median": 42.0189,
+      "min": 42.0184,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v5py",
+      "seconds": [
+        4.4172,
+        4.4553
+      ],
+      "median": 4.4363,
+      "min": 4.4172,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v5py",
+      "seconds": [
+        4.4876,
+        4.5494
+      ],
+      "median": 4.5185,
+      "min": 4.4876,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "filter_existing_100k",
+      "impl": "v5py",
+      "seconds": [
+        0.8719,
+        0.907
+      ],
+      "median": 0.8895,
+      "min": 0.8719,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "get_data_1M",
+      "impl": "v5py",
+      "seconds": [
+        3.6784,
+        3.4433
+      ],
+      "median": 3.5608,
+      "min": 3.4433,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_10k",
+      "impl": "v5cli",
+      "seconds": [
+        0.2878,
+        0.3326
+      ],
+      "median": 0.3102,
+      "min": 0.2878,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_100k",
+      "impl": "v5cli",
+      "seconds": [
+        1.3226,
+        1.3499
+      ],
+      "median": 1.3363,
+      "min": 1.3226,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "sync_1M",
+      "impl": "v5cli",
+      "seconds": [
+        11.1381,
+        11.0248
+      ],
+      "median": 11.0814,
+      "min": 11.0248,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_100k",
+      "impl": "v5cli",
+      "seconds": [
+        1.1178,
+        1.0835
+      ],
+      "median": 1.1006,
+      "min": 1.0835,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "inc_1M",
+      "impl": "v5cli",
+      "seconds": [
+        1.2636,
+        1.277
+      ],
+      "median": 1.2703,
+      "min": 1.2636,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3",
+      "impl": "v5cli",
+      "seconds": [
+        2.8672,
+        2.6514
+      ],
+      "median": 2.7593,
+      "min": 2.6514,
+      "failed": 0
+    },
+    {
+      "backend": "sqlite",
+      "case": "chain_3_engine",
+      "impl": "v5cli",
+      "seconds": [
+        3.8252,
+        3.4127
+      ],
+      "median": 3.619,
+      "min": 3.4127,
+      "failed": 0
+    }
+  ]
+}

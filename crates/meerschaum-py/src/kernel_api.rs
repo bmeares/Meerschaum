@@ -332,6 +332,20 @@ pub fn filter_unseen_df<'py>(
             hints.insert(col.clone(), k_to_pandas_dtype(typ));
         }
     }
+    // PARITY: a column the kernel keeps as `object` (bytes or dates cast by a hint against the
+    // old frame's `object` values) merges to `object` in pandas; the hint's class must not recast
+    // it (`binary[pyarrow]`, `date32[day][pyarrow]`).
+    for col in delta.columns() {
+        if let meerschaum_kernel::ColumnData::Object(values) = &col.data {
+            let first = values.iter().find(|v| !v.is_na());
+            if matches!(
+                first,
+                Some(meerschaum_kernel::Value::Bytes(_) | meerschaum_kernel::Value::Date(_))
+            ) {
+                hints.insert(col.name.clone(), "object".to_string());
+            }
+        }
+    }
     let mut labels = old.labels.clone();
     labels.extend(new.labels.clone());
     let spec = OutSpec {

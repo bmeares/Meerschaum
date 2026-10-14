@@ -25,6 +25,7 @@ pub mod compose_action;
 pub mod dateutil;
 pub mod dispatch;
 pub mod env;
+pub mod extras;
 pub mod format;
 pub mod help;
 pub mod native;

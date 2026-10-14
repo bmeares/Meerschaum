@@ -16,3 +16,10 @@ cases; `big_floats` tests cover document inference, casting, enforcement and fil
 Use fresh temporary `MRSM_ROOT_DIR` and empty `MRSM_PLUGINS_DIR` for every test and reference run.
 Run `cargo test -p meerschaum-kernel`, crate-scoped fmt/clippy, and the generators through
 `scripts/parity/run.sh`. `field_tags` verifies metadata and Arrow geometry extension export.
+
+`filter_unseen_df` returns each column with the dtype pandas gives `merge(new, old, how='left')`
+after `infer_objects()` (`merge_dtype.rs`; PARITY.md rows 17 and 18): `object` columns of
+`int`s, `float`s, `bool`s, strings or datetimes come out native, and a native/`object` pair merges
+to an object column (bytes cast by a `bytes` hint against old `object` bytes stay `object`). Pandas
+backends are not modeled for native columns. `tests/fixtures/gen_w9_merge_dtypes.py` records the
+reference matrix; `w9_merge_dtypes` compares object-versus-native strictly.

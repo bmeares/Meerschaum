@@ -76,6 +76,36 @@ def attributes(self) -> Dict[str, Any]:
 
 _cached_base_params = {}
 
+
+def _has_cross_pipe_template(self, core, raw_parameters) -> bool:
+    """
+    Whether the raw parameters hold a cross-pipe `{{ Pipe() }}` template (memoized per
+    `_core.Pipe` generation: the check reprs the whole map).
+    """
+    generation = core.generation
+    cached = self.__dict__.get('_cross_pipe_template', None)
+    if cached is not None and cached[0] == generation:
+        return cached[1]
+    has_template = '{{ Pipe(' in repr(raw_parameters).replace('{{Pipe(', '{{ Pipe(')
+    self.__dict__['_cross_pipe_template'] = (generation, has_template)
+    return has_template
+
+
+def _cross_pipe_memo_is_fresh(self) -> bool:
+    """
+    Whether the memoized resolution of cross-pipe templates is younger than
+    `pipes:attributes:local_cache_timeout_seconds` (`None`: never expires, like v4's memo).
+    """
+    import time
+    from meerschaum.config import get_config
+    resolved_ts = self.__dict__.get('_resolved_parameters_ts', None)
+    if resolved_ts is None:
+        return False
+    timeout_seconds = get_config('pipes', 'attributes', 'local_cache_timeout_seconds')
+    if timeout_seconds is None:
+        return True
+    return (time.monotonic() - resolved_ts) < timeout_seconds
+
 def get_parameters(
     self,
     apply_symlinks: bool = True,
@@ -133,13 +163,34 @@ def get_parameters(
     ### Under `MRSM_CORE=rust` the raw parameters live in `_core.Pipe`, whose mutation counter is
     ### the memo key (the Python view objects keep their identity across mutations).
     core = self.__dict__.get('_core_pipe', None)
-    memo_key = raw_parameters if core is None else core.generation
+    ### Cross-pipe `{{ Pipe() }}` templates read other pipes' state. v4 keeps them memoized
+    ### forever; under `rust` the memo is also keyed on this process's metadata writes (a hard
+    ### `_invalidate_cache()`, `register()`, or any `_core.SqlConnector` register / edit / delete,
+    ### including a sync's dtype edits) and expires after
+    ### `pipes:attributes:local_cache_timeout_seconds`, v4's own staleness window for attributes
+    ### (another process's edit of a referenced pipe shows up within it). Re-resolving on every
+    ### access cost one instance round trip per reference per access (wave 9 U).
+    cross_pipe = core is not None and _has_cross_pipe_template(self, core, raw_parameters)
+    if core is None:
+        memo_key = raw_parameters
+    elif cross_pipe:
+        from meerschaum.core.Pipe._cache import _INVALIDATION_EPOCH
+        from meerschaum import _core
+        rust_epoch = getattr(_core, 'pipe_metadata_epoch', None)
+        memo_key = (
+            core.generation,
+            _INVALIDATION_EPOCH[0],
+            rust_epoch() if rust_epoch is not None else None,
+        )
+    else:
+        memo_key = core.generation
     memo_hit = (
         self.__dict__.get('_resolved_parameters_raw', None) is raw_parameters
         if core is None
         else (
             '_resolved_parameters' in self.__dict__
             and self.__dict__.get('_resolved_parameters_raw', None) == memo_key
+            and (not cross_pipe or _cross_pipe_memo_is_fresh(self))
         )
     )
     if can_memoize and memo_hit:
@@ -206,14 +257,12 @@ def get_parameters(
 
         resolved_parameters = search_and_substitute_config(recursive_replace(parameters, tuple()))
 
-    ### Cross-pipe `{{ Pipe() }}` templates read other pipes' state, so they re-resolve on every
-    ### access under `rust` (a deliberate refinement of v4's memo, which keeps them stale).
-    if core is not None and '{{ Pipe(' in repr(raw_parameters).replace('{{Pipe(', '{{ Pipe('):
-        can_memoize = False
-
     if can_memoize:
         ### Hold a reference to the raw dict so its identity can't be reused by a freed object,
         ### and stash the symlinks captured above alongside the resolved result.
+        if cross_pipe:
+            import time
+            self.__dict__['_resolved_parameters_ts'] = time.monotonic()
         self.__dict__['_resolved_parameters_raw'] = memo_key
         self.__dict__['_resolved_parameters'] = resolved_parameters
         self.__dict__['_resolved_parameters_symlinks'] = self._symlinks

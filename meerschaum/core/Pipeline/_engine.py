@@ -21,7 +21,7 @@ from meerschaum.utils.typing import Any, Dict, List, Optional, Union
 #: Keyword arguments of `Pipe.sync()` the engine consumes itself.
 ENGINE_KEYWORDS = frozenset({
     'begin', 'end', 'force', 'retries', 'min_seconds', 'check_existing', 'enforce_dtypes',
-    'chunksize', 'workers', 'params', 'yes', 'run_id', 'resume',
+    'chunksize', 'workers', 'params', 'yes', 'run_id', 'resume', 'on_event',
 })
 
 #: Keyword arguments of `Pipe.sync()` with no meaning for an engine run.
@@ -199,8 +199,66 @@ def _default(value: Any) -> Any:
     return str(value)
 
 
-def call(name: str, request: Dict[str, Any]) -> Any:
-    """Call the engine function `name` with `request` and return the decoded JSON result."""
+def call(name: str, request: Dict[str, Any], **kwargs: Any) -> Any:
+    """
+    Call the engine function `name` with `request` (and keyword arguments such as
+    `engine_run`'s `on_event`) and return the decoded JSON result.
+    """
     core = get_core()
-    response = getattr(core, name)(json.dumps(request, default=_default))
+    response = getattr(core, name)(json.dumps(request, default=_default), **kwargs)
     return json.loads(response)
+
+
+#: The engine state rows that belong to one pipe: `(metric, column)` of `mrsm:<metric>`.
+_PIPE_STATE = (
+    ('engine_ledger', 'pipe_ref'),
+    ('engine_cursors', 'parent_ref'),
+    ('engine_cursors', 'child_ref'),
+    ('engine_state', 'pipe_ref'),
+)
+
+
+def forget_engine_state(pipe: Any, operation: str) -> None:
+    """
+    After a successful `pipe.drop()`, `pipe.delete()` or full `pipe.clear()`, forget the
+    Syncing Engine's state for the pipe (its ledger entries, the edge cursors it is part of and
+    its definition hash), so a pipe recreated under the same keys starts fresh, as in v4.
+
+    The Rust instance connectors do this in their own drop, delete and clear paths
+    (`pipe_ops::forget_engine_state`, used by the CLI and the server); this covers every pipe
+    method call from Python, whichever implementation serves the instance (`operation` names the
+    method that succeeded). It is best effort and never raises, and does nothing on an instance
+    where the engine never ran (no `mrsm_engine_runs` table). Run history is kept.
+    """
+    try:
+        if str(pipe.connector_keys) == 'mrsm':
+            return
+        connector = pipe.instance_connector
+        if connector is None or getattr(connector, 'type', None) == 'api':
+            ### The API server's instance connector forgets it.
+            return
+
+        def state_pipe(metric: str):
+            return mrsm.Pipe(
+                'mrsm', metric,
+                instance=connector,
+                temporary=True,
+                static=True,
+                cache=False,
+                target=f'mrsm_{metric}',
+            )
+
+        if not state_pipe('engine_runs').exists():
+            return
+        pipe_ref = '|'.join((
+            str(pipe.instance_keys),
+            str(pipe.connector_keys),
+            str(pipe.metric_key),
+            str(pipe.location_key),
+        ))
+        for metric, column in _PIPE_STATE:
+            state = state_pipe(metric)
+            if state.exists():
+                connector.clear_pipe(state, params={column: pipe_ref})
+    except Exception:
+        pass

@@ -500,6 +500,24 @@ fn native_cast(s: &Series, target: &DataType) -> Option<Series> {
                     .into_series(),
             )
         }
+        // PARITY: `float(Decimal)` is correctly rounded; Polars' cast divides the mantissa by
+        // `10^scale` in floating point and can land one ulp off.
+        (DataType::Decimal(..), DataType::Float64 | DataType::Float32) => {
+            let ca = s.decimal().ok()?;
+            let scale = ca.scale();
+            let floats = Float64Chunked::from_iter_options(
+                name,
+                ca.physical()
+                    .iter()
+                    .map(|m| m.map(|m| decimal_mantissa_to_f64(m, scale))),
+            )
+            .into_series();
+            if matches!(target, DataType::Float32) {
+                floats.cast(&DataType::Float32).ok()
+            } else {
+                Some(floats)
+            }
+        }
         (DataType::Decimal(..), DataType::String) => {
             let values = crate::frame::series_to_values(s);
             Some(
@@ -515,6 +533,21 @@ fn native_cast(s: &Series, target: &DataType) -> Option<Series> {
         }
         _ => s.strict_cast(target).ok(),
     }
+}
+
+/// The correctly rounded `f64` nearest `mantissa / 10^scale` (`float(Decimal)`). Both operands
+/// are exact doubles when `|mantissa| < 2^53` and `scale <= 22`, so one IEEE division is
+/// correctly rounded; otherwise parse the decimal string.
+fn decimal_mantissa_to_f64(mantissa: i128, scale: usize) -> f64 {
+    const EXACT: i128 = 1 << 53;
+    if mantissa.abs() < EXACT && scale <= 22 {
+        return mantissa as f64 / 10f64.powi(scale as i32);
+    }
+    let digits = mantissa.unsigned_abs().to_string();
+    let sign = if mantissa < 0 { "-" } else { "" };
+    format!("{sign}{digits}e-{scale}")
+        .parse()
+        .unwrap_or(f64::NAN)
 }
 
 fn convert_time_unit(v: i64, from: TimeUnit, to: TimeUnit) -> i64 {
@@ -949,8 +982,10 @@ pub fn series_coerce_timezone(
                     )));
                 }
             },
+            // PARITY: `astype('datetime64[us, UTC]')` reads integers as microseconds since
+            // the epoch (not nanoseconds, as `pd.to_datetime` would).
             Value::Int(i) => {
-                DateTimeValue::from_timestamp(*i, TimeUnit::Nanoseconds, Some(TzInfo::Utc))
+                DateTimeValue::from_timestamp(*i, TimeUnit::Microseconds, Some(TzInfo::Utc))
             }
             other => {
                 return Err(EnforceError::Raised(format!(
@@ -1109,6 +1144,7 @@ pub fn pandas_astype(name: &str, data: &ColumnData, target: &str) -> Result<Colu
             return Ok(ColumnData::Native(s.clone().with_name(name.into())));
         }
     }
+    let from_object = matches!(data, ColumnData::Object(_));
     let values = data.values();
     let err = |v: &Value| format!("Cannot cast {} '{}' to {target}", v.type_name(), v.py_str());
     let mut out = Vec::with_capacity(values.len());
@@ -1122,14 +1158,18 @@ pub fn pandas_astype(name: &str, data: &ColumnData, target: &str) -> Result<Colu
             (d, Value::Bool(b)) if d.is_integer() => Value::Int(*b as i64),
             // Arrow's safe cast: a fractional or out-of-range float is "truncated" and raises
             // (`as i64` would saturate `1e20` to `i64::MAX`).
+            // PARITY: an `object` column of floats or decimals cast to an Arrow integer type is
+            // converted value by value and truncates toward zero (`Series([2.5], dtype=object)
+            // .astype('int64[pyarrow]')` is `[2]`), while a NumPy float64 column raises.
             (d, Value::Float(f)) if d.is_integer() => {
-                if !crate::cast::float_fits_i64(*f) {
+                let f = if from_object { f.trunc() } else { *f };
+                if !crate::cast::float_fits_i64(f) {
                     return Err(err(v));
                 }
-                Value::Int(*f as i64)
+                Value::Int(f as i64)
             }
             (d, Value::Decimal(dec)) if d.is_integer() => {
-                let f = dec.to_f64();
+                let f = dec.to_f64().trunc();
                 if !crate::cast::float_fits_i64(f) {
                     return Err(err(v));
                 }
@@ -1358,6 +1398,41 @@ pub fn pipe_enforce_dtypes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decimal_to_float_rounds_like_python() {
+        // `float(Decimal('0.78431372549019607843'))` is 0.7843137254901961; the i128 mantissa
+        // exceeds 2^53, so the string path decides.
+        assert_eq!(
+            decimal_mantissa_to_f64(78_431_372_549_019_607_843, 20),
+            0.784_313_725_490_196_1
+        );
+        assert_eq!(decimal_mantissa_to_f64(-15, 1), -1.5);
+        assert_eq!(decimal_mantissa_to_f64(45_000_000, 4), 4500.0);
+        let s = Int128Chunked::from_iter_options(
+            "a".into(),
+            [Some(78_431_372_549_019_607_843i128), None].into_iter(),
+        )
+        .into_decimal_unchecked(Some(38), 20)
+        .into_series();
+        let out = native_cast(&s, &DataType::Float64).unwrap();
+        assert_eq!(out.f64().unwrap().get(0), Some(0.784_313_725_490_196_1));
+        assert_eq!(out.f64().unwrap().get(1), None);
+    }
+
+    #[test]
+    fn coerce_timezone_reads_integers_as_microseconds() {
+        // v4: `coerce_timezone(pd.Series([1791900000001]))[0]` is
+        // `1970-01-21 17:45:00.000001+00:00`.
+        let data = ColumnData::Object(vec![Value::Int(1_791_900_000_001)]);
+        let out = series_coerce_timezone(&data, false).unwrap();
+        match &out.values()[0] {
+            Value::Datetime(d) => {
+                assert_eq!(d.utc.to_string(), "1970-01-21 17:45:00.000001")
+            }
+            other => panic!("{other:?}"),
+        }
+    }
 
     #[test]
     fn par_map_chunks_matches_sequential() {

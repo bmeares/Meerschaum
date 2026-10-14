@@ -95,8 +95,16 @@ pub struct GanttBar {
     pub status: NodeStatus,
     /// Planned start (run start plus the schedule's planned offset).
     pub planned_start: Option<DateTime<Utc>>,
-    /// Planned end: the planned start plus the EWMA duration estimate from earlier runs.
+    /// Planned end: the planned start plus [`Self::planned_duration_seconds`].
     pub planned_end: Option<DateTime<Utc>>,
+    /// The planned duration: the EWMA of the node's earlier successful runs (same action,
+    /// else any action), else `system.engine.default_duration_seconds` (30 s). `0` for a node
+    /// whose action does not sync (`skip`, `observe`, ...).
+    #[serde(default)]
+    pub planned_duration_seconds: Option<f64>,
+    /// Where the planned duration comes from: `history` or `default`.
+    #[serde(default)]
+    pub planned_source: Option<String>,
     /// Actual start.
     pub actual_start: Option<DateTime<Utc>>,
     /// Actual end.
@@ -282,8 +290,10 @@ impl EngineReader {
         Ok(out)
     }
 
-    /// One run with planned-vs-actual bars. Planned length is the EWMA of the node's earlier
-    /// successful runs (when it has none, the planned bar has no end).
+    /// One run with planned-vs-actual bars. A node's planned bar starts at its CPM earliest
+    /// start and lasts its planned duration: the EWMA of the node's successful runs before this
+    /// one (same action, else any action), else `system.engine.default_duration_seconds`
+    /// (30 s). The run's own node rows get the same value in `planned_duration_seconds`.
     pub async fn run_detail(&self, run_id: &str) -> Result<Option<RunDetail>, StateError> {
         let Some(RunRecord { run, mut nodes }) = self.state.load_run(run_id).await? else {
             return Ok(None);
@@ -295,47 +305,38 @@ impl EngineReader {
                 .then_with(|| a.started.cmp(&b.started))
         });
         let history = self.state.node_history(None).await.unwrap_or_default();
-        let mut estimates = crate::schedule::EwmaDurations::new(
+        let estimates = crate::schedule::EwmaDurations::from_history(
+            history
+                .iter()
+                .filter(|h| h.run_id != run_id && h.started.is_some_and(|s| s < run.started)),
             self.config.ewma_alpha,
             self.config.default_duration,
         );
-        let mut known = std::collections::HashSet::new();
-        for h in history
-            .iter()
-            .filter(|h| h.run_id != run_id && h.started.is_some_and(|s| s < run.started))
-        {
-            if let Some(d) = h.duration_seconds {
-                estimates.observe(
-                    &h.pipe_ref,
-                    h.action,
-                    std::time::Duration::from_secs_f64(d.max(0.0)),
-                );
-                known.insert((h.pipe_ref.clone(), h.action));
+        let mut bars = Vec::with_capacity(nodes.len());
+        for n in nodes.iter_mut() {
+            let planned_start = n
+                .planned_start_seconds
+                .map(|s| run.started + ChronoDuration::milliseconds((s * 1000.0).round() as i64));
+            let source = estimates.source(&n.pipe_ref, n.action);
+            if planned_start.is_some() && n.planned_duration_seconds.is_none() {
+                n.planned_duration_seconds =
+                    Some(estimates.estimate(&n.pipe_ref, n.action).as_secs_f64());
             }
+            let planned_end = planned_start
+                .zip(n.planned_duration_seconds)
+                .map(|(p, secs)| p + ChronoDuration::milliseconds((secs * 1000.0).round() as i64));
+            bars.push(GanttBar {
+                pipe_ref: n.pipe_ref.clone(),
+                action: n.action,
+                status: n.status,
+                planned_start,
+                planned_end,
+                planned_duration_seconds: n.planned_duration_seconds,
+                planned_source: planned_start.map(|_| source.to_string()),
+                actual_start: n.started,
+                actual_end: n.finished,
+            });
         }
-        let bars = nodes
-            .iter()
-            .map(|n| {
-                let planned_start = n.planned_start_seconds.map(|s| {
-                    run.started + ChronoDuration::milliseconds((s * 1000.0).round() as i64)
-                });
-                let planned_end = planned_start
-                    .filter(|_| known.contains(&(n.pipe_ref.clone(), n.action)))
-                    .map(|p| {
-                        let secs = estimates.estimate(&n.pipe_ref, n.action).as_secs_f64();
-                        p + ChronoDuration::milliseconds((secs * 1000.0).round() as i64)
-                    });
-                GanttBar {
-                    pipe_ref: n.pipe_ref.clone(),
-                    action: n.action,
-                    status: n.status,
-                    planned_start,
-                    planned_end,
-                    actual_start: n.started,
-                    actual_end: n.finished,
-                }
-            })
-            .collect();
         Ok(Some(RunDetail {
             summary: summarize(run, &nodes),
             nodes,

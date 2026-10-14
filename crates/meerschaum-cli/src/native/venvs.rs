@@ -311,6 +311,7 @@ impl PluginNeeds {
             .values()
             .flatten()
             .map(|r| normalize(r))
+            .chain(crate::extras::declared_packages())
             .collect()
     }
 }
@@ -580,9 +581,12 @@ pub fn prune_venvs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         uninstall_args.insert("action".into(), PyValue::str_list(&names));
         uninstall_args.insert("venv".into(), PyValue::str(&plan.venv));
         uninstall_args.insert("sub_args".into(), PyValue::List(Vec::new()));
-        uninstall_args.insert("yes".into(), PyValue::Bool(true));
-        uninstall_args.insert("force".into(), PyValue::Bool(true));
-        uninstall_args.insert("noask".into(), PyValue::Bool(true));
+        // PARITY: the consent was asked above. `uninstall packages` appends `-y` to the installer's
+        // arguments when `yes` or `force` is set, and `uv pip uninstall` rejects `-y` (pip's own
+        // path adds the flag itself), so every consent flag is cleared for the Python call.
+        uninstall_args.insert("yes".into(), PyValue::Bool(false));
+        uninstall_args.insert("force".into(), PyValue::Bool(false));
+        uninstall_args.insert("noask".into(), PyValue::Bool(false));
         match crate::python::core_action("uninstall packages", &uninstall_args, rt) {
             Ok(result) if result.success => {
                 removed += names.len();

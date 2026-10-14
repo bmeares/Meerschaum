@@ -50,7 +50,7 @@ in the `keys()` dict form.
 | `parcels_raw` | no parents | `root` |
 | `parcels_clean` | cursor 2, entry 3 unconsumed | `backfill`, full range (no axis to bound it), consumes seq 3 |
 | `parcels_joined` | cursor 7 = latest | `skip` |
-| `zoning_overlay` | **no cursor** on a new edge | `incremental`, full range (first engine run; no watermarks to compare), consumes the parent's latest seq 4 |
+| `zoning_overlay` | **no cursor** on a new edge, parent has an unconsumed entry | `backfill`, full range (first engine run: the parent's ledger entries decide, an entry without an interval dirties the whole range), consumes the parent's latest seq 4 |
 | `districts` | cursor 2, entry 3 unconsumed | `backfill`, full range |
 | `district_summary` | cursor 10 = latest | `skip` |
 

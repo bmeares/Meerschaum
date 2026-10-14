@@ -19,6 +19,7 @@ pipe.sync(children=1)             # this pipe, then its direct children
 pipeline = mrsm.Pipeline(pipe, parents=True)
 print(pipeline.plan())            # node | action | bounds | chunks | reason
 run = pipeline.sync(workers=4)    # a SuccessTuple with `run.run_id`, `run.outcomes`, ...
+run = pipeline.sync(on_event=print)   # every event live, as a dict (see `_events.py`)
 ```
 
 The engine is Rust-only (D14): `parents=`, `children=` and `Pipeline` work in every `MRSM_CORE`
@@ -35,13 +36,17 @@ from datetime import datetime
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import (
-    Any, Dict, Iterable, List, Optional, SuccessTuple, Tuple, Union,
+    Any, Callable, Dict, Iterable, List, Optional, SuccessTuple, Tuple, Union,
 )
 from meerschaum.core.Pipeline._engine import (
     build_request, call, get_core, get_depth,
 )
+from meerschaum.core.Pipeline._events import EVENT_KEYS, EVENT_NAMES, EventCallback, decode_event
 
-__all__ = ('Pipeline', 'Plan', 'PlannedNode', 'RunResult', 'get_runs', 'sync_with_graph')
+__all__ = (
+    'Pipeline', 'Plan', 'PlannedNode', 'RunResult', 'get_runs', 'sync_with_graph',
+    'EVENT_KEYS', 'EVENT_NAMES', 'decode_event',
+)
 
 
 def _bounds_text(bounds: Optional[Dict[str, Any]]) -> str:
@@ -272,6 +277,10 @@ class RunResult(tuple):
 
     record: Optional[Dict[str, Any]]
         The persisted run row and node rows.
+
+    callback_error: Optional[Exception]
+        The exception an `on_event` callback raised (the run continued without it), else
+        `None`.
     """
 
     success: bool
@@ -291,6 +300,7 @@ class RunResult(tuple):
         self.plan = Plan(data, **kwargs) if data.get('plan', None) else None
         self._data = data
         self._instance_request: Optional[Dict[str, Any]] = None
+        self.callback_error: Optional[BaseException] = None
         return self
 
     def __reduce__(self):
@@ -312,10 +322,13 @@ class RunResult(tuple):
 
     def events(self, after_seq: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        The run's persisted events (`run_started`, `node_planned`, `node_started`,
-        `node_finished`, `run_finished`, ...) in order. Live streaming is not exposed to Python
-        yet; the events are read after the run from the instance
-        (`system.engine.events` sets how fine-grained they are).
+        The run's persisted events (`run_started`, `node_started`, `node_finished`,
+        `run_finished`, ...) in order, read from the instance after the run
+        (`system.engine.events` sets how fine-grained they are). Each row is
+        `{'ts', 'run_id', 'seq', 'pipe_ref', 'event', 'payload'}`.
+
+        To receive every event live while the run is going, pass `on_event=` to
+        `Pipeline.sync()` (or `pipe.sync(parents=..., children=...)`).
         """
         if self.run_id is None or self._instance_request is None:
             return []
@@ -499,17 +512,36 @@ class Pipeline:
         resume: Optional[str], default None
             Re-plan only the nodes that failed or never ran in this earlier run ID.
 
+        on_event: Optional[Callable[[Dict[str, Any]], Any]], default None
+            Called with every event of the run as it happens (`run_started`, `node_planned`,
+            `node_started`, `chunk_started`, `chunk_finished`, `node_finished`, `node_failed`,
+            `node_skipped`, `watermark_advanced`, ..., `run_finished`), each a `dict` with
+            `event`, `run_id`, `seq`, `ts` (an aware UTC `datetime`), `pipe_ref` and the
+            event's own fields. It runs on this thread; the sync work runs on the engine's
+            threads without the GIL. If it raises an `Exception`, the run continues, the error
+            is warned about once and kept in `RunResult.callback_error`, and no further events
+            are delivered. `KeyboardInterrupt` cancels the run.
+
         Returns
         -------
         A `RunResult`: a `SuccessTuple` with `run_id`, `plan`, `outcomes` and `events()`.
         """
+        on_event = kwargs.pop('on_event', None)
         failure = self._register_targets()
         if failure is not None:
             return RunResult(*failure)
         request = self._request(begin=begin, end=end, **kwargs)
-        data = call('engine_run', request)
+        callback = EventCallback(on_event) if on_event is not None else None
+        if callback is None:
+            data = call('engine_run', request)
+        else:
+            data = call('engine_run', request, on_event=callback)
+            if callback.warning is not None:
+                data['warnings'] = list(data.get('warnings', None) or []) + [callback.warning]
         run = RunResult(data['success'], data['message'], data, pipeline=self)
         run._instance_request = self._instance_request()
+        if callback is not None:
+            run.callback_error = callback.error
         return run
 
     def run(self, begin: Any = '', end: Any = None, **kwargs: Any) -> RunResult:
