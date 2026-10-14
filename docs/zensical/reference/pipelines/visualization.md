@@ -6,7 +6,7 @@ The engine emits one typed event per transition, and everything you see is drawn
 
 ## 🖥️ In the terminal
 
-`mrsm sync pipes` prints each node's result as it finishes and a summary of the run (the output shown throughout this section). The engine can also draw a finished run as a static **Gantt chart**, one line per node, bars scaled to the run's wall time:
+`mrsm sync pipes` prints each node's result as it finishes and a summary of the run (the output shown throughout this section). A run with `--parents` / `--children` and more than one node ends with a static **Gantt chart**, one line per node, bars scaled to the run's wall time (a plain `sync pipes` keeps v4's output, so it prints none, and neither does `--nopretty`). On a terminal the run also prints one progress line per node as it starts and finishes (`▶`, `✔`, `✘`, `○`). `mrsm show run <id>` draws the chart of any recorded run:
 
 ```text
 run 01JA…  6 nodes  4 workers  wall 2m14s  critical path: raw → clean → rollup
@@ -28,9 +28,18 @@ sql:src/raw
     sql:local/daily*  ← sql:local/clean
 ```
 
-!!! warning "Status in this pre-release"
+`mrsm show graph` prints the DAG of a selection (it accepts the usual filters plus `--parents` and `--children`), and `mrsm show runs [--last N]` lists the recorded runs, newest first:
 
-    The Gantt and DAG renderers are part of the engine library, and the console page below uses the same run data. The terminal actions that print them (`mrsm show runs`, `mrsm show run <id>`, `mrsm show graph`, and the live full-screen view on a TTY) are not yet wired in this build.
+```text
+run                         started (UTC)        status     wall  ok/nodes  targets
+01M4VPBBSG8NMTDT2NJYE98D2Q  2026-10-13 22:32:53  succeeded  0s    3/3       sql:local/daily
+```
+
+`--nopretty` prints JSON for `plan pipes`, `show graph`, `show runs` and `show run`.
+
+!!! note "No full-screen view yet"
+
+    The terminal view is line-oriented: progress lines while the run is going and the Gantt chart at the end. A full-screen live chart is not part of this build.
 
 ## 🌐 In the web console
 

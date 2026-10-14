@@ -2,7 +2,7 @@
 
 !!! warning "Pre-release guide"
 
-    This guide follows the [v5.0.0 design spec](https://github.com/bmeares/Meerschaum/blob/v5/docs/design/v5.0.0.md) and has been checked against the pre-release builds (the console, plugin-owned Dash apps, the native plugin loader, venv accounting and the Syncing Engine are implemented). Anything marked **⚠️ TBC** may still change before 5.0.0 ships, and a few engine entry points are not wired yet (see [The Syncing Engine](#the-syncing-engine)). Report anything that breaks against a pre-release as a GitHub issue tagged `v5-compat`.
+    This guide follows the [v5.0.0 design spec](https://github.com/bmeares/Meerschaum/blob/v5/docs/design/v5.0.0.md) and has been checked against the pre-release builds (the console, plugin-owned Dash apps, the native plugin loader, venv accounting and the Syncing Engine are implemented). Anything marked **⚠️ TBC** may still change before 5.0.0 ships. Report anything that breaks against a pre-release as a GitHub issue tagged `v5-compat`.
 
 Meerschaum v5 is a rewrite of the core, the CLI, jobs, compose, the HTTP API, the MCP server and the web console in **Rust**. The `meerschaum` Python package stays, as the plugin SDK and as a thin façade over the Rust core, so **most pipes, plugins, compose projects, jobs and scripts keep working without changes**. This page lists what you need to check, grouped by who you are.
 
@@ -108,7 +108,7 @@ mrsm sync pipes -t reports --parents --resume <run_id>    # re-run only what fai
 
 !!! warning "Not wired yet"
 
-    `--parents`, `--children`, `--resume`, `--loop` and `--listen` run on the engine today, and the web console's `/dash/pipelines` page reads its run history. `mrsm plan pipes` (dry run), `mrsm show graph`, `mrsm show runs`, `pipe.sync(parents=, children=)` and `mrsm.Pipeline` are specified but not yet available in this build. Run history is stored on your instance (the `mrsm_engine_runs` and `mrsm_engine_nodes` tables).
+    `--parents`, `--children`, `--resume`, `--loop` and `--listen` run on the engine today, and the web console's `/dash/pipelines` page reads its run history. `mrsm plan pipes` (dry run), `mrsm show graph`, `mrsm show runs` / `show run <id>`, `pipe.sync(parents=, children=)` and `mrsm.Pipeline` are available too. Run history is stored on your instance (the `mrsm_engine_runs` and `mrsm_engine_nodes` tables).
 
 The full guide, with real output, is [Pipelines](/reference/pipelines/). A bare `sync pipes` without `--parents` or `--children` keeps v4 semantics: no capping of a child at its parents' watermark, no rebuilds, no ledger-driven backfills. Two behaviors are new **inside engine runs only** (`--parents`, `--children`, `mrsm.Pipeline`, and `--loop` with a selection that has edges):
 
@@ -302,13 +302,9 @@ Side by side, a page with a dropdown that re-draws a chart:
 === "v5 (page contract)"
 
     ```python
-    from meerschaum.plugins import web_page, api_plugin
-        from html import escape
+    from html import escape
+    from meerschaum.plugins import web_page, api_plugin, figure
     import plotly.graph_objects as go
-
-    def figure(fig) -> str:
-        """The page contract: a div carrying the Plotly figure JSON."""
-        return f'<div data-mrsm-figure="{escape(fig.to_json(), quote=True)}"></div>'
 
     def counts_figure(site):
         df = counts_pipe.get_data(params={'site': site} if site != 'all' else None)
@@ -337,7 +333,7 @@ Side by side, a page with a dropdown that re-draws a chart:
 
 Notes on the contract:
 
-- The figure code did not change. Only the transport did: `dcc.Graph(figure=fig)` became a `div` with a `data-mrsm-figure` attribute carrying `fig.to_json()` (the `figure()` helper above is three lines; a helper in the SDK is ⚠️ TBC). The console renders every such `div` on load and after each HTMX swap.
+- The figure code did not change. Only the transport did: `dcc.Graph(figure=fig)` became a `div` with a `data-mrsm-figure` attribute carrying the figure JSON. `meerschaum.plugins.figure(fig)` builds that `div` from a `plotly.py` figure (or a figure `dict` or JSON string), escaping the JSON for the attribute; `figure_json(fig)` returns just the compact JSON, byte for byte what a Rust plugin built with the `plotly` crate would emit for the same chart. The console renders every such `div` on load and after each HTMX swap.
 - **Maps:** `<div data-mrsm-map='...'>` renders GeoJSON or a layer spec with the vendored MapLibre GL JS. This is the replacement for dash-leaflet.
 - **Tables:** return HTML tables; the console adds sorting. Editable grids are your concern.
 - **Login and session.** `login_required=True` is enforced by the console before your function runs. ⚠️ TBC: the function may accept `request`, `username` and `session` keyword arguments, filtered by signature like other plugin entry points.
@@ -384,7 +380,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 
 1. **Try v5 in a copy.** `MRSM_ROOT_DIR=/tmp/v5-root mrsm ...` against the same instance. v5 writes no new files into an instance until an engine run happens, and engine state lives in internal `mrsm_engine_*` tables under `_mrsm_internal`.
 2. **Lint your compose files:** `mrsm compose explain` now warns about unresolved `{{ Pipe() }}` references, `dtype:` typos (for `dtypes:`) and string-typed `tags`. It never changes behavior.
-3. **Dry-run the engine:** `mrsm plan pipes -t <tag>` prints what an engine run would do without moving data (⚠️ TBC: not wired in this build; use `sync pipes --parents` on a copy meanwhile).
+3. **Dry-run the engine:** `mrsm plan pipes -t <tag>` prints what an engine run would do without moving data.
 4. **Import every plugin:** `mrsm show plugins` on v5 imports each plugin and reports `ImportError`s from removed internals, with the replacement named in the message.
 5. **Diff `mrsm --help`** against 4.1 if you script around the CLI. Any difference is a bug; please report it.
 6. **Start the API and open the console.** If you have `@api_plugin` or `@dash_plugin` plugins, confirm the API host started (`mrsm show jobs` ⚠️ TBC) and walk through each plugin page. Old Dash URLs should redirect.

@@ -256,6 +256,8 @@ pub struct RunOptions {
     /// the stream triggers to honor a child's `min_seconds`. Unlike `exclude`, a held node is
     /// removed after the selection is resolved, so its in-selection parents still run.
     pub hold: BTreeSet<PipeRef>,
+    /// `--chunk-pipelining` for this run (R6); `None` uses `system.engine.chunk_pipelining`.
+    pub chunk_pipelining: Option<bool>,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -511,6 +513,7 @@ pub struct Engine {
     state: Arc<InstanceState>,
     leases: Arc<InstanceLeases>,
     faults: Option<Arc<dyn FaultInjector>>,
+    cadence: Option<Arc<dyn crate::cadence::Cadence>>,
     last_retention: Mutex<Option<Instant>>,
 }
 
@@ -597,6 +600,7 @@ impl Engine {
             state,
             leases,
             faults: None,
+            cadence: None,
             last_retention: Mutex::new(None),
         }
     }
@@ -604,6 +608,12 @@ impl Engine {
     /// Inject crashes into every node sync (tests).
     pub fn with_faults(mut self, faults: Arc<dyn FaultInjector>) -> Engine {
         self.faults = Some(faults);
+        self
+    }
+
+    /// Let continuous mode honor `parameters['schedule']` with this schedule parser (§5.5).
+    pub fn with_cadence(mut self, cadence: Arc<dyn crate::cadence::Cadence>) -> Engine {
+        self.cadence = Some(cadence);
         self
     }
 
@@ -920,7 +930,9 @@ impl Engine {
             lease_ttl: self.config.lease_ttl,
             lease_wait: self.config.lease_wait,
             lease_poll: self.config.lease_poll,
-            chunk_pipelining: self.config.chunk_pipelining,
+            chunk_pipelining: opts
+                .chunk_pipelining
+                .unwrap_or(self.config.chunk_pipelining),
             run_id: opts.run_id.clone(),
             plan: plan_opts.clone(),
             selection: serde_json::to_string(&selection).ok(),
@@ -1060,6 +1072,25 @@ impl Engine {
         let mut streams: Option<tokio::task::JoinSet<()>> = None;
         let mut triggers: Option<triggers::Triggers> = None;
         let mut lap = 0u64;
+        // `parameters['schedule']` (§5.5): root nodes with a schedule only sync when due.
+        let mut schedules = crate::cadence::PipeSchedules::default();
+        let mut schedules_flat = true;
+        if let (true, Some(cadence)) = (loop_opts.run_loop, self.cadence.as_ref()) {
+            if let Ok((graph, sub, _)) = self.resolve(&opts).await {
+                let roots = sub
+                    .order
+                    .iter()
+                    .filter(|r| sub.parent_edges(r).next().is_none())
+                    .filter_map(|r| graph.node(r).map(|n| (&n.pipe_ref, &n.record.parameters)));
+                let (parsed, warnings) =
+                    crate::cadence::PipeSchedules::parse(cadence.as_ref(), roots, Utc::now());
+                for w in warnings {
+                    tracing::warn!("{w}");
+                }
+                schedules = parsed;
+                schedules_flat = sub.flat;
+            }
+        }
         loop {
             if stop.is_stopped() {
                 break;
@@ -1086,8 +1117,47 @@ impl Engine {
             if let Some(t) = triggers.as_mut() {
                 self.run_triggers(t).await;
             }
+            let mut lap_opts = opts.clone();
+            let mut due_now: Vec<PipeRef> = Vec::new();
+            let lap_now = Utc::now();
+            if !schedules.is_empty() {
+                let held = schedules.not_due(lap_now);
+                due_now = schedules
+                    .nodes()
+                    .into_iter()
+                    .filter(|r| !held.contains(r))
+                    .collect();
+                if schedules_flat {
+                    lap_opts.exclude.extend(held.iter().cloned());
+                } else {
+                    lap_opts.hold.extend(held.iter().cloned());
+                }
+                if !held.is_empty() {
+                    let idle = match self.resolve(&lap_opts).await {
+                        Ok((_, sub, _)) => sub.order.is_empty(),
+                        Err(_) => false,
+                    };
+                    if idle {
+                        // Nothing is due: wait for the earliest fire time.
+                        let wait = schedules
+                            .next_due()
+                            .map(|t| (t - lap_now).to_std().unwrap_or(Duration::ZERO))
+                            .unwrap_or_else(|| Duration::from_secs_f64(min_seconds.max(1.0)));
+                        if self
+                            .wait_with_triggers(triggers.as_mut(), &stop, Some(wait))
+                            .await
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+                }
+            }
             lap += 1;
-            let result = self.run_inner(opts.clone(), Some(on_lap.clone())).await;
+            let result = self.run_inner(lap_opts, Some(on_lap.clone())).await;
+            for r in &due_now {
+                schedules.ran(r, lap_now);
+            }
             if result.record.is_none() {
                 // The lap could not run (graph or instance failure): v4's cooldown.
                 let message = format!(
@@ -1126,19 +1196,24 @@ impl Engine {
                 break;
             }
             if min_seconds > 0.0 {
+                // A schedule due sooner than `--min-seconds` shortens the sleep.
+                let sleep_seconds = schedules
+                    .next_due()
+                    .map(|t| (t - Utc::now()).num_milliseconds().max(0) as f64 / 1000.0)
+                    .map_or(min_seconds, |d| d.min(min_seconds));
                 on_lap(LapEvent::Sleeping {
-                    seconds: min_seconds,
+                    seconds: sleep_seconds,
                     message: format!(
                         "Sleeping for {} second{}.",
-                        meerschaum_core::pyfmt::py_str(&py_number(min_seconds)),
-                        if min_seconds.abs() != 1.0 { "s" } else { "" }
+                        meerschaum_core::pyfmt::py_str(&py_number(sleep_seconds)),
+                        if sleep_seconds.abs() != 1.0 { "s" } else { "" }
                     ),
                 });
                 if self
                     .wait_with_triggers(
                         triggers.as_mut(),
                         &stop,
-                        Some(Duration::from_secs_f64(min_seconds)),
+                        Some(Duration::from_secs_f64(sleep_seconds)),
                     )
                     .await
                 {

@@ -12,13 +12,13 @@ use crate::dispatch::Runtime;
 
 /// The registries of one engine: the Python adapter (listen / callback controls) and the
 /// registry the engine resolves connectors through (native plugins before the adapter).
-pub(super) struct EngineRegistry {
+pub struct EngineRegistry {
     pub python: Arc<meerschaum_engine::python::PythonRegistry>,
     pub registry: Arc<dyn meerschaum_engine::ConnectorRegistry>,
     pub config: EngineConfig,
 }
 
-pub(super) fn registry(
+pub fn registry(
     config_ref: &meerschaum_core::config::Config,
     session: &Session,
     inst: &Instance,
@@ -182,7 +182,7 @@ impl meerschaum_engine::PluginSync for Inplace {
     }
 }
 
-pub(super) fn build(
+pub fn build(
     rt: &mut Runtime<'_>,
     session: &Session,
     inst: &Instance,
@@ -202,7 +202,40 @@ pub(super) fn build(
     if let Some(kwargs) = stream_kwargs {
         python.set_stream_kwargs(kwargs);
     }
-    Ok(Engine::new(registry, config))
+    Ok(Engine::new(registry, config).with_cadence(Arc::new(JobsCadence)))
+}
+
+/// `parameters['schedule']` in continuous mode, parsed with the `-s` grammar of
+/// `meerschaum-jobs` (the same text `--schedule` accepts).
+struct JobsCadence;
+
+struct JobsTimer(meerschaum_jobs::schedule::Trigger);
+
+impl meerschaum_engine::Timer for JobsTimer {
+    fn first(
+        &mut self,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.0.next().map(|t| t.to_utc())
+    }
+    fn after(
+        &mut self,
+        after: chrono::DateTime<chrono::Utc>,
+    ) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.0.next_after(after.fixed_offset()).map(|t| t.to_utc())
+    }
+}
+
+impl meerschaum_engine::Cadence for JobsCadence {
+    fn timer(
+        &self,
+        schedule: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Box<dyn meerschaum_engine::Timer>, String> {
+        meerschaum_jobs::parse_schedule(schedule, now.fixed_offset())
+            .map(|t| Box::new(JobsTimer(t)) as Box<dyn meerschaum_engine::Timer>)
+            .map_err(|e| e.py_message())
+    }
 }
 
 #[cfg(test)]
@@ -226,6 +259,18 @@ mod tests {
             assert!(results.iter().all(Option::is_some));
             Ok(())
         }
+    }
+
+    #[test]
+    fn pipe_schedule_uses_the_jobs_grammar() {
+        use meerschaum_engine::Cadence;
+        let now = chrono::Utc::now();
+        let mut timer = JobsCadence.timer("every 2 seconds", now).unwrap();
+        let first = timer.first(now).unwrap();
+        assert!(first >= now);
+        let after = timer.after(first).unwrap();
+        assert!(after > first);
+        assert!(JobsCadence.timer("every blue moons", now).is_err());
     }
 
     #[tokio::test]

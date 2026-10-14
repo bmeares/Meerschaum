@@ -504,6 +504,57 @@ the approximate number of rows per partition (total rowcount ÷ partition count)
 signal for tuning the width.
 "##
         }
+        "_show_graph" => {
+            r##"
+Print the selected pipes and their dependencies as a DAG (v5).
+
+Each node is indented under its deepest parent and lists its in-selection parents after `←`;
+`*` marks the pipes that were selected directly (the rest were pulled in by `--parents` or
+`--children`). Edges come from `parents` / `children` and from `{{ Pipe() }}` references.
+
+Examples:
+    - `show graph -t demo`
+    - `show graph -m daily --parents`
+"##
+        }
+        "_show_runs" => {
+            r##"
+List the recorded runs of the Syncing Engine, newest first (v5).
+
+Give a run ID (`show run RUN_ID`) to print that run's Gantt chart instead.
+
+Examples:
+    - `show runs`
+    - `show runs --last 5`
+    - `show run 01JA...`
+"##
+        }
+        "_plan_pipes" => {
+            r##"
+Print the Syncing Engine's plan for the selected pipes without syncing (v5).
+
+One row per node: the action (`root`, `skip`, `incremental`, `backfill`, `rebuild`, `observe`),
+the sync bounds, the number of chunks and the reason. Accepts the usual key and tag filters,
+`--begin`, `--end`, `--parents [N]`, `--children [N]` and `--resume RUN_ID`.
+
+Examples:
+    - `plan pipes -t demo --parents`
+    - `plan pipes -m daily --nopretty`
+"##
+        }
+        "plan" => {
+            r##"
+Print what a sync would do, without syncing (v5).
+
+Command:
+    `plan {option}`
+
+Example:
+    `plan pipes --parents`
+
+    Options:
+        `plan [pipes]`"##
+        }
         "_show_pipes" => {
             r##"
 Print a stylized tree of available Meerschaum pipes.

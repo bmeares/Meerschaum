@@ -330,6 +330,24 @@ fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyExce
                 }
             };
             args.insert(flag.trim_start_matches('-').into(), depth);
+        } else if flag == "--chunk-pipelining" && attached.is_none() {
+            args.insert("chunk_pipelining".into(), PyValue::Bool(true));
+        } else if flag == "--last" && is_show_runs(sysargs) {
+            // `show runs --last N` (v5-only; scoped so plugin flags named `--last` still parse).
+            let value = attached
+                .or_else(|| sysargs.get(i + 1).map(String::as_str))
+                .and_then(|s| s.parse::<i128>().ok())
+                .filter(|n| *n >= 0)
+                .ok_or_else(|| {
+                    PyException::new(
+                        "InvalidArgumentException",
+                        "--last requires a non-negative integer",
+                    )
+                })?;
+            args.insert("last".into(), PyValue::Int(value));
+            if attached.is_none() {
+                i += 1;
+            }
         } else if flag == "--resume" {
             let value = attached
                 .or_else(|| {
@@ -351,6 +369,16 @@ fn engine_arguments(sysargs: &[String]) -> Result<(Vec<String>, ArgsMap), PyExce
         i += 1;
     }
     Ok((rest, args))
+}
+
+/// Whether the words name `show run` / `show runs`.
+fn is_show_runs(sysargs: &[String]) -> bool {
+    let words: Vec<&str> = sysargs
+        .iter()
+        .map(String::as_str)
+        .take_while(|s| !s.starts_with('-'))
+        .collect();
+    words.first() == Some(&"show") && matches!(words.get(1), Some(&"run" | &"runs"))
 }
 
 #[cfg(test)]
@@ -376,5 +404,20 @@ mod engine_argument_tests {
         assert_eq!(args["resume"], PyValue::Str("run-1".into()));
         assert!(engine_arguments(&["--parents=-1".into()]).is_err());
         assert!(engine_arguments(&["--resume".into()]).is_err());
+    }
+
+    #[test]
+    fn chunk_pipelining_and_last() {
+        let words = ["show", "runs", "--last", "3", "--chunk-pipelining"].map(str::to_owned);
+        let (rest, args) = engine_arguments(&words).unwrap();
+        assert_eq!(rest, ["show", "runs"]);
+        assert_eq!(args["last"], PyValue::Int(3));
+        assert_eq!(args["chunk_pipelining"], PyValue::Bool(true));
+        // `--last` belongs to a plugin outside `show runs`.
+        let words = ["sync", "pipes", "--last", "3"].map(str::to_owned);
+        let (rest, args) = engine_arguments(&words).unwrap();
+        assert_eq!(rest, words);
+        assert!(!args.contains_key("last"));
+        assert!(engine_arguments(&["show".into(), "runs".into(), "--last".into()]).is_err());
     }
 }

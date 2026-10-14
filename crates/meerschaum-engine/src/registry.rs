@@ -13,11 +13,13 @@
 //!   ([`SyncHooks`]). The worker agent's Python adapter implements these.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use meerschaum_connector::{Connector, InstanceConnector, async_trait};
 use meerschaum_core::success::SyncResult;
-use meerschaum_core::{Pipe, SuccessTuple};
+use meerschaum_core::value::apply_patch_maps;
+use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 
 use crate::stream::{LegacyStream, StreamSource};
 use crate::sync::{DeltaObserver, SyncArgs, SyncEnv};
@@ -113,8 +115,86 @@ pub trait ConnectorRegistry: Send + Sync {
     /// schema-qualified name (`sql_item_name`) on SQL instances and `pipe.target` elsewhere;
     /// registries that hold SQL instances override this.
     fn table_reference(&self, pipe: &Pipe) -> Result<String, String> {
-        pipe.target(None).map_err(|e| e.to_string())
+        let loaded = load_registered(self, pipe, None);
+        loaded.target(None).map_err(|e| e.to_string())
     }
+}
+
+/// How long a registered-parameters lookup is reused by [`StaticRegistry`] (a run is far shorter;
+/// the bound only keeps a registry that outlives its run from serving a stale `target`).
+const REGISTERED_TTL: Duration = Duration::from_secs(30);
+
+/// Registered parameters fetched for table references, by `instance|connector|metric|location`.
+type RegisteredCache = Mutex<HashMap<String, (Instant, Option<Map>)>>;
+
+fn pipe_cache_key(pipe: &Pipe) -> String {
+    pipe.pipe_ref()
+}
+
+/// Whether the pipe's own (call-site) parameters already name its table.
+fn names_target(pipe: &Pipe) -> bool {
+    let raw = pipe.raw_parameters();
+    ["target", "target_name", "target_table"]
+        .iter()
+        .any(|k| raw.contains_key(*k))
+}
+
+/// `pipe` carrying the parameters registered on its own instance (`Pipe.parameters` reads them
+/// from there), so a `{{ Pipe('a', 'b') }}` reference to a pipe with an explicit `target`
+/// renders that table instead of the default name. A reference is built from keys only, so
+/// without this step the explicit target is lost.
+///
+/// The lookup is async while table references are synchronous (the template resolver's
+/// contract). It runs on the current Tokio runtime when that is multi-threaded (every runtime
+/// the CLI, the Python bindings and the server build); otherwise, or when the instance is
+/// unknown, unreachable or the pipe unregistered, the pipe is returned as is.
+fn load_registered(
+    registry: &(impl ConnectorRegistry + ?Sized),
+    pipe: &Pipe,
+    cache: Option<&RegisteredCache>,
+) -> Pipe {
+    if names_target(pipe) {
+        return pipe.clone();
+    }
+    let key = pipe_cache_key(pipe);
+    if let Some(cache) = cache {
+        let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, registered)) = guard.get(&key) {
+            if at.elapsed() < REGISTERED_TTL {
+                return with_registered(pipe, registered.as_ref());
+            }
+        }
+    }
+    let registered = fetch_registered(registry, pipe);
+    if let Some(cache) = cache {
+        cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, (Instant::now(), registered.clone()));
+    }
+    with_registered(pipe, registered.as_ref())
+}
+
+fn with_registered(pipe: &Pipe, registered: Option<&Map>) -> Pipe {
+    match registered {
+        Some(params) => {
+            let mut out = pipe.clone();
+            out.set_parameters(apply_patch_maps(params, pipe.raw_parameters()));
+            out
+        }
+        None => pipe.clone(),
+    }
+}
+
+fn fetch_registered(registry: &(impl ConnectorRegistry + ?Sized), pipe: &Pipe) -> Option<Map> {
+    let instance = registry.instance(pipe.instance_keys()).ok()?;
+    let handle = tokio::runtime::Handle::try_current().ok()?;
+    if handle.runtime_flavor() != tokio::runtime::RuntimeFlavor::MultiThread {
+        return None;
+    }
+    let attrs =
+        tokio::task::block_in_place(|| handle.block_on(instance.get_pipe_attributes(pipe))).ok()?;
+    attrs.get("parameters").map(Value::to_map)
 }
 
 /// Renders `{{ Pipe(...) }}` table references.
@@ -131,6 +211,7 @@ pub struct StaticRegistry {
     legacy_streams: HashMap<String, Arc<dyn LegacyStream>>,
     hooks: Option<Arc<dyn SyncHooks>>,
     table_refs: Option<TableRefFn>,
+    registered: Arc<RegisteredCache>,
 }
 
 impl std::fmt::Debug for StaticRegistry {
@@ -239,9 +320,10 @@ impl ConnectorRegistry for StaticRegistry {
     }
 
     fn table_reference(&self, pipe: &Pipe) -> Result<String, String> {
+        let loaded = load_registered(self, pipe, Some(&self.registered));
         match &self.table_refs {
-            Some(f) => f(pipe),
-            None => pipe.target(None).map_err(|e| e.to_string()),
+            Some(f) => f(&loaded),
+            None => loaded.target(None).map_err(|e| e.to_string()),
         }
     }
 }

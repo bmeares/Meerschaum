@@ -163,7 +163,13 @@ pub async fn prepare_resolver(
                         "Failed to fetch the registered parameters of {pipe}: {e}"
                     )),
                 }
-                entry.table_reference = inst.pipe_table_reference(&pipe);
+                // The referenced pipe's registered parameters (e.g. an explicit `target`) decide
+                // its table, not its keys alone.
+                let mut registered = pipe.clone();
+                if let Some(r) = &entry.registered {
+                    registered.set_parameters(apply_patch_maps(r, pipe.raw_parameters()));
+                }
+                entry.table_reference = inst.pipe_table_reference(&registered);
             }
             None => resolver.warnings.push(format!(
                 "Cannot reach the instance '{}' of the referenced pipe {pipe}.",

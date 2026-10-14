@@ -64,6 +64,25 @@ engine.state().load_events(&run_id).await?;
 | `ConnectorRegistry` | How the engine reaches connectors. Hosts (CLI, `meerschaum-py`, server) implement it; `StaticRegistry` is a fixed map. |
 | `EngineConfig::from_config` | `system.engine.*` (`workers`, `limits.connectors`, `limits.instances`, `python_workers`, `auto_rebuild`, `implicit_edges`, `state_flush_ms`, `run_history_days`, `events`, `inclusive_cap`, `flat_ledger`, `persist_runs`, `chunk_pipelining`). |
 
+## Per-pipe schedules and chunk pipelining
+
+- **`parameters['schedule']`** (§5.5). `Engine::with_cadence(Arc<dyn Cadence>)` gives continuous
+  mode a schedule parser (the CLI passes the `meerschaum-jobs` grammar; the engine does not depend
+  on that crate). With `--loop`, a root node (every node of a flat selection) with a schedule is
+  held out of laps until its next fire time (`exclude` for flat selections, `hold` otherwise); a
+  lap with nothing due waits for the earliest fire time and the inter-lap sleep is capped by it.
+  Without a `Cadence` the key is ignored.
+- **Chunk pipelining** (R6; `RunOptions::chunk_pipelining`, `EngineConfig::chunk_pipelining`).
+  Needs an executor with `supports_chunk_pipelining()` (the native one) and a non-flat run. A
+  node that runs as `incremental`/`backfill` with two or more chunks publishes, after each window's
+  data commit, the highest ledger `seq` it has written (`ChunkProgress`). A not-yet-dispatched
+  child whose parents are all either succeeded or running in this way is re-planned against a view
+  that only shows committed ledger entries (`PipelinedView`) and, if it needs to run, runs an
+  *early pass*; early passes advance the edge cursors only to the committed seq, so at-least-once
+  delivery holds. The normal finish-to-start pass still follows (usually a `skip`, in which case the
+  node is reported `succeeded` with the early passes' counts). One level deep; `rebuild` never runs
+  early.
+
 ## Seams for other crates
 
 - **Python connectors (worker agent).** A `PythonConnector` is a `Connector` (fetch) and/or an
@@ -111,6 +130,8 @@ for all of a node's edges (after the sync succeeds); `tests/state_cost.rs` measu
 | `tests/state_cost.rs` | The engine-state write path. |
 | `tests/bare_sync.rs` | A bare `pipe.sync()` (R1). |
 | `tests/python_glue.rs` | Manifest routing, native callbacks, scoped ledger observers, real plugin sync and custom fetch kwargs. |
+| `tests/pipe_schedule.rs` | `parameters['schedule']` in `--loop`: a scheduled root only syncs when due (via a host-supplied `Cadence`), unscheduled pipes keep the lap cadence, an all-scheduled selection idles until due. |
+| `tests/chunk_pipelining.rs` | `--chunk-pipelining`: a child pre-syncs a running parent's committed windows (extra `node_started`), tables identical to a sequential run, cursors advance exactly. |
 | `tests/date_bounds.rs` | v4's `parse_date_bounds` on the fetch path: UTC-aware, naive and epoch-integer bounds. |
 
 Regenerate the v4 fixture with

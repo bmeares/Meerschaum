@@ -267,7 +267,7 @@ fn changed_keys(before: &Map, after: &Map) -> Map {
 /// The `sql:<label>` instance connector.
 #[pyclass(frozen, name = "SqlConnector", module = "meerschaum._core")]
 pub struct PySqlConnector {
-    inner: Arc<RsSqlConnector>,
+    pub(crate) inner: Arc<RsSqlConnector>,
 }
 
 impl PySqlConnector {

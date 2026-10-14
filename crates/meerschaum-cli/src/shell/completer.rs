@@ -538,6 +538,8 @@ impl CompletionData {
         let sub = action.get(1).map(String::as_str).unwrap_or("");
         let mut out: Vec<String> = actions::get_subactions(self.actions, first)
             .iter()
+            // v5-only subactions complete once a prefix is typed (the bare list is v4's).
+            .filter(|s| !sub.is_empty() || !actions::is_v5_only_subaction(first, s.name))
             .map(|s| s.name.to_string())
             .filter(|s| s.starts_with(sub) && s != sub)
             .collect();

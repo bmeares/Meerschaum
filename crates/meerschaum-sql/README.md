@@ -98,7 +98,7 @@ the Python implementation (`tests/fixtures/cross_impl/cross_impl.py`, run as a s
 `PYTHONPATH` set to this repository) into one SQLite file and with Rust into another, then
 compares `sqlite_master` DDL, `PRAGMA table_info`, row counts and stored values (with storage
 classes), and has each implementation sync into and read the other's database. It uses
-`MRSM_TEST_PYTHON` (default `~/.config/meerschaum/venvs/mrsm/bin/python`) and skips when the
+`MRSM_TEST_PYTHON` (default `.venv-ref/bin/python`, the released v4.1.4 reference; it runs with `-E`, so the interpreter itself must have `meerschaum` installed) and skips when the
 interpreter is missing; `MRSM_TEST_KEEP=1` keeps the databases for inspection.
 
 The MSSQL variant (`cross_implementation_mssql`, with `MRSM_TEST_MSSQL_URI`) syncs the same

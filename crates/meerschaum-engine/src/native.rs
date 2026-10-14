@@ -151,6 +151,8 @@ pub struct LedgerWriter<'a, S> {
     pub faults: Option<&'a dyn FaultInjector>,
     /// The intervals written, for the node's [`SyncResult::changed_intervals`].
     pub written: Mutex<Vec<ChangedInterval>>,
+    /// The highest sequence number written on each state instance.
+    pub max_seq: Mutex<HashMap<String, i64>>,
 }
 
 impl<'a, S: StateWriter> LedgerWriter<'a, S> {
@@ -169,6 +171,7 @@ impl<'a, S: StateWriter> LedgerWriter<'a, S> {
             instances,
             faults,
             written: Mutex::new(Vec::new()),
+            max_seq: Mutex::new(HashMap::new()),
         }
     }
 
@@ -192,10 +195,16 @@ impl<S: StateWriter> DeltaObserver for LedgerWriter<'_, S> {
                 })
                 .collect();
             for instance in &self.instances {
-                self.state
+                let entries = self
+                    .state
                     .append_ledger(instance, &self.pipe_ref, spans.clone())
                     .await
                     .map_err(|e| format!("cannot write the ledger on '{instance}': {e}"))?;
+                if let Some(seq) = entries.iter().map(|e| e.seq).max() {
+                    let mut max = self.max_seq.lock().unwrap_or_else(|e| e.into_inner());
+                    let slot = max.entry(instance.clone()).or_insert(seq);
+                    *slot = (*slot).max(seq);
+                }
             }
             self.written
                 .lock()
@@ -516,6 +525,10 @@ fn combine(pipe: &Pipe, results: Vec<SyncResult>) -> SyncResult {
 }
 
 impl<S: StateWriter + 'static> SyncExecutor for NativeExecutor<S> {
+    fn supports_chunk_pipelining(&self) -> bool {
+        !self.flat
+    }
+
     async fn sync(&self, request: SyncRequest) -> SyncResult {
         let started = std::time::Instant::now();
         let Some(node) = self.graph.node(&request.pipe_ref) else {
@@ -632,6 +645,14 @@ impl<S: StateWriter + 'static> SyncExecutor for NativeExecutor<S> {
                 });
             }
             let failed = !r.success;
+            if !failed {
+                // Chunk pipelining: this window's data is committed, so its ledger entries
+                // are safe for a child to consume.
+                if let (Some(progress), Some(l)) = (&request.progress, &ledger) {
+                    let seqs = l.max_seq.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                    progress.commit(pipe_ref, seqs);
+                }
+            }
             results.push(r);
             if failed {
                 // Later chunks would advance past a hole; stop and let the retry policy rerun.

@@ -14,6 +14,7 @@ from meerschaum.utils.typing import (
     Optional, Dict, Any, Union, List, Tuple, Iterator, TYPE_CHECKING,
 )
 from meerschaum.config import get_config
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
@@ -710,6 +711,9 @@ def get_chunk_interval(
     -------
     The chunk interval (`timedelta` or `int`) to use with this pipe's `datetime` axis.
     """
+    if (_rust := _rust_impl('get_chunk_interval')) is not None:
+        return _rust(self, chunk_interval, self.dtypes)
+
     dt_col = self.columns.get('datetime', None)
     dt_dtype = self.dtypes.get(dt_col, 'datetime') if dt_col is not None else 'datetime'
     is_int_axis = 'int' in str(dt_dtype).lower()
@@ -831,6 +835,20 @@ def get_chunk_bounds(
     A list of chunk bounds (datetimes or integers).
     If unbounded, the first and last chunks will include `None`.
     """
+    if (_rust := _rust_impl('get_chunk_bounds')) is not None:
+        ### The sync times stand in for an unset `begin` / `end` (v4 queries them the same way).
+        _oldest = self.get_sync_time(newest=False, debug=debug) if begin is None else None
+        _newest = self.get_sync_time(newest=True, debug=debug) if end is None else None
+        return _rust(
+            self.parse_date_bounds(begin, debug=debug),
+            self.parse_date_bounds(end, debug=debug),
+            bounded,
+            self.get_chunk_interval(chunk_interval, debug=debug),
+            align,
+            self.parse_date_bounds(_oldest, debug=debug),
+            self.parse_date_bounds(_newest, debug=debug),
+        )
+
     from datetime import timedelta
     from meerschaum.utils.dtypes import are_dtypes_equal
     from meerschaum.utils.misc import interval_str

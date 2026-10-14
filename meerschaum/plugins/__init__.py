@@ -16,6 +16,7 @@ import meerschaum as mrsm
 from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List, Tuple
 from meerschaum.utils.threading import RLock
 from meerschaum.core.Plugin import Plugin
+from meerschaum.plugins._page import figure, figure_json
 
 _api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
 _plugins_import_errors: Dict[str, Exception] = {}
@@ -49,6 +50,8 @@ __all__ = (
     "add_plugin_argument",
     "pre_sync_hook",
     "post_sync_hook",
+    "figure",
+    "figure_json",
 )
 __pdoc__ = {
     'venvs': False,

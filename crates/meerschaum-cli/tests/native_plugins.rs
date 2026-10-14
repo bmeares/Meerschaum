@@ -102,6 +102,18 @@ fn native_action_dispatches_and_is_listed() {
 }
 
 #[test]
+fn show_plugins_lists_native_plugins_with_a_marker() {
+    // No Python plugin here: any `.py` file would start the Python worker.
+    let home = Home::new();
+    let pretty = text(&home.run(&["show", "plugins"]));
+    assert!(pretty.contains("native_demo (native)"), "{pretty}");
+    // `--nopretty` keeps bare names for scripts.
+    let plain =
+        String::from_utf8_lossy(&home.run(&["show", "plugins", "--nopretty"]).stdout).into_owned();
+    assert_eq!(plain, "native_demo\n");
+}
+
+#[test]
 fn native_action_panic_is_contained() {
     let home = Home::new();
     let output = home.run(&["panic"]);

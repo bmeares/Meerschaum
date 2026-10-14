@@ -30,6 +30,7 @@ meerschaum-core = { workspace = true }
 meerschaum-kernel = { workspace = true }
 meerschaum-sql = { workspace = true }
 meerschaum-connector = { workspace = true }
+meerschaum-engine = { workspace = true }
 # The runtime the instance methods run on (owned by the extension, design §4.2).
 tokio = { workspace = true }
 # Only this crate depends on the CLI library (top layer, see crates/README.md "Crate layering").
@@ -48,6 +49,7 @@ polars = { workspace = true }
 arrow = { workspace = true, features = ["ffi"] }
 toml = { workspace = true }
 indexmap = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }

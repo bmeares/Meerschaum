@@ -105,7 +105,7 @@ Only `raw` is a *root* (it has no parent in the selection), so it syncs the norm
 
 !!! note "Flags and `--help`"
 
-    `--parents`, `--children` and `--resume` are parsed ahead of the v4 argument schema, so they do not appear in `mrsm sync pipes --help`. They work with every other `sync pipes` flag (`--begin`, `--end`, `-w`, `--yes`, `--nopretty`, ...).
+    `--parents`, `--children`, `--resume` and `--chunk-pipelining` are parsed ahead of the v4 argument schema, so they are not in `mrsm --help`. `mrsm sync pipes --help` prints v4's text followed by a **v5 additions** block that lists them. They work with every other `sync pipes` flag (`--begin`, `--end`, `-w`, `--yes`, `--nopretty`, ...).
 
 ### Python
 
@@ -117,17 +117,55 @@ pipe.sync(children=True)             # this pipe, then every descendant
 pipe.sync(parents=True, children=True)
 ```
 
+`parents` and `children` take `True` (every generation) or an `int` (that many generations); `False`, `None` and `0` mean no traversal. A bare `pipe.sync()` never touches the engine: it is the v4 code path, returns a plain `(bool, str)` tuple and records nothing.
+
+With `parents` or `children` the sync runs through the Rust engine and returns a `RunResult`, a `SuccessTuple` (`success, message = pipe.sync(children=True)` still works) that also carries the run's details:
+
+```python
+run = pipe.sync(children=True, workers=4)
+run.success, run.message     # the SuccessTuple
+run.run_id                   # the ID in the run history
+run.outcomes                 # per node, in completion order: pipe_ref, pipe, result (inserted, updated, ...)
+run.plan                     # the Plan that was executed
+run.events()                 # the run's persisted events (run_started, node_finished, ...)
+```
+
+All the usual `sync` options (`begin`, `end`, `workers`, `force`, `retries`, `check_existing`, `chunksize`, `params`, ...) apply to every node, with the engine's rules: roots take `begin` / `end` as given, every other node is clamped to them. `''` and `None` leave the window to the planner.
+
 `mrsm.Pipeline` selects a set of target pipes with traversal depths and is not stored anywhere. A saved pipeline is just a [job](/reference/background-jobs/) whose arguments include `--parents` / `--children` (and `mrsm compose sync pipes --parents` works the same inside a compose project):
 
 ```python
 pipeline = mrsm.Pipeline(pipe, parents=True, children=False)   # or Pipeline([p1, p2]) / Pipeline(tags=['demo'])
 plan = pipeline.plan()           # dry run, no data movement
-run = pipeline.run(workers=8)
+print(plan)                      # node | action | bounds | chunks | reason
+plan.nodes                       # the same table as data: node.pipe, node.action, node.reason, ...
+plan.to_dataframe()
+run = pipeline.sync(workers=8)   # or pipeline.run(...) or plan.execute()
+pipeline.pipes                   # every pipe the selection resolves to, in dependency order
 ```
 
-!!! warning "Status in this pre-release"
+| `Pipeline(...)` argument | Meaning |
+|---|---|
+| `pipes` | A `Pipe`, or a list of `Pipe` objects and `(connector_keys, metric_key[, location_key])` tuples. All must share one instance (the engine's home instance); pass `instance=` to choose it. |
+| `tags`, `connector_keys`, `metric_keys`, `location_keys` | Select the targets with the `-t`, `-c`, `-m`, `-l` filters (`_` negates) instead of listing pipes. |
+| `parents`, `children` | `True` or a number of generations. |
 
-    The engine is wired to `mrsm sync pipes` (above). The Python entry points `pipe.sync(parents=, children=)` and `mrsm.Pipeline`, and the actions `mrsm plan pipes`, `mrsm show graph` and `mrsm show runs`, are specified (design §5.2) but not yet wired in this build. Until they land, use the `sync pipes` flags to run a slice and read [Engine State](/reference/pipelines/state/) for the recorded plan and history.
+`Pipeline.sync(**kwargs)` accepts the `sync` options above plus `yes=True` (confirm `rebuild` actions) and `resume='<run_id>'` (re-plan only the nodes that failed or never ran in that run).
+
+!!! note "How the Python API reaches the engine"
+
+    The engine is written in Rust only (there is no Python copy of it), so `parents=`, `children=` and `Pipeline` use the compiled `meerschaum._core` extension in every mode, including the `MRSM_CORE=python` parity mode, and raise an `ImportError` naming `scripts/rust/build_py.sh` if the extension is not built. The engine reads the graph from the **instance**, so the pipes it traverses must be registered there (a `Pipeline` registers its target pipes if they are not), and it uses their stored definitions rather than unsaved in-memory edits. `pipe.sync(df, children=True)` is rejected: the engine fetches each node itself, so sync a DataFrame with a bare `pipe.sync(df)`. Plugin sources run in the engine's own Python worker pool, not in your interpreter, and `begin=None` means "the planner's default" rather than v4's "no lower bound".
+
+### Dry run, graph and history
+
+```bash
+mrsm plan pipes -m daily --parents      # the plan table, nothing is synced
+mrsm show graph -m daily --parents      # the selection as an ASCII DAG
+mrsm show runs --last 5                 # recorded runs, newest first
+mrsm show run <run_id>                  # one run's Gantt chart
+```
+
+`plan pipes` takes the same selection and bound flags as `sync pipes` (`--parents [N]`, `--children [N]`, `--begin`, `--end`, `--resume`) and prints one row per node: the action, the sync bounds, the number of chunks and the reason. A `*` marks a node planned against the current state that the executor re-plans when its parents finish. `--nopretty` prints the plan as JSON.
 
 ## 🧮 What the Planner Decides
 
@@ -228,6 +266,8 @@ The first engine run on a pipe has no stored hash, so it records a baseline rath
 | Failure propagation | no | `upstream_failed` |
 | Ledger entries written | yes (`system.engine.flat_ledger`, default on), so a later graph run sees what a flat run changed | yes |
 
-!!! tip "Chunk pipelining"
+### Chunk pipelining
 
-    By default a child starts after its parents finish. `system.engine.chunk_pipelining` is the setting reserved for overlapping chunks of a backfill at `(pipe, chunk)` granularity. It is accepted but **not implemented** in this build.
+By default a child starts after its parents finish. With `--chunk-pipelining` (or `system.engine.chunk_pipelining: true`) a child of a parent that syncs several chunks (an `incremental` or `backfill` node with two or more chunks) can start early: whenever the parent has finished a chunk, the child plans again against what the parent has *committed* and syncs those ranges while the parent keeps going. The child's edge cursor advances only as far as committed ledger entries, so nothing is skipped; when the parent finishes, the child makes one final pass for the rest. The child's `node_started` event appears once per pass, and its row in the run history sums the passes.
+
+Pipelining goes one level deep (a child overlaps its parents, not its grandchildren), needs the native executor, never applies to flat selections, and never starts a `rebuild` early. The resulting tables are identical to a run without it.

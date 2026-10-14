@@ -78,9 +78,21 @@ A node row has its `action`, `status`, the planner's `reason`, the window it syn
 
 Run IDs are sortable ULIDs. Retention is `clear_pipe(end=now − run_history_days)` on runs, nodes and events (default 30 days); consumed ledger entries are pruned alongside. Unconsumed entries are never pruned by age.
 
-!!! warning "Status in this pre-release"
+From Python, read it through a `Pipeline` (or `meerschaum.core.Pipeline.get_runs()` for every run on an instance):
 
-    The history is written and readable (these tables, and the console's [pipelines page](/reference/pipelines/visualization/)). The `mrsm show runs` action is specified but not yet wired in this build, so read the tables directly, e.g. with `mrsm sql` or the SQL tool for your flavor.
+```python
+pipeline = mrsm.Pipeline(pipe)
+pipeline.get_runs(limit=10)            # newest first: the run row, `status`, `duration_seconds`, node `counts`
+pipeline.get_runs(status='failed')     # 'running', 'succeeded' or 'failed'
+pipeline.get_run(run_id)               # one run: node rows plus the planned-vs-actual Gantt bars
+pipeline.get_events(run_id)            # the persisted events, in order (also `run.events()` on a `RunResult`)
+```
+
+By default `Pipeline.get_runs()` returns the runs that targeted or contained the pipeline's single target pipe; pass `all_runs=True` for every run on the instance. Events are read after the run from the instance (granularity set by `system.engine.events`); live streaming is not exposed to Python in this build.
+
+!!! tip "Reading the history"
+
+    `mrsm show runs` lists the runs and `mrsm show run <id>` draws one run's Gantt chart. The console's [pipelines page](/reference/pipelines/visualization/) and the Python calls above read the same tables.
 
 ## ⚙️ Settings
 
@@ -101,7 +113,7 @@ All keys live under `system.engine` in your configuration (`mrsm edit config sys
 | `state_flush_ms` | `500` | In continuous mode, how often buffered ledger entries and events are flushed |
 | `run_history_days` | `30` | Retention for runs, nodes and events |
 | `debounce_seconds` | unset | Minimum time between triggered runs of a stream child (see [Continuous Mode](/reference/pipelines/continuous/)) |
-| `chunk_pipelining` | `false` | Reserved; accepted but not implemented |
+| `chunk_pipelining` | `false` | Let a child pre-sync the chunks its running parents have committed (see [Pipelines](/reference/pipelines/#chunk-pipelining)); `--chunk-pipelining` turns it on for one run |
 
 ```yaml
 system:

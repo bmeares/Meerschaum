@@ -6,7 +6,7 @@
 Interact with Pipes metadata via SQLConnector.
 """
 from __future__ import annotations
-from meerschaum._core._gate import rust_method as _rust_method
+from meerschaum._core._gate import rust_method as _rust_method, rust_impl as _rust_impl
 import traceback
 from datetime import datetime, date, timedelta
 
@@ -2484,6 +2484,22 @@ def sync_pipe_inplace(
             _inplace=False,
             **kw
         )
+    if (
+        (_rust := _rust_impl('sync_pipe_inplace')) is not None
+        and _rust_method(self, 'flavor') is not None
+    ):
+        _result = _rust(
+            self.__dict__['_rust_connector'],
+            pipe,
+            params,
+            begin,
+            end,
+            check_existing,
+        )
+        ### The in-place sync may have added or retyped columns behind the pipe's cache.
+        pipe._clear_cache_key('_columns_types', debug=debug)
+        pipe._clear_cache_key('_columns_indices', debug=debug)
+        return _result
     from meerschaum.utils.sql import (
         sql_item_name,
         get_update_queries,

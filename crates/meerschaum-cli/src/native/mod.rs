@@ -9,6 +9,7 @@
 //! - [`show`], [`manage`], [`users`], [`maintenance`], [`jobs`]: the actions.
 //! - [`rich_json`]: `rich.json.JSON` (pipe attributes in `show pipes`).
 
+pub mod engine_views;
 pub mod jobs;
 pub mod maintenance;
 pub mod manage;
@@ -31,6 +32,9 @@ use crate::format::rich::pretty::PyObj;
 use crate::value::{ArgsMap, PyValue};
 
 pub use session::{Instance, Session};
+/// The engine registry builder (native connectors, worker pool, native plugins), for hosts
+/// such as `meerschaum-py`: `meerschaum_cli::native::engine_registry(..)`.
+pub use sync::engine::{EngineRegistry, build as build_engine, registry as engine_registry};
 
 use crate::builtin::ActionResult;
 
@@ -68,6 +72,9 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_index_pipes" => manage::index_pipes(args, rt),
         "_copy_pipes" => manage::copy_pipes(args, rt),
         "_sync_pipes" => sync::sync_pipes(args, rt),
+        "_plan_pipes" => engine_views::plan_pipes(args, rt),
+        "_show_graph" => engine_views::show_graph(args, rt),
+        "_show_runs" => engine_views::show_runs(args, rt),
         "_verify_pipes" => sync::sync_pipes_with(args, rt, sync::LapMethod::Verify),
         "_verify_rowcounts" => {
             let mut a = args.clone();

@@ -24,7 +24,7 @@ Stop a looping job with `mrsm stop jobs` or Ctrl-C.
 
 !!! note "Cadence per root"
 
-    A single `--min-seconds` applies to the whole selection. A per-pipe cadence (`parameters['schedule']`) and a `--schedule` flag are part of the design but are **not implemented** in this build. Use separate jobs with their own `-s` schedules or `--min-seconds` for pipes that must run at different rates.
+    `--min-seconds` sets the lap cadence of the whole selection. A root node (a pipe with no parent in the selection, or any pipe in a flat selection) can have its own cadence in `parameters['schedule']`, using the same grammar as `--schedule` / `-s` (`every 6 hours`, `daily starting 03:00`, ...). With `--loop`, such a pipe only syncs when its schedule is due: the other pipes keep syncing every lap, a lap in which nothing is due waits for the next fire time, and the sleep between laps is shortened to the next fire time when that is sooner than `--min-seconds`. A schedule that does not parse is ignored with a warning. `--schedule` itself keeps its v4 meaning: it runs the whole action on that schedule.
 
 ## 📡 Streaming Sources
 

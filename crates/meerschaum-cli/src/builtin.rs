@@ -318,6 +318,33 @@ pub fn plugin_names(dirs: &[PathBuf]) -> Vec<String> {
     names
 }
 
+/// The installed plugins as `show plugins` lists them: the Python plugins merged with the
+/// native (C-ABI) ones, sorted. In pretty output a native plugin carries a ` (native)` marker;
+/// `--nopretty` keeps bare names so scripts and completers see v4's format.
+pub fn installed_plugin_listing(
+    mut names: Vec<String>,
+    natives: &[String],
+    nopretty: bool,
+) -> Vec<String> {
+    if natives.is_empty() {
+        return names;
+    }
+    names.retain(|n| !natives.contains(n));
+    let mut all: Vec<(String, bool)> = names.into_iter().map(|n| (n, false)).collect();
+    all.extend(natives.iter().map(|n| (n.clone(), true)));
+    all.sort();
+    all.dedup();
+    all.into_iter()
+        .map(|(name, native)| {
+            if native && !nopretty {
+                format!("{name} (native)")
+            } else {
+                name
+            }
+        })
+        .collect()
+}
+
 /// `show plugins` (installed plugins only; `all` and `<username>` need a repository).
 pub fn show_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     // `parse_repo_keys(repository)` raises for non-API repositories.
@@ -328,6 +355,12 @@ pub fn show_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     }
     let nopretty = flag(args, "nopretty");
     let repository = string(args, "repository");
+    // v5: native (C-ABI) plugins live in the same directories. A native plugin shadows a
+    // Python plugin of the same name, so it is listed once, with a marker.
+    let natives: Vec<String> = crate::native::session(rt)
+        .native_plugins(rt.config())
+        .map(|n| n.names())
+        .unwrap_or_default();
     let text = rt.with_formatter(|f| {
         let repo = repository.clone().unwrap_or_else(|| {
             f.config()
@@ -340,7 +373,11 @@ pub fn show_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         } else {
             format!("api:{repo}")
         };
-        let names = plugin_names(&f.config().paths().plugins_dirs);
+        let names = installed_plugin_listing(
+            plugin_names(&f.config().paths().plugins_dirs),
+            &natives,
+            nopretty,
+        );
         let mut out = String::new();
         if !nopretty {
             out.push_str(&f.info(

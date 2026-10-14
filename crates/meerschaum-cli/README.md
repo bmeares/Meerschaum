@@ -53,6 +53,29 @@ are kept. `upgrade` prints the same plan afterwards. `prune` is in `actions::V5_
 resolves and completes subactions, but `show actions` and the top-level completion list keep v4's
 contents for the parity fixtures.
 
+### Engine surfaces (`src/native/engine_views.rs`, `src/native/sync.rs`)
+
+- `plan pipes` prints the engine's plan (spec 5.3) without syncing; `show graph` draws the
+  selection as a DAG; `show runs [--last N]` lists recorded runs and `show run <id>` (or
+  `show runs <id>`) draws a run's Gantt chart. All take the `sync pipes` selection and bound
+  flags; `--nopretty` prints JSON.
+- A graph `sync pipes` run (`--parents`, `--children`, `--resume`) with more than one node ends
+  with the Gantt chart; on a terminal (`Runtime::live`, set only by `Runtime::system`) it also
+  prints one progress line per node transition. Flat runs and `--nopretty` keep v4's output.
+- `--chunk-pipelining` and `--last N` (only for `show run[s]`) are parsed by
+  `parse::engine_arguments` like `--parents`. `parameters['schedule']` reaches the engine through
+  a `Cadence` built on `meerschaum-jobs` (`native/engine.rs`).
+- `show plugins` lists native (C-ABI) plugins as `name (native)` (bare names with `--nopretty`).
+
+### v5-only actions, subactions and flags
+
+v4's listings are fixtures, so v5 additions stay out of them: `actions::V5_ONLY_ACTIONS`
+(`prune`, `plan`) and `actions::V5_ONLY_SUBACTIONS` (`show graph`, `show runs`) resolve and run
+but are left out of `show actions`, the bare top-level and `show <TAB>` completions and the registry
+parity test (they complete once a prefix is typed). v5-only flags are listed in
+`help::v5_additions`: `mrsm sync pipes --help` prints v4's text, then a `v5 additions (not in v4):`
+block; `help::strip_v5_additions` removes it so the help fixtures still compare byte for byte.
+
 ### The CLI daemon
 
 v5 has no CLI daemon: `mrsm` dispatches actions directly and pools any Python workers within

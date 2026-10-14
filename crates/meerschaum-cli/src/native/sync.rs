@@ -1,7 +1,7 @@
 //! `sync pipes`: engine execution with v4 action output and lap timing.
 
 #[path = "engine.rs"]
-mod engine;
+pub mod engine;
 
 use std::time::Instant;
 
@@ -328,17 +328,33 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
     let mut success_count;
     loop {
         let lap_begin = Instant::now();
+        let mut gantt_text: Option<String> = None;
         let (inst, pipes) = super::pipes::selected_pipes(rt, args)?;
         let engine_results = if method == LapMethod::Sync {
             let traversal = flag(args, "parents") || flag(args, "children");
             let engine = engine::build(rt, &session, &inst, &pipes, !traversal, false, None)?;
             let opts = run_options(args, &inst, &pipes, &sync_args);
-            let result = session.block_on(engine.run(opts));
+            let graph_run = traversal || args.contains_key("resume");
+            let result = if graph_run && !nopretty && rt.live {
+                run_live(rt, &session, engine, opts)
+            } else {
+                session.block_on(engine.run(opts))
+            };
             for warning in &result.warnings {
                 warn(rt, warning);
             }
             if !result.success && result.outcomes.is_empty() {
                 return Ok(SuccessTuple::fail(result.message));
+            }
+            // §5.9: a graph run with several nodes ends with the Gantt chart. A flat run keeps
+            // v4's output byte for byte (`show run <id>` still draws it).
+            if graph_run
+                && !nopretty
+                && let Some(record) = &result.record
+                && record.nodes.len() > 1
+                && result.plan.as_ref().is_some_and(|p| !p.flat)
+            {
+                gantt_text = Some(super::engine_views::gantt(record, rt.columns));
             }
             Some(result.outcomes)
         } else {
@@ -439,6 +455,10 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
                 nopretty,
             );
         }
+        if let Some(text) = gantt_text {
+            rt.print("\n");
+            rt.print(&text);
+        }
         let total = success_count + failure_count;
         msg = format!(
             "It took {} to sync {total} pipe{}\n    ({success_count} succeeded, {failure_count} failed).",
@@ -488,7 +508,7 @@ pub fn sync_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     sync_pipes_with(args, rt, method)
 }
 
-fn depth(args: &ArgsMap, key: &str) -> Option<meerschaum_engine::Depth> {
+pub(in crate::native) fn depth(args: &ArgsMap, key: &str) -> Option<meerschaum_engine::Depth> {
     match args.get(key) {
         Some(crate::value::PyValue::Int(n)) if *n > 0 => Some(meerschaum_engine::Depth::N(
             u32::try_from(*n).unwrap_or(u32::MAX),
@@ -498,7 +518,7 @@ fn depth(args: &ArgsMap, key: &str) -> Option<meerschaum_engine::Depth> {
     }
 }
 
-fn run_options(
+pub(in crate::native) fn run_options(
     args: &ArgsMap,
     inst: &Instance,
     pipes: &[SelectedPipe],
@@ -545,6 +565,7 @@ fn run_options(
             .filter(|w| *w > 0),
         yes: flag(args, "yes") || flag(args, "force"),
         resume,
+        chunk_pipelining: flag(args, "chunk_pipelining").then_some(true),
         sync: meerschaum_engine::NodeSyncOptions {
             check_existing: sync_args.check_existing,
             chunksize: sync_args.chunksize,
@@ -555,6 +576,77 @@ fn run_options(
             ..Default::default()
         },
         ..Default::default()
+    }
+}
+
+/// Run a graph selection on the session's runtime while printing one progress line per node
+/// transition (the terminal's live view; the Gantt chart follows once the run ends).
+fn run_live(
+    rt: &mut Runtime<'_>,
+    session: &Session,
+    engine: meerschaum_engine::Engine,
+    opts: meerschaum_engine::RunOptions,
+) -> meerschaum_engine::RunResult {
+    use meerschaum_engine::EventKind;
+    use std::sync::mpsc;
+    use tokio::sync::broadcast::error::TryRecvError;
+    let mut events = engine.subscribe();
+    let (sender, receiver) = mpsc::channel();
+    session.spawn(async move {
+        let _ = sender.send(engine.run(opts).await);
+    });
+    let line = |rt: &mut Runtime<'_>, event: meerschaum_engine::Event| {
+        let Some(node) = event.pipe_ref.as_ref().map(|r| r.label()) else {
+            return;
+        };
+        let text = match &event.kind {
+            EventKind::NodeStarted { action, .. } => format!("  \u{25b6} {node} ({action})"),
+            EventKind::NodeFinished { result } => format!(
+                "  \u{2714} {node} +{} ins ~{} upd +{} ups",
+                result.inserted, result.updated, result.upserted
+            ),
+            EventKind::NodeFailed {
+                error,
+                will_retry: false,
+                ..
+            } => format!(
+                "  \u{2718} {node} {}",
+                error.lines().next().unwrap_or_default()
+            ),
+            EventKind::NodeSkipped { reason } => format!("  \u{25cb} {node} {reason}"),
+            _ => return,
+        };
+        rt.print(&format!("{text}\n"));
+    };
+    loop {
+        loop {
+            match events.try_recv() {
+                Ok(event) => line(rt, event),
+                Err(TryRecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            }
+        }
+        match receiver.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(result) => {
+                while let Ok(event) = events.try_recv() {
+                    line(rt, event);
+                }
+                return result;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return meerschaum_engine::RunResult {
+                    success: false,
+                    message: "The engine run ended without a result.".into(),
+                    plan: None,
+                    record: None,
+                    outcomes: Vec::new(),
+                    critical_path: Vec::new(),
+                    warnings: Vec::new(),
+                    duration: std::time::Duration::ZERO,
+                };
+            }
+        }
     }
 }
 

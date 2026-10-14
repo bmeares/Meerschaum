@@ -284,14 +284,65 @@ pub fn format_help(columns: usize) -> String {
     format!("{}\n", collapsed.trim_matches('\n'))
 }
 
+/// The heading of the v5-only block appended to a core action's help. The v4 help fixtures
+/// are recorded from v4.1.4, so [`strip_v5_additions`] removes this block before comparing.
+pub const V5_HELP_HEADER: &str = "v5 additions (not in v4):";
+
+/// The v5-only flags and subactions of a core action function (`_sync_pipes`, `show`, ...),
+/// printed after v4's docstring. Flags here are parsed ahead of the frozen v4 argument schema
+/// (`parse::engine_arguments`), so they never appear in `mrsm --help`.
+pub fn v5_additions(function: &str) -> Option<&'static str> {
+    Some(match function {
+        "sync" | "_sync_pipes" => {
+            r##"    - `--parents [N]`, `--children [N]`
+        - Also sync the ancestors (or descendants) of the selected pipes, in dependency order.
+          `N` limits how many generations (`--parents 1` is the direct parents).
+    - `--resume RUN_ID`
+        - Re-plan only the nodes that failed or never ran in the run `RUN_ID` (see `show runs`).
+    - `--chunk-pipelining`
+        - Let a backfilling child start each chunk as soon as the parent chunks it
+          depends on have finished (`system.engine.chunk_pipelining`).
+    - Pipe parameter `schedule` (e.g. `every 6 hours`)
+        - With `--loop`, a pipe without parents in the selection only syncs when its
+          schedule is due.
+    - `mrsm plan pipes` prints what a graph run would do, without syncing.
+"##
+        }
+        "show" => {
+            r##"    - `show graph`
+        - Print the selected pipes and their dependencies as a DAG
+          (accepts `--parents` and `--children`).
+    - `show runs [--last N]`
+        - List the recorded engine runs, newest first.
+    - `show run RUN_ID`
+        - Print the Gantt chart of a recorded run.
+"##
+        }
+        _ => return None,
+    })
+}
+
+/// `text` without the v5 block appended by [`format_action_help`].
+pub fn strip_v5_additions(text: &str) -> String {
+    match text.find(&format!("\n{V5_HELP_HEADER}")) {
+        Some(i) => text[..i].to_string(),
+        None => text.to_string(),
+    }
+}
+
 /// The help text `parse_help` prints for `mrsm <action> [<subaction>] --help`: the dedented
 /// docstring of the subaction function if the second word names one (a trailing `s` is tried),
 /// else of the main action, followed by `print`'s newline. `None` when the first word is not a
-/// core action (v4 then prints `show actions`).
+/// core action (v4 then prints `show actions`). v5-only flags are appended in a separate
+/// block ([`V5_HELP_HEADER`]).
 pub fn format_action_help(words: &[String]) -> Option<String> {
     let main = crate::actions::CORE_ACTIONS
         .iter()
         .find(|a| Some(a.name) == words.first().map(String::as_str))?;
+    let with_additions = |base: String, function: &str| match v5_additions(function) {
+        Some(extra) => format!("{base}\n{V5_HELP_HEADER}\n{extra}"),
+        None => base,
+    };
     if let Some(word) = words.get(1) {
         let sub = main.subactions.iter().find(|s| s.name == word).or_else(|| {
             main.subactions
@@ -301,14 +352,15 @@ pub fn format_action_help(words: &[String]) -> Option<String> {
         if let Some(sub) = sub {
             // PARITY: `print(textwrap.dedent(subaction.__doc__))` raises TypeError on a
             // subaction without a docstring; every core subaction has one.
-            return Some(format!("{}\n", dedent(sub.doc().unwrap_or_default())));
+            let base = format!("{}\n", dedent(sub.doc().unwrap_or_default()));
+            return Some(with_additions(base, sub.function));
         }
     }
     let doc = match main.doc() {
         Some(doc) => doc.to_string(),
         None => format!("No help available for '{}'.", main.name),
     };
-    Some(format!("{}\n", dedent(&doc)))
+    Some(with_additions(format!("{}\n", dedent(&doc)), main.function))
 }
 
 #[cfg(test)]

@@ -151,6 +151,9 @@ pub struct Runtime<'a> {
     pub in_shell: bool,
     /// The connectors and Tokio runtime the native instance actions use (built on first use).
     pub native: Option<crate::native::Session>,
+    /// Stdout is a terminal: graph runs print live progress lines before the Gantt chart. Only
+    /// the process runtime sets it, so tests and piped output never see progress lines.
+    pub live: bool,
 }
 
 fn no_vars() -> Vec<(String, String)> {
@@ -177,6 +180,7 @@ impl<'a> Runtime<'a> {
             cwd: None,
             in_shell: false,
             native: None,
+            live: std::io::IsTerminal::is_terminal(&std::io::stdout()),
         }
     }
 
@@ -201,6 +205,7 @@ impl<'a> Runtime<'a> {
             cwd: None,
             in_shell: false,
             native: None,
+            live: false,
         }
     }
 

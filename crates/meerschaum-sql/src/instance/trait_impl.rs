@@ -113,7 +113,8 @@ impl InstanceConnector for SqlConnector {
     }
 
     fn pipe_table_reference(&self, pipe: &Pipe) -> Option<String> {
-        let sp = self.sql_pipe(pipe).ok()?;
+        let loaded = self.with_registered_parameters(pipe);
+        let sp = self.sql_pipe(&loaded).ok()?;
         Some(self.pipe_table_name(&sp))
     }
 

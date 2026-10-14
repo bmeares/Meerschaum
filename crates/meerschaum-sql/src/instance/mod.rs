@@ -422,6 +422,42 @@ impl SqlConnector {
         out
     }
 
+    /// `pipe` carrying the parameters registered on this instance, so a table reference for a
+    /// pipe built from keys only (`{{ Pipe('a', 'b') }}`) names its explicit `target`, as
+    /// `Pipe.target` does in Python (which reads the registered parameters).
+    ///
+    /// `InstanceConnector::pipe_table_reference` is synchronous; the lookup runs on the current
+    /// multi-threaded Tokio runtime (every runtime the CLI, bindings and server build). On any
+    /// other context, or when the pipe is unregistered or names its own target, the pipe is
+    /// returned as is.
+    pub(crate) fn with_registered_parameters(&self, pipe: &Pipe) -> Pipe {
+        let raw = pipe.raw_parameters();
+        if ["target", "target_name", "target_table"]
+            .iter()
+            .any(|k| raw.contains_key(*k))
+        {
+            return pipe.clone();
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return pipe.clone();
+        };
+        if handle.runtime_flavor() != tokio::runtime::RuntimeFlavor::MultiThread {
+            return pipe.clone();
+        }
+        let attrs = tokio::task::block_in_place(|| handle.block_on(self.get_pipe_attributes(pipe)));
+        match attrs
+            .ok()
+            .and_then(|a| a.get("parameters").map(meerschaum_core::Value::to_map))
+        {
+            Some(registered) => {
+                let mut out = pipe.clone();
+                out.set_parameters(meerschaum_core::value::apply_patch_maps(&registered, raw));
+                out
+            }
+            None => pipe.clone(),
+        }
+    }
+
     /// `self.get_pipe_schema(pipe)`.
     pub fn get_pipe_schema(&self, pipe: &SqlPipe) -> Option<String> {
         self.ctx().get_pipe_schema(pipe)

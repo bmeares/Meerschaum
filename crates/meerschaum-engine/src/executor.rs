@@ -81,6 +81,149 @@ pub struct SyncRequest {
     pub attempt: u32,
     /// Event emitter for chunk progress.
     pub events: NodeEvents,
+    /// Set when chunk pipelining is on: publish the ledger sequence numbers committed so far
+    /// after every finished window (see [`ChunkProgress`]).
+    pub progress: Option<Arc<ChunkProgress>>,
+}
+
+/// What the running, chunked nodes of a run have committed so far (`--chunk-pipelining`, R6).
+///
+/// A parent that syncs its chunks one window at a time publishes, after each window's data
+/// commit, the highest ledger sequence number it has written. A child may then consume ledger
+/// entries up to that number while the parent keeps running, because every such entry's data
+/// is committed. Entries of the window in flight are written *before* its commit (§5.8), so the
+/// child never sees them until the next window finishes.
+#[derive(Debug, Default)]
+pub struct ChunkProgress {
+    committed: Mutex<HashMap<PipeRef, HashMap<String, i64>>>,
+    commits: Mutex<HashMap<PipeRef, u64>>,
+    notify: tokio::sync::Notify,
+}
+
+impl ChunkProgress {
+    /// A node starts running with its ledger already at `initial` (per state instance).
+    pub fn register(&self, node: &PipeRef, initial: HashMap<String, i64>) {
+        self.committed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(node.clone(), initial);
+        self.commits
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(node.clone(), 0);
+    }
+
+    /// A window of `node` finished and its data is committed. Ignored unless the node was
+    /// registered as running chunk by chunk.
+    pub fn commit(&self, node: &PipeRef, seqs: HashMap<String, i64>) {
+        {
+            let mut committed = self.committed.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(entry) = committed.get_mut(node) else {
+                return;
+            };
+            for (instance, seq) in seqs {
+                let slot = entry.entry(instance).or_insert(seq);
+                *slot = (*slot).max(seq);
+            }
+        }
+        *self
+            .commits
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(node.clone())
+            .or_insert(0) += 1;
+        self.notify.notify_one();
+    }
+
+    /// `node` stopped running: its ledger is fully committed.
+    pub fn finish(&self, node: &PipeRef) {
+        self.committed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(node);
+        self.notify.notify_one();
+    }
+
+    /// Whether `node` is running chunk by chunk.
+    pub fn is_running(&self, node: &PipeRef) -> bool {
+        self.committed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(node)
+    }
+
+    /// The highest committed sequence number of a running node on `instance`.
+    fn committed_seq(&self, node: &PipeRef, instance: &str) -> Option<Option<i64>> {
+        self.committed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(node)
+            .map(|m| m.get(instance).copied())
+    }
+
+    /// How many windows of `node` have committed.
+    fn commit_count(&self, node: &PipeRef) -> u64 {
+        self.commits
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(node)
+            .copied()
+            .unwrap_or(0)
+    }
+}
+
+/// Planning state for a child whose parents are still running: running parents show only the
+/// ledger entries they have committed.
+struct PipelinedView<'a, S> {
+    inner: &'a CachedState<'a, S>,
+    progress: &'a ChunkProgress,
+}
+
+impl<S: StateSource> StateSource for PipelinedView<'_, S> {
+    async fn watermark(&self, node: &PipeRef) -> Result<Option<Bound>, StateError> {
+        self.inner.watermark(node).await
+    }
+    async fn definition_hash(&self, node: &PipeRef) -> Result<Option<String>, StateError> {
+        self.inner.definition_hash(node).await
+    }
+    async fn cursor(
+        &self,
+        state_instance: &str,
+        parent: &PipeRef,
+        child: &PipeRef,
+    ) -> Result<Option<EdgeCursor>, StateError> {
+        self.inner.cursor(state_instance, parent, child).await
+    }
+    async fn ledger_after(
+        &self,
+        state_instance: &str,
+        parent: &PipeRef,
+        after_seq: i64,
+    ) -> Result<Vec<crate::ledger::LedgerEntry>, StateError> {
+        let mut entries = self
+            .inner
+            .ledger_after(state_instance, parent, after_seq)
+            .await?;
+        if let Some(cap) = self.progress.committed_seq(parent, state_instance) {
+            let cap = cap.unwrap_or(i64::MIN);
+            entries.retain(|e| e.seq <= cap);
+        }
+        Ok(entries)
+    }
+    async fn latest_seq(
+        &self,
+        state_instance: &str,
+        parent: &PipeRef,
+    ) -> Result<Option<i64>, StateError> {
+        let latest = self.inner.latest_seq(state_instance, parent).await?;
+        Ok(match self.progress.committed_seq(parent, state_instance) {
+            Some(cap) => match (latest, cap) {
+                (Some(l), Some(c)) => Some(l.min(c)),
+                (_, c) => c,
+            },
+            None => latest,
+        })
+    }
 }
 
 /// Runs one node's sync (D11). Implementations: the native Rust `Pipe::sync`, the Python
@@ -88,6 +231,12 @@ pub struct SyncRequest {
 pub trait SyncExecutor: Send + Sync + 'static {
     /// Sync one node. Failures are returned as an unsuccessful [`SyncResult`], never raised.
     fn sync(&self, request: SyncRequest) -> impl Future<Output = SyncResult> + Send;
+
+    /// Whether this executor publishes [`SyncRequest::progress`] after every window, so the
+    /// engine may overlap a child's chunks with the parent's (`--chunk-pipelining`).
+    fn supports_chunk_pipelining(&self) -> bool {
+        false
+    }
 }
 
 /// Per-pipe leases (§5.8): an atomic acquire with a TTL, renewed while a node syncs.
@@ -309,6 +458,7 @@ pub struct ExecuteContext<'a, S, E, L> {
 
 enum TaskOutput {
     Done {
+        early: bool,
         pipe_ref: PipeRef,
         attempt: u32,
         result: SyncResult,
@@ -333,6 +483,17 @@ struct Dispatcher<'a, 'c, S, E, L> {
     newly_ready: Vec<PipeRef>,
     attempts: HashMap<PipeRef, u32>,
     state_warnings: Vec<String>,
+    /// Chunk pipelining (R6): what running chunked parents have committed.
+    progress: Arc<ChunkProgress>,
+    pipelining: bool,
+    /// Results of early passes (a child synced while its parents were still running).
+    early: HashMap<PipeRef, SyncResult>,
+    /// Nodes with an early pass in flight.
+    early_running: HashSet<PipeRef>,
+    /// Parent commit count seen by a node's last early pass.
+    early_seen: HashMap<PipeRef, u64>,
+    /// The plan each in-flight early pass runs.
+    early_plans: HashMap<PipeRef, PlannedNode>,
 }
 
 impl<S, E, L> Dispatcher<'_, '_, S, E, L>
@@ -413,6 +574,28 @@ where
             node = replanned;
             self.planned.insert(r.clone(), node.clone());
         }
+        if matches!(node.action, Action::Skip) && !self.flat && self.early.contains_key(r) {
+            // Early passes already synced everything: the node succeeded.
+            let result = self.early.remove(r).expect("checked");
+            if let Some(row) = self.rows.get_mut(r) {
+                row.attempts = row.attempts.max(1);
+                row.action = Action::Incremental;
+                row.reason = format!(
+                    "pre-synced while its parents ran (chunk pipelining); {}",
+                    node.reason
+                );
+                row.finished = Some(Utc::now());
+                row.message = Some(result.message.clone());
+                row.duration_seconds = result.duration.map(|d| d.as_secs_f64());
+                row.inserted = result.inserted;
+                row.updated = result.updated;
+                row.upserted = result.upserted;
+                row.deleted = result.deleted;
+            }
+            self.on_success(r, &result).await;
+            self.finish(r, NodeStatus::Succeeded, None);
+            return false;
+        }
         if let Some(row) = self.rows.get_mut(r) {
             row.action = node.action;
             row.reason = node.reason.clone();
@@ -460,6 +643,107 @@ where
         self.emitter.emit(Some(r), kind);
         self.finish(r, status, None);
         false
+    }
+
+    /// A running chunked node: children may pre-sync what it has committed.
+    async fn register_pipelined(&mut self, r: &PipeRef) {
+        let mut initial = HashMap::new();
+        for instance in self.ctx.graph.ledger_instances(r) {
+            if let Ok(Some(seq)) = self.cached.inner().latest_seq(&instance, r).await {
+                initial.insert(instance, seq);
+            }
+        }
+        self.progress.register(r, initial);
+    }
+
+    /// Children that can pre-sync now (R6): not yet dispatched, every parent either succeeded
+    /// or running chunk by chunk, and a running parent committed a window since the child's
+    /// last pass. Returns each with its plan against the committed state.
+    async fn early_candidates(
+        &mut self,
+        resolved: &HashSet<PipeRef>,
+    ) -> Vec<(PipeRef, PlannedNode, u64)> {
+        let mut out = Vec::new();
+        let children: Vec<PipeRef> = self.parents.keys().cloned().collect();
+        for c in children {
+            if self.outcome.contains_key(&c)
+                || resolved.contains(&c)
+                || self.early_running.contains(&c)
+                || self.planned[&c].action == Action::Observe
+            {
+                continue;
+            }
+            let parents = self.parents[&c].clone();
+            let mut running = Vec::new();
+            let mut states: HashMap<PipeRef, ParentState> = HashMap::new();
+            let mut eligible = true;
+            for p in &parents {
+                if self.progress.is_running(p) {
+                    running.push(p.clone());
+                    states.insert(p.clone(), ParentState::Succeeded);
+                } else if self.outcome.get(p) == Some(&ParentState::Succeeded) {
+                    states.insert(p.clone(), ParentState::Succeeded);
+                } else {
+                    eligible = false;
+                    break;
+                }
+            }
+            if !eligible || running.is_empty() {
+                continue;
+            }
+            let seen: u64 = running.iter().map(|p| self.progress.commit_count(p)).sum();
+            if seen <= self.early_seen.get(&c).copied().unwrap_or(0) {
+                continue;
+            }
+            for p in &running {
+                self.cached.invalidate(p);
+            }
+            self.cached.invalidate(&c);
+            let view = PipelinedView {
+                inner: &self.cached,
+                progress: &self.progress,
+            };
+            let node = plan_node(
+                self.ctx.graph,
+                self.ctx.subgraph,
+                &c,
+                &states,
+                &view,
+                &self.options.plan,
+            )
+            .await;
+            self.early_seen.insert(c.clone(), seen);
+            if matches!(node.action, Action::Incremental | Action::Backfill)
+                && !node.requires_confirmation
+            {
+                out.push((c, node, seen));
+            }
+        }
+        out
+    }
+
+    /// Advance the edge cursors a successful pass consumed.
+    async fn write_cursors(&mut self, node: &PlannedNode) {
+        let mut by_instance: IndexMap<String, Vec<EdgeCursor>> = IndexMap::new();
+        for c in &node.consumes {
+            by_instance
+                .entry(c.state_instance.clone())
+                .or_default()
+                .push(EdgeCursor {
+                    parent_ref: c.parent_ref.clone(),
+                    child_ref: c.child_ref.clone(),
+                    seq: c.seq,
+                    parent_watermark_at_cursor: c.parent_watermark,
+                });
+        }
+        for (instance, cursors) in by_instance {
+            if let Err(e) = self.ctx.state.put_cursors(&instance, cursors).await {
+                self.state_warnings.push(format!(
+                    "{}: cannot advance the cursors: {e}",
+                    node.pipe_ref.label()
+                ));
+            }
+        }
     }
 
     async fn write_hash(&mut self, node: &PlannedNode) {
@@ -549,6 +833,106 @@ fn try_permits(
     Some(permits)
 }
 
+/// Combine an early pass's result with the next pass's.
+fn merge_results(first: SyncResult, second: SyncResult) -> SyncResult {
+    let mut out = second;
+    out.inserted += first.inserted;
+    out.updated += first.updated;
+    out.upserted += first.upserted;
+    out.deleted += first.deleted;
+    let mut intervals = first.changed_intervals;
+    intervals.append(&mut out.changed_intervals);
+    out.changed_intervals = intervals;
+    out.duration = match (first.duration, out.duration) {
+        (Some(a), Some(b)) => Some(a + b),
+        (a, b) => a.or(b),
+    };
+    out.begin = first.begin.or(out.begin);
+    out
+}
+
+/// Spawn one node attempt (leases, heartbeat, the sync) on the join set.
+#[allow(clippy::too_many_arguments)]
+fn spawn_sync<E: SyncExecutor, L: LeaseSource>(
+    join: &mut JoinSet<TaskOutput>,
+    executor: Arc<E>,
+    leases: Arc<L>,
+    request: SyncRequest,
+    permits: Vec<OwnedSemaphorePermit>,
+    attempt: u32,
+    early: bool,
+    options: &ExecutorOptions,
+) {
+    let holder = options.holder.clone();
+    let (ttl, wait, poll) = (options.lease_ttl, options.lease_wait, options.lease_poll);
+    join.spawn(async move {
+            let _permits = permits;
+            let started = Utc::now();
+            let t0 = tokio::time::Instant::now();
+            let done = |result: SyncResult| TaskOutput::Done {
+                early,
+                pipe_ref: request.pipe_ref.clone(),
+                attempt,
+                result,
+                started,
+                elapsed: t0.elapsed(),
+            };
+            let deadline = t0 + wait;
+            loop {
+                match leases.acquire(&request.pipe_ref, &holder, ttl).await {
+                    Ok(true) => break,
+                    Ok(false) if tokio::time::Instant::now() < deadline => {
+                        tokio::time::sleep(poll).await;
+                    }
+                    Ok(false) => {
+                        return done(SyncResult::new(
+                            false,
+                            format!(
+                                "the lease on {} is held by another process",
+                                request.pipe_ref.label()
+                            ),
+                        ));
+                    }
+                    Err(e) => {
+                        return done(SyncResult::new(
+                            false,
+                            format!("cannot acquire the lease: {e}"),
+                        ));
+                    }
+                }
+            }
+            let pipe_ref = request.pipe_ref.clone();
+            let result = {
+                let sync = executor.sync(request);
+                tokio::pin!(sync);
+                let period = (ttl / 3).max(Duration::from_millis(1));
+                let mut heartbeat =
+                    tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+                loop {
+                    tokio::select! {
+                        result = &mut sync => break result,
+                        _ = heartbeat.tick() => {
+                            match leases.renew(&pipe_ref, &holder, ttl).await {
+                                Ok(true) => {},
+                                Ok(false) => break SyncResult::new(false, format!("the lease on {} was lost during sync", pipe_ref.label())),
+                                Err(e) => break SyncResult::new(false, format!("cannot renew the lease during sync: {e}")),
+                            }
+                        }
+                    }
+                }
+            }; // Drop the cancelled sync future before releasing its lease.
+            let _ = leases.release(&pipe_ref, &holder).await;
+            TaskOutput::Done {
+                early,
+                pipe_ref,
+                attempt,
+                result,
+                started,
+                elapsed: t0.elapsed(),
+            }
+        });
+}
+
 /// Run a plan to completion and return the run record (also persisted through
 /// [`StateWriter::record_run`]).
 pub async fn execute<S, E, L>(
@@ -630,6 +1014,14 @@ where
         newly_ready: Vec::new(),
         attempts: HashMap::new(),
         state_warnings: Vec::new(),
+        progress: Arc::new(ChunkProgress::default()),
+        pipelining: options.chunk_pipelining
+            && !plan.flat
+            && ctx.executor.supports_chunk_pipelining(),
+        early: HashMap::new(),
+        early_running: HashSet::new(),
+        early_seen: HashMap::new(),
+        early_plans: HashMap::new(),
     };
 
     let global = Arc::new(Semaphore::new(options.workers));
@@ -667,6 +1059,11 @@ where
         let mut deferred = Vec::new();
         let mut progressed = false;
         for r in std::mem::take(&mut ready) {
+            if d.early_running.contains(&r) {
+                // Its early pass must finish first (one sync of a pipe at a time).
+                deferred.push(r);
+                continue;
+            }
             if resolved.insert(r.clone()) && !d.resolve(&r).await {
                 progressed = true;
                 continue;
@@ -692,7 +1089,7 @@ where
                 *a += 1;
                 *a
             };
-            let planned = &d.planned[&r];
+            let planned = d.planned[&r].clone();
             let request = SyncRequest {
                 run_id: run_id.clone(),
                 pipe_ref: r.clone(),
@@ -707,7 +1104,14 @@ where
                     emitter: emitter.clone(),
                     pipe_ref: r.clone(),
                 },
+                progress: d.pipelining.then(|| d.progress.clone()),
             };
+            if d.pipelining
+                && matches!(planned.action, Action::Incremental | Action::Backfill)
+                && planned.chunks.len() >= 2
+            {
+                d.register_pipelined(&r).await;
+            }
             emitter.emit(
                 Some(&r),
                 EventKind::NodeStarted {
@@ -715,74 +1119,16 @@ where
                     attempt,
                 },
             );
-            let executor = ctx.executor.clone();
-            let leases = ctx.leases.clone();
-            let holder = options.holder.clone();
-            let (ttl, wait, poll) = (options.lease_ttl, options.lease_wait, options.lease_poll);
-            join.spawn(async move {
-                let _permits = permits;
-                let started = Utc::now();
-                let t0 = tokio::time::Instant::now();
-                let done = |result: SyncResult| TaskOutput::Done {
-                    pipe_ref: request.pipe_ref.clone(),
-                    attempt,
-                    result,
-                    started,
-                    elapsed: t0.elapsed(),
-                };
-                let deadline = t0 + wait;
-                loop {
-                    match leases.acquire(&request.pipe_ref, &holder, ttl).await {
-                        Ok(true) => break,
-                        Ok(false) if tokio::time::Instant::now() < deadline => {
-                            tokio::time::sleep(poll).await;
-                        }
-                        Ok(false) => {
-                            return done(SyncResult::new(
-                                false,
-                                format!(
-                                    "the lease on {} is held by another process",
-                                    request.pipe_ref.label()
-                                ),
-                            ));
-                        }
-                        Err(e) => {
-                            return done(SyncResult::new(
-                                false,
-                                format!("cannot acquire the lease: {e}"),
-                            ));
-                        }
-                    }
-                }
-                let pipe_ref = request.pipe_ref.clone();
-                let result = {
-                    let sync = executor.sync(request);
-                    tokio::pin!(sync);
-                    let period = (ttl / 3).max(Duration::from_millis(1));
-                    let mut heartbeat =
-                        tokio::time::interval_at(tokio::time::Instant::now() + period, period);
-                    loop {
-                        tokio::select! {
-                            result = &mut sync => break result,
-                            _ = heartbeat.tick() => {
-                                match leases.renew(&pipe_ref, &holder, ttl).await {
-                                    Ok(true) => {},
-                                    Ok(false) => break SyncResult::new(false, format!("the lease on {} was lost during sync", pipe_ref.label())),
-                                    Err(e) => break SyncResult::new(false, format!("cannot renew the lease during sync: {e}")),
-                                }
-                            }
-                        }
-                    }
-                }; // Drop the cancelled sync future before releasing its lease.
-                let _ = leases.release(&pipe_ref, &holder).await;
-                TaskOutput::Done {
-                    pipe_ref,
-                    attempt,
-                    result,
-                    started,
-                    elapsed: t0.elapsed(),
-                }
-            });
+            spawn_sync(
+                &mut join,
+                ctx.executor.clone(),
+                ctx.leases.clone(),
+                request,
+                permits,
+                attempt,
+                false,
+                options,
+            );
         }
         ready = deferred;
         if !d.newly_ready.is_empty() {
@@ -816,7 +1162,74 @@ where
             ready.append(&mut d.newly_ready);
             continue;
         }
-        let Some(joined) = join.join_next().await else {
+        if d.pipelining {
+            for (c, node, seen) in d.early_candidates(&resolved).await {
+                let Some(gnode) = ctx.graph.node(&c) else {
+                    continue;
+                };
+                let Some(permits) = try_permits(
+                    &gnode.record,
+                    &global,
+                    &connector_sems,
+                    &instance_sems,
+                    python_sem.as_ref(),
+                ) else {
+                    // Try again on the next wake-up.
+                    d.early_seen.remove(&c);
+                    continue;
+                };
+                let _ = seen;
+                let request = SyncRequest {
+                    run_id: run_id.clone(),
+                    pipe_ref: c.clone(),
+                    record: gnode.record.clone(),
+                    action: node.action,
+                    clear: false,
+                    bounds: node.bounds,
+                    ranges: node.ranges.clone(),
+                    chunks: node.chunks.clone(),
+                    attempt: 1,
+                    events: NodeEvents {
+                        emitter: emitter.clone(),
+                        pipe_ref: c.clone(),
+                    },
+                    progress: None,
+                };
+                emitter.emit(
+                    Some(&c),
+                    EventKind::NodeStarted {
+                        action: node.action,
+                        attempt: 1,
+                    },
+                );
+                d.early_running.insert(c.clone());
+                d.early_plans.insert(c.clone(), node);
+                spawn_sync(
+                    &mut join,
+                    ctx.executor.clone(),
+                    ctx.leases.clone(),
+                    request,
+                    permits,
+                    1,
+                    true,
+                    options,
+                );
+            }
+        }
+        let woke = if d.pipelining {
+            let progress = d.progress.clone();
+            tokio::select! {
+                joined = join.join_next() => Some(joined),
+                _ = progress.notify.notified() => None,
+            }
+        } else {
+            Some(join.join_next().await)
+        };
+        let Some(joined) = woke else {
+            // A parent committed a window: look for children to pre-sync.
+            continue;
+        };
+        let Some(joined) = joined else {
             continue;
         };
         let output = match joined {
@@ -830,12 +1243,56 @@ where
         match output {
             TaskOutput::Retry(r) => ready.push(r),
             TaskOutput::Done {
+                early: true,
+                pipe_ref: r,
+                result,
+                started,
+                ..
+            } => {
+                d.early_running.remove(&r);
+                let node = d.early_plans.remove(&r);
+                if let Some(row) = d.rows.get_mut(&r) {
+                    row.started.get_or_insert(started);
+                }
+                match (result.success, node) {
+                    (true, Some(node)) => {
+                        d.write_cursors(&node).await;
+                        d.cached.invalidate(&r);
+                        let merged = match d.early.remove(&r) {
+                            Some(prev) => merge_results(prev, result),
+                            None => result,
+                        };
+                        d.early.insert(r, merged);
+                    }
+                    (false, _) => {
+                        // The final pass retries everything the early pass left unconsumed.
+                        d.state_warnings.push(format!(
+                            "{}: an early chunk-pipelined pass failed: {}",
+                            r.label(),
+                            result.message
+                        ));
+                    }
+                    _ => {}
+                }
+                ready.append(&mut d.newly_ready);
+            }
+            TaskOutput::Done {
                 pipe_ref: r,
                 attempt,
                 result,
                 started,
                 elapsed,
+                ..
             } => {
+                d.progress.finish(&r);
+                let result = match (result.success, d.early.remove(&r)) {
+                    (true, Some(prev)) => merge_results(prev, result),
+                    (_, Some(prev)) => {
+                        d.early.insert(r.clone(), prev);
+                        result
+                    }
+                    _ => result,
+                };
                 if let Some(row) = d.rows.get_mut(&r) {
                     row.attempts = attempt;
                     row.started.get_or_insert(started);

@@ -54,8 +54,9 @@ fi
 
 # Build a wheel into a scratch directory first, so the extension already in the tree keeps
 # working (for pytest runs in progress) during the slow compile; it is swapped in at the end.
-wheel_dir="$REPO/target/build_py_wheel"
-rm -rf "$wheel_dir"
+# A unique directory per build, so concurrent builds never collide.
+mkdir -p "$REPO/target"
+wheel_dir="$(mktemp -d "$REPO/target/build_py_wheel.XXXXXX")"
 args=(build --manifest-path crates/meerschaum-py/Cargo.toml --auditwheel skip --out "$wheel_dir")
 if [ "$profile" = "release" ]; then
   args+=(--release)

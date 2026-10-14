@@ -9,6 +9,7 @@
 //! | [`node`] | §5.1 | [`PipeRef`] node identity and [`PipeRecord`] (one `fetch_pipes_keys` row) |
 //! | [`graph`] | §5.1 | The implicit pipe graph: declared and `{{ Pipe() }}` edges, cycles, stale references |
 //! | [`selection`] | §5.2, D4, D5 | [`Selection`] / [`Pipeline`]: targets plus traversal depths, key filters |
+//! | [`cadence`] | §5.5 | `parameters['schedule']`: per-pipe fire times for `--loop` (parsed by the host) |
 //! | [`axis`] | §5.4 | Datetime/integer axes, half-open intervals, interval union, epoch-aligned grids |
 //! | [`ledger`] | §5.4 | Ledger entries, edge cursors, range mapping across edges, compaction, definition hash |
 //! | [`state`] | §5.3, §5.8 | [`StateSource`] / [`StateWriter`] traits and an in-memory implementation |
@@ -27,12 +28,14 @@
 //! | [`leases`] | §5.8 | Instance leases with the machine-local file-lock fallback |
 //! | [`engine`] | §5.2, §5.5, §5.7 | [`Engine`]: `run`, `plan`, event subscription, continuous mode |
 //!
-//! Chunk pipelining (`--chunk-pipelining`, R6) is accepted and ignored.
+//! Chunk pipelining (`--chunk-pipelining`, R6) overlaps a child's chunks with its running
+//! parents' (see [`executor`]).
 
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod axis;
+pub mod cadence;
 pub mod engine;
 pub mod events;
 pub mod executor;
@@ -55,14 +58,15 @@ pub mod sync;
 pub mod viz;
 
 pub use axis::{Axis, AxisKind, Interval};
+pub use cadence::{Cadence, PipeSchedules, Timer};
 pub use engine::{
     Engine, EngineConfig, EventGranularity, LapEvent, LapSummary, LoopOptions, LoopResult,
     NodeOutcome, PlannedRun, RunOptions, RunResult,
 };
 pub use events::{ChunkSource, Event, EventKind, EventSink};
 pub use executor::{
-    ExecuteContext, ExecutorOptions, LeaseSource, Limits, Priority, RetryPolicy, SyncExecutor,
-    SyncRequest, execute,
+    ChunkProgress, ExecuteContext, ExecutorOptions, LeaseSource, Limits, Priority, RetryPolicy,
+    SyncExecutor, SyncRequest, execute,
 };
 pub use graph::{Edge, EdgeOptions, Graph, GraphError, GraphOptions, GraphWarning, Node};
 pub use instance_state::InstanceState;

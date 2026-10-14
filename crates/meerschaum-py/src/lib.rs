@@ -27,6 +27,8 @@ pub mod arrow_bridge;
 pub mod build_info;
 pub mod convert;
 pub mod core_api;
+pub mod d14_api;
+pub mod engine_api;
 pub mod ffi_import;
 pub mod kernel_api;
 pub mod pandas_bridge;
@@ -79,6 +81,22 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(core_api::replace_pipes_syntax, m)?)?;
     m.add_function(wrap_pyfunction!(core_api::hash_password, m)?)?;
     m.add_function(wrap_pyfunction!(core_api::verify_password, m)?)?;
+
+    // meerschaum-engine (Syncing Engine, §5)
+    m.add_function(wrap_pyfunction!(engine_api::engine_plan, m)?)?;
+    m.add_function(wrap_pyfunction!(engine_api::engine_run, m)?)?;
+    m.add_function(wrap_pyfunction!(engine_api::engine_runs, m)?)?;
+    m.add_function(wrap_pyfunction!(engine_api::engine_run_detail, m)?)?;
+    m.add_function(wrap_pyfunction!(engine_api::engine_run_events, m)?)?;
+
+    // D14 runway (wave 8)
+    m.add_function(wrap_pyfunction!(d14_api::sql_item_name, m)?)?;
+    m.add_function(wrap_pyfunction!(d14_api::build_where, m)?)?;
+    m.add_function(wrap_pyfunction!(d14_api::d14_get_pipe_metadef, m)?)?;
+    m.add_function(wrap_pyfunction!(d14_api::d14_sync_pipe_inplace, m)?)?;
+    m.add_function(wrap_pyfunction!(d14_api::get_parameters, m)?)?;
+    m.add_function(wrap_pyfunction!(d14_api::get_chunk_interval, m)?)?;
+    m.add_function(wrap_pyfunction!(d14_api::get_chunk_bounds, m)?)?;
 
     m.add_class::<pipe_api::PyPipe>()?;
 

@@ -465,7 +465,12 @@ fn actions_registry_matches_python() {
             failures.push(format!("{name}: function/executor_keys differ"));
         }
         let subs = info["subactions"].as_object().unwrap();
-        let mut rs_subs: Vec<&str> = action.subactions.iter().map(|s| s.name).collect();
+        let mut rs_subs: Vec<&str> = action
+            .subactions
+            .iter()
+            .filter(|s| !actions::is_v5_only_subaction(action.name, s.name))
+            .map(|s| s.name)
+            .collect();
         let mut py_subs: Vec<&str> = subs.keys().map(|s| s.as_str()).collect();
         rs_subs.sort();
         py_subs.sort();
@@ -629,7 +634,8 @@ fn per_action_help_matches_python() {
             rt.format = Some(test_settings());
             assert_eq!(dispatch::main(&sysargs, &mut rt), 0);
         }
-        let actual = String::from_utf8(buf).unwrap();
+        // The v5-only flags appended after v4's text are not part of the recorded pages.
+        let actual = meerschaum_cli::help::strip_v5_additions(&String::from_utf8(buf).unwrap());
         if actual == expected {
             matched += 1;
         } else {

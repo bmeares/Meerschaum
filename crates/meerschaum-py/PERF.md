@@ -334,3 +334,45 @@ measurement. The remaining millisecond-scale sync-time / row-count overhead mean
 single-run benchmark does **not** establish v4 parity on every step, despite faster large
 sync and read operations. All runs used isolated roots, empty plugin directories, the
 disposable PostGIS port 5449, and `w5sql_` pipe keys.
+
+## Wave 8: the SQLite façade regression (`sync_1M` 1106 s, `inc_1M` 247 s)
+
+Wave 7's benchmark showed the Python façade under `MRSM_CORE=rust` superlinear on SQLite only
+(`sync_1M` 2.3x and `inc_1M` 6.4x slower than v4; PostgreSQL was fine; the native binary was
+fast on the same data).
+
+**Root cause.** A `pipe.sync()` of a SQL source fetches 1,000-row chunks and syncs each one, and
+every chunk's `filter_existing` reads back the existing rows of the chunk's datetime window with
+`WHERE dt >= .. AND dt < .. AND id IN ('0', .., '49')`. SQLite has no statistics on a table that
+was never `ANALYZE`d, so it estimates ~10 rows per `id` equality, 50 ids = ~500 rows, and drives
+the query through `IX_<target>_id` instead of `IX_<target>_dt_id`: each "narrow" backtrack query
+walked the rows of every listed id (a 1/50th of the table each) and sorted them. Cost per chunk
+grew with the table (4.5 ms at the start, 250 ms at 60k rows), so a run was quadratic. The native
+binary syncs 100k-row chunks (few queries) and PostgreSQL has statistics, so neither showed it.
+v4 builds the same SQL (it was 479 s at 1M); v5 was slower than v4 on top because its Rust
+`sync_pipe` also runs the same query.
+
+**Fix.** `build_where_with(.., WhereStyle { sqlite_no_index_on_lists })` (crate `meerschaum-sql`,
+`where_clause.rs`), applied by `build_data_query` when the query has a datetime bound on SQLite:
+each `IN` / `NOT IN` list is written `("id" IN (...)) = 1`, which the planner cannot drive an
+index with. The first attempt, a unary `+"id" IN (..)`, also stopped using the index but dropped
+the column's affinity, so `+"id" IN ('1')` never matched an integer column (caught by a test:
+zero rows back); `likely()` / `unlikely()` / `likelihood()` hints on the datetime terms did not
+change the plan. The returned rows are identical. Queries without a datetime bound and every
+other flavor are unchanged.
+
+| Case (sqlite) | v4py | v5py before | v5py after |
+|---|---|---|---|
+| `sync_100k` | 28.1 s | 10.8 s | 5.8 s |
+| `sync_1M` | 384 s | 1106 s | 54.3 s |
+| `inc_1M` | 19.4 s | 247 s | 5.6 s |
+
+(`scripts/bench/results/2026-10-13-w8-perf.md`; the v4 column was re-measured on the same host
+state, the w7 file shows 479 s / 38.8 s for it.) Cost per chunk is now flat (47 ms per
+1,000-row chunk from 50k to 400k rows, linear: 4.8 s, 9.5 s, 21.9 s at 100k / 200k / 400k).
+
+**What is left.** About half of the remaining per-chunk time is Python: `get_config` through
+`_core` costs ~0.27 ms a call and is called ~35 times per chunk (a plain dict lookup in v4), the
+special-column detectors run on every chunk, and `sync_pipe` clears five cache keys on disk after
+each chunk. The Rust part (`filter existing` 5 ms, write ~18 ms for 1,000 rows) is serialized on
+the single SQLite writer, so the worker pool adds nothing on SQLite.

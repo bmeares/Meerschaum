@@ -30,6 +30,28 @@ const BAD_WORDS: [&str; 3] = ["drop ", "--", ";"];
 /// Returns an empty string (and logs a warning, as Python does) when the serialized params
 /// contain a banned word.
 pub fn build_where(params: &IndexMap<String, Value>, flavor: Flavor, with_where: bool) -> String {
+    build_where_with(params, flavor, with_where, WhereStyle::default())
+}
+
+/// Knobs of [`build_where_with`] that change the SQL text without changing its meaning.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WhereStyle {
+    /// Write every `IN` / `NOT IN` list as `("col" IN (...)) = 1`, which SQLite's planner cannot
+    /// drive an index with (a unary `+` on the column would too, but it drops the column's
+    /// affinity, so `+"id" IN ('1')` never matches an integer). Set for datetime-bounded
+    /// queries, where an `IN` list over (nearly) every id otherwise outranks the datetime range
+    /// (SQLite has no statistics on a fresh table) and the "narrow" backtrack query scans a
+    /// whole id's worth of the table.
+    pub sqlite_no_index_on_lists: bool,
+}
+
+/// [`build_where`] with a [`WhereStyle`].
+pub fn build_where_with(
+    params: &IndexMap<String, Value>,
+    flavor: Flavor,
+    with_where: bool,
+    style: WhereStyle,
+) -> String {
     let params_json = Value::Map(params.clone()).json_dumps().to_lowercase();
     let negation_prefix = negation_prefix();
     for word in BAD_WORDS {
@@ -54,6 +76,12 @@ pub fn build_where(params: &IndexMap<String, Value>, flavor: Flavor, with_where:
         match value {
             // Search across a list (`IN` syntax).
             Value::List(items) => {
+                let hide_from_planner = style.sqlite_no_index_on_lists && flavor == Flavor::Sqlite;
+                let (open, close) = if hide_from_planner {
+                    ("(", ") = 1")
+                } else {
+                    ("", "")
+                };
                 let includes: Vec<Option<Value>> = items
                     .iter()
                     .filter(|item| !item.py_str().starts_with(negation_prefix))
@@ -77,13 +105,14 @@ pub fn build_where(params: &IndexMap<String, Value>, flavor: Flavor, with_where:
                     where_.push('(');
                 }
                 if !not_null_includes.is_empty() {
-                    where_.push_str(&format!("{key_name} IN ("));
+                    where_.push_str(&format!("{open}{key_name} IN ("));
                     let quoted: Vec<String> = not_null_includes
                         .iter()
                         .map(|item| format!("'{}'", item.py_str().replace('\'', "''")))
                         .collect();
                     where_.push_str(&quoted.join(", "));
                     where_.push(')');
+                    where_.push_str(close);
                 }
                 if has_null_includes {
                     if !not_null_includes.is_empty() {
@@ -100,13 +129,14 @@ pub fn build_where(params: &IndexMap<String, Value>, flavor: Flavor, with_where:
                     where_.push('(');
                 }
                 if !not_null_excludes.is_empty() {
-                    where_.push_str(&format!("{key_name} NOT IN ("));
+                    where_.push_str(&format!("{open}{key_name} NOT IN ("));
                     let quoted: Vec<String> = not_null_excludes
                         .iter()
                         .map(|item| format!("'{}'", item.py_str().replace('\'', "''")))
                         .collect();
                     where_.push_str(&quoted.join(", "));
                     where_.push(')');
+                    where_.push_str(close);
                 }
                 if has_null_excludes {
                     if !not_null_excludes.is_empty() {
@@ -184,6 +214,27 @@ mod tests {
         assert_eq!(
             build_where(&params(r#"{"foo": [1, 2, 3]}"#), Flavor::Postgresql, true),
             "\nWHERE\n    (\"foo\" IN ('1', '2', '3'))"
+        );
+    }
+
+    #[test]
+    fn sqlite_list_without_index() {
+        let style = WhereStyle {
+            sqlite_no_index_on_lists: true,
+        };
+        assert_eq!(
+            build_where_with(
+                &params(r#"{"foo": [1, 2], "bar": "x"}"#),
+                Flavor::Sqlite,
+                true,
+                style
+            ),
+            "\nWHERE\n    ((\"foo\" IN ('1', '2')) = 1)\n    AND \"bar\" = 'x'"
+        );
+        // Other flavors ignore the style.
+        assert_eq!(
+            build_where_with(&params(r#"{"foo": [1]}"#), Flavor::Postgresql, true, style),
+            "\nWHERE\n    (\"foo\" IN ('1'))"
         );
     }
 

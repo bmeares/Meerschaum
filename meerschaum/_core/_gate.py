@@ -61,6 +61,13 @@ GATED_FEATURES = {
     'verify_password': 'meerschaum.core.User._User',
     'replace_pipes_syntax': 'meerschaum.utils.pipes',
     'get_config': 'meerschaum.config',
+    'sql_item_name': 'meerschaum.utils.sql',
+    'build_where': 'meerschaum.utils.sql',
+    'get_pipe_metadef': 'meerschaum.connectors.sql._fetch',
+    'sync_pipe_inplace': 'meerschaum.connectors.sql._pipes',
+    'get_parameters': 'meerschaum.core.Pipe._attributes',
+    'get_chunk_interval': 'meerschaum.core.Pipe._data',
+    'get_chunk_bounds': 'meerschaum.core.Pipe._data',
 }
 
 #: Classes bound in `meerschaum._core` whose methods replace a v4 class's methods, mapped to the

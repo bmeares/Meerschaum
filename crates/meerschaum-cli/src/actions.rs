@@ -49,7 +49,17 @@ impl ActionDef {
 /// Actions that exist only in v5. They resolve, have help and complete like any core action, but
 /// `show actions` and the unknown-action help table keep v4's listing (the parity fixtures are
 /// recorded from v4), and the registry parity test ignores them.
-pub const V5_ONLY_ACTIONS: &[&str] = &["prune"];
+pub const V5_ONLY_ACTIONS: &[&str] = &["prune", "plan"];
+
+/// Subactions that exist only in v5 (`(action, subaction)`). They resolve and run like any
+/// core subaction, and complete once a prefix is typed, but the empty `show <TAB>` list and the
+/// registry parity test keep v4's contents.
+pub const V5_ONLY_SUBACTIONS: &[(&str, &str)] = &[("show", "graph"), ("show", "runs")];
+
+/// Whether `(action, subaction)` is v5-only.
+pub fn is_v5_only_subaction(action: &str, subaction: &str) -> bool {
+    V5_ONLY_SUBACTIONS.contains(&(action, subaction))
+}
 
 const fn sub(name: &'static str, function: &'static str) -> SubactionDef {
     SubactionDef {
@@ -176,6 +186,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
     action("vacuum", &[sub("pipes", "_vacuum_pipes")]),
     // v5 only (D20): not in v4's registry.
     action("prune", &[sub("venvs", "_prune_venvs")]),
+    action("plan", &[sub("pipes", "_plan_pipes")]),
     action(
         "show",
         &[
@@ -187,6 +198,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("daemons", "_show_daemons"),
             sub("data", "_show_data"),
             sub("environment", "_show_environment"),
+            sub("graph", "_show_graph"),
             sub("help", "_show_help"),
             sub_e("jobs", "_show_jobs"),
             sub_e("logs", "_show_logs"),
@@ -195,6 +207,7 @@ pub static CORE_ACTIONS: &[ActionDef] = &[
             sub("pipes", "_show_pipes"),
             sub("plugins", "_show_plugins"),
             sub("rowcounts", "_show_rowcounts"),
+            sub("runs", "_show_runs"),
             sub("schedules", "_show_schedules"),
             sub("sizes", "_show_sizes"),
             sub("tags", "_show_tags"),

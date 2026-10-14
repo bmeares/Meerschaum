@@ -14,6 +14,7 @@ from datetime import timezone
 import meerschaum as mrsm
 from meerschaum.utils.typing import Tuple, Dict, Any, Union, Optional, List
 from meerschaum.utils.warnings import warn, dprint
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 
 @property
@@ -147,57 +148,63 @@ def get_parameters(
         ### don't corrupt the memo.
         return deepcopy(self.__dict__['_resolved_parameters'])
 
-    parameters = {}
-    for ref_pipe in self.references:
-        try:
-            if ref_pipe in _visited:
-                warn(f"Circular reference detected in {self}: chain involves {ref_pipe}.")
-                return search_and_substitute_config(raw_parameters)
+    if is_top_level and core is not None and (_rust := _rust_impl('get_parameters')) is not None:
+        ### References, `{{ Pipe() }}` and `MRSM{}` resolve in `meerschaum_core`; the Rust call also
+        ### returns the `_symlinks` v4 records on the pipe.
+        resolved_parameters, self._symlinks = _rust(self)
+        resolved_parameters = search_and_substitute_config(resolved_parameters)
+    else:
+        parameters = {}
+        for ref_pipe in self.references:
+            try:
+                if ref_pipe in _visited:
+                    warn(f"Circular reference detected in {self}: chain involves {ref_pipe}.")
+                    return search_and_substitute_config(raw_parameters)
 
-            _visited.add(ref_pipe)
-            if refresh:
-                _ = _cached_base_params.pop(ref_pipe, None)
-            base_params = _cached_base_params.get(ref_pipe, None)
-            if base_params is None:
-                base_params = ref_pipe.get_parameters(
-                    apply_symlinks=apply_symlinks,
-                    _visited=_visited,
-                    debug=debug,
-                )
-                _cached_base_params[ref_pipe] = base_params
-                if debug:
-                    dprint(f"base_params from {ref_pipe} for {self}:")
-                    mrsm.pprint(base_params)
-            else:
-                if debug:
-                    dprint(f"Using cached base_params from {ref_pipe} for {self}")
-        except Exception as e:
-            warn(f"Failed to resolve reference pipe for {self}: {e}")
-            base_params = {}
+                _visited.add(ref_pipe)
+                if refresh:
+                    _ = _cached_base_params.pop(ref_pipe, None)
+                base_params = _cached_base_params.get(ref_pipe, None)
+                if base_params is None:
+                    base_params = ref_pipe.get_parameters(
+                        apply_symlinks=apply_symlinks,
+                        _visited=_visited,
+                        debug=debug,
+                    )
+                    _cached_base_params[ref_pipe] = base_params
+                    if debug:
+                        dprint(f"base_params from {ref_pipe} for {self}:")
+                        mrsm.pprint(base_params)
+                else:
+                    if debug:
+                        dprint(f"Using cached base_params from {ref_pipe} for {self}")
+            except Exception as e:
+                warn(f"Failed to resolve reference pipe for {self}: {e}")
+                base_params = {}
 
-        parameters = apply_patch_to_config(parameters, base_params)
+            parameters = apply_patch_to_config(parameters, base_params)
 
-    parameters = apply_patch_to_config(parameters, raw_parameters)
+        parameters = apply_patch_to_config(parameters, raw_parameters)
 
-    from meerschaum.utils.pipes import replace_pipes_syntax
-    self._symlinks = {}
+        from meerschaum.utils.pipes import replace_pipes_syntax
+        self._symlinks = {}
 
-    def recursive_replace(obj: Any, path: tuple) -> Any:
-        if isinstance(obj, dict):
-            return {k: recursive_replace(v, path + (k,)) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [recursive_replace(elem, path + (i,)) for i, elem in enumerate(obj)]
-        if isinstance(obj, str):
-            substituted_val = replace_pipes_syntax(obj, _pipe=self)
-            if substituted_val != obj:
-                self._symlinks[path] = {
-                    'original': obj,
-                    'substituted': substituted_val,
-                }
-            return substituted_val
-        return obj
+        def recursive_replace(obj: Any, path: tuple) -> Any:
+            if isinstance(obj, dict):
+                return {k: recursive_replace(v, path + (k,)) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [recursive_replace(elem, path + (i,)) for i, elem in enumerate(obj)]
+            if isinstance(obj, str):
+                substituted_val = replace_pipes_syntax(obj, _pipe=self)
+                if substituted_val != obj:
+                    self._symlinks[path] = {
+                        'original': obj,
+                        'substituted': substituted_val,
+                    }
+                return substituted_val
+            return obj
 
-    resolved_parameters = search_and_substitute_config(recursive_replace(parameters, tuple()))
+        resolved_parameters = search_and_substitute_config(recursive_replace(parameters, tuple()))
 
     ### Cross-pipe `{{ Pipe() }}` templates read other pipes' state, so they re-resolve on every
     ### access under `rust` (a deliberate refinement of v4's memo, which keeps them stale).

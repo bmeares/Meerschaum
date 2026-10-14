@@ -59,6 +59,8 @@ def sync(
     error_callback: Optional[Callable[[Exception], Any]] = None,
     chunksize: Optional[int] = -1,
     sync_chunks: bool = True,
+    parents: Union[bool, int, None] = None,
+    children: Union[bool, int, None] = None,
     debug: bool = False,
     _inplace: bool = True,
     **kw: Any
@@ -123,13 +125,47 @@ def sync(
     sync_chunks: bool, default True
         If possible, sync chunks while fetching them into memory.
 
+    parents: Union[bool, int, None], default None
+        If `True`, sync every ancestor of this pipe first, in dependency order (the implicit
+        pipe graph, including `{{ Pipe() }}` references). An `int` syncs that many generations
+        (`parents=1` is the direct parents). Runs through the Rust Syncing Engine, which skips
+        parents and children that are already caught up. A bare `sync()` (the default) never
+        uses the engine and behaves exactly like v4.
+
+    children: Union[bool, int, None], default None
+        If `True`, sync this pipe, then propagate to every descendant. An `int` limits the
+        generations. Combine with `parents` for the whole connected slice.
+        See `meerschaum.Pipeline` to plan the run first and read the run history.
+
     debug: bool, default False
         Verbosity toggle. Defaults to False.
 
     Returns
     -------
     A `SuccessTuple` of success (`bool`) and message (`str`).
+    With `parents` or `children`, a `meerschaum.core.Pipeline.RunResult` (a `SuccessTuple`
+    with the run's `run_id`, `plan`, `outcomes` and `events()`).
     """
+    if parents or children:
+        from meerschaum.core.Pipeline import sync_with_graph
+        return sync_with_graph(
+            self,
+            df,
+            parents=parents,
+            children=children,
+            begin=begin,
+            end=end,
+            force=force,
+            retries=retries,
+            min_seconds=min_seconds,
+            check_existing=check_existing,
+            enforce_dtypes=enforce_dtypes,
+            workers=workers,
+            chunksize=chunksize,
+            debug=debug,
+            **kw
+        )
+
     from meerschaum.utils.debug import dprint, _checkpoint
     from meerschaum.utils.formatting import get_console
     from meerschaum.utils.venv import Venv

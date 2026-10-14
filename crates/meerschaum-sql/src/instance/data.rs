@@ -554,7 +554,11 @@ impl SqlConnector {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             if !valid.is_empty() {
-                let w = build_where(&valid, flavor, true);
+                // SQLite: with a datetime range, keep the planner on the datetime index.
+                let style = crate::where_clause::WhereStyle {
+                    sqlite_no_index_on_lists: is_dt_bound,
+                };
+                let w = crate::where_clause::build_where_with(&valid, flavor, true, style);
                 let w = meerschaum_core::pyfmt::py_lstrip(&w)
                     .replace("WHERE", if is_dt_bound { "    AND" } else { "    " });
                 where_.push_str("    ");
