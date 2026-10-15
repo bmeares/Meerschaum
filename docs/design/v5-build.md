@@ -15,7 +15,7 @@ Conventions for the crates themselves are in `crates/README.md`.
 | `rust` / `check (ubuntu-latest)` | GitHub-hosted | `cargo check --workspace` | yes |
 | `rust` / `check (windows-latest, macos-latest)` | GitHub-hosted | `cargo check --workspace` | no (`continue-on-error`, §15) |
 | `buildx` (`docker-build.yaml`) | GitHub-hosted, manual | `scripts/docker/buildx.sh`, then `size_gate.sh` | size gate enforces by default |
-| `pytest` | self-hosted | unchanged (`scripts/test.sh db`) | yes |
+| `pytest` | self-hosted | `scripts/rust/build_py.sh`, then `scripts/test.sh db` | yes |
 
 `rust.yaml` runs on pushes to `v5` and on pull requests that touch `crates/**`, `Cargo.*`, `rust-toolchain.toml`,
 `.cargo/**`, `scripts/rust/**`, `scripts/parity/**` or the workflow itself, and on manual dispatch.
@@ -44,10 +44,11 @@ is the build cache. There is no `actions/cache` and no second target directory. 
 to hold debug, clippy and release artifacts for the whole graph, several GB once Polars and Arrow
 build (the development checkout's `target/` is already about 10 GB). This is in addition to the
 development checkout's own `target/`, on the same disk. `disk-guard` runs `cargo clean` before the
-clippy, test and build jobs when free space is under 10 GB. `pytest.yaml` checks out the same
-workspace with the default `clean: true`, which deletes `target/`, so the first Rust run after a
-pytest run is a cold build. The hosted legs use `Swatinem/rust-cache`, which stores its cache with
-GitHub, not on this host.
+Rust clippy, test and build jobs when free space is under 10 GB. `pytest.yaml` preserves the same
+`target/` and `.venv-ref/` caches and builds the native extension with the interpreter used by its
+test script. Maturin runs from an isolated tool environment under `RUNNER_TEMP`; pytest does not
+add an automatic Cargo cleanup step. The hosted legs use `Swatinem/rust-cache`, which stores its
+cache with GitHub, not on this host.
 
 ## Reference harness (§10.2)
 
@@ -174,6 +175,12 @@ a Python reference server or daemon must do so with `env -i` plus only `PATH`, a
 timestamps and absolute paths with placeholders before writing.
 
 ## Active v5 hardening work order (2026-10-15)
+
+The initial `d50d5698` pytest CI run later completed with 1,726 passed, 363 skipped and two
+failures: the external-uv Rust subprocess had no compiled `_core`, and ENV-001 reproduced the
+known Python GeoArrow registry issue. Pytest CI now builds `_core` before starting integration
+services or tests; the native password facade also requires that prerequisite in Python mode.
+This setup repair adds no fallback or test skips. ENV-001 remains a separate test-environment issue.
 
 Implementation must preserve Python plugin compatibility while moving execution into Rust.
 Track behavioral findings in the [bug and behavior review ledger](../../crates/meerschaum-py/PARITY.md#bug-and-behavior-review-ledger).

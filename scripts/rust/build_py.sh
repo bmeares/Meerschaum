@@ -13,6 +13,7 @@
 #   --no-check   Skip the post-build import check.
 #
 # Requires maturin (`uv tool install maturin`) and a Python >= 3.11 (`PYTHON`, default python3).
+# MATURIN_BIN may select a specific maturin executable; otherwise use the current PATH lookup.
 # Never set CARGO_TARGET_DIR: builds share the workspace `target/` (see crates/README.md).
 set -euo pipefail
 
@@ -21,6 +22,7 @@ cd "$REPO"
 
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$HOME/.local/bin:$PATH"
 PYTHON="${PYTHON:-python3}"
+MATURIN_BIN="${MATURIN_BIN:-maturin}"
 
 profile="release"
 polars=1
@@ -43,8 +45,8 @@ if [ -n "${CARGO_TARGET_DIR:-}" ]; then
   echo "build_py.sh: CARGO_TARGET_DIR is set ($CARGO_TARGET_DIR); unset it to use the shared target/." >&2
   exit 2
 fi
-if ! command -v maturin >/dev/null 2>&1; then
-  echo "build_py.sh: maturin not found. Install it with: uv tool install maturin" >&2
+if ! maturin_executable="$(command -v "$MATURIN_BIN")" || [ ! -x "$maturin_executable" ]; then
+  echo "build_py.sh: maturin executable '$MATURIN_BIN' not found. Install it with: uv tool install maturin" >&2
   exit 1
 fi
 if ! command -v "$PYTHON" >/dev/null 2>&1; then
@@ -71,9 +73,9 @@ if [ "$polars" -eq 1 ]; then
 fi
 args+=(--features "$features" -i "$(command -v "$PYTHON")")
 
-echo "==> maturin ${args[*]} ${extra[*]:-}"
+echo "==> $MATURIN_BIN ${args[*]} ${extra[*]:-}"
 # Unset VIRTUAL_ENV so an active venv is not inspected.
-env -u VIRTUAL_ENV PYO3_PYTHON="$(command -v "$PYTHON")" maturin "${args[@]}" "${extra[@]}"
+env -u VIRTUAL_ENV PYO3_PYTHON="$(command -v "$PYTHON")" "$maturin_executable" "${args[@]}" "${extra[@]}"
 
 shopt -s nullglob
 wheels=("$wheel_dir"/*.whl)

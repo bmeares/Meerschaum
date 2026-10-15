@@ -7,8 +7,8 @@
 # target dir on the self-hosted legs. Checkout runs with `clean: false` and a targeted `git clean`
 # that keeps `target/` and `.venv-ref/`; a `disk-guard` step runs `cargo clean` when free space drops
 # below 10 GB. Expect target/ to hold debug + clippy + release artifacts (several GB once Polars and
-# Arrow are in the graph). pytest.yaml checks out the same workspace with the default `clean: true`,
-# which wipes target/; the next Rust run is then a cold build.
+# Arrow are in the graph). pytest.yaml preserves the same target/ and .venv-ref/ caches and builds
+# the native Python extension before running its integration suite.
 name: rust
 
 on:
