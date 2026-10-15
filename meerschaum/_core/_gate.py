@@ -57,8 +57,6 @@ GATED_FEATURES = {
     'is_dtype_numeric': 'meerschaum.utils.dtypes',
     'get_geometry_type_srid': 'meerschaum.utils.dtypes',
     'get_pd_type_from_db_type': 'meerschaum.utils.dtypes.sql',
-    'hash_password': 'meerschaum.core.User._User',
-    'verify_password': 'meerschaum.core.User._User',
     'replace_pipes_syntax': 'meerschaum.utils.pipes',
     'get_config': 'meerschaum.config',
     'sql_item_name': 'meerschaum.utils.sql',

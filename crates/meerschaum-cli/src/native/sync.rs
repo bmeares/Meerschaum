@@ -211,10 +211,17 @@ pub fn sync_pipe(
         ..Default::default()
     };
     let result = session.block_on(engine.sync_pipe(&sp.pipe, None, &args));
+    print_hook_results(rt, session);
     print_chunk_progress(rt, &result.message);
     SuccessTuple {
         success: result.success,
         message: result.message,
+    }
+}
+
+fn print_hook_results(rt: &mut Runtime<'_>, session: &Session) {
+    for result in session.take_hook_results() {
+        print_tuple(rt, &result, TupleArgs::default());
     }
 }
 
@@ -340,6 +347,7 @@ pub fn sync_pipes_with(args: &ArgsMap, rt: &mut Runtime<'_>, method: LapMethod) 
             } else {
                 session.block_on(engine.run(opts))
             };
+            print_hook_results(rt, &session);
             for warning in &result.warnings {
                 warn(rt, warning);
             }
@@ -621,13 +629,17 @@ fn run_live(
     loop {
         loop {
             match events.try_recv() {
-                Ok(event) => line(rt, event),
+                Ok(event) => {
+                    print_hook_results(rt, session);
+                    line(rt, event);
+                }
                 Err(TryRecvError::Lagged(_)) => continue,
                 Err(_) => break,
             }
         }
         match receiver.recv_timeout(std::time::Duration::from_millis(50)) {
             Ok(result) => {
+                print_hook_results(rt, session);
                 while let Ok(event) = events.try_recv() {
                     line(rt, event);
                 }
@@ -725,6 +737,7 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         }
         match receiver.recv_timeout(std::time::Duration::from_millis(50)) {
             Ok(LapEvent::PipeFinished(outcome)) => {
+                print_hook_results(rt, &session);
                 print_chunk_progress(rt, &outcome.result.message);
                 if !nopretty {
                     print_tuple(
@@ -785,6 +798,7 @@ fn listen(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
+        print_hook_results(rt, &session);
     }
     Ok(result)
 }

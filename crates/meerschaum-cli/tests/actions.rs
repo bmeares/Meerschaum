@@ -391,7 +391,7 @@ fn python_writes_an_init_script_and_starts_the_interpreter() {
 }
 
 #[test]
-fn compose_explain_and_worker_subactions() {
+fn compose_explain_and_native_down() {
     let tmp = tempfile::tempdir().unwrap();
     let project = tmp.path().join("proj");
     std::fs::create_dir_all(&project).unwrap();
@@ -431,7 +431,30 @@ fn compose_explain_and_worker_subactions() {
         "{commands:?}"
     );
 
-    assert_worker_dispatch(tmp.path(), &["compose", "down"]);
+    let plugins = tmp.path().join("plugins");
+    std::fs::create_dir_all(&plugins).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm"))
+        .args(["compose", "down"])
+        .current_dir(&project)
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("HOME", tmp.path())
+        .env("MRSM_ROOT_DIR", tmp.path())
+        .env("MRSM_PLUGINS_DIR", plugins)
+        .env("MRSM_PYTHON", tmp.path().join("absent-python"))
+        .env("MRSM_CONFIG", r#"{"meerschaum":{"instance":"sql:local"}}"#)
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.status.success(), "{text}");
+    assert!(
+        !text.contains("failed to start the Python worker"),
+        "{text}"
+    );
 }
 
 #[test]

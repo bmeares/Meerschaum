@@ -80,6 +80,8 @@ enum SessionRuntime {
     Shared(tokio::runtime::Handle),
 }
 
+type WorkerEnvironment = Vec<(String, String)>;
+
 impl SessionRuntime {
     fn handle(&self) -> &tokio::runtime::Handle {
         match self {
@@ -101,6 +103,8 @@ pub struct Session {
     /// Whether the Python worker (and the plugin manifest it builds) may be used.
     python_worker: Arc<AtomicBool>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
+    worker_environment: Arc<Mutex<Option<WorkerEnvironment>>>,
+    hook_results: Arc<Mutex<Vec<meerschaum_core::SuccessTuple>>>,
     manifest: Arc<Mutex<Option<Arc<Manifest>>>>,
     python_manifest: Arc<Mutex<Option<Arc<Manifest>>>>,
     natives: Arc<Mutex<Option<Arc<NativePlugins>>>>,
@@ -137,6 +141,8 @@ impl Session {
             registered_only: Arc::new(AtomicBool::new(false)),
             python_worker: Arc::new(AtomicBool::new(true)),
             pool: Arc::new(Mutex::new(None)),
+            worker_environment: Arc::new(Mutex::new(None)),
+            hook_results: Arc::new(Mutex::new(Vec::new())),
             manifest: Arc::new(Mutex::new(None)),
             python_manifest: Arc::new(Mutex::new(None)),
             natives: Arc::new(Mutex::new(None)),
@@ -195,6 +201,30 @@ impl Session {
         self.python_worker.load(Ordering::SeqCst)
     }
 
+    /// Set an isolated session's complete worker environment before creating its pool.
+    /// Clones share this setting; the host process environment is never changed.
+    pub fn set_worker_environment(&self, env: Vec<(String, String)>) -> Result<(), ActionError> {
+        let pool = self.pool.lock().expect("worker pool");
+        if pool.is_some() {
+            return Err(ActionError::new(
+                "RuntimeError",
+                "Worker pool already initialized.",
+            ));
+        }
+        *self.worker_environment.lock().expect("worker environment") = Some(env);
+        Ok(())
+    }
+
+    /// Queue a hook result from an engine task for the host's output thread.
+    pub fn report_hook_result(&self, result: meerschaum_core::SuccessTuple) {
+        self.hook_results.lock().expect("hook results").push(result);
+    }
+
+    /// Drain hook results in the order the engine reported them.
+    pub fn take_hook_results(&self) -> Vec<meerschaum_core::SuccessTuple> {
+        std::mem::take(&mut *self.hook_results.lock().expect("hook results"))
+    }
+
     /// The single lazily-created Python pool shared by this process session.
     pub fn pool(&self, config: &Config) -> WorkerPool {
         self.pool
@@ -202,6 +232,19 @@ impl Session {
             .expect("worker pool")
             .get_or_insert_with(|| {
                 let mut settings = PoolConfig::from_config(config);
+                if let Some(env) = &*self.worker_environment.lock().expect("worker environment") {
+                    // Workers normally inherit the host. A compose session instead supplies
+                    // a complete project view, including removal of host-only variables.
+                    settings.worker.env_remove = std::env::vars()
+                        .filter_map(|(key, _)| (!env.iter().any(|(k, _)| k == &key)).then_some(key))
+                        .collect();
+                    settings.worker.python = env
+                        .iter()
+                        .find(|(k, v)| k == "MRSM_PYTHON" && !v.trim().is_empty())
+                        .map(|(_, python)| python.into())
+                        .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into());
+                    settings.worker.env.extend(env.iter().cloned());
+                }
                 settings.worker.inherit_stdin = std::io::stdin().is_terminal();
                 WorkerPool::new(settings)
             })

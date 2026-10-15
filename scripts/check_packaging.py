@@ -18,7 +18,8 @@ Source-tree checks (exit 1 on any failure):
    the wheel metadata and the `mrsm` binary report one version.
 4. Both pyproject files declare the maturin backend and the expected distribution names.
 5. `requirements/<extra>.txt` holds exactly the packages the `<extra>` extra declares (and
-   `requirements/minimal.txt` is empty: the base wheel has no dependencies, D20). Regenerate with
+   `requirements/minimal.txt` is empty: D8 intentionally retains the CLI-wheel dependency;
+   this metadata check does not establish D20 public SDK functionality). Regenerate with
    `--write` (scripts/docker/update_requirements.sh calls it).
 6. `crates/meerschaum-cli/src/extras.rs` (the extras the CLI's `show venvs` / `prune venvs` treat
    as wanted packages) equals the extras in the root pyproject.toml. Regenerate with `--write`.

@@ -226,6 +226,7 @@ fn pandas_out<'py>(
         labels: IndexMap::new(),
         reuse: IndexMap::new(),
         placeholders: Vec::new(),
+        polars_objects: Vec::new(),
     };
     frame_to_pandas(ctx, frame, &spec)
 }

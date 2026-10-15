@@ -24,7 +24,7 @@ use polars::prelude::DataType;
 use pyo3::exceptions::PyTypeError;
 use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyString};
+use pyo3::types::{PyBytes, PyDict, PyList, PyString};
 
 use crate::arrow_bridge::{ArrowStream, import_from_python};
 use crate::convert::{PyCtx, cells_to_pylist, import_optional, pylist_to_cells, qualname};
@@ -59,6 +59,8 @@ pub struct PyFrame<'py> {
     pub series: IndexMap<String, Bound<'py, PyAny>>,
     /// Columns that crossed as all-null placeholders ([`frame_from_py_with`]).
     pub placeholders: Vec<String>,
+    /// Original Polars Object columns; Arrow-native Null columns also have an object hint.
+    pub polars_objects: Vec<String>,
 }
 
 /// Restore the pandas merge dtype when a nullable-string cast changes the old dtype's
@@ -144,6 +146,98 @@ pub fn object_string_nulls(
     })
 }
 
+/// Whether pandas' `infer_objects()` makes both normalized merge inputs strings.
+/// An all-null object input stays object, including when the resulting delta is empty.
+pub fn object_string_inference(old: &ColumnData, new: &ColumnData) -> bool {
+    let strings = |data: &ColumnData| match data {
+        ColumnData::Object(values) => object_values_class(values).as_deref() == Some("string"),
+        ColumnData::Native(s) => s.dtype() == &DataType::String && s.null_count() < s.len(),
+    };
+    strings(old) && strings(new)
+}
+
+/// UUID and bytes are not serialized before pandas' `normalize_nulls().fillna(pd.NA)`.
+/// Their delta retains pd.NA while it still contains a non-null special value; otherwise
+/// v4's final value parser converts missing entries back to None.
+pub fn object_special_nulls(
+    old: &ColumnData,
+    new: &ColumnData,
+    delta: &ColumnData,
+) -> Option<ColumnData> {
+    if !matches!(old, ColumnData::Object(_)) {
+        return None;
+    }
+    let special = [old, new].iter().any(|data| match data {
+        ColumnData::Object(values) => matches!(
+            values.iter().find(|value| !value.is_na()),
+            Some(Cell::Uuid(_) | Cell::Bytes(_))
+        ),
+        ColumnData::Native(series) => {
+            series.dtype() == &DataType::Binary && series.null_count() < series.len()
+        }
+    });
+    let has_nulls = match delta {
+        ColumnData::Object(values) => values.iter().any(Cell::is_na),
+        ColumnData::Native(series) => series.null_count() > 0,
+    };
+    // v4's detector skips the final parser only if the delta still contains a special
+    // value. An all-null delta goes through attempt_cast_to_uuid/bytes, which returns None.
+    let keep_na = match delta {
+        ColumnData::Object(values) => matches!(
+            values.iter().find(|value| !value.is_na()),
+            Some(Cell::Uuid(_) | Cell::Bytes(_))
+        ),
+        ColumnData::Native(series) => {
+            series.dtype() == &DataType::Binary && series.null_count() < series.len()
+        }
+    };
+    // Native bytes (including empty deltas) must also regain the object merge dtype.
+    (special && (has_nulls || matches!(delta, ColumnData::Native(_)))).then(|| {
+        ColumnData::Object(
+            delta
+                .values()
+                .into_iter()
+                .map(|v| {
+                    if v.is_na() {
+                        if keep_na { Cell::NA } else { Cell::Null }
+                    } else {
+                        v
+                    }
+                })
+                .collect(),
+        )
+    })
+}
+
+/// When only the old frame contains JSON, v4 serializes only that frame. New nulls
+/// are normalized to pd.NA, and JSON deserialization leaves that non-string sentinel intact.
+pub fn object_json_nulls(
+    old: &ColumnData,
+    new: &ColumnData,
+    delta: &ColumnData,
+) -> Option<ColumnData> {
+    let json = |data: &ColumnData| {
+        data.first_valid_index()
+            .is_some_and(|index| matches!(data.get(index), Cell::Json(_)))
+    };
+    if !json(old) || json(new) {
+        return None;
+    }
+    let has_nulls = match delta {
+        ColumnData::Object(values) => values.iter().any(Cell::is_na),
+        ColumnData::Native(series) => series.null_count() > 0,
+    };
+    has_nulls.then(|| {
+        ColumnData::Object(
+            delta
+                .values()
+                .into_iter()
+                .map(|v| if v.is_na() { Cell::NA } else { v })
+                .collect(),
+        )
+    })
+}
+
 /// How to convert a single column into the kernel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColumnMode {
@@ -200,18 +294,64 @@ pub fn frame_from_py_with<'py>(
     let py = ctx.py;
     let name = qualname(df)?;
     if name.starts_with("polars.") {
-        let collected = if name.ends_with("LazyFrame") {
+        let mut collected = if name.ends_with("LazyFrame") {
             df.call_method0("collect")?
         } else {
             df.clone()
         };
+        // Polars exports Object values as opaque pointer bytes. Import supported special
+        // scalars value by value instead; arbitrary Python object transport is unsupported.
+        let pl = import_optional(py, "polars")?;
+        let schema = collected.getattr("schema")?;
+        let mut objects = Vec::new();
+        for item in schema.call_method0("items")?.try_iter()? {
+            let (column, dtype): (String, Bound<'py, PyAny>) = item?.extract()?;
+            if dtype.eq(pl.getattr("Object")?)? {
+                let series = collected.get_item(column.as_str())?;
+                let values = series.call_method0("to_list")?;
+                let list = values.downcast::<PyList>()?;
+                if list.iter().any(|original| {
+                    let missing = original.is_none()
+                        || ctx
+                            .na
+                            .as_ref()
+                            .is_some_and(|value| value.as_ptr() == original.as_ptr())
+                        || ctx
+                            .nat
+                            .as_ref()
+                            .is_some_and(|value| value.as_ptr() == original.as_ptr());
+                    !(missing
+                        || original.is_exact_instance_of::<PyString>()
+                        || original.is_exact_instance_of::<PyBytes>()
+                        || original.get_type().as_ptr() == ctx.uuid_cls.as_ptr()
+                        || original.get_type().as_ptr() == ctx.decimal_cls.as_ptr())
+                }) {
+                    return Err(PyTypeError::new_err(format!(
+                        "Polars Object column '{column}' contains unsupported Python objects. Supported Object values are str, bytes, Decimal, UUID, or missing values; convert other values to a native Polars dtype."
+                    )));
+                }
+                let values = pylist_to_cells(ctx, list)?;
+                let kwargs = PyDict::new(py);
+                kwargs.set_item("dtype", pl.getattr("Null")?)?;
+                let nulls = PyList::new(py, (0..values.len()).map(|_| py.None()))?;
+                let placeholder = pl
+                    .getattr("Series")?
+                    .call((column.as_str(), nulls), Some(&kwargs))?;
+                collected = collected.call_method1("with_columns", (placeholder,))?;
+                objects.push(Column::object(column, values));
+            }
+        }
         // Polars (1.36) exports `Extension` string columns as views whose buffer layout arrow-rs
         // 56 rejects; `to_arrow()` exports the non-view layout and keeps the extension metadata.
         let exported = match collected.call_method0(intern!(py, "to_arrow")) {
             Ok(table) => table,
             Err(_) => collected.clone(),
         };
-        let frame = frame_from_arrow(&exported)?;
+        let mut frame = frame_from_arrow(&exported)?;
+        let polars_objects = objects.iter().map(|column| column.name.clone()).collect();
+        for column in objects {
+            frame.set(&column.name, column.data).map_err(frame_err)?;
+        }
         let frame = match mode {
             ColumnMode::Full => frame,
             ColumnMode::Probe => probe_kernel_frame(&frame),
@@ -233,6 +373,7 @@ pub fn frame_from_py_with<'py>(
             labels,
             series: IndexMap::new(),
             placeholders: vec![],
+            polars_objects,
         });
     }
     if is_dask(df)? {
@@ -372,6 +513,7 @@ pub fn frame_from_py_with<'py>(
         labels,
         series: sources,
         placeholders,
+        polars_objects: vec![],
     })
 }
 
@@ -481,6 +623,8 @@ pub struct OutSpec<'py> {
     pub reuse: IndexMap<String, Bound<'py, PyAny>>,
     /// Placeholder columns ([`PyFrame::placeholders`]), always copied from [`OutSpec::reuse`].
     pub placeholders: Vec<String>,
+    /// Original Polars Object columns; Arrow-native Null columns also have an object hint.
+    pub polars_objects: Vec<String>,
 }
 
 /// Whether two cells are the same value of the same kind (unlike [`Cell`]'s `PartialEq`, which
@@ -1092,7 +1236,31 @@ pub fn frame_to_py<'py>(
     spec: &OutSpec<'py>,
 ) -> PyResult<Bound<'py, PyAny>> {
     match kind {
-        FrameKind::Polars => frame_to_polars(ctx.py, frame, &IndexMap::new()),
+        FrameKind::Polars => {
+            let mut df = frame_to_polars(ctx.py, frame, &IndexMap::new())?;
+            let pl = import_optional(ctx.py, "polars")?;
+            for column in frame.columns() {
+                if !spec.polars_objects.contains(&column.name) {
+                    continue;
+                }
+                // Keep recognized Python values as objects instead of coercing mixed values
+                // through Arrow's homogeneous storage. Polars uses None for missing objects.
+                let values: Vec<_> = column
+                    .data
+                    .values()
+                    .into_iter()
+                    .map(|v| if v.is_na() { Cell::Null } else { v })
+                    .collect();
+                let kwargs = PyDict::new(ctx.py);
+                kwargs.set_item("dtype", pl.getattr("Object")?)?;
+                let series = pl.getattr("Series")?.call(
+                    (column.name.as_str(), cells_to_pylist(ctx, &values)?),
+                    Some(&kwargs),
+                )?;
+                df = df.call_method1("with_columns", (series,))?;
+            }
+            Ok(df)
+        }
         FrameKind::Dask { npartitions } => {
             let pdf = frame_to_pandas(ctx, frame, spec)?;
             let dd = import_optional(ctx.py, "dask.dataframe")?;

@@ -22,6 +22,12 @@ pep440_rs = "0.7"
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 hmac = "0.12"
 sha2 = "0.10"
+sha1 = "0.10"
+sha3 = "0.10"
+md-5 = "0.10"
+blake2 = "0.10"
+ripemd = "0.1"
+sm3 = "0.4"
 getrandom = "0.3"
 
 [dev-dependencies]

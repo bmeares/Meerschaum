@@ -601,9 +601,22 @@ pub fn interval_minutes_str(minutes: i64) -> String {
     super::sync::interval_str(minutes as f64 * 60.0)
 }
 
+fn partition_interval_str(interval: Option<&Value>) -> String {
+    match interval {
+        Some(Value::Map(m)) if m.contains_key("minutes") => {
+            interval_minutes_str(m.get("minutes").and_then(Value::as_i64).unwrap_or(0))
+        }
+        Some(Value::Map(m)) if m.contains_key("seconds") => {
+            super::sync::interval_str(m.get("seconds").and_then(Value::as_f64).unwrap_or(0.0))
+        }
+        Some(Value::Int(i)) => format!("{} (int axis)", thousands(*i)),
+        _ => "-".to_string(),
+    }
+}
+
 async fn partition_metadata(inst: &Instance, pipe: &meerschaum_core::Pipe) -> (Map, Option<i64>) {
     let info = match inst.sql() {
-        Some(sql) => sql.get_partition_info(pipe).await,
+        Some(sql) => sql.get_partition_info_typed(pipe).await,
         None => Map::new(),
     };
     let rows = if info.get("partitioned").is_some_and(Value::truthy)
@@ -659,16 +672,7 @@ pub fn show_partitions(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         };
         let partitioned = pinfo.get("partitioned").is_some_and(Value::truthy);
         let count = pinfo.get("count").and_then(Value::as_i64);
-        let interval = match pinfo.get("interval") {
-            Some(Value::Map(m)) if m.contains_key("minutes") => {
-                interval_minutes_str(m.get("minutes").and_then(Value::as_i64).unwrap_or(0))
-            }
-            Some(Value::Map(m)) if m.contains_key("seconds") => {
-                super::sync::interval_str(m.get("seconds").and_then(Value::as_f64).unwrap_or(0.0))
-            }
-            Some(Value::Int(i)) => format!("{} (int axis)", thousands(*i)),
-            _ => "-".to_string(),
-        };
+        let interval = partition_interval_str(pinfo.get("interval"));
         let mut rpp = None;
         if partitioned
             && let Some(c) = count.filter(|c| *c != 0)
@@ -950,4 +954,20 @@ pub fn show_plugins_repo(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let text = rt.with_formatter(|f| f.print_options(&names, &opts));
     rt.print(&text);
     Ok(SuccessTuple::success())
+}
+
+#[cfg(test)]
+mod partition_interval_tests {
+    use super::*;
+
+    #[test]
+    fn datetime_partition_duration_and_integer_axis_have_distinct_labels() {
+        let day = Value::Map(Map::from_iter([("seconds".into(), Value::Float(86400.0))]));
+        assert_eq!(partition_interval_str(Some(&day)), "1 day");
+        assert_eq!(
+            partition_interval_str(Some(&Value::Int(1440))),
+            "1,440 (int axis)"
+        );
+        assert_eq!(partition_interval_str(None), "-");
+    }
 }

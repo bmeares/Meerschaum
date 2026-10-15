@@ -8,16 +8,10 @@ User class definition
 
 from __future__ import annotations
 
-import os
-import hashlib
-import hmac
 import uuid
-from binascii import b2a_base64, a2b_base64, Error as _BinAsciiError
 
 import meerschaum as mrsm
 from meerschaum.utils.typing import Optional, Dict, Any, Union, List
-from meerschaum.utils.warnings import warn
-from meerschaum._core._gate import rust_impl as _rust_impl
 
 
 __all__ = ('hash_password', 'verify_password', 'User')
@@ -50,29 +44,8 @@ def hash_password(
     See the `passlib` documentation on the string format:
     https://passlib.readthedocs.io/en/stable/lib/passlib.hash.pbkdf2_digest.html#format-algorithm
     """
-    if (_rust := _rust_impl('hash_password')) is not None:
-        return _rust(password, salt=salt, rounds=rounds)
-    from meerschaum._internal.static import STATIC_CONFIG
-    hash_config = STATIC_CONFIG['users']['password_hash']
-    if password is None:
-        password = ''
-    if salt is None:
-        salt = os.urandom(hash_config['salt_bytes'])
-    if rounds is None:
-        rounds = hash_config['pbkdf2_sha256__default_rounds']
-
-    pw_hash = hashlib.pbkdf2_hmac(
-        hash_config['algorithm_name'],
-        password.encode('utf-8'),
-        salt,
-        rounds,
-    ) 
-    return (
-        f"$pbkdf2-{hash_config['algorithm_name']}"
-        + f"${rounds}"
-        + '$' + ab64_encode(salt).decode('utf-8')
-        + '$' + ab64_encode(pw_hash).decode('utf-8')
-    )
+    from meerschaum._core import hash_password as _hash_password
+    return _hash_password(password, salt=salt, rounds=rounds)
 
 
 def verify_password(
@@ -94,82 +67,8 @@ def verify_password(
     -------
     A `bool` indicating whether `password` matches `password_hash`.
     """
-    if (_rust := _rust_impl('verify_password')) is not None:
-        return _rust(password, password_hash)
-    from meerschaum._internal.static import STATIC_CONFIG
-    if password is None or password_hash is None:
-        return False
-    try:
-        digest, rounds_str, encoded_salt, encoded_checksum = password_hash.split('$')[1:]
-        algorithm_name = digest.split('-')[-1]
-        salt = ab64_decode(encoded_salt)
-        checksum = ab64_decode(encoded_checksum)
-        rounds = int(rounds_str)
-    except Exception:
-        warn(f"Failed to extract context from password hash '{password_hash}'. Is it corrupted?")
-        return False
-
-    return hmac.compare_digest(
-        checksum,
-        hashlib.pbkdf2_hmac(
-            algorithm_name,
-            password.encode('utf-8'),
-            salt,
-            rounds,
-        )
-    )
-
-_BASE64_STRIP = b"=\n"
-_BASE64_PAD1 = b"="
-_BASE64_PAD2 = b"=="
-
-
-def ab64_encode(data):
-    return b64s_encode(data).replace(b"+", b".")
-
-
-def ab64_decode(data):
-    """
-    decode from shortened base64 format which omits padding & whitespace.
-    uses custom ``./`` altchars, but supports decoding normal ``+/`` altchars as well.
-    """
-    if isinstance(data, str):
-        # needs bytes for replace() call, but want to accept ascii-unicode ala a2b_base64()
-        try:
-            data = data.encode("ascii")
-        except UnicodeEncodeError:
-            raise ValueError("string argument should contain only ASCII characters")
-    return b64s_decode(data.replace(b".", b"+"))
-
-
-def b64s_encode(data):
-    return b2a_base64(data).rstrip(_BASE64_STRIP)
-
-
-def b64s_decode(data):
-    """
-    decode from shortened base64 format which omits padding & whitespace.
-    uses default ``+/`` altchars.
-    """
-    if isinstance(data, str):
-        # needs bytes for replace() call, but want to accept ascii-unicode ala a2b_base64()
-        try:
-            data = data.encode("ascii")
-        except UnicodeEncodeError as ue:
-            raise ValueError("string argument should contain only ASCII characters") from ue
-    off = len(data) & 3
-    if off == 0:
-        pass
-    elif off == 2:
-        data += _BASE64_PAD2
-    elif off == 3:
-        data += _BASE64_PAD1
-    else:  # off == 1
-        raise ValueError("Invalid base64 input")
-    try:
-        return a2b_base64(data)
-    except _BinAsciiError as err:
-        raise TypeError(err) from err
+    from meerschaum._core import verify_password as _verify_password
+    return _verify_password(password, password_hash)
 
 
 class User:

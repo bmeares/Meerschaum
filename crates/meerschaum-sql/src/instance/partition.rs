@@ -306,6 +306,16 @@ impl SqlConnector {
     /// `get_partition_info(pipe)`: `{flavor, partitioned, count, interval}` for
     /// `show partitions` (`interval` in minutes for datetime axes, axis units otherwise).
     pub async fn get_partition_info(&self, pipe: &Pipe) -> Map {
+        self.partition_info(pipe, false).await
+    }
+
+    /// Native display metadata with datetime intervals represented as `{seconds: value}`.
+    /// The public compatibility method keeps integer minutes; both paths use one query.
+    pub async fn get_partition_info_typed(&self, pipe: &Pipe) -> Map {
+        self.partition_info(pipe, true).await
+    }
+
+    async fn partition_info(&self, pipe: &Pipe, typed_interval: bool) -> Map {
         let mut info = Map::new();
         info.insert("flavor".into(), Value::Str(self.flavor.as_str().into()));
         info.insert("partitioned".into(), Value::Bool(false));
@@ -321,8 +331,7 @@ impl SqlConnector {
             return info;
         }
         let interval_value = |sp: &SqlPipe| match sp.chunk_interval() {
-            Ok(ChunkInterval::Int(i)) => Value::Int(i),
-            Ok(ChunkInterval::Delta(d)) => Value::Int(d.num_minutes()),
+            Ok(interval) => partition_interval_value(interval, typed_interval),
             Err(_) => Value::Null,
         };
         if self.flavor.is_timescaledb() {
@@ -530,5 +539,35 @@ impl SqlConnector {
     /// Whether this flavor uses inline partitions at `CREATE TABLE` (MySQL / MariaDB).
     pub(crate) fn inline_partitions(&self) -> bool {
         matches!(self.flavor, Flavor::Mysql | Flavor::Mariadb)
+    }
+}
+
+fn partition_interval_value(interval: ChunkInterval, typed: bool) -> Value {
+    match interval {
+        ChunkInterval::Int(i) => Value::Int(i),
+        ChunkInterval::Delta(d) if typed => Value::Map(Map::from_iter([(
+            "seconds".into(),
+            Value::Float(d.num_milliseconds() as f64 / 1000.0),
+        )])),
+        ChunkInterval::Delta(d) => Value::Int(d.num_minutes()),
+    }
+}
+
+#[cfg(test)]
+mod interval_tests {
+    use super::*;
+
+    #[test]
+    fn datetime_metadata_keeps_kind_without_changing_compatibility_minutes() {
+        let day = ChunkInterval::Delta(TimeDelta::days(1));
+        assert_eq!(partition_interval_value(day, false), Value::Int(1440));
+        assert_eq!(
+            partition_interval_value(day, true),
+            Value::Map(Map::from_iter([("seconds".into(), Value::Float(86400.0)),]))
+        );
+        assert_eq!(
+            partition_interval_value(ChunkInterval::Int(1440), true),
+            Value::Int(1440)
+        );
     }
 }

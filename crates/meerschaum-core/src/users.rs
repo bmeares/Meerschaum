@@ -5,9 +5,15 @@
 //! `$pbkdf2-sha256$<rounds>$<salt>$<checksum>`, where salt and checksum use passlib's "adapted
 //! base64" (standard alphabet with `.` instead of `+`, no padding).
 
+use blake2::{Blake2b512, Blake2s256};
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use hmac::Hmac;
-use sha2::{Sha224, Sha256, Sha384, Sha512};
+use hmac::{Hmac, SimpleHmac};
+use md5::Md5;
+use ripemd::Ripemd160;
+use sha1::Sha1;
+use sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
+use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512};
+use sm3::Sm3;
 use uuid::Uuid;
 
 use crate::static_config::static_config;
@@ -148,30 +154,35 @@ pub fn pbkdf2_hmac(
     if rounds < 1 {
         return Err(PasswordError::InvalidRounds);
     }
+    macro_rules! derive {
+        ($mac:ty, $size:expr) => {{
+            let mut buf = vec![0u8; $size];
+            pbkdf2::pbkdf2::<$mac>(password, salt, rounds, &mut buf)
+                .map_err(|e| PasswordError::UnsupportedDigest(e.to_string()))?;
+            buf
+        }};
+    }
     let out = match algorithm.to_lowercase().as_str() {
-        "sha256" => {
-            let mut buf = vec![0u8; 32];
-            pbkdf2::pbkdf2::<Hmac<Sha256>>(password, salt, rounds, &mut buf)
-                .map_err(|e| PasswordError::UnsupportedDigest(e.to_string()))?;
-            buf
+        "sha1" | "1.3.14.3.2.26" => derive!(Hmac<Sha1>, 20),
+        "sha224" | "2.16.840.1.101.3.4.2.4" => derive!(Hmac<Sha224>, 28),
+        "sha256" | "2.16.840.1.101.3.4.2.1" => derive!(Hmac<Sha256>, 32),
+        "sha384" | "2.16.840.1.101.3.4.2.2" => derive!(Hmac<Sha384>, 48),
+        "sha512" | "2.16.840.1.101.3.4.2.3" => derive!(Hmac<Sha512>, 64),
+        "sha512_224" | "2.16.840.1.101.3.4.2.5" => derive!(Hmac<Sha512_224>, 28),
+        "sha512_256" | "2.16.840.1.101.3.4.2.6" => derive!(Hmac<Sha512_256>, 32),
+        "sha3_224" | "2.16.840.1.101.3.4.2.7" => derive!(Hmac<Sha3_224>, 28),
+        "sha3_256" | "2.16.840.1.101.3.4.2.8" => derive!(Hmac<Sha3_256>, 32),
+        "sha3_384" | "2.16.840.1.101.3.4.2.9" => derive!(Hmac<Sha3_384>, 48),
+        "sha3_512" | "2.16.840.1.101.3.4.2.10" => derive!(Hmac<Sha3_512>, 64),
+        "md5" | "1.2.840.113549.2.5" => derive!(Hmac<Md5>, 16),
+        "ripemd160" | "ripemd" | "rmd160" | "1.3.36.3.2.1" => derive!(Hmac<Ripemd160>, 20),
+        "sm3" | "1.2.156.10197.1.401" => derive!(Hmac<Sm3>, 32),
+        // BLAKE2 uses lazy block buffering, so the generic Digest-based HMAC is required.
+        "blake2b" | "blake2b512" | "1.3.6.1.4.1.1722.12.2.1.16" => {
+            derive!(SimpleHmac<Blake2b512>, 64)
         }
-        "sha512" => {
-            let mut buf = vec![0u8; 64];
-            pbkdf2::pbkdf2::<Hmac<Sha512>>(password, salt, rounds, &mut buf)
-                .map_err(|e| PasswordError::UnsupportedDigest(e.to_string()))?;
-            buf
-        }
-        "sha384" => {
-            let mut buf = vec![0u8; 48];
-            pbkdf2::pbkdf2::<Hmac<Sha384>>(password, salt, rounds, &mut buf)
-                .map_err(|e| PasswordError::UnsupportedDigest(e.to_string()))?;
-            buf
-        }
-        "sha224" => {
-            let mut buf = vec![0u8; 28];
-            pbkdf2::pbkdf2::<Hmac<Sha224>>(password, salt, rounds, &mut buf)
-                .map_err(|e| PasswordError::UnsupportedDigest(e.to_string()))?;
-            buf
+        "blake2s" | "blake2s256" | "1.3.6.1.4.1.1722.12.2.2.8" => {
+            derive!(SimpleHmac<Blake2s256>, 32)
         }
         other => return Err(PasswordError::UnsupportedDigest(other.to_string())),
     };
@@ -535,6 +546,26 @@ mod tests {
         assert!(!verify_password("hunter3", &h).unwrap());
         assert!(!verify_password("x", "garbage").unwrap());
         assert!(verify_password("x", "$pbkdf2-md4$1$AA$AA").is_err());
+    }
+
+    #[test]
+    fn verifies_legacy_sha1_hash() {
+        // Released v4 accepts passlib's SHA1 format as well as the current SHA256 default.
+        let hash = "$pbkdf2-sha1$1$YQ$Fjdb0.tvFFKt9C1qqYPG1X541e0";
+        assert!(verify_password("p", hash).unwrap());
+        assert!(!verify_password("wrong", hash).unwrap());
+    }
+
+    #[test]
+    fn verifies_released_python_digest_schemes() {
+        let fixture =
+            Value::from_json_str(include_str!("../tests/fixtures/password_schemes.json")).unwrap();
+        for case in fixture.get("cases").and_then(Value::as_list).unwrap() {
+            let hash = case.get("hash").and_then(Value::as_str).unwrap();
+            let expected = case.get("valid").and_then(Value::as_bool).unwrap();
+            assert_eq!(verify_password("p", hash).unwrap(), expected, "{hash}");
+            assert!(!verify_password("wrong", hash).unwrap(), "{hash}");
+        }
     }
 
     #[test]

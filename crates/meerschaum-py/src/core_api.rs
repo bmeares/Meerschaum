@@ -18,7 +18,7 @@ use meerschaum_core::config::{Config, GetOptions};
 use meerschaum_core::pipe::PipeDefaults;
 use meerschaum_core::template::TemplateResolver;
 use meerschaum_core::{Map, Pipe, Value};
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PyValueError};
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::sync::GILOnceCell;
@@ -569,6 +569,36 @@ pub fn replace_pipes_syntax<'py>(
 // ---------------------------------------------------------------------------------------------
 // Passwords
 
+/// Match hashlib's conversion order and platform C-long overflow exceptions exactly.
+fn password_rounds_long(
+    py: Python<'_>,
+    value: &Bound<'_, PyAny>,
+) -> PyResult<std::os::raw::c_long> {
+    // SAFETY: `value` is a live Python object and the GIL is held. The stable-ABI function
+    // performs the same __index__ conversion as hashlib and sets the Python error on failure.
+    let rounds = unsafe { pyo3::ffi::PyLong_AsLong(value.as_ptr()) };
+    if rounds == -1 && PyErr::occurred(py) {
+        return Err(PyErr::fetch(py));
+    }
+    Ok(rounds)
+}
+
+fn checked_password_rounds(rounds: std::os::raw::c_long) -> PyResult<u32> {
+    if rounds < 1 {
+        return Err(PyValueError::new_err(
+            "iteration value must be greater than 0.",
+        ));
+    }
+    if i128::from(rounds) > i128::from(i32::MAX) {
+        return Err(PyOverflowError::new_err("iteration value is too great."));
+    }
+    Ok(rounds as u32)
+}
+
+fn password_rounds(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<u32> {
+    checked_password_rounds(password_rounds_long(py, value)?)
+}
+
 /// `hash_password(password, salt=None, rounds=None)` (passlib `pbkdf2-sha256` format).
 #[pyfunction]
 #[pyo3(signature = (password, salt=None, rounds=None))]
@@ -576,9 +606,10 @@ pub fn hash_password(
     py: Python<'_>,
     password: Option<String>,
     salt: Option<Vec<u8>>,
-    rounds: Option<u32>,
+    rounds: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<String> {
     let password = password.unwrap_or_default();
+    let rounds = rounds.map(|value| password_rounds(py, value)).transpose()?;
     py.allow_threads(|| meerschaum_core::users::hash_password(&password, salt.as_deref(), rounds))
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
@@ -593,10 +624,8 @@ pub fn verify_password(
     let (Some(password), Some(password_hash)) = (password, password_hash) else {
         return Ok(false);
     };
-    let ok = py
-        .allow_threads(|| meerschaum_core::users::verify_password(&password, &password_hash))
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
-    if !ok && password_hash.split('$').count() != 5 {
+    let parts: Vec<&str> = password_hash.split('$').collect();
+    let malformed = || -> PyResult<bool> {
         emit_warnings(
             py,
             vec![format!(
@@ -604,6 +633,43 @@ pub fn verify_password(
             )],
             2,
         )?;
+        Ok(false)
+    };
+    if parts.len() != 5
+        || meerschaum_core::users::ab64_decode(parts[3]).is_err()
+        || meerschaum_core::users::ab64_decode(parts[4]).is_err()
+    {
+        return malformed();
     }
-    Ok(ok)
+    // v4 parses an arbitrary-size Python int, then hashlib checks its iteration bound.
+    // Preserve that order: a huge valid decimal is an OverflowError, not a malformed hash.
+    let Ok(rounds) = py.get_type::<PyInt>().call1((parts[2],)) else {
+        return malformed();
+    };
+    let algorithm = parts[1].rsplit('-').next().unwrap_or(parts[1]);
+    // Argument Clinic rejects an embedded NUL in the digest name before converting rounds.
+    if algorithm.contains('\0') {
+        py.import("_hashlib")?.call_method1("new", (algorithm,))?;
+    }
+    let rounds = password_rounds_long(py, &rounds)?;
+    // CPython looks up a digest after C-long conversion but before its iteration bounds.
+    // Only native-unsupported names consult stdlib lookup metadata: no password, salt, or
+    // Python PBKDF2 implementation is involved. Its error type/message depend on the runtime.
+    let digest = match meerschaum_core::users::pbkdf2_hmac(algorithm, b"", b"", 1) {
+        Err(meerschaum_core::users::PasswordError::UnsupportedDigest(_)) => {
+            Some(py.import("_hashlib")?.call_method1("new", (algorithm,))?)
+        }
+        _ => None,
+    };
+    let rounds = checked_password_rounds(rounds)?;
+    if let Some(digest) = digest {
+        if digest.getattr("digest_size")?.extract::<usize>()? == 0 {
+            // PARITY: CPython 3.11-3.15 validates the derived key length after iterations.
+            // SHAKE has no fixed digest size and cannot be used for PBKDF2.
+            return Err(PyValueError::new_err("key length must be greater than 0."));
+        }
+    }
+    let normalized = format!("${}${rounds}${}${}", parts[1], parts[3], parts[4]);
+    py.allow_threads(|| meerschaum_core::users::verify_password(&password, &normalized))
+        .map_err(|e| PyValueError::new_err(e.to_string()))
 }

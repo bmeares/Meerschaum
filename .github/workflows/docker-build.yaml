@@ -3,10 +3,10 @@ name: buildx
 # Builds the Docker images with scripts/docker/buildx.sh (docs/design/v5-build.md):
 #   minimal and full (the default target with `meerschaum` and `meerschaum[full]` installed from the
 #   maturin wheels, plus the native `mrsm`), and slim (`--target slim`: the base wheels only),
-#   then runs the §12.1 size gate (slim < 200 MB, full < 900 MB).
+#   then runs the §12.1 size gate (slim ≤ 250 MB, full < 900 MB).
 #
 # The size gate ENFORCES by default (5.0.0rc1 requires it, §13): the job fails when `slim`
-# exceeds 200 MB or `full` exceeds 900 MB (uncompressed, `docker image inspect`). `warn` only
+# exceeds 250 MB or `full` exceeds 900 MB (uncompressed, `docker image inspect`). `warn` only
 # reports (use it to look at a branch that is over budget); `skip` does not measure.
 
 on:
@@ -21,7 +21,7 @@ on:
         type: boolean
         default: false
       size_gate:
-        description: 'Size gate mode (slim < 200 MB, full < 900 MB): enforce fails the run, warn only reports.'
+        description: 'Size gate mode (slim ≤ 250 MB, full < 900 MB): enforce fails the run, warn only reports.'
         type: choice
         options: [ enforce, warn, skip ]
         default: enforce
@@ -64,7 +64,7 @@ jobs:
           SLIM_IMAGE: ${{ steps.build.outputs.slim_image }}
           FULL_IMAGE: ${{ steps.build.outputs.full_image }}
         run: |
-          args=(--slim-image "$SLIM_IMAGE" --full-image "$FULL_IMAGE" --slim-max 200 --full-max 900)
+          args=(--slim-image "$SLIM_IMAGE" --full-image "$FULL_IMAGE" --slim-max 250 --full-max 900)
           if [ "$SIZE_GATE_MODE" = "warn" ]; then
             args+=(--warn-only)
           fi

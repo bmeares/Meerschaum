@@ -4,9 +4,8 @@
 //! The in-memory fakes reproduce the semantics the parity fixtures were recorded with (see
 //! `tests/fixtures/gen_compose.py`): a registry of pipes with parameters, `edit`/`delete` events,
 //! and a fixed set of jobs. The CLI implements [`InstanceOps`] over the Rust instance connectors
-//! (`meerschaum_cli::native::compose_instance::ComposeInstance`); `JobOps` over
-//! `meerschaum-jobs` is still to do (the CLI serves only the subactions that never list jobs:
-//! `explain`, `init`, `up --dry`).
+//! (`meerschaum_cli::native::compose_instance::ComposeInstance`); the CLI's `JobOps` reads
+//! the native supervisor under the same project configuration.
 
 use indexmap::IndexMap;
 use meerschaum_core::pipe::Pipe;
@@ -21,6 +20,12 @@ pub trait InstanceOps {
     /// environment, root directory and `config:` block scope the instance connectors (Python
     /// swaps the config and environment for the duration of a subaction). Fakes ignore it.
     fn configure(&mut self, _host: &Host, _project: &Project) {}
+
+    /// Configure a live adapter, propagating setup errors to the compose action.
+    fn try_configure(&mut self, host: &Host, project: &Project) -> Result<(), String> {
+        self.configure(host, project);
+        Ok(())
+    }
 
     /// `mrsm.get_connector(keys, **attributes)` for a custom connector defined by the project
     /// (`build_custom_connectors`). The default accepts every connector.
@@ -51,6 +56,11 @@ pub trait InstanceOps {
 
     /// `pipe.delete(drop=True)`.
     fn delete_pipe(&mut self, pipe: &Pipe) -> SuccessTuple;
+
+    /// Warnings emitted by live operations, drained after the operation.
+    fn take_warnings(&mut self) -> Vec<String> {
+        Vec::new()
+    }
 
     /// The table reference `{{ Pipe(...) }}` resolves to (the quoted, schema-qualified target on
     /// SQL instances). The default has no live connector and fails, which leaves the template
@@ -213,6 +223,11 @@ pub struct JobInfo {
 
 /// The job supervisor.
 pub trait JobOps {
+    /// Select the project's root, environment and executor before reading jobs.
+    fn configure(&mut self, _host: &Host, _project: &Project) -> Result<(), String> {
+        Ok(())
+    }
+
     /// `meerschaum.jobs.get_jobs()`.
     fn get_jobs(&mut self) -> IndexMap<String, JobInfo>;
 }

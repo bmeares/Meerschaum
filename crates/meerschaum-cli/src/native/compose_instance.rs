@@ -1,6 +1,5 @@
-//! [`InstanceOps`] over the Rust instance connectors: what `mrsm compose explain`, `init` and
-//! `up --dry` use to read (and, for `up`, edit) the project's pipe registrations
-//! (`meerschaum/compose/subactions/{explain,up}.py`).
+//! [`InstanceOps`] over the Rust instance connectors: Compose registration queries and edits,
+//! temporary-pipe syncs through the native engine, and removal of unshared pipe data.
 //!
 //! Python runs a subaction inside `replace_config(<config: block>)` and `replace_env(<project
 //! env>)`, so the instance connectors are the project's: its `config:` connectors, its
@@ -68,6 +67,7 @@ pub struct ComposeInstance {
     failed: HashMap<String, String>,
     /// Lazy connectors for absent SQLite files, by keys (only used to render table names).
     absent: HashMap<String, Arc<SqlConnector>>,
+    warnings: Vec<String>,
 }
 
 impl Default for ComposeInstance {
@@ -85,6 +85,7 @@ impl ComposeInstance {
             scope: None,
             failed: HashMap::new(),
             absent: HashMap::new(),
+            warnings: Vec::new(),
         }
     }
 
@@ -277,6 +278,10 @@ fn raised(message: &str) -> String {
 
 impl InstanceOps for ComposeInstance {
     fn configure(&mut self, host: &Host, project: &Project) {
+        let _ = self.try_configure(host, project);
+    }
+
+    fn try_configure(&mut self, host: &Host, project: &Project) -> Result<(), String> {
         // A new project scope replaces everything built for the previous one.
         if self.scope.is_some() {
             self.session.shutdown();
@@ -284,10 +289,16 @@ impl InstanceOps for ComposeInstance {
         }
         self.failed.clear();
         self.absent.clear();
-        self.scope = ProjectConfig::new(host, project).ok().map(|config| {
-            let defaults = config.pipe_defaults();
-            Scope { config, defaults }
-        });
+        self.warnings.clear();
+        self.scope = None;
+        let config = ProjectConfig::new(host, project).map_err(|e| e.message)?;
+        let env = project.env_dict().map_err(|e| e.message)?;
+        self.session
+            .set_worker_environment(meerschaum_compose::env::env_dict_to_strings(&env))
+            .map_err(|e| e.message)?;
+        let defaults = config.pipe_defaults();
+        self.scope = Some(Scope { config, defaults });
+        Ok(())
     }
 
     fn get_pipes(&mut self, instance_keys: &str, tags: &[String]) -> Vec<Pipe> {
@@ -321,6 +332,10 @@ impl InstanceOps for ComposeInstance {
     }
 
     fn get_id(&mut self, pipe: &Pipe) -> Option<i64> {
+        // PARITY: temporary Pipe.get_id() returns None even when the same keys are registered.
+        if pipe.temporary {
+            return None;
+        }
         let Resolved::Live(instance) = self.resolve(pipe.instance_keys()) else {
             return None;
         };
@@ -355,14 +370,35 @@ impl InstanceOps for ComposeInstance {
     }
 
     fn delete_pipe(&mut self, pipe: &Pipe) -> SuccessTuple {
+        if pipe.temporary {
+            return SuccessTuple::fail(
+                "Cannot delete pipes created with `temporary=True` (read-only). You may want to call `pipe.drop()` instead.",
+            );
+        }
         match self.resolve(pipe.instance_keys()) {
-            Resolved::Live(instance) => self.session.block_on(instance.conn().delete_pipe(pipe)),
+            Resolved::Live(instance) => {
+                // Compose calls `Pipe.delete(drop=True)`; deleting registration alone leaves
+                // the unshared pipe's data behind.
+                let conn = instance.conn();
+                // PARITY: Pipe._delete.py:49-52 warns on a failed drop and still deletes
+                // registration. Preserve that result and expose the warning to compose.
+                let drop = self.session.block_on(conn.drop_pipe(pipe));
+                if !drop.success {
+                    self.warnings
+                        .push(format!("Failed to drop {pipe}:\n{}", drop.message));
+                }
+                self.session.block_on(conn.delete_pipe(pipe))
+            }
             Resolved::Absent(_) => SuccessTuple::fail(format!(
                 "The database of '{}' does not exist; cannot delete {pipe}.",
                 pipe.instance_keys()
             )),
             Resolved::Failed(e) => SuccessTuple::fail(e),
         }
+    }
+
+    fn take_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.warnings)
     }
 
     fn table_reference(&mut self, pipe: &Pipe) -> Result<String, String> {
@@ -397,6 +433,35 @@ impl InstanceOps for ComposeInstance {
         }
     }
 
-    // `sync_pipe` stays the trait default (a failure): the natively served subactions
-    // (`explain`, `init`, `up --dry`) never sync in-process.
+    fn sync_pipe(&mut self, pipe: &Pipe) -> SuccessTuple {
+        let Some(config) = self.config() else {
+            return SuccessTuple::fail("No compose project is configured.");
+        };
+        // Temporary pipes retain their in-memory definition and never register. Build the
+        // same registry as ordinary native syncs, including plugin connectors and hooks.
+        let instance = match self.session.instance(pipe.instance_keys(), config) {
+            Ok(instance) => instance,
+            Err(e) => return SuccessTuple::fail(e.message),
+        };
+        let selected = SelectedPipe {
+            pipe: pipe.clone(),
+            id: None,
+            hydrated: true,
+        };
+        let registry =
+            match super::engine_registry(config, &self.session, &instance, &[selected], true) {
+                Ok(registry) => registry,
+                Err(e) => return SuccessTuple::fail(e.message),
+            };
+        let engine = meerschaum_engine::Engine::new(registry.registry, registry.config);
+        let result = self.session.block_on(engine.sync_pipe(
+            pipe,
+            None,
+            &meerschaum_engine::SyncArgs::default(),
+        ));
+        SuccessTuple {
+            success: result.success,
+            message: result.message,
+        }
+    }
 }

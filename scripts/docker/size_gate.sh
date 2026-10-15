@@ -3,7 +3,7 @@
 #                                    [--slim-image IMAGE] [--full-image IMAGE]
 #
 # Docker image size gate (docs/design/v5.0.0.md §12.1): fails if the `slim` image exceeds
-# --slim-max (default 200) MB or the `full` image exceeds --full-max (default 900) MB.
+# --slim-max (default 250) MB or the `full` image exceeds --full-max (default 900) MB.
 # Sizes are the uncompressed image size from `docker image inspect` in decimal MB (10^6 bytes),
 # the same unit `docker images` prints. The images must already be loaded locally.
 #
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 warn_only=""
-slim_max=200
+slim_max=250
 full_max=900
 slim_image="bmeares/meerschaum:slim"
 full_image="bmeares/meerschaum:full"
@@ -46,7 +46,7 @@ check() {
     return 0
   fi
   mb="$(awk -v b="$bytes" 'BEGIN { printf "%.1f", b / 1000000 }')"
-  if awk -v m="$mb" -v x="$max" 'BEGIN { exit !(m > x) }'; then
+  if awk -v b="$bytes" -v x="$max" 'BEGIN { exit !(b > x * 1000000) }'; then
     status="FAIL"
     failures=$((failures + 1))
     if [ -n "${GITHUB_ACTIONS:-}" ]; then

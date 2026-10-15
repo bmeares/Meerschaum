@@ -267,7 +267,12 @@ fn do_subaction(ctx: &mut Ctx, subaction: &str) -> Result<SuccessTuple, ComposeE
     let project = init(ctx)?;
     let pc = ProjectConfig::new(ctx.host, &project)?;
     ctx.out.project = Some(project.clone());
-    ctx.instance.configure(ctx.host, &project);
+    ctx.instance
+        .try_configure(ctx.host, &project)
+        .map_err(ComposeError::value)?;
+    ctx.jobs
+        .configure(ctx.host, &project)
+        .map_err(ComposeError::value)?;
     match selected {
         "up" => compose_up(ctx, &project, &pc, UpMode::from_args(ctx.args)),
         "run" => compose_up(
@@ -1035,6 +1040,9 @@ fn compose_down(
         }
         ctx.out.messages.info(format!("Deleting unshared {pipe}."));
         let r = ctx.instance.delete_pipe(&pipe);
+        for warning in ctx.instance.take_warnings() {
+            ctx.out.messages.warn(warning);
+        }
         if !r.success {
             failures.push(format!("Failed to delete {pipe}: {}", r.message));
         }

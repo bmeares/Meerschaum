@@ -19,6 +19,9 @@ use crate::{
     ConnectorRegistry, Engine, EngineConfig, PluginSync, SyncArgs, SyncBegin, SyncHooks, SyncResult,
 };
 
+/// Host output sink for ordered pre- and post-sync hook results.
+pub type HookReporter = Arc<dyn Fn(SuccessTuple) + Send + Sync>;
+
 /// Adds manifest-declared Python connectors and hooks to a host's native registry.
 /// A weak callback reference avoids a registry / connector ownership cycle.
 pub struct PythonRegistry {
@@ -29,6 +32,7 @@ pub struct PythonRegistry {
     callbacks: Arc<NativeCallbacks>,
     legacy_streams: AtomicBool,
     stream_kwargs: RwLock<Map>,
+    hook_reporter: RwLock<Option<HookReporter>>,
 }
 
 impl PythonRegistry {
@@ -46,6 +50,7 @@ impl PythonRegistry {
             config,
             legacy_streams: AtomicBool::new(false),
             stream_kwargs: RwLock::new(Map::new()),
+            hook_reporter: RwLock::new(None),
             callbacks: Arc::new(NativeCallbacks {
                 registry: registry.clone(),
             }),
@@ -64,6 +69,15 @@ impl PythonRegistry {
             .stream_kwargs
             .write()
             .unwrap_or_else(|e| e.into_inner()) = kwargs;
+    }
+
+    /// Report hook results through the host's output formatter. Installing a sink does not
+    /// start Python; manifests without hooks continue to use only native connectors.
+    pub fn set_hook_reporter(&self, reporter: HookReporter) {
+        *self
+            .hook_reporter
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(reporter);
     }
 
     /// Native callback handler for plugin actions and other calls made by the host.
@@ -179,6 +193,11 @@ impl ConnectorRegistry for PythonRegistry {
                 pool: self.pool.clone(),
                 callbacks: self.callbacks(),
                 native: self.native.hooks(),
+                reporter: self
+                    .hook_reporter
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone(),
             }))
         } else {
             self.native.hooks()
@@ -345,6 +364,7 @@ struct PythonHooks {
     pool: WorkerPool,
     callbacks: Arc<dyn CallbackHandler>,
     native: Option<Arc<dyn SyncHooks>>,
+    reporter: Option<HookReporter>,
 }
 impl PythonHooks {
     async fn run(
@@ -373,6 +393,9 @@ impl PythonHooks {
         {
             Ok(results) => {
                 for hook in results {
+                    if let Some(reporter) = &self.reporter {
+                        reporter(hook.result.clone());
+                    }
                     if !hook.result.success {
                         tracing::warn!("{}: {}", hook.hook, hook.result.message);
                     }

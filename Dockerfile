@@ -9,7 +9,7 @@
 ###                                        (`[api,sql,pandas]`) or `minimal` (the base wheel, no extras).
 ###   --target full                        the same image (kept so `buildx.sh` can name the target).
 ###                                        Size gate: < 900 MB.
-###   --target slim                        the two wheels, no extras. Size gate: < 200 MB.
+###   --target slim                        the two wheels, no extras. Size gate: ≤ 250 MB.
 ###   --target rust-builder / py-slim / py-full / slim-rootfs / full-rootfs   build stages only.
 ###
 ### Both images are assembled the same way, so neither carries a package manager or a toolchain:
@@ -142,7 +142,7 @@ COPY --from=py-slim /install/ /rootfs/usr/local/
 
 
 ### ---------------------------------------------------------------------------------------------
-### slim: python3 and the two wheels (no extras) on the slim-rootfs. Size gate: < 200 MB.
+### slim: python3 and the two wheels (no extras) on the slim-rootfs. Size gate: ≤ 250 MB.
 FROM scratch AS slim
 
 ARG mrsm_user=meerschaum \

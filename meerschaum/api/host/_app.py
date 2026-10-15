@@ -102,8 +102,8 @@ def build_app(load_plugins: bool = True, debug: bool = False):
     run_api_plugins(app, debug=debug)
     ### PARITY: v4's `--no-dash` serves no plugin pages at all (no Dash app is mounted).
     if dash_enabled():
-        host_dash.mount_page_contract_routes(app, debug=debug)
         host_dash.mount_dash_apps(app, debug=debug)
+        host_dash.mount_page_contract_routes(app, debug=debug)
     if webterm_enabled():
         from meerschaum.api.host import _webterm
         _webterm.mount_webterm(app, debug=debug)

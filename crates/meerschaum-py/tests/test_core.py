@@ -45,9 +45,9 @@ def run_python(code: str, **env_overrides: str) -> subprocess.CompletedProcess:
     """Run `code` in a fresh interpreter with the working tree on `sys.path`."""
     env = {
         **os.environ,
-        'PYTHONPATH': str(REPO),
-        'MRSM_ROOT_DIR': str(REPO / 'test_root'),
-        'MRSM_PLUGINS_DIR': str(REPO / 'tests' / 'plugins'),
+        'PYTHONPATH': os.pathsep.join(filter(None, (str(REPO), os.environ.get('PYTHONPATH')))),
+        'MRSM_ROOT_DIR': os.environ.get('MRSM_ROOT_DIR', str(REPO / 'test_root')),
+        'MRSM_PLUGINS_DIR': os.environ.get('MRSM_PLUGINS_DIR', str(REPO / 'tests' / 'plugins')),
     }
     env.pop('MRSM_CORE', None)
     env.update(env_overrides)
@@ -311,8 +311,13 @@ def _pyarrow_table():
     for name, arr in columns:
         field = pa.field(name, arr.type)
         if name == 'large_binary':
-            # GeoArrow-style extension metadata must survive the boundary (D10).
-            field = field.with_metadata({'ARROW:extension:name': 'geoarrow.wkb'})
+            # Unregistered extension metadata must survive the boundary (D10).
+            # A registered name (e.g. geoarrow.wkb after geometry tests) makes
+            # PyArrow's own C-stream importer promote this raw binary field into
+            # an ExtensionType. These arbitrary bytes are not geometry values.
+            field = field.with_metadata({
+                'ARROW:extension:name': 'meerschaum.test.unregistered_large_binary',
+            })
         fields.append(field)
     schema = pa.schema(fields, metadata={'mrsm': 'v5'})
     return pa.Table.from_arrays([arr for _, arr in columns], schema=schema)

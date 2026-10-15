@@ -2,8 +2,7 @@
 //!
 //! The commands compose runs re-invoke this binary ([`MrsmRunner`]) under the project
 //! environment. Pipe registrations are read from the project's real instance connectors
-//! ([`ComposeInstance`]); jobs need the job supervisor, which compose does not link yet, so only
-//! `explain`, `init` and `up --dry` run natively and the other subactions go to the core action.
+//! ([`ComposeInstance`]); job discovery uses the native supervisor under the project config.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -11,7 +10,8 @@ use std::path::PathBuf;
 use meerschaum_compose::command::{CommandRunner, MrsmCommand};
 use meerschaum_compose::env::env_dict_to_strings;
 use meerschaum_compose::error::Message;
-use meerschaum_compose::ops::{InMemoryJobs, Prompter};
+use meerschaum_compose::ops::{JobInfo, JobOps, Prompter};
+use meerschaum_compose::pipes::ProjectConfig;
 use meerschaum_compose::project::{Host, Session};
 use meerschaum_compose::subactions::{ComposeArgs, ComposeOutput, Services, compose};
 use meerschaum_core::SuccessTuple;
@@ -20,6 +20,47 @@ use crate::builtin::{ActionError, ActionResult};
 use crate::dispatch::{CommandSpec, Runtime};
 use crate::native::compose_instance::ComposeInstance;
 use crate::value::{ArgsMap, PyValue};
+
+#[derive(Default)]
+struct ComposeJobs {
+    context: Option<meerschaum_jobs::JobsContext>,
+}
+
+impl JobOps for ComposeJobs {
+    fn configure(
+        &mut self,
+        host: &Host,
+        project: &meerschaum_compose::Project,
+    ) -> Result<(), String> {
+        self.context = None;
+        let project = ProjectConfig::new(host, project).map_err(|e| e.message)?;
+        let config = project.registry();
+        self.context = Some(meerschaum_jobs::JobsContext {
+            paths: meerschaum_jobs::config::JobPaths::from_config(config),
+            config: meerschaum_jobs::config::JobsConfig::from_config(config),
+            launcher: meerschaum_jobs::Launcher::from_env(),
+        });
+        Ok(())
+    }
+
+    fn get_jobs(&mut self) -> indexmap::IndexMap<String, JobInfo> {
+        let Some(context) = &self.context else {
+            return indexmap::IndexMap::new();
+        };
+        meerschaum_jobs::executor::get_jobs(context, false)
+            .into_iter()
+            .map(|(name, mut job)| {
+                let info = JobInfo {
+                    sysargs: job.sysargs(),
+                    env: job.env(),
+                    status: job.status().as_str().into(),
+                    restart: job.restarts(),
+                };
+                (name, info)
+            })
+            .collect()
+    }
+}
 
 /// Runs compose's commands by re-invoking `mrsm` (the current executable).
 pub struct MrsmRunner<'r, 'a> {
@@ -86,9 +127,8 @@ fn path(args: &ArgsMap, key: &str) -> Option<PathBuf> {
     }
 }
 
-/// Run a natively served subaction (`explain`, `init`, `up --dry`) over the project's real
-/// instance connectors ([`ComposeInstance`]), with the commands going through `runner`. Jobs
-/// are not linked: the subactions served here never list them.
+/// Run compose over the project's native instance connectors and supervisor, with commands
+/// going through `runner` under the project environment.
 pub fn compose_native(
     host: &Host,
     args: &ComposeArgs,
@@ -97,7 +137,7 @@ pub fn compose_native(
 ) -> ComposeOutput {
     let mut session = Session::default();
     let mut instance = ComposeInstance::new();
-    let mut jobs = InMemoryJobs::default();
+    let mut jobs = ComposeJobs::default();
     compose(
         host,
         &mut session,
@@ -124,11 +164,6 @@ pub fn compose_action(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         .map(|l| l.iter().map(PyValue::py_str).collect())
         .unwrap_or_default();
     let dry = flag(args, "dry");
-    let sub = action.first().map(String::as_str).unwrap_or("default");
-    let supported = matches!(sub, "explain" | "init") || (sub == "up" && dry);
-    if !supported {
-        return crate::python::core_action("compose", args, rt);
-    }
     let settings = rt.settings();
     let compose_args = ComposeArgs {
         action: action.clone(),

@@ -14,7 +14,7 @@ Conventions for the crates themselves are in `crates/README.md`.
 | `rust` / `parity` | self-hosted | regenerate `crates/*/tests/fixtures/gen_*.py` with v4.1.4, diff | yes (optional job) |
 | `rust` / `check (ubuntu-latest)` | GitHub-hosted | `cargo check --workspace` | yes |
 | `rust` / `check (windows-latest, macos-latest)` | GitHub-hosted | `cargo check --workspace` | no (`continue-on-error`, §15) |
-| `buildx` (`docker-build.yaml`) | GitHub-hosted, manual | `scripts/docker/buildx.sh`, then `size_gate.sh` | gate is warn-only by default |
+| `buildx` (`docker-build.yaml`) | GitHub-hosted, manual | `scripts/docker/buildx.sh`, then `size_gate.sh` | size gate enforces by default |
 | `pytest` | self-hosted | unchanged (`scripts/test.sh db`) | yes |
 
 `rust.yaml` runs on pushes to `v5` and on pull requests that touch `crates/**`, `Cargo.*`, `rust-toolchain.toml`,
@@ -89,35 +89,42 @@ There is no `setup.py`, `setup.cfg` or `MANIFEST.in` any more. Two distributions
 | `meerschaum` | root `pyproject.toml` (maturin mixed project, `abi3-py311`, module `meerschaum._core._core`) | The Python SDK and façade plus the Rust extension. `dependencies` is only `meerschaum-cli` (same version); every heavier package is an extra (`pandas`, `polars`, `geo`, `sql`, `sql-mssql`, `sql-oracle`, `sql-duckdb`, `sql-cockroachdb`, `api`, `dash`, `shell`, `cli-tools`, `gui`, `full`). |
 | `meerschaum-cli` | `crates/meerschaum-cli/pyproject.toml` (`bindings = "bin"`) | The native `mrsm` binary, no Python dependencies. |
 
-`scripts/check_packaging.py` verifies that the Cargo workspace version, the `meerschaum-cli==X` pin and the extras in `pyproject.toml` agree with `meerschaum/utils/packages/_packages.py`. `.github/workflows/wheels.yaml` builds both wheels on GitHub-hosted runners only (Linux, macOS, Windows) and smoke-tests them in a fresh venv. `scripts/rust/build_py.sh` still builds the in-tree extension for development. The Docker `slim` image installs the base wheel only (about 186 MB, under the 200 MB gate); the default image installs `meerschaum[full]`.
+`scripts/check_packaging.py` verifies that the Cargo workspace version, the `meerschaum-cli==X` pin and the extras in `pyproject.toml` agree with `meerschaum/utils/packages/_packages.py`. `.github/workflows/wheels.yaml` builds both wheels on GitHub-hosted runners only (Linux, macOS, Windows) and smoke-tests them in a fresh venv. `scripts/rust/build_py.sh` still builds the in-tree extension for development. The Docker `slim` image installs the base wheels only; the default image installs `meerschaum[full]`. Current size and functional gates are recorded below, rather than inferred from the scaffold measurements.
 
 ## Docker targets and the size gate (§12.1)
 
 | `docker buildx build ...` | Image | Contents |
 |---|---|---|
-| `.` (default, last stage) | v4, unchanged | `fedora:44`, `--build-arg dep_group=minimal\|api\|full` (default `full`). Never compiles Rust. |
-| `--target full` | `bmeares/meerschaum[:full\|:latest]` | the default image + `/usr/local/bin/mrsm` (+ `meerschaum/_core/*.so` once `scripts/rust/build_py.sh` exists). The entrypoint stays `python -m meerschaum`. |
-| `--target slim` | `bmeares/meerschaum:slim` | `FROM scratch` + a Fedora 44 rootfs from `dnf --installroot` (python3, bash, coreutils-single, CA certs, tzdata; no dnf, pip or compilers) + the base `meerschaum` wheel with no extras in `/usr/local` + `mrsm`. Entrypoint `mrsm`. |
+| `.` (default, last stage) | `full` with selected extras | Installs both locally built maturin wheels; `dep_group=full` (default), `api` or `minimal` selects the extras. Entrypoint `mrsm`. |
+| `--target full` | full runtime | Fedora 44 installroot plus the wheels, selected extras, plugin-install tooling and interactive tools. Entrypoint `mrsm`. |
+| `--target slim` | base runtime | Fedora 44 installroot plus the two base wheels, with no package manager or compiler. Entrypoint `mrsm`. |
 
-The `rust-builder` stage is Fedora 44 with rustup honoring `rust-toolchain.toml`, so the binary and
-the extension match the runtimes' glibc and Python. It runs `cargo build --release --locked -p
-meerschaum-cli` with `target/` and the registry in BuildKit cache mounts. If `scripts/rust/build_py.sh`
-exists, the stage also runs it and copies the compiled `_core` extension into both runtimes.
+The Fedora 44 `rust-builder` stage builds both wheels with maturin and the repository's Rust
+toolchain. BuildKit cache mounts share the Rust artifacts between builds. The `py-slim` and
+`py-full` stages install into a prefix and trim development files before copying into the
+runtime installroots. Full still explicitly includes PyYAML while public Python config I/O
+requires it; that is an outstanding D20 dependency, not part of the declared extras.
 
 `scripts/docker/buildx.sh [--push] [--v4-only]` builds the following images:
 
-- `minimal` on the default target.
+- `minimal` on the default target with no selected extras.
 - `full` on `--target full`.
 - `slim`, tagged `<version>-slim`, plus `slim` for releases.
 
 Pre-releases (`dev`, `rc`, `aN`, `bN`) get only version-qualified tags. The script refuses to push the
-Rust targets for a version below 5. `--v4-only` reproduces the v4 commands exactly.
-`scripts/docker/size_gate.sh [--warn-only] [--slim-max 200] [--full-max 900] [--slim-image I] [--full-image I]`
+Rust targets for a version below 5. The legacy `--v4-only` option selects default-target images and omits `slim`; the current
+Dockerfile still installs the v5 wheels.
+`scripts/docker/size_gate.sh [--warn-only] [--slim-max 250] [--full-max 900] [--slim-image I] [--full-image I]`
 measures the uncompressed size from `docker image inspect` in decimal MB and fails over the limit.
-In `docker-build.yaml` the gate defaults to `warn`, because `full` is still about 1.9 GB. Switch the
-default to `enforce` once the D20 cuts land; rc1 requires it.
+The maintainer raised the slim limit to 250 MB on 2026-10-15; full remains 900 MB.
+Comparisons use exact bytes, with rounding only for display.
+In `docker-build.yaml` the gate defaults to `enforce`. A passing size gate alone does not
+establish dependency-free operation: run `scripts/docker/smoke_facade.py` in the installed
+image with isolated root and plugins directories and networking disabled. It checks the native
+CLI, config lookup, password hashing, public YAML config I/O and list-of-dicts Pipe sync/read,
+and rejects dependency-install requests. Any failed operation is a release blocker.
 
-Measured on 2026-10-12, built from the committed scaffold:
+Historical measurements on 2026-10-12, built from the committed scaffold (limits at that time):
 
 | Image | Size | Limit |
 |---|---|---|
@@ -181,10 +188,12 @@ changing reference expectations. A proposed fix is not an approved deviation.
 | Concurrent engine-state initialization | Independent connectors can initialize tables and missing schemas concurrently; interrupted or failed initialization is recoverable; existing indexes are preserved; warm writes retain their cost | PostgreSQL coordination and missing-index recovery implemented; 940 SQL tests, focused engine regressions and 11 browser tests pass. CockroachDB coordination remains open |
 | Shared environment config layers | Compose reuses core parsing while preserving file/environment/patch precedence and config references | Implemented; core and compose parity tests pass |
 | Python bridge lifecycle and bootstrap | Repeated worker interrupts remain usable; venv locks release on failure; external uv works in an isolated interpreter | Implemented; focused lifecycle, worker, venv and package tests pass in both core modes |
-| pandas string dtype parity | Preserve Python merge results across pandas 2/3, string storage backends, null and empty deltas | Implemented; expanded core suites pass with pandas 2.3.3 and 3.0.3 in both modes. Separate object-to-string inference and Polars Object transport gaps remain in the ledger |
-| Remaining CLI output parity | Restore pre/post-sync hook result lines and distinguish datetime partition durations from integer-axis intervals | Open; tracked as V5-005 and V5-006, with current behavior preserved by the concurrency tests |
-| Maintainer behavior review | Decide whether connector overrides should stop mutating shared v4 static defaults; review any intentional behavior changes and associated reference expectations together | V4-001 documented with released-reference evidence; no change approved or applied |
-| Release-candidate gates | Remaining deployment replays, full flavor gates, packaging/image limits and Python-core removal | Outstanding; current CLI benchmarks are complete, but the hardening work above does not establish release readiness |
+| pandas string dtype parity | Preserve Python merge results across pandas 2/3, string storage backends, null and empty deltas | Implemented; expanded core suites pass with pandas 2.3.3 and 3.0.3 in both modes. Wave 11 extends coverage to object dtype inference and special-value null sentinels; see the ledger |
+| Remaining CLI output parity | Restore pre/post-sync hook result lines and distinguish datetime partition durations from integer-axis intervals | Implemented; hook transcripts match released v4 and typed partition metadata distinguishes datetime durations without changing the public Python metadata shape |
+| Maintainer behavior review | Decide whether connector overrides should stop mutating shared v4 static defaults; review any intentional behavior changes and associated reference expectations together | V4-001 isolation fix and V5-007 supported Polars Object input approved on 2026-10-15; regression tests retain unrelated connector defaults and reject unsupported objects |
+| Native Compose execution | Route all lifecycle subactions through native jobs, connectors and engine; preserve ownership and project configuration | Implemented and exercised with real disposable jobs and syncs; fresh plugin setup still reaches Python core and remains a D14 gap |
+| D14 / D20 | Remove Python core and runtime dependency fallbacks while preserving the facade and plugin SDK | Password hashing now delegates unconditionally to Rust; metadata lookup uses the standard library; synchronous SQLite no longer requests an async driver. Pipe/config/actions migration remains incomplete |
+| Release-candidate gates | Remaining deployment replays, full flavor gates, packaging/image limits and Python-core removal | Six-flavor facade suites, scoped private replays and image size checks passed. Installed-package functional gates and D14/D20 removal remain blockers; current CLI benchmarks are complete |
 
 Metadata benchmark: `show partitions --nopretty` over 64 PostgreSQL pipes, each with four
 daily partitions and 64 rows, took a median 0.625 seconds with one worker and 0.192 seconds
@@ -201,7 +210,7 @@ checks, and v5 was faster in every paired case. This covers 10k, 100k and 1M syn
 The disposable benchmark schema was removed afterward.
 [CLI report and samples](../../scripts/bench/results/2026-10-15-w10-hardening-cli.md).
 
-Validation for this batch: workspace formatting, all-target Clippy and Rust tests passed
+Wave 10 validation (historical; superseded for changed paths by Wave 11 below): workspace formatting, all-target Clippy and Rust tests passed
 (1,552 tests; three ignored subprocess entrypoints exercised by their parent tests).
 After the final boundary guards, PyO3 Clippy and all 16 unit tests passed again, followed by
 194 standalone core tests with one existing xfail in each pandas 2.3.3/3.0.3 × Python/Rust
@@ -209,5 +218,127 @@ combination and 100 affected dataframe/filtering/dtype integration tests. The ma
 Python suites passed separately: Rust mode 892 passed/12 skipped; Python mode 872 passed/
 31 skipped/one explicit local GeoArrow exclusion (ENV-001). All 11 browser tests passed.
 Packaging and fixture/changed-file hygiene checks passed. Reference fixtures and existing
-parity expectations were not rewritten. The separate suite runs do not resolve V4-001's
-combined collection-order failure; that behavior remains a maintainer review item.
+parity expectations were not rewritten. Those separate suite runs did not resolve V4-001's combined collection-order failure.
+The maintainer subsequently approved the isolation fix implemented in Wave 11.
+
+
+## Wave 11 continuation (2026-10-15)
+
+The maintainer raised the slim-image size budget to 250 MB; the full-image budget remains
+900 MB. No runtime contents need to be removed solely to meet the former 200 MB limit.
+
+The maintainer approved two behavior changes: per-connector SQL engine overrides now copy
+shared defaults (V4-001), and the existing native Polars input path preserves supported Object
+strings, UUIDs, bytes and Decimals while rejecting unsupported arbitrary objects (V5-007).
+Neither approval permits other observable v4 changes or weakening reference assertions.
+
+Compose lifecycle execution now uses native jobs and engine operations with project-scoped
+worker environments. Hook result output and datetime partition labels match released-reference
+behavior. Strict dataframe tests cover full-input dtype inference, special-value null sentinels,
+partial dtype maps and empty deltas. Plugin pages registered during Dash initialization are
+collected after initialization, fixing empty plugin apps discovered in private replays.
+
+D14 and D20 remain release blockers. Password hashing and verification now use Rust without a
+Python implementation. Standard-library distribution metadata replaces installer subprocesses,
+and synchronous SQLite/GeoPackage engines no longer request an async driver. These changes do
+not remove the remaining Python Pipe sync/fetch/verify branches, config read/write/sync logic,
+action fallbacks, formatting/job dependencies or fresh-plugin setup paths. A passing suite in
+Rust mode does not establish that all Python core execution has been removed.
+
+Private API-host replays used copied plugins, scratch roots, synthetic metadata and restricted
+network access. Across the two deployments, all 23 and four page routes and their page-router
+callbacks passed, including session propagation. Native secure-server checks passed for login,
+user lookup, console sessions, scoped-token reads and denied writes, revocation, redirects and
+MCP tool visibility. This does not establish all domain-data callbacks, middleware semantics,
+deployment-data geospatial exports or deployment from the final images. Three unchanged
+deployment export helpers were separately exercised with synthetic geometries: released v4
+and v5 matched GeoJSON output and GeoPackage row, CRS and geometry readback. The transport
+call was recorded locally; no remote export destination or original dataset was used. Raw
+deployment artifacts stay private.
+
+The initial commit's hosted wheel matrix (`d50d5698`) passed on Linux, Windows, macOS and
+experimental free-threaded Python. Self-hosted Rust and pytest jobs remained queued while the
+runner was offline; local gates use separate disposable database endpoints and do not establish
+remote CI success.
+
+
+Local validation: workspace formatting and all-target Clippy passed; workspace tests passed
+1,564 tests, with three ignored subprocess entrypoints exercised by their parent tests. Final
+password binding checks additionally match all 12 released-reference edge cases exactly
+(results, exception types/messages and warning counts). Core password tests cover 37 synthetic
+legacy digest/alias vectors, and the Python facade checks both core modes. The dataframe/core
+matrix passes 300 tests with one existing xfail in each pandas 2.3.3/3.0.3 × Python/Rust run,
+including 106 strict boundary regressions. All 11 browser tests and nine API-host tests passed.
+
+
+The private Compose replay exercised 35 configuration documents in native v5 and installed
+v4.1.4, preserving definitions for metadata checks and substituting synthetic SQLite operations
+and jobs for execution. Lifecycle statuses and synthetic row snapshots match, including the
+reference failures for empty-project and duplicate-definition cleanup. A shared two-project
+workflow preserves data until the last owner is removed. One initial subprocess failed while
+the debug binary was being relinked; fresh full-lifecycle and unchanged-state reruns passed, and
+the original failure remains in the private report. Subsequent checks use an immutable binary
+copy. This validates Compose structure and lifecycle, not original production fetches or jobs.
+
+
+Final slim image size is 200,384,701 bytes (200.38 MB), below the approved 250 MB limit.
+Its installed-package smoke ran read-only with networking and automatic installs disabled.
+Native CLI version, config lookup and password operations passed; public config writes failed
+because PyYAML is absent, and dict-based Pipe sync reached missing SQLAlchemy, typing and
+formatting dependencies (including `typing_extensions`, `pygments` and `rich`).
+The smoke correctly exits nonzero. These are D14/D20 release blockers, not an invitation to add
+those dependencies to the base wheel or to ship the remaining Python core fallback.
+
+
+The full image is 844,052,775 bytes (844.05 MB), below its unchanged 900 MB limit. Both exact
+byte-size gates pass. The final SDK and CLI wheels were exported and installed together into a
+clean offline environment. Installed-wheel and image functional checks remain failures:
+
+| Environment | Native CLI / config lookup / passwords | Public config roundtrip | Dict-based Pipe roundtrip | API host |
+|---|---|---|---|---|
+| Clean base-wheel environment | Pass | Fails: missing YAML support | Fails: remaining Python dependencies | Not a base-wheel extra |
+| Slim image | Pass | Fails: missing YAML support | Fails: remaining Python dependencies | Not a base-image extra |
+| Full image | Pass | Pass | Fails: implicit `semver>=3.0.2` install request | Fails: same install request; also warns about missing `uv` |
+
+Image probes used disabled networking, read-only runtime filesystems and writable scratch roots
+and home directories. Automatic install hooks were denied. The final full-image results use a
+writable scratch home, correcting an initial harness permission error. No packages or images
+were published. Size and packaging metadata success do not override these functional failures.
+
+
+Final review also confirmed V4-002 in installed released v4.1.4: dependency-version prechecks
+can call `pip_install` directly despite `MRSM_NO_AUTO_INSTALL`. The image smoke intercepted
+this request before execution; source inspection confirms the direct installer path. This
+inherited behavior needs maintainer review before repair, including the result returned when
+a version parser is unavailable. It was not introduced by the metadata lookup change.
+
+The full Python-mode facade suite passed against SQLite, PostGIS, TimescaleDB, MariaDB,
+MySQL and MSSQL: 1,725 passed, 40 skipped, one existing xfail and the explicit local GeoArrow
+exclusion (ENV-001). This combined run includes core and dataframe-boundary tests and retains
+the original static-default assertions. The self-hosted runner subsequently came online and
+was busy; the initial commit's Rust and pytest jobs were still queued at that check.
+
+
+An initial combined Rust-mode run found three generic Arrow roundtrip fixture failures
+(1,742 other tests passed). Pure PyArrow reproduces the same promotion from raw binary to
+GeoArrow after extension registration. The opaque-metadata fixture now uses a deliberately
+unregistered synthetic name; exact schema/data assertions and the real GeoArrow integration
+test are unchanged. The same-process geometry-plus-core check passes 195 tests with one
+existing xfail; this is test isolation, not a changed v4 behavior expectation.
+
+
+Final password error-path review found and repaired unsupported-digest exception and validation
+ordering differences. All 30 bounded released-v4 cases match the rebuilt extension exactly
+(exception type/message and warnings), and 12 facade tests pass across both core modes.
+Supported hashes use Rust exclusively. Unknown digest names consult standard-library lookup
+metadata for platform-specific errors; no password, salt or PBKDF2 work is delegated to Python.
+The final affected PyO3 Clippy check and extension build pass.
+
+
+The final combined Rust-mode facade suite passes: **1,755 passed, 21 skipped, one existing
+xfail**, across SQLite, PostGIS, TimescaleDB, MariaDB, MySQL and MSSQL. It includes the rebuilt
+password binding and the isolated Arrow fixture, with no deselections. The Python-mode full
+run passed 1,725 tests (40 skipped, one existing xfail, explicit ENV-001 exclusion); the final
+password and fixture changes additionally passed focused checks in both modes. Final PyO3
+unit tests pass all 16 cases. Both rebuilt images match the final wheel extension after the
+existing stripping step and match all 30 password error oracle cases.

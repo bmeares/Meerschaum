@@ -339,6 +339,8 @@ pub fn build(
         registry,
         config,
     } = registry(rt.config(), session, inst, pipes, inplace)?;
+    let output = session.clone();
+    python.set_hook_reporter(Arc::new(move |result| output.report_hook_result(result)));
     if listen {
         python.enable_legacy_streams();
     }

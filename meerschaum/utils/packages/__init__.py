@@ -571,7 +571,7 @@ def determine_version(
 
 def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, str]:
     """
-    Get a package's metadata from pip.
+    Read installed distribution metadata with the standard library.
     This is useful for getting a version when no `__version__` is defined
     and multiple versions are installed.
 
@@ -585,39 +585,30 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
 
     Returns
     -------
-    A dictionary of metadata from pip.
+    A dictionary of distribution metadata with lowercase keys.
     """
-    import meerschaum.config.paths as paths
-    install_name = _import_to_install_name(import_name)
+    from importlib import metadata
+    install_name = _import_to_install_name(import_name, with_version=False)
     if install_name.startswith(_MRSM_PACKAGE_ARCHIVES_PREFIX):
         return {}
-    _args = ['pip', 'show', install_name]
-    if venv is not None:
-        cache_dir_path = paths.VIRTENV_RESOURCES_PATH / venv / 'cache'
-        _args += ['--cache-dir', cache_dir_path.as_posix()]
-
-    if use_uv():
-        package_name = 'uv'
-        _args = ['pip', 'show', install_name]
+    if venv is None:
+        try:
+            distributions = [metadata.distribution(install_name)]
+        except metadata.PackageNotFoundError:
+            return {}
     else:
-        package_name = 'pip'
-        _args = ['show', install_name]
+        target = venv_target_path(venv, allow_nonexistent=True)
+        if not target.exists():
+            return {}
+        distributions = metadata.distributions(path=[str(target)])
 
-    proc = run_python_package(
-        package_name, _args,
-        capture_output=True, as_proc=True, venv=venv, universal_newlines=True,
-    )
-    outs, errs = proc.communicate()
-    lines = outs.split('\n')
-    meta = {}
-    for line in lines:
-        vals = line.split(": ")
-        if len(vals) != 2:
+    normalize = lambda name: re.sub(r'[-_.]+', '-', name).lower()
+    for distribution in distributions:
+        meta = distribution.metadata
+        if normalize(meta.get('Name', '')) != normalize(install_name):
             continue
-        k, v = vals[0].lower(), vals[1]
-        if v and 'UNKNOWN' not in v:
-            meta[k] = v
-    return meta
+        return {k.lower(): v for k, v in meta.items() if v and 'UNKNOWN' not in v}
+    return {}
 
 
 def need_update(
@@ -1036,7 +1027,7 @@ def pip_install(
 
     if have_pip and not have_uv_pip and _install_uv_pip and is_uv_enabled():
         if not pip_install(
-            'uv', 'PyYAML',
+            'uv',
             venv=None,
             debug=debug,
             _install_uv_pip=False,
@@ -1774,7 +1765,6 @@ def import_pandas(
                     stack=False,
                 )
 
-    pytz = attempt_import('pytz', debug=debug, lazy=False, **kw)
     pandas, pyarrow = attempt_import('pandas', 'pyarrow', debug=debug, lazy=False, **kw)
     pd = attempt_import(pandas_module_name, debug=debug, lazy=lazy, **kw)
     return pd

@@ -18,8 +18,6 @@ from meerschaum._internal.static import STATIC_CONFIG
 
 flavor_configs = STATIC_CONFIG['sql']['create_engine_flavors']
 install_flavor_drivers = {
-    'sqlite': ['aiosqlite'],
-    'geopackage': ['aiosqlite'],
     'duckdb': ['duckdb', 'duckdb_engine'],
     'mysql': ['pymysql'],
     'mariadb': ['pymysql'],
@@ -130,7 +128,11 @@ def create_engine(
     ###       2. System configuration
     ###       3. Connector configuration
     ###       4. Keyword arguments
-    _create_engine_args = flavor_configs.get(self.flavor, {}).get('create_engine', {})
+    # Flavor defaults may share nested dictionaries across SQL dialects. Per-connector
+    # overrides must not mutate STATIC_CONFIG or affect engines created afterwards.
+    _create_engine_args = copy.deepcopy(
+        flavor_configs.get(self.flavor, {}).get('create_engine', {})
+    )
     def _apply_create_engine_args(update):
         if 'ALL' not in flavor_configs[self.flavor].get('omit_create_engine', {}):
             _create_engine_args.update(

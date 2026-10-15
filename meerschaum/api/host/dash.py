@@ -349,10 +349,12 @@ def _normalize_page_result(result: Any):
 _contract_pages: Dict[str, Dict[str, Any]] = {}
 
 
-def get_page_contract_pages(debug: bool = False) -> Dict[str, Dict[str, Any]]:
+def get_page_contract_pages(debug: bool = False, refresh: bool = False) -> Dict[str, Dict[str, Any]]:
     """
     Return the page-contract pages found when the routes were mounted (computed once).
     """
+    if refresh:
+        _contract_pages.clear()
     if not _contract_pages:
         _contract_pages.update(collect_page_contract_pages(debug=debug))
     return _contract_pages
@@ -399,7 +401,9 @@ def mount_page_contract_routes(fastapi_app, debug: bool = False) -> List[str]:
     from starlette.concurrency import run_in_threadpool
     from meerschaum.api import no_auth
 
-    pages = get_page_contract_pages(debug=debug)
+    # Dash initialization functions may register pages after an earlier registry lookup.
+    # Mount the final startup registrations, rather than an incomplete cached snapshot.
+    pages = get_page_contract_pages(debug=debug, refresh=True)
     served = []
     for page_str, page in pages.items():
         function = page['function']
@@ -445,6 +449,30 @@ def mount_dash_apps(fastapi_app, debug: bool = False) -> List[str]:
     for module_name, functions in list(_dash_plugins.items()):
         dash_functions.setdefault(plugin_name_of(module_name), []).extend(functions)
 
+    # Initialize every plugin before collecting pages: v4 plugins commonly declare their
+    # @web_page functions inside @dash_plugin, where the app is available for callbacks.
+    for plugin_name, functions in dash_functions.items():
+        if not plugin_name:
+            continue
+        dash_app = make_dash_app(plugin_name)
+        initialized = getattr(dash_app, '_mrsm_initialized_functions', None)
+        if initialized is None:
+            initialized = []
+            dash_app._mrsm_initialized_functions = initialized
+        for function in functions:
+            if any(function is previous for previous in initialized):
+                continue
+            initialized.append(function)
+            try:
+                function(dash_app)
+            except Exception:
+                warn(
+                    f"Failed to load function '{function.__name__}' "
+                    + f"from plugin '{plugin_name}':\n"
+                    + traceback.format_exc(),
+                    stack=False,
+                )
+
     pages_by_plugin = collect_plugin_pages(debug=debug)
     plugin_names = [name for name in dash_functions if name]
     plugin_names += [name for name in pages_by_plugin if name and name not in plugin_names]
@@ -455,16 +483,8 @@ def mount_dash_apps(fastapi_app, debug: bool = False) -> List[str]:
     mounted = []
     for plugin_name in plugin_names:
         dash_app = make_dash_app(plugin_name, pages=pages_by_plugin.get(plugin_name, {}))
-        for function in dash_functions.get(plugin_name, []):
-            try:
-                function(dash_app)
-            except Exception:
-                warn(
-                    f"Failed to load function '{function.__name__}' "
-                    + f"from plugin '{plugin_name}':\n"
-                    + traceback.format_exc(),
-                    stack=False,
-                )
+        # make_dash_app reuses apps created during initialization; attach their pages now.
+        dash_app._mrsm_pages.update(pages_by_plugin.get(plugin_name, {}))
         fastapi_app.mount(
             f'{DASH_PREFIX}/{plugin_name}',
             a2wsgi.WSGIMiddleware(dash_app.server),

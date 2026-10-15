@@ -21,7 +21,8 @@ use pyo3::types::{PyDict, PyFrozenSet, PyList, PySet, PyString, PyTuple};
 use crate::convert::{PyCtx, py_to_cell};
 use crate::pandas_bridge::{
     ColumnMode, FrameKind, IndexSpec, OutSpec, PyFrame, frame_from_py, frame_from_py_with,
-    frame_to_py, object_string_nulls, string_merge_hint, unchanged_columns,
+    frame_to_py, object_json_nulls, object_special_nulls, object_string_inference,
+    object_string_nulls, string_merge_hint, unchanged_columns,
 };
 
 /// A `{col: dtype}` mapping with `str()` of each key and value.
@@ -230,6 +231,7 @@ fn enforce_output<'py>(
         labels: input.labels.clone(),
         reuse: unchanged_columns(input, out),
         placeholders: input.placeholders.clone(),
+        polars_objects: input.polars_objects.clone(),
     };
     frame_to_py(ctx, out, &input.kind, &spec)
 }
@@ -336,7 +338,7 @@ pub fn filter_unseen_df<'py>(
     for (col, typ) in &declared {
         if new.dtypes.contains_key(col) && old.dtypes.contains_key(col) {
             let target = k_to_pandas_dtype(typ);
-            let merge_target = string_merge_hint(&ctx, old.series.get(col), &target)?;
+            let mut merge_target = string_merge_hint(&ctx, old.series.get(col), &target)?;
             if merge_target != target {
                 if let Ok(data) = delta.data(col) {
                     // The nullable-string cast and normalize_nulls use pd.NA. Keep that
@@ -355,8 +357,12 @@ pub fn filter_unseen_df<'py>(
                 if let (Ok(old_col), Ok(new_col), Ok(result)) =
                     (old.frame.data(col), new.frame.data(col), delta.data(col))
                 {
+                    if infer_string && object_string_inference(old_col, new_col) {
+                        merge_target = "str".to_string();
+                    }
                     if let Some(normalized) =
                         object_string_nulls(old_col, new_col, result, infer_string)
+                            .filter(|_| merge_target == "object")
                     {
                         delta
                             .set(col, normalized)
@@ -365,6 +371,41 @@ pub fn filter_unseen_df<'py>(
                 }
             }
             hints.insert(col.clone(), merge_target);
+        }
+    }
+    // Special-column serialization is detected from the frames regardless of which columns
+    // appear in an explicit dtype mapping. Restore those object sentinels after dtype hints.
+    for col in old.series.keys() {
+        if let (Ok(old_col), Ok(new_col), Ok(result)) =
+            (old.frame.data(col), new.frame.data(col), delta.data(col))
+        {
+            // An explicit partial dtype map does not suppress normalize_nulls() for
+            // untyped object columns in either input frame.
+            if !declared.contains_key(col)
+                && old.dtypes.get(col).is_some_and(|dtype| dtype == "object")
+                && new.dtypes.get(col).is_some_and(|dtype| dtype == "object")
+            {
+                if infer_string && object_string_inference(old_col, new_col) {
+                    hints.insert(col.clone(), "str".to_string());
+                } else if let Some(normalized) =
+                    object_string_nulls(old_col, new_col, result, infer_string)
+                {
+                    delta
+                        .set(col, normalized)
+                        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                }
+            }
+            let result = delta
+                .data(col)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            if let Some(normalized) = object_special_nulls(old_col, new_col, result)
+                .or_else(|| object_json_nulls(old_col, new_col, result))
+            {
+                delta
+                    .set(col, normalized)
+                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                hints.insert(col.clone(), "object".to_string());
+            }
         }
     }
     // PARITY: a column the kernel keeps as `object` (bytes or dates cast by a hint against the
@@ -392,6 +433,7 @@ pub fn filter_unseen_df<'py>(
         labels,
         reuse: IndexMap::new(),
         placeholders: vec![],
+        polars_objects: new.polars_objects.clone(),
     };
     frame_to_py(&ctx, &delta, &new.kind, &spec)
 }
@@ -513,6 +555,7 @@ pub fn query_df<'py>(
             labels: input.labels.clone(),
             reuse: unchanged_columns(&input, &result.frame),
             placeholders: vec![],
+            polars_objects: input.polars_objects.clone(),
         };
         return frame_to_py(&ctx, &result.frame, &input.kind, &spec);
     }
@@ -552,6 +595,7 @@ pub fn query_df<'py>(
         labels: input.labels.clone(),
         reuse: unchanged_columns(&input, &result.frame),
         placeholders: vec![],
+        polars_objects: input.polars_objects.clone(),
     };
     frame_to_py(&ctx, &result.frame, &input.kind, &spec)
 }
