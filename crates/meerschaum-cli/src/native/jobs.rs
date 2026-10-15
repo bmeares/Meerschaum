@@ -44,6 +44,12 @@ pub fn stop_requested_flag() -> Arc<AtomicBool> {
         .clone()
 }
 
+/// Begin a new interactive command after any previous command has finished stopping.
+pub fn reset_stop_request() {
+    SIGNALS.store(0, Ordering::SeqCst);
+    stop_requested_flag().store(false, Ordering::SeqCst);
+}
+
 /// Turn the first SIGINT / SIGTERM into a stop request for long-running actions (laps,
 /// schedules, following logs); a second signal exits immediately (v4 raises `KeyboardInterrupt`
 /// at the next checkpoint).

@@ -462,11 +462,13 @@ def init_venv(
             verified_venvs.add(venv)
         return True
 
-    from meerschaum.utils.packages import run_python_package, attempt_import, _get_pip_os_env
+    from meerschaum.utils.packages import (
+        run_python_package, attempt_import, _get_pip_os_env, _get_uv_bin,
+    )
     global tried_virtualenv
     try:
         import venv as _venv
-        uv = attempt_import('uv', venv=None, debug=debug) if is_uv_enabled() else None
+        uv = _get_uv_bin() if is_uv_enabled() else None
         virtualenv = None
     except ImportError:
         _venv = None
@@ -481,107 +483,114 @@ def init_venv(
     wait_for_lock()
     update_lock(True)
 
-    if rename_vtp:
-        if debug:
-            print(f"Moving '{vtp}' to '{temp_vtp}'...")
-        shutil.move(vtp, temp_vtp)
+    try:
+        if rename_vtp:
+            if debug:
+                print(f"Moving '{vtp}' to '{temp_vtp}'...")
+            shutil.move(vtp, temp_vtp)
 
-    if uv is not None:
-        _venv_success = run_python_package(
-            'uv',
-            ['venv', venv_path.as_posix(), '-q', '--no-project', '--allow-existing', '--seed'],
-            venv=None,
-            env=_get_pip_os_env(),
-            debug=debug,
-        ) == 0
-
-    if _venv is not None and not _venv_success:
-        f = io.StringIO()
-        with redirect_stdout(f):
+        if uv is not None:
+            # Plugin imports run in this interpreter. Letting uv choose another version
+            # makes verification recreate the venv while its creation lock is still held.
             _venv_success = run_python_package(
-                'venv',
-                [venv_path.as_posix()] + (
-                    ['--symlinks']
-                    if platform.system() != 'Windows'
-                    else []
-                ),
-                venv=None, debug=debug
+                'uv',
+                [
+                    'venv', venv_path.as_posix(), '--python', sys.executable,
+                    '-q', '--no-project', '--allow-existing', '--seed',
+                ],
+                venv=None,
+                env=_get_pip_os_env(),
+                debug=debug,
             ) == 0
+
+        if _venv is not None and not _venv_success:
+            f = io.StringIO()
+            with redirect_stdout(f):
+                _venv_success = run_python_package(
+                    'venv',
+                    [venv_path.as_posix()] + (
+                        ['--symlinks']
+                        if platform.system() != 'Windows'
+                        else []
+                    ),
+                    venv=None, debug=debug
+                ) == 0
+            if not _venv_success:
+                print(f"Please install python3-venv.\n{f.getvalue()}\nFalling back to virtualenv...")
+            if not venv_exists(venv, debug=debug):
+                _venv = None
         if not _venv_success:
-            print(f"Please install python3-venv.\n{f.getvalue()}\nFalling back to virtualenv...")
-        if not venv_exists(venv, debug=debug):
-            _venv = None
-    if not _venv_success:
-        virtualenv = attempt_import(
-            'virtualenv',
-            venv=None,
-            lazy=False,
-            install=(not tried_virtualenv),
-            warn=False,
-            check_update=False,
-            color=False,
-            debug=debug,
-        )
-        if virtualenv is None:
-            print(
-                "Failed to import `venv` or `virtualenv`! "
-                + "Please install `virtualenv` via pip then restart Meerschaum."
+            virtualenv = attempt_import(
+                'virtualenv',
+                venv=None,
+                lazy=False,
+                install=(not tried_virtualenv),
+                warn=False,
+                check_update=False,
+                color=False,
+                debug=debug,
             )
-            if rename_vtp and temp_vtp.exists():
-                if debug:
-                    print(f"Moving '{temp_vtp}' back to '{vtp}'...")
-                shutil.move(temp_vtp, vtp)
-            update_lock(False)
-            return False
+            if virtualenv is None:
+                print(
+                    "Failed to import `venv` or `virtualenv`! "
+                    + "Please install `virtualenv` via pip then restart Meerschaum."
+                )
+                if rename_vtp and temp_vtp.exists():
+                    if debug:
+                        print(f"Moving '{temp_vtp}' back to '{vtp}'...")
+                    shutil.move(temp_vtp, vtp)
+                return False
 
-        tried_virtualenv = True
-        try:
-            python_folder = (
-                'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)
-            )
-            dist_packages_path = (
-                paths.VIRTENV_RESOURCES_PATH /
-                venv / 'local' / 'lib' / python_folder / 'dist-packages'
-            )
-            local_bin_path = paths.VIRTENV_RESOURCES_PATH / venv / 'local' / 'bin'
-            bin_path = paths.VIRTENV_RESOURCES_PATH / venv / 'bin'
-            vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
-            if bin_path.exists():
-                try:
-                    shutil.rmtree(bin_path)
-                except Exception:
-                    import traceback
-                    traceback.print_exc()
-            virtualenv.cli_run([venv_path.as_posix()])
-            if dist_packages_path.exists():
-                vtp.mkdir(exist_ok=True, parents=True)
-                for file_path in dist_packages_path.glob('*'):
-                    shutil.move(file_path, vtp)
-                shutil.rmtree(dist_packages_path)
-                #  shutil.move(dist_packages_path, vtp)
-                bin_path.mkdir(exist_ok=True, parents=True)
-                for file_path in local_bin_path.glob('*'):
-                    shutil.move(file_path, bin_path)
-                #  shutil.move(local_bin_path, bin_path)
-                shutil.rmtree(local_bin_path)
+            tried_virtualenv = True
+            try:
+                python_folder = (
+                    'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)
+                )
+                dist_packages_path = (
+                    paths.VIRTENV_RESOURCES_PATH /
+                    venv / 'local' / 'lib' / python_folder / 'dist-packages'
+                )
+                local_bin_path = paths.VIRTENV_RESOURCES_PATH / venv / 'local' / 'bin'
+                bin_path = paths.VIRTENV_RESOURCES_PATH / venv / 'bin'
+                vtp = venv_target_path(venv=venv, allow_nonexistent=True, debug=debug)
+                if bin_path.exists():
+                    try:
+                        shutil.rmtree(bin_path)
+                    except Exception:
+                        import traceback
+                        traceback.print_exc()
+                virtualenv.cli_run([venv_path.as_posix()])
+                if dist_packages_path.exists():
+                    vtp.mkdir(exist_ok=True, parents=True)
+                    for file_path in dist_packages_path.glob('*'):
+                        shutil.move(file_path, vtp)
+                    shutil.rmtree(dist_packages_path)
+                    #  shutil.move(dist_packages_path, vtp)
+                    bin_path.mkdir(exist_ok=True, parents=True)
+                    for file_path in local_bin_path.glob('*'):
+                        shutil.move(file_path, bin_path)
+                    #  shutil.move(local_bin_path, bin_path)
+                    shutil.rmtree(local_bin_path)
 
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            if rename_vtp and temp_vtp.exists():
-                shutil.move(temp_vtp, vtp)
-            update_lock(False)
-            return False
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                if rename_vtp and temp_vtp.exists():
+                    shutil.move(temp_vtp, vtp)
+                return False
+        if rename_vtp and temp_vtp.exists():
+            if debug:
+                print(f"Cleanup: move '{temp_vtp}' back to '{vtp}'.")
+            shutil.move(temp_vtp, vtp)
+
+    finally:
+        update_lock(False)
+
+    # Verification can recreate an incompatible environment. Release the creation lock
+    # first so that the recursive init does not wait on our own lock for 30 seconds.
     if verify:
         verify_venv(venv, debug=debug)
         verified_venvs.add(venv)
-
-    if rename_vtp and temp_vtp.exists():
-        if debug:
-            print(f"Cleanup: move '{temp_vtp}' back to '{vtp}'.")
-        shutil.move(temp_vtp, vtp)
-
-    update_lock(False)
     return True
 
 

@@ -165,3 +165,49 @@ helpers under `fixtures/` are excluded because they name the things they scrub. 
 a Python reference server or daemon must do so with `env -i` plus only `PATH`, a temporary `HOME`,
 `MRSM_ROOT_DIR`, `MRSM_PLUGINS_DIR` and `PYTHONHASHSEED=0`, and must replace minted credentials, pids,
 timestamps and absolute paths with placeholders before writing.
+
+## Active v5 hardening work order (2026-10-15)
+
+Implementation must preserve Python plugin compatibility while moving execution into Rust.
+Track behavioral findings in the [bug and behavior review ledger](../../crates/meerschaum-py/PARITY.md#bug-and-behavior-review-ledger).
+Parity is evidence for review, not a requirement to preserve every v4 bug: intentional changes
+to observable v4 behavior and corresponding reference-test rewrites require maintainer approval.
+Record the trigger, before/after behavior, compatibility impact, evidence and decision before
+changing reference expectations. A proposed fix is not an approved deviation.
+
+| Work | Acceptance criteria | Status |
+|---|---|---|
+| Parallel metadata actions, starting with `show partitions`, `show rowcounts` and `show sizes` | Bounded concurrency only for supported connectors; explicit single-worker mode; deterministic output and preserved per-pipe errors; measured overlapping reads and serial fallback tests | Implemented for capable native SQL connectors; overlap and exact output tests pass. Python/custom, API and Valkey connectors remain serial |
+| Concurrent engine-state initialization | Independent connectors can initialize tables and missing schemas concurrently; interrupted or failed initialization is recoverable; existing indexes are preserved; warm writes retain their cost | PostgreSQL coordination and missing-index recovery implemented; 940 SQL tests, focused engine regressions and 11 browser tests pass. CockroachDB coordination remains open |
+| Shared environment config layers | Compose reuses core parsing while preserving file/environment/patch precedence and config references | Implemented; core and compose parity tests pass |
+| Python bridge lifecycle and bootstrap | Repeated worker interrupts remain usable; venv locks release on failure; external uv works in an isolated interpreter | Implemented; focused lifecycle, worker, venv and package tests pass in both core modes |
+| pandas string dtype parity | Preserve Python merge results across pandas 2/3, string storage backends, null and empty deltas | Implemented; expanded core suites pass with pandas 2.3.3 and 3.0.3 in both modes. Separate object-to-string inference and Polars Object transport gaps remain in the ledger |
+| Remaining CLI output parity | Restore pre/post-sync hook result lines and distinguish datetime partition durations from integer-axis intervals | Open; tracked as V5-005 and V5-006, with current behavior preserved by the concurrency tests |
+| Maintainer behavior review | Decide whether connector overrides should stop mutating shared v4 static defaults; review any intentional behavior changes and associated reference expectations together | V4-001 documented with released-reference evidence; no change approved or applied |
+| Release-candidate gates | Remaining deployment replays, full flavor gates, packaging/image limits and Python-core removal | Outstanding; current CLI benchmarks are complete, but the hardening work above does not establish release readiness |
+
+Metadata benchmark: `show partitions --nopretty` over 64 PostgreSQL pipes, each with four
+daily partitions and 64 rows, took a median 0.625 seconds with one worker and 0.192 seconds
+with four (3.26× speedup). Two warmups per setting preceded eight paired rounds with
+alternating order; all 20 runs produced identical output. Timing includes CLI startup and
+output capture. This measures loopback PostgreSQL with warm caches, without injected latency;
+it is not a network-latency projection. The disposable database was removed afterward.
+[Recorded samples](../../scripts/bench/results/2026-10-15-w10-metadata.json).
+
+The rebuilt release CLI also completed the SQLite/PostGIS sync, incremental-sync and chain
+benchmark matrix against v4.1.4: all 26 implementation/case entries passed their row-count
+checks, and v5 was faster in every paired case. This covers 10k, 100k and 1M syncs, 100k and
+1M incremental syncs, and three-pipe chains; graph-mode chains have no direct v4 counterpart.
+The disposable benchmark schema was removed afterward.
+[CLI report and samples](../../scripts/bench/results/2026-10-15-w10-hardening-cli.md).
+
+Validation for this batch: workspace formatting, all-target Clippy and Rust tests passed
+(1,552 tests; three ignored subprocess entrypoints exercised by their parent tests).
+After the final boundary guards, PyO3 Clippy and all 16 unit tests passed again, followed by
+194 standalone core tests with one existing xfail in each pandas 2.3.3/3.0.3 × Python/Rust
+combination and 100 affected dataframe/filtering/dtype integration tests. The main SQLite
+Python suites passed separately: Rust mode 892 passed/12 skipped; Python mode 872 passed/
+31 skipped/one explicit local GeoArrow exclusion (ENV-001). All 11 browser tests passed.
+Packaging and fixture/changed-file hygiene checks passed. Reference fixtures and existing
+parity expectations were not rewritten. The separate suite runs do not resolve V4-001's
+combined collection-order failure; that behavior remains a maintainer review item.

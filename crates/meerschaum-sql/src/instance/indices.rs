@@ -54,6 +54,31 @@ impl SqlConnector {
             chunk_interval: None,
         };
         let mut queries = get_create_index_queries(&self.ctx(), sp, &state).map_err(be)?;
+        // The v4 renderer always emits datetime/id DDL, even for existing indices.
+        // Cold internal readiness checks run against already initialized tables too;
+        // skip those ordinary indices at runtime while retaining missing unique keys.
+        if sp.pipe().temporary && sp.is_static() && sp.pipe().connector_keys() == "mrsm" {
+            let names = get_pipe_index_names(&self.ctx(), sp);
+            for role in ["datetime", "id"] {
+                if role == "datetime" && self.flavor.is_timescaledb() && sp.hypertable() {
+                    continue;
+                }
+                let Some(name) = names.get(role) else {
+                    continue;
+                };
+                let exists = state.existing_cols_indices.values().flatten().any(|index| {
+                    index
+                        .name
+                        .as_deref()
+                        .is_some_and(|existing| existing.eq_ignore_ascii_case(name))
+                });
+                if exists {
+                    if let Some(column) = sp.column(role) {
+                        queries.shift_remove(&column);
+                    }
+                }
+            }
+        }
         // GeoPackage: an index over the registered geometry column is an R-tree (§6.2).
         if self.flavor == Flavor::Geopackage {
             for (key, col) in self.geopackage_spatial_index_keys(sp).await {

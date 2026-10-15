@@ -665,6 +665,131 @@ def test_sql_connector_routing(gate, tmp_path):
 
 
 @requires_core
+@pytest.mark.parametrize('infer_string', [False, True])
+@pytest.mark.parametrize('old_dtype,new_dtype', [
+    (None, None),
+    ('str', 'str'),
+    ('str', 'string'),
+    ('string', 'str'),
+    ('string', 'string'),
+    ('string[python]', 'string[python]'),
+    ('string[pyarrow]', 'string[pyarrow]'),
+])
+@pytest.mark.parametrize('values', [(None,), ('b',), (None, 'b'), ('a',)])
+def test_filter_unseen_string_merge_dtypes(gate, infer_string, old_dtype, new_dtype, values):
+    """NaN-backed strings merge differently from nullable strings, even for null deltas."""
+    pd = pytest.importorskip('pandas')
+    pytest.importorskip('pyarrow')
+    from meerschaum.utils.dataframe import filter_unseen_df
+
+    # pandas 2.3 exposes pandas 3's inferred string dtype through this option, so the
+    # standalone suite covers it without depending on which package earlier tests import.
+    with pd.option_context('future.infer_string', infer_string):
+        old = pd.DataFrame({'s': pd.Series(['a'], dtype=old_dtype)})
+        new = pd.DataFrame({'s': pd.Series(values, dtype=new_dtype)})
+        old.index = [42]
+        new.index = range(100, 100 + len(new))
+        gate.set_mode('python')
+        expected = filter_unseen_df(old, new)
+        gate.set_mode('rust')
+        actual = filter_unseen_df(old, new)
+
+    pd.testing.assert_frame_equal(actual, expected)
+    if expected['s'].dtype == object:
+        for actual_value, expected_value in zip(actual['s'], expected['s']):
+            if expected_value is pd.NA:
+                assert actual_value is pd.NA
+    if old_dtype == new_dtype == 'string':
+        assert str(actual['s'].dtype) == 'string'
+
+
+@requires_core
+@pytest.mark.parametrize('infer_string', [False, True])
+def test_filter_unseen_mixed_object_string_nulls(gate, infer_string):
+    pd = pytest.importorskip('pandas')
+    from meerschaum.utils.dataframe import filter_unseen_df
+
+    with pd.option_context('future.infer_string', infer_string):
+        old = pd.DataFrame({'s': pd.Series(['a', 1], dtype=object)})
+        new = pd.DataFrame({'s': pd.Series([None, 'b', 2], dtype=object)})
+        gate.set_mode('python')
+        expected = filter_unseen_df(old, new)
+        gate.set_mode('rust')
+        actual = filter_unseen_df(old, new)
+
+    pd.testing.assert_frame_equal(actual, expected)
+    assert actual['s'].iloc[0] is pd.NA
+    assert actual['s'].tolist()[1:] == ['b', 2]
+
+
+@requires_core
+@pytest.mark.parametrize('declare_json', [False, True])
+def test_filter_unseen_object_string_keeps_special_nulls(gate, declare_json):
+    pd = pytest.importorskip('pandas')
+    from meerschaum.utils.dataframe import filter_unseen_df
+
+    with pd.option_context('future.infer_string', False):
+        old = pd.DataFrame({
+            's': pd.Series(['a'], dtype=object),
+            'j': pd.Series([{'x': 1}], dtype=object),
+            'n': pd.Series([decimal.Decimal('1.1')], dtype=object),
+        })
+        new = pd.DataFrame({
+            's': pd.Series([None, 'b'], dtype=object),
+            'j': pd.Series([None, {'x': 2}], dtype=object),
+            'n': pd.Series([None, decimal.Decimal('2.2')], dtype=object),
+        })
+        options = {'dtypes': {'s': 'object', 'j': 'json', 'n': 'object'}} if declare_json else {}
+        gate.set_mode('python')
+        expected = filter_unseen_df(old, new, **options)
+        gate.set_mode('rust')
+        actual = filter_unseen_df(old, new, **options)
+
+    pd.testing.assert_frame_equal(actual, expected)
+    assert actual['s'].iloc[0] is pd.NA
+    assert actual['j'].iloc[0] is None
+    assert actual['n'].iloc[0].is_nan()
+
+
+@requires_core
+def test_filter_unseen_declared_json_encoded_strings(gate):
+    pd = pytest.importorskip('pandas')
+    from meerschaum.utils.dataframe import filter_unseen_df
+
+    with pd.option_context('future.infer_string', False):
+        old = pd.DataFrame({
+            's': pd.Series(['a'], dtype=object),
+            'j': pd.Series(['{"x":1}'], dtype=object),
+        })
+        new = pd.DataFrame({
+            's': pd.Series([None, 'b'], dtype=object),
+            'j': pd.Series([None, '{"x":2}'], dtype=object),
+        })
+        options = {'dtypes': {'s': 'object', 'j': 'json'}}
+        gate.set_mode('python')
+        expected = filter_unseen_df(old, new, **options)
+        gate.set_mode('rust')
+        actual = filter_unseen_df(old, new, **options)
+
+    pd.testing.assert_frame_equal(actual, expected)
+    assert actual['s'].iloc[0] is pd.NA
+    assert actual['j'].iloc[0] is pd.NA
+    assert actual['j'].iloc[1] == '{"x":2}'
+
+
+@requires_core
+def test_filter_unseen_polars_object_null_stays_none():
+    pl = pytest.importorskip('polars')
+    old = pl.DataFrame({'s': pl.Series(['a'], dtype=pl.Object)})
+    new = pl.DataFrame({'s': pl.Series([None], dtype=pl.Object)})
+    actual = core.filter_unseen_df(old, new)
+    assert isinstance(actual, pl.DataFrame)
+    assert actual.shape == (1, 1)
+    assert actual.columns == ['s']
+    assert actual['s'][0] is None
+
+
+@requires_core
 def test_rust_mode_matches_python(gate):
     """Every gated feature returns the same values and pandas dtypes in both modes."""
     pd = pytest.importorskip('pandas')

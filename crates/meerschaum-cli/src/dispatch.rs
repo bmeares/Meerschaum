@@ -663,14 +663,22 @@ pub fn entry_with_args(mut args: ArgsMap, rt: &mut Runtime<'_>, depth: usize) ->
     {
         let schedule = schedule.py_str();
         return crate::native::jobs::run_schedule(rt, &schedule, |rt| {
-            run_action(&resolved, &args, rt)
+            run_action(&resolved, &args, rt, depth)
         });
     }
-    run_action(&resolved, &args, rt)
+    run_action(&resolved, &args, rt, depth)
 }
 
-fn run_action(resolved: &Resolved, args: &ArgsMap, rt: &mut Runtime<'_>) -> SuccessTuple {
+fn run_action(
+    resolved: &Resolved,
+    args: &ArgsMap,
+    rt: &mut Runtime<'_>,
+    depth: usize,
+) -> SuccessTuple {
     let result: ActionResult = match resolved.function_name() {
+        "_start_pipeline" if native::float(args, "timeout_seconds").is_none() => {
+            run_pipeline(args, rt, depth)
+        }
         "_show_version" => builtin::show_version(args, rt),
         "_show_arguments" => builtin::show_arguments(args, rt),
         "_show_help" => builtin::show_help(args, rt),
@@ -695,6 +703,94 @@ fn run_action(resolved: &Resolved, args: &ArgsMap, rt: &mut Runtime<'_>) -> Succ
         Ok(tup) => tup,
         Err(e) => action_failure(resolved, args, &e, rt),
     }
+}
+
+/// Keep `:` chains in the native dispatcher: core steps must not import the Python core
+/// (and its formatting / scheduling dependencies) simply because they form a pipeline.
+fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -> ActionResult {
+    let params = match args.get("params") {
+        Some(PyValue::Dict(values)) => values,
+        _ => return Ok(SuccessTuple::fail("Nothing to do.")),
+    };
+    let get_param = |key: &str| {
+        params
+            .iter()
+            .find(|(k, _)| k.as_str() == Some(key))
+            .map(|(_, v)| v)
+    };
+    let Some(PyValue::Str(line)) = get_param("sub_args_line").filter(|v| v.is_truthy()) else {
+        return Ok(SuccessTuple::fail("Nothing to do."));
+    };
+    if depth >= MAX_ENTRY_DEPTH {
+        return Ok(SuccessTuple::fail(
+            "RecursionError: maximum recursion depth exceeded",
+        ));
+    }
+    let sysargs = shlex::split(line).map_err(|e| ActionError::new("ValueError", e))?;
+    let patch: ArgsMap = match get_param("patch_args") {
+        Some(PyValue::Dict(values)) => values
+            .iter()
+            .map(|(k, v)| (k.py_str(), v.clone()))
+            .collect(),
+        _ => ArgsMap::new(),
+    };
+    let looping = native::flag(args, "loop");
+    let count = native::words(args, "action")
+        .first()
+        .and_then(|s| s.trim_start_matches('x').parse::<i64>().ok())
+        .unwrap_or(if looping { -1 } else { 1 });
+    let delay = native::float(args, "min_seconds").unwrap_or(1.0);
+    let stop = native::jobs::stop_requested_flag();
+    native::jobs::install_stop_handler(&native::session(rt));
+    let mut ran = 0;
+    let mut result = SuccessTuple::fail("Did not pipeline.");
+    loop {
+        if stop.load(std::sync::atomic::Ordering::SeqCst) {
+            native::warn(rt, "Cancelled pipeline.");
+            if result.message == "Did not pipeline." {
+                result.message = "Pipeline was cancelled.".into();
+            }
+            break;
+        }
+        let dates = rt.dates.clone();
+        result = match run_chain(&sysargs, &dates, Some(&patch), |args| {
+            entry_with_args(args, rt, depth + 1)
+        }) {
+            Ok(result) => result,
+            Err(error) => SuccessTuple::fail(format!("{}: {}", error.class, error.message)),
+        };
+        ran += 1;
+        // PARITY: v4 sleeps between attempts, including after failures, and `--loop`
+        // overrides the finite `xN` count (`actions/start.py::_start_pipeline`).
+        if !looping && count == 1 {
+            break;
+        }
+        if delay != 0.0 && ran != count {
+            native::info(
+                rt,
+                &format!(
+                    "Sleeping for {} seconds...",
+                    args.get("min_seconds")
+                        .map(PyValue::py_str)
+                        .unwrap_or_else(|| "1.0".into())
+                ),
+            );
+            native::jobs::sleep_unless_stopped(delay);
+        }
+        if !looping && ran >= count {
+            break;
+        }
+    }
+    if count != 1 {
+        native::info(
+            rt,
+            &format!(
+                "Ran pipeline {ran} time{}.",
+                if ran == 1 { "" } else { "s" }
+            ),
+        );
+    }
+    Ok(result)
 }
 
 /// `_do_action_wrapper`'s message when the action raises.

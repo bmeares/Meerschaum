@@ -61,6 +61,89 @@ pub struct PyFrame<'py> {
     pub placeholders: Vec<String>,
 }
 
+/// Restore the pandas merge dtype when a nullable-string cast changes the old dtype's
+/// storage or null sentinel. The kernel represents all these pandas backends as String.
+pub fn string_merge_hint<'py>(
+    ctx: &PyCtx<'py>,
+    old_series: Option<&Bound<'py, PyAny>>,
+    target: &str,
+) -> PyResult<String> {
+    let Some(old_series) = old_series else {
+        return Ok(target.to_string());
+    };
+    if target != "string" && !target.starts_with("string[") {
+        return Ok(target.to_string());
+    }
+    let pd = ctx.pandas()?;
+    let old_dtype = old_series.getattr("dtype")?;
+    if old_dtype.is_instance(&pd.getattr("StringDtype")?)? {
+        let target_dtype = pd
+            .getattr("api")?
+            .getattr("types")?
+            .getattr("pandas_dtype")?
+            .call1((target,));
+        if let Ok(target_dtype) = target_dtype {
+            // PARITY: str (NaN) against string (pd.NA), or different string storage
+            // backends, merges to object. This also holds for empty and all-null deltas.
+            if !old_dtype.eq(target_dtype)? {
+                return Ok("object".to_string());
+            }
+        }
+    }
+    Ok(target.to_string())
+}
+
+/// Restore `normalize_nulls`' pd.NA in ordinary object columns containing strings.
+/// Special object values undergo separate serialization/deserialization and keep their
+/// sentinels. Native string outputs under pandas' string inference are left to dtype restoration.
+pub fn object_string_nulls(
+    old: &ColumnData,
+    new: &ColumnData,
+    delta: &ColumnData,
+    infer_string: bool,
+) -> Option<ColumnData> {
+    if !matches!(old, ColumnData::Object(_)) {
+        return None;
+    }
+    match delta {
+        ColumnData::Object(values) if values.iter().any(Cell::is_na) => {}
+        ColumnData::Native(s)
+            if s.dtype() == &DataType::String && !infer_string && s.null_count() > 0 => {}
+        _ => return None,
+    }
+    let mut has_string = false;
+    for data in [old, new, delta] {
+        match data {
+            ColumnData::Object(values) => {
+                for value in values {
+                    match value {
+                        Cell::Str(_) => has_string = true,
+                        Cell::Null | Cell::NA | Cell::Bool(_) | Cell::Int(_) | Cell::Float(_) => {}
+                        _ => return None,
+                    }
+                }
+            }
+            ColumnData::Native(s) if s.dtype() == &DataType::String => {
+                has_string |= s.null_count() < s.len();
+            }
+            ColumnData::Native(s)
+                if s.dtype().is_integer()
+                    || s.dtype().is_float()
+                    || matches!(s.dtype(), DataType::Boolean | DataType::Null) => {}
+            _ => return None,
+        }
+    }
+    has_string.then(|| {
+        ColumnData::Object(
+            delta
+                .values()
+                .into_iter()
+                .map(|v| if v.is_na() { Cell::NA } else { v })
+                .collect(),
+        )
+    })
+}
+
 /// How to convert a single column into the kernel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColumnMode {
@@ -1054,6 +1137,40 @@ mod tests {
         assert_eq!(logical_class("binary[pyarrow]"), "bytes");
         assert_eq!(logical_class("decimal128(10, 2)[pyarrow]"), "numeric");
         assert_eq!(logical_class("object"), "object");
+    }
+
+    #[test]
+    fn ordinary_object_string_nulls_keep_special_values_and_inference_separate() {
+        let old = ColumnData::Object(vec![Cell::Str("a".into()), Cell::Int(1)]);
+        let new = ColumnData::Object(vec![Cell::Null, Cell::Str("b".into()), Cell::Int(2)]);
+        let normalized = object_string_nulls(&old, &new, &new, true).unwrap();
+        let ColumnData::Object(values) = normalized else {
+            panic!("ordinary object merge must stay object");
+        };
+        assert!(matches!(values[0], Cell::NA));
+        assert!(matches!(&values[1], Cell::Str(v) if v == "b"));
+        assert!(matches!(values[2], Cell::Int(2)));
+
+        let strings = ColumnData::Native(Series::new("s".into(), &[None, Some("b")]));
+        assert!(object_string_nulls(&old, &new, &strings, true).is_none());
+        assert!(object_string_nulls(&old, &new, &strings, false).is_some());
+        let no_nulls = ColumnData::Object(vec![Cell::Str("b".into()), Cell::Int(2)]);
+        assert!(object_string_nulls(&old, &new, &no_nulls, false).is_none());
+        let no_null_strings = ColumnData::Native(Series::new("s".into(), &["b"]));
+        assert!(object_string_nulls(&old, &new, &no_null_strings, false).is_none());
+
+        for special in [
+            Cell::Json(serde_json::json!({"x": 1})),
+            Cell::Decimal(meerschaum_kernel::Decimal::parse("1.1").unwrap()),
+            Cell::Bytes(vec![1]),
+            Cell::Uuid(uuid::Uuid::nil()),
+        ] {
+            let mixed = ColumnData::Object(vec![Cell::Str("a".into()), special, Cell::Null]);
+            assert!(object_string_nulls(&mixed, &new, &mixed, false).is_none());
+        }
+        let encoded = ColumnData::Object(vec![Cell::Str("{\"x\":1}".into())]);
+        let decoded = ColumnData::Object(vec![Cell::Null, Cell::Json(serde_json::json!({"x": 2}))]);
+        assert!(object_string_nulls(&encoded, &encoded, &decoded, false).is_none());
     }
 
     #[test]

@@ -205,15 +205,21 @@ pub fn show_rowcounts(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let conn = inst.conn();
     let mut query = query_from_args(args);
     query.remote = remote;
-    let mut rcs: Vec<(String, Option<i64>)> = Vec::new();
-    for p in &pipes {
-        // PARITY: `Pipe.get_rowcount()` returns 0 when the connector returns `None`.
-        let rc = session
-            .block_on(conn.get_pipe_rowcount(&p.pipe, &query))
-            .ok()
-            .map(|rc| rc.unwrap_or(0));
-        rcs.push((p.pipe.to_string(), rc));
-    }
+    let conn = &conn;
+    let query = &query;
+    let mut rcs = session.block_on(super::metadata::ordered(
+        pipes.iter().collect(),
+        super::metadata::concurrency(&inst, args),
+        |p| async move {
+            // PARITY: `Pipe.get_rowcount()` returns 0 when the connector returns `None`.
+            let rc = conn
+                .get_pipe_rowcount(&p.pipe, query)
+                .await
+                .ok()
+                .map(|rc| rc.unwrap_or(0));
+            (p.pipe.to_string(), rc)
+        },
+    ));
     // Sort descending (largest pipes first); `None` is the smallest. Python's sort is stable.
     rcs.sort_by(|a, b| {
         let ka = (a.1.is_some(), a.1.unwrap_or(0));
@@ -511,13 +517,27 @@ pub fn show_sizes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let session = session(rt);
     let conn = inst.conn();
     let mut sizes: Vec<(SelectedPipe, Option<i64>)> = Vec::new();
+    let conn = &conn;
+    let concurrency = super::metadata::concurrency(&inst, args);
+    let mut fetched = (concurrency > 1).then(|| {
+        session
+            .block_on(super::metadata::ordered(
+                pipes.iter().collect(),
+                concurrency,
+                |p| async move { conn.get_pipe_size(&p.pipe).await.unwrap_or(None) },
+            ))
+            .into_iter()
+    });
     for p in pipes {
         if !nopretty {
             info(rt, &format!("Calculating size for {}...", p.pipe));
         }
-        let size = session
-            .block_on(conn.get_pipe_size(&p.pipe))
-            .unwrap_or(None);
+        let size = match fetched.as_mut() {
+            Some(results) => results.next().expect("one size per pipe"),
+            None => session
+                .block_on(conn.get_pipe_size(&p.pipe))
+                .unwrap_or(None),
+        };
         if !nopretty {
             info(rt, &format!("Size for {}: {}", p.pipe, format_bytes(size)));
         }
@@ -581,6 +601,28 @@ pub fn interval_minutes_str(minutes: i64) -> String {
     super::sync::interval_str(minutes as f64 * 60.0)
 }
 
+async fn partition_metadata(inst: &Instance, pipe: &meerschaum_core::Pipe) -> (Map, Option<i64>) {
+    let info = match inst.sql() {
+        Some(sql) => sql.get_partition_info(pipe).await,
+        None => Map::new(),
+    };
+    let rows = if info.get("partitioned").is_some_and(Value::truthy)
+        && info
+            .get("count")
+            .and_then(Value::as_i64)
+            .is_some_and(|count| count != 0)
+    {
+        inst.conn()
+            .get_pipe_rowcount(pipe, &DataQuery::default())
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    (info, rows)
+}
+
 /// `show partitions`.
 pub fn show_partitions(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     let nopretty = flag(args, "nopretty");
@@ -597,13 +639,23 @@ pub fn show_partitions(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         rpp: Option<i64>,
     }
     let mut records: Vec<Rec> = Vec::new();
+    let concurrency = super::metadata::concurrency(&inst, args);
+    let mut fetched = (concurrency > 1).then(|| {
+        session
+            .block_on(super::metadata::ordered(
+                pipes.iter().collect(),
+                concurrency,
+                |p| partition_metadata(&inst, &p.pipe),
+            ))
+            .into_iter()
+    });
     for p in pipes {
         if !nopretty {
             info(rt, &format!("Inspecting partitions for {}...", p.pipe));
         }
-        let pinfo: Map = match inst.sql() {
-            Some(sql) => session.block_on(sql.get_partition_info(&p.pipe)),
-            None => Map::new(),
+        let (pinfo, rows) = match fetched.as_mut() {
+            Some(results) => results.next().expect("one partition result per pipe"),
+            None => session.block_on(partition_metadata(&inst, &p.pipe)),
         };
         let partitioned = pinfo.get("partitioned").is_some_and(Value::truthy);
         let count = pinfo.get("count").and_then(Value::as_i64);
@@ -620,10 +672,7 @@ pub fn show_partitions(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         let mut rpp = None;
         if partitioned
             && let Some(c) = count.filter(|c| *c != 0)
-            && let Ok(Some(rc)) = session.block_on(
-                inst.conn()
-                    .get_pipe_rowcount(&p.pipe, &DataQuery::default()),
-            )
+            && let Some(rc) = rows
         {
             rpp = Some(py_round_div(rc, c));
         }

@@ -47,6 +47,16 @@ _install_lock_depths = {}
 emitted_auto_install_warning = False
 
 
+def _get_uv_bin() -> Optional[str]:
+    """Find uv without importing or installing any bootstrap dependencies."""
+    import shutil
+    try:
+        import uv
+        return str(uv.find_uv_bin())
+    except (ImportError, FileNotFoundError):
+        return shutil.which('uv')
+
+
 def _get_pip_install_target_path(venv: Optional[str] = 'mrsm') -> pathlib.Path:
     """Resolve an installation target without creating it."""
     if venv is not None:
@@ -733,6 +743,10 @@ def need_update(
             if no_venv_semver_path is None:
                 pip_install(_import_to_install_name('semver'), debug=debug)
         semver = attempt_import('semver', check_update=False, lazy=False, debug=debug)
+        if semver is None:
+            # Installation may be disabled or unavailable. A failed version-check
+            # dependency must not turn a missing package into a NoneType traceback.
+            return False
     if check_pypi:
         ### Check PyPI for updates
         update_checker = attempt_import(
@@ -865,18 +879,13 @@ def get_pip_install_plan(
         import pip  # noqa: F401
         have_pip = True
     except ImportError:
-        have_pip = venv_contains_package('pip', venv=None, debug=debug)
+        have_pip = False
 
-    try:
-        import uv
-        uv_bin = str(uv.find_uv_bin())
-    except (ImportError, FileNotFoundError):
-        uv_bin = None
+    uv_bin = _get_uv_bin()
 
     use_uv_pip = bool(
         _use_uv_pip
         and uv_bin
-        and venv is not None
         and is_uv_enabled()
     )
     requested_packages = [
@@ -1010,29 +1019,20 @@ def pip_install(
     if args is None:
         args = ['--upgrade'] if not _uninstall else []
     ANSI = True if color else False
-    if check_wheel:
-        have_wheel = venv_contains_package('wheel', venv=venv, debug=debug)
-
     daemon_env_var = STATIC_CONFIG['environment']['daemon_id']
     inside_daemon = daemon_env_var in os.environ
     if inside_daemon:
         silent = True
 
     _args = list(args)
-    have_pip = venv_contains_package('pip', venv=None, debug=debug)
     pip_venv = None
     try:
         import pip
         have_pip = True
     except ImportError:
         have_pip = False
-    try:
-        import uv
-        uv_bin = uv.find_uv_bin()
-        have_uv_pip = True
-    except (ImportError, FileNotFoundError):
-        uv_bin = None
-        have_uv_pip = False
+    uv_bin = _get_uv_bin()
+    have_uv_pip = uv_bin is not None
 
     if have_pip and not have_uv_pip and _install_uv_pip and is_uv_enabled():
         if not pip_install(
@@ -1048,13 +1048,19 @@ def pip_install(
                 f"Failed to install `uv` for virtual environment '{venv}'.",
                 color=False,
             )
+        # The bootstrap may have made uv available in this interpreter or on PATH.
+        uv_bin = _get_uv_bin()
 
     use_uv_pip = (
         _use_uv_pip
-        and venv_contains_package('uv', venv=None, debug=debug)
         and uv_bin is not None
-        and venv is not None
         and is_uv_enabled()
+    )
+    # uv does not need wheel, setuptools, or pip in either interpreter. Checking their
+    # versions first recursively bootstraps the very installer we are trying to select.
+    have_wheel = (
+        venv_contains_package('wheel', venv=venv, debug=debug)
+        if check_wheel and not use_uv_pip else False
     )
 
     import sys
@@ -1385,7 +1391,10 @@ def run_python_package(
     env_dict = (env if isinstance(env, dict) else (os.environ or {})).copy()
     if venv_path is not None:
         env_dict.update({'VIRTUAL_ENV': venv_path.as_posix()})
-    command = [executable, '-m', str(package_name)] + [str(a) for a in args]
+    uv_bin = _get_uv_bin() if package_name == 'uv' else None
+    command = (
+        [uv_bin] if uv_bin is not None else [executable, '-m', str(package_name)]
+    ) + [str(a) for a in args]
     if debug:
         print(command, file=sys.stderr)
     try:
@@ -2153,6 +2162,9 @@ def _get_pip_os_env(color: bool = True):
     pip_os_env.update({
         'PIP_BREAK_SYSTEM_PACKAGES': 'true',
         'UV_BREAK_SYSTEM_PACKAGES': 'true',
+        # Venv targets contain packages imported by this Python process. Resolve wheels
+        # for its ABI even when uv discovers a project venv or inherits UV_PYTHON.
+        'UV_PYTHON': sys.executable,
         ('FORCE_COLOR' if color else 'NO_COLOR'): '1',
     })
     if str(python_bin_path) not in path_str:
@@ -2172,16 +2184,7 @@ def use_uv() -> bool:
     if not is_uv_enabled():
         return False
 
-    try:
-        import uv
-        uv_bin = uv.find_uv_bin()
-    except (ImportError, FileNotFoundError):
-        uv_bin = None
-
-    if uv_bin is None:
-        return False
-
-    return True
+    return _get_uv_bin() is not None
 
 
 def is_uv_enabled() -> bool:
@@ -2195,7 +2198,13 @@ def is_uv_enabled() -> bool:
     try:
         import yaml
     except ImportError:
-        return False
+        # Bootstrap with the default installer before YAML itself is installed. In Rust
+        # mode config is dependency-free, so an explicit uv opt-out is still honored.
+        from meerschaum._core._gate import rust_impl
+        get_rust_config = rust_impl('get_config')
+        if get_rust_config is not None:
+            return bool(get_rust_config('system', 'experimental', 'uv_pip'))
+        return True
 
     from meerschaum.config import get_config
     enabled = get_config('system', 'experimental', 'uv_pip')

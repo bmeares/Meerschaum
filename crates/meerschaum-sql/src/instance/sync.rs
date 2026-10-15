@@ -360,6 +360,19 @@ impl SqlConnector {
                 None
             }
         });
+        // Table existence alone does not mean an upsert is ready: another process may
+        // still be creating its unique constraint. Inspect metadata only after taking
+        // the database lock, and retain it through index creation and the first write.
+        // Warm internal writes use the cached readiness and retain their one-DML cost.
+        let _initialization_guard = if cache_internal && cached.is_none() {
+            self.driver
+                .lock_internal_initialization(&sp0.target, schema.as_deref())
+                .await
+                .map_err(be)?
+        } else {
+            None
+        };
+        let initializing_internal = cache_internal && cached.is_none();
         let mut state = match cached {
             Some(state) => state,
             None => self.pipe_state(&sp0).await,
@@ -526,9 +539,15 @@ impl SqlConnector {
             }
         }
 
-        if is_new && !internal.skip_check_indices {
+        if (is_new || initializing_internal) && !internal.skip_check_indices {
             let cols_types = internal.columns_types.clone();
             if !self.create_indices_sp(&sp, None, None, cols_types).await {
+                if cache_internal {
+                    return Ok(SyncResult::new(
+                        false,
+                        format!("Failed to initialize indices for {pipe}."),
+                    ));
+                }
                 tracing::warn!("Failed to create indices for {pipe}. Continuing...");
             }
         }
@@ -1231,6 +1250,28 @@ impl SqlConnector {
             }
             if let Some(s) = schema.as_deref().filter(|s| !s.is_empty()) {
                 let mut q = get_create_schema_if_not_exists_queries(Some(s), flavor)?;
+                if sp.pipe().temporary
+                    && sp.is_static()
+                    && sp.pipe().connector_keys() == "mrsm"
+                    && flavor.driver_family() == DriverFamily::Postgres
+                    && flavor != Flavor::Cockroachdb
+                {
+                    use sha2::{Digest, Sha256};
+
+                    // Distinct target locks do not protect creation of their common
+                    // schema. Lock only while an absent schema is created, in the same
+                    // transaction as its DDL. Existing schemas take no schema lock.
+                    let schema = truncate_item_name(s, flavor);
+                    let mut digest = Sha256::new();
+                    digest.update(b"meerschaum:internal-schema-initialization:");
+                    digest.update(schema.as_bytes());
+                    let key =
+                        i64::from_be_bytes(digest.finalize()[..8].try_into().expect("eight bytes"));
+                    q.insert(0, format!(
+                        "SELECT pg_advisory_xact_lock({key}) WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = '{}')",
+                        schema.replace('\'', "''"),
+                    ));
+                }
                 q.extend(queries);
                 queries = q;
             }

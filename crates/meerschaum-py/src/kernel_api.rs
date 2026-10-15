@@ -21,7 +21,7 @@ use pyo3::types::{PyDict, PyFrozenSet, PyList, PySet, PyString, PyTuple};
 use crate::convert::{PyCtx, py_to_cell};
 use crate::pandas_bridge::{
     ColumnMode, FrameKind, IndexSpec, OutSpec, PyFrame, frame_from_py, frame_from_py_with,
-    frame_to_py, unchanged_columns,
+    frame_to_py, object_string_nulls, string_merge_hint, unchanged_columns,
 };
 
 /// A `{col: dtype}` mapping with `str()` of each key and value.
@@ -318,7 +318,7 @@ pub fn filter_unseen_df<'py>(
         coerce_mixed_numerics,
     };
     let (old_frame, new_frame) = (&old.frame, &new.frame);
-    let delta = {
+    let mut delta = {
         let _t = crate::trace::Stage::new("kernel: filter_unseen_df");
         py.allow_threads(|| k_filter_unseen_df(Some(old_frame), new_frame, &opts))
     };
@@ -327,9 +327,44 @@ pub fn filter_unseen_df<'py>(
     // so `int64` becomes `int64[pyarrow]`) for the columns in both frames before the merge.
     let mut hints = new.dtypes.clone();
     let declared = dtypes_map.clone().unwrap_or_else(|| old.dtypes.clone());
+    let infer_string = old.dtypes.values().any(|t| t == "object")
+        && ctx
+            .pandas()?
+            .call_method1("get_option", ("future.infer_string",))
+            .and_then(|v| v.extract::<bool>())
+            .unwrap_or(false);
     for (col, typ) in &declared {
         if new.dtypes.contains_key(col) && old.dtypes.contains_key(col) {
-            hints.insert(col.clone(), k_to_pandas_dtype(typ));
+            let target = k_to_pandas_dtype(typ);
+            let merge_target = string_merge_hint(&ctx, old.series.get(col), &target)?;
+            if merge_target != target {
+                if let Ok(data) = delta.data(col) {
+                    // The nullable-string cast and normalize_nulls use pd.NA. Keep that
+                    // sentinel when restoring the object merge dtype: Arrow transport
+                    // otherwise turns string nulls into None / NaN.
+                    let values = data
+                        .values()
+                        .into_iter()
+                        .map(|v| if v.is_na() { Cell::NA } else { v })
+                        .collect();
+                    delta
+                        .set(col, meerschaum_kernel::ColumnData::Object(values))
+                        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                }
+            } else if merge_target == "object" && old.series.contains_key(col) {
+                if let (Ok(old_col), Ok(new_col), Ok(result)) =
+                    (old.frame.data(col), new.frame.data(col), delta.data(col))
+                {
+                    if let Some(normalized) =
+                        object_string_nulls(old_col, new_col, result, infer_string)
+                    {
+                        delta
+                            .set(col, normalized)
+                            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                    }
+                }
+            }
+            hints.insert(col.clone(), merge_target);
         }
     }
     // PARITY: a column the kernel keeps as `object` (bytes or dates cast by a hint against the

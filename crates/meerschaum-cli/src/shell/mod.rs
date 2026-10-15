@@ -757,6 +757,7 @@ pub fn precmd(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Contr
     patch.insert("shell".into(), PyValue::Bool(true));
     patch.insert("line".into(), PyValue::str(line.clone()));
     rt.in_shell = true;
+    crate::native::jobs::reset_stop_request();
     let result = dispatch::entry_with_patch(&sysargs_to_execute, &patch, rt);
     print_result(&result, state, rt);
     if let Some(old) = old_cwd

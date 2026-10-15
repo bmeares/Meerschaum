@@ -28,6 +28,14 @@ Normal config file and environment overrides apply. `version::version_ge` implem
 ordering, including epochs, local versions, prereleases, development and post releases.
 Invalid versions compare false; `version::parse_version` exposes parse errors.
 
+For an already loaded config, `Config::apply_environment_patches(env)` applies `MRSM_CONFIG`
+then `MRSM_PATCH`, and `Config::apply_environment_uris(env)` patches connector attributes while
+preserving other top-level keys used by `MRSM{}` symlinks. Both accept an explicit environment
+and record malformed input in `take_warnings()`. These methods respect `allow_writes` for config
+files. Initialization retains Python's URI-first order and its historical replacement of the
+config with only `meerschaum` when applying each URI. Compose instead replaces `MRSM_CONFIG`
+with its project block, applies `MRSM_PATCH`, then URI connectors and file connector overrides.
+
 Tests must run with fresh `MRSM_ROOT_DIR` and empty `MRSM_PLUGINS_DIR`. Generate the parameter
 matrix using `scripts/parity/run.sh crates/meerschaum-core/tests/fixtures/gen_parameter_resolution.py`.
 It uses in-memory instance stubs and never connects to a database. See `PARAMETER_CALL_SITES.md`

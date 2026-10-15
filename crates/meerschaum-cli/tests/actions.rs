@@ -148,6 +148,120 @@ fn show_version_and_config() {
 }
 
 #[test]
+fn pipelines_dispatch_core_steps_natively() {
+    let tmp = tempfile::tempdir().unwrap();
+    let host = SharedHost::default();
+    let (result, out) = run(
+        tmp.path(),
+        &["show", "version", "+", "show", "version", ":", "--nopretty"],
+        no_env,
+        &host,
+    );
+    assert!(result.success, "{result:?}");
+    assert_eq!(out.matches(meerschaum_cli::VERSION).count(), 2, "{out}");
+    let params = r#"{"sub_args_line":"show version","patch_args":{"nopretty":true}}"#;
+    let (result, out) = run(
+        tmp.path(),
+        &[
+            "start",
+            "pipeline",
+            "x3",
+            "--min-seconds",
+            "0",
+            "-P",
+            params,
+        ],
+        no_env,
+        &host,
+    );
+    assert!(result.success, "{result:?}");
+    assert!(
+        out.starts_with(&format!("{}\n", meerschaum_cli::VERSION)),
+        "{out}"
+    );
+    assert_eq!(out.matches(meerschaum_cli::VERSION).count(), 3, "{out}");
+    assert!(out.contains("Ran pipeline 3 times."), "{out}");
+    let (result, _) = run(tmp.path(), &["start", "pipeline"], no_env, &host);
+    assert_eq!(result, SuccessTuple::fail("Nothing to do."));
+}
+
+#[test]
+fn sql_metadata_workers_preserve_exact_action_output() {
+    use meerschaum_core::{Pipe, Value};
+    use meerschaum_sql::{
+        SqlConnector,
+        flavor::Flavor,
+        uri::{ConnectionSpec, ConnectorAttributes},
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("sqlite")).unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let attrs = ConnectorAttributes {
+        flavor: Some(Flavor::Sqlite),
+        database: Some(
+            tmp.path()
+                .join("sqlite/mrsm_local.db")
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        ..Default::default()
+    };
+    let connector = runtime
+        .block_on(SqlConnector::connect(
+            "local",
+            ConnectionSpec::from_attributes(&attrs).unwrap(),
+        ))
+        .unwrap();
+    for metric in ["populated", "empty", "missing"] {
+        let mut pipe = Pipe::builder("sql:local", metric)
+            .instance("sql:local")
+            .build()
+            .unwrap();
+        pipe.set_parameters(
+            Value::from_json_str(
+                &serde_json::json!({
+                    "target": format!("metadata_{metric}"),
+                    "columns": {"id": "id"},
+                })
+                .to_string(),
+            )
+            .unwrap()
+            .to_map(),
+        );
+        assert!(runtime.block_on(connector.register_pipe(&pipe)).success);
+    }
+    let queries = [
+        "CREATE TABLE metadata_populated (id INTEGER)".into(),
+        "INSERT INTO metadata_populated VALUES (1), (2)".into(),
+        "CREATE TABLE metadata_empty (id INTEGER)".into(),
+    ];
+    assert!(
+        runtime
+            .block_on(connector.exec_queries(&queries, true, true))
+            .iter()
+            .all(Option::is_some)
+    );
+    let host = SharedHost::default();
+    for action in ["partitions", "rowcounts", "sizes"] {
+        for nopretty in [false, true] {
+            let mut args = vec!["show", action, "-i", "sql:local", "--workers", "1"];
+            if nopretty {
+                args.push("--nopretty");
+            }
+            let serial = run(tmp.path(), &args, no_env, &host);
+            args[5] = "4";
+            let parallel = run(tmp.path(), &args, no_env, &host);
+            assert!(serial.0.success, "{action}: {:?}", serial.0);
+            assert_eq!(parallel, serial, "{action}, nopretty={nopretty}");
+            assert!(parallel.1.contains("populated"), "{}", parallel.1);
+            assert!(parallel.1.contains("empty"), "{}", parallel.1);
+            assert!(parallel.1.contains("missing"), "{}", parallel.1);
+        }
+    }
+}
+
+#[test]
 fn show_environment_lists_mrsm_variables() {
     fn env(k: &str) -> Option<String> {
         (k == "MRSM_TEST").then(|| "1".into())

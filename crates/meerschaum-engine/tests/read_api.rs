@@ -145,3 +145,51 @@ async fn reader_shows_runs_gantt_events_and_edge_lag() {
     let b = env.pipe_ref("b_clean");
     assert_eq!(view.parents_of(&b).count(), 1);
 }
+
+/// Separate CLI/server processes reopen the same SQLite instance with cold metadata caches.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn independent_sqlite_connectors_preserve_repeated_runs_nodes_and_events() {
+    let fx: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/v4_sync/v4_sync.json")).unwrap();
+    let env = env("cold_read_api").await;
+    env.exec(fx["create"].as_str().unwrap()).await;
+    for pipe in fx["pipes"].as_array().unwrap().iter().take(2) {
+        env.register(pipe["metric"].as_str().unwrap(), &pipe["parameters"])
+            .await;
+    }
+    for phase in 0..2 {
+        for statement in fx["phases"][phase]["statements"].as_array().unwrap() {
+            env.exec(statement.as_str().unwrap()).await;
+        }
+        let conn = connect(&env.db).await;
+        let registry = registry(&conn);
+        let engine = meerschaum_engine::Engine::new(registry.clone(), env.config());
+        let result = engine
+            .run(RunOptions {
+                selection: Some(
+                    Selection::refs([env.pipe_ref("b_clean")]).with_parents(Some(Depth::All)),
+                ),
+                ..Default::default()
+            })
+            .await;
+        assert!(result.success, "{}", result.message);
+        assert!(!result.message.contains("warning"), "{}", result.message);
+        let reader = EngineReader::new(registry, env.config());
+        let runs = reader.runs(&RunFilter::default()).await.unwrap();
+        assert_eq!(runs.len(), phase + 1, "{}", result.message);
+        for summary in runs {
+            let run_id = summary.run.run_id;
+            let detail = reader.run_detail(&run_id).await.unwrap().unwrap();
+            assert_eq!(detail.nodes.len(), 2);
+            let events = reader.events_after(&run_id, None).await.unwrap();
+            assert!(
+                events.iter().any(|event| event.event == "run_started"),
+                "{events:?}"
+            );
+            assert!(
+                events.iter().any(|event| event.event == "run_finished"),
+                "{events:?}"
+            );
+        }
+    }
+}

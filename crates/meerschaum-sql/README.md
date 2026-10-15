@@ -189,6 +189,19 @@ metadata after creation; `drop_pipe` invalidates the cache. Warm engine state wr
 need one DML statement. `tests/w5sql.rs` checks this along with cached façade reads, SQLite UTC
 sync times, raw document timestamps, and `{SQLITE_DB_PATH}` resolution.
 
+Cold PostgreSQL-family internal pipe writes serialize table and index initialization with a
+transaction advisory lock keyed by the physical schema and target in that database. A dedicated
+connection keeps single-connection pools usable; closing it releases the lock on cancellation.
+Connection and lock acquisition share the pool acquisition timeout and preserve the pool's TLS
+and server runtime options. Cold callers check missing indices even when the table already exists,
+skip existing ordinary indices, and never cache readiness after an index failure. Different targets
+creating the same absent schema take a schema lock only during its DDL transaction; existing
+schemas need no schema lock. Warm writes still use one DML statement, alongside existing native
+partition maintenance where configured.
+`tests/internal_initialization.rs` exercises independent one-connection pools and an existing table
+missing its upsert key on PostgreSQL and PostGIS. CockroachDB skips advisory locks, which it does
+not support; cross-process cold initialization there is still a gap.
+
 `facade::sync_pipe_mut_cached` accepts the caller's cached column types, derives the pipe's
 dtypes, and refreshes metadata after schema changes. The existing `sync_pipe_mut` remains
 available. `get_pipe_data_and_state` shares the `DataQueryOptions`-aware read implementation.

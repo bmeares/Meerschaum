@@ -133,6 +133,16 @@ def serve(address: str) -> int:
     import platform
     stream = _connect(address)
     conn = Connection(stream)
+    import signal
+    interruptible = False
+
+    def interrupt_active_call(signum, frame):
+        # The Rust host owns terminal cancellation. Idle workers share its process group
+        # and must survive SIGINT, including during handshake and between protocol writes.
+        if interruptible:
+            raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, interrupt_active_call)
 
     import meerschaum as mrsm
     from meerschaum.worker._ops import HANDLERS, error_message
@@ -173,9 +183,13 @@ def serve(address: str) -> int:
             conn.send({'t': 'result', 'id': call_id, 'value': True})
             break
         try:
-            value, out_frames = handler(conn, call_id, args, frames)
+            try:
+                interruptible = True
+                value, out_frames = handler(conn, call_id, args, frames)
+            finally:
+                interruptible = False
             conn.send({'t': 'result', 'id': call_id, 'value': value}, out_frames)
-        except Exception as e:
+        except (Exception, KeyboardInterrupt) as e:
             try:
                 conn.send(error_message(call_id, e))
             except Exception:

@@ -586,3 +586,47 @@ scenarios!(
     update_message,
     toolbar_disabled,
 );
+
+#[test]
+fn schedules_can_be_interrupted_repeatedly() {
+    let tmp = tempfile::tempdir().unwrap();
+    let scenario = json!({"config": {"shell": {"clear_screen": false}}});
+    let mut env = environment(tmp.path(), &scenario);
+    // Native pipelines must work even when no Python interpreter is available.
+    env.push((
+        "MRSM_PYTHON".into(),
+        tmp.path()
+            .join("missing-python")
+            .to_string_lossy()
+            .into_owned(),
+    ));
+    let mut term = Term::spawn(&env, tmp.path(), 40, 120);
+    term.pump(Duration::from_millis(800), Duration::from_secs(20));
+    let version = meerschaum_cli::VERSION.split('-').next().unwrap();
+    for _ in 0..2 {
+        term.send("show version : -s 'every 0.1 seconds'\r");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while term.parser.screen().contents().matches(version).count() < 3
+            && Instant::now() < deadline
+        {
+            term.pump(Duration::from_millis(100), Duration::from_millis(300));
+        }
+        assert!(term.child.try_wait().unwrap().is_none());
+        let screen = term.parser.screen().contents();
+        let count = screen.matches(version).count();
+        assert!(count >= 3, "schedule did not repeat: {screen}");
+        term.send("\x03");
+        term.pump(Duration::from_millis(500), Duration::from_secs(3));
+        assert!(
+            term.child.try_wait().unwrap().is_none(),
+            "second interrupt exited shell"
+        );
+        let screen = term.parser.screen().contents();
+        assert!(screen.contains("Exited scheduler"), "{screen}");
+        assert!(!screen.contains("KeyboardInterrupt"), "{screen}");
+        term.send("\x0c");
+        term.pump(Duration::from_millis(300), Duration::from_secs(1));
+    }
+    term.send("exit\r");
+    assert!(term.wait_exit());
+}

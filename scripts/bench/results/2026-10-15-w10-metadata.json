@@ -1,0 +1,48 @@
+{
+  "action": "show partitions --nopretty",
+  "pipes": 64,
+  "partitions_per_pipe": 4,
+  "rows_per_pipe": 64,
+  "warmups_per_setting": 2,
+  "paired_rounds": 8,
+  "method": "Alternating order; wall clock includes CLI startup and output capture; exact output verified.",
+  "scope": "Disposable PostgreSQL over loopback; warm cache; no injected latency; no concurrent benchmark load.",
+  "settings": {
+    "1": {
+      "median_seconds": 0.6245372720004525,
+      "min_seconds": 0.5118173089940683,
+      "max_seconds": 0.742403051997826,
+      "samples_seconds": [
+        0.742403051997826,
+        0.6063090520037804,
+        0.709003477000806,
+        0.6427654919971246,
+        0.5118173089940683,
+        0.5943985600024462,
+        0.7287482460014871,
+        0.5642218380016857
+      ]
+    },
+    "4": {
+      "median_seconds": 0.19179513950075489,
+      "min_seconds": 0.15971261000231607,
+      "max_seconds": 0.20974637100152904,
+      "samples_seconds": [
+        0.18939175800187513,
+        0.19548517799557885,
+        0.16677671700017527,
+        0.15971261000231607,
+        0.1985312190008699,
+        0.19419852099963464,
+        0.18224942900269525,
+        0.20974637100152904
+      ]
+    }
+  },
+  "median_speedup": 3.2562726752415663,
+  "output_parity_verified": true,
+  "verified_runs_including_warmups": 20,
+  "cleanup": "Disposable benchmark database dropped; PostgreSQL catalog confirms zero matching benchmark databases.",
+  "build": "v5 release CLI, cd9c340f plus working-tree hardening changes",
+  "date": "2026-10-15"
+}

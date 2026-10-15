@@ -343,6 +343,55 @@ impl fmt::Debug for SqlDriver {
 }
 
 impl SqlDriver {
+    /// Serialize cold internal-table initialization across independent connectors/processes.
+    /// The connection is deliberately unpooled: holding a pool slot while initialization
+    /// uses the driver would deadlock a one-connection pool. Dropping it (also on cancellation)
+    /// closes the socket and releases the transaction lock; no session lock enters the pool.
+    pub(crate) async fn lock_internal_initialization(
+        &self,
+        target: &str,
+        schema: Option<&str>,
+    ) -> Result<Option<sqlx::PgConnection>> {
+        use sha2::{Digest, Sha256};
+        use sqlx::Connection;
+
+        let Pool::Postgres(pool) = &self.pool else {
+            return Ok(None);
+        };
+        // Cockroach speaks the PostgreSQL wire protocol but has no advisory locks.
+        if self.flavor == Flavor::Cockroachdb {
+            return Ok(None);
+        }
+        // Bound both establishing the extra connection and waiting for initialization
+        // with the pool's acquisition timeout. Server lock/statement timeouts from the
+        // original connection options continue to apply and their errors propagate.
+        let connection = tokio::time::timeout(pool.options().get_acquire_timeout(), async {
+            let mut connection = sqlx::PgConnection::connect_with(&pool.connect_options()).await?;
+            let schema = match schema {
+                Some(schema) => Some(schema.to_owned()),
+                None => {
+                    sqlx::query_scalar::<_, Option<String>>("SELECT current_schema()")
+                        .fetch_one(&mut connection)
+                        .await?
+                }
+            };
+            let table = crate::ident::sql_item_name(target, self.flavor, schema.as_deref());
+            let mut digest = Sha256::new();
+            digest.update(b"meerschaum:internal-table-initialization:");
+            digest.update(table.as_bytes());
+            let key = i64::from_be_bytes(digest.finalize()[..8].try_into().expect("eight bytes"));
+            sqlx::query("BEGIN").execute(&mut connection).await?;
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(key)
+                .execute(&mut connection)
+                .await?;
+            Ok::<_, sqlx::Error>(connection)
+        })
+        .await
+        .map_err(|_| sqlx::Error::PoolTimedOut)??;
+        Ok(Some(connection))
+    }
+
     /// Open a connection pool for a connection spec. Connections are opened lazily by the pool,
     /// except that this verifies one connection can be established.
     pub async fn connect(spec: &ConnectionSpec) -> Result<Self> {
@@ -645,5 +694,62 @@ impl SqlDriver {
             #[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
             Pool::Native(p) => p.close(),
         }
+    }
+}
+
+#[cfg(test)]
+mod initialization_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancelled_initializer_releases_database_lock() {
+        let Ok(uri) = std::env::var("MRSM_TEST_PG_URI") else {
+            return;
+        };
+        let spec = ConnectionSpec::from_uri(&uri, Some("w10_lock"), None).unwrap();
+        let driver = SqlDriver::connect(&spec).await.unwrap();
+        let target = format!("w10_lock_{}", uuid::Uuid::new_v4().simple());
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let holder_driver = driver.clone();
+        let holder_target = target.clone();
+        let holder = tokio::spawn(async move {
+            let _guard = holder_driver
+                .lock_internal_initialization(&holder_target, Some("public"))
+                .await
+                .unwrap()
+                .unwrap();
+            entered_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        entered_rx.await.unwrap();
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(150),
+                driver.lock_internal_initialization(&target, None),
+            )
+            .await
+            .is_err(),
+            "the unqualified target must share the public target's lock"
+        );
+        // A different physical target must initialize independently.
+        let other = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            driver.lock_internal_initialization(&format!("{target}_other"), Some("public")),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        drop(other);
+        holder.abort();
+        assert!(holder.await.unwrap_err().is_cancelled());
+        // Cancellation of both a holder and a waiter leaves no pooled session lock.
+        let guard = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            driver.lock_internal_initialization(&target, None),
+        )
+        .await
+        .expect("cancellation must close the connection and release its lock")
+        .unwrap();
+        assert!(guard.is_some());
     }
 }

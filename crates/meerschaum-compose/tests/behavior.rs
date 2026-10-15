@@ -57,6 +57,90 @@ fn host(env: &Env) -> Host {
     Host::new(env.project.clone(), vars).unwrap()
 }
 
+#[test]
+fn project_environment_layers_keep_file_precedence_and_symlink_targets() {
+    use meerschaum_compose::error::Messages;
+    use meerschaum_compose::pipes::ProjectConfig;
+    use meerschaum_compose::project::load_project;
+    use meerschaum_core::Value;
+
+    let env = env_for("basic");
+    std::fs::create_dir_all(env.project.join("root")).unwrap();
+    std::fs::write(env.project.join("mrsm-compose.yaml"), r#"
+project_name: layers
+root_dir: ./root
+plugins_dir: [./plugins]
+config:
+  custom:
+    host: file-host
+  meerschaum:
+    connectors:
+      sql:
+        example:
+          host: 'MRSM{custom:host}'
+          database: file.db
+environment:
+  MRSM_SQL_EXAMPLE: '{"host":"env-host","port":5559}'
+  MRSM_API_OTHER: '{invalid}'
+  MRSM_CONFIG: '{"custom":{"host":"ignored","config_only":true}}'
+  MRSM_PATCH: '{"custom":{"patched":true},"meerschaum":{"connectors":{"sql":{"example":{"database":"patch.db","username":"patch-user"}}}}}'
+"#).unwrap();
+    let host = host(&env);
+    let project = load_project(&host, None, None, false, &mut Messages::default()).unwrap();
+    let config = ProjectConfig::new(&host, &project).unwrap();
+    let get = |key| config.get(&["meerschaum", "connectors", "sql", "example", key]);
+    assert_eq!(get("host"), Some(Value::from("file-host")));
+    assert_eq!(get("database"), Some(Value::from("file.db")));
+    assert_eq!(get("port"), Some(Value::Int(5559)));
+    assert_eq!(get("username"), Some(Value::from("patch-user")));
+    assert_eq!(
+        config.get(&["custom", "host"]),
+        Some(Value::from("file-host"))
+    );
+    assert_eq!(config.get(&["custom", "patched"]), Some(Value::Bool(true)));
+    assert_eq!(config.get(&["custom", "config_only"]), None);
+    assert_eq!(
+        config.get(&["meerschaum", "connectors", "api", "other", "uri"]),
+        Some(Value::from("{invalid}"))
+    );
+    assert!(!project.root_dir().join("config").exists());
+
+    // With no URI connectors to build, MRSM_PATCH directly patches the project block.
+    let mut patch_only = project.clone();
+    let environment = patch_only
+        .config
+        .get_mut("environment")
+        .unwrap()
+        .as_map_mut()
+        .unwrap();
+    environment.shift_remove("MRSM_SQL_EXAMPLE");
+    environment.shift_remove("MRSM_API_OTHER");
+    let patch_only_config = ProjectConfig::new(&host, &patch_only).unwrap();
+    assert_eq!(
+        patch_only_config.get(&["meerschaum", "connectors", "sql", "example", "database"]),
+        Some(Value::from("patch.db"))
+    );
+
+    // A bad patch is ignored without preventing connector application or file restoration.
+    let mut project = project;
+    project
+        .config
+        .get_mut("environment")
+        .unwrap()
+        .as_map_mut()
+        .unwrap()
+        .insert("MRSM_PATCH".into(), Value::from("{"));
+    let config = ProjectConfig::new(&host, &project).unwrap();
+    assert_eq!(
+        config.get(&["meerschaum", "connectors", "sql", "example", "database"]),
+        Some(Value::from("file.db"))
+    );
+    assert_eq!(
+        config.get(&["meerschaum", "connectors", "sql", "example", "port"]),
+        Some(Value::Int(5559))
+    );
+}
+
 fn run(
     host: &Host,
     session: &mut Session,

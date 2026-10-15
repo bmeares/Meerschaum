@@ -15,6 +15,7 @@ pub mod engine_views;
 pub mod jobs;
 pub mod maintenance;
 pub mod manage;
+mod metadata;
 pub mod pipes;
 pub mod rich_json;
 pub mod session;

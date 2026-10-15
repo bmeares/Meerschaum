@@ -22,8 +22,9 @@ impl ProjectConfig {
     /// Python runs a subaction inside `replace_config(block)` then `replace_env(env)`: the
     /// config is the project's `config:` block, and applying the project environment (the host
     /// environment plus `environment:`, `get_env_dict()`) patches `MRSM_PATCH` and the
-    /// `MRSM_<TYPE>_<LABEL>` connector variables on top of it, so the environment connectors win
-    /// over the file's. The root directory is the project's. When the project environment
+    /// `MRSM_<TYPE>_<LABEL>` connector variables on top of it. File-defined connector
+    /// attributes then override environment attributes for the keys they set. The root
+    /// directory is the project's. When the project environment
     /// cannot be applied (a non-string `environment:` value, an unusable root), the registry is
     /// built from the host environment, as before.
     pub fn new(host: &Host, project: &Project) -> Result<ProjectConfig, ComposeError> {
@@ -90,58 +91,16 @@ fn apply_environment_layers(
     env: &[(String, String)],
     block: &Map,
 ) {
-    use meerschaum_core::config::{get_connector_env_vars, parse_connector_env_var};
     use meerschaum_core::value::apply_patch_maps;
 
-    let lookup = |name: &str| env.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
-    let patch_var = meerschaum_core::static_config().environment.patch.clone();
-    if let Some(raw) = lookup(&patch_var) {
-        // An unparseable patch is skipped (Python warns and continues).
-        if let Ok(patch) = meerschaum_core::pyfmt::string_to_dict(raw.trim_start()) {
-            registry.set_config(apply_patch_maps(&registry.snapshot(), &patch));
-        }
-    }
-    let mut applied_uri = false;
-    for var in get_connector_env_vars(env) {
-        let Some((typ, label)) = parse_connector_env_var(&var) else {
-            continue;
-        };
-        if typ.is_empty() || label.is_empty() {
-            continue;
-        }
-        let uri = lookup(&var).unwrap_or_default();
-        let attrs = if uri.trim_start().starts_with('{') && uri.trim_end().ends_with('}') {
-            Value::from_json_str(&uri).unwrap_or_else(|_| uri_attributes(&uri))
-        } else {
-            uri_attributes(&uri)
-        };
-        let base = {
-            let opts = GetOptions {
-                warn: false,
-                write_missing: false,
-                ..GetOptions::default()
-            };
-            let (_, value) = registry.get_with(&["meerschaum"], opts);
-            let _ = registry.take_warnings();
-            value.to_map()
-        };
-        let mut label_map = Map::new();
-        label_map.insert(label, attrs);
-        let mut typ_map = Map::new();
-        typ_map.insert(typ, Value::Map(label_map));
-        let mut connectors = Map::new();
-        connectors.insert("connectors".into(), Value::Map(typ_map));
-        let mut config = registry.snapshot();
-        config.insert(
-            "meerschaum".into(),
-            Value::Map(apply_patch_maps(&base, &connectors)),
-        );
-        // Python's `set_config` keeps only the `meerschaum` key here
-        // (`config/environment.py:166`); the project's other keys (symlink targets) stay, since
-        // dropping them only loses information.
-        registry.set_config(config);
-        applied_uri = true;
-    }
+    // The project's block replaces MRSM_CONFIG; only MRSM_PATCH is reapplied.
+    let patch_env: Vec<_> = env
+        .iter()
+        .filter(|(name, _)| name != &meerschaum_core::static_config().environment.config)
+        .cloned()
+        .collect();
+    registry.apply_environment_patches(&patch_env);
+    let applied_uri = registry.apply_environment_uris(env) > 0;
     // PARITY: compose builds the connectors the file defines with `get_connector(keys,
     // **attributes)`; keyword attributes override the config's, which include the environment
     // connectors, so the file's attributes win for the keys it sets.
@@ -167,12 +126,6 @@ fn apply_environment_layers(
         );
         registry.set_config(config);
     }
-}
-
-fn uri_attributes(uri: &str) -> Value {
-    let mut m = Map::new();
-    m.insert("uri".into(), Value::Str(uri.to_string()));
-    Value::Map(m)
 }
 
 /// `get_defined_pipes(compose_config, as_meta=True)`: the keyword arguments for each pipe, with

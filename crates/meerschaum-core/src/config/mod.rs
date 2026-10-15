@@ -248,7 +248,6 @@ pub struct ConfigState {
     paths: Paths,
     defaults: Map,
     config: Map,
-    env: Vec<(String, String)>,
     allow_writes: bool,
     warnings: Vec<String>,
 }
@@ -275,12 +274,11 @@ impl Config {
             paths,
             defaults,
             config: Map::new(),
-            env: opts.env.clone(),
             allow_writes: opts.allow_writes,
             warnings: Vec::new(),
         };
-        state.apply_environment_uris();
-        state.apply_environment_patches();
+        state.apply_environment_uris(&opts.env, false);
+        state.apply_environment_patches(&opts.env);
         state.apply_patch_dirs();
         Ok(Config {
             state: Mutex::new(state),
@@ -318,6 +316,25 @@ impl Config {
     /// `set_config(cf)`: replace the in-memory config.
     pub fn set_config(&self, config: Map) {
         self.lock().config = config;
+    }
+
+    /// Apply connector variables from an explicit environment, returning the number applied.
+    ///
+    /// Existing connector attributes are patched by the environment. Other top-level keys
+    /// remain available as `MRSM{}` symlink targets. Unlike registry initialization (which
+    /// mirrors Python's whole-config replacement), this supports an already loaded config.
+    /// Invalid connector JSON records a warning and falls back to a literal `uri` attribute.
+    pub fn apply_environment_uris(&self, env: &[(String, String)]) -> usize {
+        self.lock().apply_environment_uris(env, true)
+    }
+
+    /// Apply `MRSM_CONFIG`, then `MRSM_PATCH`, from an explicit environment.
+    ///
+    /// Invalid patches record warnings and are skipped. Callers replacing `MRSM_CONFIG`
+    /// with their own config block may omit that variable from `env`. Paths and the stored
+    /// registry options are unaffected; file loading still follows this registry's paths.
+    pub fn apply_environment_patches(&self, env: &[(String, String)]) {
+        self.lock().apply_environment_patches(env);
     }
 
     /// A copy of the in-memory config (`meerschaum.config.config`).
@@ -395,13 +412,6 @@ impl ConfigState {
 
     fn warn(&mut self, msg: impl Into<String>) {
         self.warnings.push(msg.into());
-    }
-
-    fn env_get(&self, key: &str) -> Option<String> {
-        self.env
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v.clone())
     }
 
     /// The resolved paths.
@@ -970,31 +980,40 @@ impl ConfigState {
     }
 
     /// Port of `apply_environment_uris` / `apply_connector_uri`.
-    fn apply_environment_uris(&mut self) {
-        for var in get_connector_env_vars(&self.env) {
+    fn apply_environment_uris(&mut self, env: &[(String, String)], preserve_keys: bool) -> usize {
+        let mut applied = 0;
+        for var in get_connector_env_vars(env) {
             let Some((typ, label)) = parse_connector_env_var(&var) else {
                 continue;
             };
             if typ.is_empty() || label.is_empty() {
                 continue;
             }
-            let uri = self.env_get(&var).unwrap_or_default();
+            let uri = env
+                .iter()
+                .find(|(k, _)| k == &var)
+                .map(|(_, v)| v.as_str())
+                .unwrap_or_default();
             let conn_attrs = if uri.trim_start().starts_with('{') && uri.trim_end().ends_with('}') {
-                match Value::from_json_str(&uri) {
+                match Value::from_json_str(uri) {
                     Ok(v) => v,
                     Err(_) => {
                         self.warn(format!(
                             "Unable to parse JSON for environment connector '{typ}:{label}'."
                         ));
-                        uri_attrs(&uri)
+                        uri_attrs(uri)
                     }
                 }
             } else {
-                uri_attrs(&uri)
+                uri_attrs(uri)
             };
             let (_, meerschaum) =
                 self.get_config(&["meerschaum".to_string()], GetOptions::default());
-            let mut base = Map::new();
+            let mut base = if preserve_keys {
+                self.config.clone()
+            } else {
+                Map::new()
+            };
             base.insert("meerschaum".to_string(), meerschaum);
             let mut label_map = Map::new();
             label_map.insert(label, conn_attrs);
@@ -1004,17 +1023,19 @@ impl ConfigState {
             connectors.insert("connectors".to_string(), Value::Map(typ_map));
             let mut patch = Map::new();
             patch.insert("meerschaum".to_string(), Value::Map(connectors));
-            // PARITY: `set_config` replaces the whole config with only the `meerschaum` key
-            // (`config/environment.py:166`).
+            // PARITY: initialization replaces the whole config with only `meerschaum`
+            // (`config/environment.py:166`). Reapplication keeps other symlink targets.
             self.config = apply_patch_maps(&base, &patch);
+            applied += 1;
         }
+        applied
     }
 
     /// Port of `apply_environment_patches` (`MRSM_CONFIG`, then `MRSM_PATCH`).
-    fn apply_environment_patches(&mut self) {
+    fn apply_environment_patches(&mut self, env: &[(String, String)]) {
         let env_names = &static_config().environment;
         for var in [env_names.config.clone(), env_names.patch.clone()] {
-            let Some(raw) = self.env_get(&var) else {
+            let Some((_, raw)) = env.iter().find(|(k, _)| k == &var) else {
                 continue;
             };
             let patch = match string_to_dict(raw.trim_start()) {
