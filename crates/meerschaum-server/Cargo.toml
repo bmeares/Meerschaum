@@ -38,6 +38,8 @@ utoipa = "5"
 hmac = { workspace = true }
 sha2 = { workspace = true }
 base64 = "0.22"
+# Crate-private: the web terminal PTY bridge (`webterm`).
+portable-pty = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

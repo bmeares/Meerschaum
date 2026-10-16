@@ -380,3 +380,49 @@ pub fn q_params(json: &str) -> DataQuery {
         ..Default::default()
     }
 }
+
+/// [`ctx`] with the instance's default schema set to `schema` (created when missing) on the
+/// PostgreSQL-family flavors; every other flavor is returned as [`ctx`] builds it.
+pub async fn ctx_in_schema(flavor: &'static str, test: &str, schema: &str) -> Option<Ctx> {
+    if !matches!(flavor, "postgresql" | "timescaledb" | "postgis") {
+        return ctx(flavor, test).await;
+    }
+    let env = FLAVOR_ENVS
+        .iter()
+        .find(|(f, _)| *f == flavor)
+        .map(|(_, e)| *e)
+        .expect("flavor");
+    let Ok(uri) = std::env::var(env) else {
+        eprintln!("Skipping {flavor}: set {env}.");
+        return None;
+    };
+    let mut spec = ConnectionSpec::from_uri(&uri, Some(&format!("rs_test_{flavor}")), None)
+        .expect("valid URI");
+    let admin = SqlConnector::connect(&format!("rs_admin_{flavor}"), spec.clone())
+        .await
+        .expect("connects");
+    // `CREATE SCHEMA IF NOT EXISTS` races between parallel tests of one binary on PostgreSQL
+    // (23505 on pg_namespace when two creators collide); the schema exists afterwards either way.
+    if let Err(error) = admin
+        .driver()
+        .exec(&format!("CREATE SCHEMA IF NOT EXISTS {schema}"))
+        .await
+    {
+        let text = error.to_string();
+        assert!(
+            text.contains("23505") || text.contains("already exists"),
+            "create schema: {text}"
+        );
+    }
+    spec.schema = Some(schema.to_string());
+    let conn = SqlConnector::connect(&format!("rs_test_{flavor}"), spec)
+        .await
+        .expect("connects");
+    let short = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+    Some(Ctx {
+        flavor,
+        conn,
+        prefix: format!("w5sql_{short}{}", &test[..test.len().min(12)]),
+        sqlite_path: None,
+    })
+}

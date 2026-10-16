@@ -11389,6 +11389,882 @@
   },
   {
    "kind": "enforce_dtypes",
+   "frame": "ints",
+   "dtypes": {
+    "id": "int64[pyarrow]",
+    "val": "datetime"
+   },
+   "kwargs": {},
+   "input": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       },
+       {
+        "t": "int",
+        "v": 30
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000010+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000020+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000030+00:00",
+        "tz": "UTC"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   }
+  },
+  {
+   "kind": "enforce_dtypes",
+   "frame": "ints",
+   "dtypes": {
+    "id": "int64[pyarrow]",
+    "val": "datetime"
+   },
+   "kwargs": {
+    "coerce_timezone": false
+   },
+   "input": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       },
+       {
+        "t": "int",
+        "v": 30
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000010+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000020+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000030+00:00",
+        "tz": "UTC"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   }
+  },
+  {
+   "kind": "enforce_dtypes",
+   "frame": "ints",
+   "dtypes": {
+    "id": "int64[pyarrow]",
+    "val": "datetime"
+   },
+   "kwargs": {
+    "strip_timezone": true
+   },
+   "input": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       },
+       {
+        "t": "int",
+        "v": 30
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "datetime64[us]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000010",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000020",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000030",
+        "tz": null
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   }
+  },
+  {
+   "kind": "enforce_dtypes",
+   "frame": "ints",
+   "dtypes": {
+    "id": "int64[pyarrow]",
+    "val": "datetime64[ns, UTC]"
+   },
+   "kwargs": {
+    "coerce_timezone": false
+   },
+   "input": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       },
+       {
+        "t": "int",
+        "v": 30
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "datetime64[ns, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000000010+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000000020+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000000030+00:00",
+        "tz": "UTC"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   }
+  },
+  {
+   "kind": "enforce_dtypes",
+   "frame": "ints",
+   "dtypes": {
+    "id": "int64[pyarrow]",
+    "val": "datetime64[ns]"
+   },
+   "kwargs": {
+    "coerce_timezone": false
+   },
+   "input": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 10
+       },
+       {
+        "t": "int",
+        "v": 20
+       },
+       {
+        "t": "int",
+        "v": 30
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "datetime64[ns]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000000010",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000000020",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000000030",
+        "tz": null
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   }
+  },
+  {
+   "kind": "enforce_dtypes",
+   "frame": "floats",
+   "dtypes": {
+    "id": "int64[pyarrow]",
+    "val": "datetime"
+   },
+   "kwargs": {
+    "coerce_timezone": false
+   },
+   "input": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.5
+       },
+       {
+        "t": "float",
+        "v": "nan"
+       },
+       {
+        "t": "float",
+        "v": 3.25
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "ok": {
+    "columns": [
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000001+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "nat"
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000003+00:00",
+        "tz": "UTC"
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   }
+  },
+  {
+   "kind": "enforce_dtypes",
+   "frame": "epochs",
+   "dtypes": {
+    "ts": "datetime",
+    "id": "int64[pyarrow]"
+   },
+   "kwargs": {
+    "coerce_timezone": false
+   },
+   "input": {
+    "columns": [
+     {
+      "name": "ts",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1700000000.0
+       },
+       {
+        "t": "float",
+        "v": 1700000060.0
+       },
+       {
+        "t": "float",
+        "v": "nan"
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   },
+   "ok": {
+    "columns": [
+     {
+      "name": "ts",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:28:20+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:28:20.000060+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "nat"
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "int",
+        "v": 3
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     },
+     {
+      "t": "int",
+      "v": 2
+     }
+    ]
+   }
+  },
+  {
+   "kind": "enforce_dtypes",
    "frame": "numerics",
    "dtypes": {
     "num": "numeric"

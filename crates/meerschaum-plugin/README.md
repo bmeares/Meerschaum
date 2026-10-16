@@ -30,7 +30,8 @@ plugins/native_demo/plugin.toml
 plugins/native_demo/libnative_demo.so
 ```
 
-`plugin.toml` contains top-level `name` and `version` strings (see `examples/plugin.toml`).
+`plugin.toml` contains top-level `name` and `version` strings (see `examples/plugin.toml`). Instead
+of installing the library you can install the crate and let Meerschaum build it (see "Source plugins").
 On macOS use `libnative_demo.dylib`; on Windows install as `libnative_demo.dll` (rename Cargo's
 `native_demo.dll`). `discover` accepts ordered configured directories; `environment_directories`
 parses the OS path-list in `MRSM_PLUGINS_DIR`, without an implicit user-home fallback. Earlier
@@ -40,6 +41,43 @@ from Python discovery. An invalid plugin (bad descriptor, missing or unloadable 
 `Warning: Skipping invalid native plugin at '<dir>': <reason>` on stderr and the rest keep loading
 (PARITY: v4 warns about a broken Python plugin and loads the others); `discover_report` and
 `cached_manifest_report` return the skipped plugins as data.
+
+## Source plugins
+
+A plugin directory that is a Cargo crate (`plugin.toml`, `Cargo.toml`, `src/`) and has no
+up-to-date `lib<name>.<ext>` next to `plugin.toml` is built by the host (`source.rs`):
+`cargo build --release --manifest-path <dir>/Cargo.toml --target-dir <build>/<name>` with
+`CARGO_INCREMENTAL=0`, where `<build>` is `<root>/cache/native_build`. The plugins directory is
+written only by Cargo itself, and only `Cargo.lock` when it is missing or stale (the lock written
+during a build is included in the stamped fingerprint, so it does not cause a rebuild). `cargo` is `$CARGO` or the first one on `PATH`. The crate's package name must equal
+the `plugin.toml` name and `[lib] crate-type` must contain `cdylib`; otherwise the plugin is
+skipped as invalid. Without `cargo` the plugin is skipped with `Warning: Skipping native plugin
+at '<dir>': it is a source crate and no `cargo` was found on PATH (install a Rust toolchain or
+ship lib<name>.<ext>)`; a failed build is skipped with the last 20 lines of cargo's stderr. The
+other plugins still load.
+
+* **Fingerprint.** For a source plugin `Candidate::fingerprint` is the content hash of
+  every file in the plugin directory except `target/`, hidden entries other than `.cargo/`, and shared
+  libraries (so `include_str!` assets and `build.rs` inputs count; not mtimes,
+  so a checkout does not trigger a build). After a successful build the hash is written to
+  `<build>/<name>/mrsm-source-fingerprint`; a build is current when that stamp matches and the
+  library exists. The manifest cache keys on the same fingerprint, so a cache hit builds nothing.
+* **Library path.** `Candidate::library` is the file Cargo produced
+  (`<build>/<name>/release/lib<libname>.<ext>`; hyphens in the package name become underscores);
+  `Candidate::source_crate` is true and the manifest entry gets a `library` field with the path.
+* **Failed builds are remembered.** A failed build writes `<build>/<name>/mrsm-build-failed` with the
+  source fingerprint; until the sources change or the build directory is deleted the plugin is skipped
+  with `the last build failed; edit the sources or delete '<dir>' to retry` and cargo is not run.
+* **A shipped library.** If `lib<name>.<ext>` exists next to the sources it is used unless a build
+  input is newer than it; when it is stale and there is no `cargo`, it is still used, with a warning
+  (`Using native plugin at '<dir>': its library is older than the sources and was not rebuilt`).
+* **API.** `discover_report` / `discover_report_in(dirs, build_dir)` only scan: a source plugin that
+  needs building comes back with `Candidate::build` set and no library yet.
+  `Discovery::build_pending` runs the builds (a failure moves the plugin to `skipped` with
+  `Skipped::source_crate`). `discover`, `cached_manifest(_report)` and `NativePlugins::open` build
+  before they read the manifest, using `native_build` next to the cache file. Without an explicit
+  build directory the root comes from `meerschaum-core`'s `Paths::from_env` (`MRSM_ROOT_DIR`).
+  Path dependencies outside the plugin directory are not fingerprinted.
 
 ## ABI v1 and ownership
 
@@ -133,7 +171,8 @@ end (actions, hooks around a real sync, routes served by `start api`, a native p
 Python plugin of the same name, rejection of corrupt or wrong-ABI libraries, the manifest cache),
 and `tests/console/test_console.py` renders a native page in Chromium. Examples: `native_demo` (source,
 instance, action, hooks, routes, page), `native_probe` (a plain fetch source whose hooks append to
-`NATIVE_PROBE_LOG`, for asserting the built-in sync path) and `bad_abi`. Not yet available: repository
+`NATIVE_PROBE_LOG`, for asserting the built-in sync path) and `bad_abi`. `tests/source.rs` covers source plugins with a stand-in `cargo`;
+`crates/meerschaum-cli/tests/native_source_plugin.rs` builds a real crate. Not yet available: repository
 artifact upload, target-triple selection and installation (the installer's job), and continuous
 `subscribe` / lazy streaming, which need a reader/sink SDK beyond the current eager frame API. The future wasm contract is sketched in
 `wit/plugin.wit` (not compiled); it replaces native Arrow pointers with Arrow IPC bytes.

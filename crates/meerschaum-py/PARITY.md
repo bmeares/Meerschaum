@@ -41,14 +41,14 @@ and record the decision here. Existing historical resolutions are not reclassifi
 | V5-010 | v5 plugin pages registered during Dash initialization disappear | Page collection ran before `@dash_plugin` functions; functions declaring `@web_page` inside initialization produced apps with no routed pages. Private host replays exposed the same trigger in both deployments | Initialize plugin callbacks once, then collect and attach Dash pages and refresh HTML page routes; preserve page-only plugins, authentication and session stores | Fixed; all nine API-host tests pass, including dynamic Dash/HTML registration, shared sessions and idempotent initialization. Private page-route replay confirms the repair |
 | V5-011 | Native password verification rejects supported legacy digests and mishandles excessive iteration counts | Moving the public password facade unconditionally to Rust exposed unsupported digest verification and differing overflow exceptions; released v4.1.4 verifies the legacy fixtures and rejects excessive rounds before computing | Support the 16 digests accepted by the released-reference runtime with Rust implementations and validate Python integer bounds before native PBKDF2; retain malformed-hash warnings and fixed reference vectors | Compatibility repair implemented. Final password facade tests pass in both modes; 30 invalid-digest cases exactly match installed v4 exception classes/messages and warnings. Unsupported-name lookup uses stdlib error metadata only; all password hashing stays Rust. Installed-package evidence is in the build work order |
 | V4-001 | Inherited Python SQL engine creation mutates shared static defaults | Released v4.1.4 and the legacy branch bind `_create_engine_args` directly to `STATIC_CONFIG` and update it in place. A released-reference SQLite `create_engine(pool_size=3, max_overflow=4)` probe changed defaults for eleven SQL flavors without connecting to a database. This also makes `test_static_config_matches_python` order-dependent when collected after connector tests | Deep-copy flavor defaults before applying connector overrides. Tests cover precedence, cross-flavor isolation, nested dialect mutations and unchanged static configuration | **Maintainer approved the isolation fix on 2026-10-15. Implemented.** Connector overrides no longer affect other connectors. Original reference assertions retained; the regression followed by the static-config comparison passes |
-| V4-002 | Dependency-version prechecks bypass `MRSM_NO_AUTO_INSTALL` | Installed released v4.1.4 and v5 both disable the local `attempt_import` installation branch, but `is_installed` calls `need_update`, which directly calls `pip_install` for missing version parsers; non-dry-run `pip_install` has no environment guard | Honor the opt-out for implicit dependency checks while preserving explicit SDK installation semantics; define and compare the missing-parser result before changing it | Confirmed inherited bug, not introduced by Wave 11. **Behavior repair requires maintainer review.** Offline image hooks intercepted the `semver` request; no download was performed. The direct installation path is established by source inspection |
+| V4-002 | Dependency-version prechecks bypass `MRSM_NO_AUTO_INSTALL` | Installed released v4.1.4 and v5 both disable the local `attempt_import` installation branch, but `is_installed` calls `need_update`, which directly calls `pip_install` for missing version parsers; non-dry-run `pip_install` has no environment guard | Honor the opt-out for implicit dependency checks while preserving explicit SDK installation semantics; define and compare the missing-parser result before changing it | Confirmed inherited bug, not introduced by Wave 11. Offline image hooks intercepted the `semver` request; no download was performed. The direct installation path is established by source inspection. **Fixed 2026-10-16 (wave 14 K) as an intentional, documented behavior change (maintainer decision; listed in the migration guide).** One guard, `meerschaum.utils.packages._auto_install_allowed()`, reads `MRSM_NO_AUTO_INSTALL`. *Implicit* = reached from an import or precheck (`attempt_import`, `manually_import_module`, `is_installed` -> `need_update`, `ensure_readline`; these pass `pip_install(_implicit=True)`, which returns `False` without taking the lock or running an installer when the variable is set); *explicit* = `pip_install` called directly, `mrsm install packages`, `install required`, which keep working but, with the variable set, never bootstrap `uv`, `pip`, `wheel`, `setuptools` or `get-pip.py` and skip the PyPI `pip` self-update check. `need_update` also ignores `check_pypi` when disabled. Without an importable `semver` the comparison uses `_core.version_satisfies` (PEP 440, `pep440_rs`), then `packaging`, then reports 'no update needed' (`dprint` under debug). `init_venv` omits `uv venv --seed`. The API package no longer imports `uv` at import time (`shutil.which('uv')` only). With the variable unset every previous install attempt still happens (`tests/utils/test_packages.py`, `test_unset_variable_keeps_the_v4_install_attempts`) |
 | PERF-001 | Serial per-pipe metadata reads in `show partitions` and related actions | CLI waits for each pipe's metadata before starting the next; wall time accumulates network latency | Bounded concurrent reads for capable native SQL connectors; default four workers capped by pool capacity, explicit single-worker mode and serial fallback | Implemented for native `show partitions`, `show rowcounts` and `show sizes`; overlap/bounds/error tests and exact one-versus-four-worker output comparisons pass |
 | GAP-001 | Engine state targets use the instance schema rather than the specified internal schema | Moving fixed targets from multiple instance schemas into one internal schema can merge previously separate state | Design instance/schema namespacing and migration conflict handling before changing placement | Open design work; no migration or behavior change approved |
 | GAP-002 | Cross-instance cursor cleanup on pipe removal | Current cleanup removes state on the local instance; dependent cursor rows on other instances remain | Establish discovery and cleanup semantics for remote state and unreachable instances | Open; no intentional deviation approved |
 | GAP-003 | Compose execution still depends on Python core logic | Native dispatch now covers `ps`, `logs`, `down` and non-dry `up`, with project-scoped jobs, worker environments, temporary pipe sync and ownership-aware cleanup | Six execution tests exercise real jobs, plugin environment/config, SQLite sync, shared data protection and project reuse; existing Compose parity tests retained | Lifecycle migration implemented. Fresh plugin roots still reach Python-backed `install required` / `setup plugins`; existing non-local executor gaps remain. End-to-end D14 independence is **not** complete |
 | GAP-004 | Installed base wheel still needs undeclared Python dependencies for public operations | Offline, read-only slim image with only the two Meerschaum distributions passes native CLI/config lookup/password checks, but public config writes reach missing PyYAML and dict-based Pipe sync reaches SQLAlchemy and typing/formatting dependencies | Port the remaining config, Pipe and SDK dependencies through native bindings; retain an offline public-operation smoke that rejects install requests | Open D14/D20 release blocker. Meeting the approved 250 MB image budget does not establish dependency-free facade operation; clean base-wheel checks reproduce the failures, and full-image Pipe/API-host startup attempts an implicit `semver>=3.0.2` install. Final sizes pass (200.38/844.05 MB); functional failures remain open in the build work order |
 | TEST-001 | Generic Arrow roundtrip fixture collides with the registered GeoArrow extension | Combined Rust-mode collection first registers `geoarrow.wkb`; PyArrow then promotes the generic fixture's raw binary field during C-stream import, failing three exact-schema comparisons. A pure-PyArrow control reproduces this without Rust | Give opaque test metadata a deliberately unregistered synthetic name; retain exact schema/data assertions and the actual GeoArrow integration test | Test isolation repaired; same-process geometry plus core tests pass (195 passed, one existing xfail), and Python-mode core passes (194 passed, one existing xfail). Final combined Rust-mode suite passes 1,755 tests, with 21 skips and one existing xfail. No product behavior or v4 reference expectation changed |
-| ENV-001 | Python geometry test on this development environment | Known `test_polars_geometry_uses_geoarrow_wkb` failure: Arrow reports binary storage instead of a registered GeoArrow extension | Keep the assertion; report any local exclusion explicitly and retain the CI check | Environment limitation, not an approved product deviation |
+| ENV-001 | Python geometry test order dependence (`test_polars_geometry_uses_geoarrow_wkb`) | Root cause (2026-10-16): `utils/dataframe.py::to_polars` registered the GeoArrow extension with a bare `from geoarrow.types.type_pyarrow import ...` inside `try/except: pass`; the import only succeeds while the `mrsm` venv is on `sys.path`, and `mrsm.entry()` deactivates every venv on exit (`_internal/entry.py`), so after `tests/test_compose.py::test_compose_stamps_the_project_name_onto_started_jobs` the registration silently failed and Arrow exported `large_binary` | Fixed: the registration goes through `attempt_import('geoarrow.types.type_pyarrow', lazy=False, warn=False, install=False)`, which activates the venv around the import; the assertion is unchanged | **Closed**. Not a Polars/PyArrow/geoarrow version issue (the earlier note was wrong); CI keeps the check |
 
 The current execution plan is in the [hardening work order](../../docs/design/v5-build.md#active-v5-hardening-work-order-2026-10-15).
 
@@ -435,3 +435,175 @@ Final dataframe validation: 300 passed with one existing xfail in each pandas 2.
 Python/Rust combination, including 106 strict boundary regressions. All 11 browser tests and
 nine API-host tests passed after the dynamic-page repair. The expanded password checks and
 whole-workspace/server/image gates are recorded in the build work order.
+
+## Wave 13 (task H): native `Pipe.sync` for explicit data and document input/output
+
+`Pipe.sync(list[dict] | dict[str, list] | DataFrame)` into a SQL instance with a Rust driver now runs
+`_core.sync_pipe` (`src/sync_api.rs`, the engine's ordinary one-pipe flow `meerschaum_engine::sync::sync_pipe`)
+under `MRSM_CORE=rust`. It is **not** a graph run: no ledger, no run history, no `mrsm:engine_*` pipe. The
+session is the registered-only, worker-less one of `verify_pipe`'s façade (one connector, no config read,
+no Python process). Documents and dictionaries of lists cross as kernel `PipeInput::{Docs,Columns}` straight
+from the Python objects (`PyCtx::scalars` + `py_to_cell`): no pandas/Polars/pyarrow/JSON round trip, so UUID,
+`bytes`, `Decimal`, nested JSON and timezone-aware datetimes keep their types and an interpreter without any
+dataframe package can sync. `get_pipe_docs` (`as_docs=True`) builds no dataframe either. `Pipe.sync` returns a
+`SyncResult` (a `tuple` subclass, `(success, message)`-compatible, `meerschaum.core.Pipe._sync.SyncResult`) on every
+path; the native path fills `inserted`, `updated`, `upserted`, `deleted`, `duration`, `begin`, `end`; the other
+paths (and python mode) return the same class with those `None`.
+
+| # | Deviation / change | Reason |
+|---|---|---|
+| H1 | `frame_from_docs` fills a key a document lacks with `NaN`, not `None`; `convert_dtypes` turns a column that holds only `None` and `NaN` into `Int64` (`[None, None]` and `pd.NA` stay `object`) | `pd.DataFrame(docs)` fills missing keys with `NaN`, so a column that is absent from some documents and `None` in the others is `float64` and `convert_dtypes()` makes it `Int64`; the native path must give the same table column types (`crates/meerschaum-kernel/tests/docs_nulls.rs`, values read from pandas 2.3) |
+| H2 | `SqlConnector.get_pipe_docs` takes `PyCtx::scalars` instead of `PyCtx::new` | the first `get_data(as_docs=True)` of a process imported pandas (or asked `attempt_import` to install it) |
+| H3 | Data pandas would reject (`{'a': [1, 2], 'b': [1]}`: unequal lengths) is answered by the binding with the same warning and `(False, "DataFrame is None. Cannot sync <pipe>.")` as the Python path | the shape check is the binding's, so the façade does not need pandas to find out |
+| H4 | `Pipe.sync` registers the pipe and runs `validate_indices` in the façade (a plugin connector's `register()` is Python) before `_core.sync_pipe`; newly detected special columns and the `autoincrement` flag the sync persisted are applied to the in-memory pipe's parameters (`update_parameters(persist=False)`) | v4 mutates the Python pipe the same way (`SQLConnector.sync_pipe`) |
+| H5 | `parse_date_bounds` imports `dateutil` only for a text bound | the integer, `None` and datetime bounds of `sync` / `get_data` needed it (and, offline, its installation) |
+| H6 | `SQLConnector.parse_uri` is `_core.parse_sql_uri` under the gate (the Rust URL grammar is SQLAlchemy 2.0's, golden-tested against `fixtures/uris.json`). SQLAlchemy's grammar is the reference and Rust is authoritative: a malformed URI raises `ValueError` with SQLAlchemy's message text (`Could not parse SQLAlchemy URL from given URL string`) instead of `sqlalchemy.exc.ArgumentError`, and there is no silent fallback to SQLAlchemy | `MRSM_SQL_<LABEL>` URI connectors needed SQLAlchemy only to split the URI; a second grammar behind a `try` would make the result depend on whether SQLAlchemy is installed |
+| H7 | `tests/test_pipeline.py` asserts `type(result) is SyncResult` where it asserted `is tuple` | the intent (a bare `sync()` is not a graph `RunResult`) is unchanged; the spec makes the return a tuple subclass |
+| H8 | Integers beyond 64 bits (`2**70`) sync natively as a `numeric` column (and register `dtypes: numeric`); v4 fails with `DataFrame is None. Cannot sync ...` because pandas cannot build the frame | a v4 limitation of the pandas boundary, not a contract: the value is valid and the kernel represents it exactly (`test_integers_beyond_64_bits_sync_as_numeric_only_natively`) |
+| H9 | **Fixed.** Pipes with `enforce: False` and `sync(enforce_dtypes=False)` take the native sync again. The Rust instance now follows v4's non-enforcing rules: (1) a SQLite/GeoPackage table that does not enforce is read back with its `TIMESTAMP` columns as *text* (v4's `get_pipe_data` passes no `dtype` to `read()`) and the `enforce_dtypes` `astype` then reads them as UTC, so a UTC-aware row matches its backtrack and is updated, not inserted twice (`instance/data.rs`, `sqlite_datetimes_as_text`); (2) the kernel's object-path `astype` casts integer and float columns to a datetime dtype as ticks of the target's unit (`Series.astype('datetime64[us, UTC]')`), so an integer datetime axis is created as a datetime column and later integer rows are cast to it, instead of reaching the partition/insert code as integers (`enforce.rs`, `pandas_astype`; `fixtures/enforce_dtypes.json` carries the v4.1.4 oracle rows); (3) `filter_existing` raises pandas' merge `ValueError` for a timezone-naive key against a UTC-aware one (and a datetime key against a numeric/string/bool/bytes one) where v4 lets it escape from `Pipe.filter_existing()`, and the façade re-raises it from the failed native result (`// PARITY:` in `diff.rs`, `_sync_native`; `fixtures/filter_existing.json` oracle cases `no_enforce_*`) | a naive datetime axis raising on its second sync is a v4 quirk kept on purpose (the same rows with `enforce: True` are coerced to UTC and update); only the datetime merge-key rules are modeled, the `object`-column rules of pandas are not. The MySQL family stores `datetime` without a timezone, so a non-enforcing pipe there raises for UTC rows as well; the v4 oracle could not reach those containers, so it is covered by no test. Tests: `tests/test_native_sync.py::test_pipes_that_do_not_enforce_match_v4` (and `..._are_synced_natively`, `test_syncs_with_enforce_dtypes_false_match_v4`, `test_a_naive_axis_raises_the_pandas_merge_error_in_both_modes`), `crates/meerschaum-sql/tests/instance_enforce_false.rs`, `crates/meerschaum-kernel/tests/enforce_no_coerce.rs` |
+| H10 | Documents with no column at all (`[{}, {}]`) into a new table raise `ValueError("Expecting columns for table '...'.")` from `Pipe.sync`, as v4 does (`utils/sql.py:2329`); the façade raises it from the native result (matched on that message) | v4 raises rather than returning a failed tuple |
+| H11 | A static pipe that receives a new column fails in both implementations; the native message is `Failed to insert rows into "<table>".`, v4's is the SQLAlchemy traceback text. Rows and `success` are identical | v4's message is an accidental traceback; only the failure and the table contents are contract (`test_a_static_pipe_refuses_new_columns_in_both_modes`) |
+
+**Not routed yet (remaining work; they keep the current Python body, selected by `_rust_sync_eligible(...)`, which
+returns the reason and logs it under `debug`).** None of this is a new Python fallback and none of it is complete:
+- no data given (the connector's `sync()` / `fetch()`), `None`, strings (`parse_simple_lines`), generators and other
+  iterables (chunk generators, `sync_chunks`), Dask, Polars `LazyFrame`, tuples/lists of non-dicts, dicts with scalar
+  or `Series` values or non-string keys (declined by `_core.sync_pipe` itself: the call has not read or written anything);
+- `force` (the retry loop), `workers`, non-blocking syncs with `callback` / `error_callback`, `debug=True`, plugin
+  keyword arguments (any other `**kw`);
+- temporary pipes, pipes with `reference` / `references`, `{{ }}` templates or `MRSM{}` symlinks in their raw parameters;
+- instances that are not a SQL connector with a Rust driver: `mssql`, `oracle`, `duckdb`, in-memory SQLite, `api:`,
+  `valkey:` and custom `@make_connector` instances;
+- `SyncResult.changed_intervals` is `None` on every path (the one-pipe flow does not report intervals yet);
+  `SyncResult` is not exported as `mrsm.SyncResult`;
+- `Pipe(...)`, `register()`, attribute lookup and `get_data(as_docs=True)` no longer need SQLAlchemy, pandas or
+  Polars (asserted with those modules blocked in `tests/test_native_sync.py::test_construct_register_sync_and_read_docs_need_no_sqlalchemy_or_dataframes`),
+  but their Python bodies still exist behind the gate; D14 deletes them. Everything D16 (`read/exec/value/to_sql/.engine`)
+  still creates the SQLAlchemy engine on first use, as intended.
+
+GAP-004 progress: with the config round trip on Agent G's native YAML, `scripts/docker/smoke_facade.py`
+(`Pipe.sync(list[dict])` to a SQLite instance, `get_data(as_docs=True)`, `SyncResult` fields, no `sqlalchemy` /
+`pandas` / `polars` / `numpy` imported) passes in a fresh venv that holds only the `meerschaum` distribution with
+the network and installs disabled; see the final report of this wave for the commands.
+
+## Wave 13 (task G): native lossless YAML codec (D14/D20 slice 1)
+
+`meerschaum._core.yaml` (`load`, `safe_load`, `dump`, PyYAML's exception classes) is a port of PyYAML's
+reader, scanner, parser, composer, constructor, representer, serializer and emitter
+(`meerschaum_core::yaml::{scanner,parser,loader,node,emitter,dumper}`) with a lossless node tree: ordered
+mappings with typed keys, arbitrary-size integers, `date`/`datetime` (naive and offset, microseconds), `bytes`,
+tuples, sets and shared (aliased) nodes. `src/yaml_api.rs` builds real Python `datetime.date`/`datetime.datetime`/
+`bytes`/`int`/`bool`/`None`/`tuple`/`set`/`dict` objects, so `{1: a, True: b}` collapses like a Python dict. It never
+goes through `meerschaum_core::Value`; the JSON-like `meerschaum_core::yaml::{load,dump}` projection is kept for Rust
+consumers whose data model is JSON (config registry, compose) and is documented as lossy. `meerschaum/utils/yaml.py`
+routes `yaml.load` / `safe_load` / `dump` to it when the extension is present and imports no YAML library and no
+`packaging` (PyYAML/ruamel stay as the fallback of an installation without `_core`, which is not a supported v5
+configuration). Every `import yaml` / `attempt_import('yaml')` site of the package (`config/_read_config.py`, `_edit.py`,
+`_sync.py`, `config/__init__.py`, `core/Pipe/_edit.py`, `actions/edit.py`, the dash callbacks) already went through
+`utils/yaml.py`; `utils/packages/is_uv_enabled` now reads the config instead of probing `import yaml` when the codec is
+native, so a `uv_pip: false` opt-out is honored without PyYAML in either gate mode.
+
+Recorded with released `meerschaum==4.1.4` + PyYAML 6.0.3 by `crates/meerschaum-core/tests/fixtures/gen_yaml.py`
+(`yaml_parity.json`: 250 load cases x `load`/`safe_load`, 3536 dump cases, 29 `read_config`/`write_config` cases),
+consumed by `crates/meerschaum-core/tests/yaml_parity.rs` and `tests/test_yaml.py` (which also compares `_core` with
+PyYAML in one process, and replays the config cases in both `MRSM_CORE` modes in a subprocess).
+
+| # | Deviation | Reason |
+|---|---|---|
+| G1 | `yaml.load` (PyYAML's full `Loader`) refuses every `!!python/*` tag except `!!python/tuple` with the `SafeLoader` `ConstructorError` ("could not determine a constructor for the tag ..."); `!!python/object`, `/apply`, `/name`, `/module`, `/complex`, `/str`, `/dict`, `/list` are not constructed | those tags import modules and call arbitrary callables; a config file or a pipe's parameters must not execute code. `!!python/tuple` is what the Python dumper itself writes for tuples. 8 corpus cases (`PYTHON_TAG_DEVIATIONS` in `tests/test_yaml.py`) are compared as "same error as `safe_load`" |
+| G2 | A lone surrogate escape (`"\ud800"`) loads as U+FFFD | a Rust `String` cannot hold one (`tests/test_yaml.py::test_lone_surrogate_escape_deviation`) |
+| G3 | A self-referential anchor (`&a [*a]`) raises `RecursionError("maximum recursion depth exceeded")`; dumping a recursive Python structure raises `yaml.RepresenterError`, not a self-anchored document | an `Rc` node tree cannot hold a cycle; PyYAML builds the cycle and fails later in nearly every consumer (`loader.rs`, `yaml_api.rs`) |
+| G4 | `dump()` ignores keywords the codec does not know (as `filter_keywords` did before PyYAML) and has no `Dumper` class hook; `get_dumper_class()` returns `None` | the v4 `CustomDumper` behavior (blank line between top-level keys, `|`-style multi-line strings) is built in and byte-compared with the reference on all 3536 dump cases |
+| G5 | In `MRSM_CORE=rust`, the rust-mode default config carries `system:engine` inside the stack's `MRSM_CONFIG` default (v5 key; v4.1.4 lacks it); `tests/test_yaml.py` strips it before comparing the config cases | v5-only config section, not a codec difference |
+| G6 | Root-level multi-line or whitespace-edged strings written by `yaml.dump` do not round-trip through any loader | v4's `CustomDumper` doubles the line breaks at indent depth 1; the reference writes the same text, kept byte for byte (`dump_cases`); `tests/test_yaml.py::test_pyyaml_reads_what_native_writes` skips exactly those |
+| G7 | A date inside config YAML (`when: 2024-01-01`) is a `datetime.date` through `read_config(substitute=False)` (lossless), but `get_config` fails in python mode (`json.dumps` in `search_and_substitute_config`, as v4.1.4 does) and returns the string `'2024-01-01'` in rust mode (the registry is JSON-valued) | v4 quirk kept in python mode; the rust registry stores `meerschaum_core::Value` |
+
+Fixture hygiene found by this work: `scripts/parity/run.sh` exports `MRSM_PARITY_REFERENCE`, which v4 reads as a
+`parity:reference` connector the moment `meerschaum` is imported. `gen_yaml.py` therefore removes every `MRSM_*`
+variable before the import and keeps the version for its own guard (the first recording had leaked the connector into
+the recorded default config).
+
+**Config ownership (deliverable 5): stopped at a clean boundary; nothing is duplicated.** `read_config`,
+`write_config`, `search_and_substitute_config`, `get_keyfile_path` and the `_sync` helpers are still the v4 Python
+bodies, now running on the native lossless codec (no PyYAML), and `_core.get_config` still serves the live Python
+`config` dict (one registry; `set_config` / `replace_config` / env patches stay visible, nothing cached). The Rust
+`meerschaum_core::config::Config` (`read_config` / `write_config` / `search_and_substitute`) is a second, JSON-valued
+registry used by the `mrsm` binary and `meerschaum-server`. Remaining work, in order:
+1. make `meerschaum_core::config` hold the lossless node (or a `Value` with `Date`/typed keys) so a `datetime.date`
+   in `config.yaml` survives `get_config` (G7) and `write_config` of a value the JSON projection cannot represent;
+2. bind `read_config` / `write_config` / `search_and_substitute_config` / `get_keyfile_path` in `_core` over that
+   registry (with `MRSM{}` symlink restoration, backups/rollback of `config/_backup.py`, `_allow_write_missing`,
+   `with_filenames`, the malformed-file warning text) and gate them as `GATED_FEATURES` entries, then delete the
+   Python bodies (D14); the 29 recorded config cases are the acceptance fixture;
+3. make `get_config` read that registry instead of the Python dict (keeps "get_config is hot": read-only fast path).
+`meerschaum.utils.packages._packages['core']['yaml']` (PyYAML) and `packaging` remain listed for the fallback and for
+`pip_install` of plugin venvs; removing them is a `check_packaging.py` change owned by the packaging slice.
+
+GAP-004 status: the config write/read half is closed in a fresh venv without PyYAML (commands in the wave 13 report of
+task G); the Pipe-sync half is task H's. The Python CLI (`python -m meerschaum ...`) is not a supported entry point of
+the base wheel (it needs prompt_toolkit/humanfriendly); the `mrsm` binary (`meerschaum-cli` wheel) is.
+
+## Wave 13 (task I): native plugin lifecycle (`setup plugins`, `install required|plugins|packages`)
+
+The four actions run in Rust (`crates/meerschaum-cli/src/native/{lifecycle,pip,plugin_files}.rs`) and no longer
+reach `python.rs::core_action`. Python runs only a plugin's own `setup()` (worker op `setup`); a native (C-ABI)
+plugin's `setup` goes through the SDK `call` and starts no Python. Compose's `init_root`, `compose_init` and
+`check_and_install_plugins` issue the same sysargs as v4; they re-invoke this binary under the project
+environment (`MrsmRunner`), so they reach the native handlers and never `core_action`. Messages were compared
+with released 4.1.4 against a temp root and a loopback repository (`install plugins`: fresh, up to date, force,
+failing `setup`, no version, missing archive, `--skip-deps`; `install required`/`install packages`: success,
+offline failure, `--force`, empty request; `setup plugins`: bool/tuple/None/raise/odd returns; `compose init` in a
+fresh root). Deviations:
+
+| Id | v4 behavior | v5 behavior | Why |
+|---|---|---|---|
+| W13I-001 | `safely_extract_tar` compares path strings (`abs_target.startswith(abs_directory)`), so a member `../<name>.txt` escapes a directory named `<name>`; v4 also extracts symlink/hardlink members and buffers members in memory | components are compared and every destination parent is canonicalized on disk against the output directory before a write; symlink and hardlink members are refused (`Links are not allowed in plugin archives`); regular members stream to disk with a 256 MiB cap; special members are skipped; the temp directory is cleared before extraction and removed on every exit path; plugin names must be a single path component (`is_safe_plugin_name`) | closes a real sibling-prefix escape and a symlink escape found in review (2026-10-16); every other message is v4's |
+| W13I-002 | the archive is `<name>.tar.gz` and `binaryornot>=0.4.4` is unpinned: 0.6.0 (the reference venv) calls every `.gz` binary, so a repository's JSON answer (`[false, "Archive ... could not be found."]`) ends as `Failed to extract plugin` plus a gzip warning; 0.4.4 reads the content | content is inspected (0.4.4 semantics): the server's own message is printed and the install ends there | v4's result depends on an unpinned library; the content rule is the one the code was written for |
+| W13I-003 | `Plugin.get_dependencies` reads `required` from the source text and deletes the first `=` of the list (`'pandas>=2'` becomes `'pandas>2'`) and ends the list at the first `]` even in a string or comment | the list comes from the manifest when the plugin imported; else from the source with a string- and comment-aware bracket match, specifiers intact | v4's text reader mangles specifiers; `// PARITY` repair in `plugin_files::static_required` |
+| W13I-004 | an API repository without credentials prints `Please login with the command login <keys>.` before each request | not printed (the native client does not emit it) | cosmetic; the default `api:mrsm` has credentials |
+| W13I-005 | `reload` imports every plugin again after an install | the manifest refresh (changed plugin trees only; the worker pool is recycled when any changed) | D14; the step prints nothing and returns v4's `(True, "Success")` |
+| W13I-006 | bootstraps `uv` into the host interpreter (`pip install uv --break-system-packages`), updates `pip` itself, downloads `get-pip.py`, adds `--prerelease=allow` for pinned pre-releases | none of these; with `pip` as the installer the `wheel`/`setuptools`/`PyYAML` bootstrap still runs | v5 never changes the host interpreter or reaches the network on its own |
+| W13I-007 | plugin version of an installed plugin is read by importing it; a plugin's `print()` in `setup()` goes to stdout | read from the source (`__version__ = '...'`); worker prints go to the worker's stderr; `--debug` echoes the installer command line without v4's `dprint` traces | no import in the CLI process |
+| W13I-008 | `get_plugins_names()` lists plugins in symlink-farm (file-system) order | sorted by name within each plugins directory, first directory first | stable output |
+
+`MRSM_NO_AUTO_INSTALL`: an explicit install (`install required`, `install packages`) still runs, as in v4. While the variable
+is set the native code skips every bootstrap: no `uv venv --seed` (the fallback `python -m venv` gets `--without-pip`), no
+`wheel`/`setuptools`/`PyYAML`/`uv` install into the venv. This follows the repaired V4-002 (row 44, user decision 2026-10-16).
+`--dry-run` reports `auto_install_enabled`.
+
+Failed-import discovery (decided with released 4.1.4, plugins `broken.py` with a failing import, `ok.py`, `pkg/__init__.py`,
+`no_init/mod.py`): `show plugins` lists `pkg, broken, ok` and not `no_init`; `setup plugins` counts `broken` (the import
+error is warned only when something imports it). So discovery is a file-system test (`<name>/__init__.py` or `<name>.py`),
+never an import; `compose/plugins.rs::plugin_names_in_dirs` now applies the `__init__.py` rule and needs no runtime. A native
+plugin directory (`plugin.toml`) counts as installed and shadows a Python plugin of the same name.
+
+Remaining `core_action` fall-through after this task (`crates/meerschaum-cli/src/python.rs::core_action`), computed as
+the action table (`actions.rs`) minus the branches of `dispatch.rs::run_action` and `native::run`: `login`, `os`, `stack`,
+`sql`, `api start` (`_api_start`), `bootstrap connectors|jobs|pipes|plugins`, `clear cache`, `copy connectors`,
+`delete cache|config|connectors|plugins|venvs`, `drop indices`, `edit definition|jobs|plugins|tokens`, `flush indices|pipes`,
+`register connectors|tokens`, `restart|show|start|stop daemons`, `show packages|schedules|targets|tokens`, `start connectors|gui|worker`,
+`uninstall packages|plugins`, `verify packages|plugins|venvs`. Inside native handlers three more calls remain:
+`prune venvs` -> `uninstall packages` (`native/venvs.rs:590`), `upgrade meerschaum|packages|plugins` (`native/venvs.rs:619`) and
+the register-plugins fallback (`native/manage.rs:752`). Nonlocal executors are not covered.
+
+## Wave 13 (task E): native web terminal (`/webterm/{session_id}`, `/dash/webterm`)
+
+`meerschaum-server::webterm` (PTY bridge on `portable-pty`, tmux sessions, terminado's wire protocol) replaces the Tornado /
+terminado process and the API-host mount (`meerschaum/api/host/_webterm.py` deleted; the host config always sends
+`no_webterm: true`; `meerschaum/api/routes/__init__.py` now imports `routes/_webterm.py` only when `_include_webterm`, which the
+host never sets). Deviations from 4.1.4, all deliberate:
+
+| Behavior | v4.1.4 | v5 | Why |
+|---|---|---|---|
+| Who gets a shell | any logged-in user when `api:permissions:actions:non_admin` is true (its default) | administrators, or any user the actions gate (`is_user_allowed_to_execute`) lets run actions | the terminal is a shell on the server; the v4 default handed one to every registered user |
+| Second login on one server | `500` (`Failed to apply update to Pipe('mrsm','sessions')`) | works, the sessions are independent | the Python bug is not carried over |
+| Shell echo | the headless shell never echoed | the PTY echoes | real PTY |
+| New tmux window | the page typed a command into the terminal | `["new_window"]` message (v5 addition; v4 clients never send it) | no typing into the user's shell |
+| `start webterm` | starts the Tornado process | prints that the terminal is part of `start api` and fails | there is no separate process |
+| Environment of the tmux shell | a JSON file read by a `python -c` bootstrap | a `0600` sourced `webterm.env` in `WEBTERM_INTERNAL_RESOURCES_PATH` | no Python in the path; secrets stay out of `ps` |
+
+Quirks kept (`// PARITY:` in `webterm.rs`): the websocket of an unauthenticated session is accepted and closed with code 1000;
+`--no-auth` authenticates every session id; `COLUMNS`/`LINES` are removed from the shell's environment.
+The `webterm` tests run with tmux present (`tmux_sessions_survive_reconnects_and_carry_the_environment`, `tests/console`
+`[tmux]` params) and absent (`without_tmux_on_the_path_each_tab_gets_a_plain_shell`, the `no-tmux-binary` console param
+whose server PATH holds no `tmux`).

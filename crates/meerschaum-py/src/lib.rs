@@ -39,8 +39,11 @@ pub mod polars_bridge;
 pub mod runtime;
 pub mod sql_api;
 pub mod static_config;
+pub mod sync_api;
 pub mod trace;
 pub mod verify_api;
+pub mod version_api;
+pub mod yaml_api;
 
 /// The `meerschaum._core._core` extension module.
 ///
@@ -83,6 +86,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(core_api::hash_password, m)?)?;
     m.add_function(wrap_pyfunction!(core_api::verify_password, m)?)?;
 
+    // PEP 440 requirement matching for the façade's dependency prechecks (V4-002)
+    m.add_function(wrap_pyfunction!(version_api::version_satisfies, m)?)?;
+
     // meerschaum-engine (Syncing Engine, §5)
     m.add_function(wrap_pyfunction!(engine_api::engine_plan, m)?)?;
     m.add_function(wrap_pyfunction!(engine_api::engine_run, m)?)?;
@@ -104,7 +110,14 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_api::register_connector, m)?)?;
     m.add_function(wrap_pyfunction!(verify_api::unregister_connector, m)?)?;
 
+    // `Pipe.sync()` for explicit data (wave 13)
+    m.add_function(wrap_pyfunction!(sync_api::sync_pipe, m)?)?;
+    m.add_function(wrap_pyfunction!(sync_api::parse_sql_uri, m)?)?;
+
     m.add_class::<pipe_api::PyPipe>()?;
+
+    // PyYAML-compatible YAML codec with a lossless Python boundary (wave 13)
+    yaml_api::register(m)?;
 
     // meerschaum-sql (instance connector)
     m.add_class::<sql_api::PySqlConnector>()?;

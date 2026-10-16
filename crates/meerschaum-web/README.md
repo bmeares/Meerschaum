@@ -11,7 +11,14 @@ The server's additive `app_with_console` hook keeps the dependency direction `we
 The executable must choose this constructor when serving the console. `--no-dash` is respected.
 `WebConfig::with_cache(&valkey)` selects an existing cache connector; otherwise sessions use
 the configured instance. Supply the configured session TTL and HTTPS cookie policy in WebConfig.
-`webterm` optionally links a same-origin terminal route. The terminal PTY remains server-owned.
+`webterm` (`WebtermSettings`, set by `mrsm start api` unless `--no-webterm`) serves the web terminal:
+the `/dash/webterm` page embeds xterm.js in the console chrome (vendored `xterm.js`, `addon-fit.js`,
+`addon-unicode11.js`, `webterm.js`, `webterm.css`; the theme follows the console's; the mobile key row
+has ESC/CTRL/SHIFT/TAB and the arrows, CTRL and SHIFT sticky), and the router also carries the
+standalone `/webterm/{session_id}` page and the websocket `/websocket/{session_id}`. Both are
+`meerschaum_server::webterm` (the PTY bridge over `portable-pty`, tmux sessions, terminado's wire
+protocol), authenticated through this crate's session store (`WebConfig::sessions`). The standalone
+routes do not depend on the `dash` route group, like v4's.
 
 Exact core and registered page paths are mounted, never `/dash/*`. Unmatched plugin-owned
 Dash paths reach the server's existing Python-host fallback. Manifest consumers populate
@@ -93,8 +100,7 @@ This is not yet the full b3 parity gate. The pipeline view has dependency edges,
 and timing bars, but needs ledger lag and a read-side engine events stream.
 The current server only accepts events (POST); it has no events subscription endpoint.
 Plugin management supports search, metadata, install, delete and archive upload (`POST /dash/plugins/upload`, CSRF-checked, forwarded to `POST /plugins/{name}` with the session user's credentials and the API's size limit, `ARCHIVE_MAX_BYTES`).
-User and token forms delegate writes to the API. Settings exposes password changes. The terminal
-is a configured link, not a PTY implementation. Page-contract callbacks are ordinary plugin
+User and token forms delegate writes to the API. Settings exposes password changes. Page-contract callbacks are ordinary plugin
 HTTP routes; manifest auto-discovery and dynamic native plugin handlers need the plugin/host
 integration. Pixel-level equivalence to v4 Dash is not claimed. Source-sync execution depends
 on the configured API/worker backend.

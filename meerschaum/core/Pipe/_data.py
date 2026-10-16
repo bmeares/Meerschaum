@@ -1019,7 +1019,6 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None], debug: bool = 
     from meerschaum.utils.misc import is_int
     from meerschaum.utils.dtypes import coerce_timezone, MRSM_PD_DTYPES, are_dtypes_equal
     from meerschaum.utils.warnings import warn
-    dateutil_parser = mrsm.attempt_import('dateutil.parser')
 
     _columns = None
     _dtypes = None
@@ -1045,6 +1044,9 @@ def parse_date_bounds(self, *dt_vals: Union[datetime, int, None], debug: bool = 
             return int(dt_val)
 
         if isinstance(dt_val, str):
+            ### Only a text bound needs `dateutil` (a missing package is not installed
+            ### for the integer, `None` and datetime bounds that never reach here).
+            dateutil_parser = mrsm.attempt_import('dateutil.parser')
             try:
                 dt_val = dateutil_parser.parse(dt_val)
             except Exception as e:

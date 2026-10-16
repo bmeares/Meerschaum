@@ -1215,6 +1215,25 @@ pub fn pandas_astype(name: &str, data: &ColumnData, target: &str) -> Result<Colu
                 let d = crate::value::parse_datetime_value(s).ok_or_else(|| err(v))?;
                 Value::Datetime(coerce_datetime(&d, tz.is_none()))
             }
+            // `Series([1, 2]).astype('datetime64[us, UTC]')` reads integers (and truncated
+            // floats) as ticks of the *target's* unit since the epoch (an integer datetime axis
+            // that v4 enforces on the object path, e.g. `enforce: False` pipes).
+            (DataType::Datetime(tu, tz), Value::Int(i)) => Value::Datetime(
+                DateTimeValue::from_timestamp(*i, *tu, tz.as_ref().map(|_| TzInfo::Utc))
+                    .ok_or_else(|| err(v))?,
+            ),
+            (DataType::Datetime(tu, tz), Value::Float(f))
+                if f.is_finite() && crate::cast::float_fits_i64(f.trunc()) =>
+            {
+                Value::Datetime(
+                    DateTimeValue::from_timestamp(
+                        f.trunc() as i64,
+                        *tu,
+                        tz.as_ref().map(|_| TzInfo::Utc),
+                    )
+                    .ok_or_else(|| err(v))?,
+                )
+            }
             (DataType::Datetime(_, tz), Value::Date(d)) => {
                 let dt = DateTimeValue::naive(d.and_hms_opt(0, 0, 0).expect("midnight"));
                 Value::Datetime(coerce_datetime(&dt, tz.is_none()))

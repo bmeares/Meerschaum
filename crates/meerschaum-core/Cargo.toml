@@ -17,7 +17,8 @@ regex = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-yaml-rust2 = "0.10"
+num-bigint = "0.4"
+num-traits = "0.2"
 pep440_rs = "0.7"
 pbkdf2 = { workspace = true, features = ["hmac"] }
 hmac = { workspace = true }

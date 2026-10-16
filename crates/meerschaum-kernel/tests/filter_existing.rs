@@ -33,7 +33,8 @@ fn filter_existing_parity() {
         let p = &case["parameters"];
         let autoincrement = p["autoincrement"].as_bool().unwrap_or(false);
         let dtypes = pipe_get_dtypes(&configured, &remote, &columns, autoincrement);
-        if serde_json::to_value(&dtypes).unwrap() != ok["pipe_dtypes"] {
+        if case.get("err").is_none() && serde_json::to_value(&dtypes).unwrap() != ok["pipe_dtypes"]
+        {
             failures.push(format!(
                 "{name}: get_dtypes {dtypes:?} != {}",
                 ok["pipe_dtypes"]
@@ -81,9 +82,22 @@ fn filter_existing_parity() {
             calls.push(req.clone());
             backtrack.clone()
         });
-        let (unseen, update, delta) = match result {
-            Ok(r) => r,
-            Err(e) => {
+        let (unseen, update, delta) = match (result, case.get("err")) {
+            (Ok(r), None) => r,
+            (Ok(_), Some(err)) => {
+                failures.push(format!("{name}: expected error {err}"));
+                continue;
+            }
+            (Err(e), Some(err)) => {
+                // v4's `ValueError` text (the kernel raises the message without the class).
+                let expected = err.as_str().unwrap();
+                let expected = expected.strip_prefix("ValueError: ").unwrap_or(expected);
+                if e.to_string() != expected {
+                    failures.push(format!("{name}: error `{e}` != `{expected}`"));
+                }
+                continue;
+            }
+            (Err(e), None) => {
                 failures.push(format!("{name}: unexpected error {e}"));
                 continue;
             }

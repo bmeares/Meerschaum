@@ -1420,6 +1420,7 @@ pub fn new_compose_file_text(project_name: &str, pipes: &[Map]) -> String {
     format!(
         "### See https://meerschaum.io/reference/compose/ for the compose schema.\n\n{}",
         meerschaum_core::yaml::dump(&Value::Map(doc))
+            .expect("the compose template is a fixed document the YAML emitter accepts")
     )
 }
 

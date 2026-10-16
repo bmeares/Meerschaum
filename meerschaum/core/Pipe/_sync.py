@@ -29,12 +29,291 @@ from meerschaum.utils.typing import (
 )
 from meerschaum.utils.warnings import warn, error
 from meerschaum._internal.static import STATIC_CONFIG
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
 
 class InferFetch:
     MRSM_INFER_FETCH: bool = True
+
+
+class SyncResult(tuple):
+    """
+    The result of `Pipe.sync()`: a `SuccessTuple` (`(success, message)`, so
+    `success, msg = pipe.sync()` unpacks as ever) with the structured fields of the sync.
+
+    The fields are `None` when the sync did not report them (a plugin's own `sync()`,
+    the Python implementation, a failure before the data was written).
+
+    Attributes
+    ----------
+    success: bool
+        Whether the sync succeeded.
+
+    message: str
+        The message.
+
+    inserted: Optional[int]
+        Rows inserted.
+
+    updated: Optional[int]
+        Rows updated.
+
+    upserted: Optional[int]
+        Rows upserted.
+
+    deleted: Optional[int]
+        Rows deleted.
+
+    changed_intervals: Optional[List[Tuple[Any, Any]]]
+        The `(begin, end)` intervals of the datetime axis that changed.
+
+    duration: Optional[float]
+        Seconds the sync took.
+
+    begin: Union[datetime, int, None]
+        The lower bound of the sync, if one was given.
+
+    end: Union[datetime, int, None]
+        The upper bound of the sync, if one was given.
+    """
+
+    _FIELDS = (
+        'inserted', 'updated', 'upserted', 'deleted',
+        'changed_intervals', 'duration', 'begin', 'end',
+    )
+
+    success: bool
+    message: str
+
+    def __new__(cls, success: bool, message: str = 'Success', **fields: Any):
+        self = super().__new__(cls, (success, message))
+        self.success = success
+        self.message = message
+        for name in cls._FIELDS:
+            setattr(self, name, fields.pop(name, None))
+        if fields:
+            raise TypeError(f"Unexpected sync result fields: {', '.join(sorted(fields))}.")
+        return self
+
+    @classmethod
+    def from_tuple(cls, result: Any) -> Any:
+        """
+        Return `result` as a `SyncResult` if it is a plain `(bool, str)` tuple,
+        otherwise return it as it is (e.g. a `RunResult` or a plugin's own tuple).
+        """
+        if type(result) is not tuple or len(result) != 2:
+            return result
+        return cls(result[0], result[1])
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Return the result's fields as a dictionary.
+        """
+        return {
+            'success': self.success,
+            'message': self.message,
+            **{name: getattr(self, name) for name in self._FIELDS},
+        }
+
+    def __reduce__(self):
+        return _rebuild_sync_result, (self.to_dict(),)
+
+
+def _rebuild_sync_result(fields: Dict[str, Any]) -> SyncResult:
+    return SyncResult(fields.pop('success'), fields.pop('message'), **fields)
+
+
+### Pipe attributes the native sync cannot honor: another pipe's parameters would be inherited
+### (`reference`), or templates and symlinks would be resolved by Python.
+_NATIVE_SYNC_PARAMETER_MARKERS = ('MRSM{', '{{')
+### Caches of the table's layout the Python pipe drops after a sync (as `SQLConnector.sync_pipe`).
+_NATIVE_SYNC_CACHE_KEYS = (
+    '_exists',
+    '_columns_types',
+    '_columns_types_timestamp',
+    '_columns_indices',
+    '_columns_indices_timestamp',
+)
+
+
+def _rust_sync_eligible(
+    self,
+    df: Any,
+    force: bool = False,
+    blocking: bool = True,
+    workers: Optional[int] = None,
+    callback: Optional[Callable[..., Any]] = None,
+    error_callback: Optional[Callable[..., Any]] = None,
+    debug: bool = False,
+    kw: Optional[Dict[str, Any]] = None,
+    enforce_dtypes: bool = True,
+) -> Tuple[Any, str]:
+    """
+    Return `(connector, '')` when `Pipe.sync()` may run natively (`_core.sync_pipe`),
+    otherwise `(None, reason)`. The reason is logged under `debug`.
+
+    The native path covers explicit data (`df` given) into a SQL instance that has a Rust driver,
+    with the default keyword arguments plus `begin`, `end`, `check_existing`,
+    `enforce_dtypes` and `chunksize`. Everything else keeps its current implementation
+    until the engine and the worker adapters take it over (see `PARITY.md`, "Wave 13"):
+
+    - no data (the connector's `sync()` or `fetch()`), `None`, a string, generators and other
+      iterables (the shape check of the data itself is `_core.sync_pipe`'s);
+    - `force` / `retries`, `workers`, non-blocking syncs and their callbacks, `debug`,
+      plugin keyword arguments (any other `**kwargs`);
+    - temporary pipes and pipes with `reference`s, `{{ }}` templates or `MRSM{}` symlinks;
+    - instances that are not SQL, or have no Rust connector (`mssql`, `oracle`, `duckdb`,
+      in-memory SQLite).
+
+    The connector is the `meerschaum._core.SqlConnector` of the pipe's instance.
+    """
+    if df is InferFetch or hasattr(df, 'MRSM_INFER_FETCH'):
+        return None, "no data was given (the connector's `sync()` or `fetch()` runs)"
+    if df is None:
+        return None, "`None` was given as the data"
+    if force:
+        return None, "`force` retries in Python"
+    if not blocking or callback is not None or error_callback is not None:
+        return None, "non-blocking syncs and callbacks run in Python"
+    if workers is not None:
+        return None, "`workers` is not supported yet"
+    if debug:
+        return None, "`debug` output comes from Python"
+    if kw:
+        return None, "extra keyword arguments (" + ', '.join(sorted(map(str, kw))) + ")"
+    if self.temporary:
+        return None, "the pipe is temporary"
+
+    from meerschaum.core.Pipe._verify import _rust_sql_connector
+    try:
+        instance_connector = self.instance_connector
+    except Exception:
+        return None, "the instance connector cannot be built"
+    rust_connector = _rust_sql_connector(instance_connector)
+    if rust_connector is None:
+        return None, "the instance is not a SQL connector with a Rust driver"
+
+    raw_parameters = self.get_parameters(apply_symlinks=False, debug=debug) or {}
+    if not isinstance(raw_parameters, dict):
+        return None, "the parameters are not a dictionary"
+    if 'reference' in raw_parameters or 'references' in raw_parameters:
+        return None, "the pipe inherits the parameters of a reference"
+    parameters_text = repr(raw_parameters)
+    if any(marker in parameters_text for marker in _NATIVE_SYNC_PARAMETER_MARKERS):
+        return None, "the parameters contain templates or symlinks"
+    return rust_connector, ''
+
+
+def _sync_native(
+    self,
+    rust_sync: Callable[..., Dict[str, Any]],
+    df: Any,
+    begin: Union[datetime, int, str, None],
+    end: Union[datetime, int, None],
+    check_existing: bool,
+    enforce_dtypes: bool,
+    chunksize: Optional[int],
+    force: bool,
+    blocking: bool,
+    workers: Optional[int],
+    callback: Optional[Callable[..., Any]],
+    error_callback: Optional[Callable[..., Any]],
+    debug: bool,
+    kw: Dict[str, Any],
+) -> Optional[SyncResult]:
+    """
+    Run `Pipe.sync(df)` through `_core.sync_pipe`, or return `None` to keep the current
+    implementation (`_rust_sync_eligible()` and the data's shape decide).
+    """
+    rust_connector, reason = _rust_sync_eligible(
+        self,
+        df,
+        force=force,
+        blocking=blocking,
+        workers=workers,
+        callback=callback,
+        error_callback=error_callback,
+        debug=debug,
+        kw=kw,
+        enforce_dtypes=enforce_dtypes,
+    )
+    if rust_connector is None:
+        if debug:
+            from meerschaum.utils.debug import dprint
+            dprint(f"Syncing {self} without the native sync: {reason}.")
+        return None
+
+    if chunksize == 0:
+        chunksize = None
+    begin, end = self.parse_date_bounds(begin, end, debug=debug)
+    self._invalidate_cache(debug=debug)
+
+    ### Ensure that the pipe is registered (a plugin connector's `register()` is Python).
+    if self.id is None:
+        register_success, register_msg = self.register(debug=debug)
+        if not register_success and 'already' not in register_msg:
+            self._invalidate_cache(debug=debug)
+            return SyncResult(register_success, register_msg)
+
+    indices_success, indices_msg = self.validate_indices(debug=debug)
+    if not indices_success:
+        self._invalidate_cache(debug=debug)
+        return SyncResult(indices_success, indices_msg)
+
+    out = rust_sync(
+        self,
+        rust_connector,
+        df,
+        begin=begin,
+        end=end,
+        check_existing=check_existing,
+        enforce_dtypes=enforce_dtypes,
+        chunksize=chunksize,
+    )
+    if 'declined' in out:
+        if debug:
+            from meerschaum.utils.debug import dprint
+            dprint(f"Syncing {self} without the native sync: {out['declined']}.")
+        return None
+
+    for cache_key in _NATIVE_SYNC_CACHE_KEYS:
+        self._clear_cache_key(cache_key, debug=debug)
+    self._invalidate_cache(debug=debug)
+
+    if out.get('success') is False and out['message'].startswith('Expecting columns for table'):
+        ### PARITY: v4 raises (`utils/sql.py:2329`) when documents with no column at all
+        ### (`[{}, {}]`) would create the table.
+        raise ValueError(out['message'])
+
+    if out.get('success') is False and out['message'].startswith('You are trying to merge on '):
+        ### PARITY (H9): pandas' `merge` refuses a timezone-naive key column against a
+        ### timezone-aware one in `filter_existing()` and v4 lets the `ValueError` escape.
+        raise ValueError(out['message'])
+
+    if 'invalid' in out:
+        ### `Pipe.enforce_dtypes()` warns when the data cannot become a DataFrame
+        ### and the instance then refuses the `None`.
+        warn(f"Unable to cast incoming data as a DataFrame...:\n{out['invalid']}", stack=False)
+        return SyncResult(False, f"DataFrame is None. Cannot sync {self}.")
+
+    ### The sync changed some of the registered parameters (`autoincrement`, numeric and
+    ### newly detected special `dtypes`): the engine persisted them, so patch the object.
+    if out['parameters']:
+        self.update_parameters(out['parameters'], persist=False, debug=debug)
+
+    return SyncResult(
+        out['success'],
+        out['message'],
+        inserted=out['inserted'],
+        updated=out['updated'],
+        upserted=out['upserted'],
+        deleted=out['deleted'],
+        duration=out['duration'],
+        begin=out['begin'],
+        end=out['end'],
+    )
 
 
 def sync(
@@ -149,7 +428,10 @@ def sync(
 
     Returns
     -------
-    A `SuccessTuple` of success (`bool`) and message (`str`).
+    A `SyncResult`: a `SuccessTuple` of success (`bool`) and message (`str`) that also carries
+    the structured fields of the sync (`inserted`, `updated`, `upserted`, `deleted`,
+    `changed_intervals`, `duration`, `begin` and `end`; `None` where the sync did not
+    report them).
     With `parents` or `children`, a `meerschaum.core.Pipeline.RunResult` (a `SuccessTuple`
     with the run's `run_id`, `plan`, `outcomes` and `events()`).
     """
@@ -172,6 +454,27 @@ def sync(
             debug=debug,
             **kw
         )
+
+    if (_rust := _rust_impl('sync_pipe')) is not None:
+        _native_result = _sync_native(
+            self,
+            _rust,
+            df,
+            begin=begin,
+            end=end,
+            check_existing=check_existing,
+            enforce_dtypes=enforce_dtypes,
+            chunksize=chunksize,
+            force=force,
+            blocking=blocking,
+            workers=workers,
+            callback=callback,
+            error_callback=error_callback,
+            debug=debug,
+            kw=kw,
+        )
+        if _native_result is not None:
+            return _native_result
 
     from meerschaum.utils.debug import dprint, _checkpoint
     from meerschaum.utils.formatting import get_console
@@ -551,7 +854,7 @@ def sync(
         return return_tuple
 
     if blocking:
-        return _sync(self, df=df)
+        return SyncResult.from_tuple(_sync(self, df=df))
 
     from meerschaum.utils.threading import Thread
     def default_callback(result_tuple: SuccessTuple):
@@ -576,10 +879,10 @@ def sync(
         thread.start()
     except Exception as e:
         self._invalidate_cache(debug=debug)
-        return False, str(e)
+        return SyncResult(False, str(e))
 
     self._invalidate_cache(debug=debug)
-    return True, f"Spawned asyncronous sync for {self}."
+    return SyncResult(True, f"Spawned asyncronous sync for {self}.")
 
 
 def get_sync_time(

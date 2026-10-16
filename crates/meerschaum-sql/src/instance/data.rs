@@ -74,6 +74,45 @@ pub fn configured_dtypes(pipe: &Pipe) -> IndexMap<String, String> {
         .collect()
 }
 
+/// PARITY: v4 reads the datetime columns of a SQLite (and GeoPackage) table that does not
+/// enforce its dtypes as *text*. `SQLConnector.get_pipe_data` passes no `dtype` to `read()` when
+/// `enforce` is off (`connectors/sql/_pipes.py`), the driver reports `TIMESTAMP` values as their
+/// stored strings, and `Pipe.enforce_dtypes` then casts them with `astype('datetime64[us, UTC]')`,
+/// which reads them as UTC. Handing the frame over as text reproduces that (a driver that decodes
+/// the column would stay timezone-naive, and a UTC-aware incoming row would never match it).
+fn sqlite_datetimes_as_text(mut df: Frame) -> Result<Frame, String> {
+    use meerschaum_kernel::frame::ColumnData;
+    use meerschaum_kernel::value::Value as KValue;
+    let naive_datetimes: Vec<String> = df
+        .columns()
+        .iter()
+        .filter(|c| {
+            let dtype = c.data.dtype_str();
+            matches!(c.data, ColumnData::Native(_))
+                && dtype.starts_with("datetime64")
+                && !dtype.contains(',')
+        })
+        .map(|c| c.name.clone())
+        .collect();
+    for name in naive_datetimes {
+        let values: Vec<KValue> = df
+            .data(&name)
+            .map_err(|e| e.to_string())?
+            .values()
+            .into_iter()
+            .map(|v| match v {
+                KValue::Datetime(d) => {
+                    KValue::Str(d.utc.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
+                }
+                other => other,
+            })
+            .collect();
+        df.set(&name, ColumnData::Object(values))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(df)
+}
+
 /// `Pipe.get_dtypes(infer)` given the table's columns types.
 pub fn pipe_dtypes(
     pipe: &Pipe,
@@ -696,6 +735,9 @@ impl SqlConnector {
             });
         }
         let ctx = self.dtypes_ctx(sp, state);
+        if !ctx.enforce && matches!(self.flavor, Flavor::Sqlite | Flavor::Geopackage) {
+            df = sqlite_datetimes_as_text(df).map_err(be)?;
+        }
         let mut df = pipe_enforce_dtypes(PipeInput::Frame(df), &ctx).map_err(be)?;
         if self.flavor == Flavor::Geopackage {
             // GeoPackage geometries are `BLOB`s, which the driver tags as `bytes`; once enforced

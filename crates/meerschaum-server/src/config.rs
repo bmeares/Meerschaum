@@ -127,6 +127,12 @@ pub struct ServerConfig {
     pub notices: Vec<String>,
     /// `api:mcp` (the MCP server at `/mcp`, §7.2).
     pub mcp: crate::mcp::McpConfig,
+    /// `api:webterm:tmux:enabled`: keep each user's terminal in a tmux session when tmux exists.
+    pub webterm_tmux_enabled: bool,
+    /// `api:webterm:tmux:session_suffix`: appended to the user name to name the tmux session.
+    pub webterm_tmux_session_suffix: String,
+    /// `WEBTERM_INTERNAL_RESOURCES_PATH`: where the tmux path keeps the shell's environment file.
+    pub webterm_resources_path: PathBuf,
 }
 
 fn get<'a>(map: &'a Map, keys: &[&str]) -> Option<&'a Value> {
@@ -192,6 +198,9 @@ impl ServerConfig {
         }
         if let Some(p) = path_of(config, "PLUGINS_ARCHIVES_RESOURCES_PATH") {
             sc.plugins_archives_path = p;
+        }
+        if let Some(p) = path_of(config, "WEBTERM_INTERNAL_RESOURCES_PATH") {
+            sc.webterm_resources_path = p;
         }
         sc.static_path = path_of(config, "API_STATIC_PATH");
         sc.root_dir = config.paths().root_dir.clone();
@@ -376,6 +385,15 @@ impl ServerConfig {
             root_dir: PathBuf::from("."),
             notices,
             mcp: crate::mcp::McpConfig::from_map(cfg),
+            webterm_tmux_enabled: bool_at(cfg, &["api", "webterm", "tmux", "enabled"], true),
+            webterm_tmux_session_suffix: match get(
+                cfg,
+                &["api", "webterm", "tmux", "session_suffix"],
+            ) {
+                Some(Value::Null) | None => "_mrsm".into(),
+                Some(v) => v.py_str(),
+            },
+            webterm_resources_path: PathBuf::from("internal/webterm"),
         }
     }
 
@@ -392,6 +410,7 @@ impl ServerConfig {
         let paths = meerschaum_core::config::paths::Paths::for_root(root);
         sc.secret_key_path = paths.path("API_SECRET_KEY_PATH");
         sc.plugins_archives_path = paths.path("PLUGINS_ARCHIVES_RESOURCES_PATH");
+        sc.webterm_resources_path = paths.path("WEBTERM_INTERNAL_RESOURCES_PATH");
         sc.root_dir = root.to_path_buf();
         sc
     }

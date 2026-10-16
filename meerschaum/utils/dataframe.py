@@ -115,9 +115,17 @@ def to_polars(
             if geometry_cols:
                 from meerschaum.utils.dtypes import attempt_cast_to_geometry
                 shapely = mrsm.attempt_import('shapely', lazy=False)
+                ### Import inside the `mrsm` venv context: callers (e.g. `mrsm.entry()`)
+                ### may have deactivated it, and a bare import would then silently
+                ### skip registration so Arrow exports plain binary storage.
                 try:
-                    from geoarrow.types.type_pyarrow import register_extension_types
-                    register_extension_types()
+                    geoarrow_pyarrow = mrsm.attempt_import(
+                        'geoarrow.types.type_pyarrow',
+                        lazy=False,
+                        warn=False,
+                        install=False,
+                    )
+                    geoarrow_pyarrow.register_extension_types()
                 except Exception:
                     pass
             for col, (_, srid) in geometry_cols_types_srids.items():

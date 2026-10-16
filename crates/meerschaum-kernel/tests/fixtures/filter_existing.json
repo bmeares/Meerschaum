@@ -20235,6 +20235,892 @@
    }
   },
   {
+   "name": "no_enforce_aware_update",
+   "columns": {
+    "datetime": "dt",
+    "id": "id"
+   },
+   "configured_dtypes": {},
+   "remote_dtypes": {
+    "dt": "datetime64[us, UTC]",
+    "id": "int64[pyarrow]",
+    "val": "float64[pyarrow]"
+   },
+   "parameters": {
+    "enforce": false
+   },
+   "kwargs": {},
+   "filter_params_index_limit": 250,
+   "df": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 9.0
+       },
+       {
+        "t": "float",
+        "v": 2.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "backtrack": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00",
+        "tz": "UTC"
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.0
+       },
+       {
+        "t": "float",
+        "v": 2.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "ok": {
+    "pipe_dtypes": {
+     "dt": "datetime",
+     "id": "int64[pyarrow]",
+     "val": "float64[pyarrow]"
+    },
+    "explicit_dtypes": {
+     "dt": "datetime"
+    },
+    "get_data_calls": [
+     {
+      "begin": {
+       "t": "dt",
+       "v": "2023-12-31T23:59:00+00:00",
+       "tz": "UTC"
+      },
+      "end": {
+       "t": "dt",
+       "v": "2024-01-02T00:01:00+00:00",
+       "tz": "UTC"
+      },
+      "params": {
+       "id": [
+        {
+         "t": "int",
+         "v": 1
+        }
+       ]
+      }
+     }
+    ],
+    "unseen": {
+     "columns": [
+      {
+       "name": "dt",
+       "dtype": "datetime64[us, UTC]",
+       "crs": null,
+       "values": []
+      },
+      {
+       "name": "id",
+       "dtype": "int64",
+       "crs": null,
+       "values": []
+      },
+      {
+       "name": "val",
+       "dtype": "float64",
+       "crs": null,
+       "values": []
+      }
+     ],
+     "index": []
+    },
+    "update": {
+     "columns": [
+      {
+       "name": "dt",
+       "dtype": "datetime64[us, UTC]",
+       "crs": null,
+       "values": [
+        {
+         "t": "dt",
+         "v": "2024-01-01T00:00:00+00:00",
+         "tz": "UTC"
+        }
+       ]
+      },
+      {
+       "name": "id",
+       "dtype": "int64",
+       "crs": null,
+       "values": [
+        {
+         "t": "int",
+         "v": 1
+        }
+       ]
+      },
+      {
+       "name": "val",
+       "dtype": "float64",
+       "crs": null,
+       "values": [
+        {
+         "t": "float",
+         "v": 9.0
+        }
+       ]
+      }
+     ],
+     "index": [
+      {
+       "t": "int",
+       "v": 0
+      }
+     ]
+    },
+    "delta": {
+     "columns": [
+      {
+       "name": "dt",
+       "dtype": "datetime64[us, UTC]",
+       "crs": null,
+       "values": [
+        {
+         "t": "dt",
+         "v": "2024-01-01T00:00:00+00:00",
+         "tz": "UTC"
+        }
+       ]
+      },
+      {
+       "name": "id",
+       "dtype": "int64",
+       "crs": null,
+       "values": [
+        {
+         "t": "int",
+         "v": 1
+        }
+       ]
+      },
+      {
+       "name": "val",
+       "dtype": "float64",
+       "crs": null,
+       "values": [
+        {
+         "t": "float",
+         "v": 9.0
+        }
+       ]
+      }
+     ],
+     "index": [
+      {
+       "t": "int",
+       "v": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "no_enforce_naive_both",
+   "columns": {
+    "datetime": "dt",
+    "id": "id"
+   },
+   "configured_dtypes": {},
+   "remote_dtypes": {
+    "dt": "datetime64[us]",
+    "id": "int64[pyarrow]",
+    "val": "float64[pyarrow]"
+   },
+   "parameters": {
+    "enforce": false
+   },
+   "kwargs": {},
+   "filter_params_index_limit": 250,
+   "df": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00",
+        "tz": null
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 9.0
+       },
+       {
+        "t": "float",
+        "v": 2.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "backtrack": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00",
+        "tz": null
+       },
+       {
+        "t": "dt",
+        "v": "2024-01-02T00:00:00",
+        "tz": null
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       },
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.0
+       },
+       {
+        "t": "float",
+        "v": 2.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     },
+     {
+      "t": "int",
+      "v": 1
+     }
+    ]
+   },
+   "ok": {
+    "pipe_dtypes": {
+     "dt": "datetime",
+     "id": "int64[pyarrow]",
+     "val": "float64[pyarrow]"
+    },
+    "explicit_dtypes": {
+     "dt": "datetime"
+    },
+    "get_data_calls": [
+     {
+      "begin": {
+       "t": "dt",
+       "v": "2023-12-31T23:59:00+00:00",
+       "tz": "UTC"
+      },
+      "end": {
+       "t": "dt",
+       "v": "2024-01-02T00:01:00+00:00",
+       "tz": "UTC"
+      },
+      "params": {
+       "id": [
+        {
+         "t": "int",
+         "v": 1
+        }
+       ]
+      }
+     }
+    ],
+    "unseen": {
+     "columns": [
+      {
+       "name": "dt",
+       "dtype": "datetime64[us]",
+       "crs": null,
+       "values": []
+      },
+      {
+       "name": "id",
+       "dtype": "int64",
+       "crs": null,
+       "values": []
+      },
+      {
+       "name": "val",
+       "dtype": "float64",
+       "crs": null,
+       "values": []
+      }
+     ],
+     "index": []
+    },
+    "update": {
+     "columns": [
+      {
+       "name": "dt",
+       "dtype": "datetime64[us]",
+       "crs": null,
+       "values": [
+        {
+         "t": "dt",
+         "v": "2024-01-01T00:00:00",
+         "tz": null
+        }
+       ]
+      },
+      {
+       "name": "id",
+       "dtype": "int64",
+       "crs": null,
+       "values": [
+        {
+         "t": "int",
+         "v": 1
+        }
+       ]
+      },
+      {
+       "name": "val",
+       "dtype": "float64",
+       "crs": null,
+       "values": [
+        {
+         "t": "float",
+         "v": 9.0
+        }
+       ]
+      }
+     ],
+     "index": [
+      {
+       "t": "int",
+       "v": 0
+      }
+     ]
+    },
+    "delta": {
+     "columns": [
+      {
+       "name": "dt",
+       "dtype": "datetime64[us]",
+       "crs": null,
+       "values": [
+        {
+         "t": "dt",
+         "v": "2024-01-01T00:00:00",
+         "tz": null
+        }
+       ]
+      },
+      {
+       "name": "id",
+       "dtype": "int64",
+       "crs": null,
+       "values": [
+        {
+         "t": "int",
+         "v": 1
+        }
+       ]
+      },
+      {
+       "name": "val",
+       "dtype": "float64",
+       "crs": null,
+       "values": [
+        {
+         "t": "float",
+         "v": 9.0
+        }
+       ]
+      }
+     ],
+     "index": [
+      {
+       "t": "int",
+       "v": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "no_enforce_naive_df_aware_backtrack",
+   "columns": {
+    "datetime": "dt",
+    "id": "id"
+   },
+   "configured_dtypes": {},
+   "remote_dtypes": {
+    "dt": "datetime64[us, UTC]",
+    "id": "int64[pyarrow]",
+    "val": "float64[pyarrow]"
+   },
+   "parameters": {
+    "enforce": false
+   },
+   "kwargs": {},
+   "filter_params_index_limit": 250,
+   "df": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00",
+        "tz": null
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 9.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "backtrack": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "err": "ValueError: You are trying to merge on datetime64[us] and datetime64[us, UTC] columns for key 'dt'. If you wish to proceed you should use pd.concat"
+  },
+  {
+   "name": "no_enforce_aware_df_naive_backtrack",
+   "columns": {
+    "datetime": "dt",
+    "id": "id"
+   },
+   "configured_dtypes": {},
+   "remote_dtypes": {
+    "dt": "datetime64[us, UTC]",
+    "id": "int64[pyarrow]",
+    "val": "float64[pyarrow]"
+   },
+   "parameters": {
+    "enforce": false
+   },
+   "kwargs": {},
+   "filter_params_index_limit": 250,
+   "df": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 9.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "backtrack": {
+    "columns": [
+     {
+      "name": "dt",
+      "dtype": "datetime64[us]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "2024-01-01T00:00:00",
+        "tz": null
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "float64",
+      "crs": null,
+      "values": [
+       {
+        "t": "float",
+        "v": 1.0
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "err": "ValueError: You are trying to merge on datetime64[us, UTC] and datetime64[us] columns for key 'dt'. If you wish to proceed you should use pd.concat"
+  },
+  {
+   "name": "no_enforce_integer_df_datetime_backtrack",
+   "columns": {
+    "datetime": "ts",
+    "id": "id"
+   },
+   "configured_dtypes": {},
+   "remote_dtypes": {
+    "ts": "datetime64[us, UTC]",
+    "id": "int64[pyarrow]",
+    "val": "int64[pyarrow]"
+   },
+   "parameters": {
+    "enforce": false
+   },
+   "kwargs": {},
+   "filter_params_index_limit": 250,
+   "df": {
+    "columns": [
+     {
+      "name": "ts",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 9
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "backtrack": {
+    "columns": [
+     {
+      "name": "ts",
+      "dtype": "datetime64[us, UTC]",
+      "crs": null,
+      "values": [
+       {
+        "t": "dt",
+        "v": "1970-01-01T00:00:00.000001+00:00",
+        "tz": "UTC"
+       }
+      ]
+     },
+     {
+      "name": "id",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     },
+     {
+      "name": "val",
+      "dtype": "int64",
+      "crs": null,
+      "values": [
+       {
+        "t": "int",
+        "v": 1
+       }
+      ]
+     }
+    ],
+    "index": [
+     {
+      "t": "int",
+      "v": 0
+     }
+    ]
+   },
+   "err": "ValueError: You are trying to merge on int64 and datetime64[us, UTC] columns for key 'ts'. If you wish to proceed you should use pd.concat"
+  },
+  {
    "name": "numeric_column",
    "columns": {
     "datetime": "dt",

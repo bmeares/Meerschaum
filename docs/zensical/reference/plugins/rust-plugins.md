@@ -1,5 +1,9 @@
 # 🦀 Rust Plugins
 
+!!! info "v5 is still a Python package"
+
+    Meerschaum 5 is installed the same way as before (`pip install meerschaum`), and most users keep writing Python plugins, which work unchanged. Rust plugins are an option, not a requirement: use one for the native performance path (the Rust core, kernel and Syncing Engine) or to run on the Python-free `slim` image. Everything on this page is about that option.
+
 > New in v5. A Rust plugin is a native shared library that Meerschaum loads in-process. It can do everything a [Python plugin](/reference/plugins/types-of-plugins/) can: fetch or sync data, add actions and arguments, run hooks around syncs, provide a whole connector, serve HTTP routes and add console pages. Python plugins are unchanged, and the two kinds live side by side in the same plugins directory.
 
 Choose a Rust plugin when you want no Python interpreter at runtime (the `bmeares/meerschaum:slim` image), predictable performance on large frames, or a single binary artifact. Keep writing Python for everything else.
@@ -156,7 +160,7 @@ Hooks run around every sync that goes through the sync engine (`sync pipes`, job
 
 ## 🏗️ Build, install, load
 
-Build the shipped example from a checkout:
+Or build the shipped example yourself from a checkout (the prebuilt route, which needs no toolchain at runtime):
 
 ```bash
 cargo build --release -p meerschaum-plugin --example native_demo
@@ -169,6 +173,41 @@ mkdir -p "$MRSM_PLUGINS_DIR/native_demo"
 cp crates/meerschaum-plugin/examples/plugin.toml "$MRSM_PLUGINS_DIR/native_demo/"
 cp target/release/examples/libnative_demo.so "$MRSM_PLUGINS_DIR/native_demo/"
 ```
+
+### Source plugins
+
+You do not have to build and copy the library yourself. A plugin directory that is a **Cargo crate** is built by Meerschaum when `cargo` is on `PATH`:
+
+```text
+plugins/
+└── native_demo/
+    ├── plugin.toml
+    ├── Cargo.toml              # [package] name = "native_demo", [lib] crate-type = ["cdylib"]
+    ├── Cargo.lock              # optional, recommended
+    └── src/lib.rs
+```
+
+A directory counts as a source plugin when it has a `plugin.toml` and a `Cargo.toml` and no up-to-date `lib<name>.<ext>` next to `plugin.toml`. (A library shipped next to the sources is used as is, unless a source file is newer than it.) The crate's `[package] name` must equal the `name` in `plugin.toml` and the crate must build a `cdylib` with `panic = "unwind"`; otherwise the plugin is skipped with a warning like any other invalid plugin.
+
+**When it builds.** The first time `mrsm` discovers the plugin, and again whenever its source fingerprint changes: a hash of the contents of every file in the plugin directory except `target/`, hidden directories (but `.cargo/` is included) and shared libraries, so assets read by `include_str!` and files read by `build.rs` count, as do `Cargo.toml`, `Cargo.lock` and `plugin.toml`. Meerschaum runs `cargo build --release` (the `CARGO` environment variable names the executable if it is set) with `--manifest-path`, `--target-dir` and `CARGO_INCREMENTAL=0`, prints one line on stderr (`Building native plugin 'native_demo' (cargo build --release)...`) and is silent afterwards. The first build compiles the SDK's dependencies and takes minutes. A build whose sources have not changed is never repeated, and `--help` and tab completion read the cached manifest without building. Path dependencies outside the plugin directory are not part of the fingerprint, and the hash follows file contents, not modification times (touching a file does nothing): after changing such a dependency, edit a file in the plugin directory or delete `<root>/cache/native_build/<name>` to force a rebuild.
+
+!!! warning "Trust: building runs code"
+
+    `cargo build` runs the crate's build scripts and procedural macros and may download dependencies from crates.io, with no timeout. It runs whenever plugins are opened and a build is needed, including `mrsm start api`, and it is the same trust as loading the library: only put crates you trust in `MRSM_PLUGINS_DIR`. A build failure, including a transient one such as being offline, is remembered until the sources change or `<root>/cache/native_build/<name>` is deleted.
+
+**Where the artifact lives.** Under `<root>/cache/native_build/<name>/` (the root is `MRSM_ROOT_DIR`); the library is loaded from `<root>/cache/native_build/<name>/release/lib<name>.<ext>` and its path is recorded in the plugin's entry of `<root>/cache/native_plugins_manifest.json`. The only file Cargo may write into the plugin directory is `Cargo.lock`, when it is missing or out of date, so ship an up-to-date `Cargo.lock` and a read-only plugins directory works. Delete the `native_build` directory to force a rebuild.
+
+**No toolchain.** Without `cargo` the plugin is skipped and the rest still load:
+
+```text
+Warning: Skipping native plugin at '/plugins/native_demo': it is a source crate and no `cargo` was found on PATH (install a Rust toolchain or ship libnative_demo.so)
+```
+
+A failed build prints the last lines of cargo's stderr in the same kind of warning and skips that plugin only. The failure is remembered: later runs skip the plugin with `the last build failed; edit the sources or delete '<build dir>' to retry` and do not run cargo again until you edit the sources or delete the build directory. If a library is shipped next to the sources but is older than them and there is no `cargo`, the shipped library is loaded with a warning that it was not rebuilt.
+
+!!! note "The slim image ships no toolchain"
+
+    `bmeares/meerschaum:slim` has no Rust toolchain, so there only the prebuilt contract works: put `plugin.toml` and `lib<name>.so` in the plugin directory, built for the image's OS and architecture.
 
 Point `MRSM_PLUGINS_DIR` at the directory (use a temporary `MRSM_ROOT_DIR` while experimenting). The action and its argument are discovered immediately:
 
@@ -209,7 +248,7 @@ mrsm show actions --nopretty                # your actions appear here
 mrsm --help                                 # ...and here, with their documentation and flags
 ```
 
-A plugin that is missing from these listings was skipped: look for `Warning: Skipping invalid native plugin at '<dir>': <reason>` on stderr. The reasons are a bad `plugin.toml`, a missing or unloadable library, and an incompatible ABI (for example `unsupported native plugin ABI 99; expected 1`). The other plugins still load. A panic inside your code does not stop `mrsm`: the call returns a failure (`native plugin panicked`) and the next command works normally. The host caches the manifest under `$MRSM_ROOT_DIR/cache/native_plugins_manifest.json`, keyed by a fingerprint of the plugin directory, so replacing or removing a plugin takes effect on the next run (do it while `mrsm` is not running).
+A plugin that is missing from these listings was skipped: look for `Warning: Skipping invalid native plugin at '<dir>': <reason>` on stderr. The reasons are a bad `plugin.toml`, a missing or unloadable library, an incompatible ABI (for example `unsupported native plugin ABI 99; expected 1`), and, for a source crate, a package name that differs from `plugin.toml` or a crate that is not a `cdylib`. A valid source crate that could not be built (no `cargo`, a compile error) is reported as `Warning: Skipping native plugin at '<dir>': <reason>`. The other plugins still load. A panic inside your code does not stop `mrsm`: the call returns a failure (`native plugin panicked`) and the next command works normally. The host caches the manifest under `$MRSM_ROOT_DIR/cache/native_plugins_manifest.json`, keyed by a fingerprint of the plugin directory (the source fingerprint for a source crate), so replacing or removing a plugin takes effect on the next run (do it while `mrsm` is not running).
 
 To check a source and its hooks, register a pipe on a SQLite instance and sync it:
 
@@ -228,6 +267,7 @@ These suites build the example plugins in `crates/meerschaum-plugin/examples/` (
 cargo test -p meerschaum-plugin                       # the SDK and loader
 cargo test -p meerschaum-cli --test native_plugins    # the `mrsm` binary: actions, flags, a native source
 cargo test -p meerschaum-cli --test native_e2e        # hooks, routes, shadowing, rejection, cache
+cargo test -p meerschaum-cli --test native_source_plugin   # a Cargo crate built, cached and rebuilt by mrsm (compiles the SDK: slow the first time)
 MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -k rust_pages   # a native console page in Chromium
 ```
 
@@ -241,6 +281,7 @@ MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -k rust_pag
 | A custom instance (`-i native_demo:memory`): pipes listed and synced, file-lock fallback for leases | `native_e2e.rs` |
 | Corrupt library and wrong ABI skipped, manifest cache follows the directory | `native_e2e.rs`; discovery details in `native.rs` |
 | `plan pipes` / `show graph` with a native source | `native_e2e.rs` |
+| A source crate built by `mrsm`, reused on the next run, rebuilt after an edit; a mismatched crate name and a missing `cargo` skipped | `native_source_plugin.rs` (real `cargo`); stamp, fingerprint and failure handling in `meerschaum-plugin/tests/source.rs` |
 | A console page rendered in the browser, identical to the Python page | `tests/console/test_console.py` |
 
 ## 🔬 The ABI in one page
@@ -260,8 +301,8 @@ The ABI version is checked at load. A breaking change would ship as a new `mrsm_
 
 ## 📦 Distribution
 
-The plugin repository stores **per-target-triple artifacts** plus a source tarball. On install, the matching triple is downloaded; if none matches and a Rust toolchain is available, the plugin is built with `cargo build --release`. Python plugins keep using `required`, `plugin:name@api:repo` entries and `.mrsm_origins.json` unchanged, and a Python plugin may depend on a Rust plugin and vice versa.
+The plugin repository stores **per-target-triple artifacts** plus a source tarball. On install, the matching triple is downloaded; if none matches and a Rust toolchain is available, the plugin is built with `cargo build --release` (the same build described under [Source plugins](#source-plugins)). Python plugins keep using `required`, `plugin:name@api:repo` entries and `.mrsm_origins.json` unchanged, and a Python plugin may depend on a Rust plugin and vice versa.
 
 !!! note "Status in this pre-release"
 
-    Discovery, the manifest cache, actions, arguments, hooks, source `fetch`/`sync`, custom connectors, routes and pages are implemented, and each is exercised through the `mrsm` binary by the tests listed under [Testing your plugin](#testing-your-plugin). The deepest instance operations (reads, rowcounts, maintenance) are exercised only at the library level; through the binary the example instance proves resolution, `fetch_pipes_keys`, `sync_pipe` and the lease fallback. Not yet available: `subscribe` for continuous streams from a native plugin (it needs a reader/sink SDK beyond the current eager `Frame` API), repository upload and target-triple selection by `install plugin`, and live reload of an already-open library (replace a plugin while `mrsm` is not running).
+    Source plugins (a Cargo crate built by Meerschaum into the root's cache) work when `cargo` is on `PATH`; the prebuilt `lib<name>.<ext>` remains the contract for the slim image. Discovery, the manifest cache, actions, arguments, hooks, source `fetch`/`sync`, custom connectors, routes and pages are implemented, and each is exercised through the `mrsm` binary by the tests listed under [Testing your plugin](#testing-your-plugin). The deepest instance operations (reads, rowcounts, maintenance) are exercised only at the library level; through the binary the example instance proves resolution, `fetch_pipes_keys`, `sync_pipe` and the lease fallback. Not yet available: `subscribe` for continuous streams from a native plugin (it needs a reader/sink SDK beyond the current eager `Frame` API), repository upload and target-triple selection by `install plugin`, and live reload of an already-open library (replace a plugin while `mrsm` is not running).

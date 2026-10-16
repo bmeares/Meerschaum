@@ -577,6 +577,7 @@ fn route_path_allowed(path: &str) -> bool {
         && !path.split('/').any(|s| s == ".." || s == ".")
         && !path.starts_with("/dash")
         && !path.starts_with("/webterm")
+        && !path.starts_with("/websocket")
         && meerschaum_server::routes::route_group_of(path) == "other"
 }
 

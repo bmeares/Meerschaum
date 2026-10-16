@@ -165,8 +165,9 @@ impl PythonHostLauncher {
     }
 
     /// A launcher for a server: the host serves the same root and instance with the same
-    /// `--no-auth`, `--production`, `--private`, `--no-dash`, `--no-webterm` and `--debug` flags (`MRSM_API_HOST_CONFIG`,
-    /// read by `meerschaum.api` in host mode).
+    /// `--no-auth`, `--production`, `--private`, `--no-dash` and `--debug` flags
+    /// (`MRSM_API_HOST_CONFIG`, read by `meerschaum.api` in host mode). The host never serves the
+    /// web terminal (this crate does, [`crate::webterm`]), so `no_webterm` is always `true`.
     pub fn for_config(cfg: &crate::config::ServerConfig, python: PathBuf) -> PythonHostLauncher {
         let host_config = serde_json::json!({
             "mrsm_instance": cfg.instance_keys,
@@ -174,9 +175,10 @@ impl PythonHostLauncher {
             "production": cfg.production,
             "private": cfg.private,
             "debug": cfg.debug,
-            // The host serves plugin pages and the terminal only as v4's console would.
+            // The host serves plugin pages only as v4's console would.
             "no_dash": cfg.no_dash,
-            "no_webterm": cfg.no_webterm || cfg.no_dash,
+            // The terminal is served by the Rust server, never proxied to the host.
+            "no_webterm": true,
         });
         PythonHostLauncher {
             python,
@@ -585,12 +587,10 @@ mod tests {
         let mut cfg = crate::config::ServerConfig::for_root("sql:main", root.path());
         let config = host_config(&cfg);
         assert_eq!(config["no_dash"], false);
-        assert_eq!(config["no_webterm"], false);
-        cfg.no_webterm = true;
-        let config = host_config(&cfg);
-        assert_eq!(config["no_dash"], false);
+        // The terminal is the Rust server's, whatever the flags say.
         assert_eq!(config["no_webterm"], true);
-        // `--no-dash` implies no terminal either.
+        cfg.no_webterm = true;
+        assert_eq!(host_config(&cfg)["no_webterm"], true);
         cfg.no_webterm = false;
         cfg.no_dash = true;
         let config = host_config(&cfg);

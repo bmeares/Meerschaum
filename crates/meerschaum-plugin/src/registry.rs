@@ -26,21 +26,29 @@ impl NativePlugins {
     /// Discover native plugins and read or rebuild the manifest cached at `cache`.
     /// A cache hit loads no code. Directories without native plugins yield an empty set.
     pub fn open(directories: &[PathBuf], cache: &Path) -> Result<Self> {
-        let discovery::Discovery {
-            mut candidates,
-            skipped,
-        } = discovery::discover_report(directories);
-        for item in &skipped {
+        // Source plugins (Cargo crates) are built here when their library is missing or stale;
+        // a current build, and a manifest cache hit, load no code and run no cargo.
+        let mut discovery =
+            discovery::discover_report_in(directories, &discovery::build_dir_for_cache(cache));
+        discovery.build_pending();
+        for warning in discovery
+            .candidates
+            .iter()
+            .filter_map(|c| c.warning.as_deref())
+        {
+            eprintln!("Warning: {warning}");
+        }
+        for item in &discovery.skipped {
             eprintln!("Warning: {}", item.message());
         }
+        let known = discovery.skipped.len();
+        let mut candidates = discovery.candidates.clone();
         if candidates.is_empty() {
             return Ok(Self::empty());
         }
         // SAFETY: the configured plugin directories are trusted (see the module documentation).
-        // Load-time failures were not visible to `discover_report`; warn about those here.
-        let (manifest, load_skipped) =
-            unsafe { discovery::cached_manifest_report(directories, cache) }?;
-        let known = skipped.len();
+        // Load-time failures were not visible to the scan; warn about those here.
+        let (manifest, load_skipped) = unsafe { discovery::manifest_for(discovery, cache) }?;
         for item in load_skipped.iter().skip(known) {
             eprintln!("Warning: {}", item.message());
         }

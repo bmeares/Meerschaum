@@ -718,7 +718,9 @@ impl PySqlConnector {
         limit: Option<i64>,
         _kw: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Bound<'py, PyList>> {
-        let ctx = PyCtx::new(py)?;
+        // Documents never need pandas: with `PyCtx::new` the first `get_data(as_docs=True)` of
+        // a process imported it (or asked `attempt_import` to install it).
+        let ctx = PyCtx::scalars(py)?;
         let p = core_pipe(pipe, ParamsView::Resolved)?;
         let no_order = order.is_none();
         let q = data_query(

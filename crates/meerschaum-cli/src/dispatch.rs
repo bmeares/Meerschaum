@@ -692,6 +692,7 @@ fn run_action(
         "python" => builtin::python(args, rt),
         "_start_api" => crate::server::start_api(args, rt),
         "_start_mcp" => crate::server::start_mcp(args, rt),
+        "_start_webterm" => crate::server::start_webterm(args, rt),
         "sh" => builtin::sh(args, rt),
         "clear" => builtin::clear(args, rt),
         other => match crate::native::run(other, args, rt) {

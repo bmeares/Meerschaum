@@ -323,7 +323,7 @@ def test_pipelines_page_graph_gantt_and_live_updates(server, tab):
     assert _errors(tab) == [], _errors(tab)
 
 
-def test_webterm_is_served_through_the_host(webterm_server, context):
+def test_webterm_is_served_by_the_rust_server(webterm_server, context):
     base = webterm_server.base_url
     page = context.new_page()
     ### The terminal route authenticates the console's session through the shared store.
@@ -332,15 +332,13 @@ def test_webterm_is_served_through_the_host(webterm_server, context):
     tab = Tab(page, base)
     tab.login()
     cookie = [c for c in context.cookies() if c['name'] == 'mrsm-session-id'][0]['value']
+    ### The console page embeds the terminal; the standalone page is linked.
     page.goto(f"{base}/dash/webterm")
-    link = page.locator('main a:has-text("Open web terminal")')
-    assert link.get_attribute('href') == f"/webterm/{cookie}"
-    ### The terminal process starts with the host; give it a moment to listen.
-    for _ in range(40):
-        response = page.request.get(f"{base}/webterm/{cookie}")
-        if response.status == 200:
-            break
-        page.wait_for_timeout(500)
+    assert page.locator('[data-mrsm-webterm]').get_attribute('data-ws') == f"/websocket/{cookie}"
+    assert page.locator('main a:has-text("its own page")').get_attribute('href') == f"/webterm/{cookie}"
+    response = page.request.get(f"{base}/webterm/{cookie}")
     assert response.status == 200, response.status
     assert 'Meerschaum Shell' in response.text()
-    assert webterm_server.port_is_open(webterm_server.webterm_port)
+    ### No separate terminal process listens anywhere any more (`tests/console/test_webterm.py`
+    ### drives the terminal itself).
+    assert not webterm_server.port_is_open(webterm_server.webterm_port)

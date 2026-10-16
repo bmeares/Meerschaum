@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import pytest
 import meerschaum as mrsm
 from meerschaum import _core
+from meerschaum.core.Pipe._sync import SyncResult
 
 from tests.connectors import conns
 
@@ -194,18 +195,19 @@ def test_depth_limits(chain):
     assert names == ['w8_clean', 'w8_daily']
 
     ### `parents=0` / `children=False` are no traversal at all.
-    assert type(raw.sync(parents=0, children=False)) is tuple
+    assert type(raw.sync(parents=0, children=False)) is SyncResult
 
 
 def test_bare_sync_is_v4(chain):
     raw, clean, daily = chain
     before = mrsm.Pipeline(raw).get_runs(all_runs=True, limit=100)
     result = raw.sync()
-    assert type(result) is tuple
+    ### A plain tuple subclass (`SyncResult`), never a `RunResult`.
+    assert type(result) is SyncResult
     assert result[0] is True
     assert _rowcounts(raw, clean, daily) == [3, 0, 0]
     result = clean.sync()
-    assert type(result) is tuple and result[0] is True
+    assert type(result) is SyncResult and result[0] is True
     assert _rowcounts(raw, clean, daily) == [3, 3, 0]
     after = mrsm.Pipeline(raw).get_runs(all_runs=True, limit=100)
     assert len(after) == len(before)

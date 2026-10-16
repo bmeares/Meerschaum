@@ -206,6 +206,8 @@ In v5 the `mrsm` venv starts out holding only the extras you installed. To keep 
 
 4. **Pin what matters.** With `dash`, `pandas` and friends no longer pinned by Meerschaum, add lower bounds in `required` for anything your plugin is sensitive to.
 
+- **`MRSM_NO_AUTO_INSTALL=1` now disables every implicit install**, including the dependency prechecks that v4 ran anyway (v4 still downloaded `semver` for the version check even with the variable set, and the API imported `uv` at startup). `attempt_import`, `is_installed`, the version checks, the `uv`/`pip`/`wheel` bootstraps and the API host install nothing; when no version parser is available the check compares versions natively and, failing that, assumes the requirement is met. Installs you ask for (`pip_install(...)` from your own code, `mrsm install packages`, `install required`) still run. `uv` is only used if it is already on `PATH`.
+
 - **MCP tools** registered with `meerschaum.mcp.tool(...)` / `resource(...)` keep working. The Rust MCP server lists them alongside the built-in tools and forwards calls to your plugin with the caller's scopes. `get_tools`, `get_resources` and `meerschaum.mcp._registry.get_tools` stay for duplicate-registration guards.
 
 ## 🌐 API plugins
@@ -354,7 +356,9 @@ A function that returns a string (or a `(html, status)` pair) is a page-contract
 
 ## 🦀 Rust plugins
 
-New in v5. A Rust plugin is a `cdylib` built with the `meerschaum-plugin` crate, installed into `MRSM_PLUGINS_DIR` as `<name>/plugin.toml` plus the shared library. It can implement `fetch`, `sync`, `register`, `setup`, `subscribe`, actions, a connector, HTTP `routes` and console `pages`. Data crosses the boundary as Arrow record batches.
+**v5 is still a Python package** (`pip install meerschaum`). Most users keep writing Python plugins, and they work unchanged. Rust plugins are an option for the native performance path (the core, kernel and engine) and for the Python-free `slim` image.
+
+New in v5. A Rust plugin is a `cdylib` built with the `meerschaum-plugin` crate, installed into `MRSM_PLUGINS_DIR` as `<name>/plugin.toml` plus the shared library, or as a Cargo crate (`plugin.toml`, `Cargo.toml`, `src/`) that Meerschaum builds itself when `cargo` is on `PATH`. It can implement `fetch`, `sync`, `register`, `setup`, `subscribe`, actions, a connector, HTTP `routes` and console `pages`. Data crosses the boundary as Arrow record batches.
 
 ```rust
 use meerschaum_plugin::{Frame, Plugin, Request, Result};
@@ -375,7 +379,7 @@ impl Plugin for Acme {
 meerschaum_plugin::export_plugin!(Acme);
 ```
 
-A plugin directory may contain both a Rust library and a Python module; the Rust plugin replaces a Python plugin of the same name entirely, with no per-function fallback. Python plugins can depend on Rust plugins and vice versa through `required`. The [Rust plugin guide](/reference/plugins/rust-plugins/) covers the layout, the manifest, the C ABI, building and loading an example, how to test a plugin, and what is not available yet. A native plugin's console pages return the same HTML fragments and Plotly figure JSON as a Python page-contract page.
+A plugin directory may contain both a Rust library and a Python module; the Rust plugin replaces a Python plugin of the same name entirely, with no per-function fallback. Python plugins can depend on Rust plugins and vice versa through `required`. The [Rust plugin guide](/reference/plugins/rust-plugins/) covers the layout, source plugins, the manifest, the C ABI, building and loading an example, how to test a plugin, and what is not available yet. A native plugin's console pages return the same HTML fragments and Plotly figure JSON as a Python page-contract page.
 
 ## 🚢 Deployment
 
@@ -383,7 +387,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 - **Bare metal.** Replace `pip install --user meerschaum==4.1.4` with `pip install --user 'meerschaum[full]>=5,<6'` (or the extras you need). The `mrsm` on your `PATH` is now a native binary from the `meerschaum-cli` wheel.
 - **NGINX / reverse proxies.** Paths do not change. The server honors `api.server.forwarded_allow_ips` (old `api.uvicorn.*` key still read). The API host listens on a Unix socket under `MRSM_ROOT_DIR`; nothing else needs to reach it.
 - **`start api -p 8224 --host 127.0.0.1 -i sql:main --secure`** and friends are unchanged.
-- **Webterm** keeps its tmux session model and `api.webterm.tmux.session_suffix`. Its front end is xterm.js 6.0.0 (the console vendors the same release).
+- **Webterm** is served by the Rust API server itself (no Tornado/terminado process, no separate `start webterm`): `/webterm/<session id>` and its websocket keep their paths and the terminado message format, the console embeds the terminal at `/dash/webterm` (xterm.js 6.0.0 with the fit and unicode11 add-ons, vendored, plus the mobile extra-key row), and the shell is `mrsm` on the server's instance. It keeps its tmux session model (`api.webterm.tmux.enabled`, `api.webterm.tmux.session_suffix`): each user's terminal lives in the tmux session `<user><session_suffix>`, so a reload or a second tab reattaches to it, and closing a tab never kills the session. Without `tmux`, each tab gets its own shell. `--no-webterm` and `--no-auth` still turn it off. The terminal websocket refuses cross-origin requests: a reverse proxy in front of the API must pass the original `Host` (or set `X-Forwarded-Host`) or the terminal answers 403. ⚠️ Only administrators get a terminal unless `system.api.permissions.actions.non_admin` is set (v4 let every logged-in user in by default). A second login no longer fails, and the shell echoes.
 - **Logs.** The Rust server's logs and the API host's output are interleaved in the API job's logs. ⚠️ TBC: a `--host-logs` filter.
 
 ## 🧪 How to upgrade safely

@@ -184,6 +184,15 @@ CASES = [
     ('epochs', {'ts': 'int', 'id': 'int'}, {}),
     ('epochs', {'ts': 'int'}, {}),
     ('epochs', {'ts': 'datetime', 'id': 'int'}, {}),
+    ### The object path (`int64[pyarrow]` is no native dtype) reads integers and floats as ticks
+    ### of the target unit (`Series.astype('datetime64[us, UTC]')`), `coerce_timezone` or not.
+    ('ints', {'id': 'int64[pyarrow]', 'val': 'datetime'}, {}),
+    ('ints', {'id': 'int64[pyarrow]', 'val': 'datetime'}, {'coerce_timezone': False}),
+    ('ints', {'id': 'int64[pyarrow]', 'val': 'datetime'}, {'strip_timezone': True}),
+    ('ints', {'id': 'int64[pyarrow]', 'val': 'datetime64[ns, UTC]'}, {'coerce_timezone': False}),
+    ('ints', {'id': 'int64[pyarrow]', 'val': 'datetime64[ns]'}, {'coerce_timezone': False}),
+    ('floats', {'id': 'int64[pyarrow]', 'val': 'datetime'}, {'coerce_timezone': False}),
+    ('epochs', {'ts': 'datetime', 'id': 'int64[pyarrow]'}, {'coerce_timezone': False}),
     ('numerics', {'num': 'numeric'}, {}),
     ('numerics', {'num': 'numeric[10,3]'}, {}),
     ('numerics', {'id': 'int', 'num': 'numeric[10,3]'}, {}),

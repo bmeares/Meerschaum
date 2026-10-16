@@ -14,9 +14,28 @@ pub fn parse_version(value: &str) -> Result<pep440_rs::Version, pep440_rs::Versi
     value.parse()
 }
 
+/// Whether `version` satisfies a PEP 440 specifier set such as `>=2.0.0` or `>=1.2,<2`.
+/// Returns `None` when either side does not parse, so callers can tell "unknown" from "no".
+pub fn version_satisfies(version: &str, specifiers: &str) -> Option<bool> {
+    let version = parse_version(version).ok()?;
+    let specifiers: pep440_rs::VersionSpecifiers = specifiers.trim().parse().ok()?;
+    Some(specifiers.contains(&version))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn specifier_matching() {
+        assert_eq!(version_satisfies("3.0.2", ">=3.0.2"), Some(true));
+        assert_eq!(version_satisfies("3.0.1", ">=3.0.2"), Some(false));
+        assert_eq!(version_satisfies("1.5", ">=1.2,<2"), Some(true));
+        assert_eq!(version_satisfies("2.0.0rc1", ">=2.0.0rc1"), Some(true));
+        assert_eq!(version_satisfies("2.0.0-rc1", ">=2.0.0"), Some(false));
+        assert_eq!(version_satisfies("invalid", ">=1.0"), None);
+        assert_eq!(version_satisfies("1.0", "not a specifier"), None);
+    }
 
     #[test]
     fn pep440_ordering() {

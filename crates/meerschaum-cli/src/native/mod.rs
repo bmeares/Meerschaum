@@ -8,15 +8,19 @@
 //! - [`pipes`]: `get_pipes` and the pipe helpers the actions share.
 //! - [`sync`]: the sync seam (`Pipe.sync` for `sql:` source pipes; the engine replaces it).
 //! - [`show`], [`manage`], [`users`], [`maintenance`], [`jobs`]: the actions.
+//! - [`lifecycle`], [`pip`], [`plugin_files`]: `setup plugins`, `install plugins|required|packages`.
 //! - [`rich_json`]: `rich.json.JSON` (pipe attributes in `show pipes`).
 
 pub mod compose_instance;
 pub mod engine_views;
 pub mod jobs;
+pub mod lifecycle;
 pub mod maintenance;
 pub mod manage;
 mod metadata;
+pub mod pip;
 pub mod pipes;
+pub mod plugin_files;
 pub mod rich_json;
 pub mod session;
 pub mod show;
@@ -60,6 +64,10 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_show_tags" => show::show_tags(args, rt),
         "_show_venvs" => venvs::show_venvs(args, rt),
         "_prune_venvs" => venvs::prune_venvs(args, rt),
+        "_setup_plugins" => lifecycle::setup_plugins(args, rt),
+        "_install_plugins" => lifecycle::install_plugins(args, rt),
+        "_install_required" => lifecycle::install_required(args, rt),
+        "_install_packages" => lifecycle::install_packages(args, rt),
         "_upgrade_meerschaum" | "_upgrade_packages" | "_upgrade_plugins" => {
             venvs::upgrade(function, args, rt)
         }

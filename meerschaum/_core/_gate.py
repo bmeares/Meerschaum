@@ -67,11 +67,15 @@ GATED_FEATURES = {
     'get_chunk_interval': 'meerschaum.core.Pipe._data',
     'get_chunk_bounds': 'meerschaum.core.Pipe._data',
     'verify_pipe': 'meerschaum.core.Pipe._verify',
+    'sync_pipe': 'meerschaum.core.Pipe._sync',
+    'parse_sql_uri': 'meerschaum.connectors.sql._uri',
 }
 
-#: Gated features whose guarded function has another name (`Pipe.verify` is `verify_pipe`).
+#: Gated features whose guarded function has another name (`Pipe.verify` is `verify_pipe`, `Pipe.sync` is `sync_pipe`).
 GATED_FUNCTION_NAMES = {
     'verify_pipe': 'verify',
+    'sync_pipe': 'sync',
+    'parse_sql_uri': 'parse_uri',
 }
 
 #: Classes bound in `meerschaum._core` whose methods replace a v4 class's methods, mapped to the

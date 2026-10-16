@@ -36,7 +36,6 @@ CHECK_UPDATE = os.environ.get(STATIC_CONFIG['environment']['runtime'], None) != 
 
 endpoints = STATIC_CONFIG['api']['endpoints']
 
-uv = attempt_import('uv', lazy=False, check_update=CHECK_UPDATE)
 (
     fastapi,
     aiofiles,

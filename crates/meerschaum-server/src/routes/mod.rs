@@ -63,6 +63,7 @@ pub fn route_group_of(path: &str) -> &'static str {
         "info" | "chaining" | "healthcheck" | "favicon.ico" | "id" => "misc",
         "docs" | "redoc" | "openapi.json" => "docs",
         "mcp" => "mcp",
+        "webterm" | "websocket" => "webterm",
         "_mrsm" => "internal",
         _ if first.starts_with("jobs") => "jobs",
         _ => "other",
@@ -176,6 +177,11 @@ pub fn is_proxyable(cfg: &crate::config::ServerConfig, path: &str) -> bool {
         return false;
     }
     let group = route_group_of(path);
+    // The terminal is served here or not at all (`--no-webterm`, `--no-dash`); the API host
+    // no longer mounts it, so forwarding would only ask the host for a route it lacks.
+    if group == "webterm" {
+        return false;
+    }
     let core = CORE_ROUTE_GROUPS.contains(&group) || group == "mcp";
     !(core && !cfg.route_group_is_allowed(group))
 }

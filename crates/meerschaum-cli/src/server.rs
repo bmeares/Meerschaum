@@ -83,6 +83,17 @@ pub fn start_api(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     start(args, rt, false)
 }
 
+/// `start webterm`. v4 ran a Tornado terminal process next to the API; v5 serves the terminal
+/// from the API server itself (`/dash/webterm`, `/webterm/<session>`), authenticated through the
+/// console session, so there is nothing to start on its own.
+pub fn start_webterm(_args: &ArgsMap, _rt: &mut Runtime<'_>) -> ActionResult {
+    Ok(SuccessTuple::fail(
+        "The web terminal is part of the API server in v5: run `start api` and open \
+         `/dash/webterm` (or `/webterm/<session id>`). There is no separate terminal process; \
+         `--no-webterm` turns the terminal off.",
+    ))
+}
+
 /// Start newline-delimited MCP on stdio. The dispatcher's final tuple must go to stderr.
 pub fn start_mcp(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     start(args, rt, true)
@@ -206,8 +217,16 @@ pub fn console(
     }
     let mut web = meerschaum_web::WebConfig::for_state(state);
     // PARITY: `--no-webterm` (also implied by `--no-auth`) removes the terminal page.
-    if !state.config.no_webterm {
-        web.webterm = Some("/webterm".into());
+    // The terminal runs `<this binary> -i <instance>` on the server's root.
+    if !state.config.no_webterm
+        && let Ok(mut shell) =
+            meerschaum_web::ShellCommand::current_exe_shell(&state.config.instance_keys)
+    {
+        shell.env.push((
+            "MRSM_ROOT_DIR".into(),
+            state.config.root_dir.display().to_string(),
+        ));
+        web.webterm = Some(meerschaum_web::WebtermSettings::new(shell));
     }
     let natives = native::session(rt).native_plugins(rt.config())?;
     web.pages = crate::native_plugins::pages(manifest, &natives);

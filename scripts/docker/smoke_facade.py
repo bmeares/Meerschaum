@@ -22,6 +22,8 @@ def main() -> int:
     if not root.is_dir() or not plugins.is_dir():
         raise RuntimeError('The smoke test requires existing scratch root and plugins directories.')
     os.environ['MRSM_NO_AUTO_INSTALL'] = '1'
+    ### The native `Pipe.sync()` (`_core.sync_pipe`) is selected through the parity-phase gate.
+    os.environ.setdefault('MRSM_CORE', 'rust')
     os.environ['MRSM_SQL_SMOKE'] = 'sqlite:///' + str(root / 'smoke.db')
 
     import meerschaum as mrsm
@@ -74,14 +76,22 @@ def main() -> int:
         return True
 
     def pipe_round_trip():
+        heavy_names = ('sqlalchemy', 'pandas', 'polars', 'numpy')
+        already = {m for m in heavy_names if m in sys.modules}
         pipe = mrsm.Pipe(
-            'plugin:smoke', 'probe', instance='sql:smoke',
+            'sql:smoke', 'probe', instance='sql:smoke',
             columns={'id': 'id'}, dtypes={'id': 'int', 'value': 'string'},
         )
         result = pipe.sync([{'id': 1, 'value': 'ok'}])
         if not result[0]:
             raise RuntimeError(result[1])
+        success, message = result
+        assert result.success is success and result.message == message
+        assert result.inserted == 1, result.inserted
         assert pipe.get_data(as_docs=True) == [{'id': 1, 'value': 'ok'}]
+        ### Neither the Pipe round trip nor the read may need a dataframe or SQL package.
+        heavy = [m for m in heavy_names if m in sys.modules and m not in already]
+        assert not heavy, 'Unexpected imports: ' + ', '.join(heavy)
         return True
 
     check('native_version', native_version)

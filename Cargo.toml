@@ -73,10 +73,27 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arrow = "56"
 polars = { version = "0.51", features = ["lazy", "dtype-full", "serde", "json", "ipc", "parquet", "strings", "temporal", "timezones", "object"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 clap = { version = "4", features = ["derive", "env", "string"] }
 pyo3 = { version = "0.25", features = ["abi3-py311", "extension-module"] }
+# The webterm PTY bridge (`meerschaum-server`): a PTY on Unix, ConPTY on Windows.
+portable-pty = "0.9"
+
+# sqlx 0.9.0 (2026-05-21) dropped `TCP_NODELAY` (upstream issue #4335, fixed by #4336 on main, not yet
+# released): every statement's `Close` + `Ping` pair then waits on Nagle / delayed ACK (~40 ms), so a
+# non-persistent statement keeps its pooled connection busy and the next acquire opens a new one
+# (MySQL: 152 connections vs 42 for the instance sync tests, `Too many connections`; PostgreSQL ~+10%).
+# Pinned to the fix commit, whose crates are still version 0.9.0. Delete this section once sqlx 0.9.1
+# (or later) is on crates.io and `cargo update -p sqlx` resolves to it.
+[patch.crates-io]
+sqlx = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-core = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-macros = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-macros-core = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-mysql = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-postgres = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
+sqlx-sqlite = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
 
 # Release profile, shared by the PyPI wheels (wheels.yaml), the Docker images and
 # `scripts/rust/build_py.sh --release`. Measured for the `mrsm` binary on the same tree (40-core

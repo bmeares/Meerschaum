@@ -705,7 +705,7 @@ impl ConfigState {
             let parsed = if filetype == "json" {
                 Value::from_json_str(&text).map_err(|e| e.to_string())
             } else {
-                crate::yaml::load(&text).map_err(|e| e.to_string())
+                crate::yaml::load(&text).map_err(|e| e.0)
             };
             let config_key = match parsed {
                 Ok(v) => v,
@@ -778,6 +778,18 @@ impl ConfigState {
 
     /// Port of `write_config`. Returns `false` when writes are disabled or a write failed.
     pub fn write_config(&mut self, config: Option<&Map>, directory: Option<&Path>) -> bool {
+        self.write_config_with(config, directory, &crate::yaml::dump)
+    }
+
+    /// `write_config` with the YAML emitter injectable. When it fails for a key, that key's
+    /// file is **not touched** (an emitter error must never truncate a user's config) and the
+    /// write returns `false` after a warning.
+    fn write_config_with(
+        &mut self,
+        config: Option<&Map>,
+        directory: Option<&Path>,
+        dump_yaml: &dyn Fn(&Value) -> Result<String, crate::yaml::YamlError>,
+    ) -> bool {
         if !self.allow_writes {
             return false;
         }
@@ -824,7 +836,13 @@ impl ConfigState {
             }
             match filetype.as_str() {
                 "json" => text.push_str(&json_dumps(v, JsonStyle::Indent(2), true)),
-                "yaml" | "yml" => text.push_str(&crate::yaml::dump(v)),
+                "yaml" | "yml" => match dump_yaml(v) {
+                    Ok(dumped) => text.push_str(&dumped),
+                    Err(e) => {
+                        self.warn(format!("FAILED TO WRITE! Could not dump '{k}': {}", e.0));
+                        return false;
+                    }
+                },
                 other => {
                     self.warn(format!("FAILED TO WRITE! Unknown filetype '{other}'."));
                     let _ = std::fs::remove_file(&filepath);
@@ -1136,6 +1154,46 @@ mod tests {
         assert_eq!(
             Value::Map(d).get_path(&["api", "uvicorn", "workers"]),
             Some(&Value::Int(4))
+        );
+    }
+
+    #[test]
+    fn a_failing_yaml_dump_leaves_the_file_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let env = vec![(
+            "MRSM_ROOT_DIR".to_string(),
+            root.path().to_string_lossy().into_owned(),
+        )];
+        let config = Config::new(ConfigOptions::with_env(env)).unwrap();
+        let directory = root.path().join("config");
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("meerschaum.yaml");
+        std::fs::write(&path, "instance: sql:keep\n").unwrap();
+        let new = Value::from_json_str(r#"{"meerschaum": {"instance": "sql:new"}}"#)
+            .unwrap()
+            .to_map();
+
+        let failing = |_: &Value| Err(crate::yaml::YamlError("cannot represent an object".into()));
+        let wrote =
+            config.with_state(|s| s.write_config_with(Some(&new), Some(&directory), &failing));
+        assert!(!wrote);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "instance: sql:keep\n"
+        );
+        let warnings = config.take_warnings();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("FAILED TO WRITE") && w.contains("cannot represent")),
+            "{warnings:?}"
+        );
+
+        assert!(config.with_state(|s| s.write_config(Some(&new), Some(&directory))));
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("instance: sql:new")
         );
     }
 }

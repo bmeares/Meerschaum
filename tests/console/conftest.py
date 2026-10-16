@@ -93,7 +93,9 @@ def base_env(root: pathlib.Path, plugins: pathlib.Path, config: dict | None = No
     import site
     env = {
         key: val for key, val in os.environ.items()
-        if not key.startswith('MRSM_') and key not in ('PYTHONPATH', 'HOME')
+        if not key.startswith('MRSM_')
+        ### An inherited `TMUX` makes tmux ignore `TMUX_TMPDIR` and hit the caller's server.
+        and key not in ('PYTHONPATH', 'HOME', 'TMUX', 'TMUX_PANE')
     }
     merged_config = {
         'meerschaum': {'instance': 'sql:w7console', 'api_instance': 'sql:w7console'},

@@ -11,7 +11,8 @@ use crate::frame::{Column, ColumnData, Frame, FrameResult, values_to_series};
 use crate::value::{Value, parse_datetime_value};
 
 /// `pd.DataFrame(docs).convert_dtypes()` for a list of documents. Columns appear in order of
-/// first appearance; missing keys are null.
+/// first appearance; a missing key is `NaN` (what `pd.DataFrame(docs)` fills, which matters for
+/// a column no document has a value for: see [`convert_dtypes`]).
 pub fn frame_from_docs(docs: &[IndexMap<String, Value>]) -> FrameResult<Frame> {
     let mut keys: Vec<String> = Vec::new();
     for doc in docs {
@@ -26,7 +27,7 @@ pub fn frame_from_docs(docs: &[IndexMap<String, Value>]) -> FrameResult<Frame> {
         .map(|k| {
             let values = docs
                 .iter()
-                .map(|d| d.get(&k).cloned().unwrap_or(Value::Null))
+                .map(|d| d.get(&k).cloned().unwrap_or(Value::Float(f64::NAN)))
                 .collect();
             (k, values)
         })
@@ -50,6 +51,21 @@ pub fn frame_from_columns(columns: &IndexMap<String, Vec<Value>>) -> FrameResult
 pub fn convert_dtypes(name: &str, values: &[Value]) -> ColumnData {
     let non_null: Vec<&Value> = values.iter().filter(|v| !v.is_na()).collect();
     if non_null.is_empty() {
+        // PARITY: pandas infers `float64` for `None` mixed with `NaN` (a missing key, a float
+        // `nan`), which `convert_dtypes` turns into `Int64`; `[None, None]` and `pd.NA` stay
+        // `object`.
+        let has_nan = values
+            .iter()
+            .any(|v| matches!(v, Value::Float(f) if f.is_nan()));
+        let only_none_and_nan = values
+            .iter()
+            .all(|v| matches!(v, Value::Null) || matches!(v, Value::Float(f) if f.is_nan()));
+        if has_nan && only_none_and_nan {
+            let nulls = vec![Value::Null; values.len()];
+            if let Some(series) = values_to_series(name, &nulls, &DataType::Int64) {
+                return ColumnData::Native(series);
+            }
+        }
         return ColumnData::Object(values.iter().map(|_| Value::NA).collect());
     }
     let all = |f: fn(&Value) -> bool| non_null.iter().all(|v| f(v));

@@ -690,8 +690,9 @@ fn dispatch_skeleton() {
     );
     // Verify compatibility delegation with an absent interpreter; never install packages
     // or contact an API while checking dispatch.
+    // (`install plugins` is native now; `show packages` still reaches `core_action`.)
     for args in [
-        vec!["install", "plugins", "synthetic_wiring_test"],
+        vec!["show", "packages"],
         vec!["show", "pipes", "-e", "api:synthetic_wiring_test"],
     ] {
         let output = std::process::Command::new(env!("CARGO_BIN_EXE_mrsm"))

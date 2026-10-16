@@ -957,6 +957,64 @@ fn left_merge_indices(left: &Frame, right: &Frame, on: &[String]) -> Vec<(usize,
     out
 }
 
+/// pandas' `merge(on=...)` refuses key columns whose datetimes do not match: a timezone-aware
+/// column against a timezone-naive one, or a datetime column against a numeric, boolean, string
+/// or bytes one (`_maybe_coerce_merge_keys`). v4 lets the `ValueError` escape from
+/// `Pipe.filter_existing()`, so a `sync()` of a timezone-naive axis into a UTC table raises.
+///
+/// With `tz_must_agree == false` the timezone rule is skipped: `filter_unseen_df` puts every
+/// datetime column of both frames in UTC before its own merge.
+///
+/// PARITY: only the datetime rules are modeled (`object` columns, which `infer_objects()` could
+/// not narrow, are not compared). The message is pandas' own: left (new rows) dtype first.
+fn check_merge_keys(
+    left: &Frame,
+    right: &Frame,
+    on: &[String],
+    tz_must_agree: bool,
+) -> Result<(), EnforceError> {
+    use crate::merge_dtype::Class;
+    if left.is_empty() || right.is_empty() {
+        return Ok(());
+    }
+    for col in on {
+        let (Ok(l), Ok(r)) = (left.data(col), right.data(col)) else {
+            continue;
+        };
+        let (lk, rk) = (column_kind(l), column_kind(r));
+        let comparable = |c: Class| {
+            matches!(
+                c,
+                Class::Int | Class::Float | Class::Bool | Class::Str | Class::Bytes
+            )
+        };
+        let mismatch = match (lk.class, rk.class) {
+            (Class::Datetime, Class::Datetime) => {
+                tz_must_agree && lk.dtype.contains(',') != rk.dtype.contains(',')
+            }
+            (Class::Datetime, other) | (other, Class::Datetime) => comparable(other),
+            _ => false,
+        };
+        if mismatch {
+            let shown = |k: &Kind| {
+                if tz_must_agree || k.class != Class::Datetime || k.dtype.contains(',') {
+                    k.dtype.clone()
+                } else {
+                    // `filter_unseen_df` has already made the datetimes UTC-aware.
+                    k.dtype.replace(']', ", UTC]")
+                }
+            };
+            return Err(EnforceError::Raised(format!(
+                "You are trying to merge on {} and {} columns for key '{col}'. \
+                 If you wish to proceed you should use pd.concat",
+                shown(&lk),
+                shown(&rk)
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// `Pipe.filter_existing(df, ...)` with the instance access factored out: `get_backtrack`
 /// receives the `get_data()` request and returns the backtrack frame (or `None`).
 pub fn filter_existing(
@@ -1084,6 +1142,16 @@ pub fn filter_existing(
         .iter()
         .map(|(c, t)| (c.clone(), to_pandas_dtype(t)))
         .collect();
+    if !params.dtypes_ctx.enforce {
+        // Without enforcement v4 hands `filter_unseen_df` no dtypes to cast to, so its merge sees
+        // the frames as they are.
+        let common: Vec<String> = df
+            .names()
+            .into_iter()
+            .filter(|c| backtrack.contains(c))
+            .collect();
+        check_merge_keys(&df, &backtrack, &common, false)?;
+    }
     let mut delta = add_missing_cols(
         &filter_unseen_df(
             Some(&backtrack),
@@ -1153,6 +1221,7 @@ pub fn filter_existing(
         deserialize(&mut delta)?;
         (delta.clone(), get_empty_df(Some(&df), params))
     } else {
+        check_merge_keys(&delta, &backtrack, &on_cols, true)?;
         let merged = left_merge_indices(&delta, &backtrack, &on_cols);
         deserialize(&mut delta)?;
         let unseen_ix: Vec<usize> = merged

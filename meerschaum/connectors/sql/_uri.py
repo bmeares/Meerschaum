@@ -10,6 +10,7 @@ import os
 from meerschaum.utils.typing import Optional, Dict, Any, Union
 from meerschaum.utils.warnings import warn, error
 from meerschaum.utils.packages import attempt_import
+from meerschaum._core._gate import rust_impl as _rust_impl
 
 @classmethod
 def from_uri(
@@ -96,6 +97,11 @@ def parse_uri(uri: str) -> Dict[str, Any]:
     'driver': 'ODBC Driver 17 for SQL Server'}
     >>> 
     """
+    if (_rust := _rust_impl('parse_sql_uri')) is not None:
+        ### The Rust grammar is SQLAlchemy 2.0's (golden-tested) and its message is SQLAlchemy's:
+        ### a malformed URI raises `ValueError` rather than `sqlalchemy.exc.ArgumentError`
+        ### (see PARITY.md, Wave 13 H6); there is no second grammar to fall back to.
+        return _rust(uri)
     from urllib.parse import parse_qs, urlparse
     sqlalchemy = attempt_import('sqlalchemy', lazy=False)
     parser = sqlalchemy.engine.url.make_url

@@ -2,8 +2,8 @@
 //! (`docs/design/v5.0.0.md` §7.1, §7.3, §5.8, D7, D17).
 //!
 //! Every route of `meerschaum/api/routes` is served at the same path, method, query parameters,
-//! status codes and JSON shapes as v4.1 (except `/dash/*` and `/webterm`, which come in a
-//! later wave), plus the v5 `/engine/*` family. Wire quirks of the v4 server are kept and marked
+//! status codes and JSON shapes as v4.1 (`/dash/*` is the `meerschaum-web` console; the web
+//! terminal's routes are [`webterm`], merged by the console), plus the v5 `/engine/*` family. Wire quirks of the v4 server are kept and marked
 //! `// PARITY:` with the Python line.
 //!
 //! | Module | What it does |
@@ -18,6 +18,7 @@
 //! | [`backends`] | Traits for actions, jobs, engine state and extra instances, with defaults |
 //! | [`ratelimit`] | `api:permissions:rate_limits` token buckets |
 //! | [`proxy`], [`host`] | The Python API host: reverse proxy over a Unix socket, supervision |
+//! | [`webterm`] | `/webterm/{session_id}` and its websocket: the PTY bridge (`portable-pty`, tmux) |
 //! | [`mcp`] | The MCP server (`/mcp`, stdio) and its federation with the API host |
 //!
 //! All pipe operations go through `Arc<dyn InstanceConnector>`.
@@ -40,6 +41,7 @@ pub mod routes;
 pub mod serialize;
 pub mod state;
 pub mod web;
+pub mod webterm;
 
 pub use config::{ServerConfig, ServerFlags};
 pub use state::AppState;

@@ -463,7 +463,7 @@ def init_venv(
         return True
 
     from meerschaum.utils.packages import (
-        run_python_package, attempt_import, _get_pip_os_env, _get_uv_bin,
+        run_python_package, attempt_import, _get_pip_os_env, _get_uv_bin, _auto_install_allowed,
     )
     global tried_virtualenv
     try:
@@ -496,8 +496,11 @@ def init_venv(
                 'uv',
                 [
                     'venv', venv_path.as_posix(), '--python', sys.executable,
-                    '-q', '--no-project', '--allow-existing', '--seed',
-                ],
+                    '-q', '--no-project', '--allow-existing',
+                ] + (
+                    ### `--seed` downloads `pip`, `setuptools` and `wheel` into the new venv.
+                    ['--seed'] if _auto_install_allowed() else []
+                ),
                 venv=None,
                 env=_get_pip_os_env(),
                 debug=debug,

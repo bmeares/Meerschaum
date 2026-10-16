@@ -25,39 +25,45 @@ pub const INSTALL_COMPOSE_NOTICE: &str = "Compose is built into Meerschaum; the 
 is not installed. Remove `mrsm install plugin compose` from your bootstrap scripts.";
 
 /// The plugin names found in plugins directories, like `get_plugins_names()` after
-/// `sync_plugins_symlinks()`: `*.py` modules and package directories, skipping hidden entries,
-/// `__pycache__` and `__init__.py`.
+/// `sync_plugins_symlinks()`: `*.py` modules and package directories **with an `__init__.py`**,
+/// skipping hidden entries, `__pycache__` and `__init__.py`.
 ///
-/// Python additionally imports each plugin and drops the ones that fail to import; that
-/// requires the plugin runtime and is not reproduced.
+/// Failed imports (decided against released v4.1.4): `get_plugins_names()` keeps every plugin
+/// `Plugin.is_installed()` accepts, and that is a file-system test (`__file__ is not None`: a
+/// `<name>/__init__.py` or `<name>.py` in the plugins directory), never an import. So a plugin
+/// whose import raises is listed (`mrsm show plugins` prints it, `install required` and
+/// `setup plugins` count it, and the import error is only warned about when something imports
+/// it), and a directory without `__init__.py` is not a plugin. This function therefore needs no
+/// plugin runtime. Names are unique, in directory order with each directory's entries sorted.
+///
+/// v5 adds native (C-ABI) plugins: a directory holding a `plugin.toml` counts as installed.
+/// A native plugin shadows a Python plugin of the same name, so the name list is the same either
+/// way.
 pub fn plugin_names_in_dirs(dirs: &[PathBuf]) -> Vec<String> {
     let mut names = Vec::new();
     for dir in dirs {
         let Ok(entries) = std::fs::read_dir(dir) else {
             continue;
         };
-        let mut items: Vec<(String, bool)> = entries
+        let mut items: Vec<(String, PathBuf)> = entries
             .filter_map(Result::ok)
-            .map(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                let is_dir = e.path().is_dir();
-                (name, is_dir)
-            })
+            .map(|e| (e.file_name().to_string_lossy().to_string(), e.path()))
             .collect();
         items.sort();
-        for (name, is_dir) in items {
+        for (name, path) in items {
             if name.starts_with('.') || name == "__pycache__" || name == "__init__.py" {
                 continue;
             }
-            let plugin = if is_dir {
-                Some(name)
+            let plugin = if path.is_dir() {
+                (path.join("__init__.py").is_file() || path.join("plugin.toml").is_file())
+                    .then_some(name)
             } else {
                 name.strip_suffix(".py").map(String::from)
             };
-            if let Some(plugin) = plugin {
-                if !names.contains(&plugin) {
-                    names.push(plugin);
-                }
+            if let Some(plugin) = plugin
+                && !names.contains(&plugin)
+            {
+                names.push(plugin);
             }
         }
     }
@@ -159,6 +165,10 @@ pub fn check_and_install_plugins(
 
     let mut success = true;
     let mut msg = String::new();
+    // PARITY: when any configured plugin is missing, every plugin of its repository group is
+    // installed again, not only the missing member (`compose/utils/plugins.py`
+    // `check_and_install_plugins`: `install plugins <all names of the repo> -r <repo>`). The
+    // command runs the native `install plugins` of this binary under the project environment.
     for (repo, names) in &required {
         let mut args = vec!["install".to_string(), "plugins".to_string()];
         args.extend(names.iter().cloned());
@@ -238,6 +248,51 @@ pub fn filter_install_plugins(names: &[String]) -> (Vec<String>, Option<&'static
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn touch(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "").unwrap();
+    }
+
+    #[test]
+    fn discovery_never_imports_so_failed_imports_stay_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("broken.py"),
+            "import definitely_not_a_module_xyz\n",
+        )
+        .unwrap();
+        touch(&root.join("ok.py"));
+        touch(&root.join("pkg/__init__.py"));
+        // v4 drops a directory without `__init__.py` (`Plugin.__file__` is `None`).
+        touch(&root.join("no_init/mod.py"));
+        touch(&root.join("_private.py"));
+        touch(&root.join(".hidden.py"));
+        touch(&root.join("README.md"));
+        touch(&root.join("__init__.py"));
+        touch(&root.join("__pycache__/x.pyc"));
+        // A native plugin descriptor counts; it shadows a Python plugin of the same name.
+        touch(&root.join("native_one/plugin.toml"));
+        touch(&root.join("native_one.py"));
+        assert_eq!(
+            plugin_names_in_dirs(&[root.to_path_buf()]),
+            vec!["_private", "broken", "native_one", "ok", "pkg"]
+        );
+    }
+
+    #[test]
+    fn the_first_directory_orders_the_names() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        touch(&a.path().join("same.py"));
+        touch(&b.path().join("same.py"));
+        touch(&b.path().join("a_only.py"));
+        assert_eq!(
+            plugin_names_in_dirs(&[a.path().to_path_buf(), b.path().to_path_buf()]),
+            vec!["same", "a_only"]
+        );
+    }
 
     #[test]
     fn install_compose_is_a_noop() {

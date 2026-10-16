@@ -6,6 +6,7 @@ pub mod discovery;
 pub mod host;
 pub mod registry;
 pub mod sdk;
+pub mod source;
 pub use arrow;
 pub use host::{LoadedPlugin, NativeConnector};
 pub use meerschaum_kernel::Frame;

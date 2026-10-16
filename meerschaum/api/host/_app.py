@@ -84,7 +84,7 @@ def build_app(load_plugins: bool = True, debug: bool = False):
         return _built['app']
 
     _require_host_mode()
-    from meerschaum.api.host import dash_enabled, webterm_enabled
+    from meerschaum.api.host import dash_enabled
     from meerschaum.api import app
     from meerschaum.api.host._auth import install_user_loader
     from meerschaum.api.host import dash as host_dash
@@ -104,9 +104,6 @@ def build_app(load_plugins: bool = True, debug: bool = False):
     if dash_enabled():
         host_dash.mount_dash_apps(app, debug=debug)
         host_dash.mount_page_contract_routes(app, debug=debug)
-    if webterm_enabled():
-        from meerschaum.api.host import _webterm
-        _webterm.mount_webterm(app, debug=debug)
 
     _built['app'] = app
     return app

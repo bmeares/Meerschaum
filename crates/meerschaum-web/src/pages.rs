@@ -88,19 +88,18 @@ pub(crate) async fn page(State(state): State<WebState>, req: Request) -> Respons
             "Change password",
         )),
         "webterm" => Ok(
-            match state
-                .config
-                .webterm
-                .as_deref()
-                .filter(|s| s.starts_with('/') && !s.starts_with("//"))
-            {
-                // The API host serves the v4 terminal route `/webterm/{session_id}`.
-                Some("/webterm") => format!(
-                    "<a href=\"/webterm/{}\">Open web terminal</a>",
-                    escape(&cookie(headers).unwrap_or_default())
-                ),
-                Some(url) => format!("<a href=\"{}\">Open web terminal</a>", escape(url)),
-                None => "<p>Web terminal is not configured.</p>".into(),
+            match (
+                state
+                    .config
+                    .webterm
+                    .as_ref()
+                    .filter(|_| !state.server.config.no_webterm),
+                cookie(headers),
+            ) {
+                (Some(_), Some(session_id)) => {
+                    crate::webterm::embedded_content(&state, &session_id)
+                }
+                _ => "<p>Web terminal is not configured.</p>".into(),
             },
         ),
         "pipelines" => pipelines(&state, &data, &query).await,

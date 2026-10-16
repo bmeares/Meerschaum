@@ -461,7 +461,8 @@ fn compose_explain_and_native_down() {
 fn python_only_actions_dispatch_to_worker() {
     let tmp = tempfile::tempdir().unwrap();
     let host = SharedHost::default();
-    assert_worker_dispatch(tmp.path(), &["install", "plugins", "synthetic_wiring_test"]);
+    // `install plugins` is native now; `show packages` still reaches the worker `core_action`.
+    assert_worker_dispatch(tmp.path(), &["show", "packages"]);
     let (r, _) = run(tmp.path(), &["reload"], no_env, &host);
     assert_eq!(r, SuccessTuple::success());
 }

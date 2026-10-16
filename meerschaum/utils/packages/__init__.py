@@ -47,6 +47,24 @@ _install_lock_depths = {}
 emitted_auto_install_warning = False
 
 
+#: Environment variable that turns off every implicit package installation (V4-002).
+NO_AUTO_INSTALL_ENV_VAR = 'MRSM_NO_AUTO_INSTALL'
+
+
+def _auto_install_allowed() -> bool:
+    """
+    Return whether Meerschaum may install packages on its own.
+
+    This is the single guard behind `MRSM_NO_AUTO_INSTALL`. An install is *implicit* when it is
+    reached from an import or a dependency precheck (`attempt_import()`, `is_installed()`,
+    `need_update()`, bootstrapping `uv`, `pip`, `wheel`, `semver`, ...) and *explicit* when the
+    caller asked for it (`pip_install()` from user code, `mrsm install packages`,
+    `install required`). Implicit installs call this; explicit ones are always allowed, but do not
+    bootstrap installers of their own while the variable is set.
+    """
+    return os.environ.get(NO_AUTO_INSTALL_ENV_VAR, '').lower() not in ('1', 'true', 'yes')
+
+
 def _get_uv_bin() -> Optional[str]:
     """Find uv without importing or installing any bootstrap dependencies."""
     import shutil
@@ -122,6 +140,8 @@ def _locked_pip_install(func):
     def _wrapped(*args, **kw):
         if kw.get('dry_run', False):
             return func(*args, **kw)
+        if kw.get('_implicit', False) and not _auto_install_allowed():
+            return False
         with _pip_install_lock(kw.get('venv', 'mrsm')):
             return func(*args, **kw)
 
@@ -339,7 +359,8 @@ def manually_import_module(
                         split=False,
                         check_update=check_update,
                         color=color,
-                        debug=debug
+                        debug=debug,
+                        _implicit=True,
                     ) and warn:
                         warn_function(
                             f"There's an update available for '{install_name}', "
@@ -611,6 +632,56 @@ def _get_package_metadata(import_name: str, venv: Optional[str]) -> Dict[str, st
     return {}
 
 
+def _version_satisfies_without_semver(
+    version: str,
+    required_version: str,
+    debug: bool = False,
+) -> Optional[bool]:
+    """
+    Match an installed version against a PEP 440 requirement without installing anything.
+
+    Tries the Rust comparison (`meerschaum._core.version_satisfies`) if the extension binds it,
+    then `packaging` if it is importable. Returns `None` when neither can answer.
+    """
+    if debug:
+        from meerschaum.utils.debug import dprint
+    required_version = required_version.strip()
+    if not required_version:
+        return True
+
+    try:
+        from meerschaum import _core
+        satisfied = _core.version_satisfies(version, required_version)
+    except (ImportError, AttributeError):
+        satisfied = None
+    if satisfied is not None:
+        return satisfied
+
+    specifiers, packaging_version = attempt_import(
+        'packaging.specifiers',
+        'packaging.version',
+        install=False,
+        warn=False,
+        lazy=False,
+        check_update=False,
+    )
+    if specifiers is not None and packaging_version is not None:
+        try:
+            return specifiers.SpecifierSet(required_version, prereleases=True).contains(
+                packaging_version.Version(version)
+            )
+        except Exception as e:
+            if debug:
+                dprint(f"`packaging` could not match '{version}' to '{required_version}': {e}")
+
+    if debug:
+        dprint(
+            f"No version parser is available to match '{version}' to '{required_version}'; "
+            + "assuming the requirement is satisfied."
+        )
+    return None
+
+
 def need_update(
     package: Optional['ModuleType'] = None,
     install_name: Optional[str] = None,
@@ -671,6 +742,9 @@ def need_update(
         import_name.split('.')[0] if split else import_name
     )
     install_name = install_name or _import_to_install_name(root_name)
+    auto_install_allowed = _auto_install_allowed()
+    ### Asking PyPI for the latest release is an implicit network request.
+    check_pypi = check_pypi and auto_install_allowed
     with _locks['_checked_for_updates']:
         if install_name in _checked_for_updates:
             return False
@@ -708,6 +782,7 @@ def need_update(
             dprint(str(e), color=color)
             dprint("No version could be determined from the installed package.", color=color)
         return False
+    raw_version = version
     split_version = version.split('.')
     last_part = split_version[-1]
     if len(split_version) == 2:
@@ -723,19 +798,31 @@ def need_update(
         version = '.'.join(split_version[:3])
 
     packaging_version = attempt_import(
-        'packaging.version', check_update=False, lazy=False, debug=debug,
+        'packaging.version',
+        check_update=False,
+        lazy=False,
+        warn=auto_install_allowed,
+        debug=debug,
     )
 
-    ### Get semver if necessary
+    ### Get semver if necessary. With `MRSM_NO_AUTO_INSTALL` it is never installed:
+    ### without it, the final comparison falls back to `_version_satisfies_without_semver()`.
+    semver = None
     if required_version:
         semver_path = get_module_path('semver', debug=debug)
-        if semver_path is None:
+        if semver_path is None and auto_install_allowed:
             no_venv_semver_path = get_module_path('semver', venv=None, debug=debug)
             if no_venv_semver_path is None:
-                pip_install(_import_to_install_name('semver'), debug=debug)
-        semver = attempt_import('semver', check_update=False, lazy=False, debug=debug)
-        if semver is None:
-            # Installation may be disabled or unavailable. A failed version-check
+                pip_install(_import_to_install_name('semver'), debug=debug, _implicit=True)
+        semver = attempt_import(
+            'semver',
+            check_update=False,
+            lazy=False,
+            warn=auto_install_allowed,
+            debug=debug,
+        )
+        if semver is None and auto_install_allowed:
+            # Installation may be unavailable. A failed version-check
             # dependency must not turn a missing package into a NoneType traceback.
             return False
     if check_pypi:
@@ -756,7 +843,13 @@ def need_update(
             try:
                 return semver.Version.parse(result.available_version).match(required_version)
             except AttributeError as e:
-                pip_install(_import_to_install_name('semver'), venv='mrsm', debug=debug)
+                if not pip_install(
+                    _import_to_install_name('semver'),
+                    venv='mrsm',
+                    debug=debug,
+                    _implicit=True,
+                ):
+                    return False
                 semver = manually_import_module('semver', venv='mrsm')
                 return semver.Version.parse(version).match(required_version)
             except Exception as e:
@@ -780,6 +873,11 @@ def need_update(
         .replace('-py3-none-any.whl', '')
     )
 
+    if semver is None:
+        satisfied = _version_satisfies_without_semver(raw_version, required_version, debug=debug)
+        ### An unknown answer must not trigger an install: treat it as satisfied.
+        return (not satisfied) if satisfied is not None else False
+
     if 'a' in required_version:
         required_version = required_version.replace('a', '-pre.').replace('+mrsm', '')
         version = version.replace('a', '-pre.').replace('+mrsm', '')
@@ -789,7 +887,16 @@ def need_update(
             if required_version else False
         )
     except AttributeError:
-        pip_install(_import_to_install_name('semver'), venv='mrsm', debug=debug)
+        if not pip_install(
+            _import_to_install_name('semver'),
+            venv='mrsm',
+            debug=debug,
+            _implicit=True,
+        ):
+            satisfied = _version_satisfies_without_semver(
+                raw_version, required_version, debug=debug,
+            )
+            return (not satisfied) if satisfied is not None else False
         semver = manually_import_module('semver', venv='mrsm', debug=debug)
         return (
             (not semver.Version.parse(version).match(required_version))
@@ -887,9 +994,7 @@ def get_pip_install_plan(
         )
         for install_name in install_names
     ]
-    auto_install_enabled = os.environ.get('MRSM_NO_AUTO_INSTALL', '').lower() not in (
-        '1', 'true', 'yes'
-    )
+    auto_install_enabled = _auto_install_allowed()
     return {
         'operation': 'uninstall' if _uninstall else 'install',
         'environment': venv,
@@ -930,6 +1035,7 @@ def pip_install(
     _from_completely_uninstall: bool = False,
     _install_uv_pip: bool = True,
     _use_uv_pip: bool = True,
+    _implicit: bool = False,
     color: bool = True,
     silent: bool = False,
     dry_run: bool = False,
@@ -937,6 +1043,11 @@ def pip_install(
 ) -> bool:
     """
     Install packages from PyPI with `pip`.
+
+    When `MRSM_NO_AUTO_INSTALL` is set, calling this function directly still installs the
+    requested packages, but never bootstraps `uv`, `pip`, `wheel` or `setuptools` on its own
+    and never checks PyPI for a newer `pip`. Calls made on behalf of an import or a dependency
+    precheck (`_implicit=True`) install nothing and return `False`.
 
     Parameters
     ----------
@@ -991,6 +1102,7 @@ def pip_install(
     import meerschaum.config.paths as paths
     from meerschaum._internal.static import STATIC_CONFIG
     from meerschaum.utils.warnings import warn
+    auto_install_allowed = _auto_install_allowed()
     if dry_run:
         import json
         plan = get_pip_install_plan(
@@ -1025,7 +1137,13 @@ def pip_install(
     uv_bin = _get_uv_bin()
     have_uv_pip = uv_bin is not None
 
-    if have_pip and not have_uv_pip and _install_uv_pip and is_uv_enabled():
+    if (
+        auto_install_allowed
+        and have_pip
+        and not have_uv_pip
+        and _install_uv_pip
+        and is_uv_enabled()
+    ):
         if not pip_install(
             'uv',
             venv=None,
@@ -1057,6 +1175,15 @@ def pip_install(
     import sys
     if not have_pip and not use_uv_pip:
         have_mrsm_pip = venv_contains_package('pip', venv='mrsm')
+        if not have_mrsm_pip and not auto_install_allowed:
+            if not silent:
+                warn(
+                    "Neither `uv` nor `pip` is available to install packages, "
+                    + f"and {NO_AUTO_INSTALL_ENV_VAR} forbids downloading them.",
+                    stack=False,
+                    color=False,
+                )
+            return False
         if not have_mrsm_pip and not get_pip(venv=venv, color=color, debug=debug):
             import sys
             minor = sys.version_info.minor
@@ -1088,14 +1215,14 @@ def pip_install(
                 _args += ['--cache-dir', str(cache_dir_path)]
 
         if 'pip' not in ' '.join(_args) and not use_uv_pip:
-            if check_update and not _uninstall:
+            if check_update and not _uninstall and auto_install_allowed:
                 pip = attempt_import('pip', venv=venv, install=False, debug=debug, lazy=False)
                 if need_update(pip, check_pypi=check_pypi, debug=debug):
                     _args.append(all_packages['pip'])
 
         _args = (['install'] if not _uninstall else ['uninstall']) + _args
 
-        if check_wheel and not _uninstall and not use_uv_pip:
+        if check_wheel and not _uninstall and not use_uv_pip and auto_install_allowed:
             if not have_wheel:
                 setup_packages_to_install = (
                     ['setuptools', 'wheel', 'PyYAML']
@@ -1500,8 +1627,8 @@ def attempt_import(
     import importlib.util
 
     global emitted_auto_install_warning
-    no_auto_install_env_var = 'MRSM_NO_AUTO_INSTALL'
-    if os.environ.get(no_auto_install_env_var, '').lower() in ('1', 'true', 'yes'):
+    no_auto_install_env_var = NO_AUTO_INSTALL_ENV_VAR
+    if not _auto_install_allowed():
         install = False
 
     ### to prevent recursion, check if parent Meerschaum package is being imported
@@ -1616,7 +1743,8 @@ def attempt_import(
                     split = False,
                     check_update = check_update,
                     color = color,
-                    debug = debug
+                    debug = debug,
+                    _implicit = True,
                 ):
                     if warn:
                         warn_function(
@@ -2131,7 +2259,12 @@ def ensure_readline() -> 'ModuleType':
                 warn=False,
             )
         except (ImportError, ModuleNotFoundError):
-            if not pip_install(rl_name, args=['--upgrade', '--ignore-installed'], venv=None):
+            if not pip_install(
+                rl_name,
+                args=['--upgrade', '--ignore-installed'],
+                venv=None,
+                _implicit=True,
+            ):
                 print(f"Unable to import {rl_name}!", file=sys.stderr)
                 sys.exit(1)
 
@@ -2185,16 +2318,20 @@ def is_uv_enabled() -> bool:
     if is_android():
         return False
 
-    try:
-        import yaml
-    except ImportError:
-        # Bootstrap with the default installer before YAML itself is installed. In Rust
-        # mode config is dependency-free, so an explicit uv opt-out is still honored.
-        from meerschaum._core._gate import rust_impl
-        get_rust_config = rust_impl('get_config')
-        if get_rust_config is not None:
-            return bool(get_rust_config('system', 'experimental', 'uv_pip'))
-        return True
+    ### The native YAML codec (`meerschaum._core`) needs no package to read the config, so the
+    ### user's `uv_pip` opt-out is always honored when the extension is present.
+    from meerschaum.utils.yaml import _native
+    if _native is None:
+        try:
+            import yaml
+        except ImportError:
+            # Bootstrap with the default installer before YAML itself is installed. In Rust
+            # mode config is dependency-free, so an explicit uv opt-out is still honored.
+            from meerschaum._core._gate import rust_impl
+            get_rust_config = rust_impl('get_config')
+            if get_rust_config is not None:
+                return bool(get_rust_config('system', 'experimental', 'uv_pip'))
+            return True
 
     from meerschaum.config import get_config
     enabled = get_config('system', 'experimental', 'uv_pip')

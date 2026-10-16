@@ -3,6 +3,8 @@
 mod pages;
 mod pipelines;
 pub mod sessions;
+pub mod webterm;
+pub use webterm::{ShellCommand, WebtermSettings};
 
 use askama::Template;
 use axum::{
@@ -42,7 +44,8 @@ pub struct WebConfig {
     pub sessions: Arc<dyn SessionStore>,
     pub session_ttl: i64,
     pub secure_cookie: bool,
-    pub webterm: Option<String>,
+    /// The web terminal (`/dash/webterm`, `/webterm/{session_id}`); `None` serves none.
+    pub webterm: Option<WebtermSettings>,
     pub pages: Vec<PluginPage>,
     /// Map old relative page paths to owning plugin names.
     pub legacy_pages: BTreeMap<String, String>,
@@ -155,6 +158,8 @@ pub(crate) struct WebState {
     pub server: AppState,
     pub api: Router,
     pub config: WebConfig,
+    /// Whether the terminal keeps its shell in a tmux session (shows the new-window control).
+    pub webterm_tmux: bool,
 }
 #[derive(Template)]
 #[template(path = "chrome.html")]
@@ -176,8 +181,11 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
     if server.config.no_dash {
         return Ok(Router::new());
     }
+    let webterm = webterm::config(&server, &config);
+    let server_state = server.clone();
     let state = WebState {
         api: meerschaum_server::app(server.clone()),
+        webterm_tmux: webterm.as_ref().is_some_and(|w| w.uses_tmux()),
         server,
         config,
     };
@@ -262,6 +270,10 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
         "cytoscape.min.js",
         "xterm.js",
         "xterm.css",
+        "addon-fit.js",
+        "addon-unicode11.js",
+        "webterm.js",
+        "webterm.css",
     ] {
         router = router.route(&format!("/dash/assets/{name}"), get(asset));
     }
@@ -324,7 +336,13 @@ pub fn router(server: AppState, config: WebConfig) -> Result<Router, String> {
         }
         router = router.route(&format!("/dash/{path}"), get(legacy));
     }
-    Ok(router.with_state(state))
+    let mut router = router.with_state(state);
+    // The terminal's own routes (`/webterm/{session_id}`, `/websocket/{session_id}`), outside
+    // `/dash` as in v4 and independent of the `dash` route group.
+    if let Some(webterm) = webterm {
+        router = router.merge(meerschaum_server::webterm::routes(server_state, webterm));
+    }
+    Ok(router)
 }
 async fn hidden_page() -> Response {
     StatusCode::NOT_FOUND.into_response()
@@ -547,7 +565,7 @@ pub(crate) fn render_options(
         } else {
             Vec::new()
         };
-        if console_pages && state.config.webterm.is_some() {
+        if console_pages && state.config.webterm.is_some() && !state.server.config.no_webterm {
             links.push(("/dash/webterm".into(), "Terminal".into()));
         }
         for page in &state.config.pages {
@@ -764,6 +782,13 @@ async fn asset(req: Request) -> Response {
         ),
         "xterm.js" => (include_bytes!("../assets/xterm.js"), "text/javascript"),
         "xterm.css" => (include_bytes!("../assets/xterm.css"), "text/css"),
+        "addon-fit.js" => (include_bytes!("../assets/addon-fit.js"), "text/javascript"),
+        "addon-unicode11.js" => (
+            include_bytes!("../assets/addon-unicode11.js"),
+            "text/javascript",
+        ),
+        "webterm.js" => (include_bytes!("../assets/webterm.js"), "text/javascript"),
+        "webterm.css" => (include_bytes!("../assets/webterm.css"), "text/css"),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     ([(header::CONTENT_TYPE, mime)], data).into_response()

@@ -124,6 +124,9 @@ fn infer_kind(cells: &[SqlValue]) -> ColumnKind {
 impl Backend for SqliteBackend {
     type DB = Sqlite;
     const DYNAMIC_TYPES: bool = true;
+    // A pooled SQLite connection prepares against its cached schema until a statement runs, so
+    // describing after another connection altered a table returned the old columns.
+    const SCHEMA_REFRESH: Option<&'static str> = Some("SELECT 1 FROM sqlite_master LIMIT 1");
 
     fn plan(columns: &[SqliteColumn]) -> Vec<ColumnPlan> {
         columns
@@ -284,9 +287,9 @@ impl Backend for SqliteBackend {
     }
 
     fn bind<'q>(
-        q: sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+        q: sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments>,
         p: &super::params::SqlParam,
-    ) -> sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+    ) -> sqlx::query::Query<'q, Sqlite, sqlx::sqlite::SqliteArguments> {
         super::params::bind_sqlite(q, p)
     }
 }
@@ -298,7 +301,9 @@ pub(crate) async fn read_docs_frame(
 ) -> Result<meerschaum_kernel::Frame> {
     use futures_util::TryStreamExt;
     use meerschaum_kernel::value::Value;
-    let mut rows = sqlx::query(sql).persistent(false).fetch(pool);
+    let mut rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .persistent(false)
+        .fetch(pool);
     let mut columns: Vec<(String, Vec<Value>)> = Vec::new();
     while let Some(row) = rows.try_next().await? {
         if columns.is_empty() {

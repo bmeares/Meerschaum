@@ -3,11 +3,11 @@
 # vim:fenc=utf-8
 
 """
-The API host's `--no-dash` / webterm wiring and its internal-token transport (v5 design §7.3,
-§8.4). The Rust server passes its flags in `MRSM_API_HOST_CONFIG`; the host serves no plugin
-pages or Dash apps under `no_dash` (v4 served no Dash app at all), serves the web terminal only
-when the flags allow it, and accepts the signed internal token as `X-Mrsm-Host-Token` or as a
-bearer `Authorization` header (what the console's registry fetch sends).
+The API host's `--no-dash` wiring and its internal-token transport (v5 design §7.3, §8.4). The
+Rust server passes its flags in `MRSM_API_HOST_CONFIG`; the host serves no plugin pages or Dash
+apps under `no_dash` (v4 served no Dash app at all), never serves the web terminal (the Rust
+server does, §7.1), and accepts the signed internal token as `X-Mrsm-Host-Token` or as a bearer
+`Authorization` header (what the console's registry fetch sends).
 """
 
 import json
@@ -65,25 +65,24 @@ out['registry'] = web_page_registry()
 out['ping'] = client.get('/flagged/ping').json()
 out['fragment'] = client.get('/_pages/flagged/fragment').status_code
 out['dash_layout'] = client.get('/dash/flagged/_dash-layout').status_code
-from meerschaum.api.host import dash_enabled, webterm_enabled
-out['flags'] = [dash_enabled(), webterm_enabled()]
+from meerschaum.api.host import dash_enabled
+out['flags'] = dash_enabled()
 """
     enabled = _run(root, plugins, {'no_dash': False}, body)
     assert enabled['ping'] == {'pong': True}
     assert enabled['fragment'] == 200 and enabled['dash_layout'] == 200
     assert {p['path'] for p in enabled['registry']} == {'/dash/flagged/fragment', '/dash/flagged/legacy'}
-    assert enabled['flags'] == [True, False]
+    assert enabled['flags'] is True
 
     ### The default (no flag) serves the pages, as before.
     default = _run(root, plugins, {}, body)
-    assert default['fragment'] == 200 and default['flags'] == [True, False]
+    assert default['fragment'] == 200 and default['flags'] is True
 
     disabled = _run(root, plugins, {'no_dash': True, 'no_webterm': False}, body)
     assert disabled['ping'] == {'pong': True}
     assert disabled['registry'] == []
     assert disabled['fragment'] == 404 and disabled['dash_layout'] == 404
-    ### The terminal needs the console.
-    assert disabled['flags'] == [False, False]
+    assert disabled['flags'] is False
 
 
 def test_internal_token_as_header_or_bearer(sandbox):
@@ -109,45 +108,24 @@ out['basic'] = client.get(REGISTRY_PATH, headers={'authorization': 'Basic ' + go
     }
 
 
-def test_webterm_routes_follow_the_flags(sandbox):
+def test_the_host_never_mounts_the_web_terminal(sandbox):
+    """The Rust server serves `/webterm/<session>` and its websocket; the host asks for neither."""
     root, plugins = sandbox
-    ### The terminal process itself is not started here: `start_webterm` is replaced.
-    config = {'no_dash': False, 'no_webterm': False, 'webterm_port': 18766}
-    script = (
-        "import os, json\n"
-        f"os.environ['MRSM_API_HOST_CONFIG'] = json.dumps({{'mrsm_instance': 'sql:apihosttest', **{config!r}}})\n"
-        "started = []\n"
-        "import meerschaum.api\n"
-        "from meerschaum.api.host import dash as host_dash\n"
-        "host_dash.install_dash_surface()\n"
-        "import meerschaum.api.dash.webterm as wt\n"
-        "wt.start_webterm = lambda webterm_port=None: started.append(webterm_port)\n"
-        "from starlette.testclient import TestClient\n"
-        "from meerschaum.api.host import build_app, webterm_enabled\n"
-        "app = build_app()\n"
-        "client = TestClient(app)\n"
-        "out = {'enabled': webterm_enabled(), 'started': started}\n"
-        "r = client.get('/webterm/not-a-session')\n"
-        "out['unauthorized'] = [r.status_code, 'Unauthorized' in r.text]\n"
-        "print('JSON:' + json.dumps(out))\n"
-    )
-    result = run_python(root, plugins, script)
-    assert result.returncode == 0, result.stderr[-4000:]
-    out = json.loads([l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1][5:])
-    assert out['enabled'] is True
-    assert out['started'] == [18766]
-    assert out['unauthorized'] == [401, True]
-
-    ### Off by default and under `--no-webterm`, `--no-dash` or `--no-auth`.
-    for flags in ({}, {'no_webterm': True}, {'no_dash': True, 'no_webterm': False},
-                  {'no_webterm': False, 'no_auth': True}):
+    for flags in ({}, {'no_webterm': False}, {'no_dash': True, 'no_webterm': False}):
         result = run_python(root, plugins, (
-            "import os, json\n"
+            "import os, json, sys\n"
             f"os.environ['MRSM_API_HOST_CONFIG'] = json.dumps({{'mrsm_instance': 'sql:apihosttest', **{flags!r}}})\n"
-            "from meerschaum.api.host import build_app, webterm_enabled\n"
+            "from meerschaum.api.host import build_app\n"
             "app = build_app()\n"
-            "print('JSON:' + json.dumps([webterm_enabled(), any(r.path.startswith('/webterm') for r in app.routes)]))\n"
+            "paths = [getattr(r, 'path', '') for r in app.routes]\n"
+            "print('JSON:' + json.dumps([\n"
+            "    any(p.startswith(('/webterm', '/websocket')) for p in paths),\n"
+            "    'meerschaum.api.routes._webterm' in sys.modules,\n"
+            "    'meerschaum.api.dash.webterm' in sys.modules,\n"
+            "]))\n"
         ))
         assert result.returncode == 0, result.stderr[-3000:]
-        enabled, routed = json.loads([l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1][5:])
-        assert enabled is False and routed is False, flags
+        routed, route_module, dash_module = json.loads(
+            [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1][5:]
+        )
+        assert (routed, route_module, dash_module) == (False, False, False), flags
