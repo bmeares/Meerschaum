@@ -54,7 +54,7 @@ its core Dash stores. Configure both hosts with the same instance/cache and TTL.
 ## Front-end assets
 
 Vendored files and upstream URLs are pinned in `assets/versions.json`, with adjacent licenses:
-HTMX 2.0.4, Plotly.js 2.35.2, MapLibre GL JS 4.7.1, Cytoscape.js 3.30.4, xterm.js 5.5.0.
+HTMX 2.0.4, Plotly.js 2.35.2, MapLibre GL JS 4.7.1, Cytoscape.js 3.30.4, xterm.js 6.0.0.
 There are no runtime CDN fetches. Map specs referencing external tiles remain plugin-owned.
 The Python SDK should pin a compatible Plotly.py 5.24.x range for Plotly.js 2.35.x figures.
 

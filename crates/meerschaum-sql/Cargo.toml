@@ -18,7 +18,8 @@ oracle = ["dep:oracle"]
 duckdb = ["dep:duckdb"]
 
 [dependencies]
-sha2 = "0.10"
+sha2 = { workspace = true }
+hex = { workspace = true }
 meerschaum-core = { workspace = true }
 meerschaum-kernel = { workspace = true }
 meerschaum-connector = { workspace = true }

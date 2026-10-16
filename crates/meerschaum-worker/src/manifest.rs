@@ -4,9 +4,21 @@
 //! subactions), `add_plugin_argument` arguments, sync hooks, `@api_plugin` / `@dash_plugin` /
 //! `@web_page` registrations, MCP tools / resources / prompts, custom connector types and data
 //! functions. A worker builds it (`build_manifest`); the host caches it at
-//! [`manifest_path`] keyed by a [`fingerprint`] of every plugin source tree (relative paths,
-//! sizes and modification times), so `--help`, completion and argument validation never start
-//! Python unless a plugin changed.
+//! [`manifest_path`] keyed by a [`fingerprint`] of every plugin source tree (the relative paths,
+//! sizes and modification times of its `.py` files), so `--help`, completion and argument
+//! validation never start Python unless a plugin changed.
+//!
+//! **Staleness is idempotent.** A manifest is stale when the plugins *it tracks* changed. The
+//! tracked set is every plugin Rust discovers in the plugins directories ([`discover_plugins`])
+//! plus every plugin the manifest lists that discovery did not find but that reported a `path`
+//! (Python also finds pip-installed plugins exposed through the `meerschaum.plugins`
+//! entry-point group). The set is derived from the manifest itself, so right after
+//! [`build_manifest`] on an unchanged tree [`stale_plugins`] is `(false, [])` whatever Python
+//! reported. A manifest-only plugin without a `path` cannot be fingerprinted and is never
+//! stale; a discovered plugin Python omitted is covered by the combined fingerprint. Only `.py`
+//! files are hashed, so a plugin writing data files into its own tree at runtime does not
+//! invalidate the cache, and the fingerprint is taken after the worker imported the plugins,
+//! so a plugin that writes into its tree on import does not either.
 //!
 //! The JSON schema is `schema/manifest.schema.json` in this crate. The top-level
 //! `api_plugins` / `dash_plugins` / `web_pages` / `mcp_tools` lists are the plugin names the
@@ -438,7 +450,8 @@ fn hash_tree(hasher: &mut Sha256, root: &Path, path: &Path) {
         }
         return;
     }
-    if path.extension().and_then(|e| e.to_str()) == Some("pyc") {
+    // Only Python sources: data files written into a plugin's tree must not invalidate it.
+    if path.extension().and_then(|e| e.to_str()) != Some("py") {
         return;
     }
     let mtime = meta
@@ -474,51 +487,93 @@ pub fn plugin_fingerprint(source: &PluginSource) -> String {
 
 /// The combined fingerprint of every plugin in `plugins_dirs`, plus each plugin's own.
 pub fn fingerprint(plugins_dirs: &[PathBuf]) -> (String, IndexMap<String, String>) {
+    fingerprint_sources(&discover_plugins(plugins_dirs))
+}
+
+/// The combined fingerprint of `sources`, plus each plugin's own.
+pub fn fingerprint_sources(sources: &[PluginSource]) -> (String, IndexMap<String, String>) {
     let mut per_plugin = IndexMap::new();
     let mut hasher = Sha256::new();
     hasher.update(MANIFEST_SCHEMA_VERSION.to_le_bytes());
-    for source in discover_plugins(plugins_dirs) {
-        let fp = plugin_fingerprint(&source);
+    for source in sources {
+        let fp = plugin_fingerprint(source);
         hasher.update(source.name.as_bytes());
         hasher.update([0]);
         hasher.update(fp.as_bytes());
-        per_plugin.insert(source.name, fp);
+        per_plugin.insert(source.name.clone(), fp);
     }
     (hex::encode(hasher.finalize()), per_plugin)
 }
 
+/// The plugins a manifest tracks: everything [`discover_plugins`] finds in `plugins_dirs`, then
+/// every plugin of `listed` that discovery did not find but that has a `path` (entry-point
+/// plugins). A package's `__init__.py` stands for its directory.
+fn tracked_sources(
+    plugins_dirs: &[PathBuf],
+    listed: &IndexMap<String, PluginManifest>,
+) -> Vec<PluginSource> {
+    let mut sources = discover_plugins(plugins_dirs);
+    for (name, info) in listed {
+        if sources.iter().any(|s| &s.name == name) {
+            continue;
+        }
+        let Some(path) = info.path.as_deref().filter(|p| !p.is_empty()) else {
+            continue;
+        };
+        let mut path = PathBuf::from(path);
+        if path.file_name().is_some_and(|n| n == "__init__.py")
+            && let Some(parent) = path.parent()
+        {
+            path = parent.to_path_buf();
+        }
+        sources.push(PluginSource {
+            name: name.clone(),
+            path,
+        });
+    }
+    sources
+}
+
 /// Whether a cached manifest is stale for `plugins_dirs`, and the plugins that changed
-/// (added, removed or modified).
+/// (added, removed or modified). See the module documentation for what is tracked.
 pub fn stale_plugins(manifest: &Manifest, plugins_dirs: &[PathBuf]) -> (bool, Vec<String>) {
-    let (combined, per_plugin) = fingerprint(plugins_dirs);
+    let sources = tracked_sources(plugins_dirs, &manifest.plugins);
+    let (combined, per_plugin) = fingerprint_sources(&sources);
     let mut changed = Vec::new();
     for (name, fp) in &per_plugin {
-        let cached = manifest
-            .plugins
-            .get(name)
-            .and_then(|p| p.fingerprint.as_ref());
-        if cached != Some(fp) {
+        // A discovered plugin Python listed nothing for is covered by the combined fingerprint.
+        if let Some(plugin) = manifest.plugins.get(name)
+            && plugin.fingerprint.as_ref() != Some(fp)
+        {
             changed.push(name.clone());
         }
     }
-    for name in manifest.plugins.keys() {
-        if !per_plugin.contains_key(name) {
+    for (name, plugin) in &manifest.plugins {
+        // Listed with a fingerprint but no longer tracked: its source was removed.
+        if !per_plugin.contains_key(name) && plugin.fingerprint.is_some() {
             changed.push(name.clone());
         }
     }
     let stale = manifest.schema_version != MANIFEST_SCHEMA_VERSION
-        || manifest.fingerprint.as_deref() != Some(combined.as_str())
-        || !changed.is_empty();
+        || manifest.fingerprint.as_deref() != Some(combined.as_str());
+    if stale && changed.is_empty() {
+        // Added plugins (listed nowhere yet) and a schema bump have no per-plugin report.
+        changed.extend(
+            per_plugin
+                .keys()
+                .filter(|name| !manifest.plugins.contains_key(*name))
+                .cloned(),
+        );
+    }
     (stale, changed)
 }
 
-/// Build a fresh manifest and stamp it with the fingerprints of `plugins_dirs`.
+/// Build a fresh manifest and stamp it with the fingerprints of the plugins it tracks.
 ///
 /// The manifest is built in a dedicated, freshly started worker (shut down afterwards): pooled
 /// workers may hold modules imported before a plugin changed, and importing every plugin must
 /// not leak into them.
 pub async fn build_manifest(pool: &WorkerPool, plugins_dirs: &[PathBuf]) -> WorkerResult<Manifest> {
-    // Fingerprint first: a plugin edited while the worker imports it is rebuilt next time.
     let (combined, per_plugin) = fingerprint(plugins_dirs);
     if per_plugin.is_empty() {
         return Ok(Manifest {
@@ -545,6 +600,10 @@ pub async fn build_manifest(pool: &WorkerPool, plugins_dirs: &[PathBuf]) -> Work
     let mut manifest: Manifest = serde_json::from_value(json)
         .map_err(|e| WorkerError::Protocol(format!("invalid manifest from the worker: {e}")))?;
     manifest.schema_version = MANIFEST_SCHEMA_VERSION;
+    // Fingerprint after the import: a plugin that writes into its own tree while it is
+    // imported must not make the fresh manifest stale (the check is idempotent).
+    let sources = tracked_sources(plugins_dirs, &manifest.plugins);
+    let (combined, per_plugin) = fingerprint_sources(&sources);
     manifest.fingerprint = Some(combined);
     for (name, info) in manifest.plugins.iter_mut() {
         info.fingerprint = per_plugin.get(name).cloned();
@@ -575,10 +634,22 @@ pub async fn ensure_manifest(
             return Ok((cached, ManifestSource::Cache));
         }
     }
+    rebuild_manifest(pool, path, plugins_dirs)
+        .await
+        .map(|manifest| (manifest, ManifestSource::Built))
+}
+
+/// Rebuild the manifest unconditionally, rewrite the cache at `path` and recycle the pool's idle
+/// workers (an unchanged tree never gets here, so it keeps its warm workers).
+pub async fn rebuild_manifest(
+    pool: &WorkerPool,
+    path: &Path,
+    plugins_dirs: &[PathBuf],
+) -> WorkerResult<Manifest> {
     let manifest = build_manifest(pool, plugins_dirs).await?;
     manifest.write(path)?;
     pool.recycle().await;
-    Ok((manifest, ManifestSource::Built))
+    Ok(manifest)
 }
 
 #[cfg(test)]
@@ -647,6 +718,159 @@ mod tests {
         std::fs::remove_file(dir.path().join("a.py")).unwrap();
         let (_, changed) = stale_plugins(&manifest, &dirs);
         assert_eq!(changed, vec!["b", "a"]);
+    }
+
+    /// What [`build_manifest`] does after the worker replied: list `plugins` and stamp them.
+    fn stamped(dirs: &[PathBuf], plugins: Vec<PluginManifest>) -> Manifest {
+        let mut manifest = Manifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            ..Default::default()
+        };
+        for plugin in plugins {
+            manifest.plugins.insert(plugin.name.clone(), plugin);
+        }
+        let sources = tracked_sources(dirs, &manifest.plugins);
+        let (combined, per_plugin) = fingerprint_sources(&sources);
+        manifest.fingerprint = Some(combined);
+        for (name, info) in manifest.plugins.iter_mut() {
+            info.fingerprint = per_plugin.get(name).cloned();
+        }
+        manifest
+    }
+
+    fn listed(name: &str, path: Option<&Path>) -> PluginManifest {
+        PluginManifest {
+            name: name.into(),
+            path: path.map(|p| p.display().to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn manifest_only_plugin_without_a_path_is_never_stale() {
+        let plugins = tempfile::tempdir().unwrap();
+        let dirs = vec![plugins.path().to_path_buf()];
+        std::fs::write(plugins.path().join("a.py"), "x = 1\n").unwrap();
+        // Python listed an extra plugin (an import error, no path) that discovery cannot see.
+        let manifest = stamped(
+            &dirs,
+            vec![
+                listed("a", Some(&plugins.path().join("a.py"))),
+                listed("ghost", None),
+            ],
+        );
+        assert_eq!(manifest.plugins["ghost"].fingerprint, None);
+        assert_eq!(stale_plugins(&manifest, &dirs), (false, vec![]));
+        assert_eq!(stale_plugins(&manifest, &dirs), (false, vec![]));
+    }
+
+    #[test]
+    fn manifest_only_plugin_with_a_path_is_tracked() {
+        let plugins = tempfile::tempdir().unwrap();
+        let site = tempfile::tempdir().unwrap();
+        let dirs = vec![plugins.path().to_path_buf()];
+        std::fs::write(plugins.path().join("a.py"), "x = 1\n").unwrap();
+        // An entry-point module next to unrelated files, and an entry-point package.
+        let module = site.path().join("eppl.py");
+        std::fs::write(&module, "x = 1\n").unwrap();
+        std::fs::write(site.path().join("other.py"), "y = 1\n").unwrap();
+        let package = site.path().join("epkg");
+        std::fs::create_dir(&package).unwrap();
+        std::fs::write(package.join("__init__.py"), "").unwrap();
+        let manifest = stamped(
+            &dirs,
+            vec![
+                listed("a", Some(&plugins.path().join("a.py"))),
+                listed("eppl", Some(&module)),
+                listed("epkg", Some(&package.join("__init__.py"))),
+            ],
+        );
+        assert!(manifest.plugins["eppl"].fingerprint.is_some());
+        assert!(manifest.plugins["epkg"].fingerprint.is_some());
+        assert_eq!(stale_plugins(&manifest, &dirs), (false, vec![]));
+
+        // Unrelated files next to the module and data files in the package change nothing.
+        std::fs::write(site.path().join("other.py"), "y = 22222\n").unwrap();
+        std::fs::write(package.join("cache.json"), "{}").unwrap();
+        assert_eq!(stale_plugins(&manifest, &dirs), (false, vec![]));
+
+        // Editing the module or any source of the package invalidates it.
+        std::fs::write(&module, "x = 12345\n").unwrap();
+        assert_eq!(stale_plugins(&manifest, &dirs), (true, vec!["eppl".into()]));
+        let manifest = stamped(
+            &dirs,
+            vec![
+                listed("a", Some(&plugins.path().join("a.py"))),
+                listed("eppl", Some(&module)),
+                listed("epkg", Some(&package.join("__init__.py"))),
+            ],
+        );
+        std::fs::write(package.join("extra.py"), "z = 1\n").unwrap();
+        assert_eq!(stale_plugins(&manifest, &dirs), (true, vec!["epkg".into()]));
+
+        // Removing the source is a change too.
+        let manifest = stamped(
+            &dirs,
+            vec![
+                listed("a", Some(&plugins.path().join("a.py"))),
+                listed("eppl", Some(&module)),
+            ],
+        );
+        std::fs::remove_file(&module).unwrap();
+        assert_eq!(stale_plugins(&manifest, &dirs), (true, vec!["eppl".into()]));
+    }
+
+    #[test]
+    fn discovered_plugin_missing_from_the_manifest_does_not_loop() {
+        let plugins = tempfile::tempdir().unwrap();
+        let dirs = vec![plugins.path().to_path_buf()];
+        std::fs::write(plugins.path().join("a.py"), "x = 1\n").unwrap();
+        std::fs::write(plugins.path().join("b.py"), "x = 2\n").unwrap();
+        // Python listed only `a`: `b` is discovered by Rust but absent from the manifest.
+        let manifest = stamped(&dirs, vec![listed("a", Some(&plugins.path().join("a.py")))]);
+        assert!(!manifest.plugins.contains_key("b"));
+        assert_eq!(stale_plugins(&manifest, &dirs), (false, vec![]));
+        assert_eq!(stale_plugins(&manifest, &dirs), (false, vec![]));
+
+        // Editing the omitted plugin still invalidates the manifest, and the report names it.
+        std::fs::write(plugins.path().join("b.py"), "x = 22222\n").unwrap();
+        assert_eq!(stale_plugins(&manifest, &dirs), (true, vec!["b".into()]));
+
+        // A plugin added after the build is reported as changed.
+        let manifest = stamped(&dirs, vec![listed("a", Some(&plugins.path().join("a.py")))]);
+        std::fs::write(plugins.path().join("c.py"), "x = 3\n").unwrap();
+        let (stale, changed) = stale_plugins(&manifest, &dirs);
+        // Unlisted plugins carry no fingerprint of their own: the report names all of them.
+        assert!(stale);
+        assert_eq!(changed, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn schema_version_bump_is_stale() {
+        let plugins = tempfile::tempdir().unwrap();
+        let dirs = vec![plugins.path().to_path_buf()];
+        std::fs::write(plugins.path().join("a.py"), "x = 1\n").unwrap();
+        let mut manifest = stamped(&dirs, vec![listed("a", Some(&plugins.path().join("a.py")))]);
+        assert_eq!(stale_plugins(&manifest, &dirs), (false, vec![]));
+        manifest.schema_version = MANIFEST_SCHEMA_VERSION - 1;
+        let (stale, changed) = stale_plugins(&manifest, &dirs);
+        assert!(stale);
+        assert!(changed.is_empty());
+    }
+
+    #[test]
+    fn data_files_do_not_change_the_fingerprint() {
+        let plugins = tempfile::tempdir().unwrap();
+        let dirs = vec![plugins.path().to_path_buf()];
+        let package = plugins.path().join("pkg");
+        std::fs::create_dir(&package).unwrap();
+        std::fs::write(package.join("__init__.py"), "").unwrap();
+        let before = fingerprint(&dirs);
+        std::fs::write(package.join("state.json"), "{\"n\": 1}").unwrap();
+        std::fs::write(package.join("state.json"), "{\"n\": 22}").unwrap();
+        assert_eq!(fingerprint(&dirs), before);
+        std::fs::write(package.join("mod.py"), "").unwrap();
+        assert_ne!(fingerprint(&dirs), before);
     }
 
     #[test]

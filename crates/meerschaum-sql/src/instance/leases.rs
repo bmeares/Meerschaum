@@ -111,7 +111,7 @@ impl SqlConnector {
         }
         self.ensure_leases().await?;
         // Hash holders to keep identity case-sensitive even on case-insensitive collations.
-        let holder = format!("{:x}", Sha256::digest(holder.as_bytes()));
+        let holder = hex::encode(Sha256::digest(holder.as_bytes()));
         // Length-delimited JSON avoids ambiguous pipe keys and ignores connector label aliases.
         let key = serde_json::to_vec(&(
             self.schema(),
@@ -120,7 +120,7 @@ impl SqlConnector {
             pipe.location_key(),
         ))
         .map_err(be)?;
-        let key = format!("{:x}", Sha256::digest(key));
+        let key = hex::encode(Sha256::digest(key));
         let ttl = i64::try_from(ttl.as_micros().max(1)).map_err(be)?;
         let p = |n| placeholder(self.flavor, n);
         let table = self.lease_table();
@@ -213,7 +213,7 @@ impl SqlConnector {
     pub async fn release_pipe_lease(&self, pipe: &Pipe, holder: &str) -> ConnectorResult<bool> {
         self.ensure_leases().await?;
         // Hash holders to keep identity case-sensitive even on case-insensitive collations.
-        let holder = format!("{:x}", Sha256::digest(holder.as_bytes()));
+        let holder = hex::encode(Sha256::digest(holder.as_bytes()));
         let key = serde_json::to_vec(&(
             self.schema(),
             pipe.connector_keys(),
@@ -221,7 +221,7 @@ impl SqlConnector {
             pipe.location_key(),
         ))
         .map_err(be)?;
-        let key = format!("{:x}", Sha256::digest(key));
+        let key = hex::encode(Sha256::digest(key));
         let sql = format!(
             "DELETE FROM {} WHERE pipe_ref={} AND holder={} AND expires_us > {}",
             self.lease_table(),

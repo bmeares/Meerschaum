@@ -15,7 +15,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }
 thiserror = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
 unicode-width = "0.2"
 
 [dev-dependencies]

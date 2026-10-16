@@ -110,7 +110,7 @@ symlinks (cycles and external files are not tracked). This is a native-only rest
 Python plugin discovery is unchanged. Install by replacement when no library is loaded;
 this API does not promise live reload of an already-open library.
 
-## Validation and remaining integration
+## Validation and remaining work
 
 Run with fresh temporary `MRSM_ROOT_DIR` and empty `MRSM_PLUGINS_DIR`:
 
@@ -127,11 +127,15 @@ invalidation. Test subprocesses receive their own temporary roots. No database o
 reference is used: v4 had no native ABI; the reused connector return shapes and manifest
 schema are the compatibility surfaces.
 
-The CLI/engine/PyO3 owners still need to merge native discovery/manifests, register adapters,
-route actions/hooks and prefer native entries over Python. Repository artifact upload,
-target-triple selection and installation belong to the installer. Server routes/pages are
-not exposed by this SDK yet. Continuous `subscribe` and lazy streaming need a reader/sink SDK
-beyond the current eager frame API. The future wasm contract is sketched in
+Host integration is done (see "Hosting" below). The `mrsm` binary tests in
+`crates/meerschaum-cli/tests/native_plugins.rs` and `native_e2e.rs` drive the examples end to
+end (actions, hooks around a real sync, routes served by `start api`, a native plugin replacing a
+Python plugin of the same name, rejection of corrupt or wrong-ABI libraries, the manifest cache),
+and `tests/console/test_console.py` renders a native page in Chromium. Examples: `native_demo` (source,
+instance, action, hooks, routes, page), `native_probe` (a plain fetch source whose hooks append to
+`NATIVE_PROBE_LOG`, for asserting the built-in sync path) and `bad_abi`. Not yet available: repository
+artifact upload, target-triple selection and installation (the installer's job), and continuous
+`subscribe` / lazy streaming, which need a reader/sink SDK beyond the current eager frame API. The future wasm contract is sketched in
 `wit/plugin.wit` (not compiled); it replaces native Arrow pointers with Arrow IPC bytes.
 
 ## Hosting (wave 6)

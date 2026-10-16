@@ -15,8 +15,23 @@
 //! unregistered keys fail instead of connecting to configured connectors, and
 //! [`Session::set_python_worker`] turns off the Python worker (empty manifests, no child
 //! process). With nothing registered and the defaults, the config path is unchanged.
+//!
+//! **The plugin manifest is cached in memory per session.** The first [`Session::manifest`]
+//! validates the plugin trees (one fingerprint walk, [`stale_plugins`]) and rebuilds the Python
+//! manifest in a fresh worker only when something changed; later calls return the same `Arc`
+//! without touching the disk. [`Session::invalidate_manifest`] re-arms the single validation
+//! the next call performs: the shell does it after every command, so a plugin edited while the
+//! user was typing is picked up at the next prompt (spec §4.3: "rebuilt when a file changes")
+//! at the price of one cheap walk per prompt, never one per call. The worker pool is recycled
+//! only when the manifest was really rebuilt (or replaced by a different cached one); an
+//! unchanged tree keeps its warm workers. [`Session::refresh_manifest`] validates now
+//! (`install`/`uninstall`/`setup`/`upgrade plugins`) and [`Session::reload_plugins`] rebuilds
+//! unconditionally (`reload`). Native plugins are re-opened only when their discovery
+//! signature changed.
 
-use meerschaum_worker::manifest::{Manifest, ensure_manifest, manifest_path};
+use meerschaum_worker::manifest::{
+    Manifest, ManifestSource, ensure_manifest, manifest_path, rebuild_manifest, stale_plugins,
+};
 use meerschaum_worker::{PoolConfig, WorkerPool};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -105,9 +120,21 @@ pub struct Session {
     pool: Arc<Mutex<Option<WorkerPool>>>,
     worker_environment: Arc<Mutex<Option<WorkerEnvironment>>>,
     hook_results: Arc<Mutex<Vec<meerschaum_core::SuccessTuple>>>,
-    manifest: Arc<Mutex<Option<Arc<Manifest>>>>,
-    python_manifest: Arc<Mutex<Option<Arc<Manifest>>>>,
-    natives: Arc<Mutex<Option<Arc<NativePlugins>>>>,
+    manifests: Arc<Mutex<ManifestState>>,
+}
+
+/// The session's plugin manifests and whether they were validated since the last
+/// [`Session::invalidate_manifest`].
+#[derive(Default)]
+struct ManifestState {
+    python: Option<Arc<Manifest>>,
+    natives: Option<Arc<NativePlugins>>,
+    /// The native plugins' discovery signature `natives` was opened for.
+    native_signature: Option<Vec<String>>,
+    /// The error from opening the native plugins, reported as a `load_errors` entry.
+    native_error: Option<String>,
+    merged: Option<Arc<Manifest>>,
+    validated: bool,
 }
 
 impl Default for Session {
@@ -143,9 +170,7 @@ impl Session {
             pool: Arc::new(Mutex::new(None)),
             worker_environment: Arc::new(Mutex::new(None)),
             hook_results: Arc::new(Mutex::new(Vec::new())),
-            manifest: Arc::new(Mutex::new(None)),
-            python_manifest: Arc::new(Mutex::new(None)),
-            natives: Arc::new(Mutex::new(None)),
+            manifests: Arc::new(Mutex::new(ManifestState::default())),
         }
     }
 
@@ -251,86 +276,129 @@ impl Session {
             .clone()
     }
 
-    /// Refresh the fingerprinted manifest (Python plugins merged with native plugins) without
-    /// starting Python for an empty plugin tree.
+    /// The fingerprinted manifest (Python plugins merged with native plugins), validated at most
+    /// once per [`Session::invalidate_manifest`]. Starts no Python for an empty plugin tree or
+    /// an unchanged cache.
     pub fn manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
-        if !self.worker_enabled() {
-            let empty = Arc::new(Manifest::default());
-            *self.python_manifest.lock().expect("python manifest") = Some(empty.clone());
-            *self.natives.lock().expect("natives") = Some(Arc::new(NativePlugins::empty()));
-            *self.manifest.lock().expect("manifest") = Some(empty.clone());
-            return Ok(empty);
-        }
-        let python = self.python_manifest_refresh(config)?;
-        let paths = config.paths();
-        let natives = match NativePlugins::open(
-            &paths.plugins_dirs,
-            &crate::native_plugins::cache_path(&paths.root_dir),
-        ) {
-            Ok(natives) => natives,
-            Err(error) => {
-                // A broken native plugin must not disable the Python plugins.
-                let mut manifest = (*python).clone();
-                manifest
-                    .load_errors
-                    .insert("native plugins".into(), error.to_string());
-                *self.natives.lock().expect("natives") = Some(Arc::new(NativePlugins::empty()));
-                let manifest = Arc::new(manifest);
-                *self.manifest.lock().expect("manifest") = Some(manifest.clone());
-                return Ok(manifest);
-            }
-        };
-        let natives = Arc::new(natives);
-        let manifest = Arc::new(crate::native_plugins::merge(&python, &natives));
-        *self.natives.lock().expect("natives") = Some(natives);
-        *self.manifest.lock().expect("manifest") = Some(manifest.clone());
-        Ok(manifest)
+        let mut state = self.manifests.lock().expect("manifests");
+        self.validate_manifests(&mut state, config, false)?;
+        Ok(state.merged.clone().expect("validated manifest"))
     }
 
-    fn python_manifest_refresh(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+    /// Re-arm the next [`Session::manifest`] call to validate the plugin trees again (one
+    /// fingerprint walk). Cheap; the shell calls it after every command.
+    pub fn invalidate_manifest(&self) {
+        self.manifests.lock().expect("manifests").validated = false;
+    }
+
+    /// Validate the plugin trees now, rebuilding the manifest if a plugin changed.
+    pub fn refresh_manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+        self.invalidate_manifest();
+        self.manifest(config)
+    }
+
+    /// `reload`: rebuild the Python manifest unconditionally in a fresh worker, re-open the
+    /// native plugins and recycle the worker pool.
+    pub fn reload_plugins(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
+        let mut state = self.manifests.lock().expect("manifests");
+        self.validate_manifests(&mut state, config, true)?;
+        Ok(state.merged.clone().expect("validated manifest"))
+    }
+
+    fn validate_manifests(
+        &self,
+        state: &mut ManifestState,
+        config: &Config,
+        force: bool,
+    ) -> Result<(), ActionError> {
+        if !force && state.validated && state.merged.is_some() {
+            return Ok(());
+        }
         if !self.worker_enabled() {
             let empty = Arc::new(Manifest::default());
-            *self.python_manifest.lock().expect("python manifest") = Some(empty.clone());
-            return Ok(empty);
+            state.python = Some(empty.clone());
+            state.natives = Some(Arc::new(NativePlugins::empty()));
+            state.merged = Some(empty);
+            state.validated = true;
+            return Ok(());
         }
         let paths = config.paths();
         let pool = self.pool(config);
-        let (manifest, _) = self
-            .block_on(ensure_manifest(
-                &pool,
-                &manifest_path(&paths.root_dir),
+        let manifest_file = manifest_path(&paths.root_dir);
+        let previous = state.python.clone();
+        let mut python_changed = state.merged.is_none();
+        let python = match previous.clone() {
+            Some(cached) if !force && !stale_plugins(&cached, &paths.plugins_dirs).0 => cached,
+            _ => {
+                let (manifest, source) = if force {
+                    self.block_on(rebuild_manifest(&pool, &manifest_file, &paths.plugins_dirs))
+                        .map(|manifest| (manifest, ManifestSource::Built))
+                } else {
+                    self.block_on(ensure_manifest(&pool, &manifest_file, &paths.plugins_dirs))
+                }
+                .map_err(|e| ActionError::new("WorkerError", e.to_string()))?;
+                // A cache another process rebuilt: this process's workers still hold the old
+                // plugin modules, so they are recycled too (a rebuild already did).
+                if source == ManifestSource::Cache
+                    && previous.as_ref().is_some_and(|p| **p != manifest)
+                {
+                    self.block_on(pool.recycle());
+                }
+                python_changed |= previous.as_ref().is_none_or(|p| **p != manifest);
+                Arc::new(manifest)
+            }
+        };
+        python_changed |= force;
+        let signature = native_signature(&paths.plugins_dirs);
+        if force || state.natives.is_none() || state.native_signature.as_ref() != Some(&signature) {
+            let (natives, error) = match NativePlugins::open(
                 &paths.plugins_dirs,
-            ))
-            .map_err(|e| ActionError::new("WorkerError", e.to_string()))?;
-        let manifest = Arc::new(manifest);
-        *self.python_manifest.lock().expect("python manifest") = Some(manifest.clone());
-        Ok(manifest)
+                &crate::native_plugins::cache_path(&paths.root_dir),
+            ) {
+                Ok(natives) => (Arc::new(natives), None),
+                // A broken native plugin must not disable the Python plugins.
+                Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
+            };
+            state.natives = Some(natives);
+            state.native_signature = Some(signature);
+            state.merged = None;
+            state.native_error = error;
+        }
+        if python_changed || state.merged.is_none() {
+            let natives = state.natives.clone().expect("natives");
+            let mut merged = crate::native_plugins::merge(&python, &natives);
+            if let Some(error) = &state.native_error {
+                merged
+                    .load_errors
+                    .insert("native plugins".into(), error.clone());
+            }
+            state.merged = Some(Arc::new(merged));
+        }
+        state.python = Some(python);
+        state.validated = true;
+        Ok(())
     }
 
     /// The Python-only manifest (what the Python worker adapters may claim).
     pub fn python_manifest(&self, config: &Config) -> Result<Arc<Manifest>, ActionError> {
-        if let Some(manifest) = self
-            .python_manifest
-            .lock()
-            .expect("python manifest")
-            .clone()
-        {
-            return Ok(manifest);
+        let mut state = self.manifests.lock().expect("manifests");
+        // Engine tasks call this per sync: whatever the session holds is current enough.
+        if let Some(python) = state.python.clone() {
+            return Ok(python);
         }
-        self.manifest(config)?;
-        self.python_manifest_refresh(config)
+        self.validate_manifests(&mut state, config, false)?;
+        Ok(state.python.clone().expect("validated manifest"))
     }
 
     /// The native plugins (discovered with the manifest).
     pub fn native_plugins(&self, config: &Config) -> Result<Arc<NativePlugins>, ActionError> {
-        if let Some(natives) = self.natives.lock().expect("natives").clone() {
+        let mut state = self.manifests.lock().expect("manifests");
+        if let Some(natives) = state.natives.clone() {
             return Ok(natives);
         }
-        self.manifest(config)?;
-        Ok(self
+        self.validate_manifests(&mut state, config, false)?;
+        Ok(state
             .natives
-            .lock()
-            .expect("natives")
             .clone()
             .unwrap_or_else(|| Arc::new(NativePlugins::empty())))
     }
@@ -499,6 +567,18 @@ impl Session {
 }
 
 /// `type:label` with the default label filled in (the session's map key).
+/// What native plugin discovery sees (names, trees and skipped directories): when it is
+/// unchanged the opened [`NativePlugins`] and the warnings printed for it are still current.
+fn native_signature(plugins_dirs: &[std::path::PathBuf]) -> Vec<String> {
+    let discovery = meerschaum_plugin::discovery::discover_report(plugins_dirs);
+    discovery
+        .candidates
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.name, c.version, c.fingerprint))
+        .chain(discovery.skipped.iter().map(|s| s.message()))
+        .collect()
+}
+
 fn full_keys(keys: &str) -> String {
     let (typ, label) = split_keys(keys);
     format!("{typ}:{label}")

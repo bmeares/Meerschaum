@@ -22,7 +22,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true }
 # Crate-private: the definition hash (§5.4).
-sha2 = "0.10"
+sha2 = { workspace = true }
 # Crate-private: the machine-local lease fallback (interprocess file locks, §5.8).
 fs4 = "0.13"
 

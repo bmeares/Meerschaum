@@ -23,8 +23,8 @@ tokio = { workspace = true }
 arrow = { workspace = true }
 # Crate-private: MessagePack values (control messages) and source-tree fingerprints.
 rmpv = "1"
-sha2 = "0.10"
-hex = "0.4"
+sha2 = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 meerschaum-sql = { workspace = true }

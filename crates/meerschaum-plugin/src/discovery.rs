@@ -197,7 +197,7 @@ pub fn fingerprint(root: &Path) -> Result<String> {
     hash.update(descriptor.name.as_bytes());
     hash.update([0]);
     walk(root, root, &mut hash)?;
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hex::encode(hash.finalize()))
 }
 
 /// Read cached manifests without loading code on cache hits. Cache destination must be
@@ -231,7 +231,7 @@ pub unsafe fn cached_manifest_report(
         hash.update([0]);
         hash.update(candidate.fingerprint.as_bytes());
     }
-    let key = format!("{:x}", hash.finalize());
+    let key = hex::encode(hash.finalize());
     if let Ok(bytes) = std::fs::read(cache) {
         if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
             if v["fingerprint"] == key && validate_manifest(&v).is_ok() {

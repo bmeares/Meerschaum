@@ -598,7 +598,19 @@ fn words_of(args: &ArgsMap) -> Vec<String> {
 }
 
 /// `Shell.precmd(line)` followed by the command: run one line.
+///
+/// The session validates the plugin trees once per prompt: the next prompt's completion data
+/// (or the next line) re-checks them after this command, so a plugin edited meanwhile is picked
+/// up, and every manifest lookup within one command is served from memory.
 pub fn precmd(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Control {
+    let control = run_line(line, state, rt);
+    if let Some(session) = &rt.native {
+        session.invalidate_manifest();
+    }
+    control
+}
+
+fn run_line(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Control {
     let line = line.replace("\\\n", " ");
     clear_screen(rt, state.debug);
     if line.trim().is_empty() {
@@ -702,6 +714,15 @@ pub fn precmd(line: &str, state: &mut ShellState, rt: &mut Runtime<'_>) -> Contr
         let main_name = actions::get_main_action_name(&action, CORE_ACTIONS);
         let main_name = match main_name {
             Some(n) => n.to_string(),
+            // A plugin's `@make_action` is an action too (v4 registers it in `actions`); only
+            // words nobody claims run as shell commands.
+            None if crate::python::manifest(rt)
+                .ok()
+                .and_then(|m| crate::python::action_name(&action, &m))
+                .is_some() =>
+            {
+                words_of(kwargs)[0].clone()
+            }
             None => {
                 action.insert(0, "sh".into());
                 kwargs.insert("action".into(), PyValue::str_list(&action));

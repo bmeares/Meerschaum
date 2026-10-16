@@ -19,15 +19,15 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 yaml-rust2 = "0.10"
 pep440_rs = "0.7"
-pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
-hmac = "0.12"
-sha2 = "0.10"
-sha1 = "0.10"
-sha3 = "0.10"
-md-5 = "0.10"
-blake2 = "0.10"
-ripemd = "0.1"
-sm3 = "0.4"
+pbkdf2 = { workspace = true, features = ["hmac"] }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+sha1 = { workspace = true }
+sha3 = { workspace = true }
+md-5 = { workspace = true }
+blake2 = { workspace = true }
+ripemd = { workspace = true }
+sm3 = { workspace = true }
 getrandom = "0.3"
 
 [dev-dependencies]

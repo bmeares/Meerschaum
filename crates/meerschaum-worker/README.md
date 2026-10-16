@@ -220,6 +220,12 @@ stderr so MCP stdio stays clean. Interactive `python` is launched by the CLI dir
 Manifest schema version 2 adds `actions[].has_completer`; version 3 adds `web_pages[].mode` (`html` or `dash`, found by calling the page function once like v4) and `web_pages[].route`. An empty plugin tree is fingerprinted
 and cached entirely in Rust, including when no Python interpreter is installed.
 
+Manifest staleness is idempotent: the fingerprint covers the `.py` files of every plugin Rust
+discovers plus every manifest-listed plugin outside the plugins directories that reported a
+`path` (pip entry-point plugins), and it is taken after the worker imported the plugins, so an
+unchanged tree is never stale whatever Python reported. `ensure_manifest` recycles the pool only
+when it really rebuilt; `rebuild_manifest` forces a rebuild (the `reload` action).
+
 Nested calls from native callback processing have a bounded reserve in the same pool, so a
 plugin syncing into a Python instance cannot deadlock a size-one pool. Main-call concurrency
 still uses `python_workers`; callback calls may temporarily use up to eight reserve workers

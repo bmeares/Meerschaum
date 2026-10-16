@@ -22,7 +22,7 @@ chrono-tz = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 base64 = "0.22"
-hex = "0.4"
+hex = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }

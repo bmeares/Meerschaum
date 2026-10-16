@@ -39,7 +39,19 @@ def chain():
     """
     `readings table -> raw -> clean -> daily`, each level reading the previous one through
     `{{ Pipe() }}` (no `parents` key: the engine sees the edges from the SQL).
+
+    Every test shares the one source table and the three pipes, so under `pytest -n` two
+    workers running tests from this module at once would drop each other's table mid-run
+    (CI saw `1 failed, 1 upstream_failed` on a chain sync). An inter-process lock keeps the
+    chain tests serial across workers.
     """
+    from meerschaum.config.paths import ROOT_DIR_PATH
+    from meerschaum.utils.locks import InterProcessLock
+    with InterProcessLock(ROOT_DIR_PATH / '.w8_pipeline_chain.lock'):
+        yield from _build_chain()
+
+
+def _build_chain():
     conn = conns['sqlite']
     inst = str(conn)
     conn.exec_queries([f"DROP TABLE IF EXISTS {SOURCE_TABLE}"], silent=True)
@@ -92,6 +104,19 @@ def chain():
     conn.exec_queries([f"DROP TABLE IF EXISTS {SOURCE_TABLE}"], silent=True)
 
 
+def _why(run):
+    """
+    The run message plus every node that did not succeed (the summary alone says only
+    `1 failed, 1 upstream_failed`).
+    """
+    failed = [
+        (o['pipe_ref'], o.get('status'), (o.get('result') or {}).get('message'))
+        for o in getattr(run, 'outcomes', [])
+        if not (o.get('result') or {}).get('success')
+    ]
+    return f"{run.message}; failed nodes: {failed}"
+
+
 def _statuses(run):
     return {
         node['pipe_ref'].split('|')[2]: node['status']
@@ -127,7 +152,7 @@ def test_second_run_skips_caught_up_children(chain):
     raw, clean, daily = chain
     assert raw.sync(children=True).success
     run = raw.sync(children=True)
-    assert run.success, run.message
+    assert run.success, _why(run)
     statuses = _statuses(run)
     assert statuses['w8_clean'] == 'skipped'
     assert statuses['w8_daily'] == 'skipped'
@@ -136,14 +161,14 @@ def test_second_run_skips_caught_up_children(chain):
     ### New source rows flow all the way down.
     _insert(conns['sqlite'], [('2024-01-01 03:00:00', 'b', 4)])
     run = raw.sync(children=True)
-    assert run.success, run.message
+    assert run.success, _why(run)
     assert _rowcounts(raw, clean, daily) == [4, 4, 4]
 
 
 def test_parents_true_syncs_the_ancestors_first(chain):
     raw, clean, daily = chain
     run = daily.sync(parents=True)
-    assert run.success, run.message
+    assert run.success, _why(run)
     assert [o['pipe_ref'].split('|')[2] for o in run.outcomes] == ['w8_raw', 'w8_clean', 'w8_daily']
     assert _rowcounts(raw, clean, daily) == [3, 3, 3]
 
@@ -155,7 +180,7 @@ def test_depth_limits(chain):
 
     ### `children=1` stops at the direct child.
     run = raw.sync(children=1)
-    assert run.success, run.message
+    assert run.success, _why(run)
     names = [o['pipe_ref'].split('|')[2] for o in run.outcomes]
     assert names == ['w8_raw', 'w8_clean']
     assert _rowcounts(raw, clean, daily) == [4, 4, 3]
@@ -163,7 +188,7 @@ def test_depth_limits(chain):
     ### `parents=1` is the direct parent only.
     _insert(conns['sqlite'], [('2024-01-01 04:00:00', 'a', 5)])
     run = daily.sync(parents=1)
-    assert run.success, run.message
+    assert run.success, _why(run)
     names = [o['pipe_ref'].split('|')[2] for o in run.outcomes]
     assert 'w8_raw' not in names
     assert names == ['w8_clean', 'w8_daily']
@@ -216,7 +241,7 @@ def test_pipeline_sync_and_plan_execute(chain):
     raw, clean, daily = chain
     pipeline = mrsm.Pipeline([raw, clean], children=True)
     run = pipeline.sync(workers=2)
-    assert run.success, run.message
+    assert run.success, _why(run)
     assert run.plan is not None and len(run.plan) == 3
     assert _rowcounts(raw, clean, daily) == [3, 3, 3]
     runs = pipeline.get_runs()
@@ -227,7 +252,7 @@ def test_pipeline_sync_and_plan_execute(chain):
     _insert(conns['sqlite'], [('2024-01-01 05:00:00', 'b', 6)])
     plan = mrsm.Pipeline(raw, children=True).plan()
     second = plan.execute()
-    assert second.success, second.message
+    assert second.success, _why(second)
     assert _rowcounts(raw, clean, daily) == [4, 4, 4]
     assert second.run_id != run.run_id
 
@@ -243,7 +268,7 @@ def test_pipeline_from_tags_and_keys(chain):
     )
     assert [p.metric_key for p in by_keys.pipes] == ['w8_raw', 'w8_clean']
     run = pipeline.sync()
-    assert run.success, run.message
+    assert run.success, _why(run)
     assert _rowcounts(raw, clean, daily) == [3, 3, 3]
 
 

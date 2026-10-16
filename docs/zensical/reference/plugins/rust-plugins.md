@@ -30,7 +30,7 @@ The library name is always `lib<name>.<ext>`, with the `lib` prefix on Windows t
 
 ### Rust before Python
 
-A directory that contains both a `plugin.toml` and Python files is a Rust plugin. If a Rust plugin and a Python plugin have the same name, **the Rust entry points take precedence**. This lets you port a plugin one function at a time: ship the Rust library, keep the Python module as the fallback for anything the library does not implement.
+A directory that contains both a `plugin.toml` and Python files is a Rust plugin. If a Rust plugin and a Python plugin have the same name, **the Rust plugin replaces the Python plugin entirely**: its actions, hooks, connectors, routes and pages disappear from the merged manifest, and nothing falls back to the Python module, even for functions the library does not implement. Python plugins with other names are unaffected and keep working beside the native one. To port a plugin gradually, split it: move one capability into a Rust plugin with a new name and keep the rest in Python (the two may depend on each other through `required`).
 
 ## 🔧 Writing one
 
@@ -117,7 +117,7 @@ Bounds (`begin`, `end`) are integers, ISO timestamp strings or `null`. Results a
 
 ## 📜 The manifest
 
-`manifest()` returns the same JSON document the Python plugin manifest uses (schema version 3). The host validates it at load time, so `--help`, tab completion and the server can learn what your plugin offers **without loading the library**: it is cached by a fingerprint of the plugin directory and rebuilt when a file changes.
+`manifest()` returns the same JSON document the Python plugin manifest uses (schema version 4). The host validates it at load time, so `--help`, tab completion and the server can learn what your plugin offers **without loading the library**: it is cached by a fingerprint of the plugin directory and rebuilt when a file changes.
 
 The part for your plugin lives under `plugins.<name>`:
 
@@ -152,6 +152,8 @@ The part for your plugin lives under `plugins.<name>`:
 
 Data always crosses the boundary as an **Arrow C stream** (`FFI_ArrowArrayStream`), never JSON. The SDK handles that for you: you return a `Frame`, and the host imports it without copying through Python.
 
+Hooks run around every sync that goes through the sync engine (`sync pipes`, jobs, compose). A failing hook never fails the sync: the host prints `Warning: Native plugin '<plugin>' hook failed: <hook>: <message>` on stderr and carries on with the remaining hooks. A hook that succeeds prints nothing, whereas the messages of Python hooks are shown in the sync output.
+
 ## 🏗️ Build, install, load
 
 Build the shipped example from a checkout:
@@ -174,10 +176,12 @@ Point `MRSM_PLUGINS_DIR` at the directory (use a temporary `MRSM_ROOT_DIR` while
 $ mrsm hello
  🎉 Hello from native_demo
 
-$ mrsm --help | grep -A1 hello
+$ mrsm --help | grep -A1 '^hello'
 hello
-  --native-demo  Enable demo.
+Return a synthetic greeting.
 ```
+
+The plugin's flags (`--native-demo`) are listed in `--help` after its last action, and `mrsm hello --native-demo` is accepted.
 
 Register a pipe that uses it as a source:
 
@@ -191,6 +195,53 @@ mrsm sync pipes -i sql:local --nopretty
 ```
 
 The example declares both `fetch` **and** `sync`, so (exactly like a Python plugin that defines `sync()`) its own `sync` replaces the built-in sync process: it keeps the rows in memory and reports `Success` instead of writing a table. Remove `sync` from `data_functions` to let Meerschaum write the fetched frame to your instance.
+
+## 🧪 Testing your plugin
+
+Everything below runs against a throwaway root, so it never touches your real configuration:
+
+```bash
+export MRSM_ROOT_DIR="$(mktemp -d)"
+export MRSM_PLUGINS_DIR="$(mktemp -d)"      # install your plugin directory here
+mrsm show plugins                           # native plugins are listed as `name (native)`
+mrsm show plugins --nopretty                # bare names, for scripts
+mrsm show actions --nopretty                # your actions appear here
+mrsm --help                                 # ...and here, with their documentation and flags
+```
+
+A plugin that is missing from these listings was skipped: look for `Warning: Skipping invalid native plugin at '<dir>': <reason>` on stderr. The reasons are a bad `plugin.toml`, a missing or unloadable library, and an incompatible ABI (for example `unsupported native plugin ABI 99; expected 1`). The other plugins still load. A panic inside your code does not stop `mrsm`: the call returns a failure (`native plugin panicked`) and the next command works normally. The host caches the manifest under `$MRSM_ROOT_DIR/cache/native_plugins_manifest.json`, keyed by a fingerprint of the plugin directory, so replacing or removing a plugin takes effect on the next run (do it while `mrsm` is not running).
+
+To check a source and its hooks, register a pipe on a SQLite instance and sync it:
+
+```bash
+mrsm register pipe -c plugin:my_plugin -m demo -i sql:local --params '{"columns": {"id": "id"}}'
+mrsm sync pipes -c plugin:my_plugin -m demo -i sql:local --nopretty
+mrsm plan pipes -c plugin:my_plugin -m demo -i sql:local --nopretty    # the plugin as a graph source
+mrsm start api -i sql:local --host 127.0.0.1 -p 8224 --no-dash        # your routes are served next to the core API
+```
+
+### What the repository tests
+
+These suites build the example plugins in `crates/meerschaum-plugin/examples/` (`native_demo`, `native_probe`, `bad_abi`) and load them as real shared libraries; all data is synthetic. Run each with a temporary `MRSM_ROOT_DIR` and `MRSM_PLUGINS_DIR`:
+
+```bash
+cargo test -p meerschaum-plugin                       # the SDK and loader
+cargo test -p meerschaum-cli --test native_plugins    # the `mrsm` binary: actions, flags, a native source
+cargo test -p meerschaum-cli --test native_e2e        # hooks, routes, shadowing, rejection, cache
+MRSM_TEST_CONSOLE=1 PYTHONPATH=$(pwd) python -m pytest tests/console -k rust_pages   # a native console page in Chromium
+```
+
+| Capability | Covered by |
+|---|---|
+| Fetch source, sync override, in-memory instance, actions, hooks, panic containment (library level) | `meerschaum-plugin/tests/native.rs` |
+| Action dispatch, `show plugins`/`show actions`, flags, panic containment, a sync from a native source | `native_plugins.rs` |
+| Native hooks around real syncs, the built-in sync writing a native fetch, failing hooks as warnings | `native_e2e.rs` |
+| Routes (public, authenticated, `--no-auth`) served by `mrsm start api` | `native_e2e.rs` |
+| A native plugin replacing a Python plugin of the same name | `native_e2e.rs` (needs a Python environment; skipped without one) |
+| A custom instance (`-i native_demo:memory`): pipes listed and synced, file-lock fallback for leases | `native_e2e.rs` |
+| Corrupt library and wrong ABI skipped, manifest cache follows the directory | `native_e2e.rs`; discovery details in `native.rs` |
+| `plan pipes` / `show graph` with a native source | `native_e2e.rs` |
+| A console page rendered in the browser, identical to the Python page | `tests/console/test_console.py` |
 
 ## 🔬 The ABI in one page
 
@@ -213,4 +264,4 @@ The plugin repository stores **per-target-triple artifacts** plus a source tarba
 
 !!! note "Status in this pre-release"
 
-    Discovery, the manifest cache, actions, arguments, hooks, source `fetch`/`sync`, custom connectors, routes and pages are implemented and tested. Not yet available: `subscribe` for continuous streams from a native plugin (it needs a reader/sink SDK beyond the current eager `Frame` API), repository upload and target-triple selection by `install plugin`, and live reload of an already-open library (replace a plugin while `mrsm` is not running).
+    Discovery, the manifest cache, actions, arguments, hooks, source `fetch`/`sync`, custom connectors, routes and pages are implemented, and each is exercised through the `mrsm` binary by the tests listed under [Testing your plugin](#testing-your-plugin). The deepest instance operations (reads, rowcounts, maintenance) are exercised only at the library level; through the binary the example instance proves resolution, `fetch_pipes_keys`, `sync_pipe` and the lease fallback. Not yet available: `subscribe` for continuous streams from a native plugin (it needs a reader/sink SDK beyond the current eager `Frame` API), repository upload and target-triple selection by `install plugin`, and live reload of an already-open library (replace a plugin while `mrsm` is not running).

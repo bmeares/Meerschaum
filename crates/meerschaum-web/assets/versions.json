@@ -8,7 +8,7 @@
   "maplibre.LICENSE": "https://unpkg.com/maplibre-gl@4.7.1/LICENSE.txt",
   "cytoscape.min.js": "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js",
   "cytoscape.LICENSE": "https://unpkg.com/cytoscape@3.30.4/LICENSE",
-  "xterm.js": "https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js",
-  "xterm.css": "https://unpkg.com/@xterm/xterm@5.5.0/css/xterm.css",
-  "xterm.LICENSE": "https://unpkg.com/@xterm/xterm@5.5.0/LICENSE"
+  "xterm.js": "https://unpkg.com/@xterm/xterm@6.0.0/lib/xterm.js",
+  "xterm.css": "https://unpkg.com/@xterm/xterm@6.0.0/css/xterm.css",
+  "xterm.LICENSE": "https://unpkg.com/@xterm/xterm@6.0.0/LICENSE"
 }

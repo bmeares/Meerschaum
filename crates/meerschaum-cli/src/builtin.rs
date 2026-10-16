@@ -402,11 +402,35 @@ pub fn show_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     Ok(SuccessTuple::success())
 }
 
-/// `reload`: a no-op in Rust (every command reads the config fresh).
+/// `reload`: the configuration is read fresh by every command, so this rebuilds the plugin
+/// manifest unconditionally (a fresh worker imports every plugin again), re-opens the native
+/// plugins and recycles the Python workers so the next action imports the plugins anew.
 pub fn reload(_args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
+    let session = crate::native::session(rt);
+    let manifest = match session.reload_plugins(rt.config()) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return Ok(SuccessTuple::fail(format!(
+                "Unable to reload plugins: {}",
+                error.message
+            )));
+        }
+    };
+    let count = manifest.plugins.len();
+    let message = format!(
+        "Reloaded {count} plugin{}; the configuration is read fresh on every command.",
+        if count == 1 { "" } else { "s" }
+    );
+    let text = rt.with_formatter(|f| f.info(&message, true));
+    rt.print(&text);
+    Ok(SuccessTuple::success())
+}
+
+/// What `edit config` reports after the editor exits (v4 ran `reload`).
+fn reload_config(rt: &mut Runtime<'_>) -> ActionResult {
     let text = rt.with_formatter(|f| {
         f.info(
-            "Nothing to reload: the Rust CLI reads the configuration and plugins on every command.",
+            "Nothing to reload: the Rust CLI reads the configuration on every command.",
             true,
         )
     });
@@ -530,7 +554,7 @@ pub fn edit_config(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             }
         }
     }
-    reload(args, rt)
+    reload_config(rt)
 }
 
 /// `clear` without a subaction: clear the screen (`clear pipes` needs an instance).

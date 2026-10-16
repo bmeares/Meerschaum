@@ -58,6 +58,17 @@ chrono-tz = "0.10"
 uuid = { version = "1", features = ["v4", "serde"] }
 rust_decimal = { version = "1", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
+# RustCrypto: every crate below sits on `digest` 0.11, so the workspace carries one digest stack.
+sha2 = "0.11"
+sha1 = "0.11"
+sha3 = "0.12"
+md-5 = "0.11"
+blake2 = "0.11"
+ripemd = "0.2"
+sm3 = "0.5"
+hmac = "0.13"
+pbkdf2 = { version = "0.13", default-features = false }
+hex = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arrow = "56"

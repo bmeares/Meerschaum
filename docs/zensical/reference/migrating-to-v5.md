@@ -375,7 +375,7 @@ impl Plugin for Acme {
 meerschaum_plugin::export_plugin!(Acme);
 ```
 
-A plugin directory may contain both a Rust library and a Python module; the Rust entry points take precedence. Python plugins can depend on Rust plugins and vice versa through `required`. The [Rust plugin guide](/reference/plugins/rust-plugins/) covers the layout, the manifest, the C ABI, building and loading an example, and what is not available yet. A native plugin's console pages return the same HTML fragments and Plotly figure JSON as a Python page-contract page.
+A plugin directory may contain both a Rust library and a Python module; the Rust plugin replaces a Python plugin of the same name entirely, with no per-function fallback. Python plugins can depend on Rust plugins and vice versa through `required`. The [Rust plugin guide](/reference/plugins/rust-plugins/) covers the layout, the manifest, the C ABI, building and loading an example, how to test a plugin, and what is not available yet. A native plugin's console pages return the same HTML fragments and Plotly figure JSON as a Python page-contract page.
 
 ## 🚢 Deployment
 
@@ -383,7 +383,7 @@ A plugin directory may contain both a Rust library and a Python module; the Rust
 - **Bare metal.** Replace `pip install --user meerschaum==4.1.4` with `pip install --user 'meerschaum[full]>=5,<6'` (or the extras you need). The `mrsm` on your `PATH` is now a native binary from the `meerschaum-cli` wheel.
 - **NGINX / reverse proxies.** Paths do not change. The server honors `api.server.forwarded_allow_ips` (old `api.uvicorn.*` key still read). The API host listens on a Unix socket under `MRSM_ROOT_DIR`; nothing else needs to reach it.
 - **`start api -p 8224 --host 127.0.0.1 -i sql:main --secure`** and friends are unchanged.
-- **Webterm** keeps its tmux session model and `api.webterm.tmux.session_suffix`.
+- **Webterm** keeps its tmux session model and `api.webterm.tmux.session_suffix`. Its front end is xterm.js 6.0.0 (the console vendors the same release).
 - **Logs.** The Rust server's logs and the API host's output are interleaved in the API job's logs. ⚠️ TBC: a `--host-logs` filter.
 
 ## 🧪 How to upgrade safely

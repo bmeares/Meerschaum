@@ -13,7 +13,7 @@ use axum::http::HeaderMap;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use meerschaum_connector::{InstanceConnector, TokenModel};
 use meerschaum_core::users::User;
 use meerschaum_core::{SuccessTuple, Value};

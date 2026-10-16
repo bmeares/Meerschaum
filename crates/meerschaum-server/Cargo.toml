@@ -35,8 +35,8 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 # Crate-private: OpenAPI (`/openapi.json`, `/docs`).
 utoipa = "5"
 # Crate-private: HS256 JWTs (byte-identical to PyJWT) and the API-key base64.
-hmac = "0.12"
-sha2 = "0.10"
+hmac = { workspace = true }
+sha2 = { workspace = true }
 base64 = "0.22"
 
 [dev-dependencies]

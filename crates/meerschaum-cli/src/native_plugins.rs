@@ -246,7 +246,7 @@ pub fn arguments(args: &mut ArgsMap, plugins: &[&PluginManifest], sysargs: &[Str
     }
 }
 
-fn json_to_py(value: &serde_json::Value) -> PyValue {
+pub(crate) fn json_to_py(value: &serde_json::Value) -> PyValue {
     match value {
         serde_json::Value::Null => PyValue::None,
         serde_json::Value::Bool(b) => PyValue::Bool(*b),
