@@ -84,8 +84,18 @@ def test_tree_is_imported_from_the_repo():
     assert Path(core.__file__).resolve().parent == REPO / 'meerschaum' / '_core'
 
 
-def test_import_is_lazy():
-    """Importing `meerschaum` or the loader must not load the extension."""
+def test_import_is_lazy(monkeypatch):
+    """
+    Importing `meerschaum` or the loader must not load the extension.
+
+    `MRSM_<TYPE>_<LABEL>` connector variables (which `scripts/test.sh` exports) make the import
+    apply them over `meerschaum.yaml`, as v4 does, and reading that file legitimately loads the
+    native YAML codec: drop every `MRSM_*` variable but the root and plugins dirs so the bare
+    import is what is measured.
+    """
+    for key in list(os.environ):
+        if key.startswith('MRSM_') and key not in ('MRSM_ROOT_DIR', 'MRSM_PLUGINS_DIR'):
+            monkeypatch.delenv(key)
     proc = run_python("""
         import sys
         import meerschaum

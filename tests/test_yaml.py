@@ -469,8 +469,16 @@ def _run_config_cases(tmp_path, mode):
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-def _unwrapped(outcome):
-    return {**outcome, 'stderr': ''.join(outcome['stderr'].split())}
+def _unwrapped(outcome, root=None):
+    """
+    The outcome with whitespace removed from stderr. The runner scrubs the root before `warn()`'s
+    line wrapping is undone, so a long (xdist) temporary root split across lines survives the
+    scrub: replace it again once the text is unwrapped.
+    """
+    stderr = ''.join(outcome['stderr'].split())
+    if root is not None:
+        stderr = stderr.replace(str(root), '{ROOT}')
+    return {**outcome, 'stderr': stderr}
 
 
 def _without_v5_defaults(spec):
@@ -501,7 +509,7 @@ def test_config_cases_match_released_reference(parity, tmp_path, mode):
         got = actual[case['name']]
         ### `warn()` wraps long lines at the terminal width, and the temporary root's path length
         ### decides where: compare the warnings without whitespace.
-        expected, got = _unwrapped(expected), _unwrapped(got)
+        expected, got = _unwrapped(expected), _unwrapped(got, tmp_path / 'root')
         if mode == 'rust':
             ### PARITY (wave 13, PARITY.md): the Rust default config carries `system:engine`.
             expected, got = _without_v5_defaults(expected), _without_v5_defaults(got)
