@@ -15,6 +15,12 @@ This is the current release cycle, so stay tuned for future releases!
 - **Let `*` execute actions and jobs for non-admins.**  
   The check for permission to run actions and jobs looked for `actions:execute` and `jobs:execute` in the granted scopes, so a non-admin whose scopes were `*` was refused with "Missing scope 'actions:execute'". A literal `*` now satisfies it.
 
+- **Keep `*` when editing a token in the web console.**  
+  The edit form listed only the built-in scopes, so a token holding `*` showed an empty checklist and saving it replaced `*` with nothing. The form now has the same "Grant all scopes" switch as the registration form, turned on (with the checklist hidden) for a token which holds `*`, and saving keeps `*` unless the switch is turned off.
+
+- **Fix `register tokens --nopretty`.**  
+  Printing the new token as JSON failed with "Object of type UUID is not JSON serializable". The token's ID and timestamps are now serialized, so the command prints the token and its secret as JSON.
+
 - **Match detached jobs only within their own root directory.**  
   When a job's PID file is lost, its process is found by the job's name in the command line. A job with the same name under another `MRSM_ROOT_DIR` matched too, so stopping or killing a job without a PID file could end another root's job. Processes are now matched only if their `MRSM_ROOT_DIR` is this root (unset means the default root). If a process's environment cannot be read, or its root is a relative path, it is still matched as before.
 

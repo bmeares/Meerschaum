@@ -489,7 +489,7 @@ def _register_tokens(
     from meerschaum.connectors.parse import parse_instance_keys
     from meerschaum.utils.prompt import yes_no, choose
     from meerschaum.utils.formatting import make_header, print_tuple
-    from meerschaum.utils.dtypes import value_is_null
+    from meerschaum.utils.dtypes import value_is_null, json_serialize_value
 
     expiration = (
         end
@@ -574,7 +574,10 @@ def _register_tokens(
             + f"    - API Key: {token.get_api_key()}\n"
         )
         if not nopretty
-        else json.dumps({'secret': token_secret, **dict(token_model)})
+        else json.dumps(
+            {'secret': token_secret, **dict(token_model)},
+            default=json_serialize_value,
+        )
     ) 
     print(msg_to_print)
     return True, f"Successfully registered token '{token.label}'."

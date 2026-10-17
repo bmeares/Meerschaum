@@ -332,3 +332,117 @@ def test_dash_token_form_grants_all_scopes_with_a_star():
     lines = [line for line in result.stdout.splitlines() if line.startswith('SCOPES=')]
     assert lines, result.stderr[-2000:]
     assert json.loads(lines[0][len('SCOPES='):]) == [['*'], ['pipes:read']]
+
+
+def test_register_tokens_nopretty_prints_json(tokens_instance, monkeypatch, capsys):
+    """
+    `register tokens --nopretty` prints the token (with its UUID and datetimes) as JSON.
+    """
+    from meerschaum.actions.register import _register_tokens
+    _fake_prompts(monkeypatch, '')
+    success, msg = _register_tokens(
+        mrsm_instance=str(tokens_instance),
+        name='json-token',
+        scopes=['*'],
+        nopretty=True,
+    )
+    assert success, msg
+    printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    (token_id,) = tokens_instance.tokens
+    assert printed['id'] == str(token_id)
+    assert printed['label'] == 'json-token'
+    assert printed['scopes'] == ['*']
+    assert printed['secret']
+
+
+def test_dash_edit_token_form_keeps_a_star():
+    """
+    The console's edit form shows "Grant all scopes" on (and the checklist hidden) for a token
+    which holds `*`, and saves `['*']` unless the switch is turned off.
+    """
+    import importlib.util
+    import subprocess
+    import sys
+    if importlib.util.find_spec('dash_bootstrap_components') is None:
+        pytest.skip("Dash is not installed.")
+
+    code = '''
+import json
+from types import SimpleNamespace
+import meerschaum.api.dash.callbacks.tokens as t
+import meerschaum.api.dash.tokens as forms
+
+def walk(component):
+    yield component
+    children = getattr(component, 'children', None)
+    if isinstance(children, (list, tuple)):
+        for child in children:
+            yield from walk(child)
+    elif children is not None and not isinstance(children, (str, int, float)):
+        yield from walk(children)
+
+def form_state(scopes):
+    token = SimpleNamespace(
+        id='11111111-1111-1111-1111-111111111111',
+        label='label',
+        expiration=None,
+        is_valid=True,
+        scopes=scopes,
+    )
+    components = list(walk(forms.build_edit_token_modal(token)))
+    def find(kind):
+        for component in components:
+            component_id = getattr(component, 'id', None)
+            if isinstance(component_id, dict) and component_id.get('type') == kind:
+                return component
+    switch = find('tokens-toggle-scopes-switch')
+    div = find('tokens-scopes-checklist-div')
+    checklist = find('tokens-scopes-checklist')
+    return {
+        'switch': switch.value,
+        'hidden': (getattr(div, 'style', None) or {}).get('display') == 'none',
+        'checked': list(checklist.value),
+    }
+
+saved = []
+class FakeToken:
+    def __init__(self, **kw):
+        saved.append(kw['scopes'])
+    def edit(self, debug=False):
+        return True, 'Success'
+
+t.Token = FakeToken
+t.check_token_access = lambda token_id, session: (True, '')
+t.get_api_connector = lambda: None
+token_id = '11111111-1111-1111-1111-111111111111'
+t.dash = SimpleNamespace(
+    callback_context=SimpleNamespace(triggered=[{
+        'value': 1,
+        'prop_id': json.dumps({'index': token_id, 'type': 'tokens-edit-submit-button'}) + '.n_clicks',
+    }]),
+    no_update=None,
+)
+for grant_all in (True, False, None):
+    t.edit_token_submit_button_click(1, None, ['pipes:read'], 'label', grant_all, {})
+
+print('RESULT=' + json.dumps({
+    'star': form_state(['*']),
+    'some': form_state(['pipes:read']),
+    'saved': saved,
+}))
+'''
+    result = subprocess.run(
+        [sys.executable, '-c', code],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    lines = [line for line in result.stdout.splitlines() if line.startswith('RESULT=')]
+    assert lines, result.stderr[-3000:]
+    data = json.loads(lines[0][len('RESULT='):])
+    assert data['star']['switch'] is True
+    assert data['star']['hidden'] is True
+    assert data['some']['switch'] is False
+    assert data['some']['hidden'] is False
+    assert data['some']['checked'] == ['pipes:read']
+    assert data['saved'] == [['*'], ['pipes:read'], ['pipes:read']]

@@ -197,6 +197,8 @@ def build_edit_token_modal(token: Token) -> dbc.Modal:
     """
     Return the Modal for editing the token.
     """
+    ### A literal `*` grants every scope, so show the switch on and the checklist hidden.
+    grants_all_scopes = '*' in (token.scopes or [])
     return dbc.Modal(
         [
             dbc.ModalHeader([
@@ -242,6 +244,17 @@ def build_edit_token_modal(token: Token) -> dbc.Modal:
                                     },
                                 )
                             ),
+                            dbc.Col(
+                                dbc.Switch(
+                                    id={
+                                        'type': 'tokens-toggle-scopes-switch',
+                                        'index': str(token.id),
+                                    },
+                                    label="Grant all scopes (`*`, including custom and future scopes)",
+                                    value=grants_all_scopes,
+                                ),
+                                className="me-3",
+                            ),
                         ] if token.is_valid else []) + [
                             dbc.Col([
                             ]),
@@ -271,7 +284,11 @@ def build_edit_token_modal(token: Token) -> dbc.Modal:
                                         {"label": scope, "value": scope}
                                         for scope in STATIC_CONFIG['tokens']['scopes']
                                     ],
-                                    value=token.scopes,
+                                    value=(
+                                        list(STATIC_CONFIG['tokens']['scopes'])
+                                        if grants_all_scopes
+                                        else token.scopes
+                                    ),
                                     id={
                                         'type': "tokens-scopes-checklist",
                                         'index': str(token.id),
@@ -283,7 +300,7 @@ def build_edit_token_modal(token: Token) -> dbc.Modal:
                     ] if token.is_valid else [], id={
                         'type': 'tokens-scopes-checklist-div',
                         'index': str(token.id),
-                    }),
+                    }, style=({'display': 'none'} if grants_all_scopes else {})),
                 ]),
 
             ]),
