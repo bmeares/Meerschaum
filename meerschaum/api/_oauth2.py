@@ -10,7 +10,7 @@ import os
 import base64
 import functools
 import inspect
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from meerschaum.api import endpoints, CHECK_UPDATE, no_auth, debug
 from meerschaum.api._tokens import optional_token, get_token_from_authorization
@@ -209,10 +209,20 @@ async def CurrentScopes(request: Request) -> List[str]:
     return get_granted_scopes(request, user_or_token)
 
 
-def ScopedAuth(scopes: List[str]):
+def ScopedAuth(scopes: List[str], aliases: Optional[Dict[str, str]] = None):
     """
     Dependency factory for authenticating with either a user session or a scoped token.
+
+    Parameters
+    ----------
+    scopes: List[str]
+        The scopes which the caller must hold (a literal `*` holds all of them).
+
+    aliases: Optional[Dict[str, str]], default None
+        Map a required scope to a legacy spelling which is accepted in its place
+        when the token explicitly holds it. The 403 still names the current scope.
     """
+    aliases = aliases or {}
     async def _authenticate(
         request: Request,
     ) -> Union[User, Token, None]:
@@ -229,7 +239,10 @@ def ScopedAuth(scopes: List[str]):
             return user_or_token
 
         for scope in scopes:
-            if scope not in current_scopes:
+            legacy_scope = aliases.get(scope, None)
+            if scope not in current_scopes and (
+                legacy_scope is None or legacy_scope not in current_scopes
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Missing required scope: '{scope}'",

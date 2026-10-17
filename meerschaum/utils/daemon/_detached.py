@@ -14,11 +14,13 @@ are remembered per daemon.
 from __future__ import annotations
 
 import os
+import pathlib
 import threading
 import time
 from datetime import datetime, timezone
 
 from meerschaum.utils.typing import Dict, List, Optional, Tuple
+from meerschaum._internal.static import STATIC_CONFIG
 from meerschaum.utils.packages import attempt_import
 
 INDEX_TTL_SECONDS: float = 2.0
@@ -39,13 +41,43 @@ CREATE_TIME_SLACK_SECONDS: float = 5.0
 _MARKER_PREFIX = "daemon_id='"
 
 _lock = threading.Lock()
-_index: Optional[Tuple[float, datetime, List[Tuple[int, str]]]] = None
+_index: Optional[Tuple[float, datetime, List[Tuple[int, str, Optional[str]]]]] = None
 _negative: Dict[str, Tuple[float, Tuple[Optional[str], ...]]] = {}
 
 
-def _scan() -> List[Tuple[int, str]]:
+def _read_root(proc) -> Optional[str]:
     """
-    Walk the process table once and return `(pid, command line)` for each process
+    Return the root directory (a resolved POSIX path) which a process was started with,
+    from its `MRSM_ROOT_DIR` environment variable (unset means the default root).
+    Return `None` if it cannot be determined: the environment is unreadable
+    (e.g. `AccessDenied`) or the variable is a relative path, which cannot be resolved
+    without the directory the process was started from.
+    """
+    import meerschaum.config.paths as paths
+    try:
+        environment = proc.environ()
+        value = environment.get(STATIC_CONFIG['environment']['root'], None)
+        if value is None:
+            return pathlib.Path(paths.DEFAULT_ROOT_DIR_PATH).resolve().as_posix()
+        path = pathlib.Path(value)
+        if not path.is_absolute():
+            return None
+        return path.resolve().as_posix()
+    except Exception:
+        return None
+
+
+def _get_root() -> str:
+    """
+    Return the root directory of this process.
+    """
+    import meerschaum.config.paths as paths
+    return pathlib.Path(paths.ROOT_DIR_PATH).resolve().as_posix()
+
+
+def _scan() -> List[Tuple[int, str, Optional[str]]]:
+    """
+    Walk the process table once and return `(pid, command line, root)` for each process
     which mentions a `daemon_id`.
     """
     psutil = attempt_import('psutil')
@@ -58,7 +90,7 @@ def _scan() -> List[Tuple[int, str]]:
             cmdline = proc.info.get('cmdline') or []
             joined = '\0'.join(part or '' for part in cmdline)
             if _MARKER_PREFIX in joined:
-                entries.append((int(proc.info['pid']), joined))
+                entries.append((int(proc.info['pid']), joined, _read_root(proc)))
         except Exception:
             continue
     return entries
@@ -66,7 +98,9 @@ def _scan() -> List[Tuple[int, str]]:
 
 def find_pids(daemon_id: str, not_older_than: Optional[datetime] = None) -> List[int]:
     """
-    Return the PIDs of the processes whose command line references the `daemon_id`.
+    Return the PIDs of the processes whose command line references the `daemon_id`
+    and which belong to this root directory (a job with the same name under another
+    `MRSM_ROOT_DIR` is not this job). Processes whose root cannot be read are kept.
     The process table is only scanned if the last scan is older than `INDEX_TTL_SECONDS`
     or began before `not_older_than` (a naive UTC datetime, e.g. when the job was launched).
     """
@@ -81,7 +115,12 @@ def find_pids(daemon_id: str, not_older_than: Optional[datetime] = None) -> List
             started_at = datetime.now(timezone.utc).replace(tzinfo=None)
             _index = (time.monotonic(), started_at, _scan())
         entries = _index[2]
-    return [pid for pid, cmdline in entries if marker in cmdline]
+    root = _get_root()
+    return [
+        pid
+        for pid, cmdline, entry_root in entries
+        if marker in cmdline and (entry_root is None or entry_root == root)
+    ]
 
 
 def invalidate(daemon_id: Optional[str] = None) -> None:

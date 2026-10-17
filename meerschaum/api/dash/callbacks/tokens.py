@@ -124,6 +124,18 @@ def deselect_scopes_click(n_clicks: Optional[int], name: str):
 
 
 @dash_app.callback(
+    Output({'type': 'tokens-scopes-checklist-div', 'index': MATCH}, 'style'),
+    Input({'type': 'tokens-toggle-scopes-switch', 'index': MATCH}, 'value'),
+    prevent_initial_call=True,
+)
+def edit_token_toggle_scopes_checklist(value: bool):
+    """
+    Toggle the scopes checklist of the edit form.
+    """
+    return {'display': 'none'} if value else {}
+
+
+@dash_app.callback(
     Output({'type': 'tokens-scopes-checklist', 'index': MATCH}, 'value'),
     Output({'type': 'tokens-deselect-scopes-button', 'index': MATCH}, 'children'),
     Input({'type': 'tokens-deselect-scopes-button', 'index': MATCH}, 'n_clicks'),
@@ -173,8 +185,10 @@ def register_token_click(
     if not n_clicks:
         raise PreventUpdate
 
+    ### NOTE: `*` is stored literally so that it also grants custom (plugin) scopes
+    ###       and scopes which are added later.
     scopes = (
-        list(STATIC_CONFIG['tokens']['scopes'])
+        ['*']
         if grant_all_scopes
         else (scopes or [])
     )
@@ -310,6 +324,7 @@ def edit_token_button_click(n_clicks: int):
     State({'type': 'tokens-expiration-datepickersingle', 'index': MATCH}, 'date'),
     State({'type': 'tokens-scopes-checklist', 'index': MATCH}, 'value'),
     State({'type': 'tokens-name-input', 'index': MATCH}, 'value'),
+    State({'type': 'tokens-toggle-scopes-switch', 'index': MATCH}, 'value'),
     State('session-store', 'data'),
     prevent_initial_call=True,
 )
@@ -318,6 +333,7 @@ def edit_token_submit_button_click(
     expiration: Optional[datetime],
     scopes: List[str],
     label: str,
+    grant_all_scopes: Optional[bool] = None,
     session_store_data: Optional[Dict[str, Any]] = None,
 ):
     if not n_clicks:
@@ -336,11 +352,13 @@ def edit_token_submit_button_click(
 
     expiration_date = datetime.fromisoformat(expiration) if expiration is not None else None
 
+    ### NOTE: `*` is stored literally so that it also grants custom (plugin) scopes
+    ###       and scopes which are added later.
     token = Token(
         id=token_id,
         label=label,
         expiration=expiration_date,
-        scopes=scopes,
+        scopes=(['*'] if grant_all_scopes else scopes),
         instance=get_api_connector(),
     )
 
