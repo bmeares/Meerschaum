@@ -727,7 +727,8 @@ fn valid_env_name(name: &str) -> bool {
 /// Write the shell's environment for the tmux path (`0600`, replaced atomically) and return its
 /// path: the server's environment plus [`ShellCommand::env`].
 fn write_env_file(tmux: &TmuxSettings, shell: &ShellCommand) -> std::io::Result<PathBuf> {
-    let mut vars: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+    let mut vars: std::collections::BTreeMap<String, String> =
+        meerschaum_core::process_env::vars().into_iter().collect();
     for (key, value) in &shell.env {
         vars.insert(key.clone(), value.clone());
     }

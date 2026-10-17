@@ -15,9 +15,10 @@ pub type ProcessEnv = IndexMap<String, String>;
 /// `environment:` block keep their YAML types (Python passes them through unconverted).
 pub type EnvDict = IndexMap<String, Value>;
 
-/// Build a [`ProcessEnv`] from `std::env::vars()`.
+/// Build a [`ProcessEnv`] from the process environment (variables that are not valid UTF-8 are
+/// skipped).
 pub fn current_process_env() -> ProcessEnv {
-    std::env::vars().collect()
+    meerschaum_core::process_env::vars().into_iter().collect()
 }
 
 /// Convert an [`EnvDict`] into string pairs for spawning a process (`str(value)`, `None` as an

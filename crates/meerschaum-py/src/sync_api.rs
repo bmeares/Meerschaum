@@ -566,8 +566,17 @@ pub fn sync_pipe<'py>(
             inplace,
         },
         need_python,
-    )
-    .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+    );
+    let built = match built {
+        Ok(built) => built,
+        // A worker is not started while a worker imports a plugin (a plugin whose import syncs a
+        // `plugin:` pipe would recurse): the sync fails like any failed sync, and the import
+        // goes on.
+        Err(message) if meerschaum_worker::worker::spawn_refused() => {
+            return failed_sync(py, out, &message);
+        }
+        Err(message) => return Err(pyo3::exceptions::PyRuntimeError::new_err(message)),
+    };
     let registry = built.registry;
     let engine_config = built.config;
     let settings = home_sql.as_ref().map(|c| c.settings.clone());
@@ -671,6 +680,26 @@ pub fn sync_pipe<'py>(
     }
     out.set_item("changed_intervals", intervals)?;
     out.set_item("parameters", core_to_py(py, &Value::Map(patch))?)?;
+    Ok(out)
+}
+
+/// The dictionary `sync_pipe` returns for a sync that could not start: a failed result with
+/// nothing inserted.
+fn failed_sync<'py>(
+    py: Python<'py>,
+    out: Bound<'py, PyDict>,
+    message: &str,
+) -> PyResult<Bound<'py, PyDict>> {
+    out.set_item("success", false)?;
+    out.set_item("message", message)?;
+    for key in ["inserted", "updated", "upserted", "deleted"] {
+        out.set_item(key, 0)?;
+    }
+    out.set_item("duration", py.None())?;
+    out.set_item("begin", py.None())?;
+    out.set_item("end", py.None())?;
+    out.set_item("changed_intervals", PyList::empty(py))?;
+    out.set_item("parameters", PyDict::new(py))?;
     Ok(out)
 }
 

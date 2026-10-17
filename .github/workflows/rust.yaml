@@ -101,6 +101,10 @@ jobs:
       - name: Disk guard (cargo clean below 10 GB free)
         run: scripts/rust/ci.sh disk-guard
       - name: cargo test --workspace
+        # This job does not build the `_core` extension, so Python workers cannot start here;
+        # pytest.yaml covers them with it.
+        env:
+          MRSM_TEST_NO_CORE: '1'
         run: scripts/rust/ci.sh test
 
   build:

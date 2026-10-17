@@ -520,6 +520,14 @@ fn python_only_actions_dispatch_to_worker() {
     )
     .unwrap();
     assert_worker_dispatch(tmp.path(), &["verify", "plugins"]);
+    // The worker imports `meerschaum`, which needs the built `_core` extension (D14). The Rust CI
+    // job does not build it and says so with `MRSM_TEST_NO_CORE=1`; pytest runs `mrsm reload`
+    // with the extension (`tests/test_actions_facade.py`). Anywhere else a missing or stale
+    // extension fails here.
+    if std::env::var_os("MRSM_TEST_NO_CORE").is_some() {
+        eprintln!("skipped `reload`: MRSM_TEST_NO_CORE is set");
+        return;
+    }
     let (r, _) = run(tmp.path(), &["reload"], no_env, &host);
     assert_eq!(r, SuccessTuple::success());
 }

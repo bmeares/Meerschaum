@@ -222,6 +222,38 @@ def test_python_dash_m_runs_the_native_binary(tmp_path):
     assert failing.returncode == 1
 
 
+def test_reload_rebuilds_the_plugin_manifest_through_the_worker(tmp_path):
+    """`mrsm reload` imports the plugins in a Python worker and writes the manifest."""
+    from meerschaum._internal.binary import find_binary
+
+    binary = find_binary()
+    if binary is None:
+        pytest.skip("No `mrsm` binary is built (cargo build -p meerschaum-cli).")
+    root, plugins = tmp_path / 'root', tmp_path / 'plugins'
+    root.mkdir()
+    plugins.mkdir()
+    (plugins / 'w16_reload.py').write_text("def fetch(pipe, **kwargs):\n    return []\n")
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith('MRSM_') or key == 'MRSM_NO_AUTO_INSTALL'
+    }
+    env.update({
+        'PYTHONPATH': str(REPO),
+        'MRSM_ROOT_DIR': str(root),
+        'MRSM_PLUGINS_DIR': str(plugins),
+        'MRSM_PYTHON': sys.executable,
+        'MRSM_BIN': binary,
+    })
+    result = subprocess.run(
+        [binary, 'reload'], capture_output=True, text=True, env=env, timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    manifest = root / 'cache' / 'plugins_manifest.json'
+    assert manifest.exists(), result.stdout + result.stderr
+    assert 'w16_reload' in manifest.read_text()
+
+
 def test_python_dash_m_names_the_missing_binary(tmp_path):
     """Without a binary the error says which package to install."""
     (tmp_path / 'root').mkdir()
@@ -745,9 +777,21 @@ def test_a_plugin_that_syncs_a_plugin_pipe_when_imported_keeps_the_process_count
         "    return {'dt': [datetime(2026, 1, 1)], 'v': [1]}\n"
     )
     (plugins / 'w16syncimp.py').write_text(
+        "from datetime import datetime\n"
         "import meerschaum as mrsm\n"
+        "from meerschaum.plugins import make_action\n"
         "__version__ = '0.0.1'\n"
-        "mrsm.Pipe('plugin:w16src', 'imp', instance='sql:w16').sync()\n"
+        "### Refused inside a worker that is importing (a failed tuple, not an exception), so the\n"
+        "### import completes and everything below stays available.\n"
+        "REFUSED = mrsm.Pipe('plugin:w16src', 'imp', instance='sql:w16').sync()\n"
+        "import os\n"
+        "with open(os.environ['W16_LOG'], 'a') as f:\n"
+        "    f.write(f'{os.getpid()} {tuple(REFUSED)!r}\\n')\n"
+        "def fetch(pipe, **kw):\n"
+        "    return {'dt': [datetime(2026, 1, 1)], 'v': [1]}\n"
+        "@make_action\n"
+        "def w16after(**kw):\n"
+        "    return True, f'after: {REFUSED[0]}'\n"
     )
     (tmp_path / 'root').mkdir()
     env = {
@@ -757,6 +801,7 @@ def test_a_plugin_that_syncs_a_plugin_pipe_when_imported_keeps_the_process_count
         'MRSM_PLUGINS_DIR': str(plugins),
         'MRSM_SQL_W16': f"sqlite:///{tmp_path / 'w16.db'}",
         'W16_MARK': marker,
+        'W16_LOG': str(tmp_path / 'refused.log'),
     }
     peak = [0]
     runaway = threading.Event()
@@ -779,7 +824,10 @@ def test_a_plugin_that_syncs_a_plugin_pipe_when_imported_keeps_the_process_count
         result = subprocess.run(
             [sys.executable, '-c',
              "import meerschaum as mrsm\n"
-             "print('RESULT', mrsm.entry(['show', 'version', '--nopretty'])[0], flush=True)\n"],
+             "print('RESULT', mrsm.entry(['show', 'version', '--nopretty'])[0], flush=True)\n"
+             "print('ACTION', mrsm.entry(['w16after']), flush=True)\n"
+             "pipe = mrsm.Pipe('plugin:w16syncimp', 'm', instance='sql:w16')\n"
+             "print('FETCH', pipe.sync()[0], pipe.get_rowcount(), flush=True)\n"],
             capture_output=True, text=True, env=env, timeout=120,
         )
     finally:
@@ -789,6 +837,15 @@ def test_a_plugin_that_syncs_a_plugin_pipe_when_imported_keeps_the_process_count
     assert not runaway.is_set(), f"workers multiplied (peak {peak[0]})"
     assert result.returncode == 0, result.stderr[-2000:]
     assert 'RESULT True' in result.stdout, result.stdout
+    ### The refused sync was a failed tuple: the import completed, so the plugin's action and
+    ### `fetch` are available in the worker.
+    assert "ACTION (True, 'after: " in result.stdout, result.stdout
+    ### A worker that imports the plugin gets a failed tuple for its refused sync (the one that
+    ### serves a plugin action syncs through the host instead); none gets an exception.
+    logged = (tmp_path / 'refused.log').read_text().splitlines()
+    assert logged, "no worker imported the plugin"
+    assert any("(False, 'failed to start the Python worker: not starting" in l for l in logged), logged
+    assert 'FETCH True 1' in result.stdout, result.stdout
     assert peak[0] <= 12, peak[0]
     assert time.time() - started < 90
     assert _marked_pids(marker) == []

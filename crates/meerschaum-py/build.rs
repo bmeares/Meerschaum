@@ -22,9 +22,11 @@ fn record_build_info() {
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let mut features: Vec<String> = env::vars()
+    let mut features: Vec<String> = env::vars_os()
         .filter_map(|(key, _)| {
-            key.strip_prefix("CARGO_FEATURE_")
+            key.into_string()
+                .ok()?
+                .strip_prefix("CARGO_FEATURE_")
                 .map(|feat| feat.to_lowercase().replace('_', "-"))
         })
         .collect();

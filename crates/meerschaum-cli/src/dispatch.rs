@@ -272,13 +272,10 @@ fn no_vars() -> Vec<(String, String)> {
     Vec::new()
 }
 
-/// The process environment as strings, in order. A variable that is not valid UTF-8 is skipped
-/// (`std::env::vars()` panics on it).
+/// The process environment as strings, in order (variables that are not valid UTF-8 are
+/// skipped: `std::env::vars()` panics on them).
 pub fn process_vars() -> Vec<(String, String)> {
-    // `std::env::vars()` panics on a variable that is not valid UTF-8; skip those.
-    std::env::vars_os()
-        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
-        .collect()
+    meerschaum_core::process_env::vars()
 }
 
 impl<'a> Runtime<'a> {

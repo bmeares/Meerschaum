@@ -280,7 +280,7 @@ pub struct ConfigOptions {
 impl ConfigOptions {
     /// Options from the current process (environment, home directory, CPU count).
     pub fn from_process() -> ConfigOptions {
-        let env: Vec<(String, String)> = std::env::vars().collect();
+        let env: Vec<(String, String)> = crate::process_env::vars();
         let home = env
             .iter()
             .find(|(k, _)| k == "HOME" || k == "USERPROFILE")

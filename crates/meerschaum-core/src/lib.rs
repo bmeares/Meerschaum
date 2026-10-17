@@ -26,6 +26,7 @@
 pub mod config;
 pub mod dtypes;
 pub mod pipe;
+pub mod process_env;
 pub mod pyfmt;
 pub mod static_config;
 pub mod success;
