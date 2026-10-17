@@ -179,36 +179,75 @@ mod imp {
     }
 }
 
-pub use imp::{proc_state, process_cmdlines, send_signal};
+pub use imp::{proc_state, send_signal};
 
-/// Port of `Daemon._find_detached_pids`: the PIDs (other than ours) whose command line contains
-/// `daemon_id='<id>'`. Python daemons embed it in their `python -c` code; the Rust supervisor
-/// passes it as an argument for the same reason.
-///
-/// A Rust supervisor also carries `--jobs-dir <dir>`: it only counts when that is `jobs_dir`,
-/// so a job named `alpha` under one root is never "found" (and then reported as running, or
-/// killed by `stop`) because a job of the same name runs under another root. A command line
-/// without `--jobs-dir` (a Python daemon) matches by name only, like v4.
-pub fn find_detached_pids(daemon_id: &str, jobs_dir: &std::path::Path) -> Vec<i32> {
-    let marker = daemon_marker(daemon_id);
-    let me = std::process::id() as i32;
-    let same_dir = |a: &str| {
-        let (a, b) = (std::path::Path::new(a), jobs_dir);
-        a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+static CMDLINE_SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many times the process table has been enumerated by [`process_cmdlines`] in this process
+/// (tests assert that status reads of completed jobs enumerate nothing).
+pub fn cmdline_scans() -> usize {
+    CMDLINE_SCANS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// The command lines of every process: `(pid, argv)`. This reads `/proc/*/cmdline`: it is
+/// expensive on a busy host, so job code goes through [`crate::detached`], which shares and
+/// bounds it.
+pub fn process_cmdlines() -> Vec<(i32, Vec<String>)> {
+    CMDLINE_SCANS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    imp::process_cmdlines()
+}
+
+/// The direct children of a process (Linux: `/proc/<pid>/task/*/children`; empty elsewhere or
+/// when the kernel does not expose them).
+pub fn children(pid: i32) -> Vec<i32> {
+    let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+        return Vec::new();
     };
-    process_cmdlines()
-        .into_iter()
-        .filter(|(pid, args)| {
-            *pid != me
-                && args.iter().any(|a| a.contains(&marker))
-                && args
-                    .iter()
-                    .position(|a| a == "--jobs-dir")
-                    .and_then(|i| args.get(i + 1))
-                    .is_none_or(|dir| same_dir(dir))
-        })
-        .map(|(pid, _)| pid)
-        .collect()
+    let mut out = Vec::new();
+    for task in tasks.flatten() {
+        if let Ok(text) = std::fs::read_to_string(task.path().join("children")) {
+            out.extend(
+                text.split_whitespace()
+                    .filter_map(|p| p.parse::<i32>().ok()),
+            );
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// When the process started (naive UTC), from `/proc/<pid>/stat` and the boot time: with the PID
+/// it identifies one process, so a reused PID is told apart. `None` when it cannot be read
+/// (not Linux, or the process is gone).
+#[cfg(target_os = "linux")]
+pub fn process_start_time(pid: i32) -> Option<chrono::NaiveDateTime> {
+    use std::sync::OnceLock;
+    static BOOT: OnceLock<Option<i64>> = OnceLock::new();
+    let boot = (*BOOT.get_or_init(|| {
+        std::fs::read_to_string("/proc/stat")
+            .ok()?
+            .lines()
+            .find_map(|l| l.strip_prefix("btime ")?.trim().parse::<i64>().ok())
+    }))?;
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Field 22 (`starttime`, clock ticks since boot); count from the last `)` since the command
+    // name may contain spaces and parentheses.
+    let ticks: f64 = stat[stat.rfind(')')? + 2..]
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()?;
+    // USER_HZ is 100 on every Linux ABI `/proc` exposes it for.
+    let secs = boot as f64 + ticks / 100.0;
+    chrono::DateTime::from_timestamp(secs.floor() as i64, ((secs.fract()) * 1e9) as u32)
+        .map(|d| d.naive_utc())
+}
+
+/// See the Linux version.
+#[cfg(not(target_os = "linux"))]
+pub fn process_start_time(_pid: i32) -> Option<chrono::NaiveDateTime> {
+    None
 }
 
 /// The command-line marker identifying a daemon's process: `daemon_id='<id>'`.

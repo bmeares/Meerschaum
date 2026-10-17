@@ -9,6 +9,7 @@ use meerschaum_core::success::SuccessTuple;
 use meerschaum_core::value::{Map, Value};
 
 use crate::config::{DaemonPaths, JobPaths, JobsConfig, Seconds};
+use crate::detached::{self, Timestamps};
 use crate::process::{self, ProcState, Sig};
 use crate::properties::{self, merge_properties};
 use crate::remote::RemoteJobsResolver;
@@ -262,7 +263,7 @@ impl Daemon {
 
     /// `_capture_process_timestamp(key)`: record `process.<key>` and write the properties.
     pub fn capture_process_timestamp(&mut self, key: &str, write: bool) -> SuccessTuple {
-        if !matches!(key, "began" | "ended" | "paused" | "stopped") {
+        if !matches!(key, "began" | "ended" | "paused" | "stopped" | "launched") {
             return SuccessTuple::fail(format!("Invalid key '{key}'."));
         }
         let mut props = self.properties();
@@ -390,12 +391,19 @@ impl Daemon {
         }
     }
 
-    /// `pid`: the PID file's contents, or a detached process found by its command line.
+    /// `pid`: the PID file's contents; without one, a detached process of a job which began
+    /// and never ended (see [`crate::detached`]). A job which completed, or never ran, has no
+    /// process and is never searched for.
     pub fn pid(&self) -> Option<i32> {
         if !self.paths.pid.exists() {
-            return process::find_detached_pids(&self.daemon_id, &self.ctx.paths.jobs_dir)
-                .first()
-                .copied();
+            return self.detached_pid();
+        }
+        // A PID file left from a run which has ended names no process of this job: its
+        // process is gone or the PID was reused. (A file written after `ended` belongs to a
+        // newer run and stands.)
+        if self.pid_file_is_stale() {
+            self.unlink_pid();
+            return None;
         }
         let text = fs::read_to_string(&self.paths.pid).ok()?;
         if text.is_empty() {
@@ -403,6 +411,127 @@ impl Daemon {
         }
         // PARITY: `int(text.rstrip())`.
         meerschaum_core::pyfmt::parse_py_int(text.trim_end()).map(|p| p as i32)
+    }
+
+    /// Write `process.launched` into the properties file. It goes to the file only: the
+    /// in-memory properties must not keep a copy of `began` / `ended`, which would then shadow
+    /// what the supervisor records later.
+    fn record_launch(&self) {
+        let mut props = self.read_properties().unwrap_or_default();
+        let process = props
+            .entry("process".to_string())
+            .or_insert_with(Value::new_map);
+        if !process.is_map() {
+            *process = Value::new_map();
+        }
+        if let Some(m) = process.as_map_mut() {
+            m.insert(
+                "launched".to_string(),
+                Value::Str(crate::pytime::naive_isoformat(crate::pytime::utcnow())),
+            );
+        }
+        let _ = properties::write_properties(&self.paths.properties, &props);
+    }
+
+    /// The PID file is older than the recorded end of the last run.
+    fn pid_file_is_stale(&self) -> bool {
+        let timestamps = self.timestamps();
+        if !timestamps.is_completed() {
+            return false;
+        }
+        let (Some(ended), Ok(modified)) = (
+            timestamps.ended,
+            fs::metadata(&self.paths.pid).and_then(|m| m.modified()),
+        ) else {
+            return false;
+        };
+        chrono::DateTime::<chrono::Utc>::from(modified).naive_utc() <= ended
+    }
+
+    /// Undo [`Daemon::record_launch`] after a launch which failed: nothing is starting.
+    fn clear_launch(&self) {
+        let Some(mut props) = self.read_properties() else {
+            return;
+        };
+        let removed = props
+            .get_mut("process")
+            .and_then(Value::as_map_mut)
+            .is_some_and(|m| m.shift_remove("launched").is_some());
+        if removed {
+            let _ = properties::write_properties(&self.paths.properties, &props);
+        }
+    }
+
+    /// The recorded `began` / `ended` / `launched` of the job (no process is inspected).
+    pub fn timestamps(&self) -> Timestamps {
+        Timestamps::from_properties(&self.read_properties().unwrap_or_default())
+    }
+
+    /// Forget the shared process scan and what is remembered as missing for this job
+    /// (started, stopped, paused, resumed or deleted through Meerschaum).
+    fn forget_detached(&self) {
+        detached::invalidate(&self.daemon_id, &self.ctx.paths.jobs_dir);
+    }
+
+    /// The process of a job whose PID file is missing, from the recorded metadata first.
+    fn detached_pid(&self) -> Option<i32> {
+        if !self.paths.dir.exists() {
+            return None;
+        }
+        let timestamps = self.timestamps();
+        if timestamps.is_completed() || timestamps.never_ran() {
+            return None;
+        }
+        let limits = self.ctx.config.detached;
+        let jobs_dir = &self.ctx.paths.jobs_dir;
+        let now = crate::pytime::utcnow().naive_utc();
+        let launching = timestamps.in_launch_window(now, limits.launch_grace);
+        if !launching && detached::is_known_missing(&self.daemon_id, jobs_dir, &timestamps, &limits)
+        {
+            return None;
+        }
+        let mut found = detached::find_pids(
+            &self.daemon_id,
+            jobs_dir,
+            &limits,
+            launching.then_some(timestamps.launched).flatten(),
+            false,
+        );
+        // A process which started after the recorded `began` is a reused PID.
+        if let Some(began) = timestamps.current_began() {
+            found.retain(|f| !detached::is_stale_process(f.pid, began, limits.create_slack));
+        }
+        let Some(first) = found.first().copied() else {
+            if !launching {
+                detached::remember_missing(&self.daemon_id, jobs_dir, &timestamps);
+            }
+            return None;
+        };
+        if !first.supervisor {
+            // A Python daemon is the worker.
+            self.restore_pid_file(first.pid, &timestamps);
+            return Some(first.pid);
+        }
+        // The command line names the supervisor; `process.pid` and every signal belong to its
+        // worker (stopping the supervisor alone would report `paused` while the job runs).
+        match process::children(first.pid).as_slice() {
+            [worker] => {
+                self.restore_pid_file(*worker, &timestamps);
+                Some(*worker)
+            }
+            // The worker is not up yet (or already exiting): the supervisor stands for the
+            // job, and nothing is written down.
+            _ => Some(first.pid),
+        }
+    }
+
+    /// Write the PID file again for a running job which lost it, so that later reads are cheap.
+    /// Only once the job has recorded `began` for this launch: before that the process found
+    /// may be the launcher.
+    fn restore_pid_file(&self, pid: i32, timestamps: &Timestamps) {
+        if timestamps.current_began().is_some() && !self.paths.pid.exists() {
+            let _ = fs::write(&self.paths.pid, pid.to_string());
+        }
     }
 
     fn unlink_pid(&self) {
@@ -535,7 +664,19 @@ impl Daemon {
         if !setup.success {
             return setup;
         }
-        match self.launch(keep_daemon_output) {
+        // The PID file does not exist until the supervisor has started: record the launch so a
+        // job which completed earlier is not taken for a finished one (and launched twice) in the
+        // meantime. (v4.1.5 records the same `process.launched`.)
+        self.forget_detached();
+        self.record_launch();
+        let launched = self.launch(keep_daemon_output);
+        if launched.is_err() {
+            // Nothing is starting: do not leave the job looking like it is for 30 s and then
+            // searched for once a minute.
+            self.clear_launch();
+        }
+        self.forget_detached();
+        match launched {
             Ok(()) => SuccessTuple::success(),
             Err(e) => {
                 SuccessTuple::fail(format!("Failed to start daemon '{}'.\n{e}", self.daemon_id))
@@ -671,7 +812,17 @@ impl Daemon {
     /// `_kill_detached_processes(timeout)`: SIGTERM, then SIGKILL, every process whose command
     /// line carries this daemon's marker. Returns how many were targeted.
     pub fn kill_detached_processes(&self, timeout: Option<Seconds>) -> usize {
-        let pids = process::find_detached_pids(&self.daemon_id, &self.ctx.paths.jobs_dir);
+        // An explicit stop searches fresh: nothing cached is trusted.
+        let pids: Vec<i32> = detached::find_pids(
+            &self.daemon_id,
+            &self.ctx.paths.jobs_dir,
+            &self.ctx.config.detached,
+            None,
+            true,
+        )
+        .into_iter()
+        .map(|f| f.pid)
+        .collect();
         if pids.is_empty() {
             return 0;
         }
@@ -691,6 +842,7 @@ impl Daemon {
                 let _ = process::send_signal(*pid, Sig::Kill);
             }
         }
+        self.forget_detached();
         pids.len()
     }
 
@@ -707,6 +859,7 @@ impl Daemon {
 
     /// `kill(timeout)`: SIGTERM (then SIGKILL) the daemon.
     pub fn kill(&mut self, timeout: Option<Seconds>) -> SuccessTuple {
+        self.forget_detached();
         if !self.paths.pid.exists() {
             let reaped = self.kill_detached_processes(timeout);
             self.sweep_stop("kill");
@@ -760,6 +913,7 @@ impl Daemon {
 
     /// `quit(timeout)`: SIGINT the daemon (a paused daemon is killed).
     pub fn quit(&mut self, timeout: Option<Seconds>) -> SuccessTuple {
+        self.forget_detached();
         if self.status() == Status::Paused {
             return self.kill(timeout);
         }
@@ -777,6 +931,7 @@ impl Daemon {
 
     /// `pause(timeout)`: SIGSTOP the daemon and wait until it is stopped.
     pub fn pause(&mut self, timeout: Option<Seconds>, interval: Option<Seconds>) -> SuccessTuple {
+        self.forget_detached();
         let _ = self.remove_blocking_stdin_file();
         let Some(pid) = self.process() else {
             return SuccessTuple::fail(format!(
@@ -826,6 +981,7 @@ impl Daemon {
 
     /// `resume(timeout)`: SIGCONT a paused daemon and wait until it runs.
     pub fn resume(&mut self, timeout: Option<Seconds>, interval: Option<Seconds>) -> SuccessTuple {
+        self.forget_detached();
         match self.status() {
             Status::Running => {
                 return SuccessTuple::ok(format!(
@@ -884,6 +1040,7 @@ impl Daemon {
 
     /// `cleanup(keep_logs)`: remove the daemon's directory (and its logs and log offset).
     pub fn cleanup(&mut self, keep_logs: bool) -> SuccessTuple {
+        self.forget_detached();
         // Never remove anything which is not `<jobs dir>/<one component>`: the daemon id may
         // come straight from an HTTP path or a command line.
         if crate::names::invalid_job_name_reason(&self.daemon_id).is_some()

@@ -100,6 +100,8 @@ pub struct JobsConfig {
     pub cli_refresh_seconds: Seconds,
     /// `meerschaum.executor`, if configured.
     pub executor: Option<String>,
+    /// `jobs.detached.*`: how a job's process is searched for without its PID file.
+    pub detached: crate::detached::Limits,
 }
 
 impl Default for JobsConfig {
@@ -119,6 +121,7 @@ impl Default for JobsConfig {
             refresh_files_seconds: Seconds::Int(5),
             cli_refresh_seconds: Seconds::Float(0.1),
             executor: None,
+            detached: crate::detached::Limits::default(),
         }
     }
 }
@@ -189,6 +192,24 @@ impl JobsConfig {
         }
         out.executor =
             get(&["meerschaum", "executor"]).and_then(|v| v.as_str().map(str::to_string));
+        let secs = |key: &str| {
+            get(&["jobs", "detached", key])
+                .as_ref()
+                .and_then(Seconds::from_value)
+                .map(Seconds::duration)
+        };
+        if let Some(d) = secs("index_seconds") {
+            out.detached.index_ttl = d;
+        }
+        if let Some(d) = secs("negative_seconds") {
+            out.detached.negative_ttl = d;
+        }
+        if let Some(d) = secs("launch_grace_seconds") {
+            out.detached.launch_grace = d;
+        }
+        if let Some(d) = secs("create_time_slack_seconds") {
+            out.detached.create_slack = d;
+        }
         out
     }
 }

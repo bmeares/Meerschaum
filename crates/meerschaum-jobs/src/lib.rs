@@ -30,6 +30,7 @@
 
 pub mod config;
 pub mod daemon;
+pub mod detached;
 pub mod executor;
 pub mod job;
 pub mod laps;

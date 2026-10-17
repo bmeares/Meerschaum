@@ -988,3 +988,36 @@ A regression found on the way and fixed: `config_api::live_config` (task O) buil
 | W15L2-013 | `filter_existing()` on PostgreSQL reports a stored row whose nullable `int` is `NULL` as changed (the `NULL` read back compares unequal with the incoming `NaN`) | no change is reported for an unchanged row | v4 quirk not reproduced; `tests/test_pipe_methods_native.py::_special_rows` keeps the stored rows non-null |
 | W15L2-014 | `get_data(as_docs=True)` on a PostgreSQL-family instance returns a geometry column as the hex EWKB text (psycopg); on SQLite as shapely objects; `filter_existing()` of a declared `geometry` column holding WKT text returns a GeoDataFrame `geometry` column, of shapely objects an `object` column | the same (`Reader::raw_geometries`; the WKT columns of the input decide the `geometry` hint) | review round 3 |
 | W15L2-015 | an instance whose Rust build failed runs the v4 SQLAlchemy bodies | `RuntimeError` naming the cause ("no usable Rust driver") from every `Pipe` read; Oracle without `libclntsh` keeps the v4 body with a warning once per process (as `Pipe.sync`), W15L-006, until wave 16. The reason is structured (`_sync.NativeUnavailable.kind`: `oracle_client`, `no_driver`, `unbuildable`), never matched on its text | review round 3 |
+
+## Wave 16 (task M2): no recurring process-table scans for job status
+
+v4 and v5 (wave 15) read `Daemon.pid` and, without a PID file, enumerated every process's command line looking for
+`daemon_id='<id>'`. A completed job never has a PID file and one supervisor pass reads a job's PID many times (listing,
+status, restart check, formatting), so a production 4.1.4 API with retained completed jobs spent 70-100% of a core there.
+
+| Behavior | v4.1.4 / v5 wave 15 | v5 now | Why |
+|---|---|---|---|
+| `pid()` without a PID file | scan of `/proc` on every read | metadata first (`jobs::detached`): a job whose `process.ended` is not older than its `began` / `launched`, or which never began, has no process and is never searched for. Only a job which began and never ended is searched for | a completed job is not a detached process |
+| The search | one scan per read | one scan shared by every job for 2 s, indexed by `(daemon_id, --jobs-dir)`; a miss is remembered for 60 s per job unless its recorded `began` / `ended` / `launched` change; start, stop, pause, resume, kill, quit and delete forget it; kill / quit still search fresh | bounded cost per supervisor pass |
+| Recovery | PID of any matching process | the same, plus: a process which started more than 5 s after the recorded `began` (a reused PID) is ignored, and the PID file is written again (only once `began` of this launch is recorded) so the next read is a file read | identity check; cheap re-reads |
+| `process.launched` | not recorded | `run()` records it in `properties.json` (the file only, never in the handle's memory), as v4.1.5 does; for 30 s after a launch which has not recorded `began` a miss is not remembered and the scan is never older than the launch | a restart job which completed earlier is not seen as finished, and launched twice, before its supervisor wrote its PID file. The key adds `process` before `result` in a new job's `properties.json` (the `supervise.rs` layout test records it); v4 and v4.1.5 read the file unchanged |
+| Tunables | none | `jobs:detached:index_seconds` (2), `negative_seconds` (60), `launch_grace_seconds` (30), `create_time_slack_seconds` (5) | |
+
+| Orphan whose job recorded `ended` | listed `running` (the command line still matched) | listed `stopped`: a job whose last run ended is never searched for, so `stop jobs` filtered to running jobs does not target it; `kill` / `quit` (an explicit `stop`) still search fresh and reap it | the point of the change. Status reads may also write `process.pid` (restoring a lost file) |
+| What is restored and trusted | the PID of whichever process matched | the marker is on a Rust supervisor's command line, but `process.pid` and every signal belong to its **worker** (the supervisor's only child): the worker's PID is returned and restored (if the worker cannot be resolved the supervisor stands for the job and nothing is written; a Python daemon is the worker itself), so `pause` stops the worker, not the supervisor. The supervisor removes a PID file naming its worker **or itself** when it exits. A PID file older than the recorded `ended` of a completed job is stale (ignored and removed); one written after `ended` belongs to a newer run | a restored file naming the supervisor made `pause` report `paused` while the worker kept running, survived the job, and could name a reused PID |
+| A failed launch | n/a | `run()` removes the `process.launched` it recorded when the supervisor could not be spawned | otherwise the job looked "launching" and was searched for once a minute |
+| Worker resolution without `/proc/<pid>/task/*/children` | n/a | where the kernel or sandbox lacks the per-task `children` files, a lost PID file cannot be resolved to the worker: the supervisor stands in for status reads and nothing is restored, so `pause` of such a job stops only the supervisor (the pre-fix behavior) | minimal kernels/sandboxes only; mainstream Linux provides the files |
+
+Known pid files are read as before (no start-time check of a PID read from the file: a placeholder in the parity fixtures is
+newer than the recorded `began`); only the stale-file rule above applies.
+
+Tests: `crates/meerschaum-jobs/tests/detached_scans.rs` counts `process::cmdline_scans()`: 50 completed jobs, 10 passes plus
+status / pid / restart-check / formatting reads: 0 scans; a lost-PID live job among 20 completed ones: 1 scan for the pass,
+the PID file restored, then 0; a reused PID (recorded `began` an hour before the process) is not matched; a miss is remembered
+until `launched` changes (a second handle sees a relaunch by the first) or the job is stopped; a real supervisor: delete `process.pid`, status restores the worker's PID, `pause` stops the worker, `resume`, `stop` end it and remove the file; a stale PID file of a completed job is ignored; a failed launch leaves no `launched`; a job being relaunched is `running` (no second launch); restart policies
+(restart after an external stop, stay stopped after `stop`). Micro-benchmark `tests/bench_pass.rs` (`--release`, 1124
+processes on the host, 50 completed jobs, per idle pass of list + restart check + status / PID / result / formatting reads):
+**1773 ms CPU before, 5.0 ms after**.
+
+For the user: a 4.1.x hotfix is worth it, and v4.1.5 (`meerschaum/utils/daemon/_detached.py`) is that backport; main was not
+touched.

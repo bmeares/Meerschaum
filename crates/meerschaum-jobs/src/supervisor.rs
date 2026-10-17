@@ -630,12 +630,13 @@ mod imp {
         }
 
         // The PID file outlives a Python daemon until the next status check; remove it now if it
-        // still names our worker (so a recycled PID is never mistaken for the job).
+        // still names our worker (so a recycled PID is never mistaken for the job), or this
+        // supervisor (a status read which found the job without its PID file wrote it back).
         if fs::read_to_string(&dpaths.pid)
             .ok()
             .as_deref()
             .map(str::trim)
-            == Some(&pid.to_string())
+            .is_some_and(|p| p == pid.to_string() || p == std::process::id().to_string())
         {
             let _ = fs::remove_file(&dpaths.pid);
         }

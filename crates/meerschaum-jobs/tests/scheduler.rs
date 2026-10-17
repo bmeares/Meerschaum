@@ -111,4 +111,19 @@ fn two_roots_list_their_own_jobs() {
     assert!(ea.get_job_exists("only-on-a"));
     assert!(!eb.get_job_exists("only-on-a"));
     assert!(eb.get_job_names().is_empty());
+    // The job (a supervisor and its `echo`) writes its logs and error log under the root until
+    // it exits: wait for that before the temporary directories are removed.
+    assert!(
+        common::wait_for(30.0, || {
+            meerschaum_jobs::detached::find_pids(
+                "only-on-a",
+                &ca.paths.jobs_dir,
+                &Default::default(),
+                None,
+                true,
+            )
+            .is_empty()
+        }),
+        "the job's supervisor did not exit"
+    );
 }

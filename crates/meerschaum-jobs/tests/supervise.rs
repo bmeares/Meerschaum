@@ -60,7 +60,9 @@ fn completed_job_layout_and_logs() {
     let props = fs::read_to_string(jobdir.join("properties.json")).unwrap();
     let props = Value::from_json_str(&props).unwrap();
     let keys: Vec<&str> = props.as_map().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(keys, ["label", "target", "result", "process"]);
+    // `process` is created by `run()` recording `process.launched` (as v4.1.5 does), before the
+    // supervisor records `result`.
+    assert_eq!(keys, ["label", "target", "process", "result"]);
     assert_eq!(
         props.get("target").unwrap().json_dumps(),
         r#"{"name": "entry", "module": "meerschaum._internal.entry", "args": [["-c", "echo hello; echo oops >&2; sleep 0.3"]], "kw": {}}"#
@@ -73,7 +75,7 @@ fn completed_job_layout_and_logs() {
         .keys()
         .map(String::as_str)
         .collect();
-    assert_eq!(process, ["began", "ended"]);
+    assert_eq!(process, ["launched", "began", "ended"]);
     assert!(job.began().is_some() && job.ended().is_some() && job.paused().is_none());
 
     // Both streams pass through their own interceptor: each starts with a newline.

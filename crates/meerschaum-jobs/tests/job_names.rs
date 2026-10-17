@@ -99,18 +99,30 @@ fn a_same_named_supervisor_of_another_root_is_not_found() {
         .spawn()
         .unwrap();
     // The command line is visible once the shell has exec'ed (a moment).
+    // A job is only searched for once it has recorded that it began (and not that it ended).
+    let began = |ctx: &JobsContext| {
+        std::fs::create_dir_all(ctx.paths.jobs_dir.join("dupe")).unwrap();
+        let mut d = Daemon::new("dupe", vec![], None, Default::default(), ctx);
+        assert!(d.capture_process_timestamp("began", true).success);
+    };
     let seen = |ctx: &JobsContext| Daemon::new("dupe", vec![], None, Default::default(), ctx).pid();
     let mut other_ctx = JobsContext::for_root(dir.path().join("other-root"));
     other_ctx.paths.jobs_dir = other_jobs;
+    began(&other_ctx);
+    began(&ctx);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while seen(&other_ctx).is_none() {
         assert!(
             std::time::Instant::now() < deadline,
             "the process was not found"
         );
+        // (a negative result is remembered; the process may not have been visible yet)
+        meerschaum_jobs::detached::invalidate("dupe", &other_ctx.paths.jobs_dir);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert_eq!(seen(&other_ctx), Some(child.id() as i32));
+    // The marker is on the supervisor's command line; the job is its worker (the `sleep`).
+    let worker = meerschaum_jobs::process::children(child.id() as i32)[0];
+    assert_eq!(seen(&other_ctx), Some(worker));
     assert_eq!(seen(&ctx), None);
     let daemon = Daemon::new("dupe", vec![], None, Default::default(), &ctx);
     assert_eq!(daemon.kill_detached_processes(None), 0);
