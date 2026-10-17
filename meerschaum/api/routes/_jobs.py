@@ -234,7 +234,12 @@ def start_job(
 @app.post(endpoints['jobs'] + '/{name}/stop', tags=['Jobs'])
 def stop_job(
     name: str,
-    curr_user=fastapi.Security(ScopedAuth(['jobs:execute', 'josb:stop'])),
+    ### NOTE: v4.1.5 and earlier required the misspelled scope `josb:stop`, which no token
+    ###       can be given, so only `*` tokens and admins could stop jobs. Tokens which
+    ###       explicitly hold `josb:stop` are still accepted in place of `jobs:stop`.
+    curr_user=fastapi.Security(
+        ScopedAuth(['jobs:execute', 'jobs:stop'], aliases={'jobs:stop': 'josb:stop'})
+    ),
 ) -> SuccessTuple:
     """
     Stop a job if running.

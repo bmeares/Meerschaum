@@ -341,14 +341,17 @@ def _edit_users(
         attributes = {}
         ### Change the scopes.
         attributes['scopes'] = prompt(
-            f"Scopes for user '{username}' (`*` to grant all scopes):",
+            (
+                f"Scopes for user '{username}' "
+                "(`*` grants all scopes, including custom and future scopes):"
+            ),
             default_editable=' '.join(User(
                 username,
                 instance=instance_connector,
             ).get_scopes(refresh=True, debug=debug)),
         ).split()
-        if attributes['scopes'] == ['*']:
-            attributes['scopes'] = list(STATIC_CONFIG['tokens']['scopes'])
+        ### NOTE: `*` is stored literally so that it also grants custom (plugin) scopes
+        ###       and scopes which are added later.
 
         ### Change the attributes
         if yes_no(
@@ -686,14 +689,12 @@ def _edit_tokens(
             else None
         )
         new_scopes_str = prompt(
-            "Scope (`*` to grant all permissions):",
+            "Scope (`*` grants all scopes, including custom and future scopes):",
             default_editable=' '.join(token_model.scopes),
         )
-        new_attrs['scopes'] = (
-            new_scopes_str.split(' ')
-            if new_scopes_str != '*'
-            else list(STATIC_CONFIG['tokens']['scopes'])
-        )
+        ### NOTE: `*` is stored literally so that it also grants custom (plugin) scopes
+        ###       and scopes which are added later.
+        new_attrs['scopes'] = new_scopes_str.split(' ')
         invalidate = (
             yes_no("Do you want to invalidate this token?", default='n')
             if token_model.is_valid

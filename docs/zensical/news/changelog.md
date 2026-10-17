@@ -4,6 +4,20 @@
 
 This is the current release cycle, so stay tuned for future releases!
 
+### v4.1.6
+
+- **Let tokens with `jobs:stop` stop jobs over the API.**  
+  The stop route required the misspelled scope `josb:stop`, which is not a scope, so only `*` tokens and administrators could stop a job through the API. `POST /jobs/{name}/stop` now requires `jobs:execute` and `jobs:stop`, and a token which explicitly holds the old `josb:stop` is still accepted in place of `jobs:stop`. A refused request names `jobs:stop`.
+
+- **Store `*` literally so it grants every scope.**  
+  `edit tokens` and `edit users` replaced a typed `*` with the built-in scope list, so an "all scopes" token or user lacked custom (plugin) scopes and any scope added later. `*` is now stored as `*`, which every scope check already honored. The prompts say "`*` grants all scopes, including custom and future scopes", and the "Grant all scopes" switch in the web console's token form registers `*`. `register tokens --scopes '*'` and the token registration route already kept a literal `*`. A token or user created without scopes still gets the built-in list.
+
+- **Let `*` execute actions and jobs for non-admins.**  
+  The check for permission to run actions and jobs looked for `actions:execute` and `jobs:execute` in the granted scopes, so a non-admin whose scopes were `*` was refused with "Missing scope 'actions:execute'". A literal `*` now satisfies it.
+
+- **Match detached jobs only within their own root directory.**  
+  When a job's PID file is lost, its process is found by the job's name in the command line. A job with the same name under another `MRSM_ROOT_DIR` matched too, so stopping or killing a job without a PID file could end another root's job. Processes are now matched only if their `MRSM_ROOT_DIR` is this root (unset means the default root). If a process's environment cannot be read, or its root is a relative path, it is still matched as before.
+
 ### v4.1.5
 
 - **Stop scanning the process table for completed jobs.**  

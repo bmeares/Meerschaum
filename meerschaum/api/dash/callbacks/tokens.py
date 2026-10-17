@@ -173,8 +173,10 @@ def register_token_click(
     if not n_clicks:
         raise PreventUpdate
 
+    ### NOTE: `*` is stored literally so that it also grants custom (plugin) scopes
+    ###       and scopes which are added later.
     scopes = (
-        list(STATIC_CONFIG['tokens']['scopes'])
+        ['*']
         if grant_all_scopes
         else (scopes or [])
     )

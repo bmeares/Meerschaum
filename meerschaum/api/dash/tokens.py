@@ -517,7 +517,7 @@ def build_tokens_register_input_modal() -> dbc.Modal:
                         dbc.Col(
                             dbc.Switch(
                                 id="tokens-toggle-scopes-switch",
-                                label="Grant all scopes",
+                                label="Grant all scopes (`*`, including custom and future scopes)",
                                 value=True,
                             ),
                             className="me-3",
